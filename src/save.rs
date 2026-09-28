@@ -70,6 +70,14 @@ impl R<'_> {
 }
 
 pub fn write(d: &SaveData) -> io::Result<()> {
+    write_to(&save_path(), d)
+}
+
+pub fn read() -> io::Result<SaveData> {
+    read_from(&save_path())
+}
+
+pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     let mut w = W(Vec::new());
     w.0.extend_from_slice(MAGIC);
     w.u32(VERSION);
@@ -98,15 +106,17 @@ pub fn write(d: &SaveData) -> io::Result<()> {
             w.u8(id);
         }
     }
-    std::fs::create_dir_all("saves")?;
-    let tmp = save_path().with_extension("tmp");
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
     std::fs::File::create(&tmp)?.write_all(&w.0)?;
-    std::fs::rename(tmp, save_path())
+    std::fs::rename(tmp, path)
 }
 
-pub fn read() -> io::Result<SaveData> {
+pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     let mut buf = Vec::new();
-    std::fs::File::open(save_path())?.read_to_end(&mut buf)?;
+    std::fs::File::open(path)?.read_to_end(&mut buf)?;
     let mut r = R(&buf);
     if &r.take::<4>()? != MAGIC || r.u32()? != VERSION {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "not a Minceraft save"));

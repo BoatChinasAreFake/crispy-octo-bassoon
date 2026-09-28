@@ -13,6 +13,8 @@ mod noise;
 mod player;
 mod render;
 mod save;
+mod server;
+mod upnp;
 mod sound;
 mod texture;
 mod ui;
@@ -92,6 +94,12 @@ struct App {
     chat: Option<String>,
     last_view_proj: Mat4,
     lan_addr: Option<String>,
+    /// Password for joining, and for hosting if set.
+    mp_password: String,
+    /// UPnP request running in the background.
+    upnp_job: Option<std::sync::mpsc::Receiver<Result<upnp::Mapping, String>>>,
+    upnp_mapping: Option<upnp::Mapping>,
+    internet_status: Option<String>,
 }
 
 /// Feed typed characters into a text buffer.
@@ -104,6 +112,10 @@ fn type_into(buf: &mut String, max: usize) {
     if is_key_pressed(KeyCode::Backspace) {
         buf.pop();
     }
+}
+
+fn players(n: usize) -> String {
+    if n == 1 { "1 player".into() } else { format!("{n} players") }
 }
 
 fn drain_chars() {
@@ -168,6 +180,12 @@ impl App {
         self.game.disconnect();
         self.chat = None;
         self.lan_addr = None;
+        self.internet_status = None;
+        self.upnp_job = None;
+        if let Some(m) = self.upnp_mapping.take() {
+            // Tidy up the router's port forward without blocking the menu.
+            std::thread::spawn(move || upnp::close(&m));
+        }
         let mut gl = unsafe { get_internal_gl() };
         gl.flush();
         self.renderer.clear(gl.quad_context);
@@ -256,10 +274,14 @@ impl App {
             return;
         }
         if self.screen == Screen::Multiplayer {
-            let buf = if self.mp_focus == 0 { &mut self.mp_name } else { &mut self.mp_addr };
-            type_into(buf, if self.mp_focus == 0 { 16 } else { 64 });
+            let (buf, max) = match self.mp_focus {
+                0 => (&mut self.mp_name, 16),
+                1 => (&mut self.mp_addr, 128),
+                _ => (&mut self.mp_password, 64),
+            };
+            type_into(buf, max);
             if is_key_pressed(KeyCode::Tab) {
-                self.mp_focus = 1 - self.mp_focus;
+                self.mp_focus = (self.mp_focus + 1) % 3;
             }
             if is_key_pressed(KeyCode::Escape) {
                 self.joining = None;
@@ -346,6 +368,7 @@ impl App {
             self.status = Some((e, 8.0));
         }
         self.update_joining();
+        self.poll_upnp();
         if self.game.dead.is_some() && self.screen != Screen::Dead {
             self.set_screen(Screen::Dead);
         }
@@ -391,6 +414,14 @@ impl App {
         }
         let Some((conn, started)) = &mut self.joining else { return };
         let mut msgs = conn.poll();
+        if let Some(net::Msg::Challenge { nonce, password }) = msgs.iter().find(|m| matches!(m, net::Msg::Challenge { .. })) {
+            if *password && self.mp_password.is_empty() {
+                self.joining = None;
+                self.status = Some(("This server needs a password. Type it in the Password box.".into(), 6.0));
+                return;
+            }
+            conn.send(&net::Msg::Auth { proof: net::auth_proof(nonce, &self.mp_password) });
+        }
         conn.flush();
         if let Some(i) = msgs.iter().position(|m| matches!(m, net::Msg::Welcome { .. })) {
             let leftover = msgs.split_off(i + 1);
@@ -405,7 +436,7 @@ impl App {
         } else if let Some(e) = &conn.closed {
             Some(format!("Connection failed: {e}"))
         } else if get_time() - *started > 10.0 {
-            Some("The host didn't answer. Is the world open to LAN?".into())
+            Some("The host didn't answer. Check the address, and that the world is open / the port is forwarded.".into())
         } else {
             None
         };
@@ -418,21 +449,29 @@ impl App {
     fn multiplayer_screen(&mut self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
-        self.ui.text_centered("Multiplayer (LAN)", w / 2.0, h * 0.14, 16.0, WHITE);
-        let bw = (220.0 * s).min(w * 0.85);
+        self.ui.text_centered("Multiplayer", w / 2.0, h * 0.11, 16.0, WHITE);
+        let bw = (240.0 * s).min(w * 0.85);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.24;
-        self.ui.text("Your name", x, y - 3.0 * s, 9.0, GRAY);
-        if self.ui.text_field(Rect::new(x, y, bw, bh), &self.mp_name, self.mp_focus == 0) {
-            self.mp_focus = 0;
+        let mut y = h * 0.19;
+        let masked = "*".repeat(self.mp_password.chars().count());
+        let fields: [(&str, &str); 3] = [
+            ("Your name", &self.mp_name),
+            ("Server address: IP, IP:port, [IPv6]:port or a hostname", &self.mp_addr),
+            ("Password (leave empty if the server has none)", &masked),
+        ];
+        let mut clicked = None;
+        for (i, (label, value)) in fields.iter().enumerate() {
+            self.ui.text(label, x, y - 3.0 * s, 9.0, GRAY);
+            if self.ui.text_field(Rect::new(x, y, bw, bh), value, self.mp_focus == i) {
+                clicked = Some(i);
+            }
+            y += bh + 14.0 * s;
         }
-        y += bh + 14.0 * s;
-        self.ui.text("Server address (IP or IP:port)", x, y - 3.0 * s, 9.0, GRAY);
-        if self.ui.text_field(Rect::new(x, y, bw, bh), &self.mp_addr, self.mp_focus == 1) {
-            self.mp_focus = 1;
+        if let Some(i) = clicked {
+            self.mp_focus = i;
         }
-        y += bh + 10.0 * s;
+        y -= 4.0 * s;
         let busy = self.joining.is_some() || self.connect_next.is_some();
         let label = if busy { "Connecting..." } else { "Join Server" };
         if self.ui.button(Rect::new(x, y, bw, bh), label, !busy) {
@@ -445,12 +484,74 @@ impl App {
         }
         y += bh + 14.0 * s;
         for line in [
-            "To host: start or continue a world, press Esc, then \"Open to LAN\".",
-            "The host's address is shown in their pause menu. Default port 25565.",
-            "Everyone on the same network can join. Tab switches fields.",
+            "Host from a world: Esc > \"Open to LAN\" or \"Open to Internet\". Your password above protects it.",
+            "Or run a dedicated server: minceraft --server --password <pw>. Default port 25565.",
+            "Tab switches fields. Enter joins.",
         ] {
             self.ui.text_centered(line, w / 2.0, y, 9.0, Color::new(0.85, 0.85, 0.85, 1.0));
             y += 12.0 * s;
+        }
+    }
+
+    /// Start hosting (if not already). Returns the port.
+    fn host_now(&mut self) -> Option<u16> {
+        if self.game.is_host() {
+            if let Some(multiplayer::Net::Host(srv)) = &self.game.net {
+                return Some(srv.port);
+            }
+        }
+        let pw = Some(self.mp_password.clone()).filter(|p| !p.is_empty());
+        match self.game.open_lan(&self.mp_name, pw) {
+            Ok(port) => {
+                let ip = net::lan_ip().unwrap_or_else(|| "this computer's IP".into());
+                let addr = format!("{ip}:{port}");
+                self.status = Some((format!("Hosting! Friends on your network can join at {addr}"), 8.0));
+                self.lan_addr = Some(addr);
+                Some(port)
+            }
+            Err(e) => {
+                self.status = Some((format!("Couldn't start hosting: {e}"), 6.0));
+                None
+            }
+        }
+    }
+
+    fn open_to_internet(&mut self) {
+        let Some(port) = self.host_now() else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(upnp::open_port(port));
+        });
+        self.upnp_job = Some(rx);
+        self.internet_status = Some("Asking your router to open the port (UPnP)...".into());
+    }
+
+    fn poll_upnp(&mut self) {
+        let Some(rx) = &self.upnp_job else { return };
+        let Ok(result) = rx.try_recv() else { return };
+        self.upnp_job = None;
+        let port = match &self.game.net {
+            Some(multiplayer::Net::Host(s)) => s.port,
+            _ => net::DEFAULT_PORT,
+        };
+        let v6 = net::public_ipv6().map(|ip| format!("  or  [{ip}]:{port}")).unwrap_or_default();
+        self.internet_status = Some(match result {
+            Ok(m) => {
+                let text = match &m.external_ip {
+                    Some(ip) if m.behind_second_nat() => format!(
+                        "Port opened, but your ISP puts you behind a second NAT ({ip}), so outsiders can't reach you.{}",
+                        if v6.is_empty() { " Try a dedicated server on a VPS.".to_string() } else { format!(" Share IPv6 instead:{v6}") }
+                    ),
+                    Some(ip) => format!("Online! Friends can join at {ip}:{port}{v6}"),
+                    None => format!("Port {port} opened. Share your public IP (search \"what is my IP\"){v6}"),
+                };
+                self.upnp_mapping = Some(m);
+                text
+            }
+            Err(e) => format!("{e} Forward TCP port {port} to this computer in your router settings.{v6}"),
+        });
+        if let (Some(t), Some(_)) = (&self.internet_status, &self.upnp_mapping) {
+            self.game.msg(t.clone());
         }
     }
 
@@ -679,27 +780,34 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.32;
+        let mut y = h * 0.29;
         if self.ui.button(Rect::new(x, y, bw, bh), "Back to Game", true) {
             self.set_screen(Screen::Playing);
         }
         y += bh + 5.0 * s;
         let client = self.game.is_client();
         if client {
-            let host = self.game.peers.get(&0).map(|p| p.name.clone()).unwrap_or_else(|| "the host".into());
-            self.ui.text_centered(&format!("Playing on {host}'s world ({} players)", self.game.player_count()), w / 2.0, y + bh * 0.65, 10.0, GRAY);
+            let host = self.game.peers.get(&0).map(|p| format!("{}'s world", p.name)).unwrap_or_else(|| "a dedicated server".into());
+            self.ui.text_centered(&format!("Playing on {host} ({})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GRAY);
         } else if self.game.is_host() {
             let addr = self.lan_addr.clone().unwrap_or_default();
-            self.ui.text_centered(&format!("Open to LAN at {addr}  ({} players)", self.game.player_count()), w / 2.0, y + bh * 0.65, 10.0, GOLD);
+            let lock = if self.game.has_password() { ", password protected" } else { ", no password" };
+            self.ui.text_centered(&format!("Hosting at {addr}  ({}{lock})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GOLD);
         } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to LAN", true) {
-            match self.game.open_lan(&self.mp_name) {
-                Ok(port) => {
-                    let ip = net::lan_ip().unwrap_or_else(|| "this computer's IP".into());
-                    let addr = format!("{ip}:{port}");
-                    self.status = Some((format!("Hosting! Friends can join at {addr}"), 8.0));
-                    self.lan_addr = Some(addr);
-                }
-                Err(e) => self.status = Some((format!("Couldn't open to LAN: {e}"), 6.0)),
+            self.host_now();
+        }
+        if !client {
+            y += bh + 5.0 * s;
+            if let Some(t) = &self.internet_status {
+                // Long messages wrap onto two lines.
+                let (a, b) = match t.char_indices().filter(|(_, c)| *c == ' ').map(|(i, _)| i).find(|&i| i > 60) {
+                    Some(i) if t.len() > 80 => (&t[..i], &t[i + 1..]),
+                    _ => (t.as_str(), ""),
+                };
+                self.ui.text_centered(a, w / 2.0, y + bh * 0.4, 9.0, Color::new(0.7, 0.9, 1.0, 1.0));
+                self.ui.text_centered(b, w / 2.0, y + bh * 0.4 + 11.0 * s, 9.0, Color::new(0.7, 0.9, 1.0, 1.0));
+            } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to Internet", true) {
+                self.open_to_internet();
             }
         }
         y += bh + 5.0 * s;
@@ -973,6 +1081,7 @@ struct ShotArgs {
     pitch: f32,
     pos: Option<Vec3>,
     addr: String,
+    password: String,
 }
 
 fn parse_args() -> Option<ShotArgs> {
@@ -984,6 +1093,7 @@ fn parse_args() -> Option<ShotArgs> {
         frames: get("--frames").and_then(|f| f.parse().ok()).unwrap_or(240),
         time: get("--time").and_then(|f| f.parse().ok()),
         addr: get("--addr").unwrap_or_else(|| "127.0.0.1".into()),
+        password: get("--password").unwrap_or_default(),
         yaw: get("--yaw").and_then(|f| f.parse().ok()).unwrap_or(2.4),
         pitch: get("--pitch").and_then(|f| f.parse().ok()).unwrap_or(-0.25),
         pos: get("--pos").and_then(|p| {
@@ -1009,9 +1119,12 @@ fn install_audio_panic_hook() {
     }));
 }
 
-#[macroquad::main(window_conf)]
-async fn main() {
+fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Headless modes run before any window (or GPU) is touched.
+    if args.iter().any(|a| a == "--server") {
+        std::process::exit(server::run(&args));
+    }
     if let Some(i) = args.iter().position(|a| a == "--export-sounds") {
         let dir = args.get(i + 1).map(String::as_str).unwrap_or("sounds");
         match sound::export_wavs(std::path::Path::new(dir)) {
@@ -1020,6 +1133,10 @@ async fn main() {
         }
         return;
     }
+    macroquad::Window::from_config(window_conf(), game_main());
+}
+
+async fn game_main() {
     let atlas = texture::build_atlas(1337);
     let renderer = {
         let gl = unsafe { get_internal_gl() };
@@ -1054,6 +1171,10 @@ async fn main() {
         chat: None,
         last_view_proj: Mat4::IDENTITY,
         lan_addr: None,
+        mp_password: String::new(),
+        upnp_job: None,
+        upnp_mapping: None,
+        internet_status: None,
     };
 
     if let Some(s) = &shot {
@@ -1076,11 +1197,18 @@ async fn main() {
             }
             "host" => {
                 app.start_game(Game::new(424242, true, false));
-                app.game.open_lan("Hosty").expect("open to LAN");
+                app.game.open_lan("Hosty", None).expect("open to LAN");
                 app.show_debug = true;
+            }
+            "internet" => {
+                app.start_game(Game::new(424242, true, false));
+                app.mp_password = "sekrit".into();
+                app.open_to_internet();
+                app.set_screen(Screen::Paused);
             }
             "join" => {
                 app.mp_name = "Joiny".into();
+                app.mp_password = s.password.clone();
                 app.connect_next = Some(s.addr.clone());
                 app.set_screen(Screen::Multiplayer);
             }
@@ -1097,7 +1225,7 @@ async fn main() {
     let mut frames = 0u32;
     loop {
         if let Some(s) = &shot {
-            if !matches!(s.mode.as_str(), "title" | "inventory" | "join") || (s.mode == "join" && app.game.is_client()) {
+            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet") || (s.mode == "join" && app.game.is_client()) {
                 // Keep the demo camera looking at something interesting.
                 app.game.player.pitch = s.pitch;
                 app.game.player.yaw = s.yaw;

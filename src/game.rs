@@ -87,6 +87,8 @@ pub struct Game {
     pub pending_msgs: Vec<Msg>,
     /// Set when the connection drops; the app returns to the title screen.
     pub net_error: Option<String>,
+    /// Headless `--server`: no local player at all.
+    pub dedicated: bool,
 }
 
 impl Game {
@@ -144,6 +146,7 @@ impl Game {
             net_timers: [0.0; 3],
             pending_msgs: Vec::new(),
             net_error: None,
+            dedicated: false,
         }
     }
 
@@ -182,7 +185,11 @@ impl Game {
     }
 
     pub fn msg(&mut self, s: impl Into<String>) {
-        self.messages.push((s.into(), 7.0));
+        let s = s.into();
+        if self.dedicated {
+            println!("[{}] {s}", crate::server::timestamp());
+        }
+        self.messages.push((s, 7.0));
         if self.messages.len() > 6 {
             self.messages.remove(0);
         }
@@ -610,6 +617,9 @@ impl Game {
     }
 
     fn block_particles_tile(&mut self, pos: IVec3, tile: u16, n: usize) {
+        if self.dedicated {
+            return;
+        }
         for _ in 0..n {
             let r = &mut self.rng;
             let p = pos.as_vec3() + Vec3::new(r.range(0.1, 0.9), r.range(0.1, 0.9), r.range(0.1, 0.9));
@@ -626,6 +636,9 @@ impl Game {
     }
 
     fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
+        if self.dedicated {
+            return;
+        }
         for _ in 0..n {
             let r = &mut self.rng;
             self.particles.push(Particle {
@@ -687,7 +700,7 @@ impl Game {
         }
         self.explosion_effects(at, r);
         let pd = (self.player.body.pos + Vec3::Y * 0.9).distance(at);
-        if pd < r * 2.0 {
+        if pd < r * 2.0 && !self.dedicated {
             let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
             self.player.hurt = 0.0;
             self.hurt_player(dmg, cause);
@@ -706,7 +719,7 @@ impl Game {
     /// Mob AI targets and damage recipients: (player id, chest position).
     pub fn player_targets(&self) -> Vec<(u32, Vec3)> {
         let mut t = Vec::new();
-        if self.dead.is_none() {
+        if self.dead.is_none() && !self.dedicated {
             t.push((self.my_id, self.player.body.pos + Vec3::Y * 0.9));
         }
         t.extend(self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target + Vec3::Y * 0.9)));
@@ -732,6 +745,25 @@ impl Game {
         } else {
             self.sfx(Sfx::Place(material(new)), Some(center));
         }
+    }
+
+    /// One tick of a headless dedicated server.
+    pub fn server_tick(&mut self, dt: f32) {
+        self.net_receive(dt);
+        self.clock += dt;
+        self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+        for m in self.messages.iter_mut() {
+            m.1 -= dt;
+        }
+        self.messages.retain(|m| m.1 > 0.0);
+        let centers: Vec<(Vec3, i32)> = self.peers.values().map(|p| (p.target, 4)).collect();
+        self.world.stream(&centers);
+        self.world.dirty.clear(); // nothing to draw
+        if !self.peers.is_empty() {
+            self.update_entities(dt);
+        }
+        self.net_send(dt);
+        self.sounds.clear();
     }
 
     fn update_entities(&mut self, dt: f32) {
@@ -806,7 +838,7 @@ impl Game {
         let mut i = 0;
         while i < self.mobs.len() {
             let m = &self.mobs[i];
-            let far = m.body.pos.distance(self.player.body.pos) > 110.0 && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
+            let far = (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
                 if m.health <= 0.0 && m.health > -50.0 {
@@ -862,8 +894,11 @@ impl Game {
 
     fn try_spawn(&mut self) {
         // Spawn around a random player so everyone gets company.
-        let mut centers = vec![self.player.body.pos];
+        let mut centers = if self.dedicated { vec![] } else { vec![self.player.body.pos] };
         centers.extend(self.peers.values().map(|p| p.target));
+        if centers.is_empty() {
+            return;
+        }
         let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
         let passive = self.mobs.iter().filter(|m| !m.kind.hostile()).count();
         let hostile = self.mobs.len() - passive;

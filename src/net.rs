@@ -4,10 +4,16 @@
 use macroquad::math::Vec3;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_PORT: u16 = 25565;
-pub const PROTOCOL: u32 = 1;
+/// v2: challenge/response login, used for internet play.
+pub const PROTOCOL: u32 = 2;
+/// Drop a connection that has been silent this long (mob snapshots and player
+/// states flow many times a second, so silence means the link is dead).
+pub const TIMEOUT_SECS: f32 = 30.0;
+/// A connection must finish logging in within this time.
+pub const LOGIN_SECS: f32 = 15.0;
 const MAX_FRAME: usize = 8 << 20;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +55,10 @@ pub enum Msg {
     Sound { sfx: u8, at: Vec3 },
     Time(f32),
     Chat { from: u32, text: String },
+    /// host -> client, after Hello: prove you know the password (if any).
+    Challenge { nonce: [u8; 16], password: bool },
+    /// client -> host: sha256(nonce || password).
+    Auth { proof: [u8; 32] },
 }
 
 pub const FLAG_SNEAK: u8 = 1;
@@ -76,6 +86,9 @@ impl W {
         self.f32(v.x);
         self.f32(v.y);
         self.f32(v.z);
+    }
+    fn bytes(&mut self, b: &[u8]) {
+        self.0.extend_from_slice(b);
     }
     fn str(&mut self, s: &str) {
         let b = &s.as_bytes()[..s.len().min(1024)];
@@ -109,6 +122,9 @@ impl R<'_> {
     }
     fn v3(&mut self) -> io::Result<Vec3> {
         Ok(Vec3::new(self.f32()?, self.f32()?, self.f32()?))
+    }
+    fn arr<const N: usize>(&mut self) -> io::Result<[u8; N]> {
+        Ok(self.take(N)?.try_into().unwrap())
     }
     fn str(&mut self) -> io::Result<String> {
         let n = self.u32()? as usize;
@@ -245,6 +261,15 @@ impl Msg {
                 w.u32(*from);
                 w.str(text);
             }
+            Msg::Challenge { nonce, password } => {
+                w.u8(17);
+                w.bytes(nonce);
+                w.u8(*password as u8);
+            }
+            Msg::Auth { proof } => {
+                w.u8(18);
+                w.bytes(proof);
+            }
         }
         w.0
     }
@@ -296,6 +321,8 @@ impl Msg {
             14 => Msg::Sound { sfx: r.u8()?, at: r.v3()? },
             15 => Msg::Time(r.f32()?),
             16 => Msg::Chat { from: r.u32()?, text: r.str()? },
+            17 => Msg::Challenge { nonce: r.arr()?, password: r.u8()? != 0 },
+            18 => Msg::Auth { proof: r.arr()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -310,24 +337,30 @@ pub struct Conn {
     rbuf: Vec<u8>,
     wbuf: Vec<u8>,
     pub closed: Option<String>,
+    pub opened: Instant,
+    last_recv: Instant,
 }
 
 impl Conn {
     fn new(stream: TcpStream) -> io::Result<Conn> {
         stream.set_nonblocking(true)?;
         stream.set_nodelay(true)?;
-        Ok(Conn { stream, rbuf: Vec::new(), wbuf: Vec::new(), closed: None })
+        let now = Instant::now();
+        Ok(Conn { stream, rbuf: Vec::new(), wbuf: Vec::new(), closed: None, opened: now, last_recv: now })
+    }
+
+    /// Seconds since anything arrived.
+    pub fn idle_secs(&self) -> f32 {
+        self.last_recv.elapsed().as_secs_f32()
+    }
+
+    pub fn peer_addr(&self) -> String {
+        self.stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "?".into())
     }
 
     /// Connect to "host", "host:port" or "ip:port" (blocks for at most a few seconds).
     pub fn connect(addr: &str) -> io::Result<Conn> {
-        let addr = addr.trim();
-        let with_port = if addr.rsplit_once(':').map(|(_, p)| p.parse::<u16>().is_ok()).unwrap_or(false) && !addr.ends_with(']') {
-            addr.to_string()
-        } else {
-            format!("{addr}:{DEFAULT_PORT}")
-        };
-        let targets: Vec<SocketAddr> = with_port.to_socket_addrs()?.collect();
+        let targets: Vec<SocketAddr> = with_default_port(addr).to_socket_addrs()?.collect();
         let mut last = io::Error::new(io::ErrorKind::NotFound, "no address found");
         for t in targets {
             match TcpStream::connect_timeout(&t, Duration::from_secs(4)) {
@@ -370,7 +403,10 @@ impl Conn {
         while self.closed.is_none() {
             match self.stream.read(&mut buf) {
                 Ok(0) => self.closed = Some("connection closed".into()),
-                Ok(n) => self.rbuf.extend_from_slice(&buf[..n]),
+                Ok(n) => {
+                    self.rbuf.extend_from_slice(&buf[..n]);
+                    self.last_recv = Instant::now();
+                }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => self.closed = Some(e.to_string()),
@@ -405,45 +441,83 @@ pub struct Client {
     pub id: u32,
     pub name: String,
     pub conn: Conn,
-    /// Hello received and Welcome sent.
+    /// Challenge sent, waiting for Auth.
+    pub nonce: Option<[u8; 16]>,
+    /// Logged in: Welcome sent.
     pub joined: bool,
+    /// Token bucket for block edits (anti-grief on public servers).
+    pub edit_budget: f32,
 }
 
 pub struct Server {
-    listener: TcpListener,
+    listeners: Vec<TcpListener>,
     pub port: u16,
     pub clients: Vec<Client>,
     next_id: u32,
+    pub password: Option<String>,
+    pub max_players: usize,
 }
 
 impl Server {
-    /// Listen on all interfaces, trying a few ports if the default is taken.
-    pub fn open() -> io::Result<Server> {
+    /// Listen on all interfaces (IPv4 and, where available, IPv6), starting at
+    /// `first_port` and trying the next few if it's taken.
+    pub fn open(first_port: u16) -> io::Result<Server> {
         let mut last = None;
-        for port in DEFAULT_PORT..DEFAULT_PORT + 10 {
+        for port in first_port..first_port.saturating_add(10) {
+            let mut listeners = Vec::new();
+            // On Linux/macOS "[::]" is dual-stack and also takes IPv4, so the IPv4
+            // bind may then fail harmlessly; on Windows both are needed.
+            if let Ok(l) = TcpListener::bind(("::", port)) {
+                listeners.push(l);
+            }
             match TcpListener::bind(("0.0.0.0", port)) {
-                Ok(listener) => {
-                    listener.set_nonblocking(true)?;
-                    return Ok(Server { listener, port, clients: Vec::new(), next_id: 1 });
-                }
+                Ok(l) => listeners.push(l),
                 Err(e) => last = Some(e),
             }
+            if !listeners.is_empty() {
+                for l in &listeners {
+                    l.set_nonblocking(true)?;
+                }
+                return Ok(Server { listeners, port, clients: Vec::new(), next_id: 1, password: None, max_players: 8 });
+            }
         }
-        Err(last.unwrap())
+        Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::AddrInUse, "no free port")))
     }
 
     /// Accept pending connections; returns ids of the new clients.
     pub fn accept(&mut self) -> Vec<u32> {
         let mut new = Vec::new();
-        while let Ok((stream, _)) = self.listener.accept() {
+        let mut streams = Vec::new();
+        for l in &self.listeners {
+            while let Ok((stream, _)) = l.accept() {
+                streams.push(stream);
+            }
+        }
+        for stream in streams {
+            // Hard cap on half-open logins so a flood can't exhaust us.
+            if self.clients.len() >= self.max_players + 8 {
+                continue;
+            }
             if let Ok(conn) = Conn::new(stream) {
                 let id = self.next_id;
                 self.next_id += 1;
-                self.clients.push(Client { id, name: String::new(), conn, joined: false });
+                self.clients.push(Client { id, name: String::new(), conn, nonce: None, joined: false, edit_budget: 200.0 });
                 new.push(id);
             }
         }
         new
+    }
+
+    pub fn joined_count(&self) -> usize {
+        self.clients.iter().filter(|c| c.joined).count()
+    }
+
+    pub fn kick(&mut self, id: u32, reason: &str) {
+        if let Some(c) = self.get(id) {
+            c.conn.send(&Msg::Kick { reason: reason.into() });
+            c.conn.flush();
+            c.conn.closed = Some(format!("kicked: {reason}"));
+        }
     }
 
     pub fn get(&mut self, id: u32) -> Option<&mut Client> {
@@ -470,6 +544,114 @@ impl Server {
         for c in self.clients.iter_mut() {
             c.conn.flush();
         }
+    }
+}
+
+/// Add the default port unless one is given. Handles "host", "host:port",
+/// "1.2.3.4", "1.2.3.4:5", "2001:db8::1" and "[2001:db8::1]:5".
+pub fn with_default_port(addr: &str) -> String {
+    let addr = addr.trim();
+    if let Some(rest) = addr.strip_prefix('[') {
+        return if rest.contains("]:") { addr.to_string() } else { format!("{}:{DEFAULT_PORT}", addr) };
+    }
+    match addr.matches(':').count() {
+        0 => format!("{addr}:{DEFAULT_PORT}"),
+        1 => addr.to_string(),
+        _ => format!("[{addr}]:{DEFAULT_PORT}"), // bare IPv6
+    }
+}
+
+/// A fresh random-ish challenge. Not cryptographic-grade randomness, but unique
+/// per login, which is all the challenge needs to defeat replay.
+pub fn make_nonce() -> [u8; 16] {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let mut seed = Vec::new();
+    seed.extend_from_slice(&t.to_le_bytes());
+    seed.extend_from_slice(&COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes());
+    seed.extend_from_slice(&(std::process::id() as u64).to_le_bytes());
+    seed.extend_from_slice(&(&seed as *const _ as usize as u64).to_le_bytes());
+    let h = sha256(&seed);
+    h[..16].try_into().unwrap()
+}
+
+/// Proof that the client knows the password, without sending it.
+pub fn auth_proof(nonce: &[u8; 16], password: &str) -> [u8; 32] {
+    let mut data = nonce.to_vec();
+    data.extend_from_slice(password.as_bytes());
+    sha256(&data)
+}
+
+/// Constant-time comparison so response timing doesn't leak how close a guess was.
+pub fn proof_matches(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Plain SHA-256 (FIPS 180-4).
+pub fn sha256(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut msg = data.to_vec();
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+    for block in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes(block[i * 4..i * 4 + 4].try_into().unwrap());
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ (!e & g);
+            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+        for (x, v) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
+            *x = x.wrapping_add(v);
+        }
+    }
+    let mut out = [0u8; 32];
+    for (i, v) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
+    }
+    out
+}
+
+/// This machine's global IPv6 address, if it has one. With IPv6, friends can
+/// usually connect directly without any port forwarding (firewall permitting).
+pub fn public_ipv6() -> Option<String> {
+    let s = std::net::UdpSocket::bind("[::]:0").ok()?;
+    s.connect("[2001:4860:4860::8888]:53").ok()?; // picks a route; sends nothing
+    match s.local_addr().ok()?.ip() {
+        std::net::IpAddr::V6(ip) if (ip.segments()[0] & 0xe000) == 0x2000 => Some(ip.to_string()),
+        _ => None,
     }
 }
 
@@ -500,6 +682,8 @@ mod tests {
             },
             Msg::HurtYou { dmg: 3.0, cause: "was groaned".into(), knock: Vec3::Y },
             Msg::Chat { from: 0, text: "hello 🧱".into() },
+            Msg::Challenge { nonce: [7; 16], password: true },
+            Msg::Auth { proof: [9; 32] },
         ];
         for m in msgs {
             assert_eq!(Msg::decode(&m.encode()).unwrap(), m);
@@ -509,8 +693,33 @@ mod tests {
     }
 
     #[test]
+    fn sha256_matches_known_vectors() {
+        let hex = |b: [u8; 32]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        assert_eq!(hex(sha256(b"")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(hex(sha256(b"abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        // Two-block message from FIPS 180-2.
+        assert_eq!(
+            hex(sha256(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+        let n = make_nonce();
+        assert_ne!(n, make_nonce());
+        assert!(proof_matches(&auth_proof(&n, "pw"), &auth_proof(&n, "pw")));
+        assert!(!proof_matches(&auth_proof(&n, "pw"), &auth_proof(&n, "pW")));
+    }
+
+    #[test]
+    fn addresses_get_default_ports() {
+        assert_eq!(with_default_port("example.com"), "example.com:25565");
+        assert_eq!(with_default_port(" 1.2.3.4:7777 "), "1.2.3.4:7777");
+        assert_eq!(with_default_port("2001:db8::1"), "[2001:db8::1]:25565");
+        assert_eq!(with_default_port("[2001:db8::1]"), "[2001:db8::1]:25565");
+        assert_eq!(with_default_port("[2001:db8::1]:9"), "[2001:db8::1]:9");
+    }
+
+    #[test]
     fn frames_survive_tcp() {
-        let mut server = Server::open().unwrap();
+        let mut server = Server::open(DEFAULT_PORT + 100).unwrap();
         let mut client = Conn::connect(&format!("127.0.0.1:{}", server.port)).unwrap();
         client.send(&Msg::Hello { protocol: PROTOCOL, name: "a".into() });
         client.send(&Msg::Time(0.5));

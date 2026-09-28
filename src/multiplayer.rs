@@ -63,15 +63,40 @@ impl Game {
     }
 
     /// Start hosting this world. Returns the port in use.
-    pub fn open_lan(&mut self, name: &str) -> std::io::Result<u16> {
-        let server = Server::open()?;
+    pub fn open_lan(&mut self, name: &str, password: Option<String>) -> std::io::Result<u16> {
+        let port = self.open_server(DEFAULT_PORT, password, 8)?;
+        self.player_name = sanitize_name(name);
+        self.msg(format!("Opened to LAN on port {port}. Tell your friends (or your other computer)."));
+        Ok(port)
+    }
+
+    /// Start accepting players (used by both player hosting and --server).
+    pub fn open_server(&mut self, port: u16, password: Option<String>, max_players: usize) -> std::io::Result<u16> {
+        if let Some(Net::Host(s)) = &mut self.net {
+            s.password = password.filter(|p| !p.is_empty());
+            return Ok(s.port);
+        }
+        let mut server = Server::open(port)?;
+        server.password = password.filter(|p| !p.is_empty());
+        server.max_players = max_players.max(1);
         let port = server.port;
         self.net = Some(Net::Host(server));
         self.world.log_edits = true;
         self.my_id = 0;
-        self.player_name = sanitize_name(name);
-        self.msg(format!("Opened to LAN on port {port}. Tell your friends (or your other computer)."));
         Ok(port)
+    }
+
+    pub fn has_password(&self) -> bool {
+        matches!(&self.net, Some(Net::Host(s)) if s.password.is_some())
+    }
+
+    /// Kick a player by name (host only). Returns false if nobody matched.
+    pub fn kick_player(&mut self, name: &str, reason: &str) -> bool {
+        let Some((&id, _)) = self.peers.iter().find(|(_, p)| p.name.eq_ignore_ascii_case(name)) else { return false };
+        if let Some(Net::Host(s)) = &mut self.net {
+            s.kick(id, reason);
+        }
+        true
     }
 
     /// Build a client-side game from the host's Welcome.
@@ -95,8 +120,11 @@ impl Game {
     }
 
     pub fn peer_name(&self, id: u32) -> String {
-        if id == self.my_id {
+        if id == self.my_id && !self.dedicated {
             return self.player_name.clone();
+        }
+        if id == 0 && !self.peers.contains_key(&0) {
+            return "Server".into();
         }
         self.peers.get(&id).map(|p| p.name.clone()).unwrap_or_else(|| format!("Player{id}"))
     }
@@ -154,7 +182,7 @@ impl Game {
         if text.is_empty() {
             return;
         }
-        self.msg(format!("<{}> {}", self.player_name, text));
+        self.msg(format!("<{}> {}", self.peer_name(self.my_id), text));
         let m = Msg::Chat { from: self.my_id, text };
         self.net_send_msg(m);
     }
@@ -191,12 +219,22 @@ impl Game {
                 inbox.extend(c.poll().into_iter().map(|m| (0, m)));
                 if let Some(e) = &c.closed {
                     self.net_error = Some(format!("Lost connection to the host ({e})."));
+                } else if c.idle_secs() > TIMEOUT_SECS {
+                    self.net_error = Some("The host stopped responding (timed out).".into());
                 }
             }
             Some(Net::Host(s)) => {
                 s.accept();
                 for c in s.clients.iter_mut() {
                     inbox.extend(c.conn.poll().into_iter().map(|m| (c.id, m)));
+                    c.edit_budget = (c.edit_budget + dt * 60.0).min(200.0);
+                    if c.conn.closed.is_none() {
+                        if !c.joined && c.conn.opened.elapsed().as_secs_f32() > LOGIN_SECS {
+                            c.conn.closed = Some("login timed out".into());
+                        } else if c.conn.idle_secs() > TIMEOUT_SECS {
+                            c.conn.closed = Some("timed out".into());
+                        }
+                    }
                 }
                 for c in s.clients.iter().filter(|c| c.conn.closed.is_some()) {
                     if c.joined {
@@ -224,17 +262,56 @@ impl Game {
         let Some(Net::Host(server)) = &mut self.net else { return };
         let joined = server.get(from).map(|c| c.joined).unwrap_or(false);
         if !joined {
-            // Only Hello is accepted before joining.
-            let Msg::Hello { protocol, name } = m else { return };
-            if protocol != PROTOCOL {
-                if let Some(c) = server.get(from) {
-                    c.conn.send(&Msg::Kick { reason: format!("Version mismatch (host speaks protocol {PROTOCOL}, you speak {protocol})") });
-                    c.conn.flush();
-                    c.conn.closed = Some("kicked".into());
+            // Login: Hello -> Challenge -> Auth -> Welcome. Nothing else is accepted before.
+            match m {
+                Msg::Hello { protocol, name } => {
+                    if protocol != PROTOCOL {
+                        server.kick(from, &format!("Version mismatch (host speaks protocol {PROTOCOL}, you speak {protocol}). Update your game."));
+                        return;
+                    }
+                    if server.joined_count() >= server.max_players {
+                        server.kick(from, &format!("The server is full ({} players).", server.max_players));
+                        return;
+                    }
+                    let password = server.password.is_some();
+                    if let Some(c) = server.get(from) {
+                        if c.nonce.is_some() {
+                            return;
+                        }
+                        let nonce = make_nonce();
+                        c.name = sanitize_name(&name);
+                        c.nonce = Some(nonce);
+                        c.conn.send(&Msg::Challenge { nonce, password });
+                    }
                 }
-                return;
+                Msg::Auth { proof } => {
+                    let pw = server.password.clone();
+                    let Some(c) = server.get(from) else { return };
+                    let Some(nonce) = c.nonce else { return };
+                    if let Some(pw) = pw {
+                        if !proof_matches(&proof, &auth_proof(&nonce, &pw)) {
+                            let who = c.conn.peer_addr();
+                            server.kick(from, "Wrong password.");
+                            self.msg(format!("Rejected a login from {who} (wrong password)"));
+                            return;
+                        }
+                    }
+                    self.complete_join(from);
+                }
+                _ => {}
             }
-            let mut name = sanitize_name(&name);
+            return;
+        }
+        self.host_handle_joined(from, m);
+    }
+
+    fn complete_join(&mut self, from: u32) {
+        let name = match &mut self.net {
+            Some(Net::Host(server)) => server.get(from).map(|c| c.name.clone()),
+            _ => None,
+        };
+        let Some(mut name) = name else { return };
+        {
             let taken = |n: &str| n == self.player_name || self.peers.values().any(|p| p.name == n);
             if taken(&name) {
                 name = format!("{}{}", name.chars().take(13).collect::<String>(), from);
@@ -246,7 +323,10 @@ impl Game {
                 .iter()
                 .map(|(&(cx, cz), m)| Msg::Mods { cx, cz, entries: m.iter().map(|(&i, &b)| (i, b)).collect() })
                 .collect();
-            let mut roster = vec![Msg::PlayerJoin { id: self.my_id, name: self.player_name.clone() }];
+            let mut roster = Vec::new();
+            if !self.dedicated {
+                roster.push(Msg::PlayerJoin { id: self.my_id, name: self.player_name.clone() });
+            }
             roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
@@ -260,20 +340,42 @@ impl Game {
             server.broadcast(&Msg::PlayerJoin { id: from, name: name.clone() }, Some(from));
             self.peers.insert(from, Peer::new(name.clone(), self.spawn));
             self.msg(format!("{name} joined the game"));
-            return;
         }
+    }
+
+    fn host_handle_joined(&mut self, from: u32, m: Msg) {
         match m {
             Msg::Blocks(list) => {
                 let quiet = list.len() > 4;
+                // Anti-grief: edits must be within reach of where that player is,
+                // and at a human-ish rate. Rejected edits are corrected on their screen.
+                let eye = self.peers.get(&from).map(|p| p.target + Vec3::Y * 1.6);
+                let mut budget = match &mut self.net {
+                    Some(Net::Host(s)) => s.get(from).map(|c| c.edit_budget).unwrap_or(0.0),
+                    _ => 0.0,
+                };
+                let mut corrections = Vec::new();
                 for (x, y, z, id) in list {
-                    if id >= NUM_BLOCKS {
+                    let center = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
+                    let in_reach = eye.map(|e| e.distance(center) <= 10.0).unwrap_or(false);
+                    if id >= NUM_BLOCKS || !in_reach || budget < 1.0 {
+                        corrections.push((x, y, z, self.world.get(x, y, z)));
                         continue;
                     }
+                    budget -= 1.0;
                     // Logged, so the host re-broadcasts it to everyone.
                     let old = self.world.get(x, y, z);
                     self.world.set(x, y, z, id);
                     if !quiet && old != id {
                         self.block_change_feedback(IVec3::new(x, y, z), old, id);
+                    }
+                }
+                if let Some(Net::Host(s)) = &mut self.net {
+                    if let Some(c) = s.get(from) {
+                        c.edit_budget = budget;
+                        if !corrections.is_empty() {
+                            c.conn.send(&Msg::Blocks(corrections));
+                        }
                     }
                 }
             }
@@ -387,7 +489,7 @@ impl Game {
                 let name = self.peer_name(from);
                 self.msg(format!("<{name}> {text}"));
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } => {}
         }
     }
 
@@ -452,7 +554,7 @@ impl Game {
         for t in self.net_timers.iter_mut() {
             *t -= dt;
         }
-        if self.net_timers[0] <= 0.0 {
+        if self.net_timers[0] <= 0.0 && !self.dedicated {
             self.net_timers[0] = 0.05;
             let p = &self.player;
             let mut flags = 0;
@@ -558,10 +660,32 @@ mod tests {
         let mut host = Game::new(777, true, false);
         let spawn = host.spawn;
         load_around(&mut host, spawn);
-        let port = host.open_lan("Hosty").unwrap();
+        let port = host.open_lan("Hosty", Some("hunter2".into())).unwrap();
         // An edit made before anyone joins must reach the client via the join snapshot.
         let (sx, sy, sz) = (spawn.x as i32 + 2, spawn.y as i32 + 3, spawn.z as i32);
         host.world.set(sx, sy, sz, GLOWROCK);
+
+        // A wrong password is refused.
+        let mut bad = Conn::connect(&format!("127.0.0.1:{port}")).unwrap();
+        bad.send(&Msg::Hello { protocol: PROTOCOL, name: "Mallory".into() });
+        bad.flush();
+        let start = Instant::now();
+        let kicked = loop {
+            host.update(0.016, &idle());
+            let msgs = bad.poll();
+            if let Some(Msg::Challenge { nonce, password }) = msgs.iter().find(|m| matches!(m, Msg::Challenge { .. })) {
+                assert!(*password);
+                bad.send(&Msg::Auth { proof: auth_proof(nonce, "hunter3") });
+                bad.flush();
+            }
+            if let Some(Msg::Kick { reason }) = msgs.iter().find(|m| matches!(m, Msg::Kick { .. })) {
+                break reason.clone();
+            }
+            assert!(start.elapsed() < Duration::from_secs(10), "bad login never kicked");
+            std::thread::sleep(Duration::from_millis(4));
+        };
+        assert_eq!(kicked, "Wrong password.");
+        assert!(host.peers.is_empty());
 
         let mut conn = Conn::connect(&format!("127.0.0.1:{port}")).unwrap();
         conn.send(&Msg::Hello { protocol: PROTOCOL, name: "Clienty".into() });
@@ -570,6 +694,10 @@ mod tests {
         let (welcome, leftover) = loop {
             host.update(0.016, &idle());
             let mut msgs = conn.poll();
+            if let Some(Msg::Challenge { nonce, .. }) = msgs.iter().find(|m| matches!(m, Msg::Challenge { .. })) {
+                conn.send(&Msg::Auth { proof: auth_proof(nonce, "hunter2") });
+                conn.flush();
+            }
             if let Some(i) = msgs.iter().position(|m| matches!(m, Msg::Welcome { .. })) {
                 let rest = msgs.split_off(i + 1);
                 break (msgs.pop().unwrap(), rest);
@@ -591,6 +719,15 @@ mod tests {
         client.world.set(sx, sy + 1, sz, BRICK);
         host.world.set(sx, sy + 2, sz, PLANKS);
         assert!(pump(&mut host, &mut client, |h, c| h.world.get(sx, sy + 1, sz) == BRICK && c.world.get(sx, sy + 2, sz) == PLANKS));
+
+        // An edit far outside the player's reach is refused and corrected.
+        let (fx, fy, fz) = (sx + 20, sy, sz);
+        assert!(client.world.is_loaded(fx, fz) && host.world.is_loaded(fx, fz));
+        let before = host.world.get(fx, fy, fz);
+        client.world.set_remote(fx, fy, fz, BRICK);
+        client.net_send_msg(Msg::Blocks(vec![(fx, fy, fz, BRICK)]));
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get(fx, fy, fz) == before));
+        assert_eq!(host.world.get(fx, fy, fz), before);
 
         // Mobs are owned by the host and mirrored to the client.
         let mut m = Mob::new(MobKind::Oinker, spawn + Vec3::new(3.0, 1.0, 0.0), &mut host.rng);
