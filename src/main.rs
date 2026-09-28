@@ -12,6 +12,7 @@ mod mods;
 mod multiplayer;
 mod net;
 mod noise;
+mod palette;
 mod player;
 mod render;
 mod save;
@@ -1180,6 +1181,12 @@ impl App {
                 format!("Facing: {facing}"),
                 format!("Biome: {} (surface {hgt})", biome.name()),
                 format!("Chunks: {} meshed, {} loaded", self.renderer.chunks.len(), g.world.chunks.len()),
+                {
+                    // Palette-packed block storage vs. two bytes per block.
+                    let (bytes, bits) = g.world.chunks.values().fold((0, 0), |(b, t), c| (b + c.blocks.bytes(), t + c.blocks.total_bits()));
+                    let blocks = (g.world.chunks.len() * (world::CW * world::CW * world::CH) as usize).max(1);
+                    format!("Block memory: {:.1} MB ({:.1} bits/block, flat would be {:.1} MB)", bytes as f64 / 1e6, bits as f64 / blocks as f64, blocks as f64 * 2.0 / 1e6)
+                },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
                 format!("Seed: {}  Mode: {}", g.world.seed(), if g.creative { "Creative" } else { "Survival" }),

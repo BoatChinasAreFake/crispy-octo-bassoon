@@ -66,6 +66,8 @@ pub fn face_tile(id: Id, face: usize) -> u16 {
 /// 3x3 chunk neighbourhood with fast local lookups (lx/lz in -16..32).
 struct Hood<'a> {
     c: [Option<&'a Chunk>; 9],
+    /// The middle chunk unpacked from its palettes: nearly every lookup lands here.
+    own: Vec<Id>,
 }
 
 impl<'a> Hood<'a> {
@@ -82,8 +84,11 @@ impl<'a> Hood<'a> {
         if y >= CH {
             return AIR;
         }
+        if (0..CW).contains(&lx) && (0..CW).contains(&lz) {
+            return self.own[idx(lx, y, lz)];
+        }
         match self.chunk_of(lx, lz) {
-            (Some(c), x, z) => c.blocks[idx(x, y, z)],
+            (Some(c), x, z) => c.blocks.get(idx(x, y, z)),
             _ => STONE,
         }
     }
@@ -105,7 +110,7 @@ fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 2]) -> Vertex {
 }
 
 pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
-    let mut hood = Hood { c: [None; 9] };
+    let mut hood = Hood { c: [None; 9], own: Vec::new() };
     for dz in -1..=1 {
         for dx in -1..=1 {
             hood.c[((dz + 1) * 3 + dx + 1) as usize] = world.chunks.get(&(cx + dx, cz + dz));
@@ -113,6 +118,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
     }
     let mut out = ChunkMesh { opaque: MeshData::default(), water: MeshData::default(), lights: Vec::new() };
     let Some(me) = hood.c[4] else { return out };
+    hood.own = vec![AIR; (CW * CW * CH) as usize];
+    me.blocks.decode_into(&mut hood.own);
     let (bx, bz) = ((cx * CW) as f32, (cz * CW) as f32);
 
     // Only walk the vertical span that contains anything.
@@ -123,9 +130,13 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
     let max_y = (max_y + 2).min(CH);
 
     for y in 0..max_y {
+        // All-air sections have nothing to draw (their neighbours draw the faces).
+        if me.blocks.sections()[y as usize / 16].is_uniform(AIR) {
+            continue;
+        }
         for lz in 0..CW {
             for lx in 0..CW {
-                let id = me.blocks[idx(lx, y, lz)];
+                let id = hood.own[idx(lx, y, lz)];
                 if id == AIR {
                     continue;
                 }

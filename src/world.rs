@@ -2,6 +2,7 @@
 
 use crate::block::*;
 use crate::noise::{hash2, hash3, Perlin};
+use crate::palette::PalettedBlocks;
 use macroquad::math::{ivec3, IVec3, Vec3};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -18,7 +19,8 @@ pub fn idx(lx: i32, y: i32, lz: i32) -> usize {
 }
 
 pub struct Chunk {
-    pub blocks: Vec<Id>,
+    /// Block ids, packed per 16-block-tall section (see palette.rs). Index with `idx`.
+    pub blocks: PalettedBlocks,
     /// Per column: one above the highest sky-blocking block.
     pub heights: [u8; 256],
 }
@@ -27,7 +29,7 @@ impl Chunk {
     fn recompute_height(&mut self, lx: i32, lz: i32) {
         let mut h = 0;
         for y in (0..CH).rev() {
-            if blocks_sky(self.blocks[idx(lx, y, lz)]) {
+            if blocks_sky(self.blocks.get(idx(lx, y, lz))) {
                 h = y + 1;
                 break;
             }
@@ -315,7 +317,7 @@ pub struct World {
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
     req_tx: Option<Sender<(i32, i32)>>,
-    res_rx: Receiver<(i32, i32, Vec<Id>)>,
+    res_rx: Receiver<(i32, i32, PalettedBlocks)>,
 }
 
 impl World {
@@ -332,7 +334,8 @@ impl World {
             let _ = builder.spawn(move || loop {
                 let job = rx.lock().ok().and_then(|r| r.recv().ok());
                 let Some((cx, cz)) = job else { return };
-                if tx.send((cx, cz, g.generate(cx, cz))).is_err() {
+                // Packed here, on the worker, so the main thread never holds a flat copy.
+                if tx.send((cx, cz, PalettedBlocks::from_ids(&g.generate(cx, cz)))).is_err() {
                     return;
                 }
             });
@@ -364,7 +367,7 @@ impl World {
             let mut chunk = Chunk { blocks, heights: [0; 256] };
             if let Some(m) = self.mods.get(&(cx, cz)) {
                 for (&i, &id) in m {
-                    chunk.blocks[i as usize] = id;
+                    chunk.blocks.set(i as usize, id);
                 }
             }
             chunk.recompute_heights();
@@ -442,7 +445,7 @@ impl World {
             return AIR;
         }
         match self.chunks.get(&(x.div_euclid(CW), z.div_euclid(CW))) {
-            Some(c) => c.blocks[idx(x.rem_euclid(CW), y, z.rem_euclid(CW))],
+            Some(c) => c.blocks.get(idx(x.rem_euclid(CW), y, z.rem_euclid(CW))),
             None => AIR,
         }
     }
@@ -494,11 +497,10 @@ impl World {
         let (lx, lz) = (x.rem_euclid(CW), z.rem_euclid(CW));
         let c = self.chunks.get_mut(&(cx, cz))?;
         let i = idx(lx, y, lz);
-        let old = c.blocks[i];
-        if old == id {
+        if c.blocks.get(i) == id {
             return None;
         }
-        c.blocks[i] = id;
+        let old = c.blocks.set(i, id);
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
         let xs: &[i32] = if lx == 0 { &[-1, 0] } else if lx == CW - 1 { &[0, 1] } else { &[0] };
