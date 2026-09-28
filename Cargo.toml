@@ -1,0 +1,18 @@
+[package]
+name = "minceraft"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+macroquad = { version = "0.4", default-features = false }
+
+# Keep debug builds playable: the world generator and mesher are hot loops.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
