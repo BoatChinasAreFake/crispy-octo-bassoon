@@ -62,6 +62,10 @@ enum Screen {
     Help { from_title: bool },
     Multiplayer,
     Mods,
+    Worlds,
+    CreateWorld,
+    RenameWorld,
+    DeleteWorld,
 }
 
 struct Settings {
@@ -111,6 +115,17 @@ struct App {
     mods_scroll: usize,
     /// Joined a server, so its mods (not ours) are active.
     using_server_mods: bool,
+    // ---- world slots
+    /// Folder id of the world being played (where Save writes).
+    current_world: Option<String>,
+    worlds: Vec<save::WorldEntry>,
+    world_sel: Option<usize>,
+    world_scroll: usize,
+    last_click: (usize, f64),
+    form_name: String,
+    form_seed: String,
+    form_creative: bool,
+    form_focus: usize,
 }
 
 /// A random splash text, including ones added by mods.
@@ -182,8 +197,50 @@ impl App {
         self.set_screen(Screen::Playing);
     }
 
-    fn new_world(&mut self, creative: bool) {
-        let mut g = Game::new(random_seed(), creative, false);
+    fn open_worlds(&mut self) {
+        let root = save::saves_dir();
+        match save::migrate_legacy(&root) {
+            Ok(Some(_)) => self.status = Some(("Your old save is now the world \"My World\".".into(), 6.0)),
+            Ok(None) => {}
+            Err(e) => self.status = Some((format!("Couldn't move your old save: {e}"), 6.0)),
+        }
+        self.worlds = save::list_worlds(&root);
+        self.world_sel = if self.worlds.is_empty() { None } else { Some(0) };
+        self.world_scroll = 0;
+        self.set_screen(Screen::Worlds);
+    }
+
+    fn play_world(&mut self, i: usize) {
+        let Some(w) = self.worlds.get(i) else { return };
+        let id = w.id.clone();
+        match save::read_from(&save::world_file(&save::saves_dir(), &id)) {
+            Ok(d) => {
+                let mut g = Game::from_save(d);
+                g.start_scripts();
+                self.current_world = Some(id);
+                self.start_game(g);
+            }
+            Err(e) => self.status = Some((format!("Couldn't load \"{}\": {e}", w.name), 6.0)),
+        }
+    }
+
+    fn create_world(&mut self) {
+        let root = save::saves_dir();
+        let name = save::clean_name(&self.form_name);
+        let id = save::new_world_id(&root, &name);
+        if let Err(e) = save::write_name(&root, &id, &name) {
+            self.status = Some((format!("Couldn't create the world: {e}"), 6.0));
+            return;
+        }
+        let seed = save::parse_seed(&self.form_seed, random_seed());
+        self.current_world = Some(id);
+        self.new_world(self.form_creative, seed);
+        // Save straight away so it's in the list even if the game is closed abruptly.
+        self.save_quietly();
+    }
+
+    fn new_world(&mut self, creative: bool, seed: u32) {
+        let mut g = Game::new(seed, creative, false);
         g.msg(if creative {
             "Creative mode: infinite blocks, zero consequences. Double-tap Space to fly."
         } else {
@@ -198,6 +255,7 @@ impl App {
             self.save();
         }
         self.game.disconnect();
+        self.current_world = None;
         self.chat = None;
         self.lan_addr = None;
         self.internet_status = None;
@@ -224,11 +282,24 @@ impl App {
             self.status = Some(("Only the host can save this world.".into(), 3.0));
             return;
         }
-        let data = self.game.to_save();
-        match save::write(&data) {
-            Ok(()) => self.status = Some(("World saved.".into(), 3.0)),
-            Err(e) => self.status = Some((format!("Save failed: {e}"), 6.0)),
+        match self.write_current_world() {
+            Some(Ok(())) => self.status = Some(("World saved.".into(), 3.0)),
+            Some(Err(e)) => self.status = Some((format!("Save failed: {e}"), 6.0)),
+            None => {}
         }
+    }
+
+    fn save_quietly(&mut self) {
+        if let Some(Err(e)) = self.write_current_world() {
+            self.status = Some((format!("Save failed: {e}"), 6.0));
+        }
+    }
+
+    /// Write the game into its world slot (None if it has no slot, e.g. a joined server).
+    fn write_current_world(&mut self) -> Option<std::io::Result<()>> {
+        let id = self.current_world.clone()?;
+        let data = self.game.to_save();
+        Some(save::write_to(&save::world_file(&save::saves_dir(), &id), &data))
     }
 
     fn controls(&mut self) -> Controls {
@@ -297,6 +368,51 @@ impl App {
                 self.set_screen(Screen::Playing);
             }
             return;
+        }
+        match self.screen {
+            Screen::Worlds => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Title);
+                } else if is_key_pressed(KeyCode::Enter) {
+                    if let Some(i) = self.world_sel.filter(|&i| self.worlds.get(i).map(|w| w.problem.is_none()).unwrap_or(false)) {
+                        self.play_world(i);
+                    }
+                } else if !self.worlds.is_empty() && (is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::Up)) {
+                    let n = self.worlds.len();
+                    let cur = self.world_sel.unwrap_or(0);
+                    self.world_sel = Some(if is_key_pressed(KeyCode::Down) { (cur + 1).min(n - 1) } else { cur.saturating_sub(1) });
+                }
+                return;
+            }
+            Screen::CreateWorld => {
+                let (buf, max) = if self.form_focus == 0 { (&mut self.form_name, 32) } else { (&mut self.form_seed, 40) };
+                type_into(buf, max);
+                if is_key_pressed(KeyCode::Tab) {
+                    self.form_focus = 1 - self.form_focus;
+                }
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Worlds);
+                } else if is_key_pressed(KeyCode::Enter) {
+                    self.create_world();
+                }
+                return;
+            }
+            Screen::RenameWorld => {
+                type_into(&mut self.form_name, 32);
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Worlds);
+                } else if is_key_pressed(KeyCode::Enter) {
+                    self.finish_rename();
+                }
+                return;
+            }
+            Screen::DeleteWorld => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Worlds);
+                }
+                return;
+            }
+            _ => {}
         }
         if self.screen == Screen::Multiplayer {
             let (buf, max) = match self.mp_focus {
@@ -500,6 +616,201 @@ impl App {
         if let Some(f) = failure {
             self.joining = None;
             self.status = Some((f, 6.0));
+        }
+    }
+
+    fn worlds_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Select World", w / 2.0, h * 0.07, 16.0, WHITE);
+        let pw = (300.0 * s).min(w * 0.92);
+        let x = w / 2.0 - pw / 2.0;
+        let row_h = 30.0 * s;
+        let top = h * 0.07 + 10.0 * s;
+        let bottom = h - 56.0 * s;
+        let rows = (((bottom - top) / row_h).floor() as usize).max(1);
+
+        if self.worlds.is_empty() {
+            self.ui.text_centered("No worlds yet. Create one below!", w / 2.0, top + 40.0 * s, 11.0, WHITE);
+        }
+        let wheel = mouse_wheel().1;
+        if wheel.abs() > 0.1 {
+            let max = self.worlds.len().saturating_sub(rows);
+            self.world_scroll = if wheel > 0.0 { self.world_scroll.saturating_sub(1) } else { (self.world_scroll + 1).min(max) };
+        }
+        let mut play: Option<usize> = None;
+        for i in self.world_scroll..(self.world_scroll + rows).min(self.worlds.len()) {
+            let wd = &self.worlds[i];
+            let y = top + (i - self.world_scroll) as f32 * row_h;
+            let r = Rect::new(x, y, pw, row_h - 3.0 * s);
+            let selected = self.world_sel == Some(i);
+            let hov = self.ui.hovered(r);
+            let bg = if selected { Color::new(0.25, 0.3, 0.45, 0.95) } else if hov { Color::new(0.18, 0.18, 0.22, 0.95) } else { Color::new(0.1, 0.1, 0.12, 0.9) };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            if selected {
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, s, WHITE);
+            }
+            // A little grass (or glowrock, for creative) block as the world's icon.
+            let icon = r.h - 6.0 * s;
+            self.ui.icon(if wd.creative { block::GLOWROCK } else { block::GRASS }, r.x + 3.0 * s, r.y + 3.0 * s, icon);
+            let tx = r.x + icon + 9.0 * s;
+            let text_w = r.w - icon - 14.0 * s;
+            self.ui.text(&self.ui.fit(&wd.name, 11.0, text_w), tx, r.y + 12.0 * s, 11.0, WHITE);
+            let detail = match &wd.problem {
+                Some(p) => format!("Can't be opened: {p}"),
+                None => format!(
+                    "{}  -  seed {}  -  played {}  -  {} KB",
+                    if wd.creative { "Creative" } else { "Survival" },
+                    wd.seed,
+                    save::ago(wd.last_played),
+                    wd.size.div_ceil(1024)
+                ),
+            };
+            let col = if wd.problem.is_some() { Color::new(1.0, 0.5, 0.4, 1.0) } else { Color::new(0.75, 0.75, 0.75, 1.0) };
+            self.ui.text(&self.ui.fit(&detail, 8.0, text_w), tx, r.y + 22.0 * s, 8.0, col);
+            if hov && self.ui.clicked {
+                // Double-click to play.
+                let now = get_time();
+                if self.last_click.0 == i && now - self.last_click.1 < 0.4 {
+                    play = Some(i);
+                }
+                self.last_click = (i, now);
+                self.world_sel = Some(i);
+            }
+        }
+
+        let sel = self.world_sel.filter(|&i| i < self.worlds.len());
+        let playable = sel.map(|i| self.worlds[i].problem.is_none()).unwrap_or(false);
+        let gap = 5.0 * s;
+        let bh = 20.0 * s;
+        let half = (pw - gap) / 2.0;
+        let quarter = (pw - 3.0 * gap) / 4.0;
+        let y1 = h - 50.0 * s;
+        let y2 = y1 + bh + gap;
+        if self.ui.button(Rect::new(x, y1, half, bh), "Play Selected World", playable) {
+            play = sel;
+        }
+        if self.ui.button(Rect::new(x + half + gap, y1, half, bh), "Create New World", true) {
+            self.form_name = "New World".into();
+            self.form_seed.clear();
+            self.form_creative = false;
+            self.form_focus = 0;
+            drain_chars();
+            self.set_screen(Screen::CreateWorld);
+            return;
+        }
+        if self.ui.button(Rect::new(x, y2, quarter, bh), "Rename", sel.is_some()) {
+            self.form_name = self.worlds[sel.unwrap()].name.clone();
+            drain_chars();
+            self.set_screen(Screen::RenameWorld);
+            return;
+        }
+        if self.ui.button(Rect::new(x + quarter + gap, y2, quarter, bh), "Delete", sel.is_some()) {
+            self.set_screen(Screen::DeleteWorld);
+            return;
+        }
+        if self.ui.button(Rect::new(x + 2.0 * (quarter + gap), y2, quarter * 2.0 + gap, bh), "Back", true) {
+            self.set_screen(Screen::Title);
+            return;
+        }
+        if let Some(i) = play.filter(|&i| self.worlds.get(i).map(|w| w.problem.is_none()).unwrap_or(false)) {
+            self.play_world(i);
+        }
+    }
+
+    fn create_world_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Create New World", w / 2.0, h * 0.14, 16.0, WHITE);
+        let bw = (220.0 * s).min(w * 0.85);
+        let bh = 20.0 * s;
+        let x = w / 2.0 - bw / 2.0;
+        let mut y = h * 0.26;
+        self.ui.text("World name", x, y - 3.0 * s, 9.0, GRAY);
+        if self.ui.text_field(Rect::new(x, y, bw, bh), &self.form_name, self.form_focus == 0) {
+            self.form_focus = 0;
+        }
+        y += bh + 14.0 * s;
+        self.ui.text("Seed (leave empty for a random world; any text works)", x, y - 3.0 * s, 9.0, GRAY);
+        if self.ui.text_field(Rect::new(x, y, bw, bh), &self.form_seed, self.form_focus == 1) {
+            self.form_focus = 1;
+        }
+        y += bh + 8.0 * s;
+        let mode = if self.form_creative { "Game Mode: Creative" } else { "Game Mode: Survival" };
+        if self.ui.button(Rect::new(x, y, bw, bh), mode, true) {
+            self.form_creative = !self.form_creative;
+        }
+        y += bh + 2.0 * s;
+        let hint = if self.form_creative { "Fly, infinite blocks, no damage." } else { "Gather, craft, and try not to get hissed at." };
+        self.ui.text_centered(hint, w / 2.0, y + 9.0 * s, 8.0, GRAY);
+        y += 18.0 * s;
+        let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y, half, bh), "Create World", true) {
+            self.create_world();
+            return;
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Cancel", true) {
+            self.set_screen(Screen::Worlds);
+        }
+    }
+
+    fn rename_world_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Rename World", w / 2.0, h * 0.25, 16.0, WHITE);
+        let bw = (220.0 * s).min(w * 0.85);
+        let bh = 20.0 * s;
+        let x = w / 2.0 - bw / 2.0;
+        let y = h * 0.38;
+        self.ui.text_field(Rect::new(x, y, bw, bh), &self.form_name, true);
+        let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y + bh + 10.0 * s, half, bh), "Save Name", true) {
+            self.finish_rename();
+            return;
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y + bh + 10.0 * s, half, bh), "Cancel", true) {
+            self.set_screen(Screen::Worlds);
+        }
+    }
+
+    fn finish_rename(&mut self) {
+        if let Some(wd) = self.world_sel.and_then(|i| self.worlds.get_mut(i)) {
+            match save::write_name(&save::saves_dir(), &wd.id, &self.form_name) {
+                Ok(()) => wd.name = save::clean_name(&self.form_name),
+                Err(e) => self.status = Some((format!("Couldn't rename: {e}"), 5.0)),
+            }
+        }
+        self.set_screen(Screen::Worlds);
+    }
+
+    fn delete_world_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let Some(wd) = self.world_sel.and_then(|i| self.worlds.get(i)) else {
+            self.set_screen(Screen::Worlds);
+            return;
+        };
+        let (id, name) = (wd.id.clone(), wd.name.clone());
+        self.ui.text_centered(&format!("Delete \"{name}\"?"), w / 2.0, h * 0.3, 16.0, WHITE);
+        self.ui.text_centered("Its builds, inventory and script data will be gone for good.", w / 2.0, h * 0.3 + 20.0 * s, 10.0, Color::new(1.0, 0.6, 0.5, 1.0));
+        let bw = (220.0 * s).min(w * 0.85);
+        let bh = 20.0 * s;
+        let x = w / 2.0 - bw / 2.0;
+        let half = (bw - 5.0 * s) / 2.0;
+        let y = h * 0.45;
+        if self.ui.button(Rect::new(x, y, half, bh), "Delete Forever", true) {
+            match save::delete_world(&save::saves_dir(), &id) {
+                Ok(()) => self.status = Some((format!("Deleted \"{name}\"."), 4.0)),
+                Err(e) => self.status = Some((format!("Couldn't delete: {e}"), 6.0)),
+            }
+            self.worlds = save::list_worlds(&save::saves_dir());
+            self.world_sel = if self.worlds.is_empty() { None } else { Some(0) };
+            self.world_scroll = 0;
+            self.set_screen(Screen::Worlds);
+            return;
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Cancel", true) {
+            self.set_screen(Screen::Worlds);
         }
     }
 
@@ -752,6 +1063,15 @@ impl App {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.mods_screen();
             }
+            Screen::Worlds | Screen::CreateWorld | Screen::RenameWorld | Screen::DeleteWorld => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.65));
+                match self.screen {
+                    Screen::Worlds => self.worlds_screen(),
+                    Screen::CreateWorld => self.create_world_screen(),
+                    Screen::RenameWorld => self.rename_world_screen(),
+                    _ => self.delete_world_screen(),
+                }
+            }
             Screen::Multiplayer => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
                 self.multiplayer_screen();
@@ -874,26 +1194,9 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.40;
-        let has_save = save::exists();
-        if self.ui.button(Rect::new(x, y, bw, bh), "Continue Saved World", has_save) {
-            match save::read() {
-                Ok(d) => {
-                    let mut g = Game::from_save(d);
-                    g.start_scripts();
-                    self.start_game(g);
-                }
-                Err(e) => self.status = Some((format!("Couldn't load save: {e}"), 5.0)),
-            }
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "New Survival World", true) {
-            self.new_world(false);
-            return;
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "New Creative World", true) {
-            self.new_world(true);
+        let mut y = h * 0.45;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Singleplayer", true) {
+            self.open_worlds();
             return;
         }
         y += bh + 5.0 * s;
@@ -1340,6 +1643,15 @@ async fn game_main() {
         atlas_gen: block::generation(),
         mods_scroll: 0,
         using_server_mods: false,
+        current_world: None,
+        worlds: Vec::new(),
+        world_sel: None,
+        world_scroll: 0,
+        last_click: (usize::MAX, 0.0),
+        form_name: String::new(),
+        form_seed: String::new(),
+        form_creative: false,
+        form_focus: 0,
     };
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {
@@ -1379,6 +1691,25 @@ async fn game_main() {
                 app.game = Game::new(424242, true, true);
                 app.set_screen(Screen::Mods);
             }
+            "worlds" => {
+                app.game = Game::new(424242, true, true);
+                app.open_worlds();
+            }
+            "createform" => {
+                app.game = Game::new(424242, true, true);
+                app.form_name = "Cheese Kingdom".into();
+                app.form_seed = "cheese".into();
+                app.form_focus = 1;
+                app.set_screen(Screen::CreateWorld);
+            }
+            "newworld" => {
+                // Goes through the real "Create World" path.
+                app.form_name = "Harness Test World".into();
+                app.form_seed = "cheese".into();
+                app.form_creative = true;
+                app.create_world();
+                app.show_debug = true;
+            }
             "palette" => {
                 app.start_game(Game::new(424242, true, false));
                 app.set_screen(Screen::Inventory);
@@ -1408,7 +1739,7 @@ async fn game_main() {
     let mut frames = 0u32;
     loop {
         if let Some(s) = &shot {
-            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette") || (s.mode == "join" && app.game.is_client()) {
+            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette" | "worlds" | "newworld" | "createform") || (s.mode == "join" && app.game.is_client()) {
                 // Keep the demo camera looking at something interesting.
                 app.game.player.pitch = s.pitch;
                 app.game.player.yaw = s.yaw;
