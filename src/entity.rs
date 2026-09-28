@@ -117,11 +117,27 @@ pub enum MobKind {
     Groaner,
     Fluffer,
     Starer,
+    Cluckster,
+    Mooer,
+    Rattler,
+    Webber,
+    Bloop,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 5] = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner, MobKind::Fluffer, MobKind::Starer];
+    pub const ALL: [MobKind; 10] = [
+        MobKind::Oinker,
+        MobKind::Hisser,
+        MobKind::Groaner,
+        MobKind::Fluffer,
+        MobKind::Starer,
+        MobKind::Cluckster,
+        MobKind::Mooer,
+        MobKind::Rattler,
+        MobKind::Webber,
+        MobKind::Bloop,
+    ];
 
     pub fn index(self) -> u8 {
         MobKind::ALL.iter().position(|k| *k == self).unwrap_or(0) as u8
@@ -137,6 +153,11 @@ impl MobKind {
             "groaner" | "zombie" => Some(MobKind::Groaner),
             "fluffer" | "sheep" => Some(MobKind::Fluffer),
             "starer" | "enderman" => Some(MobKind::Starer),
+            "cluckster" | "chicken" => Some(MobKind::Cluckster),
+            "mooer" | "cow" => Some(MobKind::Mooer),
+            "rattler" | "skeleton" => Some(MobKind::Rattler),
+            "webber" | "spider" => Some(MobKind::Webber),
+            "bloop" | "slime" => Some(MobKind::Bloop),
             _ => None,
         }
     }
@@ -147,8 +168,14 @@ impl MobKind {
             MobKind::Groaner => "Groaner",
             MobKind::Fluffer => "Fluffer",
             MobKind::Starer => "Starer",
+            MobKind::Cluckster => "Cluckster",
+            MobKind::Mooer => "Mooer",
+            MobKind::Rattler => "Rattler",
+            MobKind::Webber => "Webber",
+            MobKind::Bloop => "Bloop",
         }
     }
+    /// Half-width and height at size 1.
     fn dims(self) -> (f32, f32) {
         match self {
             MobKind::Oinker => (0.45, 0.9),
@@ -156,6 +183,11 @@ impl MobKind {
             MobKind::Groaner => (0.3, 1.95),
             MobKind::Fluffer => (0.45, 1.25),
             MobKind::Starer => (0.3, 2.9),
+            MobKind::Cluckster => (0.2, 0.7),
+            MobKind::Mooer => (0.45, 1.4),
+            MobKind::Rattler => (0.3, 1.95),
+            MobKind::Webber => (0.7, 0.9),
+            MobKind::Bloop => (0.26, 0.52),
         }
     }
     fn max_health(self) -> f32 {
@@ -165,12 +197,25 @@ impl MobKind {
             MobKind::Groaner => 20.0,
             MobKind::Fluffer => 8.0,
             MobKind::Starer => 40.0,
+            MobKind::Cluckster => 4.0,
+            MobKind::Mooer => 10.0,
+            MobKind::Rattler => 20.0,
+            MobKind::Webber => 16.0,
+            MobKind::Bloop => 1.0, // times size squared
         }
     }
     /// Spawns at night / in caves and counts toward the hostile cap.
-    /// (Starers are only hostile once provoked, but they keep monster hours.)
+    /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !matches!(self, MobKind::Oinker | MobKind::Fluffer)
+        !self.passive()
+    }
+    /// Farm animals: wander, flee when hit, spawn in daylight on grass.
+    pub fn passive(self) -> bool {
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer)
+    }
+    /// Undead: burn in sunlight.
+    fn burns(self) -> bool {
+        matches!(self, MobKind::Groaner | MobKind::Rattler)
     }
 }
 
@@ -198,6 +243,10 @@ pub struct Mob {
     pub angry: bool,
     /// Starer: seconds until it may teleport again.
     pub warp_cd: f32,
+    /// Bloops come in sizes 1, 2 and 4 (it scales the body, health and damage).
+    pub size: f32,
+    /// Bloop: seconds until the next hop.
+    hop_cd: f32,
 }
 
 pub enum MobEvent {
@@ -206,6 +255,8 @@ pub enum MobEvent {
     Smoke(Vec3),
     /// A Starer blinked from one place to another.
     Warp(Vec3, Vec3),
+    /// A Rattler loosed a Pointy Stick: (from, velocity).
+    Shoot(Vec3, Vec3),
 }
 
 /// A spot a Starer can teleport to near `around`: standing room on solid ground.
@@ -249,7 +300,20 @@ impl Mob {
             burning: false,
             angry: false,
             warp_cd: 0.0,
+            size: 1.0,
+            hop_cd: rng.range(0.5, 2.0),
         }
+    }
+
+    /// Resize (Bloops): scales the body, and health with the square of the size.
+    pub fn with_size(mut self, size: u8) -> Self {
+        let size = size.clamp(1, 4) as f32;
+        let (half, h) = self.kind.dims();
+        self.size = size;
+        self.body.half = half * size;
+        self.body.height = h * size;
+        self.health = self.kind.max_health() * size * size;
+        self
     }
 
     pub fn eye(&self) -> Vec3 {
@@ -268,7 +332,8 @@ impl Mob {
         self.knock = dir * 7.0;
         self.body.vel.y = 6.0;
         match self.kind {
-            MobKind::Oinker | MobKind::Fluffer => self.flee = 4.0,
+            k if k.passive() => self.flee = 4.0,
+            MobKind::Webber => self.angry = true,
             MobKind::Starer => {
                 self.angry = true;
                 // Takes the hit, then blinks away to think about it (flee = "wants to warp").
@@ -288,8 +353,11 @@ impl Mob {
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
 
         let mut want: Option<(f32, f32)> = None; // (yaw, speed)
+        // Wander when there's nothing better to do (Bloops only ever hop).
+        let mut may_wander = true;
+        let face = flat.x.atan2(-flat.z);
         match self.kind {
-            MobKind::Oinker | MobKind::Fluffer => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 }
@@ -322,13 +390,62 @@ impl Mob {
                         self.attack_cd = 1.0;
                     }
                 }
-                let head = self.eye();
-                self.burning = daylight > 0.65 && world.sky_light(head.x.floor() as i32, head.y.floor() as i32, head.z.floor() as i32) >= 1.0 && !self.body.in_water;
-                if self.burning {
-                    self.health -= dt * 1.5;
-                    if rng.chance(dt * 8.0) {
-                        ev.push(MobEvent::Smoke(head));
+            }
+            MobKind::Rattler => {
+                let fd = flat.length();
+                if player_visible && dist < 22.0 {
+                    // Keep a polite shooting distance.
+                    if fd > 11.0 {
+                        want = Some((face, 2.2));
+                    } else if fd < 5.0 {
+                        want = Some((face + std::f32::consts::PI, 2.0));
+                    } else {
+                        self.yaw += angle_diff(face, self.yaw).clamp(-8.0 * dt, 8.0 * dt);
+                        may_wander = false;
                     }
+                    let eye = self.eye();
+                    let aim = player - eye;
+                    let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                    if self.attack_cd <= 0.0 && fd < 16.0 && clear {
+                        // Lob it a little higher the further away you are (arrows drop).
+                        let vel = aim.normalize_or_zero() * Arrow::SPEED + Vec3::Y * aim.length() * 0.42;
+                        ev.push(MobEvent::Shoot(eye + aim.normalize_or_zero() * 0.5, vel));
+                        self.attack_cd = rng.range(1.6, 2.6);
+                    }
+                }
+            }
+            MobKind::Webber => {
+                if !player_visible || dist > 32.0 {
+                    self.angry = false;
+                }
+                // Neutral in bright daylight unless provoked.
+                if player_visible && dist < 18.0 && (self.angry || daylight < 0.5) {
+                    want = Some((face, 3.4));
+                    if flat.length() < self.body.half + 0.9 && to_player.y.abs() < 1.5 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(2.0, "was nibbled by a Webber"));
+                        self.attack_cd = 0.9;
+                    }
+                }
+            }
+            MobKind::Bloop => {
+                may_wander = false;
+                self.hop_cd = (self.hop_cd - dt).max(0.0);
+                if self.body.on_ground {
+                    if self.hop_cd <= 0.0 {
+                        let chase = player_visible && dist < 16.0;
+                        self.yaw = if chase { face } else { rng.range(0.0, std::f32::consts::TAU) };
+                        self.body.vel.y = 6.0 + self.size * 0.6;
+                        self.body.on_ground = false;
+                        self.hop_cd = if chase { rng.range(0.6, 1.2) } else { rng.range(1.5, 3.5) };
+                        self.anim += 1.0;
+                    }
+                } else {
+                    want = Some((self.yaw, 2.6 + self.size * 0.3));
+                }
+                // Small ones are harmless; bigger ones hurt on contact.
+                if self.size >= 2.0 && flat.length() < self.body.half + 0.6 && to_player.y.abs() < self.body.height && self.attack_cd <= 0.0 {
+                    ev.push(MobEvent::HurtPlayer(self.size, "was bloop'd"));
+                    self.attack_cd = 1.0;
                 }
             }
             MobKind::Starer => {
@@ -369,7 +486,17 @@ impl Mob {
                 }
             }
         }
-        if want.is_none() {
+        if self.kind.burns() {
+            let head = self.eye();
+            self.burning = daylight > 0.65 && world.sky_light(head.x.floor() as i32, head.y.floor() as i32, head.z.floor() as i32) >= 1.0 && !self.body.in_water;
+            if self.burning {
+                self.health -= dt * 1.5;
+                if rng.chance(dt * 8.0) {
+                    ev.push(MobEvent::Smoke(head));
+                }
+            }
+        }
+        if want.is_none() && may_wander {
             self.wander_t -= dt;
             if self.wander_t <= 0.0 {
                 self.wander_t = rng.range(2.0, 6.0);
@@ -394,11 +521,21 @@ impl Mob {
             self.body.vel.y = (self.body.vel.y + 14.0 * dt).min(2.5);
         } else {
             self.body.vel.y = (self.body.vel.y - GRAVITY * dt).max(-50.0);
+            if self.kind == MobKind::Cluckster {
+                // Flap flap: Clucksters flutter down instead of falling.
+                self.body.vel.y = self.body.vel.y.max(-2.5);
+            }
         }
         let prev_ground = self.body.on_ground;
         move_body(world, &mut self.body, dt, false);
-        if moving && self.body.hit_wall && (self.body.on_ground || prev_ground) {
-            self.body.vel.y = 8.8;
+        if moving && self.body.hit_wall {
+            match self.kind {
+                // Webbers walk straight up walls.
+                MobKind::Webber => self.body.vel.y = 3.2,
+                MobKind::Bloop => {}
+                _ if self.body.on_ground || prev_ground => self.body.vel.y = 8.8,
+                _ => {}
+            }
         }
         let spd = Vec3::new(self.body.vel.x, 0.0, self.body.vel.z).length();
         self.anim += spd * dt * 5.0;
@@ -417,14 +554,22 @@ impl Mob {
             MobKind::Groaner if n > 0 => Some((GOO, n)),
             MobKind::Fluffer => Some((WOOL, n.max(1))),
             MobKind::Starer if n > 0 => Some((PEARL, 1)),
+            MobKind::Cluckster if n > 0 => Some((FEATHER, n)),
+            MobKind::Mooer => Some((MOO_STEAK, n + 1)),
+            MobKind::Rattler if n > 0 => Some((BONE, n)),
+            MobKind::Webber if n > 0 => Some((STRING, n)),
+            // Only the smallest Bloops leave anything; bigger ones split instead.
+            MobKind::Bloop if n > 0 && self.size <= 1.0 => Some((GOO, n)),
             _ => None,
         }
     }
 
-    /// Anything dropped besides `loot` (Fluffers also give Baa-con).
+    /// Anything dropped besides `loot` (Baa-con, Cluckets, spare Pointy Sticks).
     pub fn extra_loot(&self, rng: &mut Rng) -> Option<(Id, u8)> {
         match self.kind {
             MobKind::Fluffer if rng.chance(0.7) => Some((MUTTON, 1)),
+            MobKind::Cluckster => Some((CLUCKETS, 1)),
+            MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             _ => None,
         }
     }
@@ -446,13 +591,13 @@ impl Mob {
             [3.0, 3.0, 3.0, 1.0]
         } else if self.burning {
             [1.0, 0.8, 0.6, 1.0]
-        } else if self.angry {
+        } else if self.angry && self.kind == MobKind::Starer {
             [1.6, 0.9, 1.8, 1.0]
         } else {
             [1.0; 4]
         };
         let mut p = self.body.pos;
-        if self.angry {
+        if self.angry && self.kind == MobKind::Starer {
             // Angry Starers vibrate with rage.
             p.x += (self.anim * 37.0 + self.id as f32).sin() * 0.03;
             p.z += (self.anim * 29.0).cos() * 0.03;
@@ -460,7 +605,12 @@ impl Mob {
         let sky = world.sky_light(p.x.floor() as i32, (p.y + 0.5).floor() as i32, p.z.floor() as i32);
         geo.begin(Pass::Opaque, tint, false);
         let swell = if self.kind == MobKind::Hisser { 1.0 + self.fuse * 0.08 } else { 1.0 };
-        let root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(Vec3::splat(swell));
+        let mut scale = Vec3::splat(swell * self.size);
+        if self.kind == MobKind::Bloop && !self.body.on_ground {
+            // Stretch a little mid-hop.
+            scale *= Vec3::new(0.9, 1.2, 0.9);
+        }
+        let root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
         draw_model(geo, &root, model(self.kind), self.anim, sky, false);
     }
 }
@@ -482,6 +632,8 @@ pub enum Limb {
     Swing(f32),
     /// Arms held forward, groaner style.
     Forward,
+    /// Sweeps side to side around the vertical axis (Webber legs).
+    SwingY(f32),
 }
 
 pub struct Part {
@@ -554,6 +706,54 @@ static STARER: [Part; 6] = [
 ];
 pub static STOVE: [Part; 6] = humanoid(T_SKIN, T_STOVE_FACE, T_STOVE_SHIRT, T_STOVE_PANTS, Limb::Swing(-1.0), Limb::Swing(1.0));
 
+const CB: u16 = T_CLUCK_BODY;
+const CL: u16 = T_CLUCK_LEG;
+static CLUCKSTER: [Part; 7] = [
+    part([-0.19, 0.25, -0.25], [0.38, 0.35, 0.5], [0.0; 3], Limb::Fixed, [CB; 6]),
+    part([-0.12, 0.45, -0.42], [0.24, 0.3, 0.2], [0.0; 3], Limb::Fixed, [CB, CB, CB, CB, CB, T_CLUCK_FACE]),
+    part([-0.1, 0.0, -0.05], [0.06, 0.26, 0.06], [0.0, 0.26, 0.0], Limb::Swing(1.0), [CL; 6]),
+    part([0.04, 0.0, -0.05], [0.06, 0.26, 0.06], [0.0, 0.26, 0.0], Limb::Swing(-1.0), [CL; 6]),
+    // Wings (they flap when it walks, and it only really walks when fleeing).
+    part([-0.24, 0.3, -0.2], [0.05, 0.22, 0.4], [-0.2, 0.52, 0.0], Limb::Swing(0.3), [CB; 6]),
+    part([0.19, 0.3, -0.2], [0.05, 0.22, 0.4], [0.2, 0.52, 0.0], Limb::Swing(-0.3), [CB; 6]),
+    part([-0.08, 0.5, 0.2], [0.16, 0.15, 0.1], [0.0; 3], Limb::Fixed, [CB; 6]),
+];
+
+const MS: u16 = T_MOO_SKIN;
+static MOOER: [Part; 8] = [
+    part([-0.38, 0.62, -0.62], [0.76, 0.66, 1.24], [0.0; 3], Limb::Fixed, [MS; 6]),
+    part([-0.26, 0.86, -1.0], [0.52, 0.5, 0.4], [0.0; 3], Limb::Fixed, [MS, MS, MS, MS, MS, T_MOO_FACE]),
+    part([-0.34, 1.3, -0.86], [0.1, 0.12, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
+    part([0.24, 1.3, -0.86], [0.1, 0.12, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
+    part([-0.36, 0.0, -0.5], [0.22, 0.62, 0.22], [0.0, 0.62, -0.4], Limb::Swing(1.0), [MS; 6]),
+    part([0.14, 0.0, -0.5], [0.22, 0.62, 0.22], [0.0, 0.62, -0.4], Limb::Swing(-1.0), [MS; 6]),
+    part([-0.36, 0.0, 0.28], [0.22, 0.62, 0.22], [0.0, 0.62, 0.4], Limb::Swing(-1.0), [MS; 6]),
+    part([0.14, 0.0, 0.28], [0.22, 0.62, 0.22], [0.0, 0.62, 0.4], Limb::Swing(1.0), [MS; 6]),
+];
+
+static RATTLER: [Part; 6] = humanoid(T_BONE, T_RATTLER_FACE, T_BONE, T_BONE, Limb::Forward, Limb::Forward);
+
+const WS: u16 = T_WEB_SKIN;
+const fn web_leg(side: f32, z: f32, phase: f32) -> Part {
+    let x = if side < 0.0 { -1.05 } else { 0.35 };
+    part([x, 0.34, z], [0.7, 0.09, 0.09], [side * 0.35, 0.38, z], Limb::SwingY(phase), [WS; 6])
+}
+static WEBBER: [Part; 10] = [
+    part([-0.42, 0.25, -0.05], [0.84, 0.5, 0.85], [0.0; 3], Limb::Fixed, [WS; 6]),
+    part([-0.3, 0.22, -0.6], [0.6, 0.42, 0.56], [0.0; 3], Limb::Fixed, [WS, WS, WS, WS, WS, T_WEB_FACE]),
+    web_leg(-1.0, -0.45, 1.0),
+    web_leg(-1.0, -0.2, -1.0),
+    web_leg(-1.0, 0.05, 1.0),
+    web_leg(-1.0, 0.3, -1.0),
+    web_leg(1.0, -0.45, -1.0),
+    web_leg(1.0, -0.2, 1.0),
+    web_leg(1.0, 0.05, -1.0),
+    web_leg(1.0, 0.3, 1.0),
+];
+
+const BL: u16 = T_BLOOP;
+static BLOOP: [Part; 1] = [part([-0.26, 0.0, -0.26], [0.52, 0.52, 0.52], [0.0; 3], Limb::Fixed, [BL, BL, BL, BL, BL, T_BLOOP_FACE])];
+
 fn model(kind: MobKind) -> &'static [Part] {
     match kind {
         MobKind::Oinker => &OINKER,
@@ -561,6 +761,11 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Groaner => &GROANER,
         MobKind::Fluffer => &FLUFFER,
         MobKind::Starer => &STARER,
+        MobKind::Cluckster => &CLUCKSTER,
+        MobKind::Mooer => &MOOER,
+        MobKind::Rattler => &RATTLER,
+        MobKind::Webber => &WEBBER,
+        MobKind::Bloop => &BLOOP,
     }
 }
 
@@ -571,6 +776,7 @@ pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky:
             Limb::Fixed => Mat4::IDENTITY,
             Limb::Swing(s) => Mat4::from_rotation_x(swing * s),
             Limb::Forward => Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2 + swing * 0.1),
+            Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
         };
         let pivot = Vec3::from_array(p.pivot);
         let m = *root
@@ -610,6 +816,72 @@ impl Particle {
         let m = Mat4::from_translation(self.pos - Vec3::splat(s * 0.5)) * Mat4::from_scale(Vec3::splat(s));
         let r = [self.uv[0], self.uv[1], self.uv[0] + 0.25, self.uv[1] + 0.25];
         geo.cube(&m, [self.tile; 6], sky, r);
+    }
+}
+
+/// A Pointy Stick in flight (or stuck in something).
+pub struct Arrow {
+    pub pos: Vec3,
+    pub vel: Vec3,
+    /// Player id that fired it, or None for a Rattler.
+    pub shooter: Option<u32>,
+    pub damage: f32,
+    /// Seconds left before it disappears.
+    pub life: f32,
+    pub stuck: bool,
+    /// Which way it points (kept once it stops moving).
+    pub dir: Vec3,
+}
+
+impl Arrow {
+    pub const SPEED: f32 = 24.0;
+    const GRAVITY: f32 = 20.0;
+
+    pub fn new(pos: Vec3, vel: Vec3, shooter: Option<u32>, damage: f32) -> Arrow {
+        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z) }
+    }
+
+    /// Fly for `dt`. Returns true if it just hit a block (and stuck there).
+    pub fn fly(&mut self, dt: f32, world: &World) -> bool {
+        self.life -= dt;
+        if self.stuck {
+            return false;
+        }
+        self.vel.y -= Self::GRAVITY * dt;
+        self.dir = self.vel.normalize_or(self.dir);
+        let d = self.vel * dt;
+        let steps = (d.length() / 0.2).ceil().max(1.0) as i32;
+        for _ in 0..steps {
+            let next = self.pos + d / steps as f32;
+            if is_solid(world.get(next.x.floor() as i32, next.y.floor() as i32, next.z.floor() as i32)) {
+                self.stuck = true;
+                self.vel = Vec3::ZERO;
+                self.life = self.life.min(5.0);
+                return true;
+            }
+            self.pos = next;
+        }
+        false
+    }
+
+    /// For the network: velocity while flying; a tiny vector along `dir` once stuck.
+    pub fn wire_vel(&self) -> Vec3 {
+        if self.stuck { self.dir * 1e-3 } else { self.vel }
+    }
+
+    /// A client's copy, from the host's snapshot.
+    pub fn from_wire(pos: Vec3, v: Vec3) -> Arrow {
+        let stuck = v.length() < 0.01;
+        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z) }
+    }
+
+    pub fn draw(&self, geo: &mut DynGeo, world: &World) {
+        let sky = world.sky_light(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32);
+        let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, self.dir);
+        let m = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.03, -0.03, -0.55)) * Mat4::from_scale(Vec3::new(0.06, 0.06, 0.6));
+        geo.cube(&m, [T_PLANKS; 6], sky, [0.0, 0.0, 0.25, 0.25]);
+        let tip = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.04, -0.04, 0.0)) * Mat4::from_scale(Vec3::new(0.08, 0.08, 0.1));
+        geo.cube(&tip, [T_STONE; 6], sky, [0.0, 0.0, 0.25, 0.25]);
     }
 }
 

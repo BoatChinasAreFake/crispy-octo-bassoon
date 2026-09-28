@@ -50,6 +50,8 @@ pub struct Game {
     pub mobs: Vec<Mob>,
     pub particles: Vec<Particle>,
     pub tnts: Vec<PrimedTnt>,
+    /// Pointy Sticks in flight or stuck in things (owned by the host; clients mirror them).
+    pub arrows: Vec<Arrow>,
     pub inv: Inventory,
     pub creative: bool,
     /// Fraction of a day, 0 = sunrise.
@@ -123,6 +125,7 @@ impl Game {
             mobs: Vec::new(),
             particles: Vec::new(),
             tnts: Vec::new(),
+            arrows: Vec::new(),
             inv,
             creative,
             time: 0.02,
@@ -239,6 +242,8 @@ impl Game {
             DIAMOND => "dimonds",
             GOLD_INGOT => "fools_gold",
             WOOL => "fluffed",
+            FEATHER => "why_cross",
+            MOO_STEAK => "udderly",
             TABLE => "benchmarking",
             PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND => "tool_time",
             _ => return,
@@ -711,6 +716,93 @@ impl Game {
         }
     }
 
+    /// Loose a Pointy Stick from the bow (the host owns arrows, so clients ask it to).
+    fn shoot_bow(&mut self) {
+        if !self.creative && self.inv.count(ARROW) == 0 {
+            self.msg("No Pointy Sticks. The bow twangs sadly at nothing.");
+            return;
+        }
+        if !self.creative {
+            self.inv.remove(ARROW, 1);
+        }
+        let dir = self.player.look_dir();
+        let pos = self.player.eye() + dir * 0.5;
+        self.player.swing = 1.0;
+        self.use_cd = 0.6;
+        if self.is_client() {
+            self.net_send_msg(Msg::Shoot { pos, dir });
+            self.sfx(Sfx::Twang, None);
+        } else {
+            let me = self.my_id;
+            self.spawn_arrow(pos, dir * Arrow::SPEED * 1.2, Some(me));
+        }
+    }
+
+    /// Fire an arrow: from a player's bow (`shooter` = their id) or a Rattler (None).
+    pub fn spawn_arrow(&mut self, pos: Vec3, vel: Vec3, shooter: Option<u32>) {
+        let damage = if shooter.is_some() { 5.0 } else { 3.0 };
+        self.arrows.push(Arrow::new(pos, vel, shooter, damage));
+        self.sfx(Sfx::Twang, Some(pos));
+        if self.arrows.len() > 200 {
+            self.arrows.remove(0);
+        }
+    }
+
+    /// Move arrows and see what they hit (host / single player only).
+    fn update_arrows(&mut self, dt: f32) {
+        let mut arrows = std::mem::take(&mut self.arrows);
+        arrows.retain_mut(|a| {
+            if a.fly(dt, &self.world) {
+                self.sfx(Sfx::Thunk, Some(a.pos));
+            }
+            if a.life <= 0.0 {
+                return false;
+            }
+            if a.stuck {
+                return true;
+            }
+            let hit_box = |min: Vec3, max: Vec3| {
+                let e = Vec3::splat(0.15);
+                let p = a.pos;
+                p.cmpge(min - e).all() && p.cmple(max + e).all()
+            };
+            match a.shooter {
+                Some(pid) => {
+                    // Players' arrows hit mobs.
+                    let Some(m) = self.mobs.iter_mut().find(|m| hit_box(m.body.min(), m.body.max())) else { return true };
+                    m.hurt = 0.0;
+                    m.damage(a.damage, a.pos - a.vel);
+                    m.last_attacker = pid;
+                    let (kind, at) = (m.kind, m.body.pos);
+                    self.sfx(Sfx::hurt_of(kind), Some(at));
+                    if pid == self.my_id && !self.dedicated {
+                        self.advance("robin_hood");
+                    }
+                    false
+                }
+                None => {
+                    // Rattlers' arrows hit players.
+                    let me = self.player.body.clone();
+                    if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
+                        self.player.hurt = 0.0;
+                        self.hurt_player(a.damage, "was shot by a Rattler (with a Pointy Stick)");
+                        self.player.body.vel += a.vel.normalize_or_zero() * 4.0;
+                        return false;
+                    }
+                    let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
+                    if let Some(id) = hit {
+                        self.hurt_peer(id, a.damage, "was shot by a Rattler (with a Pointy Stick)", a.vel.normalize_or_zero() * 4.0);
+                        return false;
+                    }
+                    true
+                }
+            }
+        });
+        // Anything fired while we were busy (none today, but keep them).
+        arrows.append(&mut self.arrows);
+        self.arrows = arrows;
+    }
+
     /// Placing a sponge soaks up water around it.
     fn soak(&mut self, at: IVec3) {
         let mut n = 0;
@@ -899,6 +991,10 @@ impl Game {
         if held == PEARL {
             self.player.swing = 1.0;
             self.throw_pearl();
+            return;
+        }
+        if held == BOW {
+            self.shoot_bow();
             return;
         }
         let Some(Target::Block(h)) = &self.target else { return };
@@ -1305,6 +1401,11 @@ impl Game {
                     MobKind::Oinker => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Groaner => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Fluffer => noises.push((Sfx::Baa, m.body.pos)),
+                    MobKind::Cluckster => noises.push((Sfx::Cluck, m.body.pos)),
+                    MobKind::Mooer => noises.push((Sfx::Moo, m.body.pos)),
+                    MobKind::Rattler => noises.push((Sfx::Rattle, m.body.pos)),
+                    MobKind::Webber => noises.push((Sfx::Skitter, m.body.pos)),
+                    MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer => {}
                 }
             }
@@ -1345,8 +1446,10 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(from));
                     self.sfx(Sfx::Warp, Some(to));
                 }
+                MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
             }
         }
+        self.update_arrows(dt);
         let mut i = 0;
         while i < self.mobs.len() {
             let m = &self.mobs[i];
@@ -1366,8 +1469,20 @@ impl Game {
                             MobKind::Hisser => self.advance("hiss_tory"),
                             MobKind::Groaner => self.advance("groan_up"),
                             MobKind::Starer => self.advance("staring_champ"),
-                            MobKind::Fluffer => {}
+                            MobKind::Rattler => self.advance("bone_zone"),
+                            MobKind::Webber => self.advance("arachno"),
+                            MobKind::Bloop => self.advance("split_decision"),
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer => {}
                         }
+                    }
+                    // Big Bloops split into smaller ones.
+                    if m.kind == MobKind::Bloop && m.size > 1.0 {
+                        let size = (m.size / 2.0) as u8;
+                        for _ in 0..self.rng.int(2, 4) {
+                            let off = Vec3::new(self.rng.range(-0.4, 0.4), 0.3, self.rng.range(-0.4, 0.4)) * m.size;
+                            self.alloc_mob_sized(MobKind::Bloop, m.body.pos + off, size);
+                        }
+                        self.sfx(Sfx::Bloop, Some(at));
                     }
                     let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
                     for (item, n) in drops.into_iter().flatten() {
@@ -1415,7 +1530,11 @@ impl Game {
     }
 
     fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
-        let mut m = Mob::new(kind, pos, &mut self.rng);
+        self.alloc_mob_sized(kind, pos, 1);
+    }
+
+    fn alloc_mob_sized(&mut self, kind: MobKind, pos: Vec3, size: u8) {
+        let mut m = Mob::new(kind, pos, &mut self.rng).with_size(size);
         m.id = self.next_mob_id;
         self.next_mob_id += 1;
         self.mobs.push(m);
@@ -1441,7 +1560,7 @@ impl Game {
         let top = self.world.get(x, y, z);
         let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && w.get(x, y, z) != WATER;
         if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
-            let kind = if self.rng.chance(0.4) { MobKind::Fluffer } else { MobKind::Oinker };
+            let kind = [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize];
             for i in 0..self.rng.int(1, 3) {
                 let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.7, y as f32 + 1.0, z as f32 + 0.5);
                 self.alloc_mob(kind, pos);
@@ -1452,19 +1571,28 @@ impl Game {
             return;
         }
         let roll = self.rng.f32();
-        let kind = if roll < 0.4 { MobKind::Hisser } else if roll < 0.85 { MobKind::Groaner } else { MobKind::Starer };
-        // Starers are tall: they need an extra block of headroom.
-        let clear = |w: &World, y: i32| clear(w, y) && (kind != MobKind::Starer || !is_solid(w.get(x, y + 2, z)));
+        let kind = match roll {
+            r if r < 0.28 => MobKind::Hisser,
+            r if r < 0.56 => MobKind::Groaner,
+            r if r < 0.74 => MobKind::Rattler,
+            r if r < 0.86 => MobKind::Webber,
+            r if r < 0.94 => MobKind::Bloop,
+            _ => MobKind::Starer,
+        };
+        let size = if kind == MobKind::Bloop { [1, 2, 2, 4][self.rng.int(0, 3) as usize] } else { 1 };
+        // Starers (and big Bloops) are tall: they need an extra block of headroom.
+        let tall = kind == MobKind::Starer || size == 4;
+        let clear = |w: &World, y: i32| clear(w, y) && (!tall || !is_solid(w.get(x, y + 2, z)));
         if self.is_night() && is_solid(top) && clear(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
-            self.alloc_mob(kind, pos);
+            self.alloc_mob_sized(kind, pos, size);
             return;
         }
         // Caves are always spooky.
         let cy = self.rng.int(4, y.max(5));
         if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 {
             let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
-            self.alloc_mob(kind, pos);
+            self.alloc_mob_sized(kind, pos, size);
         }
     }
 
@@ -1529,6 +1657,13 @@ impl Game {
         for m in &self.mobs {
             if m.body.pos.distance(eye) < (render_distance * 16) as f32 {
                 m.draw(&mut g, &self.world);
+            }
+        }
+        // Pointy Sticks
+        if !self.arrows.is_empty() {
+            g.begin(Pass::Opaque, [1.0; 4], false);
+            for a in self.arrows.iter().filter(|a| a.pos.distance(eye) < (render_distance * 16) as f32) {
+                a.draw(&mut g, &self.world);
             }
         }
         // Other players
@@ -1958,6 +2093,97 @@ mod tests {
         let d = g.to_save();
         let back = Game::from_save(d);
         assert_eq!(back.advancements.count(), g.advancements.count());
+    }
+
+    /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
+    fn arena(seed: u32) -> Game {
+        let mut g = Game::new(seed, false, false);
+        g.world = loaded_world(seed);
+        g.ready = true;
+        for x in -12..12 {
+            for z in -12..12 {
+                g.world.set(x, 49, z, STONE);
+                for y in 50..62 {
+                    g.world.set(x, y, z, AIR);
+                }
+            }
+        }
+        g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+        g.spawn_timer = 1e9; // no surprise visitors
+        g
+    }
+
+    #[test]
+    fn bows_shoot_mobs_and_rattlers_shoot_back() {
+        let mut g = arena(21);
+        // A Mooer straight ahead (-Z), and a bow with one Pointy Stick.
+        g.alloc_mob(MobKind::Mooer, Vec3::new(0.5, 50.0, -6.5));
+        let before = g.mobs[0].health;
+        g.inv.slots[g.inv.selected] = Some((BOW, 1));
+        g.inv.slots[1] = Some((ARROW, 1));
+        g.player.yaw = 0.0;
+        g.player.pitch = -0.05;
+        g.shoot_bow();
+        assert_eq!(g.inv.count(ARROW), 0, "the arrow is used up");
+        assert_eq!(g.arrows.len(), 1);
+        for _ in 0..30 {
+            g.update_arrows(0.02);
+        }
+        assert!(g.mobs[0].health < before, "the arrow hit the Mooer");
+        assert!(g.arrows.is_empty());
+        assert!(g.advancements.has("robin_hood"));
+        g.shoot_bow();
+        assert!(g.arrows.is_empty(), "no Pointy Sticks, no shot");
+
+        // A Rattler at night, with a clear line of sight, shoots within a few seconds.
+        g.mobs.clear();
+        g.time = 0.75;
+        g.alloc_mob(MobKind::Rattler, Vec3::new(0.5, 50.0, -9.5));
+        let health = g.player.health;
+        for _ in 0..200 {
+            g.update_entities(0.02);
+            g.player.hurt = 0.0;
+        }
+        assert!(g.player.health < health, "the Rattler hit the player ({} left)", g.player.health);
+    }
+
+    #[test]
+    fn bloops_split_and_clucksters_flutter() {
+        let mut g = arena(22);
+        g.creative = true; // nobody gets hurt
+        g.alloc_mob_sized(MobKind::Bloop, Vec3::new(4.5, 50.0, 4.5), 4);
+        assert_eq!(g.mobs[0].body.height, 0.52 * 4.0);
+        g.mobs[0].health = 0.0;
+        g.update_entities(0.02);
+        let kids: Vec<f32> = g.mobs.iter().filter(|m| m.kind == MobKind::Bloop).map(|m| m.size).collect();
+        assert!(kids.len() >= 2 && kids.iter().all(|&s| s == 2.0), "{kids:?}");
+
+        g.mobs.clear();
+        g.alloc_mob(MobKind::Cluckster, Vec3::new(-4.5, 58.0, -4.5));
+        for _ in 0..20 {
+            g.update_entities(0.02);
+        }
+        assert!(g.mobs[0].body.vel.y >= -2.5, "Clucksters flutter down ({})", g.mobs[0].body.vel.y);
+    }
+
+    #[test]
+    fn webbers_climb_walls() {
+        let mut g = arena(23);
+        g.time = 0.75; // night: Webbers hunt
+        // A wall between the Webber and the player, who stands on top of it.
+        for x in -12..12 {
+            for y in 50..54 {
+                g.world.set(x, y, -3, STONE);
+            }
+        }
+        g.player.body.pos = Vec3::new(0.5, 54.0, -2.5);
+        g.alloc_mob(MobKind::Webber, Vec3::new(0.5, 50.0, -7.5));
+        let mut top = 0.0f32;
+        for _ in 0..200 {
+            g.update_entities(0.02);
+            top = top.max(g.mobs[0].body.pos.y);
+        }
+        assert!(top > 53.0, "climbed to {top}");
     }
 
     #[test]

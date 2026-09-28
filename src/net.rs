@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 pub const DEFAULT_PORT: u16 = 25565;
 /// v2: challenge/response login. v3: the host sends its mods to joining players.
 /// v4: script effects (UseItem, Effect). v5: two-byte block/item ids, new mobs.
-pub const PROTOCOL: u32 = 5;
+/// v6: mob sizes, arrows in flight, and the bow (Shoot).
+pub const PROTOCOL: u32 = 6;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -29,6 +30,8 @@ pub struct MobSnap {
     pub fuse: f32,
     pub hurt: f32,
     pub burning: bool,
+    /// Bloops come in sizes 1, 2 and 4; everything else is 1.
+    pub size: u8,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -46,7 +49,8 @@ pub enum Msg {
     PlayerLeave { id: u32 },
     /// Both directions; the host fills in `id` when relaying.
     PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8 },
-    Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)> },
+    /// Mobs, primed TNT (position, fuse) and arrows in flight (position, velocity).
+    Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)> },
     /// client -> host
     Attack { mob: u32, dmg: f32, from: Vec3 },
     /// client -> host
@@ -67,6 +71,8 @@ pub enum Msg {
     ModPack { data: Vec<u8> },
     /// client -> host: I right-clicked with this item (for script `on_use_item`).
     UseItem { item: Id },
+    /// client -> host: fire a bow from `pos` in direction `dir`.
+    Shoot { pos: Vec3, dir: Vec3 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -217,7 +223,7 @@ impl Msg {
                 w.f32(*pitch);
                 w.u8(*flags);
             }
-            Msg::Mobs { mobs, tnts } => {
+            Msg::Mobs { mobs, tnts, arrows } => {
                 w.u8(8);
                 w.u32(mobs.len() as u32);
                 for m in mobs {
@@ -228,11 +234,17 @@ impl Msg {
                     w.f32(m.fuse);
                     w.f32(m.hurt);
                     w.u8(m.burning as u8);
+                    w.u8(m.size);
                 }
                 w.u32(tnts.len() as u32);
                 for &(p, f) in tnts {
                     w.v3(p);
                     w.f32(f);
+                }
+                w.u32(arrows.len() as u32);
+                for &(p, v) in arrows {
+                    w.v3(p);
+                    w.v3(v);
                 }
             }
             Msg::Attack { mob, dmg, from } => {
@@ -307,6 +319,11 @@ impl Msg {
                 w.u16(a);
                 w.u8(b);
             }
+            Msg::Shoot { pos, dir } => {
+                w.u8(22);
+                w.v3(*pos);
+                w.v3(*dir);
+            }
         }
         w.0
     }
@@ -338,17 +355,22 @@ impl Msg {
             6 => Msg::PlayerLeave { id: r.u32()? },
             7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()? },
             8 => {
-                let n = r.count(30)?;
+                let n = r.count(31)?;
                 let mut mobs = Vec::with_capacity(n);
                 for _ in 0..n {
-                    mobs.push(MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0 });
+                    mobs.push(MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0, size: r.u8()? });
                 }
                 let n = r.count(16)?;
                 let mut tnts = Vec::with_capacity(n);
                 for _ in 0..n {
                     tnts.push((r.v3()?, r.f32()?));
                 }
-                Msg::Mobs { mobs, tnts }
+                let n = r.count(24)?;
+                let mut arrows = Vec::with_capacity(n);
+                for _ in 0..n {
+                    arrows.push((r.v3()?, r.v3()?));
+                }
+                Msg::Mobs { mobs, tnts, arrows }
             }
             9 => Msg::Attack { mob: r.u32()?, dmg: r.f32()?, from: r.v3()? },
             10 => Msg::Ignite { x: r.i32()?, y: r.i32()?, z: r.i32()? },
@@ -372,6 +394,7 @@ impl Msg {
                 let (has_take, a, b) = (r.u8()? != 0, r.u16()?, r.u8()?);
                 Msg::Effect { heal, teleport: has_t.then_some(t), launch: has_l.then_some(l), take: has_take.then_some((a, b)) }
             }
+            22 => Msg::Shoot { pos: r.v3()?, dir: r.v3()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -728,8 +751,9 @@ mod tests {
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
             Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING },
             Msg::Mobs {
-                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true }],
+                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4 }],
                 tnts: vec![(Vec3::Z, 2.0)],
+                arrows: vec![(Vec3::Y, Vec3::new(20.0, 3.0, -1.0))],
             },
             Msg::HurtYou { dmg: 3.0, cause: "was groaned".into(), knock: Vec3::Y },
             Msg::Chat { from: 0, text: "hello 🧱".into() },
@@ -737,6 +761,7 @@ mod tests {
             Msg::Auth { proof: [9; 32] },
             Msg::ModPack { data: vec![1, 2, 3] },
             Msg::UseItem { item: 7 },
+            Msg::Shoot { pos: Vec3::ONE, dir: -Vec3::Z },
             Msg::Effect { heal: 2.0, teleport: Some(Vec3::new(1.0, 70.0, -3.0)), launch: None, take: Some((DIAMOND_TEST, 2)) },
             Msg::Effect { heal: 0.0, teleport: None, launch: Some(12.0), take: None },
         ];

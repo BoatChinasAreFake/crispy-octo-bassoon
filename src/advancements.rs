@@ -37,6 +37,12 @@ pub const ALL: &[Advancement] = &[
     adv("thirsty", "Thirsty", "Place a Sponge in water. Glug."),
     adv("kaboom", "Kaboom", "Blow something up with TNT. Totally Not Trouble."),
     adv("centurion", "Centurion", "Break 100 blocks. Your hands must be so tired."),
+    adv("why_cross", "Why Did the Cluckster Cross the Road?", "Get a Feather. The answer is still unclear."),
+    adv("udderly", "Udderly Ridiculous", "Get Raw Moo-steak from a Mooer."),
+    adv("bone_zone", "Bone Zone", "Defeat a Rattler. It had a bone to pick with you."),
+    adv("arachno", "Arachno-no-bia", "Defeat a Webber. Eight legs, zero chances."),
+    adv("split_decision", "Split Decision", "Defeat a Bloop. Watch it become several Bloops."),
+    adv("robin_hood", "Robin Hood (Legally Distinct)", "Hit a mob with a Pointy Stick from a bow."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

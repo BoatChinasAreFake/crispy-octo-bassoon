@@ -3,7 +3,7 @@
 //! Block edits go both ways and the host re-broadcasts them to everyone.
 
 use crate::block::*;
-use crate::entity::{Mob, MobKind, PrimedTnt};
+use crate::entity::{Arrow, Mob, MobKind, PrimedTnt};
 use crate::game::Game;
 use crate::net::*;
 use crate::player::Player;
@@ -25,11 +25,13 @@ pub struct Peer {
     pub pitch: f32,
     pub flags: u8,
     pub anim: f32,
+    /// Game clock time of their last bow shot (anti-spam).
+    last_shot: f32,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, anim: 0.0 }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, anim: 0.0, last_shot: f32::NEG_INFINITY }
     }
     pub fn alive(&self) -> bool {
         self.flags & FLAG_DEAD == 0
@@ -43,7 +45,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp)
+    matches!(s, Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -472,6 +474,16 @@ impl Game {
                     self.fire("on_use_item", vec![who.into(), reg().key_of(item).into()]);
                 }
             }
+            Msg::Shoot { pos, dir } => {
+                // Only from roughly where they are, in a real direction, at a bow's pace.
+                let clock = self.clock;
+                let Some(p) = self.peers.get_mut(&from) else { return };
+                let near = pos.distance(p.target + Vec3::Y * 1.6) < 3.0;
+                if near && dir.is_finite() && dir.length() > 0.5 && clock - p.last_shot > 0.4 {
+                    p.last_shot = clock;
+                    self.spawn_arrow(pos, dir.normalize() * Arrow::SPEED * 1.2, Some(from));
+                }
+            }
             _ => {}
         }
     }
@@ -525,7 +537,7 @@ impl Game {
                     p.flags = flags;
                 }
             }
-            Msg::Mobs { mobs, tnts } => self.sync_mobs(mobs, tnts),
+            Msg::Mobs { mobs, tnts, arrows } => self.sync_mobs(mobs, tnts, arrows),
             Msg::HurtYou { dmg, cause, knock } => {
                 self.player.hurt = 0.0;
                 self.hurt_player(dmg, &cause);
@@ -569,12 +581,12 @@ impl Game {
                     self.inv.remove(item, n as u32);
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } => {}
         }
     }
 
     /// Mirror the host's mob list, keeping local copies so they can be smoothed.
-    fn sync_mobs(&mut self, snaps: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>) {
+    fn sync_mobs(&mut self, snaps: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)>) {
         let mut next = Vec::with_capacity(snaps.len());
         let mut old: Vec<Mob> = std::mem::take(&mut self.mobs);
         for s in snaps {
@@ -582,7 +594,7 @@ impl Game {
             let mut m = match old.iter().position(|m| m.id == s.id) {
                 Some(i) => old.swap_remove(i),
                 None => {
-                    let mut m = Mob::new(kind, s.pos, &mut self.rng);
+                    let mut m = Mob::new(kind, s.pos, &mut self.rng).with_size(s.size);
                     m.id = s.id;
                     m
                 }
@@ -598,6 +610,7 @@ impl Game {
         }
         self.mobs = next;
         self.tnts = tnts.into_iter().map(|(pos, fuse)| PrimedTnt { pos, fuse }).collect();
+        self.arrows = arrows.into_iter().map(|(p, v)| Arrow::from_wire(p, v)).collect();
     }
 
     /// Client-side entity tick: particles plus smoothing the host's mobs.
@@ -611,6 +624,11 @@ impl Game {
             }
             m.anim += Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length() * 5.0;
             m.hurt = (m.hurt - dt).max(0.0);
+        }
+        // Arrows in flight keep moving between snapshots.
+        for a in self.arrows.iter_mut().filter(|a| !a.stuck) {
+            a.pos += a.vel * dt;
+            a.vel.y -= 20.0 * dt;
         }
         for t in self.tnts.iter_mut() {
             t.fuse -= dt;
@@ -669,10 +687,12 @@ impl Game {
                         fuse: if m.angry { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
+                        size: m.size as u8,
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
-                self.net_broadcast(Msg::Mobs { mobs, tnts });
+                let arrows = self.arrows.iter().map(|a| (a.pos, a.wire_vel())).collect();
+                self.net_broadcast(Msg::Mobs { mobs, tnts, arrows });
             }
             if self.net_timers[2] <= 0.0 {
                 self.net_timers[2] = 2.0;
