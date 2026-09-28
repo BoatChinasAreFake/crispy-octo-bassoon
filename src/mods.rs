@@ -7,7 +7,7 @@
 use crate::block::build::{def, item, leak};
 use crate::block::*;
 use crate::noise::Rng;
-use crate::texture::{base_texture, FIRST_MOD_TILE, TILE};
+use crate::texture::{base_texture, FIRST_MOD_TILE, TILE, TILES_PER_ROW};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -290,7 +290,7 @@ fn parse_color(v: &str) -> Option<[u8; 4]> {
 }
 
 impl Ctx<'_> {
-    fn resolve(&self, modid: &str, name: &str) -> Option<u8> {
+    fn resolve(&self, modid: &str, name: &str) -> Option<Id> {
         let name = name.trim().to_ascii_lowercase();
         if name.contains(':') {
             return self.reg.lookup(&name);
@@ -329,8 +329,8 @@ impl Ctx<'_> {
     }
 
     fn alloc_tile(&mut self, px: Vec<u8>, errs: &mut Vec<String>, line: usize) -> Option<u16> {
-        if self.next_tile > 255 {
-            errs.push(format!("line {line}: out of texture space (160 mod textures max)"));
+        if self.next_tile >= TILES_PER_ROW * TILES_PER_ROW {
+            errs.push(format!("line {line}: out of texture space ({} mod textures max)", TILES_PER_ROW * TILES_PER_ROW - FIRST_MOD_TILE));
             return None;
         }
         let t = self.next_tile;
@@ -365,12 +365,7 @@ impl Ctx<'_> {
                     "midnight" => Some(Action::SetTime(0.75)),
                     x => x.parse::<f32>().ok().map(|t| Action::SetTime(t.rem_euclid(1.0))),
                 },
-                "spawn" => match arg.to_ascii_lowercase().as_str() {
-                    "oinker" | "pig" => Some(Action::Spawn(0)),
-                    "hisser" => Some(Action::Spawn(1)),
-                    "groaner" | "zombie" => Some(Action::Spawn(2)),
-                    _ => None,
-                },
+                "spawn" => crate::entity::MobKind::from_name(arg).map(|k| Action::Spawn(k.index())),
                 _ => None,
             };
             match a {
@@ -434,13 +429,13 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         let mut b = def(leak(&key), leak(&s.name), Model::Cube, true, true, [crate::texture::T_WHITE; 3], 1.0, 0, false, AIR, 0.0, 0);
-                        b.drop = reg.blocks.len() as u8;
+                        b.drop = reg.blocks.len() as Id;
                         reg.blocks.push(b);
                         info.added.0 += 1;
                     }
                 }
                 "item" => {
-                    if reg.items.len() + FIRST_ITEM as usize > 255 {
+                    if reg.items.len() + FIRST_ITEM as usize > Id::MAX as usize {
                         errs.push(format!("line {}: too many items across all mods", s.line));
                     } else if reg.lookup(&key).is_some() {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
@@ -709,7 +704,7 @@ fn fill_item(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) 
     it.consume = flag(s, "consume", true, errs);
 }
 
-fn parse_stack(ctx: &Ctx, modid: &str, v: &str, errs: &mut Vec<String>, line: usize) -> Option<(u8, u8)> {
+fn parse_stack(ctx: &Ctx, modid: &str, v: &str, errs: &mut Vec<String>, line: usize) -> Option<(Id, u8)> {
     let mut w = v.split_whitespace();
     let name = w.next()?;
     let n: u8 = w.next().map(|x| x.parse().unwrap_or(0)).unwrap_or(1);
@@ -731,7 +726,7 @@ fn parse_recipe(ctx: &Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) -
         errs.push(format!("line {}: [recipe] needs inputs = ... and output = ...", s.line));
         return None;
     };
-    let ins: Vec<(u8, u8)> = inputs.split(',').filter(|p| !p.trim().is_empty()).filter_map(|p| parse_stack(ctx, &m.id, p, errs, *il)).collect();
+    let ins: Vec<(Id, u8)> = inputs.split(',').filter(|p| !p.trim().is_empty()).filter_map(|p| parse_stack(ctx, &m.id, p, errs, *il)).collect();
     let out = parse_stack(ctx, &m.id, output, errs, *ol)?;
     if ins.is_empty() || ins.len() > 6 {
         errs.push(format!("line {il}: a recipe needs 1 to 6 inputs"));
@@ -858,6 +853,27 @@ Now with cheese!
         let (_, px) = reg.textures.iter().find(|(t, _)| *t == w.tex[0]).unwrap();
         assert_eq!(&px[..4], &[240, 200, 60, 255]);
         assert_eq!(&px[(16 + 1) * 4..(16 + 1) * 4 + 4], &[200, 160, 40, 255]);
+    }
+
+    #[test]
+    fn hundreds_of_mod_blocks_and_items_fit() {
+        // Far more than the old one-byte ids allowed (76 blocks, 138 items).
+        let mut text = String::new();
+        for i in 0..600 {
+            text.push_str(&format!("[block b{i}]\n[item i{i}]\n"));
+        }
+        text.push_str("[recipe]\ninputs = b599 2\noutput = i599\n");
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.into_bytes());
+        let reg = build(&[ModSource { id: "big".into(), files }], &[]);
+        assert!(reg.mods[0].errors.is_empty(), "{:?}", &reg.mods[0].errors[..3.min(reg.mods[0].errors.len())]);
+        assert_eq!(reg.mods[0].added.0, 600);
+        let last_block = reg.lookup("big:b599").unwrap();
+        let last_item = reg.lookup("big:i599").unwrap();
+        assert_eq!(last_block, NUM_BLOCKS + 599);
+        assert_eq!(last_item, FIRST_MOD_ITEM + 599);
+        assert_eq!(reg.key_of(last_item), "big:i599");
+        assert!(reg.recipes.iter().any(|r| r.output == (last_item, 1) && r.inputs == vec![(last_block, 2)]));
     }
 
     #[test]

@@ -101,7 +101,7 @@ impl Ui {
     }
 
     /// Item icon: blocks become a little isometric cube, everything else a flat sprite.
-    pub fn icon(&self, item: u8, x: f32, y: f32, size: f32) {
+    pub fn icon(&self, item: Id, x: f32, y: f32, size: f32) {
         if is_block_item(item) && block(item).model == Model::Cube {
             let t = block(item).tex;
             let cx = x + size / 2.0;
@@ -132,7 +132,7 @@ impl Ui {
         }
     }
 
-    pub fn stack(&self, stack: Option<(u8, u8)>, x: f32, y: f32, size: f32, show_count: bool) {
+    pub fn stack(&self, stack: Option<(Id, u8)>, x: f32, y: f32, size: f32, show_count: bool) {
         if let Some((id, n)) = stack {
             let pad = size * 0.12;
             self.icon(id, x + pad, y + pad, size - pad * 2.0);
@@ -145,7 +145,7 @@ impl Ui {
     }
 
     /// Returns (clicked, right-clicked, hovered).
-    pub fn slot(&self, stack: Option<(u8, u8)>, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
+    pub fn slot(&self, stack: Option<(Id, u8)>, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
         let r = Rect::new(x, y, size, size);
         let hov = self.hovered(r);
         draw_rectangle(x, y, size, size, if hov { Color::new(0.45, 0.45, 0.5, 0.95) } else { SLOT_BG });

@@ -1,57 +1,77 @@
 //! Blocks, items, tools and recipes, held in a registry that mods extend.
 //!
-//! Every item id is a `u8`: ids below `FIRST_ITEM` are placeable blocks
-//! (base game `0..NUM_BLOCKS`, mods `NUM_BLOCKS..FIRST_ITEM`), the rest are
-//! plain items (base game `100..FIRST_MOD_ITEM`, mods after that).
+//! Every block and item id is an [`Id`] (two bytes): ids below `FIRST_ITEM` are
+//! placeable blocks (base game `0..NUM_BLOCKS`, mods `NUM_BLOCKS..FIRST_ITEM`),
+//! the rest are plain items (base game `FIRST_ITEM..FIRST_MOD_ITEM`, mods after
+//! that). Saves and the network store names for mod things, so the numbers
+//! themselves can move between versions.
 
 use crate::texture::*;
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
-pub const AIR: u8 = 0;
-pub const GRASS: u8 = 1;
-pub const DIRT: u8 = 2;
-pub const STONE: u8 = 3;
-pub const COBBLE: u8 = 4;
-pub const SAND: u8 = 5;
-pub const GRAVEL: u8 = 6;
-pub const WATER: u8 = 7;
-pub const LOG: u8 = 8;
-pub const LEAVES: u8 = 9;
-pub const PLANKS: u8 = 10;
-pub const GLASS: u8 = 11;
-pub const BEDROCK: u8 = 12;
-pub const COAL_ORE: u8 = 13;
-pub const IRON_ORE: u8 = 14;
-pub const DIAMOND_ORE: u8 = 15;
-pub const SNOW_GRASS: u8 = 16;
-pub const BRICK: u8 = 17;
-pub const TNT: u8 = 18;
-pub const TABLE: u8 = 19;
-pub const GLOWROCK: u8 = 20;
-pub const TORCH: u8 = 21;
-pub const FLOWER: u8 = 22;
-pub const TALL_GRASS: u8 = 23;
-/// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: u8 = 24;
-pub const FIRST_ITEM: u8 = 100;
+/// A block or item id.
+pub type Id = u16;
 
-pub const STICK: u8 = 100;
-pub const COAL: u8 = 101;
-pub const IRON: u8 = 102;
-pub const DIAMOND: u8 = 103;
-pub const GUNPOWDER: u8 = 104;
-pub const PORKCHOP: u8 = 105;
-pub const GOO: u8 = 106;
-pub const PICK_WOOD: u8 = 110;
-pub const PICK_STONE: u8 = 111;
-pub const PICK_IRON: u8 = 112;
-pub const PICK_DIAMOND: u8 = 113;
-pub const SWORD_WOOD: u8 = 114;
-pub const SWORD_STONE: u8 = 115;
-pub const SWORD_IRON: u8 = 116;
-pub const SWORD_DIAMOND: u8 = 117;
+pub const AIR: Id = 0;
+pub const GRASS: Id = 1;
+pub const DIRT: Id = 2;
+pub const STONE: Id = 3;
+pub const COBBLE: Id = 4;
+pub const SAND: Id = 5;
+pub const GRAVEL: Id = 6;
+pub const WATER: Id = 7;
+pub const LOG: Id = 8;
+pub const LEAVES: Id = 9;
+pub const PLANKS: Id = 10;
+pub const GLASS: Id = 11;
+pub const BEDROCK: Id = 12;
+pub const COAL_ORE: Id = 13;
+pub const IRON_ORE: Id = 14;
+pub const DIAMOND_ORE: Id = 15;
+pub const SNOW_GRASS: Id = 16;
+pub const BRICK: Id = 17;
+pub const TNT: Id = 18;
+pub const TABLE: Id = 19;
+pub const GLOWROCK: Id = 20;
+pub const TORCH: Id = 21;
+pub const FLOWER: Id = 22;
+pub const TALL_GRASS: Id = 23;
+pub const GOLD_ORE: Id = 24;
+pub const PUMPKIN: Id = 25;
+pub const JACK: Id = 26;
+pub const CACTUS: Id = 27;
+pub const ICE: Id = 28;
+pub const BOUNCY: Id = 29;
+pub const BED: Id = 30;
+pub const CAKE: Id = 31;
+pub const SPONGE: Id = 32;
+pub const WOOL: Id = 33;
+/// Number of base-game blocks; mod blocks start here.
+pub const NUM_BLOCKS: Id = 34;
+/// Half the id space for blocks, half for items.
+pub const FIRST_ITEM: Id = 0x8000;
+
+pub const STICK: Id = FIRST_ITEM;
+pub const COAL: Id = FIRST_ITEM + 1;
+pub const IRON: Id = FIRST_ITEM + 2;
+pub const DIAMOND: Id = FIRST_ITEM + 3;
+pub const GUNPOWDER: Id = FIRST_ITEM + 4;
+pub const PORKCHOP: Id = FIRST_ITEM + 5;
+pub const GOO: Id = FIRST_ITEM + 6;
+pub const PICK_WOOD: Id = FIRST_ITEM + 10;
+pub const PICK_STONE: Id = FIRST_ITEM + 11;
+pub const PICK_IRON: Id = FIRST_ITEM + 12;
+pub const PICK_DIAMOND: Id = FIRST_ITEM + 13;
+pub const SWORD_WOOD: Id = FIRST_ITEM + 14;
+pub const SWORD_STONE: Id = FIRST_ITEM + 15;
+pub const SWORD_IRON: Id = FIRST_ITEM + 16;
+pub const SWORD_DIAMOND: Id = FIRST_ITEM + 17;
+pub const GOLD_INGOT: Id = FIRST_ITEM + 18;
+pub const GOLDEN_CHOP: Id = FIRST_ITEM + 19;
+pub const PEARL: Id = FIRST_ITEM + 20;
+pub const MUTTON: Id = FIRST_ITEM + 21;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: u8 = 118;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 22;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -68,9 +88,9 @@ pub enum Action {
     Explode(f32),
     Launch(f32),
     Message(&'static str),
-    Give(u8, u8),
+    Give(Id, u8),
     SetTime(f32),
-    /// Mob kind index: 0 oinker, 1 hisser, 2 groaner.
+    /// Mob kind index (`MobKind::ALL`): 0 oinker, 1 hisser, 2 groaner, 3 fluffer, 4 starer.
     Spawn(u8),
 }
 
@@ -93,7 +113,7 @@ pub struct BlockDef {
     pub pick_tier: u8,
     /// Whether pickaxes speed it up at all.
     pub pick_block: bool,
-    pub drop: u8,
+    pub drop: Id,
     /// Point-light radius in blocks (0 = dark).
     pub light: f32,
     /// Sound family: 0 stone, 1 wood, 2 grass, 3 sand, 4 glass.
@@ -125,15 +145,15 @@ pub struct ItemDef {
 
 #[derive(Clone)]
 pub struct Recipe {
-    pub inputs: Vec<(u8, u8)>,
-    pub output: (u8, u8),
+    pub inputs: Vec<(Id, u8)>,
+    pub output: (Id, u8),
 }
 
 /// Mod world generation: ore veins underground.
 #[derive(Clone, Debug)]
 pub struct OreGen {
-    pub block: u8,
-    pub replace: u8,
+    pub block: Id,
+    pub replace: Id,
     pub min_y: i32,
     pub max_y: i32,
     pub chance: f32,
@@ -142,8 +162,8 @@ pub struct OreGen {
 /// Mod world generation: plants on the surface.
 #[derive(Clone, Debug)]
 pub struct PlantGen {
-    pub block: u8,
-    pub on: u8,
+    pub block: Id,
+    pub on: Id,
     pub chance: f32,
 }
 
@@ -212,7 +232,7 @@ pub(crate) fn leak(s: &str) -> &'static str {
 use Model::*;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn def(key: &'static str, name: &'static str, model: Model, solid: bool, opaque: bool, tex: [u16; 3], hardness: f32, pick_tier: u8, pick_block: bool, drop: u8, light: f32, sound: u8) -> BlockDef {
+pub(crate) fn def(key: &'static str, name: &'static str, model: Model, solid: bool, opaque: bool, tex: [u16; 3], hardness: f32, pick_tier: u8, pick_block: bool, drop: Id, light: f32, sound: u8) -> BlockDef {
     BlockDef {
         key,
         name,
@@ -271,8 +291,20 @@ impl Registry {
             def("torch", "Torch", Cross, false, false, [T_TORCH; 3], 0.0, 0, false, TORCH, 8.0, S_WOOD),
             def("flower", "Poppy-ish", Cross, false, false, [T_FLOWER; 3], 0.0, 0, false, FLOWER, 0.0, S_GRASS),
             def("tall_grass", "Tall Grass", Cross, false, false, [T_TALLGRASS; 3], 0.0, 0, false, AIR, 0.0, S_GRASS),
+            def("gold_ore", "Gold Ore (Shiny, Useless)", Cube, true, true, [T_GOLD_ORE; 3], 3.0, 3, true, GOLD_INGOT, 0.0, S_STONE),
+            def("pumpkin", "Pumpkin (Fruit? Vegetable? Yes.)", Cube, true, true, [T_PUMPKIN_TOP, T_PUMPKIN_SIDE, T_PUMPKIN_TOP], 1.0, 0, false, PUMPKIN, 0.0, S_WOOD),
+            def("jack_o_lantern", "Jack o'Lantern (Faces Everywhere)", Cube, true, true, [T_PUMPKIN_TOP, T_JACK_FACE, T_PUMPKIN_TOP], 1.0, 0, false, JACK, 12.0, S_WOOD),
+            def("cactus", "Pokey Plant (Do Not Hug)", Cube, true, true, [T_CACTUS_TOP, T_CACTUS_SIDE, T_CACTUS_TOP], 0.4, 0, false, CACTUS, 0.0, S_GRASS),
+            def("ice", "Ice (Nature's Floor Wax)", Cube, true, true, [T_ICE; 3], 0.5, 0, false, AIR, 0.0, S_GLASS),
+            def("bouncy_goo", "Bouncy Goo Block", Cube, true, true, [T_BOUNCY; 3], 0.3, 0, false, BOUNCY, 0.0, S_GRASS),
+            def("bed", "Bed (One Block, Budget Cuts)", Cube, true, true, [T_BED_TOP, T_BED_SIDE, T_PLANKS], 0.4, 0, false, BED, 0.0, S_WOOD),
+            def("cake", "Cake (Not a Lie)", Cube, true, true, [T_CAKE_TOP, T_CAKE_SIDE, T_CAKE_SIDE], 0.5, 0, false, CAKE, 0.0, S_GRASS),
+            def("sponge", "Sponge (Very Thirsty)", Cube, true, true, [T_SPONGE; 3], 0.6, 0, false, SPONGE, 0.0, S_GRASS),
+            def("wool", "Wool (Ethically Sheared)", Cube, true, true, [T_WOOL; 3], 0.8, 0, false, WOOL, 0.0, S_GRASS),
         ];
         blocks[GLASS as usize].see_through = true;
+        blocks[ICE as usize].speed = 1.6;
+        blocks[BOUNCY as usize].bounce = 0.85;
         for id in [AIR, WATER, BEDROCK] {
             blocks[id as usize].creative = false;
         }
@@ -302,9 +334,15 @@ impl Registry {
         for (i, (k, n)) in tiers.iter().enumerate() {
             items.push(ItemDef { stack: 1, damage: 4.0 + i as f32, ..item(leak(&format!("{k}_sword")), leak(&format!("{n} Sword")), T_SWORD0 + i as u16) });
         }
+        items.extend([
+            item("gold", "Gold Ingot (Too Soft for Anything)", T_GOLD),
+            ItemDef { food: Some(20.0), stack: 16, ..item("golden_oinkchop", "Suspiciously Golden Oinkchop", T_GOLD_CHOP) },
+            ItemDef { stack: 16, ..item("stare_pearl", "Stare Pearl (Throw to Teleport)", T_PEARL) },
+            ItemDef { food: Some(5.0), ..item("mutton", "Raw Baa-con", T_MUTTON) },
+        ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
-        let r = |inputs: &[(u8, u8)], output: (u8, u8)| Recipe { inputs: inputs.to_vec(), output };
+        let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
         let recipes = vec![
             r(&[(LOG, 1)], (PLANKS, 4)),
             r(&[(PLANKS, 2)], (STICK, 4)),
@@ -323,19 +361,26 @@ impl Registry {
             r(&[(DIRT, 4), (COAL, 1)], (BRICK, 4)),
             r(&[(GUNPOWDER, 5), (SAND, 4)], (TNT, 1)),
             r(&[(TORCH, 4), (GLASS, 1)], (GLOWROCK, 1)),
+            r(&[(PUMPKIN, 1), (TORCH, 1)], (JACK, 1)),
+            r(&[(GOO, 4)], (BOUNCY, 1)),
+            r(&[(WOOL, 3), (PLANKS, 3)], (BED, 1)),
+            r(&[(PORKCHOP, 1), (MUTTON, 1), (SAND, 2)], (CAKE, 1)),
+            r(&[(WOOL, 2), (GOO, 2)], (SPONGE, 1)),
+            r(&[(PORKCHOP, 1), (GOLD_INGOT, 4)], (GOLDEN_CHOP, 1)),
+            r(&[(GOLD_INGOT, 3), (STICK, 2)], (PICK_WOOD, 1)),
         ];
         Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new() }
     }
 
     /// Look up a block or item id by key ("stone", "cheese:wheel", ...).
-    pub fn lookup(&self, key: &str) -> Option<u8> {
+    pub fn lookup(&self, key: &str) -> Option<Id> {
         if let Some(i) = self.blocks.iter().position(|b| b.key == key) {
-            return Some(i as u8);
+            return Some(i as Id);
         }
-        self.items.iter().position(|it| it.real && it.key == key).map(|i| i as u8 + FIRST_ITEM)
+        self.items.iter().position(|it| it.real && it.key == key).map(|i| i as Id + FIRST_ITEM)
     }
 
-    pub fn key_of(&self, id: u8) -> &'static str {
+    pub fn key_of(&self, id: Id) -> &'static str {
         if id < FIRST_ITEM {
             self.blocks.get(id as usize).map(|b| b.key).unwrap_or("air")
         } else {
@@ -345,18 +390,18 @@ impl Registry {
 }
 
 #[inline]
-pub fn block(id: u8) -> &'static BlockDef {
+pub fn block(id: Id) -> &'static BlockDef {
     let r = reg();
     r.blocks.get(id as usize).unwrap_or(&r.blocks[0])
 }
 
 /// A placeable block id that exists in the current registry.
-pub fn valid_block(id: u8) -> bool {
+pub fn valid_block(id: Id) -> bool {
     (id as usize) < reg().blocks.len()
 }
 
 /// Any block or item id that exists in the current registry.
-pub fn valid_item(id: u8) -> bool {
+pub fn valid_item(id: Id) -> bool {
     if id < FIRST_ITEM {
         id > AIR && valid_block(id)
     } else {
@@ -364,7 +409,7 @@ pub fn valid_item(id: u8) -> bool {
     }
 }
 
-fn item_def(id: u8) -> Option<&'static ItemDef> {
+fn item_def(id: Id) -> Option<&'static ItemDef> {
     if id < FIRST_ITEM {
         return None;
     }
@@ -372,35 +417,35 @@ fn item_def(id: u8) -> Option<&'static ItemDef> {
 }
 
 #[inline]
-pub fn is_opaque(id: u8) -> bool {
+pub fn is_opaque(id: Id) -> bool {
     block(id).opaque
 }
 #[inline]
-pub fn is_solid(id: u8) -> bool {
+pub fn is_solid(id: Id) -> bool {
     block(id).solid
 }
 /// Stops sunlight: used by the column heightmap for sky lighting.
 #[inline]
-pub fn blocks_sky(id: u8) -> bool {
+pub fn blocks_sky(id: Id) -> bool {
     let b = block(id);
     !matches!(b.model, Empty | Cross) && !b.see_through
 }
 /// Can the player point at it (and break it)?
 #[inline]
-pub fn targetable(id: u8) -> bool {
+pub fn targetable(id: Id) -> bool {
     id != AIR && id != WATER
 }
 /// Placing into this cell simply replaces it.
 #[inline]
-pub fn replaceable(id: u8) -> bool {
+pub fn replaceable(id: Id) -> bool {
     matches!(id, AIR | WATER | TALL_GRASS)
 }
 
-pub fn is_block_item(id: u8) -> bool {
+pub fn is_block_item(id: Id) -> bool {
     id > AIR && id < FIRST_ITEM && valid_block(id)
 }
 
-pub fn item_name(id: u8) -> &'static str {
+pub fn item_name(id: Id) -> &'static str {
     if id < FIRST_ITEM {
         return block(id).name;
     }
@@ -408,38 +453,38 @@ pub fn item_name(id: u8) -> &'static str {
 }
 
 /// Texture tile used for the flat inventory icon (blocks get an isometric cube instead).
-pub fn item_tile(id: u8) -> u16 {
+pub fn item_tile(id: Id) -> u16 {
     if id < FIRST_ITEM {
         return block(id).tex[1];
     }
     item_def(id).map(|i| i.tile).unwrap_or(T_WHITE)
 }
 
-pub fn max_stack(id: u8) -> u8 {
+pub fn max_stack(id: Id) -> u8 {
     item_def(id).map(|i| i.stack.clamp(1, 64)).unwrap_or(64)
 }
 
 /// Pickaxe tier 1..=4, or 0 if not a pickaxe.
-pub fn pick_tier(id: u8) -> u8 {
+pub fn pick_tier(id: Id) -> u8 {
     item_def(id).map(|i| i.pick_tier.min(4)).unwrap_or(0)
 }
 
-pub fn attack_damage(id: u8) -> f32 {
+pub fn attack_damage(id: Id) -> f32 {
     item_def(id).map(|i| i.damage).unwrap_or(1.0)
 }
 
 /// Health restored when eaten, if edible.
-pub fn food_value(id: u8) -> Option<f32> {
+pub fn food_value(id: Id) -> Option<f32> {
     item_def(id).and_then(|i| i.food)
 }
 
 /// Mod-defined behaviour when the item is used: (actions, consumes one).
-pub fn use_actions(id: u8) -> Option<(&'static [Action], bool)> {
+pub fn use_actions(id: Id) -> Option<(&'static [Action], bool)> {
     item_def(id).filter(|i| !i.on_use.is_empty()).map(|i| (i.on_use.as_slice(), i.consume))
 }
 
 /// Seconds to break `id` while holding `held`, and whether it drops anything.
-pub fn break_time(id: u8, held: u8) -> (f32, bool) {
+pub fn break_time(id: Id, held: Id) -> (f32, bool) {
     let b = block(id);
     if b.hardness < 0.0 {
         return (f32::INFINITY, false);
@@ -460,10 +505,10 @@ pub fn recipes() -> &'static [Recipe] {
 }
 
 /// Everything the creative palette offers.
-pub fn creative_items() -> Vec<u8> {
+pub fn creative_items() -> Vec<Id> {
     let r = reg();
-    let mut v: Vec<u8> = (1..r.blocks.len() as u8).filter(|&b| r.blocks[b as usize].creative).collect();
-    v.extend((0..r.items.len()).filter(|&i| r.items[i].real).map(|i| i as u8 + FIRST_ITEM));
+    let mut v: Vec<Id> = (1..r.blocks.len() as Id).filter(|&b| r.blocks[b as usize].creative).collect();
+    v.extend((0..r.items.len()).filter(|&i| r.items[i].real).map(|i| i as Id + FIRST_ITEM));
     v
 }
 

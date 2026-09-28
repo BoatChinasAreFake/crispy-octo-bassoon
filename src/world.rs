@@ -2,6 +2,7 @@
 
 use crate::block::*;
 use crate::noise::{hash2, hash3, Perlin};
+use crate::palette::PalettedBlocks;
 use macroquad::math::{ivec3, IVec3, Vec3};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -18,7 +19,8 @@ pub fn idx(lx: i32, y: i32, lz: i32) -> usize {
 }
 
 pub struct Chunk {
-    pub blocks: Vec<u8>,
+    /// Block ids, packed per 16-block-tall section (see palette.rs). Index with `idx`.
+    pub blocks: PalettedBlocks,
     /// Per column: one above the highest sky-blocking block.
     pub heights: [u8; 256],
 }
@@ -27,7 +29,7 @@ impl Chunk {
     fn recompute_height(&mut self, lx: i32, lz: i32) {
         let mut h = 0;
         for y in (0..CH).rev() {
-            if blocks_sky(self.blocks[idx(lx, y, lz)]) {
+            if blocks_sky(self.blocks.get(idx(lx, y, lz))) {
                 h = y + 1;
                 break;
             }
@@ -123,6 +125,11 @@ impl Generator {
         (h, biome)
     }
 
+    /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
+    fn cold(&self, x: i32, z: i32) -> bool {
+        self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
+    }
+
     fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32)> {
         let (h, biome) = self.column(x, z);
         let density = match biome {
@@ -155,7 +162,7 @@ impl Generator {
         y < 36 && self.cavern.noise3(fx / 55.0, fy / 28.0, fz / 55.0) > 0.42
     }
 
-    pub fn generate(&self, cx: i32, cz: i32) -> Vec<u8> {
+    pub fn generate(&self, cx: i32, cz: i32) -> Vec<Id> {
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -206,6 +213,8 @@ impl Generator {
                             b[i] = IRON_ORE;
                         } else if y < 18 && (0.019..0.0215).contains(&r) && r2 < 0.5 {
                             b[i] = DIAMOND_ORE;
+                        } else if y < 32 && (0.0215..0.0245).contains(&r) && r2 < 0.55 {
+                            b[i] = GOLD_ORE;
                         }
                     }
                     for (oi, ore) in self.ores.iter().enumerate() {
@@ -227,7 +236,20 @@ impl Generator {
                         b[idx(lx, top, lz)] = FLOWER;
                     } else if r < 0.11 {
                         b[idx(lx, top, lz)] = TALL_GRASS;
+                    } else if r < 0.1125 && biome == Biome::Plains {
+                        b[idx(lx, top, lz)] = PUMPKIN;
                     }
+                }
+                // Pokey Plants in the desert, 1-3 tall.
+                if biome == Biome::Desert && top + 3 < CH && b[idx(lx, h, lz)] == SAND && hash2(s ^ 0xCAC, x, z) < 0.005 {
+                    let tall = 1 + (hash2(s ^ 0xCAD, x, z) * 3.0) as i32;
+                    for y in top..top + tall.min(3) {
+                        b[idx(lx, y, lz)] = CACTUS;
+                    }
+                }
+                // Cold seas freeze over.
+                if h < SEA && b[idx(lx, SEA, lz)] == WATER && self.cold(x, z) {
+                    b[idx(lx, SEA, lz)] = ICE;
                 }
                 if top < CH && b[idx(lx, top, lz)] == AIR {
                     let below = b[idx(lx, h, lz)];
@@ -245,7 +267,7 @@ impl Generator {
             for tx in cx * CW - 3..cx * CW + CW + 3 {
                 let Some((h, trunk)) = self.tree_at(tx, tz) else { continue };
                 let top = h + trunk;
-                let mut put = |x: i32, y: i32, z: i32, id: u8, force: bool| {
+                let mut put = |x: i32, y: i32, z: i32, id: Id, force: bool| {
                     let (lx, lz) = (x - cx * CW, z - cz * CW);
                     if !(0..CW).contains(&lx) || !(0..CW).contains(&lz) || !(0..CH).contains(&y) {
                         return;
@@ -287,15 +309,15 @@ pub struct World {
     pub generator: Arc<Generator>,
     pub chunks: HashMap<(i32, i32), Chunk>,
     /// Player edits, keyed by chunk then block index. Re-applied when chunks regenerate.
-    pub mods: HashMap<(i32, i32), HashMap<u32, u8>>,
+    pub mods: HashMap<(i32, i32), HashMap<u32, Id>>,
     /// Chunks whose mesh is stale.
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
-    pub edit_log: Vec<(i32, i32, i32, u8)>,
+    pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
     req_tx: Option<Sender<(i32, i32)>>,
-    res_rx: Receiver<(i32, i32, Vec<u8>)>,
+    res_rx: Receiver<(i32, i32, PalettedBlocks)>,
 }
 
 impl World {
@@ -312,7 +334,8 @@ impl World {
             let _ = builder.spawn(move || loop {
                 let job = rx.lock().ok().and_then(|r| r.recv().ok());
                 let Some((cx, cz)) = job else { return };
-                if tx.send((cx, cz, g.generate(cx, cz))).is_err() {
+                // Packed here, on the worker, so the main thread never holds a flat copy.
+                if tx.send((cx, cz, PalettedBlocks::from_ids(&g.generate(cx, cz)))).is_err() {
                     return;
                 }
             });
@@ -344,7 +367,7 @@ impl World {
             let mut chunk = Chunk { blocks, heights: [0; 256] };
             if let Some(m) = self.mods.get(&(cx, cz)) {
                 for (&i, &id) in m {
-                    chunk.blocks[i as usize] = id;
+                    chunk.blocks.set(i as usize, id);
                 }
             }
             chunk.recompute_heights();
@@ -414,7 +437,7 @@ impl World {
     }
 
     #[inline]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub fn get(&self, x: i32, y: i32, z: i32) -> Id {
         if y < 0 {
             return BEDROCK;
         }
@@ -422,12 +445,12 @@ impl World {
             return AIR;
         }
         match self.chunks.get(&(x.div_euclid(CW), z.div_euclid(CW))) {
-            Some(c) => c.blocks[idx(x.rem_euclid(CW), y, z.rem_euclid(CW))],
+            Some(c) => c.blocks.get(idx(x.rem_euclid(CW), y, z.rem_euclid(CW))),
             None => AIR,
         }
     }
 
-    pub fn get_v(&self, p: IVec3) -> u8 {
+    pub fn get_v(&self, p: IVec3) -> Id {
         self.get(p.x, p.y, p.z)
     }
 
@@ -445,7 +468,7 @@ impl World {
         if y >= h { 1.0 } else { (1.0 - (h - y) as f32 * 0.09).max(0.0) }
     }
 
-    pub fn set(&mut self, x: i32, y: i32, z: i32, id: u8) {
+    pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
         if self.set_inner(x, y, z, id).is_some() && self.log_edits {
             self.edit_log.push((x, y, z, id));
         }
@@ -453,7 +476,7 @@ impl World {
 
     /// Apply an edit that came from another player: not echoed back out.
     /// Returns the previous block if anything changed.
-    pub fn set_remote(&mut self, x: i32, y: i32, z: i32, id: u8) -> Option<u8> {
+    pub fn set_remote(&mut self, x: i32, y: i32, z: i32, id: Id) -> Option<Id> {
         if !valid_block(id) {
             return None;
         }
@@ -466,7 +489,7 @@ impl World {
         self.set_inner(x, y, z, id)
     }
 
-    fn set_inner(&mut self, x: i32, y: i32, z: i32, id: u8) -> Option<u8> {
+    fn set_inner(&mut self, x: i32, y: i32, z: i32, id: Id) -> Option<Id> {
         if !(0..CH).contains(&y) {
             return None;
         }
@@ -474,11 +497,10 @@ impl World {
         let (lx, lz) = (x.rem_euclid(CW), z.rem_euclid(CW));
         let c = self.chunks.get_mut(&(cx, cz))?;
         let i = idx(lx, y, lz);
-        let old = c.blocks[i];
-        if old == id {
+        if c.blocks.get(i) == id {
             return None;
         }
-        c.blocks[i] = id;
+        let old = c.blocks.set(i, id);
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
         let xs: &[i32] = if lx == 0 { &[-1, 0] } else if lx == CW - 1 { &[0, 1] } else { &[0] };
@@ -493,7 +515,7 @@ impl World {
 
     /// Set a block even if its chunk isn't loaded here (it's applied when the
     /// chunk generates), and share it with other players. Used by scripts.
-    pub fn set_or_record(&mut self, x: i32, y: i32, z: i32, id: u8) {
+    pub fn set_or_record(&mut self, x: i32, y: i32, z: i32, id: Id) {
         if self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) {
             self.set(x, y, z, id);
         } else if (0..CH).contains(&y) && valid_block(id) {
@@ -505,7 +527,7 @@ impl World {
         }
     }
 
-    pub fn set_v(&mut self, p: IVec3, id: u8) {
+    pub fn set_v(&mut self, p: IVec3, id: Id) {
         self.set(p.x, p.y, p.z, id)
     }
 

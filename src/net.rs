@@ -1,6 +1,7 @@
 //! LAN multiplayer transport: a tiny length-prefixed binary protocol over
 //! non-blocking TCP, using only the standard library.
 
+use crate::block::Id;
 use macroquad::math::Vec3;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
@@ -8,8 +9,8 @@ use std::time::{Duration, Instant};
 
 pub const DEFAULT_PORT: u16 = 25565;
 /// v2: challenge/response login. v3: the host sends its mods to joining players.
-/// v4: script effects (UseItem, Effect).
-pub const PROTOCOL: u32 = 4;
+/// v4: script effects (UseItem, Effect). v5: two-byte block/item ids, new mobs.
+pub const PROTOCOL: u32 = 5;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -38,9 +39,9 @@ pub enum Msg {
     Welcome { id: u32, seed: u32, time: f32, creative: bool, spawn: Vec3 },
     Kick { reason: String },
     /// Player edits for one chunk (sent on join).
-    Mods { cx: i32, cz: i32, entries: Vec<(u32, u8)> },
+    Mods { cx: i32, cz: i32, entries: Vec<(u32, Id)> },
     /// Block changes, both directions.
-    Blocks(Vec<(i32, i32, i32, u8)>),
+    Blocks(Vec<(i32, i32, i32, Id)>),
     PlayerJoin { id: u32, name: String },
     PlayerLeave { id: u32 },
     /// Both directions; the host fills in `id` when relaying.
@@ -53,7 +54,7 @@ pub enum Msg {
     /// host -> client
     HurtYou { dmg: f32, cause: String, knock: Vec3 },
     /// host -> client: loot from a mob you killed.
-    Give { item: u8, n: u8 },
+    Give { item: Id, n: u8 },
     Explosion { at: Vec3, r: f32 },
     Sound { sfx: u8, at: Vec3 },
     Time(f32),
@@ -65,9 +66,9 @@ pub enum Msg {
     /// host -> client, just before Welcome: the host's mods (see mods::encode_pack).
     ModPack { data: Vec<u8> },
     /// client -> host: I right-clicked with this item (for script `on_use_item`).
-    UseItem { item: u8 },
+    UseItem { item: Id },
     /// host -> client: a script did something to you.
-    Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(u8, u8)> },
+    Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
 
 pub const FLAG_SNEAK: u8 = 1;
@@ -81,6 +82,9 @@ struct W(Vec<u8>);
 impl W {
     fn u8(&mut self, v: u8) {
         self.0.push(v)
+    }
+    fn u16(&mut self, v: u16) {
+        self.0.extend_from_slice(&v.to_le_bytes())
     }
     fn u32(&mut self, v: u32) {
         self.0.extend_from_slice(&v.to_le_bytes())
@@ -118,6 +122,9 @@ impl R<'_> {
     }
     fn u8(&mut self) -> io::Result<u8> {
         Ok(self.take(1)?[0])
+    }
+    fn u16(&mut self) -> io::Result<u16> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
     }
     fn u32(&mut self) -> io::Result<u32> {
         Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
@@ -180,7 +187,7 @@ impl Msg {
                 w.u32(entries.len() as u32);
                 for &(i, id) in entries {
                     w.u32(i);
-                    w.u8(id);
+                    w.u16(id);
                 }
             }
             Msg::Blocks(list) => {
@@ -190,7 +197,7 @@ impl Msg {
                     w.i32(x);
                     w.i32(y);
                     w.i32(z);
-                    w.u8(id);
+                    w.u16(id);
                 }
             }
             Msg::PlayerJoin { id, name } => {
@@ -248,7 +255,7 @@ impl Msg {
             }
             Msg::Give { item, n } => {
                 w.u8(12);
-                w.u8(*item);
+                w.u16(*item);
                 w.u8(*n);
             }
             Msg::Explosion { at, r } => {
@@ -286,7 +293,7 @@ impl Msg {
             }
             Msg::UseItem { item } => {
                 w.u8(20);
-                w.u8(*item);
+                w.u16(*item);
             }
             Msg::Effect { heal, teleport, launch, take } => {
                 w.u8(21);
@@ -297,7 +304,7 @@ impl Msg {
                 w.f32(launch.unwrap_or(0.0));
                 w.u8(take.is_some() as u8);
                 let (a, b) = take.unwrap_or((0, 0));
-                w.u8(a);
+                w.u16(a);
                 w.u8(b);
             }
         }
@@ -312,18 +319,18 @@ impl Msg {
             2 => Msg::Kick { reason: r.str()? },
             3 => {
                 let (cx, cz) = (r.i32()?, r.i32()?);
-                let n = r.count(5)?;
+                let n = r.count(6)?;
                 let mut entries = Vec::with_capacity(n);
                 for _ in 0..n {
-                    entries.push((r.u32()?, r.u8()?));
+                    entries.push((r.u32()?, r.u16()?));
                 }
                 Msg::Mods { cx, cz, entries }
             }
             4 => {
-                let n = r.count(13)?;
+                let n = r.count(14)?;
                 let mut list = Vec::with_capacity(n);
                 for _ in 0..n {
-                    list.push((r.i32()?, r.i32()?, r.i32()?, r.u8()?));
+                    list.push((r.i32()?, r.i32()?, r.i32()?, r.u16()?));
                 }
                 Msg::Blocks(list)
             }
@@ -346,7 +353,7 @@ impl Msg {
             9 => Msg::Attack { mob: r.u32()?, dmg: r.f32()?, from: r.v3()? },
             10 => Msg::Ignite { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             11 => Msg::HurtYou { dmg: r.f32()?, cause: r.str()?, knock: r.v3()? },
-            12 => Msg::Give { item: r.u8()?, n: r.u8()? },
+            12 => Msg::Give { item: r.u16()?, n: r.u8()? },
             13 => Msg::Explosion { at: r.v3()?, r: r.f32()? },
             14 => Msg::Sound { sfx: r.u8()?, at: r.v3()? },
             15 => Msg::Time(r.f32()?),
@@ -357,12 +364,12 @@ impl Msg {
                 let n = r.count(1)?;
                 Msg::ModPack { data: r.take(n)?.to_vec() }
             }
-            20 => Msg::UseItem { item: r.u8()? },
+            20 => Msg::UseItem { item: r.u16()? },
             21 => {
                 let heal = r.f32()?;
                 let (has_t, t) = (r.u8()? != 0, r.v3()?);
                 let (has_l, l) = (r.u8()? != 0, r.f32()?);
-                let (has_take, a, b) = (r.u8()? != 0, r.u8()?, r.u8()?);
+                let (has_take, a, b) = (r.u8()? != 0, r.u16()?, r.u8()?);
                 Msg::Effect { heal, teleport: has_t.then_some(t), launch: has_l.then_some(l), take: has_take.then_some((a, b)) }
             }
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
@@ -710,15 +717,15 @@ pub fn lan_ip() -> Option<String> {
 mod tests {
     use super::*;
 
-    const DIAMOND_TEST: u8 = 103;
+    const DIAMOND_TEST: Id = crate::block::DIAMOND;
 
     #[test]
     fn messages_round_trip() {
         let msgs = vec![
             Msg::Hello { protocol: PROTOCOL, name: "Stove".into() },
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0) },
-            Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 18)] },
-            Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0)]),
+            Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
+            Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
             Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING },
             Msg::Mobs {
                 mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true }],

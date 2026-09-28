@@ -1,6 +1,7 @@
 //! Tiny hand-rolled binary save format. Stores the seed, player, inventory and
 //! only the blocks the player changed; terrain is regenerated from the seed.
 
+use crate::block::{Id, FIRST_ITEM};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -8,8 +9,14 @@ use std::time::SystemTime;
 
 const MAGIC: &[u8; 4] = b"MNCR";
 /// v2 adds the mod palette (names of mod blocks/items); v3 adds script mod
-/// variables. Older saves still load.
-const VERSION: u32 = 3;
+/// variables; v4 adds earned advancements; v5 widens block/item ids to two
+/// bytes. Older saves still load.
+const VERSION: u32 = 5;
+
+/// Before v5, ids were one byte: blocks below 100, items from 100 up.
+pub(crate) fn legacy_id(v: u8) -> Id {
+    if v < 100 { v as Id } else { FIRST_ITEM + (v - 100) as Id }
+}
 
 pub struct SaveData {
     pub seed: u32,
@@ -20,12 +27,14 @@ pub struct SaveData {
     pub pitch: f32,
     pub health: f32,
     pub spawn: [f32; 3],
-    pub slots: Vec<Option<(u8, u8)>>,
-    pub mods: HashMap<(i32, i32), HashMap<u32, u8>>,
+    pub slots: Vec<Option<(Id, u8)>>,
+    pub mods: HashMap<(i32, i32), HashMap<u32, Id>>,
     /// Ids of mod-added blocks/items and their names (save v2+).
-    pub palette: Vec<(u8, String)>,
+    pub palette: Vec<(Id, String)>,
     /// Script mod variables: (mod id, encoded variables) (save v3+).
     pub script_vars: Vec<(String, Vec<u8>)>,
+    /// Keys of the advancements earned in this world (save v4+).
+    pub advancements: Vec<String>,
 }
 
 
@@ -33,6 +42,9 @@ struct W(Vec<u8>);
 impl W {
     fn u8(&mut self, v: u8) {
         self.0.push(v)
+    }
+    fn u16(&mut self, v: u16) {
+        self.0.extend_from_slice(&v.to_le_bytes())
     }
     fn u32(&mut self, v: u32) {
         self.0.extend_from_slice(&v.to_le_bytes())
@@ -57,6 +69,9 @@ impl R<'_> {
     }
     fn u8(&mut self) -> io::Result<u8> {
         Ok(self.take::<1>()?[0])
+    }
+    fn u16(&mut self) -> io::Result<u16> {
+        Ok(u16::from_le_bytes(self.take()?))
     }
     fn u32(&mut self) -> io::Result<u32> {
         Ok(u32::from_le_bytes(self.take()?))
@@ -95,7 +110,7 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     w.u32(d.slots.len() as u32);
     for s in &d.slots {
         let (id, n) = s.unwrap_or((0, 0));
-        w.u8(id);
+        w.u16(id);
         w.u8(n);
     }
     w.u32(d.mods.len() as u32);
@@ -105,12 +120,12 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
         w.u32(m.len() as u32);
         for (&i, &id) in m {
             w.u32(i);
-            w.u8(id);
+            w.u16(id);
         }
     }
     w.u32(d.palette.len() as u32);
     for (id, key) in &d.palette {
-        w.u8(*id);
+        w.u16(*id);
         w.u32(key.len() as u32);
         w.0.extend_from_slice(key.as_bytes());
     }
@@ -120,6 +135,11 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
         w.0.extend_from_slice(id.as_bytes());
         w.u32(blob.len() as u32);
         w.0.extend_from_slice(blob);
+    }
+    w.u32(d.advancements.len() as u32);
+    for key in &d.advancements {
+        w.u32(key.len() as u32);
+        w.0.extend_from_slice(key.as_bytes());
     }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
@@ -140,6 +160,8 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     if !(1..=VERSION).contains(&version) {
         return Err(io::Error::new(io::ErrorKind::InvalidData, format!("save is from a newer version ({version})")));
     }
+    // One-byte ids before v5.
+    let wide = version >= 5;
     let seed = r.u32()?;
     let creative = r.u8()? != 0;
     let time = r.f32()?;
@@ -149,7 +171,8 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     let n = r.u32()? as usize;
     let mut slots = Vec::with_capacity(n);
     for _ in 0..n {
-        let (id, c) = (r.u8()?, r.u8()?);
+        let id = if wide { r.u16()? } else { legacy_id(r.u8()?) };
+        let c = r.u8()?;
         slots.push(if c > 0 { Some((id, c)) } else { None });
     }
     let mut mods = HashMap::new();
@@ -158,14 +181,14 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
         let mut m = HashMap::new();
         for _ in 0..r.u32()? {
             let i = r.u32()?;
-            m.insert(i, r.u8()?);
+            m.insert(i, if wide { r.u16()? } else { legacy_id(r.u8()?) });
         }
         mods.insert(key, m);
     }
     let mut palette = Vec::new();
     if version >= 2 {
         for _ in 0..r.u32()? {
-            let id = r.u8()?;
+            let id = if wide { r.u16()? } else { legacy_id(r.u8()?) };
             let len = r.u32()? as usize;
             if len > 256 {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "bad palette entry"));
@@ -185,7 +208,13 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
             script_vars.push((String::from_utf8_lossy(&id).into_owned(), blob));
         }
     }
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars })
+    let mut advancements = Vec::new();
+    if version >= 4 {
+        for _ in 0..r.u32()? {
+            advancements.push(String::from_utf8_lossy(&r.bytes(256)?).into_owned());
+        }
+    }
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -387,7 +416,63 @@ mod tests {
             mods: HashMap::new(),
             palette: Vec::new(),
             script_vars: Vec::new(),
+            advancements: Vec::new(),
         }
+    }
+
+    #[test]
+    fn one_byte_saves_are_widened() {
+        use crate::block::{COBBLE, DIAMOND, TORCH};
+        // A v4 save written by hand: one-byte ids everywhere.
+        let mut w = W(Vec::new());
+        w.0.extend_from_slice(MAGIC);
+        w.u32(4);
+        w.u32(77); // seed
+        w.u8(0); // survival
+        for v in [0.3f32, 1.0, 50.0, 2.0, 0.0, 50.0, 0.0, 0.5, -0.1, 18.0] {
+            w.f32(v); // time, pos, spawn, yaw, pitch, health
+        }
+        w.u32(2); // slots
+        w.u8(103); // diamond, as an old item id
+        w.u8(5);
+        w.u8(4); // cobblestone
+        w.u8(64);
+        w.u32(1); // one edited chunk
+        w.i32(0);
+        w.i32(-1);
+        w.u32(1);
+        w.u32(1234);
+        w.u8(21); // a torch
+        w.u32(1); // palette: an old mod item
+        w.u8(118);
+        w.u32(9);
+        w.0.extend_from_slice(b"aaa:thing");
+        w.u32(0); // script vars
+        w.u32(0); // advancements
+        let root = tmp("legacy-ids");
+        let path = root.join("old.mncr");
+        std::fs::write(&path, &w.0).unwrap();
+        let d = read_from(&path).unwrap();
+        assert_eq!(d.slots, vec![Some((DIAMOND, 5)), Some((COBBLE, 64))]);
+        assert_eq!(d.mods[&(0, -1)][&1234], TORCH);
+        assert_eq!(d.palette, vec![(legacy_id(118), "aaa:thing".to_string())]);
+        assert_eq!(legacy_id(118), FIRST_ITEM + 18);
+        // Written back out, it's a v5 save that reads the same.
+        write_to(&path, &d).unwrap();
+        let again = read_from(&path).unwrap();
+        assert_eq!((again.slots, again.palette), (d.slots, d.palette));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn advancements_round_trip() {
+        let root = tmp("adv");
+        let path = root.join("w.mncr");
+        let mut d = data(5, false);
+        d.advancements = vec!["getting_wood".into(), "dimonds".into()];
+        write_to(&path, &d).unwrap();
+        assert_eq!(read_from(&path).unwrap().advancements, d.advancements);
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

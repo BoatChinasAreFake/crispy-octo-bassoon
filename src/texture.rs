@@ -3,7 +3,8 @@
 
 use crate::noise::{Perlin, Rng};
 
-pub const ATLAS: usize = 256;
+/// 64x64 tiles: the base game uses the first 96, mods get the rest.
+pub const ATLAS: usize = 1024;
 pub const TILE: usize = 16;
 pub const TILES_PER_ROW: u16 = (ATLAS / TILE) as u16;
 
@@ -65,6 +66,29 @@ pub const T_STOVE_FACE: u16 = 79;
 pub const T_STOVE_SHIRT: u16 = 80;
 pub const T_STOVE_PANTS: u16 = 81;
 pub const T_HALF_HEART: u16 = 82;
+pub const T_GOLD_ORE: u16 = 29;
+pub const T_PUMPKIN_TOP: u16 = 30;
+pub const T_PUMPKIN_SIDE: u16 = 31;
+pub const T_JACK_FACE: u16 = 37;
+pub const T_CACTUS_TOP: u16 = 38;
+pub const T_CACTUS_SIDE: u16 = 39;
+pub const T_ICE: u16 = 40;
+pub const T_BOUNCY: u16 = 41;
+pub const T_BED_TOP: u16 = 42;
+pub const T_BED_SIDE: u16 = 43;
+pub const T_CAKE_TOP: u16 = 44;
+pub const T_CAKE_SIDE: u16 = 45;
+pub const T_SPONGE: u16 = 46;
+pub const T_WOOL: u16 = 47;
+pub const T_GOLD: u16 = 55;
+pub const T_GOLD_CHOP: u16 = 83;
+pub const T_PEARL: u16 = 84;
+pub const T_MUTTON: u16 = 85;
+pub const T_FLUFF_FACE: u16 = 86;
+pub const T_FLUFF_SKIN: u16 = 87;
+pub const T_STARER_SKIN: u16 = 88;
+pub const T_STARER_FACE: u16 = 89;
+pub const T_TROPHY: u16 = 90;
 
 /// Mod textures are allocated from here to the end of the atlas.
 pub const FIRST_MOD_TILE: u16 = 96;
@@ -116,6 +140,24 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("iron_sword", T_SWORD0 + 2),
     ("diamond_sword", T_SWORD0 + 3),
     ("white", T_WHITE),
+    ("gold_ore", T_GOLD_ORE),
+    ("pumpkin_top", T_PUMPKIN_TOP),
+    ("pumpkin_side", T_PUMPKIN_SIDE),
+    ("jack_o_lantern", T_JACK_FACE),
+    ("cactus_top", T_CACTUS_TOP),
+    ("cactus_side", T_CACTUS_SIDE),
+    ("ice", T_ICE),
+    ("bouncy_goo", T_BOUNCY),
+    ("bed_top", T_BED_TOP),
+    ("bed_side", T_BED_SIDE),
+    ("cake_top", T_CAKE_TOP),
+    ("cake_side", T_CAKE_SIDE),
+    ("sponge", T_SPONGE),
+    ("wool", T_WOOL),
+    ("gold", T_GOLD),
+    ("golden_oinkchop", T_GOLD_CHOP),
+    ("stare_pearl", T_PEARL),
+    ("mutton", T_MUTTON),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -462,6 +504,63 @@ const HISSER_FACE: [&str; 16] = [
     "................",
 ];
 
+const PEARL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "......####......",
+    "....##tttt##....",
+    "...#ttwwtttt#...",
+    "...#twwttttt#...",
+    "..#tttttPPttt#..",
+    "..#ttttPppPtt#..",
+    "..#ttttPppPtt#..",
+    "...#tttPPttt#...",
+    "...#tttttttd#...",
+    "....##tttdd#....",
+    "......####......",
+    "................",
+    "................",
+];
+
+const TROPHY: [&str; 16] = [
+    "................",
+    "................",
+    "..############..",
+    ".#y#yyyywyyy#y#.",
+    ".#y#yyyywyyy#y#.",
+    ".#y#yyyyyyyy#y#.",
+    "..##yyyyyyyy##..",
+    "....#yyyyyy#....",
+    ".....#yyyy#.....",
+    "......#dd#......",
+    "......#yy#......",
+    ".....#yyyy#.....",
+    "....########....",
+    "....#dddddd#....",
+    "....########....",
+    "................",
+];
+
+const JACK_FACE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "...ff......ff...",
+    "..ffff....ffff..",
+    "..ffff....ffff..",
+    "................",
+    ".......ff.......",
+    "......ffff......",
+    "................",
+    "..f..........f..",
+    "..ff.ff..ff.ff..",
+    "...ffffffffff...",
+    "....ff.ff.ff....",
+    "................",
+    "................",
+];
+
 pub fn build_atlas(seed: u64) -> Vec<u8> {
     let mut a = Atlas { px: vec![0u8; ATLAS * ATLAS * 4], rng: Rng::new(seed), perlin: Perlin::new(seed) };
 
@@ -741,6 +840,127 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     a.speckle(T_STOVE_SHIRT, rgb(60, 170, 170), 0.08);
     a.speckle(T_STOVE_PANTS, rgb(60, 60, 150), 0.08);
+
+    // ---- The "More Parody" update
+    a.ore(T_GOLD_ORE, rgb(252, 220, 70), rgb(200, 150, 30));
+
+    a.each(T_PUMPKIN_SIDE, |x, _, r, _| {
+        let groove = x % 4 == 0;
+        shade(rgb(224, 128, 28), r.range(0.9, 1.05) * if groove { 0.78 } else { 1.0 })
+    });
+    a.each(T_PUMPKIN_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        if dx.abs() < 1.5 && dy.abs() < 1.5 {
+            shade(rgb(90, 70, 30), r.range(0.9, 1.1)) // the stalk
+        } else {
+            shade(rgb(214, 120, 26), r.range(0.88, 1.05) * (1.0 - (dx * dx + dy * dy).sqrt() * 0.015))
+        }
+    });
+    a.copy(T_PUMPKIN_SIDE, T_JACK_FACE);
+    a.sprite(T_JACK_FACE, &JACK_FACE, &[('f', rgb(255, 230, 90))]);
+
+    a.each(T_CACTUS_SIDE, |x, y, r, _| {
+        let spine = (x == 2 || x == 8 || x == 13) && y % 4 == 1;
+        if spine {
+            rgb(230, 230, 190)
+        } else {
+            let rib = if x % 5 == 0 { 0.8 } else { 1.0 };
+            shade(rgb(60, 140, 50), rib * r.range(0.9, 1.1))
+        }
+    });
+    a.each(T_CACTUS_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if edge { rgb(45, 110, 40) } else { rgb(90, 170, 70) }, r.range(0.9, 1.08))
+    });
+
+    a.each(T_ICE, |x, y, r, _| {
+        let streak = (x + 16 - y) % 11 == 0 || (x + 16 - y) % 11 == 1;
+        shade(if streak { rgb(215, 235, 255) } else { rgb(150, 190, 245) }, r.range(0.95, 1.04))
+    });
+
+    a.each(T_BOUNCY, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        let inner = (4..12).contains(&x) && (4..12).contains(&y);
+        let c = if edge { rgb(70, 150, 45) } else if inner { rgb(100, 200, 70) } else { rgb(130, 220, 95) };
+        shade(c, r.range(0.94, 1.06))
+    });
+    a.set(T_BOUNCY, 5, 5, rgb(220, 255, 200));
+    a.set(T_BOUNCY, 6, 5, rgb(220, 255, 200));
+
+    a.each(T_BED_TOP, |x, y, r, _| {
+        if y < 5 {
+            if x == 0 || x == 15 || y == 0 { rgb(210, 210, 210) } else { shade(rgb(245, 245, 245), r.range(0.95, 1.02)) } // pillow
+        } else {
+            shade(rgb(180, 30, 35), r.range(0.88, 1.05) * if (x + y) % 6 == 0 { 0.85 } else { 1.0 })
+        }
+    });
+    a.copy(T_PLANKS, T_BED_SIDE);
+    for y in 0..9 {
+        for x in 0..16 {
+            let c = if y < 3 { shade(rgb(240, 240, 240), a.rng.range(0.94, 1.02)) } else { shade(rgb(180, 30, 35), a.rng.range(0.88, 1.05)) };
+            a.set(T_BED_SIDE, x, y, c);
+        }
+    }
+
+    a.each(T_CAKE_TOP, |x, y, r, _| {
+        let cherry = (x == 7 || x == 8) && (y == 7 || y == 8);
+        let sprinkle = (x * 7 + y * 13) % 17 == 0;
+        if cherry {
+            rgb(220, 20, 40)
+        } else if sprinkle {
+            [rgb(255, 90, 150), rgb(90, 200, 255), rgb(255, 230, 80)][(x + y) % 3]
+        } else {
+            shade(rgb(250, 245, 240), r.range(0.95, 1.02))
+        }
+    });
+    a.each(T_CAKE_SIDE, |x, y, r, _| {
+        let drip = y < 3 || (y < 5 && (x * 5) % 7 < 3);
+        if drip {
+            shade(rgb(250, 245, 240), r.range(0.95, 1.02))
+        } else if y == 9 {
+            rgb(200, 40, 60) // jam layer
+        } else {
+            shade(rgb(190, 120, 70), r.range(0.9, 1.06))
+        }
+    });
+
+    a.each(T_SPONGE, |x, y, r, p| {
+        let hole = p.noise2(x as f32 * 0.7 + 20.0, y as f32 * 0.7) > 0.3;
+        shade(rgb(215, 200, 70), r.range(0.92, 1.05) * if hole { 0.7 } else { 1.0 })
+    });
+
+    a.each(T_WOOL, |x, y, r, p| {
+        let curl = (p.noise2(x as f32 * 0.9, y as f32 * 0.9 + 40.0) * 3.0).sin() * 0.06;
+        shade(rgb(236, 236, 230), 1.0 + curl + r.range(-0.05, 0.03))
+    });
+
+    a.sprite(T_GOLD, &INGOT, &[('#', rgb(110, 80, 10)), ('w', rgb(255, 250, 180)), ('l', rgb(250, 215, 60)), ('d', rgb(200, 150, 30))]);
+    a.sprite(T_GOLD_CHOP, &PORK, &[('#', rgb(110, 80, 10)), ('p', rgb(240, 190, 40)), ('P', rgb(255, 225, 90)), ('w', rgb(255, 255, 210)), ('b', rgb(255, 245, 190))]);
+    a.sprite(T_MUTTON, &PORK, &[('#', rgb(80, 20, 20)), ('p', rgb(200, 60, 60)), ('P', rgb(225, 90, 85)), ('w', rgb(250, 235, 220)), ('b', rgb(230, 225, 200))]);
+    a.sprite(T_PEARL, &PEARL, &[('#', rgb(10, 40, 40)), ('t', rgb(30, 110, 100)), ('w', rgb(170, 240, 225)), ('P', rgb(20, 70, 60)), ('p', rgb(5, 25, 25)), ('d', rgb(20, 75, 70))]);
+    a.sprite(T_TROPHY, &TROPHY, &[('#', rgb(90, 60, 10)), ('y', rgb(250, 205, 50)), ('w', rgb(255, 250, 200)), ('d', rgb(120, 80, 40))]);
+
+    // Fluffer (legally distinct sheep) and Starer (legally distinct tall stranger)
+    a.speckle(T_FLUFF_SKIN, rgb(225, 200, 170), 0.06);
+    a.copy(T_FLUFF_SKIN, T_FLUFF_FACE);
+    for (x, y, c) in [(3, 6, rgb(255, 255, 255)), (4, 6, rgb(30, 30, 30)), (11, 6, rgb(30, 30, 30)), (12, 6, rgb(255, 255, 255))] {
+        a.set(T_FLUFF_FACE, x, y, c);
+    }
+    for x in 6..10 {
+        a.set(T_FLUFF_FACE, x, 11, rgb(200, 150, 150));
+    }
+    for x in 0..16 {
+        for y in 0..3 {
+            let c = shade(rgb(236, 236, 230), a.rng.range(0.92, 1.02));
+            a.set(T_FLUFF_FACE, x, y, c);
+        }
+    }
+    a.speckle(T_STARER_SKIN, rgb(22, 18, 28), 0.15);
+    a.copy(T_STARER_SKIN, T_STARER_FACE);
+    for x in [2usize, 3, 4, 11, 12, 13] {
+        let c = if x == 3 || x == 12 { rgb(250, 200, 255) } else { rgb(200, 80, 240) };
+        a.set(T_STARER_FACE, x, 8, c);
+    }
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));

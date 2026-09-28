@@ -32,11 +32,11 @@ pub const TICK: f32 = 0.05;
 /// A world change requested by a script.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cmd {
-    SetBlock(i32, i32, i32, u8),
+    SetBlock(i32, i32, i32, Id),
     Message(String, String),
     Broadcast(String),
-    Give(String, u8, u8),
-    Take(String, u8, u8),
+    Give(String, Id, u8),
+    Take(String, Id, u8),
     Heal(String, f32),
     Damage(String, f32),
     Teleport(String, Vec3),
@@ -109,13 +109,13 @@ fn coord(d: &Dynamic) -> Res<i32> {
     if v.abs() > 30_000_000.0 { err("coordinate out of range") } else { Ok(v as i32) }
 }
 
-fn lookup(name: &str) -> Res<u8> {
+fn lookup(name: &str) -> Res<Id> {
     let r = reg();
     let n = name.trim().to_ascii_lowercase();
-    r.lookup(&n).or_else(|| r.blocks.iter().position(|b| b.key.ends_with(&format!(":{n}"))).map(|i| i as u8)).map(Ok).unwrap_or_else(|| err(format!("unknown block or item \"{name}\"")))
+    r.lookup(&n).or_else(|| r.blocks.iter().position(|b| b.key.ends_with(&format!(":{n}"))).map(|i| i as Id)).map(Ok).unwrap_or_else(|| err(format!("unknown block or item \"{name}\"")))
 }
 
-fn block_id(name: &str) -> Res<u8> {
+fn block_id(name: &str) -> Res<Id> {
     let id = lookup(name)?;
     if id >= FIRST_ITEM { err(format!("\"{name}\" is an item, not a block")) } else { Ok(id) }
 }
@@ -235,13 +235,10 @@ fn register_api(e: &mut Engine) {
         push(Cmd::Explode(Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32), num(&r)?.clamp(0.5, 8.0) as f32))
     });
     e.register_fn("spawn_mob", |kind: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Res<()> {
-        let k = match kind.to_ascii_lowercase().as_str() {
-            "oinker" | "pig" => 0,
-            "hisser" => 1,
-            "groaner" | "zombie" => 2,
-            other => return err(format!("unknown mob \"{other}\" (oinker, hisser, groaner)")),
+        let Some(k) = crate::entity::MobKind::from_name(kind) else {
+            return err(format!("unknown mob \"{kind}\" (oinker, hisser, groaner, fluffer, starer)"));
         };
-        push(Cmd::Spawn(k, Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))
+        push(Cmd::Spawn(k.index(), Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))
     });
     e.register_fn("set_time", |t: Dynamic| -> Res<()> { push(Cmd::SetTime(num(&t)?.rem_euclid(1.0) as f32)) });
     e.register_fn("play_sound", |name: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Res<()> {
@@ -259,6 +256,10 @@ fn register_api(e: &mut Engine) {
             "eat" => Sfx::Eat,
             "break" => Sfx::Break(Mat::Stone),
             "glass" => Sfx::Break(Mat::Glass),
+            "baa" => Sfx::Baa,
+            "warp" => Sfx::Warp,
+            "fanfare" => Sfx::Fanfare,
+            "boing" => Sfx::Boing,
             other => return err(format!("unknown sound \"{other}\"")),
         };
         push(Cmd::Sound(s, Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))

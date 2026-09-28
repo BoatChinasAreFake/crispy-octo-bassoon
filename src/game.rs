@@ -1,5 +1,6 @@
 //! Gameplay: the world plus everything living in it, and scene assembly.
 
+use crate::advancements::{Advancement, Progress};
 use crate::block::*;
 use crate::entity::*;
 use crate::inventory::Inventory;
@@ -7,7 +8,7 @@ use crate::mesher::mesh_chunk;
 use crate::multiplayer::{Net, Peer};
 use crate::net::Msg;
 use crate::noise::{hash2, Perlin, Rng};
-use crate::player::{Input, Player, MAX_HEALTH};
+use crate::player::{Input, Player, EYE, MAX_HEALTH};
 use crate::render::{DynGeo, FrameParams, Pass, Renderer};
 use crate::save::SaveData;
 use crate::scripting::{Cmd, ScriptHost};
@@ -95,6 +96,9 @@ pub struct Game {
     pub scripts: Option<ScriptHost>,
     /// Script variables loaded from the save, handed to the scripts when they start.
     saved_script_vars: Vec<(String, Vec<u8>)>,
+    pub advancements: Progress,
+    /// "Advancement Made!" toasts on screen: (advancement, seconds left).
+    pub toasts: Vec<(&'static Advancement, f32)>,
 }
 
 impl Game {
@@ -155,12 +159,15 @@ impl Game {
             dedicated: false,
             scripts: None,
             saved_script_vars: Vec::new(),
+            advancements: Progress::default(),
+            toasts: Vec::new(),
         }
     }
 
     pub fn from_save(d: SaveData) -> Self {
         let mut g = Game::new(d.seed, d.creative, false);
         g.saved_script_vars = d.script_vars.clone();
+        g.advancements = Progress::from_keys(&d.advancements);
         let remap = palette_remap(reg(), &d.palette);
         g.world.mods = d.mods;
         if let Some(remap) = &remap {
@@ -203,7 +210,51 @@ impl Game {
             mods: self.world.mods.clone(),
             palette: mod_palette(reg()),
             script_vars: self.export_script_vars(),
+            advancements: self.advancements.earned.clone(),
         }
+    }
+
+    /// Earn an advancement (once per world): toast, fanfare, chat line.
+    pub fn advance(&mut self, key: &str) {
+        if self.menu || self.dedicated {
+            return;
+        }
+        if let Some(a) = self.advancements.grant(key) {
+            self.toasts.push((a, 5.0));
+            self.sfx(Sfx::Fanfare, None);
+            self.msg(format!("Advancement made: [{}]", a.title));
+            if !self.is_client() {
+                let me = self.player_name.clone();
+                self.fire("on_advancement", vec![me.into(), key.to_string().into()]);
+            }
+        }
+    }
+
+    /// Advancements for getting hold of an item.
+    fn item_advancements(&mut self, item: Id) {
+        let key = match item {
+            LOG => "getting_wood",
+            COBBLE => "stone_age",
+            IRON => "iron_will",
+            DIAMOND => "dimonds",
+            GOLD_INGOT => "fools_gold",
+            WOOL => "fluffed",
+            TABLE => "benchmarking",
+            PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND => "tool_time",
+            _ => return,
+        };
+        self.advance(key);
+    }
+
+    /// Called by the crafting screen after a successful craft.
+    pub fn on_crafted(&mut self, output: Id, via_gold: bool) {
+        if via_gold {
+            self.msg("Gold is too soft for tools, so you got a wooden one. Economics!");
+        } else {
+            self.msg(format!("Crafted {}. Nobody knows how.", item_name(output)));
+        }
+        self.sfx(Sfx::Craft, None);
+        self.item_advancements(output);
     }
 
     pub fn msg(&mut self, s: impl Into<String>) {
@@ -345,6 +396,11 @@ impl Game {
             m.1 -= dt;
         }
         self.messages.retain(|m| m.1 > 0.0);
+        if let Some(t) = self.toasts.first_mut() {
+            // One at a time, like a polite queue.
+            t.1 -= dt;
+        }
+        self.toasts.retain(|t| t.1 > 0.0);
         if self.menu || !self.ready || self.dead.is_some() {
             return;
         }
@@ -359,6 +415,7 @@ impl Game {
             self.hurt_player(fall, "hit the ground too hard (the ground is fine)");
         }
         self.footsteps(dt);
+        self.block_effects();
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
@@ -455,7 +512,7 @@ impl Game {
     }
 
     fn apply_cmds(&mut self, cmds: Vec<Cmd>) {
-        let effect = |heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(u8, u8)>| Msg::Effect { heal, teleport, launch, take };
+        let effect = |heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)>| Msg::Effect { heal, teleport, launch, take };
         for c in cmds {
             match c {
                 Cmd::SetBlock(x, y, z, id) => self.world.set_or_record(x, y, z, id),
@@ -523,8 +580,9 @@ impl Game {
                 }
                 Cmd::Explode(at, r) => self.explode(at, r, "was blown up by a script"),
                 Cmd::Spawn(k, at) => {
-                    let kind = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner][(k as usize).min(2)];
-                    self.alloc_mob(kind, at);
+                    if let Some(kind) = MobKind::from_index(k) {
+                        self.alloc_mob(kind, at);
+                    }
                 }
                 Cmd::SetTime(t) => {
                     self.time = t;
@@ -562,6 +620,115 @@ impl Game {
             if is_solid(under) {
                 self.sfx(Sfx::Step(material(under)), None);
             }
+        }
+    }
+
+    /// What the blocks around the player do to them: bouncing, pokey plants, ice.
+    fn block_effects(&mut self) {
+        if self.player.bounced {
+            self.player.bounced = false;
+            self.sfx(Sfx::Boing, None);
+            self.advance("boing");
+        }
+        let b = &self.player.body;
+        let (min, max) = (b.min() - Vec3::new(0.06, 0.0, 0.06), b.max() + Vec3::new(0.06, 0.0, 0.06));
+        let mut pokey = false;
+        for y in min.y.floor() as i32..=(max.y - 0.01).floor() as i32 {
+            for z in min.z.floor() as i32..=max.z.floor() as i32 {
+                for x in min.x.floor() as i32..=max.x.floor() as i32 {
+                    pokey |= self.world.get(x, y, z) == CACTUS;
+                }
+            }
+        }
+        // Standing on top of one counts too.
+        let feet = b.pos - Vec3::Y * 0.05;
+        let under = self.world.get(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
+        pokey |= under == CACTUS && b.on_ground;
+        let zoom = under == ICE && b.on_ground && self.player.sprinting;
+        if pokey && self.player.hurt <= 0.0 && !self.creative {
+            self.hurt_player(1.0, "hugged a Pokey Plant. We said not to.");
+            self.advance("ouch");
+        }
+        if zoom {
+            self.advance("zoomies");
+        }
+    }
+
+    /// Right-clicking a bed.
+    fn sleep(&mut self, bed: IVec3) {
+        self.spawn = bed.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
+        if !self.is_night() {
+            self.msg("You can only sleep at night. Naps are a premium feature. (Spawn point set, though.)");
+            return;
+        }
+        let me = self.player.body.pos;
+        if self.mobs.iter().any(|m| m.kind.hostile() && m.body.pos.distance(me) < 10.0) {
+            self.msg("You may not rest now, there are monsters nearby. They're very loud sleepers.");
+            return;
+        }
+        if self.is_client() {
+            self.msg("Spawn point set. Only the host's bed controls time. Democracy!");
+            return;
+        }
+        self.time = 0.01;
+        self.net_broadcast(Msg::Time(self.time));
+        self.mobs.retain(|m| !m.kind.hostile() || m.body.pos.distance(me) > 64.0);
+        self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set.");
+        self.advance("sweet_dreams");
+    }
+
+    /// Throw a Stare Pearl: blink to wherever you're looking.
+    fn throw_pearl(&mut self) {
+        let eye = self.player.eye();
+        let dir = self.player.look_dir();
+        let to = match self.world.raycast(eye, dir, 48.0) {
+            Some(h) => {
+                let cell = h.pos + h.normal;
+                // Find standing room at (or just above) the spot we hit.
+                let spot = (0..3).map(|dy| cell + IVec3::Y * dy).find(|c| !is_solid(self.world.get_v(*c)) && !is_solid(self.world.get_v(*c + IVec3::Y)));
+                match spot {
+                    Some(c) => c.as_vec3() + Vec3::new(0.5, 0.0, 0.5),
+                    None => {
+                        self.msg("The pearl hit a wall and had a think about it.");
+                        return;
+                    }
+                }
+            }
+            None => eye + dir * 48.0 - Vec3::Y * EYE,
+        };
+        let from = self.player.body.pos;
+        self.smoke(from + Vec3::Y, 12, 0.4);
+        self.player.body.pos = to;
+        self.player.body.vel = Vec3::ZERO;
+        self.player.fall_start = to.y;
+        self.smoke(to + Vec3::Y, 12, 0.4);
+        self.sfx(Sfx::Warp, None);
+        self.player.hurt = 0.0;
+        self.hurt_player(2.0, "teleported directly into a bad decision");
+        self.advance("rude_teleport");
+        if !self.creative {
+            self.inv.consume_held();
+        }
+    }
+
+    /// Placing a sponge soaks up water around it.
+    fn soak(&mut self, at: IVec3) {
+        let mut n = 0;
+        for dy in -3..=3 {
+            for dz in -3..=3 {
+                for dx in -3..=3 {
+                    let p = at + ivec3(dx, dy, dz);
+                    if self.world.get_v(p) == WATER {
+                        self.world.set_v(p, AIR);
+                        n += 1;
+                    }
+                }
+            }
+        }
+        if n > 0 {
+            self.sfx(Sfx::Splash, Some(at.as_vec3()));
+            self.msg(format!("Glug. The sponge drank {n} blocks of water. It's still thirsty."));
+            self.advance("thirsty");
         }
     }
 
@@ -615,7 +782,7 @@ impl Game {
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
-                        self.sfx(if kind == MobKind::Oinker { Sfx::Oink } else { Sfx::MobHurt }, Some(at));
+                        self.sfx(Sfx::hurt_of(kind), Some(at));
                     }
                     self.attack_cd = 0.35;
                 }
@@ -708,7 +875,15 @@ impl Game {
                     self.inv.consume_held();
                 }
                 self.sfx(Sfx::Eat, None);
-                self.msg(if held == GOO { "You ate Groaner Goo. You feel... gooey." } else { "*nom* Oinkchop acquired (internally)." });
+                self.msg(match held {
+                    GOO => "You ate Groaner Goo. You feel... gooey.",
+                    MUTTON => "Raw Baa-con. Crunchy? No. Wool-adjacent? Yes.",
+                    GOLDEN_CHOP => "You feel golden. Also slightly metallic. Fully healed!",
+                    _ => "*nom* Oinkchop acquired (internally).",
+                });
+                if held == GOLDEN_CHOP {
+                    self.advance("golden_boy");
+                }
                 return;
             }
         }
@@ -721,9 +896,32 @@ impl Game {
             }
             return;
         }
+        if held == PEARL {
+            self.player.swing = 1.0;
+            self.throw_pearl();
+            return;
+        }
         let Some(Target::Block(h)) = &self.target else { return };
         let (hit_pos, normal) = (h.pos, h.normal);
         let hit_id = self.world.get_v(hit_pos);
+        // Sneak to place blocks against beds and cakes instead of using them.
+        if hit_id == BED && !self.player.sneaking {
+            self.sleep(hit_pos);
+            return;
+        }
+        if hit_id == CAKE && !self.player.sneaking {
+            if self.player.health >= MAX_HEALTH && !self.creative {
+                self.msg("You're full. Even for cake. Impressive restraint.");
+                return;
+            }
+            self.player.health = (self.player.health + 8.0).min(MAX_HEALTH);
+            self.world.set_v(hit_pos, AIR);
+            self.block_particles_tile(hit_pos, T_CAKE_SIDE, 12);
+            self.sfx(Sfx::Eat, None);
+            self.msg("You ate the whole cake in one bite. The cake was not a lie.");
+            self.advance("cake");
+            return;
+        }
         if hit_id == TNT && (held == TORCH || held == AIR) {
             if self.is_client() {
                 self.world.set_remote(hit_pos.x, hit_pos.y, hit_pos.z, AIR);
@@ -777,6 +975,11 @@ impl Game {
         if !self.creative {
             self.inv.consume_held();
         }
+        match held {
+            SPONGE => self.soak(place),
+            JACK => self.advance("spooky"),
+            _ => {}
+        }
     }
 
     pub fn break_block(&mut self, pos: IVec3, drops: bool) {
@@ -798,6 +1001,13 @@ impl Game {
             self.run_actions(on_break, pos.as_vec3() + Vec3::splat(0.5));
         }
         self.stat_blocks_broken += 1;
+        if self.stat_blocks_broken >= 100 {
+            self.advance("centurion");
+        }
+        if id == ICE && !self.creative {
+            self.world.set_v(pos, WATER);
+            self.msg("The ice melted. Science!");
+        }
         if drops && !self.creative {
             let d = block(id).drop;
             if d != AIR {
@@ -861,8 +1071,7 @@ impl Game {
                 Action::Spawn(k) => {
                     if self.is_client() {
                         self.msg("Only the host can spawn mobs.");
-                    } else {
-                        let kind = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner][(*k as usize).min(2)];
+                    } else if let Some(kind) = MobKind::from_index(*k) {
                         self.alloc_mob(kind, at + Vec3::Y * 0.5);
                     }
                 }
@@ -870,11 +1079,12 @@ impl Game {
         }
     }
 
-    fn give(&mut self, item: u8, n: u8) {
+    pub fn give(&mut self, item: Id, n: u8) {
         self.sfx(Sfx::Pop, None);
         if self.inv.add(item, n) > 0 {
             self.msg("Inventory full. The item has been respectfully ignored.");
         }
+        self.item_advancements(item);
     }
 
     fn block_particles(&mut self, pos: IVec3, n: usize) {
@@ -1000,7 +1210,7 @@ impl Game {
     }
 
     /// Particles and sound for a block someone else changed.
-    pub fn block_change_feedback(&mut self, pos: IVec3, old: u8, new: u8) {
+    pub fn block_change_feedback(&mut self, pos: IVec3, old: Id, new: Id) {
         let center = pos.as_vec3() + Vec3::splat(0.5);
         if new == AIR || new == WATER {
             if targetable(old) {
@@ -1044,6 +1254,34 @@ impl Game {
         let daylight = self.daylight();
         let mut events = Vec::new();
         let mut noises = Vec::new();
+        // Who is looking where, for Starers: (is the local player, eye, look direction).
+        let mut gazes: Vec<(bool, Vec3, Vec3)> = Vec::new();
+        if visible && self.dead.is_none() && !self.dedicated {
+            gazes.push((true, self.player.eye(), self.player.look_dir()));
+        }
+        for p in self.peers.values().filter(|p| p.alive()) {
+            let dir = Vec3::new(p.yaw.sin() * p.pitch.cos(), p.pitch.sin(), -p.yaw.cos() * p.pitch.cos());
+            gazes.push((false, p.target + Vec3::Y * EYE, dir));
+        }
+        let mut eye_contact = false;
+        for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Starer && !m.angry) {
+            for &(local, eye, dir) in &gazes {
+                if !m.stared_at(eye, dir) {
+                    continue;
+                }
+                let dist = (m.body.pos + Vec3::Y * (m.body.height - 0.25)).distance(eye);
+                // Walls block eye contact.
+                if self.world.raycast(eye, dir, dist).is_none_or(|h| h.dist > dist - 0.5) {
+                    m.angry = true;
+                    noises.push((Sfx::Warp, m.body.pos));
+                    eye_contact |= local;
+                }
+            }
+        }
+        if eye_contact {
+            self.msg("You made eye contact with a Starer. Bold. Also a mistake.");
+            self.advance("dont_blink");
+        }
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
@@ -1066,7 +1304,8 @@ impl Game {
                 match m.kind {
                     MobKind::Oinker => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Groaner => noises.push((Sfx::Groan, m.body.pos)),
-                    MobKind::Hisser => {}
+                    MobKind::Fluffer => noises.push((Sfx::Baa, m.body.pos)),
+                    MobKind::Hisser | MobKind::Starer => {}
                 }
             }
         }
@@ -1100,6 +1339,12 @@ impl Game {
                 }
                 MobEvent::Explode(at, r, cause) => self.explode(at, r, cause),
                 MobEvent::Smoke(at) => self.smoke(at, 1, 0.2),
+                MobEvent::Warp(from, to) => {
+                    self.smoke(from + Vec3::Y * 1.4, 10, 0.4);
+                    self.smoke(to + Vec3::Y * 1.4, 10, 0.4);
+                    self.sfx(Sfx::Warp, Some(from));
+                    self.sfx(Sfx::Warp, Some(to));
+                }
             }
         }
         let mut i = 0;
@@ -1114,14 +1359,25 @@ impl Game {
                     let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
                     let args = vec![m.kind.name().to_ascii_lowercase().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
                     self.fire("on_mob_death", args);
-                    if let Some((item, n)) = m.loot(&mut self.rng) {
-                        if m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker) {
+                    let remote = m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker);
+                    if !remote && !self.dedicated && at.distance(self.player.body.pos) < 32.0 {
+                        match m.kind {
+                            MobKind::Oinker => self.advance("bacon"),
+                            MobKind::Hisser => self.advance("hiss_tory"),
+                            MobKind::Groaner => self.advance("groan_up"),
+                            MobKind::Starer => self.advance("staring_champ"),
+                            MobKind::Fluffer => {}
+                        }
+                    }
+                    let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
+                    for (item, n) in drops.into_iter().flatten() {
+                        if remote {
                             if !self.creative {
                                 self.net_send_to(m.last_attacker, Msg::Give { item, n });
                             }
                         } else if !self.creative {
-                            self.give(item, n);
                             self.msg(format!("{} dropped {}x {}", m.kind.name(), n, item_name(item)));
+                            self.give(item, n);
                         }
                     }
                 }
@@ -1146,6 +1402,9 @@ impl Game {
         self.tnts.retain(|t| t.fuse > 0.0);
         for at in boom {
             self.explode(at, 4.0, "went out with a bang (TNT)");
+            if at.distance(self.player.body.pos) < 48.0 {
+                self.advance("kaboom");
+            }
         }
 
         self.spawn_timer -= dt;
@@ -1182,16 +1441,20 @@ impl Game {
         let top = self.world.get(x, y, z);
         let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && w.get(x, y, z) != WATER;
         if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
+            let kind = if self.rng.chance(0.4) { MobKind::Fluffer } else { MobKind::Oinker };
             for i in 0..self.rng.int(1, 3) {
                 let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.7, y as f32 + 1.0, z as f32 + 0.5);
-                self.alloc_mob(MobKind::Oinker, pos);
+                self.alloc_mob(kind, pos);
             }
             return;
         }
         if hostile >= 12 + 4 * self.peers.len() {
             return;
         }
-        let kind = if self.rng.chance(0.45) { MobKind::Hisser } else { MobKind::Groaner };
+        let roll = self.rng.f32();
+        let kind = if roll < 0.4 { MobKind::Hisser } else if roll < 0.85 { MobKind::Groaner } else { MobKind::Starer };
+        // Starers are tall: they need an extra block of headroom.
+        let clear = |w: &World, y: i32| clear(w, y) && (kind != MobKind::Starer || !is_solid(w.get(x, y + 2, z)));
         if self.is_night() && is_solid(top) && clear(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
             self.alloc_mob(kind, pos);
@@ -1396,21 +1659,21 @@ impl Game {
 }
 
 /// Names of every mod-added block and item, so saves survive mods being added or removed.
-fn mod_palette(r: &Registry) -> Vec<(u8, String)> {
-    let blocks = (NUM_BLOCKS..r.blocks.len() as u8).map(|id| (id, r.blocks[id as usize].key.to_string()));
-    let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as u8, r.key_of(id as u8).to_string()));
+fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
+    let blocks = (NUM_BLOCKS..r.blocks.len() as Id).map(|id| (id, r.blocks[id as usize].key.to_string()));
+    let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as Id, r.key_of(id as Id).to_string()));
     blocks.chain(items).collect()
 }
 
 /// Map ids in a save to ids in the current registry. Mod things that no longer
 /// exist become air (blocks) or vanish (items). None when nothing needs changing.
-fn palette_remap(r: &Registry, palette: &[(u8, String)]) -> Option<Vec<u8>> {
-    let mut map: Vec<u8> = (0..=255u8).collect();
+fn palette_remap(r: &Registry, palette: &[(Id, String)]) -> Option<Vec<Id>> {
+    let mut map: Vec<Id> = (0..=Id::MAX).collect();
     // Any mod-range id the save doesn't mention is unknown.
     for id in NUM_BLOCKS..FIRST_ITEM {
         map[id as usize] = AIR;
     }
-    for id in FIRST_MOD_ITEM..=255 {
+    for id in FIRST_MOD_ITEM..=Id::MAX {
         map[id as usize] = AIR;
     }
     for (old, key) in palette {
@@ -1569,6 +1832,132 @@ mod tests {
         assert_eq!(map[gem as usize], AIR);
         assert_eq!(map[STONE as usize], STONE);
         assert_eq!(map[DIAMOND as usize], DIAMOND);
+    }
+
+    #[test]
+    fn old_saves_keep_their_mod_things_after_new_base_blocks() {
+        use crate::mods::{build, ModSource};
+        let mut files = std::collections::BTreeMap::new();
+        files.insert("mod.txt".to_string(), b"[block one]\n[item gem]\n".to_vec());
+        let r = build(&[ModSource { id: "aaa".into(), files }], &[]);
+        // Before the parody update, the first mod block was id 24 and the first mod
+        // item one-byte id 118 (widened on load like everything in an old save).
+        let gem_old = crate::save::legacy_id(118);
+        let old_palette = vec![(24, "aaa:one".to_string()), (gem_old, "aaa:gem".to_string())];
+        let map = palette_remap(&r, &old_palette).expect("ids moved");
+        assert_eq!(map[24], r.lookup("aaa:one").unwrap());
+        assert_eq!(map[24], NUM_BLOCKS);
+        assert_eq!(map[gem_old as usize], r.lookup("aaa:gem").unwrap());
+        assert_eq!(map[gem_old as usize], FIRST_MOD_ITEM);
+        assert_eq!(map[PEARL as usize], PEARL, "base items the palette doesn't mention stay put");
+        assert_eq!(map[FIRST_MOD_ITEM as usize + 5], AIR, "unknown mod ids become nothing");
+        assert_eq!(map[DIAMOND_ORE as usize], DIAMOND_ORE);
+    }
+
+    #[test]
+    fn mob_kinds_round_trip() {
+        for k in MobKind::ALL {
+            assert_eq!(MobKind::from_index(k.index()), Some(k));
+            assert_eq!(MobKind::from_name(k.name()), Some(k));
+        }
+        assert_eq!(MobKind::from_name("enderman"), Some(MobKind::Starer));
+        assert_eq!(MobKind::from_name("sheep"), Some(MobKind::Fluffer));
+        assert!(MobKind::from_index(99).is_none());
+        let mut rng = Rng::new(1);
+        let s = Mob::new(MobKind::Starer, Vec3::new(0.0, 0.0, -10.0), &mut rng);
+        let eye = Vec3::new(0.0, 2.65, 0.0);
+        assert!(s.stared_at(eye, -Vec3::Z), "looking straight at its face");
+        assert!(!s.stared_at(eye, Vec3::new(0.3, 0.0, -1.0).normalize()), "looking past it");
+        assert!(!s.stared_at(eye, Vec3::Z), "looking away");
+    }
+
+    #[test]
+    fn parody_blocks_and_advancements() {
+        let mut g = Game::new(11, false, false);
+        g.world = loaded_world(11);
+        g.ready = true;
+        let top = g.world.surface_y(2, 2);
+        let base = IVec3::new(2, top + 1, 2);
+        let clear = |g: &mut Game| {
+            for y in 0..6 {
+                for z in -4..=4 {
+                    for x in -4..=4 {
+                        g.world.set(2 + x, top + 1 + y, 2 + z, AIR);
+                    }
+                }
+            }
+        };
+        clear(&mut g);
+
+        // Items grant advancements when you get them.
+        g.give(LOG, 1);
+        assert!(g.advancements.has("getting_wood"));
+        assert_eq!(g.toasts.len(), 1);
+        g.give(LOG, 1);
+        assert_eq!(g.toasts.len(), 1, "only once");
+
+        // Cake heals and disappears.
+        g.world.set_v(base, CAKE);
+        g.player.health = 5.0;
+        g.target = Some(Target::Block(crate::world::Hit { pos: base, normal: IVec3::Y, dist: 1.0 }));
+        g.use_item();
+        assert_eq!(g.world.get_v(base), AIR);
+        assert_eq!(g.player.health, 13.0);
+        assert!(g.advancements.has("cake"));
+
+        // Beds skip the night (and not the day).
+        g.world.set_v(base, BED);
+        g.time = 0.25;
+        g.sleep(base);
+        assert_eq!(g.time, 0.25);
+        g.time = 0.7;
+        g.sleep(base);
+        assert!(g.time < 0.05 && !g.is_night());
+        assert!(g.advancements.has("sweet_dreams"));
+        assert_eq!(g.spawn, base.as_vec3() + Vec3::new(0.5, 1.0, 0.5));
+
+        // Sponges drink water.
+        clear(&mut g);
+        for x in 0..3 {
+            g.world.set(1 + x, top + 1, 4, WATER);
+        }
+        g.soak(base);
+        assert!((0..3).all(|x| g.world.get(1 + x, top + 1, 4) == AIR));
+        assert!(g.advancements.has("thirsty"));
+
+        // Broken ice leaves water behind.
+        g.world.set_v(base, ICE);
+        g.break_block(base, true);
+        assert_eq!(g.world.get_v(base), WATER);
+        g.world.set_v(base, AIR);
+
+        // Stare Pearls teleport you to where you look (and sting a bit).
+        g.player.body.pos = Vec3::new(2.5, top as f32 + 1.0, 2.5);
+        g.player.health = 20.0;
+        g.player.yaw = 0.0; // -Z
+        g.player.pitch = -0.6;
+        g.inv.slots[g.inv.selected] = Some((PEARL, 2));
+        g.throw_pearl();
+        let moved = g.player.body.pos.distance(Vec3::new(2.5, top as f32 + 1.0, 2.5));
+        assert!(moved > 1.0, "moved {moved}");
+        assert_eq!(g.player.health, 18.0);
+        assert_eq!(g.inv.count(PEARL), 1);
+        assert!(g.advancements.has("rude_teleport"));
+
+        // Pokey plants poke.
+        g.player.hurt = 0.0;
+        let p = g.player.body.pos;
+        g.world.set(p.x.floor() as i32 + 1, p.y.floor() as i32, p.z.floor() as i32, CACTUS);
+        g.player.body.pos.x = p.x.floor() + 0.65;
+        let before = g.player.health;
+        g.block_effects();
+        assert_eq!(g.player.health, before - 1.0);
+        assert!(g.advancements.has("ouch"));
+
+        // And it all goes in the save.
+        let d = g.to_save();
+        let back = Game::from_save(d);
+        assert_eq!(back.advancements.count(), g.advancements.count());
     }
 
     #[test]

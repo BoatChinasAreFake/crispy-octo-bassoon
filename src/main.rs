@@ -2,6 +2,7 @@
 //! Rust + raw OpenGL (via miniquad/macroquad). No asset files: everything is
 //! generated at startup.
 
+mod advancements;
 mod block;
 mod entity;
 mod game;
@@ -11,6 +12,7 @@ mod mods;
 mod multiplayer;
 mod net;
 mod noise;
+mod palette;
 mod player;
 mod render;
 mod save;
@@ -49,6 +51,14 @@ const SPLASHES: &[&str] = &[
     "Stove approves!",
     "Groaners hate sunlight!",
     "Also try: going outside!",
+    "Don't look at the Starers!",
+    "Fluffers: ethically sheared!",
+    "The cake is NOT a lie!",
+    "Beds skip nights! Budget cuts shrank them!",
+    "Gold: shiny, useless, beloved!",
+    "Advancement made: reading this!",
+    "Do not hug the Pokey Plant!",
+    "Now 34% more parody!",
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -60,6 +70,7 @@ enum Screen {
     Dead,
     Options { from_title: bool },
     Help { from_title: bool },
+    Advancements,
     Multiplayer,
     Mods,
     Worlds,
@@ -113,6 +124,7 @@ struct App {
     /// Registry generation the GPU atlas was built from.
     atlas_gen: u32,
     mods_scroll: usize,
+    adv_scroll: usize,
     /// Joined a server, so its mods (not ours) are active.
     using_server_mods: bool,
     // ---- world slots
@@ -473,6 +485,11 @@ impl App {
             Screen::Paused => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Playing);
+                }
+            }
+            Screen::Advancements => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Paused);
                 }
             }
             Screen::Options { from_title } | Screen::Help { from_title } => {
@@ -1036,9 +1053,9 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Help { .. });
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Help { .. } | Screen::Advancements);
         for (s, at) in std::mem::take(&mut self.game.sounds) {
-            if world_audible || s == Sfx::Craft {
+            if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
                 self.audio.play(s, at, listener);
             }
         }
@@ -1080,6 +1097,7 @@ impl App {
                 self.hud();
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
+                    Screen::Advancements => self.advancements_screen(),
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
@@ -1163,6 +1181,12 @@ impl App {
                 format!("Facing: {facing}"),
                 format!("Biome: {} (surface {hgt})", biome.name()),
                 format!("Chunks: {} meshed, {} loaded", self.renderer.chunks.len(), g.world.chunks.len()),
+                {
+                    // Palette-packed block storage vs. two bytes per block.
+                    let (bytes, bits) = g.world.chunks.values().fold((0, 0), |(b, t), c| (b + c.blocks.bytes(), t + c.blocks.total_bits()));
+                    let blocks = (g.world.chunks.len() * (world::CW * world::CW * world::CH) as usize).max(1);
+                    format!("Block memory: {:.1} MB ({:.1} bits/block, flat would be {:.1} MB)", bytes as f64 / 1e6, bits as f64 / blocks as f64, blocks as f64 * 2.0 / 1e6)
+                },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
                 format!("Seed: {}  Mode: {}", g.world.seed(), if g.creative { "Creative" } else { "Survival" }),
@@ -1177,6 +1201,7 @@ impl App {
                 self.ui.text(l, 4.0 * s, (12.0 + i as f32 * 10.0) * s, 9.0, WHITE);
             }
         }
+        self.toast();
     }
 
     fn title_screen(&mut self) {
@@ -1274,11 +1299,16 @@ impl App {
             self.save();
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Options", true) {
-            self.set_screen(Screen::Options { from_title: false });
+        let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::ALL.len());
+        if self.ui.button(Rect::new(x, y, bw, bh), &adv, true) {
+            self.set_screen(Screen::Advancements);
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "How to Play", true) {
+        let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y, half, bh), "Options", true) {
+            self.set_screen(Screen::Options { from_title: false });
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "How to Play", true) {
             self.set_screen(Screen::Help { from_title: false });
         }
         y += bh + 5.0 * s;
@@ -1286,6 +1316,66 @@ impl App {
         if self.ui.button(Rect::new(x, y, bw, bh), quit_label, true) {
             self.back_to_title();
         }
+    }
+
+    fn advancements_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+        let title = format!("Advancements: {}/{} (they're per world, like memories)", self.game.advancements.count(), advancements::ALL.len());
+        self.ui.text_centered(&title, w / 2.0, h * 0.08, 14.0, WHITE);
+        let p = &self.game.advancements;
+        let cols = if w >= 2.0 * 220.0 * s { 2 } else { 1 };
+        let col_w = ((w - 20.0 * s) / cols as f32).min(290.0 * s);
+        let row_h = 21.0 * s;
+        let per_col = advancements::ALL.len().div_ceil(cols);
+        let x0 = w / 2.0 - col_w * cols as f32 / 2.0;
+        let y0 = h * 0.12;
+        let max_rows = ((h * 0.84 - y0) / row_h).floor().max(1.0) as usize;
+        let max_scroll = per_col.saturating_sub(max_rows);
+        let wheel = mouse_wheel().1;
+        if wheel.abs() > 0.1 {
+            self.adv_scroll = if wheel > 0.0 { self.adv_scroll.saturating_sub(1) } else { self.adv_scroll + 1 };
+        }
+        self.adv_scroll = self.adv_scroll.min(max_scroll);
+        for (i, a) in advancements::ALL.iter().enumerate() {
+            let (c, r) = (i / per_col, i % per_col);
+            let Some(r) = r.checked_sub(self.adv_scroll).filter(|&r| r < max_rows) else { continue };
+            let (x, y) = (x0 + c as f32 * col_w, y0 + r as f32 * row_h);
+            let got = p.has(a.key);
+            draw_rectangle(x + 2.0 * s, y, col_w - 4.0 * s, row_h - 2.0 * s, if got { Color::new(0.25, 0.22, 0.08, 0.9) } else { Color::new(0.12, 0.12, 0.14, 0.85) });
+            let tint = if got { WHITE } else { Color::new(0.3, 0.3, 0.3, 1.0) };
+            self.ui.tile(texture::T_TROPHY, x + 4.0 * s, y + 1.0 * s, row_h - 4.0 * s, tint);
+            let tx = x + row_h + 4.0 * s;
+            let max = col_w - row_h - 10.0 * s;
+            self.ui.text(&self.ui.fit(a.title, 9.0, max), tx, y + 9.0 * s, 9.0, if got { GOLD } else { GRAY });
+            self.ui.text(&self.ui.fit(a.desc, 7.0, max), tx, y + 17.0 * s, 7.0, if got { WHITE } else { Color::new(0.55, 0.55, 0.55, 1.0) });
+        }
+        if max_scroll > 0 {
+            self.ui.text_centered("(scroll for more)", w / 2.0, y0 + max_rows as f32 * row_h + 6.0 * s, 7.0, GRAY);
+        }
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Paused);
+        }
+    }
+
+    /// "Advancement Made!" toast in the top-right corner.
+    fn toast(&self) {
+        let Some(&(a, t)) = self.game.toasts.first() else { return };
+        let (w, s) = (screen_width(), self.ui.s);
+        let tw = (170.0 * s).min(w - 8.0 * s);
+        let th = 30.0 * s;
+        // Slide in, hold, slide out.
+        let slide = ((5.0 - t) / 0.3).min(t / 0.3).clamp(0.0, 1.0);
+        let x = w - (tw + 4.0 * s) * slide;
+        let y = 4.0 * s;
+        draw_rectangle(x, y, tw, th, Color::new(0.13, 0.1, 0.05, 0.95));
+        draw_rectangle_lines(x, y, tw, th, 1.5 * s, GOLD);
+        self.ui.tile(texture::T_TROPHY, x + 4.0 * s, y + 4.0 * s, th - 8.0 * s, WHITE);
+        let tx = x + th + 2.0 * s;
+        self.ui.text("Advancement Made!", tx, y + 12.0 * s, 9.0, Color::new(1.0, 0.95, 0.4, 1.0));
+        self.ui.text(&self.ui.fit(a.title, 9.0, tw - th - 6.0 * s), tx, y + 24.0 * s, 9.0, WHITE);
     }
 
     fn options_screen(&mut self, from_title: bool) {
@@ -1353,7 +1443,8 @@ impl App {
             "",
             "Survival tips: punch a Tree Chunk, craft Planks, then Sticks, then a Wooden Pickaxe.",
             "Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier.",
-            "Hissers explode. Groaners bite and burn in daylight. Oinkers are friends (and food).",
+            "Hissers explode. Groaners bite and burn in daylight. Oinkers and Fluffers are friends (and food).",
+            "Never look a Starer in the eye. Right-click a bed at night to skip it. Pokey Plants poke.",
             "Crafting works anywhere. The crafting table is purely decorative. Satire!",
             "Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.",
         ];
@@ -1361,7 +1452,7 @@ impl App {
             self.ui.text_centered(l, w / 2.0, h * 0.2 + i as f32 * 13.0 * s, 9.0, if l.is_empty() { WHITE } else { Color::new(0.9, 0.9, 0.9, 1.0) });
         }
         let bw = (160.0 * s).min(w * 0.8);
-        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.2 + 14.0 * 13.0 * s, bw, 20.0 * s), "Got it", true) {
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.2 + 15.0 * 13.0 * s, bw, 20.0 * s), "Got it", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
         }
     }
@@ -1511,8 +1602,8 @@ impl App {
                                 break;
                             }
                         }
-                        self.game.msg(format!("Crafted {}. Nobody knows how.", item_name(r.output.0)));
-                        self.game.sfx(Sfx::Craft, None);
+                        let via_gold = r.inputs.iter().any(|&(i, _)| i == GOLD_INGOT) && r.output.0 == PICK_WOOD;
+                        self.game.on_crafted(r.output.0, via_gold);
                     }
                 }
             }
@@ -1642,6 +1733,7 @@ async fn game_main() {
         base_atlas,
         atlas_gen: block::generation(),
         mods_scroll: 0,
+        adv_scroll: 0,
         using_server_mods: false,
         current_world: None,
         worlds: Vec::new(),
@@ -1686,6 +1778,18 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.game.open_lan("Hosty", None).expect("open to LAN");
                 app.show_debug = false;
+            }
+            "parody" => {
+                app.start_game(Game::new(424242, true, false));
+                app.show_debug = false;
+            }
+            "advancements" => {
+                let mut g = Game::new(424242, false, false);
+                for a in advancements::ALL.iter().step_by(3) {
+                    g.advancements.grant(a.key);
+                }
+                app.start_game(g);
+                app.set_screen(Screen::Advancements);
             }
             "mods" => {
                 app.game = Game::new(424242, true, true);
@@ -1754,24 +1858,30 @@ async fn game_main() {
                 let line = s.chat[(frames - 150) as usize].clone();
                 app.game.send_chat(&line);
             }
-            if s.mode == "showcase" && frames == 120 {
-                // A little display of every mod block, on a stone plinth in front of the player.
+            if (s.mode == "showcase" || s.mode == "parody") && frames == 120 {
+                // A little display of every mod block (or the newest base ones), on stone plinths in front of the player.
                 let p = app.game.player.body.pos;
                 let (fx, fz) = (2.4f32.sin(), -2.4f32.cos());
                 let r = block::reg();
-                for (i, id) in (block::NUM_BLOCKS..r.blocks.len() as u8).enumerate() {
-                    let side = i as f32 * 1.6 - 3.0;
+                let ids = if s.mode == "parody" { block::GOLD_ORE..block::NUM_BLOCKS } else { block::NUM_BLOCKS..r.blocks.len() as block::Id };
+                let n = ids.len() as f32;
+                for (i, id) in ids.enumerate() {
+                    let side = if s.mode == "parody" { (i as f32 - (n - 1.0) / 2.0) * 1.3 } else { i as f32 * 1.6 - 3.0 };
                     let at = p + Vec3::new(fx * 5.0 - fz * side, 0.0, fz * 5.0 + fx * side);
                     let (x, y, z) = (at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
                     app.game.world.set(x, y, z, block::STONE);
                     app.game.world.set(x, y + 1, z, id);
                 }
             }
-            if (s.mode == "survival" || s.mode == "creative") && frames == 150 {
+            if s.mode == "parody" && frames == 140 {
+                app.game.advance("dimonds");
+            }
+            if matches!(s.mode.as_str(), "survival" | "creative" | "parody") && frames == 150 {
                 let p = app.game.player.body.pos;
                 let mut rng = noise::Rng::new(9);
-                for (i, kind) in [entity::MobKind::Oinker, entity::MobKind::Hisser, entity::MobKind::Groaner].into_iter().enumerate() {
-                    let at = p + Vec3::new(2.4f32.sin() * 6.0 + (i as f32 - 1.0) * 2.0, 2.0, -2.4f32.cos() * 6.0);
+                let dist = if s.mode == "parody" { 9.0 } else { 6.0 };
+                for (i, kind) in entity::MobKind::ALL.into_iter().enumerate() {
+                    let at = p + Vec3::new(2.4f32.sin() * dist + (i as f32 - 2.0) * 2.4, 2.0, -2.4f32.cos() * dist);
                     let m = entity::Mob::new(kind, at, &mut rng);
                     app.game.mobs.push(m);
                 }
