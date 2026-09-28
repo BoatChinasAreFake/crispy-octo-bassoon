@@ -11,8 +11,8 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// v2 adds the mod palette (names of mod blocks/items); v3 adds script mod
 /// variables; v4 adds earned advancements; v5 widens block/item ids to two
 /// bytes; v6 adds farm soil and the fishing log; v7 adds what's in chests and
-/// furnaces. Older saves still load.
-const VERSION: u32 = 7;
+/// furnaces; v8 adds items lying on the ground. Older saves still load.
+const VERSION: u32 = 8;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -42,6 +42,8 @@ pub struct SaveData {
     pub fish_log: Vec<u8>,
     /// Chest and furnace contents, packed by `containers::encode` (save v7+).
     pub containers: Vec<u8>,
+    /// Items on the ground, packed by `drops::encode` (save v8+).
+    pub drops: Vec<u8>,
 }
 
 
@@ -148,7 +150,7 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
         w.u32(key.len() as u32);
         w.0.extend_from_slice(key.as_bytes());
     }
-    for blob in [&d.farm, &d.fish_log, &d.containers] {
+    for blob in [&d.farm, &d.fish_log, &d.containers, &d.drops] {
         w.u32(blob.len() as u32);
         w.0.extend_from_slice(blob);
     }
@@ -227,7 +229,8 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     }
     let (farm, fish_log) = if version >= 6 { (r.bytes(64 << 20)?, r.bytes(1 << 20)?) } else { (Vec::new(), Vec::new()) };
     let containers = if version >= 7 { r.bytes(64 << 20)? } else { Vec::new() };
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers })
+    let drops = if version >= 8 { r.bytes(16 << 20)? } else { Vec::new() };
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -433,6 +436,7 @@ mod tests {
             farm: Vec::new(),
             fish_log: Vec::new(),
             containers: Vec::new(),
+            drops: Vec::new(),
         }
     }
 

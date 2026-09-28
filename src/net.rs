@@ -15,7 +15,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v7: farming and fishing (Interact, Catch), stricter hosts, and host-checked
 /// inventories (held item in PlayerState, Craft, Consume, InventoryCheck, Inventory).
 /// v8: chests and furnaces (OpenContainer, CloseContainer, ContainerMove, Container).
-pub const PROTOCOL: u32 = 8;
+/// v9: items on the ground (Drops, Pickup, DropItem), armour in PlayerState,
+/// slabs, stairs and doors.
+pub const PROTOCOL: u32 = 9;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -65,7 +67,7 @@ pub enum Msg {
     PlayerLeave { id: u32 },
     /// Both directions; the host fills in `id` when relaying.
     /// `held` is the item in hand (the host only believes it if the player owns one).
-    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id },
+    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, armor: u16 },
     /// Mobs, primed TNT (position, fuse) and arrows in flight (position, velocity).
     Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)> },
     /// client -> host
@@ -109,6 +111,12 @@ pub enum Msg {
     ContainerMove { x: i32, y: i32, z: i32, slot: u8, item: Id, n: u8, put: bool },
     /// host -> client: what's in the container you have open, and its furnace gauges (0..1).
     Container { x: i32, y: i32, z: i32, slots: Vec<(Id, u8)>, burn: f32, cook: f32 },
+    /// host -> client: every item on the ground: (id, position, item, count).
+    Drops(Vec<(u32, Vec3, Id, u8)>),
+    /// client -> host: I walked into drop `id` and have room for this many.
+    Pickup { id: u32, room: u8 },
+    /// client -> host: I threw these (Q), or they didn't fit in my inventory.
+    DropItem { item: Id, n: u8 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -251,7 +259,7 @@ impl Msg {
                 w.u8(6);
                 w.u32(*id);
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, held } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held, armor } => {
                 w.u8(7);
                 w.u32(*id);
                 w.v3(*pos);
@@ -259,6 +267,7 @@ impl Msg {
                 w.f32(*pitch);
                 w.u8(*flags);
                 w.u16(*held);
+                w.u16(*armor);
             }
             Msg::Mobs { mobs, tnts, arrows } => {
                 w.u8(8);
@@ -420,6 +429,26 @@ impl Msg {
                 w.f32(*burn);
                 w.f32(*cook);
             }
+            Msg::Drops(list) => {
+                w.u8(33);
+                w.u32(list.len() as u32);
+                for &(id, pos, item, n) in list {
+                    w.u32(id);
+                    w.v3(pos);
+                    w.u16(item);
+                    w.u8(n);
+                }
+            }
+            Msg::Pickup { id, room } => {
+                w.u8(34);
+                w.u32(*id);
+                w.u8(*room);
+            }
+            Msg::DropItem { item, n } => {
+                w.u8(35);
+                w.u16(*item);
+                w.u8(*n);
+            }
         }
         w.0
     }
@@ -449,7 +478,7 @@ impl Msg {
             }
             5 => Msg::PlayerJoin { id: r.u32()?, name: r.str()? },
             6 => Msg::PlayerLeave { id: r.u32()? },
-            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()? },
+            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, armor: r.u16()? },
             8 => {
                 let n = r.count(31)?;
                 let mut mobs = Vec::with_capacity(n);
@@ -518,6 +547,16 @@ impl Msg {
                 }
                 Msg::Container { x, y, z, slots, burn: r.f32()?, cook: r.f32()? }
             }
+            33 => {
+                let n = r.count(19)?;
+                let mut list = Vec::with_capacity(n);
+                for _ in 0..n {
+                    list.push((r.u32()?, r.v3()?, r.u16()?, r.u8()?));
+                }
+                Msg::Drops(list)
+            }
+            34 => Msg::Pickup { id: r.u32()?, room: r.u8()? },
+            35 => Msg::DropItem { item: r.u16()?, n: r.u8()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -943,12 +982,15 @@ mod tests {
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0) },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
-            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003 },
+            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, armor: 0x4102 },
             Msg::Craft { recipe: 12, times: 64 },
             Msg::Consume { item: 0x8005, n: 1 },
             Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },
             Msg::Inventory { items: vec![] },
             Msg::OpenContainer { x: -4, y: 60, z: 9 },
+            Msg::Drops(vec![(7, Vec3::new(1.0, 64.5, -3.25), 0x8003, 12), (8, Vec3::ZERO, 4, 1)]),
+            Msg::Pickup { id: 7, room: 64 },
+            Msg::DropItem { item: 0x8010, n: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true },
             Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1), (0, 0), (0x8001, 64)], burn: 0.5, cook: 0.25 },

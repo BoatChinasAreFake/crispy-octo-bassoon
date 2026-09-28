@@ -162,6 +162,17 @@ pub const T_COOKED_BOOT: u16 = 174;
 /// UI: the furnace's flame and progress arrow.
 pub const T_FLAME: u16 = 175;
 pub const T_ARROW_UI: u16 = 176;
+/// Doors: the two halves, and the item.
+pub const T_DOOR_BOTTOM: u16 = 177;
+pub const T_DOOR_TOP: u16 = 178;
+pub const T_DOOR_ITEM: u16 = 179;
+/// Armour item sprites: `T_ARMOR_ITEMS + tier * 4 + slot` (tiers wool, iron,
+/// gold, dimond; slots helmet, chestplate, leggings, boots).
+pub const T_ARMOR_ITEMS: u16 = 180;
+/// What worn armour looks like on a player, per tier.
+pub const T_ARMOR_WORN: u16 = 196;
+/// HUD: one armour point pair.
+pub const T_ARMOR_ICON: u16 = 200;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -245,6 +256,8 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("furnace_top", T_FURNACE_TOP),
     ("furnace_side", T_FURNACE_SIDE),
     ("furnace_lit", T_FURNACE_LIT),
+    ("door_bottom", T_DOOR_BOTTOM),
+    ("door_top", T_DOOR_TOP),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -817,6 +830,101 @@ const FISH: [&str; 16] = [
     "................",
     "................",
     "................",
+];
+
+const HELMET: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "....########....",
+    "...#hhbbbbbb#...",
+    "..#hbbbbbbbbd#..",
+    "..#hbbbbbbbbd#..",
+    "..#bbbbbbbbbd#..",
+    "..#bbd####dbd#..",
+    "..#bd#....#dd#..",
+    "..#bd#....#dd#..",
+    "..###......###..",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
+const CHESTPLATE: [&str; 16] = [
+    "................",
+    "..####....####..",
+    ".#hbb#....#bbd#.",
+    ".#hbbb####bbbd#.",
+    ".#hbbbbbbbbbbd#.",
+    ".###bbbbbbbbd###",
+    "...#hbbbbbbbd#..",
+    "...#hbbbbbbbd#..",
+    "...#hbbbbbbbd#..",
+    "...#hbbbbbbbd#..",
+    "...#hbbbbbbbd#..",
+    "...#bbbbbbbbd#..",
+    "...#dddddddddd#.",
+    "...###########..",
+    "................",
+    "................",
+];
+
+const LEGGINGS: [&str; 16] = [
+    "................",
+    "...##########...",
+    "...#hbbbbbbd#...",
+    "...#hbbbbbbd#...",
+    "...#hbb##bbd#...",
+    "...#hbb##bbd#...",
+    "...#hbb##bbd#...",
+    "...#hbd##hbd#...",
+    "...#hbd##hbd#...",
+    "...#hbd##hbd#...",
+    "...#hbd##hbd#...",
+    "...#hbd##hbd#...",
+    "...#ddd##ddd#...",
+    "...#####.####...",
+    "................",
+    "................",
+];
+
+const BOOTS: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "..####....####..",
+    "..#hb#....#bd#..",
+    "..#hb#....#bd#..",
+    "..#hb#....#bd#..",
+    "..#hb#....#bd#..",
+    ".#hbb#....#bbd#.",
+    ".#hbb#....#bbd#.",
+    ".#ddd#....#ddd#.",
+    ".#####....#####.",
+    "................",
+    "................",
+];
+
+const DOOR_ITEM: [&str; 16] = [
+    "....########....",
+    "....#bbbbbb#....",
+    "....#b#bb#b#....",
+    "....#b#bb#b#....",
+    "....#bbbbbb#....",
+    "....#bdbbdb#....",
+    "....#bbbbbb#....",
+    "....#bbbbbw#....",
+    "....#bbbbbw#....",
+    "....#bdbbdb#....",
+    "....#bbbbbb#....",
+    "....#bdbbdb#....",
+    "....#bbbbbb#....",
+    "....#bdbbdb#....",
+    "....#bbbbbb#....",
+    "....########....",
 ];
 
 const BOOT: [&str; 16] = [
@@ -1656,6 +1764,42 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             a.set(T_FURNACE_LIT, x, y, fire);
         }
     }
+    // ---- Doors and armour
+    for (tile, top) in [(T_DOOR_BOTTOM, false), (T_DOOR_TOP, true)] {
+        a.each(tile, |x, y, r, _| {
+            let frame = x <= 1 || x >= 14 || (!top && y >= 14) || (top && y <= 1);
+            let window = top && (4..12).contains(&x) && (4..12).contains(&y) && x != 7 && x != 8 && y != 7 && y != 8;
+            let panel = !top && (4..12).contains(&x) && ((2..7).contains(&y) || (9..13).contains(&y));
+            let handle = !top && x == 12 && (1..3).contains(&y);
+            if handle {
+                rgb(60, 60, 60)
+            } else if window {
+                rgb(170, 210, 230)
+            } else if frame {
+                shade(rgb(110, 80, 45), r.range(0.9, 1.05))
+            } else if panel {
+                shade(rgb(150, 112, 65), r.range(0.9, 1.05))
+            } else {
+                shade(rgb(170, 130, 78), r.range(0.9, 1.06) * if x % 5 == 0 { 0.9 } else { 1.0 })
+            }
+        });
+    }
+    a.sprite(T_DOOR_ITEM, &DOOR_ITEM, &[('#', rgb(80, 55, 30)), ('b', rgb(170, 130, 78)), ('d', rgb(130, 95, 55)), ('w', rgb(60, 60, 60))]);
+    let tiers = [rgb(225, 225, 225), rgb(200, 200, 205), rgb(245, 205, 60), rgb(100, 230, 225)];
+    for (t, base) in tiers.iter().enumerate() {
+        let pal = [('#', shade(*base, 0.3)), ('b', *base), ('d', shade(*base, 0.72)), ('h', shade(*base, 1.2))];
+        for (slot, rows) in [&HELMET, &CHESTPLATE, &LEGGINGS, &BOOTS].into_iter().enumerate() {
+            a.sprite(T_ARMOR_ITEMS + t as u16 * 4 + slot as u16, rows, &pal);
+        }
+        let (base, wool) = (*base, t == 0);
+        a.each(T_ARMOR_WORN + t as u16, |x, y, r, _| {
+            let rim = x == 0 || y == 0 || x == 15 || y == 15;
+            let knit = wool && (x + y) % 4 == 0;
+            shade(base, r.range(0.9, 1.05) * if rim { 0.7 } else if knit { 0.85 } else { 1.0 })
+        });
+    }
+    a.sprite(T_ARMOR_ICON, &CHESTPLATE, &[('#', rgb(30, 30, 30)), ('b', rgb(210, 210, 215)), ('d', rgb(150, 150, 155)), ('h', rgb(245, 245, 250))]);
+
     let cooked = |raw: Rgba| shade([raw[0] / 2 + 70, raw[1] / 2 + 40, raw[2] / 3 + 20, 255], 1.0);
     a.sprite(T_COOKED_CHOP, &PORK, &[('#', rgb(60, 30, 15)), ('p', cooked(rgb(230, 110, 110))), ('P', cooked(rgb(245, 150, 150))), ('w', rgb(230, 200, 160)), ('b', rgb(230, 225, 200))]);
     a.sprite(T_COOKED_MUTTON, &PORK, &[('#', rgb(50, 25, 10)), ('p', cooked(rgb(200, 60, 60))), ('P', cooked(rgb(225, 90, 85))), ('w', rgb(220, 190, 150)), ('b', rgb(230, 225, 200))]);

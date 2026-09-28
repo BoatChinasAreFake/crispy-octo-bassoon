@@ -53,6 +53,10 @@ pub const ALL: &[Advancement] = &[
     adv("bootiful", "Boot-iful", "Fish up a Soggy Boot. Just the left one."),
     adv("sunken_treasure", "Sunken Treasure", "Fish up something valuable."),
     adv("big_bob", "Big Bob", "Catch the legendary Big Bob. Dawn or dusk, deep ocean. Good luck."),
+    adv("suit_up", "Suit Up", "Put on a piece of armour. Even the socks count."),
+    adv("cover_me", "Cover Me in Dimonds", "Wear a full set of Dimond armour. Subtle."),
+    adv("open_door_policy", "Open Door Policy", "Open a door. Then close it. Then open it again."),
+    adv("butterfingers", "Butterfingers", "Throw something on the floor with Q. On purpose, surely."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

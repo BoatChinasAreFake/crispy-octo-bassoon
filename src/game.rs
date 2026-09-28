@@ -31,6 +31,8 @@ pub struct Controls {
     pub use_pressed: bool,
     pub pick: bool,
     pub drop: bool,
+    /// With `drop`: the whole stack (Ctrl+Q).
+    pub drop_all: bool,
 }
 
 pub enum Target {
@@ -115,6 +117,12 @@ pub struct Game {
     /// Containers whose contents changed since viewers were last told.
     pub dirty_containers: HashSet<IVec3>,
     pub container_sync_timer: f32,
+    /// Items on the ground (see drops.rs).
+    pub drops: Vec<crate::drops::ItemDrop>,
+    pub next_drop_id: u32,
+    pub drop_timer: f32,
+    pub drop_sync: f32,
+    pub drops_sent_empty: bool,
 }
 
 impl Game {
@@ -186,6 +194,11 @@ impl Game {
             viewers: HashMap::new(),
             dirty_containers: HashSet::new(),
             container_sync_timer: 0.0,
+            drops: Vec::new(),
+            next_drop_id: 0,
+            drop_timer: 0.0,
+            drop_sync: 0.0,
+            drops_sent_empty: true,
         }
     }
 
@@ -214,6 +227,13 @@ impl Game {
             }
             g.world.containers.insert(p, c);
         }
+        for (pos, item, n, age) in crate::drops::decode(&d.drops) {
+            let item = remap.as_ref().map(|r| r[item as usize]).unwrap_or(item);
+            g.spawn_drop(pos, item, n, Vec3::ZERO, 0.0);
+            if let Some(last) = g.drops.last_mut() {
+                last.age = age;
+            }
+        }
         g.time = d.time;
         g.player.body.pos = Vec3::from_array(d.pos);
         g.player.fall_start = d.pos[1];
@@ -222,11 +242,16 @@ impl Game {
         g.player.health = d.health.max(1.0);
         g.spawn = Vec3::from_array(d.spawn);
         g.inv.slots = [None; 36];
-        for (i, s) in d.slots.into_iter().take(36).enumerate() {
-            g.inv.slots[i] = match (s, &remap) {
+        for (i, s) in d.slots.into_iter().take(40).enumerate() {
+            let s = match (s, &remap) {
                 (Some((id, n)), Some(r)) => Some((r[id as usize], n)).filter(|(id, _)| *id != AIR),
                 (s, _) => s,
             };
+            if i < 36 {
+                g.inv.slots[i] = s;
+            } else if s.is_some_and(|(id, _)| armor_of(id).map(|(slot, _)| slot) == Some(i - 36)) {
+                g.inv.armor[i - 36] = s;
+            }
         }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
@@ -243,7 +268,8 @@ impl Game {
             pitch: self.player.pitch,
             health: self.player.health,
             spawn: self.spawn.to_array(),
-            slots: self.inv.slots.to_vec(),
+            // The four worn armour slots go after the 36 inventory slots.
+            slots: self.inv.slots.iter().chain(self.inv.armor.iter()).copied().collect(),
             mods: self.world.mods.clone(),
             palette: mod_palette(reg()),
             script_vars: self.export_script_vars(),
@@ -251,6 +277,7 @@ impl Game {
             farm: crate::farming::encode(&self.world.farm),
             fish_log: self.fish_log.encode(),
             containers: crate::containers::encode(&self.world.containers),
+            drops: crate::drops::encode(&self.drops),
         }
     }
 
@@ -271,7 +298,7 @@ impl Game {
     }
 
     /// Advancements for getting hold of an item.
-    fn item_advancements(&mut self, item: Id) {
+    pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
             LOG => "getting_wood",
             COBBLE => "stone_age",
@@ -451,6 +478,12 @@ impl Game {
             return;
         }
 
+        if self.inv.armor_points() > 0 {
+            self.advance("suit_up");
+            if self.inv.armor.iter().all(|s| s.and_then(|(id, _)| armor_of(id)).is_some_and(|(_, tier)| tier == 3)) {
+                self.advance("cover_me");
+            }
+        }
         let mut fall = self.player.update(dt, &c.input, &self.world, self.creative);
         let landed = self.player.landed.take();
         let feet = self.player.body.pos - Vec3::Y * 0.05;
@@ -837,7 +870,7 @@ impl Game {
                     let me = self.player.body.clone();
                     if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         self.player.hurt = 0.0;
-                        self.hurt_player(a.damage, "was shot by a Rattler (with a Pointy Stick)");
+                        self.hurt_player_armored(a.damage, "was shot by a Rattler (with a Pointy Stick)");
                         self.player.body.vel += a.vel.normalize_or_zero() * 4.0;
                         return false;
                     }
@@ -992,11 +1025,7 @@ impl Game {
             }
         }
         if c.drop {
-            let held = self.inv.held();
-            if held != AIR {
-                self.use_up_held();
-                self.msg(format!("Yeeted 1x {} into the void.", item_name(held)));
-            }
+            self.throw_held(c.drop_all);
         }
     }
 
@@ -1020,6 +1049,14 @@ impl Game {
                     return;
                 }
             }
+        }
+        // Armour goes on (swapping with whatever was worn).
+        if armor_of(held).is_some() {
+            let slot = self.inv.selected;
+            self.inv.equip(slot);
+            self.sfx(Sfx::Place(crate::sound::Mat::Glass), None);
+            self.msg(format!("You put on the {}. Dashing.", item_name(held)));
+            return;
         }
         // Planting, tilling and soil science come before eating (carrots are both).
         if let Some(Target::Block(h)) = &self.target {
@@ -1121,7 +1158,13 @@ impl Game {
         }
         let Some(Target::Block(h)) = &self.target else { return };
         let (hit_pos, normal) = (h.pos, h.normal);
+        let hit_y = self.player.eye().y + self.player.look_dir().y * h.dist - hit_pos.y as f32;
         let hit_id = self.world.get_v(hit_pos);
+        // Doors open and close (sneak to place against one instead).
+        if is_door(hit_id) && !self.player.sneaking {
+            self.toggle_door(hit_pos);
+            return;
+        }
         // Sneak to place blocks against beds and cakes instead of using them.
         if hit_id == BED && !self.player.sneaking {
             self.sleep(hit_pos);
@@ -1157,7 +1200,14 @@ impl Game {
             self.msg("It's decorative! Press E to craft anywhere. Revolutionary.");
             return;
         }
+        if held == DOOR {
+            self.place_door(hit_pos, normal, hit_id);
+            return;
+        }
         if !is_block_item(held) {
+            return;
+        }
+        if self.try_merge_slab(held, hit_pos, hit_id, normal) {
             return;
         }
         let place = if replaceable(hit_id) { hit_pos } else { hit_pos + normal };
@@ -1170,16 +1220,8 @@ impl Game {
             TORCH if !is_solid(below) => return,
             _ => {}
         }
-        if is_solid(held) {
-            if self.player.body.intersects_block(place.x, place.y, place.z) {
-                return;
-            }
-            if self.mobs.iter().any(|m| m.body.intersects_block(place.x, place.y, place.z)) {
-                return;
-            }
-            if self.peers.values().any(|p| p.intersects_block(place)) {
-                return;
-            }
+        if is_solid(held) && self.cell_occupied(place) {
+            return;
         }
         if !self.is_client() {
             let args = vec![self.player_name.clone().into(), (place.x as INT).into(), (place.y as INT).into(), (place.z as INT).into(), reg().key_of(held).into()];
@@ -1187,7 +1229,8 @@ impl Game {
                 return;
             }
         }
-        self.world.set_v(place, held);
+        let oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
+        self.world.set_v(place, oriented);
         self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
         if !self.creative {
@@ -1212,9 +1255,12 @@ impl Game {
             }
         }
         self.block_particles(pos, 14);
+        if is_door(id) {
+            self.remove_door_partner(pos, id);
+        }
         // Chests and furnaces hand over what was inside (joined players get it from the host).
         if !self.is_client() {
-            self.spill_container(pos, None);
+            self.spill_container(pos);
         }
         self.world.set_v(pos, AIR);
         self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
@@ -1231,20 +1277,21 @@ impl Game {
             self.msg("The ice melted. Science!");
         }
         if drops && !self.creative {
-            let d = block(id).drop;
-            if d != AIR {
-                self.give(d, 1);
-            }
-            // The random extras are rolled where the world lives; joined players
-            // get theirs from the host (see ledger.rs).
+            // Drops land where the world lives; joined players' come from the host
+            // (see ledger.rs), and they pick them up like anything else.
             if !self.is_client() {
+                let center = pos.as_vec3() + Vec3::splat(0.5);
+                let d = block(id).drop;
+                if d != AIR {
+                    self.pop_drop(center, d, 1);
+                }
                 for (item, n) in crate::farming::random_drops(id, &mut self.rng) {
                     match item {
                         COAL => self.msg("Found coal in the gravel. Don't ask."),
                         BAIT => self.msg("You found a Wiggly Worm. The fish will love it."),
                         _ => {}
                     }
-                    self.give(item, n);
+                    self.pop_drop(center, item, n);
                 }
             }
             self.farm_break_effects(pos, id);
@@ -1252,10 +1299,13 @@ impl Game {
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
-        if block(a).model == Model::Cross {
+        if block(a).model == Model::Cross || door_state(a).is_some_and(|(_, _, top)| !top) {
             self.world.set_v(above, AIR);
-            if !self.creative && block(a).drop != AIR {
-                self.give(block(a).drop, 1);
+            if is_door(a) {
+                self.world.set_v(above + IVec3::Y, AIR);
+            }
+            if !self.creative && !self.is_client() && block(a).drop != AIR {
+                self.pop_drop(above.as_vec3() + Vec3::splat(0.5), block(a).drop, 1);
             }
         }
         // Water flows (lazily) into the hole.
@@ -1311,8 +1361,16 @@ impl Game {
 
     pub fn give(&mut self, item: Id, n: u8) {
         self.sfx(Sfx::Pop, None);
-        if self.inv.add(item, n) > 0 {
-            self.msg("Inventory full. The item has been respectfully ignored.");
+        let left = self.inv.add(item, n);
+        if left > 0 {
+            self.msg("Inventory full. It's on the floor now.");
+            if self.is_client() {
+                // The host already counted it as ours: it puts it on the ground for us.
+                self.net_send_msg(Msg::DropItem { item, n: left });
+            } else {
+                let at = self.player.body.pos + Vec3::Y * 0.5;
+                self.spawn_drop(at, item, left, Vec3::ZERO, crate::drops::THROW_DELAY);
+            }
         }
         self.item_advancements(item);
     }
@@ -1359,6 +1417,12 @@ impl Game {
         }
     }
 
+    /// Damage that armour softens (mobs, arrows, explosions): 4% less per armour point.
+    pub fn hurt_player_armored(&mut self, amount: f32, cause: &str) {
+        let cut = (self.inv.armor_points() as f32 * 0.04).min(0.8);
+        self.hurt_player(amount * (1.0 - cut), cause);
+    }
+
     pub fn hurt_player(&mut self, amount: f32, cause: &str) {
         if self.creative || self.dead.is_some() || self.player.hurt > 0.0 {
             return;
@@ -1397,7 +1461,7 @@ impl Game {
                         _ => {
                             self.world.set_v(p, AIR);
                             if !self.creative && self.rng.chance(0.25) && block(id).drop != AIR && block(id).pick_tier <= 1 {
-                                self.give(block(id).drop, 1);
+                                self.pop_drop(p.as_vec3() + Vec3::splat(0.5), block(id).drop, 1);
                             }
                         }
                     }
@@ -1409,7 +1473,7 @@ impl Game {
         if pd < r * 2.0 && !self.dedicated {
             let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
             self.player.hurt = 0.0;
-            self.hurt_player(dmg, cause);
+            self.hurt_player_armored(dmg, cause);
             let push = (self.player.body.pos - at).normalize_or_zero() * (1.0 - pd / (r * 2.0)) * 14.0;
             self.player.body.vel += push + Vec3::Y * 4.0;
         }
@@ -1568,7 +1632,7 @@ impl Game {
                     let _ = target;
                 }
                 MobEvent::HurtPlayer(d, cause) => {
-                    self.hurt_player(d, cause);
+                    self.hurt_player_armored(d, cause);
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
                     self.player.body.vel += knock * 3.0 + Vec3::Y * 3.0;
                 }
@@ -1620,13 +1684,8 @@ impl Game {
                     }
                     let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
                     for (item, n) in drops.into_iter().flatten() {
-                        if remote {
-                            if !self.creative {
-                                self.give_peer(m.last_attacker, item, n);
-                            }
-                        } else if !self.creative {
-                            self.msg(format!("{} dropped {}x {}", m.kind.name(), n, item_name(item)));
-                            self.give(item, n);
+                        if !self.creative {
+                            self.pop_drop(m.body.pos + Vec3::Y * 0.5, item, n);
                         }
                     }
                 }
@@ -1663,6 +1722,7 @@ impl Game {
         }
         self.farm_tick(dt);
         self.container_tick(dt);
+        self.drops_tick(dt);
     }
 
     fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
@@ -1834,6 +1894,7 @@ impl Game {
             let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
             let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw);
             draw_model(&mut g, &root, &STOVE, p.anim, sky, true);
+            crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky);
         }
         // The player, in third person
         if self.third_person && !self.menu {
@@ -1843,6 +1904,7 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw);
             draw_model(&mut g, &root, &STOVE, p.bob * 2.0, sky, true);
+            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), p.bob * 2.0, sky);
         }
         // Primed TNT
         for t in &self.tnts {
@@ -1853,6 +1915,8 @@ impl Game {
             let sky = self.world.sky_light(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
+        // Items on the ground
+        self.draw_drops(&mut g, eye, 48.0);
         // Particles
         g.begin(Pass::Opaque, [1.0; 4], false);
         for p in &self.particles {
@@ -1868,6 +1932,12 @@ impl Game {
             let id = self.world.get_v(h.pos);
             let (min, max) = if block(id).model == Model::Cross {
                 (h.pos.as_vec3() + Vec3::new(0.2, 0.0, 0.2), h.pos.as_vec3() + Vec3::new(0.8, 0.8, 0.8))
+            } else if block(id).model == Model::Shaped {
+                // Around all of its boxes.
+                let (boxes, n) = block_boxes(id);
+                let lo = boxes[..n].iter().fold(Vec3::ONE, |m, b| m.min(Vec3::from_array(b.0)));
+                let hi = boxes[..n].iter().fold(Vec3::ZERO, |m, b| m.max(Vec3::from_array(b.1)));
+                (h.pos.as_vec3() + lo, h.pos.as_vec3() + hi)
             } else {
                 (h.pos.as_vec3(), h.pos.as_vec3() + Vec3::ONE)
             };
@@ -1915,13 +1985,17 @@ impl Game {
             let light = sky.max(0.2);
             g.cube(&sleeve, [T_STOVE_SHIRT; 6], light, [0.0, 0.0, 1.0, 1.0]);
             g.cube(&hand, [T_SKIN; 6], light, [0.0, 0.0, 1.0, 1.0]);
-        } else if is_block_item(held) && block(held).model == Model::Cube {
+        } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) {
             let tiles = {
                 let t = block(held).tex;
                 [t[1], t[1], t[0], t[2], t[1], t[1]]
             };
-            let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.14)) * Mat4::from_scale(Vec3::splat(0.28));
-            g.cube(&m, tiles, sky.max(0.2), [0.0, 0.0, 1.0, 1.0]);
+            let (boxes, n) = block_boxes(held);
+            for &(a, b) in &boxes[..n] {
+                let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
+                let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.14)) * Mat4::from_scale(Vec3::splat(0.28)) * Mat4::from_translation(a) * Mat4::from_scale(b - a);
+                g.cube(&m, tiles, sky.max(0.2), [a.x, 1.0 - b.y, b.x, 1.0 - a.y]);
+            }
         } else {
             let tile = if is_block_item(held) { block(held).tex[1] } else { item_tile(held) };
             let m = basis * local * Mat4::from_rotation_y(-0.5) * Mat4::from_rotation_z(0.2);
@@ -2288,9 +2362,11 @@ mod tests {
         let back = Game::from_save(g.to_save());
         assert_eq!(back.world.containers[&chest].slots[0], Some((DIAMOND, 5)));
 
-        // Breaking it hands over the contents (and the chest).
+        // Breaking it spills the contents (and the chest) on the ground.
         g.break_block(chest, true);
         assert!(!g.world.containers.contains_key(&chest));
+        assert_eq!(g.inv.count(DIAMOND), 0);
+        collect(&mut g);
         assert_eq!(g.inv.count(DIAMOND), 5);
         assert_eq!(g.inv.count(CHEST), 1);
 
@@ -2321,6 +2397,189 @@ mod tests {
         assert_eq!(g.world.get_v(furnace), FURNACE);
         assert_eq!(g.world.containers[&furnace].slots[OUTPUT], Some((COOKED_CHOP, 1)));
         assert_eq!(g.world.containers[&furnace].slots[INPUT], None);
+    }
+
+    fn aim(g: &mut Game, pos: IVec3, normal: IVec3) {
+        let dist = (pos.as_vec3() + Vec3::splat(0.5)).distance(g.player.eye());
+        g.target = Some(Target::Block(crate::world::Hit { pos, normal, dist }));
+    }
+
+    #[test]
+    fn slabs_stairs_and_doors() {
+        let mut g = arena(41);
+        g.player.yaw = 0.0; // looking north (-z)
+        g.player.pitch = 0.0;
+        // Stairs placed on the floor rise away from you.
+        g.inv.slots[g.inv.selected] = Some((stairs(0, 0), 4));
+        aim(&mut g, IVec3::new(0, 49, -3), IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get(0, 50, -3), stairs(0, 0));
+        g.player.yaw = std::f32::consts::FRAC_PI_2; // east
+        aim(&mut g, IVec3::new(0, 49, -4), IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get(0, 50, -4), stairs(0, 1));
+        g.player.yaw = 0.0;
+        assert_eq!(g.inv.count(stairs(0, 0)), 2);
+
+        // A slab on the floor sits low; a second one on top makes cobblestone.
+        g.inv.slots[g.inv.selected] = Some((slab(1, false), 8));
+        aim(&mut g, IVec3::new(1, 49, -3), IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get(1, 50, -3), slab(1, false));
+        aim(&mut g, IVec3::new(1, 50, -3), IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get(1, 50, -3), COBBLE);
+        // Against the upper half of a wall, it goes on top.
+        g.world.set(2, 51, -4, STONE);
+        aim(&mut g, IVec3::new(2, 51, -4), IVec3::Z);
+        g.use_item();
+        assert_eq!(g.world.get(2, 51, -3), slab(1, true));
+        assert_eq!(g.inv.count(slab(1, false)), 5);
+
+        // Only the slab's half is there to hit or bump into.
+        g.world.set(4, 50, 0, slab(1, false));
+        let hit = g.world.raycast(Vec3::new(4.5, 55.0, 0.5), Vec3::NEG_Y, 10.0).unwrap();
+        assert_eq!((hit.pos, hit.normal), (IVec3::new(4, 50, 0), IVec3::Y));
+        assert!((hit.dist - 4.5).abs() < 1e-3);
+        // Walking into it steps up onto it; a full block is a wall.
+        g.world.set(5, 50, 0, slab(1, false));
+        g.world.set(8, 50, 0, STONE);
+        g.world.set(8, 51, 0, STONE);
+        let mut b = crate::entity::Body::new(Vec3::new(2.5, 50.0, 0.5), 0.3, 1.8);
+        let mut on_slabs = false;
+        for _ in 0..60 {
+            b.vel.x = 4.0;
+            b.vel.y -= crate::entity::GRAVITY * 0.05;
+            crate::entity::move_body(&g.world, &mut b, 0.05, false);
+            on_slabs |= (4.5..5.5).contains(&b.pos.x) && (b.pos.y - 50.5).abs() < 0.01;
+        }
+        assert!(on_slabs, "stepped up onto the slabs");
+        assert!(b.pos.x < 7.71 && b.pos.x > 7.5, "stopped by the wall: {}", b.pos);
+
+        // Doors: two blocks tall, facing away from you.
+        g.inv.slots[g.inv.selected] = Some((DOOR, 2));
+        aim(&mut g, IVec3::new(-2, 49, -3), IVec3::Y);
+        g.use_item();
+        let (bottom, top) = (IVec3::new(-2, 50, -3), IVec3::new(-2, 51, -3));
+        assert_eq!((g.world.get_v(bottom), g.world.get_v(top)), (door(0, false, false), door(0, false, true)));
+        assert_eq!(g.inv.count(DOOR), 1);
+        // Right-click opens both halves; the panel moves to the side.
+        aim(&mut g, top, IVec3::Z);
+        g.use_item();
+        assert_eq!((g.world.get_v(bottom), g.world.get_v(top)), (door(0, true, false), door(0, true, true)));
+        assert!(g.advancements.has("open_door_policy"));
+        assert_ne!(block_boxes(door(0, true, false)).0[0], block_boxes(door(0, false, false)).0[0]);
+        // Breaking either half takes the whole door, and drops one.
+        g.break_block(top, true);
+        assert_eq!((g.world.get_v(bottom), g.world.get_v(top)), (AIR, AIR));
+        collect(&mut g);
+        assert_eq!(g.inv.count(DOOR), 2);
+        // No door without room for it.
+        g.world.set(-3, 51, -3, STONE);
+        aim(&mut g, IVec3::new(-3, 49, -3), IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get(-3, 50, -3), AIR);
+    }
+
+    #[test]
+    fn armour_softens_blows() {
+        let mut g = arena(43);
+        let chest = ARMOR_FIRST + 3 * 4 + CHESTPLATE as Id; // dimond
+        g.inv.slots[g.inv.selected] = Some((chest, 1));
+        g.use_item();
+        assert_eq!(g.inv.armor[CHESTPLATE], Some((chest, 1)));
+        assert_eq!(g.inv.held(), AIR);
+        assert_eq!(g.inv.armor_points(), 8);
+        g.hurt_player_armored(10.0, "tested armour");
+        assert!((g.player.health - (MAX_HEALTH - 6.8)).abs() < 1e-3, "{}", g.player.health);
+        // Only the right slot takes it; worn armour still counts as owned.
+        g.inv.cursor = Some((chest, 1));
+        g.inv.click_armor(HELMET);
+        assert_eq!(g.inv.armor[HELMET], None);
+        g.inv.cursor = None;
+        assert_eq!(g.inv.counts().get(&chest), Some(&1));
+        // Shift-click equips from the inventory, swapping out what was worn.
+        let iron = ARMOR_FIRST + 4 + CHESTPLATE as Id;
+        g.inv.slots[5] = Some((iron, 1));
+        assert!(g.inv.equip(5));
+        assert_eq!((g.inv.armor[CHESTPLATE], g.inv.slots[5]), (Some((iron, 1)), Some((chest, 1))));
+        for slot in [HELMET, LEGGINGS, BOOTS] {
+            g.inv.armor[slot] = Some((ARMOR_FIRST + 3 * 4 + slot as Id, 1));
+        }
+        assert_eq!(g.inv.armor_points(), 3 + 6 + 6 + 3);
+        assert_eq!(g.inv.armor_look(), 0x4424);
+        // Saved with the world.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.inv.armor, g.inv.armor);
+        assert_eq!(back.inv.slots[5], Some((chest, 1)));
+        // Falling isn't softened.
+        g.player.health = MAX_HEALTH;
+        g.player.hurt = 0.0;
+        g.hurt_player(4.0, "fell");
+        assert_eq!(g.player.health, MAX_HEALTH - 4.0);
+    }
+
+    #[test]
+    fn items_on_the_ground() {
+        let mut g = arena(47);
+        // Q throws one; it can't be caught again straight away.
+        g.inv.slots[g.inv.selected] = Some((DIRT, 3));
+        g.throw_held(false);
+        assert_eq!((g.inv.count(DIRT), g.drops.len()), (2, 1));
+        assert!(g.advancements.has("butterfingers"));
+        g.player.body.pos = g.drops[0].body.pos;
+        g.drops_tick(0.1);
+        assert_eq!(g.inv.count(DIRT), 2, "too soon");
+        for _ in 0..20 {
+            g.drops_tick(0.1);
+            g.player.body.pos = g.drops.first().map(|d| d.body.pos).unwrap_or(g.player.body.pos);
+        }
+        assert_eq!((g.inv.count(DIRT), g.drops.len()), (3, 0));
+        // Ctrl+Q throws the stack, and things fall and stop on the floor.
+        g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+        g.throw_held(true);
+        for _ in 0..30 {
+            g.drops[0].age = 0.0; // keep it out of reach of pickup for now
+            g.drops_tick(0.1);
+        }
+        let d = &g.drops[0];
+        assert_eq!((d.item, d.n), (DIRT, 3));
+        assert!((d.body.pos.y - 50.0).abs() < 0.01 && d.body.on_ground, "{}", d.body.pos);
+        // A full inventory leaves things where they are.
+        g.drops.clear();
+        g.inv.slots = [Some((STONE, 64)); 36];
+        g.give(DIRT, 5);
+        assert_eq!(g.drops.len(), 1, "what didn't fit is on the floor");
+        for _ in 0..30 {
+            g.drops_tick(0.1);
+            g.player.body.pos = g.drops[0].body.pos;
+        }
+        assert_eq!(g.drops[0].n, 5);
+        // Mobs and explosions drop things too, and it's all saved.
+        g.inv.slots = [None; 36];
+        g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+        g.world.set(3, 50, 3, COBBLE);
+        g.break_block(IVec3::new(3, 50, 3), true);
+        assert!(g.drops.iter().any(|d| d.item == COBBLE));
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.drops.len(), g.drops.len());
+        // And they don't last forever.
+        for d in g.drops.iter_mut() {
+            d.age = crate::drops::DESPAWN_SECS;
+        }
+        g.drops_tick(0.1);
+        assert!(g.drops.is_empty());
+    }
+
+    /// Walk over every item on the ground (then back).
+    fn collect(g: &mut Game) {
+        let home = g.player.body.pos;
+        for _ in 0..100 {
+            let Some(p) = g.drops.first().map(|d| d.body.pos) else { break };
+            g.player.body.pos = p;
+            g.drops_tick(0.1);
+        }
+        g.player.body.pos = home;
     }
 
     /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
@@ -2441,6 +2700,7 @@ mod tests {
         assert_eq!(g.world.get_v(above), Crop::Wheat.block(3), "{}", g.world.farm[&soil].report(1.0, true));
         assert!(g.world.farm[&soil].nutrients[0] < 60.0, "wheat ate some nitrogen");
         g.break_block(above, true);
+        collect(&mut g);
         assert!(g.inv.count(WHEAT) >= 1 && g.advancements.has("green_thumb"));
         g.farm_tick(1.0);
         assert_eq!(g.world.farm[&soil].last, Some(Crop::Wheat));

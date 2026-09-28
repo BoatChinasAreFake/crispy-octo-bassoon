@@ -191,6 +191,38 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             out.water.quad(v, false);
                         }
                     }
+                    Model::Shaped => {
+                        // Slabs, stairs, doors: each box's faces, skipping only those
+                        // flush against an opaque neighbour. The texture follows the
+                        // box's position in the cell, so a slab shows half a tile.
+                        let sky = hood.sky(lx, y, lz).max(hood.sky(lx, y + 1, lz));
+                        let (boxes, n) = def.shape.boxes();
+                        for &(bmin, bmax) in &boxes[..n] {
+                            for (f, (nrm, corners, shade)) in FACES.iter().enumerate() {
+                                let axis = if nrm[0] != 0 { 0 } else if nrm[1] != 0 { 1 } else { 2 };
+                                let flush = if nrm[axis] > 0 { bmax[axis] >= 1.0 } else { bmin[axis] <= 0.0 };
+                                if flush && is_opaque(hood.get(lx + nrm[0], y + nrm[1], lz + nrm[2])) {
+                                    continue;
+                                }
+                                let tile = face_tile(id, f);
+                                let mut v = [Vertex::default(); 4];
+                                for i in 0..4 {
+                                    let c = corners[i];
+                                    let p = [0, 1, 2].map(|k| if c[k] > 0.5 { bmax[k] } else { bmin[k] });
+                                    let uv = match f {
+                                        0 => [1.0 - p[2], 1.0 - p[1]],
+                                        1 => [p[2], 1.0 - p[1]],
+                                        2 => [p[0], p[2]],
+                                        3 => [p[0], 1.0 - p[2]],
+                                        4 => [p[0], 1.0 - p[1]],
+                                        _ => [1.0 - p[0], 1.0 - p[1]],
+                                    };
+                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [shade * 0.95, sky]);
+                                }
+                                out.opaque.quad(v, false);
+                            }
+                        }
+                    }
                     Model::Cube => {
                         for (f, (n, corners, shade)) in FACES.iter().enumerate() {
                             let (nx, ny, nz) = (lx + n[0], y + n[1], lz + n[2]);

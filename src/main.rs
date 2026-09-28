@@ -4,7 +4,9 @@
 
 mod advancements;
 mod block;
+mod building;
 mod containers;
+mod drops;
 mod entity;
 mod farming;
 mod fishing;
@@ -373,6 +375,7 @@ impl App {
             use_pressed: mouse_p(MouseButton::Right),
             pick: mouse_p(MouseButton::Middle),
             drop: playing && is_key_pressed(KeyCode::Q),
+            drop_all: is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl),
         }
     }
 
@@ -1177,6 +1180,10 @@ impl App {
         draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
         if !g.creative {
             self.ui.hearts(g.player.health, x0, y0 - 12.0 * s);
+            let points = g.inv.armor_points();
+            if points > 0 {
+                self.ui.armor_bar(points, x0, y0 - 23.0 * s);
+            }
         }
         if g.held_name > 0.0 {
             let held = g.inv.held();
@@ -1535,7 +1542,7 @@ impl App {
             "Ctrl or R ... sprint            Shift ... sneak (won't fall off ledges)",
             "Left mouse ... mine / attack    Right mouse ... place / eat / light TNT with a torch",
             "1-9 / wheel ... pick hotbar     Middle mouse ... pick block (creative)",
-            "E or Tab ... inventory + crafting    Q ... yeet held item",
+            "E or Tab ... inventory + crafting    Q ... throw held item (Ctrl+Q: stack)",
             "F5 ... third person    F3 ... debug info    F11 ... fullscreen    Esc ... pause",
             "Creative: double-tap Space to fly, Shift to descend.",
             "",
@@ -1676,14 +1683,46 @@ impl App {
         let slot = 20.0 * s;
         let creative = self.game.creative;
         let left_w = slot * 9.0 + 12.0 * s;
-        let right_w = (170.0 * s).min(w - left_w - 30.0 * s);
-        let total_w = left_w + 8.0 * s + right_w;
+        let armor_w = slot + 12.0 * s;
+        let right_w = (170.0 * s).min(w - left_w - armor_w - 36.0 * s);
+        let total_w = armor_w + 6.0 * s + left_w + 8.0 * s + right_w;
         let panel_h = (slot * 9.5).min(h - 20.0 * s).max(slot * 7.0);
-        let x0 = (w - total_w) / 2.0;
+        let x0 = (w - total_w) / 2.0 + armor_w + 6.0 * s;
         let y0 = (h - panel_h) / 2.0;
         draw_rectangle(x0, y0, left_w, panel_h, ui::PANEL);
         draw_rectangle_lines(x0, y0, left_w, panel_h, s, WHITE);
         let mut tooltip: Option<String> = None;
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+
+        // Armour: four slots, each taking only its own kind.
+        let ax = x0 - armor_w - 6.0 * s;
+        let armor_h = 18.0 * s + slot * 4.0 + 24.0 * s;
+        draw_rectangle(ax, y0, armor_w, armor_h, ui::PANEL);
+        draw_rectangle_lines(ax, y0, armor_w, armor_h, s, WHITE);
+        self.ui.text("Armour", ax + 4.0 * s, y0 + 12.0 * s, 8.0, WHITE);
+        for i in 0..4 {
+            let (sx, sy) = (ax + 6.0 * s, y0 + 18.0 * s + i as f32 * slot);
+            let worn = self.game.inv.armor[i];
+            let (l, r, hov) = self.ui.slot(worn, sx, sy, slot, false);
+            if worn.is_none() {
+                // A faint outline of what goes here.
+                let pad = slot * 0.12;
+                self.ui.tile(texture::T_ARMOR_ITEMS + 4 + i as u16, sx + pad, sy + pad, slot - 2.0 * pad, Color::new(0.0, 0.0, 0.0, 0.35));
+            }
+            if hov {
+                tooltip = Some(match worn {
+                    Some((id, _)) => format!("{} (+{} armour)", item_name(id), armor_points(id)),
+                    None => ["Helmet", "Chestplate", "Leggings", "Boots"][i].to_string(),
+                });
+            }
+            if l || r {
+                self.game.inv.click_armor(i);
+            }
+        }
+        let points = self.game.inv.armor_points();
+        let cut = (points as f32 * 4.0).min(80.0);
+        self.ui.text(&format!("{points} pts"), ax + 4.0 * s, y0 + 18.0 * s + slot * 4.0 + 9.0 * s, 7.0, GRAY);
+        self.ui.text(&format!("-{cut:.0}% dmg"), ax + 4.0 * s, y0 + 18.0 * s + slot * 4.0 + 18.0 * s, 7.0, GRAY);
 
         let sx = x0 + 6.0 * s;
         let inv_top = y0 + 18.0 * s;
@@ -1710,7 +1749,7 @@ impl App {
                 if hov {
                     tooltip = self.game.inv.slots[i].map(|s| item_name(s.0).to_string());
                 }
-                if l {
+                if l && !(shift && self.game.inv.equip(i)) {
                     self.game.inv.click(i);
                 }
                 if r {
@@ -1729,7 +1768,7 @@ impl App {
             if l {
                 if creative && self.game.inv.cursor.is_none() {
                     self.game.inv.slots[i] = None;
-                } else {
+                } else if !(shift && self.game.inv.equip(i)) {
                     self.game.inv.click(i);
                 }
             }
@@ -1737,10 +1776,15 @@ impl App {
                 self.game.inv.right_click(i);
             }
         }
-        if creative && self.game.inv.cursor.is_some() && self.ui.clicked {
-            let hov_any = self.ui.hovered(Rect::new(x0, y0, left_w, panel_h));
-            if !hov_any {
-                self.game.inv.cursor = None;
+        if self.game.inv.cursor.is_some() && self.ui.clicked {
+            let panels = [Rect::new(x0, y0, left_w, panel_h), Rect::new(ax, y0, armor_w, armor_h), Rect::new(x0 + left_w + 8.0 * s, y0, right_w, panel_h)];
+            if !panels.iter().any(|r| self.ui.hovered(*r)) {
+                // Clicked outside: creative forgets it, survival throws it on the floor.
+                if creative {
+                    self.game.inv.cursor = None;
+                } else if let Some((item, n)) = self.game.inv.cursor.take() {
+                    self.game.throw_stack(item, n);
+                }
             }
         }
 
@@ -1967,9 +2011,12 @@ async fn game_main() {
             "survival" | "creative" | "inventory" | "night" => {
                 let mut g = Game::new(424242, s.mode == "creative", false);
                 if s.mode == "inventory" {
-                    for (item, n) in [(LOG, 12), (COBBLE, 20), (COAL, 5), (IRON, 3), (DIAMOND, 2), (GUNPOWDER, 5), (SAND, 9), (PORKCHOP, 3)] {
+                    for (item, n) in [(LOG, 12), (COBBLE, 20), (COAL, 5), (IRON, 3), (DIAMOND, 2), (GUNPOWDER, 5), (SAND, 9), (PORKCHOP, 3), (block::stairs(1, 0), 8), (block::slab(0, false), 12), (block::DOOR, 2)] {
                         g.inv.add(item, n);
                     }
+                    g.inv.add(block::ARMOR_FIRST + 8, 1);
+                    g.inv.armor[1] = Some((block::ARMOR_FIRST + 4 + 1, 1));
+                    g.inv.armor[3] = Some((block::ARMOR_FIRST + 3, 1));
                 }
                 if let Some(t) = s.time {
                     g.time = t;
@@ -1995,7 +2042,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2104,7 +2151,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2237,6 +2284,56 @@ async fn game_main() {
                     "chest" => app.game.open_container(chest),
                     "furnace" => app.game.open_container(busy),
                     _ => {}
+                }
+            }
+            if matches!(s.mode.as_str(), "building" | "armour") && frames == 125 {
+                // A little staircase, slabs, a pair of doors and some things on the floor.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y = p.y.floor() as i32;
+                let at = |f: f32, r: f32, up: i32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y + up, v.z.floor() as i32)
+                };
+                // Which way is "away" from the camera, as a facing.
+                let away = if fwd.x.abs() > fwd.z.abs() { if fwd.x > 0.0 { 1 } else { 3 } } else if fwd.z > 0.0 { 2 } else { 0 };
+                let side = (away + 1) % 4;
+                for (i, m) in [0usize, 1, 2].into_iter().enumerate() {
+                    let r = i as f32 * 1.0 - 5.0;
+                    app.game.world.set_v(at(5.0, r, 0), block::stairs(m, away));
+                    app.game.world.set_v(at(6.0, r, 0), block::MATERIALS[m].0);
+                    app.game.world.set_v(at(6.0, r, 1), block::stairs(m, away));
+                    app.game.world.set_v(at(7.0, r, 0), block::MATERIALS[m].0);
+                    app.game.world.set_v(at(7.0, r, 1), block::MATERIALS[m].0);
+                    app.game.world.set_v(at(4.0, r + 4.0, 0), block::slab(m, false));
+                    app.game.world.set_v(at(5.0, r + 4.0, 1), block::slab(m, true));
+                    app.game.world.set_v(at(5.0, r + 4.0, 0), block::STONE);
+                }
+                for (r, open) in [(3.0, false), (4.0, true)] {
+                    app.game.world.set_v(at(6.0, r, 0), block::door(away, open, false));
+                    app.game.world.set_v(at(6.0, r, 1), block::door(away, open, true));
+                }
+                for r in [2.0, 5.0] {
+                    for up in 0..3 {
+                        app.game.world.set_v(at(6.0, r, up), block::PLANKS);
+                    }
+                }
+                app.game.world.set_v(at(6.0, 3.0, 2), block::PLANKS);
+                app.game.world.set_v(at(6.0, 4.0, 2), block::PLANKS);
+                let _ = side;
+                let loot = [(block::DIAMOND, 3), (block::COBBLE, 12), (block::PORKCHOP, 1), (block::stairs(0, 0), 4), (block::ARMOR_FIRST + 4, 1), (block::DOOR, 1), (block::TORCH, 5)];
+                for (i, (item, n)) in loot.into_iter().enumerate() {
+                    let v = p + fwd * (2.5 + (i % 3) as f32 * 0.7) + right * ((i as f32 - 3.0) * 0.6);
+                    app.game.spawn_drop(Vec3::new(v.x, y as f32, v.z), item, n, Vec3::ZERO, 60.0);
+                }
+                if s.mode == "armour" {
+                    for slot in 0..4 {
+                        let tier = [3, 1, 2, 0][slot];
+                        app.game.inv.armor[slot] = Some((block::ARMOR_FIRST + tier * 4 + slot as u16, 1));
+                    }
+                    app.game.third_person = true;
+                    app.game.player.health = 15.0;
                 }
             }
             if s.mode == "zoo" && frames > 150 {

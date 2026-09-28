@@ -25,6 +25,8 @@ pub struct Peer {
     pub yaw: f32,
     pub pitch: f32,
     pub flags: u8,
+    /// What they're wearing (see `Inventory::armor_look`).
+    pub armor: u16,
     pub anim: f32,
     /// Game clock time each rate-limited action was last allowed (see `peer_rate_ok`).
     last: HashMap<&'static str, f32>,
@@ -38,7 +40,7 @@ pub struct Peer {
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default() }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & FLAG_DEAD == 0
@@ -431,11 +433,6 @@ impl Game {
                         self.strike(from);
                         continue;
                     }
-                    // And only with items they really have, at the speed their tools allow.
-                    if old != id && !self.ledger_edit(from, old, id) {
-                        corrections.push((x, y, z, old));
-                        continue;
-                    }
                     // Scripts may veto what remote players do, just like the host's own actions.
                     if old != id && self.scripts.is_some() {
                         let who = self.peer_name(from);
@@ -446,12 +443,22 @@ impl Game {
                             continue;
                         }
                     }
-                    // Whoever breaks a chest or furnace gets what was inside.
+                    // And only with items they really have, at the speed their tools allow
+                    // (last, because a break that goes through drops its items).
+                    if old != id && !self.ledger_edit(from, IVec3::new(x, y, z), old, id) {
+                        corrections.push((x, y, z, old));
+                        continue;
+                    }
+                    // A broken chest or furnace spills what was inside.
                     if crate::containers::is_container(old) && !crate::containers::is_container(id) {
-                        self.spill_container(IVec3::new(x, y, z), Some(from));
+                        self.spill_container(IVec3::new(x, y, z));
                     }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
+                    // Half a door takes the other half with it.
+                    if is_door(old) && !is_door(id) {
+                        self.remove_door_partner(IVec3::new(x, y, z), old);
+                    }
                     if !quiet && old != id {
                         self.block_change_feedback(IVec3::new(x, y, z), old, id);
                     }
@@ -465,7 +472,7 @@ impl Game {
                     }
                 }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, held, .. } => {
+            Msg::PlayerState { pos, yaw, pitch, flags, held, armor, .. } => {
                 self.set_peer_held(from, held);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // No NaNs, nothing absurd, and no teleporting across the map (the
@@ -481,7 +488,8 @@ impl Game {
                 p.yaw = yaw;
                 p.pitch = pitch.clamp(-1.6, 1.6);
                 p.flags = flags;
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held });
+                p.armor = armor;
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, armor });
             }
             Msg::Attack { mob, dmg, .. } => {
                 // Hits come from where the player actually is, within reach, at a human pace.
@@ -588,6 +596,12 @@ impl Game {
                 }
             }
             Msg::CloseContainer { x, y, z } => self.host_close(from, IVec3::new(x, y, z)),
+            Msg::Pickup { id, room } => self.host_pickup(from, id, room),
+            Msg::DropItem { item, n } => {
+                if self.peer_rate_ok(from, "throw", 0.05) {
+                    self.host_throw(from, item, n);
+                }
+            }
             Msg::ContainerMove { x, y, z, slot, item, n, put } => self.host_container_move(from, IVec3::new(x, y, z), slot as usize, item, n, put),
             Msg::InventoryCheck { items } => {
                 if self.peer_rate_ok(from, "check", 1.0) {
@@ -638,6 +652,17 @@ impl Game {
             let on_farmland = is_farmland(self.world.get(x, y - 1, z));
             return replaceable(old) && on_farmland && (stage == 0 || (self.creative && block(new).creative));
         }
+        // Doors open and close; a door's top half only goes on its own bottom half.
+        if let (Some((f, o, t)), Some((nf, no, nt))) = (door_state(old), door_state(new)) {
+            return f == nf && t == nt && o != no;
+        }
+        if let Some((f, o, true)) = door_state(new) {
+            return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
+        }
+        // Two slabs make a block.
+        if let Some((m, _)) = slab_of(old) {
+            return new == AIR || new == MATERIALS[m].0;
+        }
         match new {
             AIR => true,
             // Melting ice, or water running into a hole next to water.
@@ -646,7 +671,7 @@ impl Game {
             n if is_farmland(n) => matches!(old, GRASS | DIRT | SNOW_GRASS),
             DIRT if is_farmland(old) => true,
             // Placing: only into an empty-ish cell, and only blocks a player could have.
-            _ => replaceable(old) && block(new).creative,
+            _ => replaceable(old) && placing_item(new).is_some(),
         }
     }
 
@@ -691,29 +716,30 @@ impl Game {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, .. } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, armor, .. } => {
                 if let Some(p) = self.peers.get_mut(&id) {
                     p.target = pos;
                     p.yaw = yaw;
                     p.pitch = pitch;
                     p.flags = flags;
+                    p.armor = armor;
                 }
             }
             Msg::Mobs { mobs, tnts, arrows } => self.sync_mobs(mobs, tnts, arrows),
             Msg::HurtYou { dmg, cause, knock } => {
                 self.player.hurt = 0.0;
-                self.hurt_player(dmg, &cause);
+                self.hurt_player_armored(dmg, &cause);
                 self.player.body.vel += knock;
             }
             Msg::Give { item, n } => {
                 if valid_item(item) && n > 0 {
-                    self.msg(format!("Loot: {n}x {}", item_name(item)));
                     self.give(item, n);
                     self.inv_sync.note_host(item, n as i64);
                 }
             }
             Msg::Inventory { items } => self.apply_inventory(items),
             Msg::Container { x, y, z, slots, burn, cook } => self.apply_container(IVec3::new(x, y, z), slots, burn, cook),
+            Msg::Drops(list) => self.apply_drops(list),
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
@@ -747,7 +773,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } => {}
         }
     }
 
@@ -803,6 +829,7 @@ impl Game {
             p.update(dt, &self.world);
         }
         self.particles.retain(|p| p.life > 0.0);
+        self.client_drops(dt);
     }
 
     // ------------------------------------------------------------ send
@@ -836,7 +863,7 @@ impl Game {
             if p.hurt > 0.2 {
                 flags |= FLAG_HURT;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held() };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), armor: self.inv.armor_look() };
             self.net_send_msg(m);
         }
         if self.is_host() {
@@ -860,6 +887,7 @@ impl Game {
                 let arrows = self.arrows.iter().map(|a| (a.pos, a.wire_vel())).collect();
                 self.net_broadcast(Msg::Mobs { mobs, tnts, arrows });
             }
+            self.send_drops(dt);
             if self.net_timers[2] <= 0.0 {
                 self.net_timers[2] = 2.0;
                 self.net_broadcast(Msg::Time(self.time));
@@ -897,6 +925,7 @@ mod tests {
             use_pressed: false,
             pick: false,
             drop: false,
+            drop_all: false,
         }
     }
 
@@ -1091,7 +1120,7 @@ mod tests {
 
         // Teleporting across the map is refused and the client is put back.
         // (NaN positions never get this far: the decoder drops the connection.)
-        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0 });
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, armor: 0 });
         for _ in 0..20 {
             host.update(0.016, &idle());
             std::thread::sleep(Duration::from_millis(4));
@@ -1176,11 +1205,16 @@ mod tests {
         assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == DIRT));
         assert_eq!(host.peers[&id].ledger.bag.count(DIRT), 2);
 
-        // Breaking pays out the block's drop on both sides (dirt digs quickly by hand).
+        // Breaking drops the block on the host's ground (dirt digs quickly by hand)...
         client.break_block(IVec3::new(x, top + 1, z), true);
-        assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == AIR));
-        assert!(host.peers[&id].ledger.bag.count(DIRT) >= 3);
-        assert_eq!(client.inv.count(DIRT), 3);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == AIR && !h.drops.is_empty()));
+        assert_eq!(client.inv.count(DIRT), 2, "nothing until it's picked up");
+        // ...and walking into it picks it up, through the ledger.
+        assert!(pump(&mut host, &mut client, |_, c| !c.drops.is_empty()));
+        client.player.body.pos = host.drops[0].body.pos;
+        assert!(pump(&mut host, &mut client, |h, c| c.inv.count(DIRT) == 3 && h.drops.is_empty()));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIRT), 3);
+        client.player.body.pos = spawn;
 
         // Mining faster than bare hands allow is refused: stone takes ~7.5s by hand.
         let stone = IVec3::new(x, top - 1, z);
@@ -1226,6 +1260,87 @@ mod tests {
         assert!(pump(&mut host, &mut client, |h, _| h.mobs.iter().find(|m| m.id == 777).map(|m| m.health < before).unwrap_or(true)));
         let after = host.mobs.iter().find(|m| m.id == 777).map(|m| m.health).unwrap_or(before - 99.0);
         assert!(before - after <= attack_damage(AIR) * 1.5 + 1e-3, "hit for {}", before - after);
+    }
+
+    #[test]
+    fn doors_stairs_and_drops_through_the_host() {
+        let mut host = Game::new(782, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Buildy", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).map(|p| p.target.distance(spawn) < 1.0).unwrap_or(false)));
+        let (x, z) = (spawn.x.floor() as i32 + 2, spawn.z.floor() as i32);
+        let ground = host.world.surface_y(x, z);
+        for dx in 0..3 {
+            for y in ground + 1..ground + 4 {
+                host.world.set(x + dx, y, z, AIR);
+            }
+            host.world.set(x + dx, ground, z, STONE);
+        }
+        assert!(pump(&mut host, &mut client, |_, c| (0..3).all(|dx| c.world.get(x + dx, ground, z) == STONE && c.world.get(x + dx, ground + 1, z) == AIR)));
+        host.give_peer(id, DOOR, 1);
+        host.give_peer(id, stairs(0, 0), 3);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DOOR) == 1 && c.inv.count(stairs(0, 0)) == 3));
+
+        // A door: both halves, paid for with one door item.
+        let (bottom, top) = (IVec3::new(x, ground + 1, z), IVec3::new(x, ground + 2, z));
+        client.world.set_v(bottom, door(1, false, false));
+        client.world.set_v(top, door(1, false, true));
+        client.inv.remove(DOOR, 1);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(bottom) == door(1, false, false) && h.world.get_v(top) == door(1, false, true)));
+        assert_eq!(host.peers[&id].ledger.bag.count(DOOR), 0);
+        // A door top floating on its own is refused.
+        let lone = IVec3::new(x + 1, ground + 2, z);
+        client.world.set_v(lone, door(1, false, true));
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(lone) == AIR));
+        // Opening it is free.
+        client.world.set_v(bottom, door(1, true, false));
+        client.world.set_v(top, door(1, true, true));
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(top) == door(1, true, true)));
+
+        // Stairs facing any way cost the stairs item.
+        let step = IVec3::new(x + 2, ground + 1, z);
+        client.world.set_v(step, stairs(0, 3));
+        client.inv.remove(stairs(0, 0), 1);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(step) == stairs(0, 3)));
+        assert_eq!(host.peers[&id].ledger.bag.count(stairs(0, 0)), 2);
+
+        // Throwing takes them from the ledger and puts them on the host's ground.
+        client.inv.slots = [None; 36];
+        client.inv.slots[client.inv.selected] = Some((stairs(0, 0), 2));
+        client.throw_held(true);
+        assert!(pump(&mut host, &mut client, |h, _| h.drops.iter().any(|d| d.item == stairs(0, 0) && d.n == 2)));
+        assert_eq!(host.peers[&id].ledger.bag.count(stairs(0, 0)), 0);
+        // Throwing what you don't have makes nothing.
+        client.net_send_msg(Msg::DropItem { item: DIAMOND, n: 64 });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(!host.drops.iter().any(|d| d.item == DIAMOND));
+        // Asking for a drop from across the map gets nothing either.
+        let far = host.drops[0].id;
+        client.player.body.pos = spawn + Vec3::new(30.0, 0.0, 0.0);
+        client.net_send_msg(Msg::Pickup { id: far, room: 64 });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(host.drops.iter().any(|d| d.id == far));
+        client.player.body.pos = spawn;
+
+        // Breaking the door (after a moment: doors take a second by hand) takes both halves, one drop.
+        for _ in 0..120 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        host.drops.clear();
+        client.break_block(bottom, true);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(bottom) == AIR && h.world.get_v(top) == AIR));
+        assert_eq!(host.drops.iter().filter(|d| d.item == DOOR).count(), 1);
     }
 
     #[test]
