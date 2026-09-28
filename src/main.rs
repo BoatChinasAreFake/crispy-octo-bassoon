@@ -14,6 +14,7 @@ mod noise;
 mod player;
 mod render;
 mod save;
+mod scripting;
 mod server;
 mod upnp;
 mod sound;
@@ -188,6 +189,7 @@ impl App {
         } else {
             "Survival mode: punch a tree. Press E to craft. Avoid anything that hisses."
         });
+        g.start_scripts();
         self.start_game(g);
     }
 
@@ -604,7 +606,8 @@ impl App {
             } else {
                 let (b, it, r) = m.added;
                 let desc = if m.description.is_empty() { String::new() } else { format!("{}  -  ", m.description) };
-                format!("{desc}{b} blocks, {it} items, {r} recipes")
+                let scripts = if m.scripts > 0 { format!(", {} script(s)", m.scripts) } else { String::new() };
+                format!("{desc}{b} blocks, {it} items, {r} recipes{scripts}")
             };
             self.ui.text(&self.ui.fit(&detail, 8.0, text_w), x + 5.0 * s, y + 22.0 * s, 8.0, Color::new(0.8, 0.8, 0.8, 1.0));
             if let Some(e) = m.errors.first() {
@@ -876,7 +879,8 @@ impl App {
         if self.ui.button(Rect::new(x, y, bw, bh), "Continue Saved World", has_save) {
             match save::read() {
                 Ok(d) => {
-                    let g = Game::from_save(d);
+                    let mut g = Game::from_save(d);
+                    g.start_scripts();
                     self.start_game(g);
                 }
                 Err(e) => self.status = Some((format!("Couldn't load save: {e}"), 5.0)),
@@ -1234,6 +1238,7 @@ struct ShotArgs {
     pos: Option<Vec3>,
     addr: String,
     password: String,
+    chat: Vec<String>,
 }
 
 fn parse_args() -> Option<ShotArgs> {
@@ -1246,6 +1251,7 @@ fn parse_args() -> Option<ShotArgs> {
         time: get("--time").and_then(|f| f.parse().ok()),
         addr: get("--addr").unwrap_or_else(|| "127.0.0.1".into()),
         password: get("--password").unwrap_or_default(),
+        chat: args.windows(2).filter(|w| w[0] == "--chat").map(|w| w[1].clone()).collect(),
         yaw: get("--yaw").and_then(|f| f.parse().ok()).unwrap_or(2.4),
         pitch: get("--pitch").and_then(|f| f.parse().ok()).unwrap_or(-0.25),
         pos: get("--pos").and_then(|p| {
@@ -1352,6 +1358,7 @@ async fn game_main() {
                 if let Some(t) = s.time {
                     g.time = t;
                 }
+                g.start_scripts();
                 app.start_game(g);
                 app.show_debug = true;
                 if s.mode == "inventory" {
@@ -1410,6 +1417,11 @@ async fn game_main() {
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
                 }
+            }
+            if frames >= 150 && frames < 150 + s.chat.len() as u32 {
+                // Type the scripted chat lines one per frame.
+                let line = s.chat[(frames - 150) as usize].clone();
+                app.game.send_chat(&line);
             }
             if s.mode == "showcase" && frames == 120 {
                 // A little display of every mod block, on a stone plinth in front of the player.

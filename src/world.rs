@@ -491,6 +491,20 @@ impl World {
         Some(old)
     }
 
+    /// Set a block even if its chunk isn't loaded here (it's applied when the
+    /// chunk generates), and share it with other players. Used by scripts.
+    pub fn set_or_record(&mut self, x: i32, y: i32, z: i32, id: u8) {
+        if self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) {
+            self.set(x, y, z, id);
+        } else if (0..CH).contains(&y) && valid_block(id) {
+            let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
+            self.mods.entry((cx, cz)).or_default().insert(idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
+            if self.log_edits {
+                self.edit_log.push((x, y, z, id));
+            }
+        }
+    }
+
     pub fn set_v(&mut self, p: IVec3, id: u8) {
         self.set(p.x, p.y, p.z, id)
     }

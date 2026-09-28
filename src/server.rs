@@ -79,6 +79,7 @@ pub fn run(args: &[String]) -> i32 {
     game.dedicated = true;
     game.ready = true;
     game.messages.clear();
+    game.start_scripts();
 
     let port = match game.open_server(port, password.clone(), max_players) {
         Ok(p) => p,
@@ -187,7 +188,13 @@ pub fn run(args: &[String]) -> i32 {
                     }
                     log(if on { "Password set (applies to new logins)." } else { "Password removed: anyone can join." });
                 }
-                _ => log(&format!("Unknown command \"{cmd}\". Type help.")),
+                // "/something" goes to script mods as chat from "Server".
+                _ if cmd.starts_with('/') => {
+                    if game.fire("on_chat", vec!["Server".into(), cmd.clone().into()]) {
+                        log(&format!("No script handled {cmd}"));
+                    }
+                }
+                _ => log(&format!("Unknown command \"{cmd}\". Type help, or /command for script mods.")),
             }
         }
         next += Duration::from_secs_f32(TICK);

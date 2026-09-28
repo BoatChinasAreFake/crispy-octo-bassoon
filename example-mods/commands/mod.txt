@@ -1,0 +1,7 @@
+// Chat commands and a few world events, written as a script.
+// The code lives in main.rhai; this file just names the mod.
+[mod]
+name = Handy Commands
+version = 1.0
+author = Minceraft Scripting Club
+description = /help /home /sethome /tower /day /night /spawn and more.

@@ -158,6 +158,8 @@ pub struct ModInfo {
     pub errors: Vec<String>,
     /// Counts of what it added: blocks, items, recipes.
     pub added: (usize, usize, usize),
+    /// Number of `.rhai` script files.
+    pub scripts: usize,
 }
 
 pub struct Registry {

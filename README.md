@@ -4,6 +4,8 @@ A native, compiled block-building parody written in Rust, with no browser, no we
 
 The game ships with **no image or audio files**. At startup it builds the whole texture atlas (grass, ores, mobs, tools, hearts, the logo) from noise and tiny ASCII sprites, and synthesises every sound effect and the music.
 
+Its only dependencies are macroquad (window, input, audio) and [Rhai](https://rhai.rs), the sandboxed scripting language used for code mods.
+
 ## Build and run
 
 You need a Rust toolchain ([rustup.rs](https://rustup.rs)).
@@ -35,7 +37,8 @@ Run the tests with `cargo test --release`.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
 - **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, groans, Hisser hisses, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
 - **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day and chat. Servers can require a password, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
-- **Mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants and simple effects (bouncy or fast blocks, items that heal, launch, explode, give things or spawn mobs). Mods are data, not code, so servers send theirs to players automatically. See **[MODDING.md](MODDING.md)** and the example in `example-mods/cheese`.
+- **Mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants and simple effects (bouncy or fast blocks, items that heal, launch, explode, give things or spawn mobs). Servers send their mods to players automatically. See **[MODDING.md](MODDING.md)** and `example-mods/cheese`.
+- **Code mods (scripting).** Mods can also include sandboxed [Rhai](https://rhai.rs) scripts, which react to events (chat commands, breaking and placing blocks, item use, joins, mob deaths, ticks) and call a game API (blocks, items, health, teleport, explosions, mobs, time, messages). Scripts run on the machine that owns the world, including dedicated servers. See **[SCRIPTING.md](SCRIPTING.md)** and `example-mods/commands`.
 - **Saving and loading.** Only your edits are stored (`saves/world.mncr`); the terrain regenerates from the seed.
 - First-person hand and held item, third-person view, block-breaking cracks, particles, screen shake, a panoramic title screen with splash texts, and options for render distance, FOV, sensitivity and fullscreen.
 
@@ -53,7 +56,7 @@ Run the tests with `cargo test --release`.
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |
-| T or Enter | Chat (multiplayer) |
+| T or Enter | Chat, and `/commands` from script mods |
 | Q | Drop (yeet) the held item |
 | F5 | Toggle third person |
 | F3 | Debug info |
@@ -132,6 +135,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/texture.rs` | Procedural texture atlas |
 | `src/block.rs` | Block and item registry, tools, recipes |
 | `src/mods.rs` | Mod loader (`mod.txt` parser, textures, mod packs) |
+| `src/scripting.rs` | Script mods: sandboxed Rhai engine, events and game API |
 | `src/inventory.rs` | Inventory and crafting |
 | `src/save.rs` | Binary save format |
 | `src/net.rs` | Network protocol and non-blocking TCP |

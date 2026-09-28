@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 macroquad = { version = "0.4", default-features = false }
+rhai = "1.26.1"
 
 [features]
 default = ["sound"]

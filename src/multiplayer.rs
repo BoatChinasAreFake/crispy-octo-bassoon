@@ -182,9 +182,38 @@ impl Game {
         if text.is_empty() {
             return;
         }
-        self.msg(format!("<{}> {}", self.peer_name(self.my_id), text));
+        let me = self.peer_name(self.my_id);
+        if self.is_client() {
+            // The host runs the scripts; commands aren't echoed as chat.
+            if !text.starts_with('/') {
+                self.msg(format!("<{me}> {text}"));
+            }
+            self.net_send_msg(Msg::Chat { from: self.my_id, text });
+            return;
+        }
+        if !self.fire("on_chat", vec![me.clone().into(), text.clone().into()]) {
+            return; // a script handled it
+        }
+        if text.starts_with('/') {
+            self.msg(format!("Unknown command {}. Commands come from script mods.", text.split_whitespace().next().unwrap_or("")));
+            return;
+        }
+        self.msg(format!("<{me}> {text}"));
         let m = Msg::Chat { from: self.my_id, text };
         self.net_send_msg(m);
+    }
+
+    /// A private line to one remote player, or to everyone with `None`.
+    pub fn system_message(&mut self, to: Option<u32>, text: &str) {
+        let m = Msg::Chat { from: SYSTEM, text: text.into() };
+        match to {
+            Some(id) => self.net_send_to(id, m),
+            None => self.net_broadcast(m),
+        }
+    }
+
+    pub fn peer_by_name(&self, name: &str) -> Option<u32> {
+        self.peers.iter().find(|(_, p)| p.name.eq_ignore_ascii_case(name)).map(|(&id, _)| id)
     }
 
     pub fn disconnect(&mut self) {
@@ -248,6 +277,7 @@ impl Game {
             self.peers.remove(&id);
             self.net_broadcast(Msg::PlayerLeave { id });
             self.msg(format!("{name} left the game"));
+            self.fire("on_player_leave", vec![name.into()]);
         }
         for (from, m) in inbox {
             if self.is_host() {
@@ -342,6 +372,7 @@ impl Game {
             server.broadcast(&Msg::PlayerJoin { id: from, name: name.clone() }, Some(from));
             self.peers.insert(from, Peer::new(name.clone(), self.spawn));
             self.msg(format!("{name} joined the game"));
+            self.fire("on_player_join", vec![name.clone().into()]);
         }
     }
 
@@ -365,8 +396,18 @@ impl Game {
                         continue;
                     }
                     budget -= 1.0;
-                    // Logged, so the host re-broadcasts it to everyone.
                     let old = self.world.get(x, y, z);
+                    // Scripts may veto what remote players do, just like the host's own actions.
+                    if old != id && self.scripts.is_some() {
+                        let who = self.peer_name(from);
+                        let (hook, key) = if id == AIR || id == WATER { ("on_block_break", old) } else { ("on_block_place", id) };
+                        let args = vec![who.into(), (x as rhai::INT).into(), (y as rhai::INT).into(), (z as rhai::INT).into(), reg().key_of(key).into()];
+                        if !self.fire(hook, args) {
+                            corrections.push((x, y, z, old));
+                            continue;
+                        }
+                    }
+                    // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
                     if !quiet && old != id {
                         self.block_change_feedback(IVec3::new(x, y, z), old, id);
@@ -415,8 +456,23 @@ impl Game {
             }
             Msg::Chat { text, .. } => {
                 let text: String = text.chars().take(200).collect();
-                self.msg(format!("<{}> {}", self.peer_name(from), text));
+                let who = self.peer_name(from);
+                if !self.fire("on_chat", vec![who.clone().into(), text.clone().into()]) {
+                    return;
+                }
+                if text.starts_with('/') {
+                    let cmd = text.split_whitespace().next().unwrap_or("").to_string();
+                    self.system_message(Some(from), &format!("Unknown command {cmd}. Commands come from script mods."));
+                    return;
+                }
+                self.msg(format!("<{who}> {text}"));
                 self.relay(from, Msg::Chat { from, text });
+            }
+            Msg::UseItem { item } => {
+                if valid_item(item) {
+                    let who = self.peer_name(from);
+                    self.fire("on_use_item", vec![who.into(), reg().key_of(item).into()]);
+                }
             }
             _ => {}
         }
@@ -494,11 +550,29 @@ impl Game {
                 }
             }
             Msg::Time(t) => self.time = t.rem_euclid(1.0),
+            Msg::Chat { from: SYSTEM, text } => self.msg(text),
             Msg::Chat { from, text } => {
                 let name = self.peer_name(from);
                 self.msg(format!("<{name}> {text}"));
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } => {}
+            Msg::Effect { heal, teleport, launch, take } => {
+                if heal > 0.0 && self.dead.is_none() {
+                    self.player.health = (self.player.health + heal).min(crate::player::MAX_HEALTH);
+                }
+                if let Some(p) = teleport {
+                    self.player.body.pos = p;
+                    self.player.body.vel = Vec3::ZERO;
+                    self.player.fall_start = p.y;
+                }
+                if let Some(v) = launch {
+                    self.player.body.vel.y = v;
+                    self.player.fall_start = self.player.body.pos.y;
+                }
+                if let Some((item, n)) = take {
+                    self.inv.remove(item, n as u32);
+                }
+            }
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } => {}
         }
     }
 

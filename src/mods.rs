@@ -47,7 +47,7 @@ pub fn read_disk(dir: &Path) -> Vec<ModSource> {
                 for f in inner.flatten() {
                     let fname = f.file_name().to_string_lossy().to_string();
                     let lower = fname.to_ascii_lowercase();
-                    if (lower.ends_with(".txt") || lower.ends_with(".png")) && f.path().is_file() {
+                    if (lower.ends_with(".txt") || lower.ends_with(".png") || lower.ends_with(".rhai")) && f.path().is_file() {
                         if let Ok(bytes) = std::fs::read(f.path()) {
                             if bytes.len() <= MAX_FILE {
                                 files.insert(fname, bytes);
@@ -106,9 +106,21 @@ pub fn install_sources(sources: Vec<ModSource>, disabled: &[String]) -> Vec<ModI
     infos
 }
 
-/// The active mods, packed for sending to a joining player.
+/// The active mods, packed for sending to a joining player. Scripts stay on
+/// the host (only the host runs them), so they're left out.
 pub fn active_pack() -> Vec<u8> {
-    encode_pack(&ACTIVE.lock().unwrap())
+    let without_scripts: Vec<ModSource> = ACTIVE
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|m| ModSource { id: m.id.clone(), files: m.files.iter().filter(|(n, _)| !n.to_ascii_lowercase().ends_with(".rhai")).map(|(k, v)| (k.clone(), v.clone())).collect() })
+        .collect();
+    encode_pack(&without_scripts)
+}
+
+/// The active (enabled) mods' files, for starting their scripts.
+pub fn active_sources() -> Vec<ModSource> {
+    ACTIVE.lock().unwrap().clone()
 }
 
 pub fn encode_pack(mods: &[ModSource]) -> Vec<u8> {
@@ -438,6 +450,12 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                     }
                 }
                 _ => {}
+            }
+        }
+        for (fname, bytes) in m.files.iter().filter(|(n, _)| n.to_ascii_lowercase().ends_with(".rhai")) {
+            info.scripts += 1;
+            if let Err(e) = crate::scripting::check(&String::from_utf8_lossy(bytes)) {
+                errs.push(format!("{fname}: {e}"));
             }
         }
         info.errors = errs;
@@ -861,7 +879,7 @@ Now with cheese!
 
     #[test]
     fn the_shipped_example_mod_loads_cleanly() {
-        let sources = read_disk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("example-mods"));
+        let sources: Vec<ModSource> = read_disk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("example-mods")).into_iter().filter(|m| m.id == "cheese").collect();
         assert_eq!(sources.len(), 1);
         assert!(sources[0].files.contains_key("wheel_side.png"));
         let reg = build(&sources, &[]);

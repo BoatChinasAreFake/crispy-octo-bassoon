@@ -8,7 +8,10 @@ use std::time::{Duration, Instant};
 
 pub const DEFAULT_PORT: u16 = 25565;
 /// v2: challenge/response login. v3: the host sends its mods to joining players.
-pub const PROTOCOL: u32 = 3;
+/// v4: script effects (UseItem, Effect).
+pub const PROTOCOL: u32 = 4;
+/// `Chat.from` for messages from scripts or the server itself (shown without a name).
+pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
 /// states flow many times a second, so silence means the link is dead).
 pub const TIMEOUT_SECS: f32 = 30.0;
@@ -61,6 +64,10 @@ pub enum Msg {
     Auth { proof: [u8; 32] },
     /// host -> client, just before Welcome: the host's mods (see mods::encode_pack).
     ModPack { data: Vec<u8> },
+    /// client -> host: I right-clicked with this item (for script `on_use_item`).
+    UseItem { item: u8 },
+    /// host -> client: a script did something to you.
+    Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(u8, u8)> },
 }
 
 pub const FLAG_SNEAK: u8 = 1;
@@ -277,6 +284,22 @@ impl Msg {
                 w.u32(data.len() as u32);
                 w.bytes(data);
             }
+            Msg::UseItem { item } => {
+                w.u8(20);
+                w.u8(*item);
+            }
+            Msg::Effect { heal, teleport, launch, take } => {
+                w.u8(21);
+                w.f32(*heal);
+                w.u8(teleport.is_some() as u8);
+                w.v3(teleport.unwrap_or(Vec3::ZERO));
+                w.u8(launch.is_some() as u8);
+                w.f32(launch.unwrap_or(0.0));
+                w.u8(take.is_some() as u8);
+                let (a, b) = take.unwrap_or((0, 0));
+                w.u8(a);
+                w.u8(b);
+            }
         }
         w.0
     }
@@ -333,6 +356,14 @@ impl Msg {
             19 => {
                 let n = r.count(1)?;
                 Msg::ModPack { data: r.take(n)?.to_vec() }
+            }
+            20 => Msg::UseItem { item: r.u8()? },
+            21 => {
+                let heal = r.f32()?;
+                let (has_t, t) = (r.u8()? != 0, r.v3()?);
+                let (has_l, l) = (r.u8()? != 0, r.f32()?);
+                let (has_take, a, b) = (r.u8()? != 0, r.u8()?, r.u8()?);
+                Msg::Effect { heal, teleport: has_t.then_some(t), launch: has_l.then_some(l), take: has_take.then_some((a, b)) }
             }
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
@@ -679,6 +710,8 @@ pub fn lan_ip() -> Option<String> {
 mod tests {
     use super::*;
 
+    const DIAMOND_TEST: u8 = 103;
+
     #[test]
     fn messages_round_trip() {
         let msgs = vec![
@@ -696,6 +729,9 @@ mod tests {
             Msg::Challenge { nonce: [7; 16], password: true },
             Msg::Auth { proof: [9; 32] },
             Msg::ModPack { data: vec![1, 2, 3] },
+            Msg::UseItem { item: 7 },
+            Msg::Effect { heal: 2.0, teleport: Some(Vec3::new(1.0, 70.0, -3.0)), launch: None, take: Some((DIAMOND_TEST, 2)) },
+            Msg::Effect { heal: 0.0, teleport: None, launch: Some(12.0), take: None },
         ];
         for m in msgs {
             assert_eq!(Msg::decode(&m.encode()).unwrap(), m);

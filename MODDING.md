@@ -2,7 +2,9 @@
 
 A mod is a **folder inside `mods/`** that contains a text file called `mod.txt`, plus any PNG textures it uses. The `mods/` folder goes next to where you run the game (for `cargo run`, the repository root).
 
-Mods are data, not code. That means they're safe to download and share, and a multiplayer server automatically **sends its mods to everyone who joins**, so players don't install anything themselves.
+`mod.txt` is data: it describes content. A multiplayer server automatically **sends it to everyone who joins**, so players don't install anything themselves.
+
+For behaviour that data can't express (chat commands, events, custom game rules), add **scripts**: `.rhai` files in the same folder. See **[SCRIPTING.md](SCRIPTING.md)**. Scripts are sandboxed and only run on the machine that owns the world.
 
 To try one:
 

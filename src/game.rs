@@ -10,6 +10,8 @@ use crate::noise::{hash2, Perlin, Rng};
 use crate::player::{Input, Player, MAX_HEALTH};
 use crate::render::{DynGeo, FrameParams, Pass, Renderer};
 use crate::save::SaveData;
+use crate::scripting::{Cmd, ScriptHost};
+use rhai::{Dynamic, INT};
 use crate::sound::{material, Sfx};
 use crate::texture::*;
 use crate::world::{Hit, World, CH, SEA};
@@ -89,6 +91,8 @@ pub struct Game {
     pub net_error: Option<String>,
     /// Headless `--server`: no local player at all.
     pub dedicated: bool,
+    /// Script mods (only where the world lives: single player, host, server).
+    pub scripts: Option<ScriptHost>,
 }
 
 impl Game {
@@ -147,6 +151,7 @@ impl Game {
             pending_msgs: Vec::new(),
             net_error: None,
             dedicated: false,
+            scripts: None,
         }
     }
 
@@ -358,6 +363,155 @@ impl Game {
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
         self.update_entities(dt);
+        self.script_tick(dt);
+    }
+
+    // ------------------------------------------------------------ scripting
+
+    /// Load the active mods' scripts and run their `on_load`.
+    pub fn start_scripts(&mut self) {
+        if self.is_client() || self.menu || self.scripts.is_some() {
+            return;
+        }
+        let (host, problems) = ScriptHost::new(&crate::mods::active_sources());
+        for p in problems {
+            self.msg(format!("Script error {p}"));
+        }
+        if !host.is_empty() {
+            let ids = host.mod_ids().join(", ");
+            self.scripts = Some(host);
+            if self.dedicated {
+                self.msg(format!("Scripts running: {ids}"));
+            }
+            self.fire("on_load", vec![]);
+        }
+    }
+
+    /// Run a script event. Returns false if a script cancelled the default action.
+    pub fn fire(&mut self, hook: &str, args: Vec<Dynamic>) -> bool {
+        let Some(mut host) = self.scripts.take() else { return true };
+        let r = host.call(self, hook, args);
+        self.scripts = Some(host);
+        for line in r.log {
+            self.msg(line);
+        }
+        for e in r.errors {
+            eprintln!("script error: {e}");
+            self.msg(format!("Script error {e}"));
+        }
+        self.apply_cmds(r.cmds);
+        r.allow
+    }
+
+    fn script_tick(&mut self, dt: f32) {
+        let Some(host) = &mut self.scripts else { return };
+        host.tick_acc += dt;
+        if host.tick_acc < crate::scripting::TICK {
+            return;
+        }
+        host.tick_acc -= crate::scripting::TICK;
+        self.fire("on_tick", vec![Dynamic::from(crate::scripting::TICK as rhai::FLOAT)]);
+    }
+
+    pub fn is_local_player(&self, name: &str) -> bool {
+        !self.dedicated && (name.is_empty() || name.eq_ignore_ascii_case(&self.player_name))
+    }
+
+    pub fn player_names(&self) -> Vec<String> {
+        let mut v = if self.dedicated { vec![] } else { vec![self.player_name.clone()] };
+        v.extend(self.peers.values().map(|p| p.name.clone()));
+        v
+    }
+
+    pub fn player_position(&self, name: &str) -> Option<Vec3> {
+        if self.is_local_player(name) {
+            return Some(self.player.body.pos);
+        }
+        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.target)
+    }
+
+    fn apply_cmds(&mut self, cmds: Vec<Cmd>) {
+        let effect = |heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(u8, u8)>| Msg::Effect { heal, teleport, launch, take };
+        for c in cmds {
+            match c {
+                Cmd::SetBlock(x, y, z, id) => self.world.set_or_record(x, y, z, id),
+                Cmd::Broadcast(t) => {
+                    self.msg(t.clone());
+                    self.system_message(None, &t);
+                }
+                Cmd::Message(p, t) => {
+                    if self.is_local_player(&p) {
+                        self.msg(t);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.system_message(Some(id), &t);
+                    } else if self.dedicated && p.eq_ignore_ascii_case("server") {
+                        self.msg(t);
+                    }
+                }
+                Cmd::Give(p, item, n) => {
+                    if self.is_local_player(&p) {
+                        self.give(item, n);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, Msg::Give { item, n });
+                    }
+                }
+                Cmd::Take(p, item, n) => {
+                    if self.is_local_player(&p) {
+                        self.inv.remove(item, n as u32);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(0.0, None, None, Some((item, n))));
+                    }
+                }
+                Cmd::Heal(p, n) => {
+                    if self.is_local_player(&p) {
+                        self.player.health = (self.player.health + n).min(MAX_HEALTH);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(n, None, None, None));
+                    }
+                }
+                Cmd::Damage(p, n) => {
+                    if self.is_local_player(&p) {
+                        self.player.hurt = 0.0;
+                        self.hurt_player(n, "was smitten by a script");
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.hurt_peer(id, n, "was smitten by a script", Vec3::ZERO);
+                    }
+                }
+                Cmd::Teleport(p, to) => {
+                    if self.is_local_player(&p) {
+                        self.player.body.pos = to;
+                        self.player.body.vel = Vec3::ZERO;
+                        self.player.fall_start = to.y;
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(0.0, Some(to), None, None));
+                        if let Some(peer) = self.peers.get_mut(&id) {
+                            peer.target = to;
+                        }
+                    }
+                }
+                Cmd::Launch(p, v) => {
+                    if self.is_local_player(&p) {
+                        self.player.body.vel.y = v;
+                        self.player.fall_start = self.player.body.pos.y;
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(0.0, None, Some(v), None));
+                    }
+                }
+                Cmd::Explode(at, r) => self.explode(at, r, "was blown up by a script"),
+                Cmd::Spawn(k, at) => {
+                    let kind = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner][(k as usize).min(2)];
+                    self.alloc_mob(kind, at);
+                }
+                Cmd::SetTime(t) => {
+                    self.time = t;
+                    self.net_broadcast(Msg::Time(t));
+                }
+                Cmd::Sound(s, at) => {
+                    self.sfx(s, Some(at));
+                    self.net_broadcast(Msg::Sound { sfx: s.to_u8(), at });
+                }
+            }
+        }
     }
 
     pub fn sfx(&mut self, s: Sfx, at: Option<Vec3>) {
@@ -513,6 +667,16 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        if held != AIR {
+            if self.is_client() {
+                self.net_send_msg(Msg::UseItem { item: held });
+            } else {
+                let me = self.player_name.clone();
+                if !self.fire("on_use_item", vec![me.into(), reg().key_of(held).into()]) {
+                    return;
+                }
+            }
+        }
         if let Some(heal) = food_value(held) {
             if self.player.health < MAX_HEALTH || self.creative {
                 self.player.health = (self.player.health + heal).min(MAX_HEALTH);
@@ -577,6 +741,12 @@ impl Game {
                 return;
             }
         }
+        if !self.is_client() {
+            let args = vec![self.player_name.clone().into(), (place.x as INT).into(), (place.y as INT).into(), (place.z as INT).into(), reg().key_of(held).into()];
+            if !self.fire("on_block_place", args) {
+                return;
+            }
+        }
         self.world.set_v(place, held);
         self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
@@ -589,6 +759,12 @@ impl Game {
         let id = self.world.get_v(pos);
         if !targetable(id) || block(id).hardness < 0.0 {
             return;
+        }
+        if !self.is_client() {
+            let args = vec![self.player_name.clone().into(), (pos.x as INT).into(), (pos.y as INT).into(), (pos.z as INT).into(), reg().key_of(id).into()];
+            if !self.fire("on_block_break", args) {
+                return;
+            }
         }
         self.block_particles(pos, 14);
         self.world.set_v(pos, AIR);
@@ -828,6 +1004,7 @@ impl Game {
         if !self.peers.is_empty() {
             self.update_entities(dt);
         }
+        self.script_tick(dt);
         self.net_send(dt);
         self.sounds.clear();
     }
@@ -910,6 +1087,9 @@ impl Game {
                 if m.health <= 0.0 && m.health > -50.0 {
                     let at = m.body.pos + Vec3::Y * 0.5;
                     self.smoke(at, 10, 0.3);
+                    let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
+                    let args = vec![m.kind.name().to_ascii_lowercase().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
+                    self.fire("on_mob_death", args);
                     if let Some((item, n)) = m.loot(&mut self.rng) {
                         if m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker) {
                             if !self.creative {
@@ -1382,6 +1562,62 @@ mod tests {
         let before = solid(&g);
         g.run_actions(&[Action::Explode(3.0)], Vec3::new(0.5, top as f32 + 0.5, 0.5));
         assert!(solid(&g) < before);
+    }
+
+    #[test]
+    fn scripts_drive_the_game() {
+        use crate::mods::ModSource;
+        let mut files = std::collections::BTreeMap::new();
+        files.insert(
+            "main.rhai".to_string(),
+            br#"
+            fn on_load() { set_var("loaded", true); }
+            fn on_chat(player, text) {
+                if text == "/tower" {
+                    let p = player_pos(player);
+                    fill(p[0] + 2, p[1], p[2], p[0] + 2, p[1] + 4, p[2], "glass");
+                    give(player, "diamond", 5);
+                    message(player, "Tower built!");
+                    return false;
+                }
+                if text == "/loaded" { message(player, `loaded=${get_var("loaded")}`); return false; }
+            }
+            fn on_block_break(player, x, y, z, block) {
+                if block == "glass" { message(player, "The glass is protected."); return false; }
+            }
+            fn on_use_item(player, item) { if item == "diamond" { launch(player, 20); } }
+            "#
+            .to_vec(),
+        );
+        let (host, problems) = ScriptHost::new(&[ModSource { id: "cmds".into(), files }]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut g = Game::new(21, false, false);
+        g.world = loaded_world(21);
+        let top = g.world.surface_y(0, 0);
+        g.player.body.pos = Vec3::new(0.5, top as f32 + 1.0, 0.5);
+        g.scripts = Some(host);
+        g.fire("on_load", vec![]);
+
+        g.send_chat("/tower");
+        for dy in 0..5 {
+            assert_eq!(g.world.get(2, top + 1 + dy, 0), GLASS);
+        }
+        assert_eq!(g.inv.count(DIAMOND), 5);
+        assert!(g.messages.iter().any(|m| m.0 == "Tower built!"));
+        // The command wasn't echoed as chat.
+        assert!(!g.messages.iter().any(|m| m.0.contains("/tower")));
+        g.send_chat("/loaded");
+        assert!(g.messages.iter().any(|m| m.0 == "loaded=true"));
+        g.send_chat("/nope");
+        assert!(g.messages.iter().any(|m| m.0.starts_with("Unknown command /nope")));
+
+        // Cancelling a block break.
+        g.break_block(ivec3(2, top + 1, 0), true);
+        assert_eq!(g.world.get(2, top + 1, 0), GLASS);
+        // Item use.
+        g.inv.selected = g.inv.slots.iter().position(|s| s.map(|s| s.0) == Some(DIAMOND)).unwrap();
+        g.use_item();
+        assert_eq!(g.player.body.vel.y, 20.0);
     }
 
     #[test]
