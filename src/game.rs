@@ -1,0 +1,1031 @@
+//! Gameplay: the world plus everything living in it, and scene assembly.
+
+use crate::block::*;
+use crate::entity::*;
+use crate::inventory::Inventory;
+use crate::mesher::mesh_chunk;
+use crate::noise::{hash2, Perlin, Rng};
+use crate::player::{Input, Player, MAX_HEALTH};
+use crate::render::{DynGeo, FrameParams, Pass, Renderer};
+use crate::save::SaveData;
+use crate::texture::*;
+use crate::world::{Hit, World, CH, SEA};
+use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
+use macroquad::miniquad::RenderingBackend;
+use std::f32::consts::{PI, TAU};
+
+pub const DAY_SECONDS: f32 = 600.0;
+
+pub struct Controls {
+    pub input: Input,
+    pub attack_held: bool,
+    pub attack_pressed: bool,
+    pub use_held: bool,
+    pub use_pressed: bool,
+    pub pick: bool,
+    pub drop: bool,
+}
+
+pub enum Target {
+    Block(Hit),
+    Mob(usize),
+}
+
+pub struct Camera {
+    pub pos: Vec3,
+    pub dir: Vec3,
+    pub view_proj: Mat4,
+}
+
+pub struct Game {
+    pub world: World,
+    pub player: Player,
+    pub mobs: Vec<Mob>,
+    pub particles: Vec<Particle>,
+    pub tnts: Vec<PrimedTnt>,
+    pub inv: Inventory,
+    pub creative: bool,
+    /// Fraction of a day, 0 = sunrise.
+    pub time: f32,
+    pub clock: f32,
+    pub messages: Vec<(String, f32)>,
+    pub breaking: Option<(IVec3, f32)>,
+    pub rng: Rng,
+    attack_cd: f32,
+    use_cd: f32,
+    pub spawn: Vec3,
+    pub shake: f32,
+    /// Title-screen panorama: no player simulation.
+    pub menu: bool,
+    pub target: Option<Target>,
+    pub dead: Option<String>,
+    pub third_person: bool,
+    pub ready: bool,
+    pub held_name: f32,
+    spawn_timer: f32,
+    stars: Vec<Vec3>,
+    clouds: Perlin,
+    pub stat_blocks_broken: u32,
+}
+
+impl Game {
+    pub fn new(seed: u32, creative: bool, menu: bool) -> Self {
+        let world = World::new(seed);
+        let spawn = world.find_spawn();
+        let mut rng = Rng::new(seed as u64 ^ 0xC0FFEE);
+        let stars = (0..350)
+            .map(|_| Vec3::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)).normalize_or_zero())
+            .collect();
+        let mut inv = Inventory::new();
+        if creative {
+            for (i, b) in [GRASS, COBBLE, PLANKS, LOG, GLASS, BRICK, GLOWROCK, TORCH, TNT].iter().enumerate() {
+                inv.slots[i] = Some((*b, 64));
+            }
+        }
+        let mut player = Player::new(spawn);
+        player.yaw = 0.6;
+        Game {
+            world,
+            player,
+            mobs: Vec::new(),
+            particles: Vec::new(),
+            tnts: Vec::new(),
+            inv,
+            creative,
+            time: 0.02,
+            clock: 0.0,
+            messages: Vec::new(),
+            breaking: None,
+            rng,
+            attack_cd: 0.0,
+            use_cd: 0.0,
+            spawn,
+            shake: 0.0,
+            menu,
+            target: None,
+            dead: None,
+            third_person: false,
+            ready: false,
+            held_name: 0.0,
+            spawn_timer: 0.0,
+            stars,
+            clouds: Perlin::new(seed as u64 ^ 0xC10D),
+            stat_blocks_broken: 0,
+        }
+    }
+
+    pub fn from_save(d: SaveData) -> Self {
+        let mut g = Game::new(d.seed, d.creative, false);
+        g.world.mods = d.mods;
+        g.time = d.time;
+        g.player.body.pos = Vec3::from_array(d.pos);
+        g.player.fall_start = d.pos[1];
+        g.player.yaw = d.yaw;
+        g.player.pitch = d.pitch;
+        g.player.health = d.health.max(1.0);
+        g.spawn = Vec3::from_array(d.spawn);
+        g.inv.slots = [None; 36];
+        for (i, s) in d.slots.into_iter().take(36).enumerate() {
+            g.inv.slots[i] = s;
+        }
+        g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
+        g
+    }
+
+    pub fn to_save(&mut self) -> SaveData {
+        self.inv.return_cursor();
+        SaveData {
+            seed: self.world.seed(),
+            creative: self.creative,
+            time: self.time,
+            pos: self.player.body.pos.to_array(),
+            yaw: self.player.yaw,
+            pitch: self.player.pitch,
+            health: self.player.health,
+            spawn: self.spawn.to_array(),
+            slots: self.inv.slots.to_vec(),
+            mods: self.world.mods.clone(),
+        }
+    }
+
+    pub fn msg(&mut self, s: impl Into<String>) {
+        self.messages.push((s.into(), 7.0));
+        if self.messages.len() > 6 {
+            self.messages.remove(0);
+        }
+    }
+
+    pub fn sun_angle(&self) -> f32 {
+        self.time * TAU
+    }
+
+    pub fn daylight(&self) -> f32 {
+        let s = self.sun_angle().sin();
+        let t = ((s + 0.15) / 0.4).clamp(0.0, 1.0);
+        0.18 + 0.82 * t * t * (3.0 - 2.0 * t)
+    }
+
+    pub fn is_night(&self) -> bool {
+        self.sun_angle().sin() < -0.05
+    }
+
+    pub fn sky_color(&self) -> [f32; 3] {
+        let d = ((self.daylight() - 0.18) / 0.82).clamp(0.0, 1.0);
+        let day = [0.55, 0.75, 1.0];
+        let night = [0.02, 0.03, 0.08];
+        let mut c = [0.0; 3];
+        for i in 0..3 {
+            c[i] = night[i] + (day[i] - night[i]) * d;
+        }
+        // Sunrise / sunset glow
+        let s = self.sun_angle().sin().abs();
+        let glow = (1.0 - s / 0.25).clamp(0.0, 1.0) * 0.5;
+        c[0] += (1.0 - c[0]) * glow;
+        c[1] += (0.55 - c[1]) * glow * 0.6;
+        c[2] *= 1.0 - glow * 0.5;
+        c
+    }
+
+    /// Stream chunks and upload fresh meshes. Returns true once the player's area is ready.
+    pub fn stream(&mut self, renderer: &mut Renderer, ctx: &mut dyn RenderingBackend, radius: i32) {
+        let center = self.player.body.pos;
+        for k in self.world.stream(center, radius) {
+            renderer.drop_chunk(ctx, k);
+        }
+        let (pcx, pcz) = ((center.x / 16.0).floor() as i32, (center.z / 16.0).floor() as i32);
+        let mut dirty: Vec<(i32, (i32, i32))> = self
+            .world
+            .dirty
+            .iter()
+            .filter(|&&(cx, cz)| self.world.neighbours_ready(cx, cz))
+            .map(|&(cx, cz)| ((cx - pcx).pow(2) + (cz - pcz).pow(2), (cx, cz)))
+            .collect();
+        dirty.sort_unstable();
+        let start = macroquad::time::get_time();
+        for (i, (_, k)) in dirty.into_iter().enumerate() {
+            // Always finish a few (edits near the player), then stop at ~6 ms.
+            if i >= 3 && macroquad::time::get_time() - start > 0.006 {
+                break;
+            }
+            let mesh = mesh_chunk(&self.world, k.0, k.1);
+            renderer.set_chunk(ctx, k, mesh);
+            self.world.dirty.remove(&k);
+        }
+        if !self.ready {
+            let p = self.player.body.pos;
+            let key = ((p.x / 16.0).floor() as i32, (p.z / 16.0).floor() as i32);
+            if renderer.chunks.contains_key(&key) {
+                self.ready = true;
+                if !self.menu {
+                    self.settle_player();
+                }
+            }
+        }
+    }
+
+    /// Make sure we don't start inside terrain.
+    fn settle_player(&mut self) {
+        let p = self.player.body.pos;
+        let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
+        let mut y = p.y.floor() as i32;
+        while y < CH - 2 && (is_solid(self.world.get(x, y, z)) || is_solid(self.world.get(x, y + 1, z))) {
+            y += 1;
+        }
+        self.player.body.pos.y = y as f32;
+        self.player.fall_start = y as f32;
+    }
+
+    pub fn camera(&self, aspect: f32, fov_deg: f32) -> Camera {
+        let (pos, dir) = if self.menu {
+            let t = self.clock * 0.04;
+            let dir = Vec3::new(t.sin() * 0.97, -0.22, -t.cos() * 0.97).normalize();
+            (self.spawn + Vec3::Y * 14.0, dir)
+        } else {
+            let dir = self.player.look_dir();
+            let mut eye = self.player.eye();
+            if self.shake > 0.0 {
+                let s = self.shake * 0.25;
+                eye += Vec3::new((self.clock * 53.0).sin() * s, (self.clock * 71.0).sin() * s, (self.clock * 37.0).cos() * s);
+            }
+            if self.third_person {
+                let back = self.world.raycast(eye, -dir, 4.0).map(|h| (h.dist - 0.3).max(0.2)).unwrap_or(4.0);
+                (eye - dir * back, dir)
+            } else {
+                let b = self.player.bob;
+                let bob = Vec3::new(0.0, (b * 2.0).sin().abs() * 0.06, 0.0);
+                (eye + bob, dir)
+            }
+        };
+        let fov = if !self.menu && self.player.sprinting { fov_deg + 8.0 } else { fov_deg };
+        let proj = Mat4::perspective_rh_gl(fov.to_radians(), aspect, 0.05, 1000.0);
+        let view = Mat4::look_at_rh(pos, pos + dir, Vec3::Y);
+        Camera { pos, dir, view_proj: proj * view }
+    }
+
+    pub fn update(&mut self, dt: f32, c: &Controls) {
+        self.clock += dt;
+        self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+        self.shake = (self.shake - dt * 1.5).max(0.0);
+        self.held_name = (self.held_name - dt).max(0.0);
+        for m in self.messages.iter_mut() {
+            m.1 -= dt;
+        }
+        self.messages.retain(|m| m.1 > 0.0);
+        if self.menu || !self.ready || self.dead.is_some() {
+            return;
+        }
+        let p = self.player.body.pos;
+        if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
+            return;
+        }
+
+        let fall = self.player.update(dt, &c.input, &self.world, self.creative);
+        if fall > 0.0 {
+            self.hurt_player(fall, "hit the ground too hard (the ground is fine)");
+        }
+        if self.player.body.pos.y < -30.0 {
+            self.hurt_player(100.0, "fell out of the world. Classic.");
+        }
+
+        self.update_target();
+        self.attack_cd = (self.attack_cd - dt).max(0.0);
+        self.use_cd = (self.use_cd - dt).max(0.0);
+        self.handle_actions(dt, c);
+        self.update_entities(dt);
+    }
+
+    fn reach(&self) -> f32 {
+        if self.creative { 6.5 } else { 5.0 }
+    }
+
+    fn update_target(&mut self) {
+        let eye = self.player.eye();
+        let dir = self.player.look_dir();
+        let reach = self.reach();
+        let hit = self.world.raycast(eye, dir, reach);
+        let block_dist = hit.as_ref().map(|h| h.dist).unwrap_or(f32::MAX);
+        let mut best: Option<(usize, f32)> = None;
+        for (i, m) in self.mobs.iter().enumerate() {
+            if let Some(t) = ray_aabb(eye, dir, m.body.min(), m.body.max()) {
+                if t < reach.min(block_dist) && best.map(|b| t < b.1).unwrap_or(true) {
+                    best = Some((i, t));
+                }
+            }
+        }
+        self.target = match (best, hit) {
+            (Some((i, _)), _) => Some(Target::Mob(i)),
+            (None, Some(h)) => Some(Target::Block(h)),
+            _ => None,
+        };
+    }
+
+    fn handle_actions(&mut self, dt: f32, c: &Controls) {
+        let held = self.inv.held();
+        if c.attack_pressed {
+            self.player.swing = 1.0;
+        }
+        if c.attack_held && self.player.swing < 0.3 {
+            self.player.swing = 1.0;
+        }
+
+        match &self.target {
+            Some(Target::Mob(i)) => {
+                self.breaking = None;
+                if c.attack_pressed && self.attack_cd <= 0.0 {
+                    let i = *i;
+                    let dmg = attack_damage(held) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
+                    let from = self.player.body.pos;
+                    self.mobs[i].damage(dmg, from);
+                    self.attack_cd = 0.35;
+                }
+            }
+            Some(Target::Block(h)) => {
+                let pos = h.pos;
+                if c.attack_held {
+                    let id = self.world.get_v(pos);
+                    if self.creative {
+                        if self.attack_cd <= 0.0 {
+                            self.break_block(pos, false);
+                            self.attack_cd = 0.22;
+                        }
+                    } else {
+                        let (t, _) = break_time(id, held);
+                        let progress = match self.breaking {
+                            Some((p, prog)) if p == pos => prog,
+                            _ => 0.0,
+                        };
+                        let progress = if t <= 0.0 { 1.0 } else { progress + dt / t };
+                        if self.rng.chance(dt * 10.0) {
+                            self.block_particles(pos, 1);
+                        }
+                        if progress >= 1.0 {
+                            let (_, drops) = break_time(id, held);
+                            self.break_block(pos, drops);
+                            self.breaking = None;
+                            self.attack_cd = 0.15;
+                        } else {
+                            self.breaking = Some((pos, progress));
+                        }
+                    }
+                } else {
+                    self.breaking = None;
+                }
+            }
+            None => self.breaking = None,
+        }
+        if !c.attack_held {
+            self.breaking = None;
+        }
+
+        if (c.use_pressed || (c.use_held && self.use_cd <= 0.0)) && self.use_cd <= 0.0 {
+            self.use_cd = 0.25;
+            self.use_item();
+        }
+        if !c.use_held {
+            self.use_cd = 0.0;
+        }
+
+        if c.pick {
+            if let Some(Target::Block(h)) = &self.target {
+                let id = self.world.get_v(h.pos);
+                if self.creative && is_block_item(id) {
+                    self.inv.slots[self.inv.selected] = Some((id, 64));
+                    self.held_name = 2.0;
+                }
+            }
+        }
+        if c.drop {
+            let held = self.inv.held();
+            if held != AIR {
+                self.inv.consume_held();
+                self.msg(format!("Yeeted 1x {} into the void.", item_name(held)));
+            }
+        }
+    }
+
+    fn use_item(&mut self) {
+        let held = self.inv.held();
+        if let Some(heal) = food_value(held) {
+            if self.player.health < MAX_HEALTH || self.creative {
+                self.player.health = (self.player.health + heal).min(MAX_HEALTH);
+                if !self.creative {
+                    self.inv.consume_held();
+                }
+                self.msg(if held == GOO { "You ate Groaner Goo. You feel... gooey." } else { "*nom* Oinkchop acquired (internally)." });
+                return;
+            }
+        }
+        let Some(Target::Block(h)) = &self.target else { return };
+        let (hit_pos, normal) = (h.pos, h.normal);
+        let hit_id = self.world.get_v(hit_pos);
+        if hit_id == TNT && (held == TORCH || held == AIR) {
+            self.world.set_v(hit_pos, AIR);
+            self.tnts.push(PrimedTnt { pos: hit_pos.as_vec3(), fuse: 3.0 });
+            self.msg("Hisss... wait, that's the TNT. RUN.");
+            return;
+        }
+        if hit_id == TABLE && !is_block_item(held) {
+            self.msg("It's decorative! Press E to craft anywhere. Revolutionary.");
+            return;
+        }
+        if !is_block_item(held) {
+            return;
+        }
+        let place = if replaceable(hit_id) { hit_pos } else { hit_pos + normal };
+        if place.y < 0 || place.y >= CH || !replaceable(self.world.get_v(place)) {
+            return;
+        }
+        let below = self.world.get_v(place - IVec3::Y);
+        match held {
+            FLOWER | TALL_GRASS if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
+            TORCH if !is_solid(below) => return,
+            _ => {}
+        }
+        if is_solid(held) {
+            if self.player.body.intersects_block(place.x, place.y, place.z) {
+                return;
+            }
+            if self.mobs.iter().any(|m| m.body.intersects_block(place.x, place.y, place.z)) {
+                return;
+            }
+        }
+        self.world.set_v(place, held);
+        self.player.swing = 1.0;
+        if !self.creative {
+            self.inv.consume_held();
+        }
+    }
+
+    pub fn break_block(&mut self, pos: IVec3, drops: bool) {
+        let id = self.world.get_v(pos);
+        if !targetable(id) || block(id).hardness < 0.0 {
+            return;
+        }
+        self.world.set_v(pos, AIR);
+        self.block_particles(pos, 14);
+        self.stat_blocks_broken += 1;
+        if drops && !self.creative {
+            let d = block(id).drop;
+            if d != AIR {
+                self.give(d, 1);
+            }
+            if id == LEAVES && self.rng.chance(0.08) {
+                self.give(STICK, 1);
+            }
+            if id == GRAVEL && self.rng.chance(0.1) {
+                self.give(COAL, 1);
+                self.msg("Found coal in the gravel. Don't ask.");
+            }
+        }
+        // Plants and torches pop off with their support.
+        let above = pos + IVec3::Y;
+        let a = self.world.get_v(above);
+        if block(a).model == Model::Cross {
+            self.world.set_v(above, AIR);
+            if !self.creative && block(a).drop != AIR {
+                self.give(block(a).drop, 1);
+            }
+        }
+        // Water flows (lazily) into the hole.
+        for n in [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z, IVec3::Y] {
+            if self.world.get_v(pos + n) == WATER && pos.y <= SEA {
+                self.world.set_v(pos, WATER);
+                break;
+            }
+        }
+    }
+
+    fn give(&mut self, item: u8, n: u8) {
+        if self.inv.add(item, n) > 0 {
+            self.msg("Inventory full. The item has been respectfully ignored.");
+        }
+    }
+
+    fn block_particles(&mut self, pos: IVec3, n: usize) {
+        let id = self.world.get_v(pos);
+        let tile = block(id).tex[1];
+        for _ in 0..n {
+            let r = &mut self.rng;
+            let p = pos.as_vec3() + Vec3::new(r.range(0.1, 0.9), r.range(0.1, 0.9), r.range(0.1, 0.9));
+            self.particles.push(Particle {
+                pos: p,
+                vel: Vec3::new(r.range(-2.0, 2.0), r.range(0.5, 4.0), r.range(-2.0, 2.0)),
+                life: r.range(0.4, 1.0),
+                tile,
+                uv: [r.int(0, 3) as f32 * 0.25, r.int(0, 3) as f32 * 0.25],
+                size: r.range(0.06, 0.14),
+                gravity: 18.0,
+            });
+        }
+    }
+
+    fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
+        for _ in 0..n {
+            let r = &mut self.rng;
+            self.particles.push(Particle {
+                pos: at + Vec3::new(r.range(-spread, spread), r.range(-spread, spread), r.range(-spread, spread)),
+                vel: Vec3::new(r.range(-1.5, 1.5), r.range(0.5, 3.0), r.range(-1.5, 1.5)),
+                life: r.range(0.6, 1.6),
+                tile: T_CLOUD,
+                uv: [0.0, 0.0],
+                size: r.range(0.15, 0.45),
+                gravity: -1.0,
+            });
+        }
+    }
+
+    pub fn hurt_player(&mut self, amount: f32, cause: &str) {
+        if self.creative || self.dead.is_some() || self.player.hurt > 0.0 {
+            return;
+        }
+        self.player.health -= amount;
+        self.player.hurt = 0.5;
+        if self.player.health <= 0.0 {
+            self.player.health = 0.0;
+            self.dead = Some(format!("Stove {cause}"));
+        }
+    }
+
+    pub fn explode(&mut self, at: Vec3, r: f32, cause: &str) {
+        let c = ivec3(at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
+        let ri = r.ceil() as i32;
+        for dy in -ri..=ri {
+            for dz in -ri..=ri {
+                for dx in -ri..=ri {
+                    let p = c + ivec3(dx, dy, dz);
+                    let d = (p.as_vec3() + Vec3::splat(0.5)).distance(at);
+                    if d > r * self.rng.range(0.7, 1.05) {
+                        continue;
+                    }
+                    let id = self.world.get_v(p);
+                    match id {
+                        AIR | WATER | BEDROCK => {}
+                        TNT => {
+                            self.world.set_v(p, AIR);
+                            let fuse = self.rng.range(0.3, 0.9);
+                            self.tnts.push(PrimedTnt { pos: p.as_vec3(), fuse });
+                        }
+                        _ => {
+                            self.world.set_v(p, AIR);
+                            if !self.creative && self.rng.chance(0.25) && block(id).drop != AIR && block(id).pick_tier <= 1 {
+                                self.give(block(id).drop, 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.smoke(at, 45, r * 0.6);
+        let pd = (self.player.body.pos + Vec3::Y * 0.9).distance(at);
+        if pd < r * 2.0 {
+            let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
+            self.player.hurt = 0.0;
+            self.hurt_player(dmg, cause);
+            let push = (self.player.body.pos - at).normalize_or_zero() * (1.0 - pd / (r * 2.0)) * 14.0;
+            self.player.body.vel += push + Vec3::Y * 4.0;
+        }
+        self.shake = (self.shake + (1.0 - (pd / 40.0).min(1.0)) * 1.2).min(1.5);
+        for m in self.mobs.iter_mut() {
+            let d = (m.body.pos + Vec3::Y * 0.5).distance(at);
+            if d < r * 2.0 {
+                m.hurt = 0.0;
+                m.damage((1.0 - d / (r * 2.0)) * r * 5.0, at);
+            }
+        }
+    }
+
+    fn update_entities(&mut self, dt: f32) {
+        let ppos = self.player.body.pos + Vec3::Y * 0.9;
+        let visible = !self.creative;
+        let daylight = self.daylight();
+        let mut events = Vec::new();
+        for m in self.mobs.iter_mut() {
+            let p = m.body.pos;
+            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
+                continue;
+            }
+            events.extend(m.update(dt, &self.world, ppos, visible, daylight, &mut self.rng));
+        }
+        // Keep mobs from stacking inside each other.
+        for i in 0..self.mobs.len() {
+            for j in i + 1..self.mobs.len() {
+                let d = self.mobs[j].body.pos - self.mobs[i].body.pos;
+                let flat = Vec3::new(d.x, 0.0, d.z);
+                let min = self.mobs[i].body.half + self.mobs[j].body.half;
+                let l = flat.length();
+                if l < min && l > 1e-4 && d.y.abs() < 1.5 {
+                    let push = flat / l * (min - l) * 0.5;
+                    self.mobs[i].body.pos -= push;
+                    self.mobs[j].body.pos += push;
+                }
+            }
+        }
+        for e in events {
+            match e {
+                MobEvent::HurtPlayer(d, cause) => {
+                    self.hurt_player(d, cause);
+                    let knock = (self.player.body.pos - ppos).normalize_or_zero();
+                    self.player.body.vel += knock * 3.0 + Vec3::Y * 3.0;
+                }
+                MobEvent::Explode(at, r, cause) => self.explode(at, r, cause),
+                MobEvent::Smoke(at) => self.smoke(at, 1, 0.2),
+            }
+        }
+        let mut i = 0;
+        while i < self.mobs.len() {
+            let m = &self.mobs[i];
+            let far = m.body.pos.distance(self.player.body.pos) > 110.0;
+            if m.health <= 0.0 || far {
+                let m = self.mobs.swap_remove(i);
+                if m.health <= 0.0 && m.health > -50.0 {
+                    let at = m.body.pos + Vec3::Y * 0.5;
+                    self.smoke(at, 10, 0.3);
+                    if let Some((item, n)) = m.loot(&mut self.rng) {
+                        if !self.creative {
+                            self.give(item, n);
+                            self.msg(format!("{} dropped {}x {}", m.kind.name(), n, item_name(item)));
+                        }
+                    }
+                }
+                continue;
+            }
+            i += 1;
+        }
+
+        for p in self.particles.iter_mut() {
+            p.update(dt, &self.world);
+        }
+        self.particles.retain(|p| p.life > 0.0);
+        if self.particles.len() > 1500 {
+            let n = self.particles.len() - 1500;
+            self.particles.drain(0..n);
+        }
+
+        for t in self.tnts.iter_mut() {
+            t.fuse -= dt;
+        }
+        let boom: Vec<Vec3> = self.tnts.iter().filter(|t| t.fuse <= 0.0).map(|t| t.pos + Vec3::splat(0.5)).collect();
+        self.tnts.retain(|t| t.fuse > 0.0);
+        for at in boom {
+            self.explode(at, 4.0, "went out with a bang (TNT)");
+        }
+
+        self.spawn_timer -= dt;
+        if self.spawn_timer <= 0.0 {
+            self.spawn_timer = 1.0;
+            self.try_spawn();
+        }
+    }
+
+    fn try_spawn(&mut self) {
+        let p = self.player.body.pos;
+        let passive = self.mobs.iter().filter(|m| !m.kind.hostile()).count();
+        let hostile = self.mobs.len() - passive;
+        let a = self.rng.range(0.0, TAU);
+        let d = self.rng.range(24.0, 56.0);
+        let (x, z) = ((p.x + a.cos() * d).floor() as i32, (p.z + a.sin() * d).floor() as i32);
+        if !self.world.is_loaded(x, z) {
+            return;
+        }
+        let y = self.world.surface_y(x, z);
+        let top = self.world.get(x, y, z);
+        let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && w.get(x, y, z) != WATER;
+        if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
+            for i in 0..self.rng.int(1, 3) {
+                let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.7, y as f32 + 1.0, z as f32 + 0.5);
+                let m = Mob::new(MobKind::Oinker, pos, &mut self.rng);
+                self.mobs.push(m);
+            }
+            return;
+        }
+        if hostile >= 12 {
+            return;
+        }
+        let kind = if self.rng.chance(0.45) { MobKind::Hisser } else { MobKind::Groaner };
+        if self.is_night() && is_solid(top) && clear(&self.world, y + 1) {
+            let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
+            let m = Mob::new(kind, pos, &mut self.rng);
+            self.mobs.push(m);
+            return;
+        }
+        // Caves are always spooky.
+        let cy = self.rng.int(4, y.max(5));
+        if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 {
+            let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
+            let m = Mob::new(kind, pos, &mut self.rng);
+            self.mobs.push(m);
+        }
+    }
+
+    pub fn respawn(&mut self) {
+        self.dead = None;
+        self.player = Player::new(self.spawn);
+        self.mobs.retain(|m| !m.kind.hostile());
+        self.ready = false;
+        self.msg("Respawned. Inventory kept, because we're nice.");
+    }
+
+    /// Build all per-frame geometry: sky, clouds, entities, highlights, hand.
+    pub fn build_geo(&self, cam: &Camera, render_distance: i32) -> DynGeo {
+        let mut g = DynGeo::default();
+        let eye = cam.pos;
+        let a = self.sun_angle();
+        let sun_dir = Vec3::new(a.cos(), a.sin(), 0.25).normalize();
+
+        // Stars fade in at night.
+        let night = 1.0 - ((self.daylight() - 0.18) / 0.5).clamp(0.0, 1.0);
+        if night > 0.01 {
+            g.begin(Pass::Sky, [1.0, 1.0, 1.0, night], true);
+            let rot = Mat4::from_rotation_z(a);
+            for (i, s) in self.stars.iter().enumerate() {
+                let d = rot.transform_vector3(*s);
+                let size = 0.25 + (i % 3) as f32 * 0.12;
+                sky_quad(&mut g, eye + d * 150.0, d, size, T_WHITE);
+            }
+        }
+        g.begin(Pass::Sky, [1.0; 4], true);
+        sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
+        sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
+
+        // Clouds: a scrolling blocky layer.
+        let cloud_y = 112.0;
+        let cell = 12.0;
+        let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
+        let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
+        let reach = ((render_distance * 16) as f32 / cell) as i32 + 4;
+        g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
+        for j in -reach..=reach {
+            for i in -reach..=reach {
+                let (ci, cj) = (ox.floor() as i32 + i, oz.floor() as i32 + j);
+                if self.clouds.noise2(ci as f32 * 0.17, cj as f32 * 0.17) + hash2(7, ci, cj) * 0.12 < 0.12 {
+                    continue;
+                }
+                let x0 = ci as f32 * cell - scroll;
+                let z0 = cj as f32 * cell;
+                let c = [
+                    Vec3::new(x0, cloud_y, z0 + cell),
+                    Vec3::new(x0 + cell, cloud_y, z0 + cell),
+                    Vec3::new(x0 + cell, cloud_y, z0),
+                    Vec3::new(x0, cloud_y, z0),
+                ];
+                g.quad(c, T_CLOUD, [0.0, 0.0, 1.0, 1.0], [1.0, 1.0]);
+            }
+        }
+
+        // Mobs
+        for m in &self.mobs {
+            if m.body.pos.distance(eye) < (render_distance * 16) as f32 {
+                m.draw(&mut g, &self.world);
+            }
+        }
+        // The player, in third person
+        if self.third_person && !self.menu {
+            let p = &self.player;
+            let sky = self.world.sky_light(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
+            let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
+            g.begin(Pass::Opaque, tint, false);
+            let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw);
+            draw_model(&mut g, &root, &STOVE, p.bob * 2.0, sky, true);
+        }
+        // Primed TNT
+        for t in &self.tnts {
+            let flash = (t.fuse * 8.0).sin() > 0.0;
+            g.begin(Pass::Opaque, if flash { [3.0, 3.0, 3.0, 1.0] } else { [1.0; 4] }, false);
+            let s = 1.0 + (1.0 - t.fuse.min(1.0)) * 0.15;
+            let m = Mat4::from_translation(t.pos + Vec3::splat(0.5)) * Mat4::from_scale(Vec3::splat(s)) * Mat4::from_translation(Vec3::splat(-0.5));
+            let sky = self.world.sky_light(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
+            g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
+        }
+        // Particles
+        g.begin(Pass::Opaque, [1.0; 4], false);
+        for p in &self.particles {
+            p.draw(&mut g, &self.world);
+        }
+
+        if self.menu || self.dead.is_some() {
+            return g;
+        }
+
+        // Block highlight and cracks
+        if let Some(Target::Block(h)) = &self.target {
+            let id = self.world.get_v(h.pos);
+            let (min, max) = if block(id).model == Model::Cross {
+                (h.pos.as_vec3() + Vec3::new(0.2, 0.0, 0.2), h.pos.as_vec3() + Vec3::new(0.8, 0.8, 0.8))
+            } else {
+                (h.pos.as_vec3(), h.pos.as_vec3() + Vec3::ONE)
+            };
+            g.begin(Pass::Blend, [0.0, 0.0, 0.0, 0.55], true);
+            outline(&mut g, min - Vec3::splat(0.004), max + Vec3::splat(0.004), 0.012);
+            if let Some((bp, prog)) = self.breaking {
+                if bp == h.pos {
+                    let stage = ((prog * 5.0) as u16).min(4);
+                    g.begin(Pass::Blend, [1.0; 4], false);
+                    let m = Mat4::from_translation(min - Vec3::splat(0.003)) * Mat4::from_scale(max - min + Vec3::splat(0.006));
+                    g.cube(&m, [T_CRACK0 + stage; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
+                }
+            }
+        }
+
+        if !self.third_person {
+            self.draw_hand(&mut g, cam);
+        }
+        g
+    }
+
+    fn draw_hand(&self, g: &mut DynGeo, cam: &Camera) {
+        let fwd = cam.dir;
+        let right = fwd.cross(Vec3::Y).normalize();
+        let up = right.cross(fwd);
+        let basis = Mat4::from_cols(right.extend(0.0), up.extend(0.0), (-fwd).extend(0.0), cam.pos.extend(1.0));
+        let e = self.player.eye();
+        let sky = self.world.sky_light(e.x.floor() as i32, e.y.floor() as i32, e.z.floor() as i32);
+        let s = self.player.swing;
+        let swing = (s * PI).sin();
+        let bob = self.player.bob;
+        let local = Mat4::from_translation(Vec3::new(0.42 - swing * 0.15, -0.42 + (bob * 2.0).sin().abs() * 0.03 + swing * 0.12, -0.72 - swing * 0.1))
+            * Mat4::from_rotation_x(-swing * 0.9);
+        let held = self.inv.held();
+        let tint = if self.player.hurt > 0.3 { [1.0, 0.6, 0.6, 1.0] } else { [1.0; 4] };
+        g.begin(Pass::Overlay, tint, false);
+        if held == AIR {
+            let m = basis * local * Mat4::from_rotation_x(0.3) * Mat4::from_translation(Vec3::new(-0.07, -0.1, -0.4)) * Mat4::from_scale(Vec3::new(0.14, 0.14, 0.48));
+            g.cube(&m, [T_SKIN; 6], sky.max(0.2), [0.0, 0.0, 1.0, 1.0]);
+        } else if is_block_item(held) && block(held).model == Model::Cube {
+            let tiles = {
+                let t = block(held).tex;
+                [t[1], t[1], t[0], t[2], t[1], t[1]]
+            };
+            let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.14)) * Mat4::from_scale(Vec3::splat(0.28));
+            g.cube(&m, tiles, sky.max(0.2), [0.0, 0.0, 1.0, 1.0]);
+        } else {
+            let tile = if is_block_item(held) { block(held).tex[1] } else { item_tile(held) };
+            let m = basis * local * Mat4::from_rotation_y(-0.5) * Mat4::from_rotation_z(0.2);
+            let s = 0.42;
+            let c = [Vec3::new(-s / 2.0, -s / 2.0, 0.0), Vec3::new(s / 2.0, -s / 2.0, 0.0), Vec3::new(s / 2.0, s / 2.0, 0.0), Vec3::new(-s / 2.0, s / 2.0, 0.0)].map(|p| m.transform_point3(p));
+            g.quad(c, tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky.max(0.2)]);
+            g.quad([c[1], c[0], c[3], c[2]], tile, [1.0, 0.0, 0.0, 1.0], [1.0, sky.max(0.2)]);
+        }
+    }
+
+    pub fn frame_params(&self, cam: &Camera, renderer: &Renderer, render_distance: i32) -> FrameParams {
+        let underwater = !self.menu && self.player.head_in_water(&self.world);
+        let sky = self.sky_color();
+        let far = (render_distance * 16) as f32;
+        let (fog_color, fog_start, fog_end) = if underwater {
+            ([0.05, 0.12, 0.35], 0.0, 22.0)
+        } else {
+            (sky, far * 0.55, far - 4.0)
+        };
+        // Held torches glow too.
+        let mut extra = Vec::new();
+        let held = self.inv.held();
+        if !self.menu && is_block_item(held) && block(held).light > 0.0 {
+            let e = self.player.eye();
+            extra.push([e.x, e.y, e.z, block(held).light * 0.8]);
+        }
+        let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), lights }
+    }
+}
+
+fn sky_quad(g: &mut DynGeo, center: Vec3, dir: Vec3, size: f32, tile: u16) {
+    let u = Vec3::Z.cross(dir).normalize_or_zero();
+    let u = if u.length_squared() < 0.5 { Vec3::X } else { u };
+    let v = dir.cross(u);
+    let c = [center - u * size - v * size, center + u * size - v * size, center + u * size + v * size, center - u * size + v * size];
+    g.quad(c, tile, [0.0, 0.0, 1.0, 1.0], [1.0, 1.0]);
+}
+
+/// Twelve thin boxes along the edges of an AABB.
+fn outline(g: &mut DynGeo, min: Vec3, max: Vec3, t: f32) {
+    let s = max - min;
+    let edges: [(Vec3, Vec3); 12] = [
+        (Vec3::new(0.0, 0.0, 0.0), Vec3::new(s.x, t, t)),
+        (Vec3::new(0.0, s.y - t, 0.0), Vec3::new(s.x, t, t)),
+        (Vec3::new(0.0, 0.0, s.z - t), Vec3::new(s.x, t, t)),
+        (Vec3::new(0.0, s.y - t, s.z - t), Vec3::new(s.x, t, t)),
+        (Vec3::new(0.0, 0.0, 0.0), Vec3::new(t, s.y, t)),
+        (Vec3::new(s.x - t, 0.0, 0.0), Vec3::new(t, s.y, t)),
+        (Vec3::new(0.0, 0.0, s.z - t), Vec3::new(t, s.y, t)),
+        (Vec3::new(s.x - t, 0.0, s.z - t), Vec3::new(t, s.y, t)),
+        (Vec3::new(0.0, 0.0, 0.0), Vec3::new(t, t, s.z)),
+        (Vec3::new(s.x - t, 0.0, 0.0), Vec3::new(t, t, s.z)),
+        (Vec3::new(0.0, s.y - t, 0.0), Vec3::new(t, t, s.z)),
+        (Vec3::new(s.x - t, s.y - t, 0.0), Vec3::new(t, t, s.z)),
+    ];
+    for (o, sz) in edges {
+        let m = Mat4::from_translation(min + o) * Mat4::from_scale(sz);
+        g.cube(&m, [T_WHITE; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
+    }
+}
+
+/// Slab-method ray/AABB test; returns entry distance.
+fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let (mut t0, mut t1) = (0.0f32, f32::MAX);
+    for i in 0..3 {
+        if d[i].abs() < 1e-8 {
+            if o[i] < min[i] || o[i] > max[i] {
+                return None;
+            }
+            continue;
+        }
+        let inv = 1.0 / d[i];
+        let (mut a, mut b) = ((min[i] - o[i]) * inv, (max[i] - o[i]) * inv);
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        t0 = t0.max(a);
+        t1 = t1.min(b);
+        if t0 > t1 {
+            return None;
+        }
+    }
+    Some(t0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inventory::Inventory;
+
+    fn loaded_world(seed: u32) -> World {
+        let mut w = World::new(seed);
+        let start = std::time::Instant::now();
+        while w.chunks.len() < 9 && start.elapsed().as_secs() < 20 {
+            w.stream(Vec3::ZERO, 1);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        w
+    }
+
+    #[test]
+    fn generation_is_deterministic() {
+        let g = crate::world::Generator::new(99);
+        assert_eq!(g.generate(3, -2), g.generate(3, -2));
+        assert_ne!(g.generate(0, 0), crate::world::Generator::new(100).generate(0, 0));
+    }
+
+    #[test]
+    fn raycast_hits_ground_and_edits_persist() {
+        let mut w = loaded_world(7);
+        let top = w.surface_y(4, 4);
+        let hit = w.raycast(Vec3::new(4.5, top as f32 + 3.5, 4.5), -Vec3::Y, 10.0).expect("should hit terrain");
+        assert_eq!(hit.normal, IVec3::Y);
+        assert_eq!(hit.pos.y, top);
+        w.set(4, top + 1, 4, BRICK);
+        assert_eq!(w.get(4, top + 1, 4), BRICK);
+        assert_eq!(w.mods.values().map(|m| m.len()).sum::<usize>(), 1);
+    }
+
+    #[test]
+    fn crafting_consumes_inputs() {
+        let mut inv = Inventory::new();
+        inv.add(LOG, 1);
+        let planks = RECIPES.iter().find(|r| r.output.0 == PLANKS).unwrap();
+        assert!(inv.craft(planks));
+        assert_eq!(inv.count(LOG), 0);
+        assert_eq!(inv.count(PLANKS), 4);
+        assert!(!inv.craft(planks));
+        assert_eq!(inv.add(PICK_WOOD, 1), 0);
+        assert_eq!(inv.count(PICK_WOOD), 1);
+    }
+
+    #[test]
+    fn pickaxe_tiers_gate_drops() {
+        assert!(!break_time(DIAMOND_ORE, PICK_STONE).1);
+        assert!(break_time(DIAMOND_ORE, PICK_IRON).1);
+        assert!(!break_time(STONE, AIR).1);
+        assert!(break_time(STONE, PICK_WOOD).0 < break_time(STONE, AIR).0);
+        assert!(break_time(BEDROCK, PICK_DIAMOND).0.is_infinite());
+    }
+
+    #[test]
+    fn explosions_make_craters() {
+        let mut g = Game::new(5, true, false);
+        g.world = loaded_world(5);
+        let top = g.world.surface_y(0, 0);
+        let solid_before = (-2..=2).flat_map(|x| (-2..=2).map(move |z| (x, z))).filter(|&(x, z)| is_solid(g.world.get(x, top - 1, z))).count();
+        g.explode(Vec3::new(0.5, top as f32, 0.5), 3.0, "test");
+        let solid_after = (-2..=2).flat_map(|x| (-2..=2).map(move |z| (x, z))).filter(|&(x, z)| is_solid(g.world.get(x, top - 1, z))).count();
+        assert!(solid_after < solid_before);
+    }
+
+    #[test]
+    fn save_round_trip() {
+        let dir = std::env::temp_dir().join(format!("minceraft-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        let mut g = Game::new(1234, false, false);
+        g.inv.add(DIAMOND, 7);
+        g.world.mods.entry((2, -3)).or_default().insert(99, TNT);
+        g.time = 0.4;
+        crate::save::write(&g.to_save()).unwrap();
+        let back = Game::from_save(crate::save::read().unwrap());
+        assert_eq!(back.world.seed(), 1234);
+        assert_eq!(back.inv.count(DIAMOND), 7);
+        assert_eq!(back.world.mods[&(2, -3)][&99], TNT);
+        assert!((back.time - 0.4).abs() < 1e-6);
+        assert!(!back.creative);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
