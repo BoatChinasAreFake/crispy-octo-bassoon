@@ -11,6 +11,8 @@ pub struct Ui {
     pub s: f32,
     pub clicked: bool,
     pub rclicked: bool,
+    /// Set whenever a button fires this frame, so the app can play a click.
+    pub pressed: std::cell::Cell<bool>,
 }
 
 pub const PANEL: Color = Color::new(0.08, 0.08, 0.1, 0.88);
@@ -18,7 +20,7 @@ pub const SLOT_BG: Color = Color::new(0.25, 0.25, 0.28, 0.9);
 
 impl Ui {
     pub fn new(tex: Texture2D) -> Self {
-        Ui { tex, s: 2.0, clicked: false, rclicked: false }
+        Ui { tex, s: 2.0, clicked: false, rclicked: false, pressed: std::cell::Cell::new(false) }
     }
 
     pub fn begin_frame(&mut self) {
@@ -70,7 +72,11 @@ impl Ui {
         let size = 10.0;
         let dims = measure_text(label, None, self.font(size), 1.0);
         self.text(label, r.x + (r.w - dims.width) / 2.0, r.y + r.h / 2.0 + dims.offset_y / 2.0 - b, size, col);
-        hov && self.clicked
+        let fired = hov && self.clicked;
+        if fired {
+            self.pressed.set(true);
+        }
+        fired
     }
 
     fn tile_src(tile: u16) -> Rect {

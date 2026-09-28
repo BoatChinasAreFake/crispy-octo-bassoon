@@ -11,6 +11,7 @@ mod noise;
 mod player;
 mod render;
 mod save;
+mod sound;
 mod texture;
 mod ui;
 mod world;
@@ -20,6 +21,7 @@ use game::{Controls, Game};
 use macroquad::prelude::*;
 use player::Input;
 use render::Renderer;
+use sound::{Audio, Sfx};
 use ui::Ui;
 
 const SPLASHES: &[&str] = &[
@@ -74,6 +76,7 @@ struct App {
     quit: bool,
     status: Option<(String, f32)>,
     fps: f32,
+    audio: Audio,
 }
 
 fn window_conf() -> Conf {
@@ -291,6 +294,23 @@ impl App {
 
         set_default_camera();
         self.draw_ui();
+        self.play_sounds(dt);
+    }
+
+    fn play_sounds(&mut self, dt: f32) {
+        let listener = self.game.player.eye();
+        if self.ui.pressed.replace(false) {
+            self.audio.play(Sfx::Click, None, listener);
+        }
+        // Keep the game world quiet while paused or in menus layered over it.
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Help { .. });
+        for (s, at) in std::mem::take(&mut self.game.sounds) {
+            if world_audible || s == Sfx::Craft {
+                self.audio.play(s, at, listener);
+            }
+        }
+        let in_game = !self.game.menu && self.screen != Screen::Dead;
+        self.audio.update_music(dt, in_game);
     }
 
     fn draw_ui(&mut self) {
@@ -508,6 +528,16 @@ impl App {
         y += bh + 5.0 * s;
         st.sensitivity = (st.sensitivity + 0.1 * row(&self.ui, format!("Mouse Sensitivity: {:.0}%", st.sensitivity * 100.0), y) as f32).clamp(0.1, 3.0);
         y += bh + 5.0 * s;
+        let vol = &mut self.audio.volume;
+        *vol = (*vol + 0.1 * row(&self.ui, format!("Sound Volume: {:.0}%", *vol * 100.0), y) as f32).clamp(0.0, 1.0);
+        *vol = (*vol * 10.0).round() / 10.0;
+        y += bh + 5.0 * s;
+        let music = if self.audio.music_on { "Music: ON (occasionally, tastefully)" } else { "Music: OFF" };
+        if self.ui.button(Rect::new(x, y, bw, bh), music, true) {
+            self.audio.music_on = !self.audio.music_on;
+        }
+        y += bh + 5.0 * s;
+        let st = &mut self.settings;
         let fs = if st.fullscreen { "Fullscreen: ON (F11)" } else { "Fullscreen: OFF (F11)" };
         if self.ui.button(Rect::new(x, y, bw, bh), fs, true) {
             self.settings.fullscreen = !self.settings.fullscreen;
@@ -692,6 +722,7 @@ impl App {
                             }
                         }
                         self.game.msg(format!("Crafted {}. Nobody knows how.", item_name(r.output.0)));
+                        self.game.sfx(Sfx::Craft, None);
                     }
                 }
             }
@@ -709,7 +740,7 @@ impl App {
     }
 }
 
-/// Headless-ish verification helper: `--screenshot out.png [--mode title|survival|creative] [--frames N]`.
+/// Headless-ish verification helper: `--screenshot out.png [--mode title|survival|creative|inventory|night|options] [--frames N]`.
 struct ShotArgs {
     path: String,
     mode: String,
@@ -737,8 +768,33 @@ fn parse_args() -> Option<ShotArgs> {
     })
 }
 
+/// The platform audio backend panics on its own thread when there's no sound device.
+/// Treat that as "no audio" instead of printing a scary backtrace and spamming errors.
+fn install_audio_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let name = std::thread::current().name().map(str::to_owned);
+        if name.is_none() {
+            if !sound::AUDIO_DEAD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("Minceraft: no usable audio device ({info}). Continuing in silence.");
+            }
+            return;
+        }
+        default(info)
+    }));
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--export-sounds") {
+        let dir = args.get(i + 1).map(String::as_str).unwrap_or("sounds");
+        match sound::export_wavs(std::path::Path::new(dir)) {
+            Ok(n) => println!("Wrote {n} sounds to {dir}/"),
+            Err(e) => eprintln!("Couldn't export sounds: {e}"),
+        }
+        return;
+    }
     let atlas = texture::build_atlas(1337);
     let renderer = {
         let gl = unsafe { get_internal_gl() };
@@ -746,6 +802,9 @@ async fn main() {
     };
     let tex = Texture2D::from_rgba8(texture::ATLAS as u16, texture::ATLAS as u16, &atlas);
     tex.set_filter(FilterMode::Nearest);
+
+    install_audio_panic_hook();
+    let audio = Audio::load().await;
 
     let shot = parse_args();
     let mut app = App {
@@ -761,6 +820,7 @@ async fn main() {
         quit: false,
         status: None,
         fps: 60.0,
+        audio,
     };
 
     if let Some(s) = &shot {
@@ -780,6 +840,10 @@ async fn main() {
                 if s.mode == "inventory" {
                     app.set_screen(Screen::Inventory);
                 }
+            }
+            "options" => {
+                app.game = Game::new(424242, true, true);
+                app.set_screen(Screen::Options { from_title: true });
             }
             _ => {
                 app.game = Game::new(424242, true, true);

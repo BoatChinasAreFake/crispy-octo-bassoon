@@ -8,6 +8,7 @@ use crate::noise::{hash2, Perlin, Rng};
 use crate::player::{Input, Player, MAX_HEALTH};
 use crate::render::{DynGeo, FrameParams, Pass, Renderer};
 use crate::save::SaveData;
+use crate::sound::{material, Sfx};
 use crate::texture::*;
 use crate::world::{Hit, World, CH, SEA};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
@@ -66,6 +67,11 @@ pub struct Game {
     stars: Vec<Vec3>,
     clouds: Perlin,
     pub stat_blocks_broken: u32,
+    /// Sound effects requested this frame (effect, world position if positional).
+    pub sounds: Vec<(Sfx, Option<Vec3>)>,
+    dig_tick: f32,
+    step_dist: f32,
+    was_in_water: bool,
 }
 
 impl Game {
@@ -111,6 +117,10 @@ impl Game {
             stars,
             clouds: Perlin::new(seed as u64 ^ 0xC10D),
             stat_blocks_broken: 0,
+            sounds: Vec::new(),
+            dig_tick: 0.0,
+            step_dist: 0.0,
+            was_in_water: false,
         }
     }
 
@@ -281,8 +291,10 @@ impl Game {
 
         let fall = self.player.update(dt, &c.input, &self.world, self.creative);
         if fall > 0.0 {
+            self.sfx(Sfx::Thud, None);
             self.hurt_player(fall, "hit the ground too hard (the ground is fine)");
         }
+        self.footsteps(dt);
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
@@ -292,6 +304,33 @@ impl Game {
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
         self.update_entities(dt);
+    }
+
+    pub fn sfx(&mut self, s: Sfx, at: Option<Vec3>) {
+        if !self.menu {
+            self.sounds.push((s, at));
+        }
+    }
+
+    fn footsteps(&mut self, dt: f32) {
+        let in_water = self.player.body.in_water;
+        if in_water && !self.was_in_water {
+            self.sfx(Sfx::Splash, None);
+        }
+        self.was_in_water = in_water;
+        let b = &self.player.body;
+        if !b.on_ground || in_water || self.player.flying {
+            return;
+        }
+        self.step_dist += Vec3::new(b.vel.x, 0.0, b.vel.z).length() * dt;
+        if self.step_dist > 1.9 {
+            self.step_dist = 0.0;
+            let feet = b.pos - Vec3::Y * 0.2;
+            let under = self.world.get(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
+            if is_solid(under) {
+                self.sfx(Sfx::Step(material(under)), None);
+            }
+        }
     }
 
     fn reach(&self) -> f32 {
@@ -336,6 +375,8 @@ impl Game {
                     let dmg = attack_damage(held) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
                     let from = self.player.body.pos;
                     self.mobs[i].damage(dmg, from);
+                    let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
+                    self.sfx(if kind == MobKind::Oinker { Sfx::Oink } else { Sfx::MobHurt }, Some(at));
                     self.attack_cd = 0.35;
                 }
             }
@@ -357,6 +398,11 @@ impl Game {
                         let progress = if t <= 0.0 { 1.0 } else { progress + dt / t };
                         if self.rng.chance(dt * 10.0) {
                             self.block_particles(pos, 1);
+                        }
+                        self.dig_tick -= dt;
+                        if self.dig_tick <= 0.0 {
+                            self.dig_tick = 0.25;
+                            self.sfx(Sfx::Hit(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
                         }
                         if progress >= 1.0 {
                             let (_, drops) = break_time(id, held);
@@ -411,6 +457,7 @@ impl Game {
                 if !self.creative {
                     self.inv.consume_held();
                 }
+                self.sfx(Sfx::Eat, None);
                 self.msg(if held == GOO { "You ate Groaner Goo. You feel... gooey." } else { "*nom* Oinkchop acquired (internally)." });
                 return;
             }
@@ -421,6 +468,7 @@ impl Game {
         if hit_id == TNT && (held == TORCH || held == AIR) {
             self.world.set_v(hit_pos, AIR);
             self.tnts.push(PrimedTnt { pos: hit_pos.as_vec3(), fuse: 3.0 });
+            self.sfx(Sfx::Hiss, Some(hit_pos.as_vec3() + Vec3::splat(0.5)));
             self.msg("Hisss... wait, that's the TNT. RUN.");
             return;
         }
@@ -450,6 +498,7 @@ impl Game {
             }
         }
         self.world.set_v(place, held);
+        self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
         if !self.creative {
             self.inv.consume_held();
@@ -461,8 +510,9 @@ impl Game {
         if !targetable(id) || block(id).hardness < 0.0 {
             return;
         }
-        self.world.set_v(pos, AIR);
         self.block_particles(pos, 14);
+        self.world.set_v(pos, AIR);
+        self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
         self.stat_blocks_broken += 1;
         if drops && !self.creative {
             let d = block(id).drop;
@@ -496,6 +546,7 @@ impl Game {
     }
 
     fn give(&mut self, item: u8, n: u8) {
+        self.sfx(Sfx::Pop, None);
         if self.inv.add(item, n) > 0 {
             self.msg("Inventory full. The item has been respectfully ignored.");
         }
@@ -540,6 +591,7 @@ impl Game {
         }
         self.player.health -= amount;
         self.player.hurt = 0.5;
+        self.sfx(Sfx::Hurt, None);
         if self.player.health <= 0.0 {
             self.player.health = 0.0;
             self.dead = Some(format!("Stove {cause}"));
@@ -547,6 +599,7 @@ impl Game {
     }
 
     pub fn explode(&mut self, at: Vec3, r: f32, cause: &str) {
+        self.sfx(Sfx::Explode, Some(at));
         let c = ivec3(at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
         let ri = r.ceil() as i32;
         for dy in -ri..=ri {
@@ -599,12 +652,28 @@ impl Game {
         let visible = !self.creative;
         let daylight = self.daylight();
         let mut events = Vec::new();
+        let mut noises = Vec::new();
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
                 continue;
             }
+            let fuse_before = m.fuse;
             events.extend(m.update(dt, &self.world, ppos, visible, daylight, &mut self.rng));
+            if fuse_before == 0.0 && m.fuse > 0.0 {
+                noises.push((Sfx::Hiss, m.body.pos));
+            }
+            // Idle chatter.
+            if self.rng.chance(dt * 0.1) && m.body.pos.distance(ppos) < 20.0 {
+                match m.kind {
+                    MobKind::Oinker => noises.push((Sfx::Oink, m.body.pos)),
+                    MobKind::Groaner => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::Hisser => {}
+                }
+            }
+        }
+        for (s, at) in noises {
+            self.sfx(s, Some(at));
         }
         // Keep mobs from stacking inside each other.
         for i in 0..self.mobs.len() {

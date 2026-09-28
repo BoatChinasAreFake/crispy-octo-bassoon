@@ -6,6 +6,16 @@ edition = "2024"
 [dependencies]
 macroquad = { version = "0.4", default-features = false }
 
+[features]
+default = ["sound"]
+# Real audio output (ALSA on Linux, WASAPI on Windows, CoreAudio on macOS).
+# Build with --no-default-features to get a silent game without the ALSA dev package.
+sound = ["macroquad/audio", "dep:quad-alsa-sys"]
+
+# Already pulled in by macroquad's audio; used directly only to check for a sound card.
+[target.'cfg(target_os = "linux")'.dependencies]
+quad-alsa-sys = { version = "0.3", optional = true }
+
 # Keep debug builds playable: the world generator and mesher are hot loops.
 [profile.dev]
 opt-level = 1

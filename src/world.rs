@@ -280,7 +280,9 @@ impl World {
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).saturating_sub(1).clamp(1, 6);
         for _ in 0..workers {
             let (rx, tx, g) = (req_rx.clone(), res_tx.clone(), generator.clone());
-            std::thread::spawn(move || loop {
+            // Named so the panic hook can tell them apart from the (unnamed) audio thread.
+            let builder = std::thread::Builder::new().name("chunkgen".into());
+            let _ = builder.spawn(move || loop {
                 let job = rx.lock().ok().and_then(|r| r.recv().ok());
                 let Some((cx, cz)) = job else { return };
                 if tx.send((cx, cz, g.generate(cx, cz))).is_err() {
