@@ -2,6 +2,7 @@
 
 use crate::block::*;
 use crate::noise::{hash2, hash3, Perlin};
+use crate::containers::{is_container, Container};
 use crate::farming::{is_farmland, Soil};
 use crate::palette::PalettedBlocks;
 use macroquad::math::{ivec3, IVec3, Vec3};
@@ -348,6 +349,8 @@ pub struct World {
     pending: HashSet<(i32, i32)>,
     /// Soil records for every tilled block (see farming.rs); kept in step with the blocks.
     pub farm: HashMap<IVec3, Soil>,
+    /// What's inside every chest and furnace (see containers.rs); kept in step with the blocks.
+    pub containers: HashMap<IVec3, Container>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -381,6 +384,7 @@ impl World {
             mods: HashMap::new(),
             dirty: HashSet::new(),
             farm: HashMap::new(),
+            containers: HashMap::new(),
             pending: HashSet::new(),
             edit_log: Vec::new(),
             log_edits: false,
@@ -543,6 +547,13 @@ impl World {
             self.farm.entry(p).or_default();
         } else if is_farmland(old) {
             self.farm.remove(&p);
+        }
+        // Placing a chest or furnace makes it an empty inventory; breaking one
+        // throws it away (spill it first). A furnace lighting up keeps its own.
+        if is_container(id) {
+            self.containers.entry(p).or_insert_with(|| Container::for_block(id));
+        } else if is_container(old) {
+            self.containers.remove(&p);
         }
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);

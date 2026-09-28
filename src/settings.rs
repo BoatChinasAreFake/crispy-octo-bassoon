@@ -1,0 +1,153 @@
+//! Options that outlive the game: `settings.txt`, one `key=value` per line.
+//!
+//! Hand-editable on purpose. Unknown keys are ignored, bad values fall back to
+//! the defaults, and everything is clamped to what the Options screen allows,
+//! so a mangled file can't do worse than reset a slider.
+
+use std::path::{Path, PathBuf};
+
+pub const FILE: &str = "settings.txt";
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Settings {
+    pub render_distance: i32,
+    pub fov: f32,
+    pub sensitivity: f32,
+    pub fullscreen: bool,
+    pub volume: f32,
+    pub music_on: bool,
+    /// Last name and server used on the Multiplayer screen (empty: pick a fresh name).
+    pub mp_name: String,
+    pub mp_addr: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            render_distance: 8,
+            fov: 72.0,
+            sensitivity: 1.0,
+            fullscreen: false,
+            volume: 0.8,
+            music_on: true,
+            mp_name: String::new(),
+            mp_addr: "127.0.0.1".into(),
+        }
+    }
+}
+
+pub fn path() -> PathBuf {
+    PathBuf::from(FILE)
+}
+
+/// One line of text, safe to write back out: no newlines or control characters.
+fn clean(s: &str, max: usize) -> String {
+    s.chars().filter(|c| !c.is_control()).take(max).collect::<String>().trim().to_string()
+}
+
+impl Settings {
+    pub fn to_text(&self) -> String {
+        format!(
+            "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\n",
+            self.render_distance,
+            self.fov,
+            self.sensitivity,
+            self.fullscreen,
+            self.volume,
+            self.music_on,
+            clean(&self.mp_name, 16),
+            clean(&self.mp_addr, 128),
+        )
+    }
+
+    pub fn from_text(text: &str) -> Settings {
+        let mut s = Settings::default();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('#') {
+                continue;
+            }
+            let Some((k, v)) = line.split_once('=') else { continue };
+            let v = v.trim();
+            let num = |d: f32| v.parse::<f32>().ok().filter(|x| x.is_finite()).unwrap_or(d);
+            let flag = |d: bool| match v {
+                "true" | "on" | "yes" | "1" => true,
+                "false" | "off" | "no" | "0" => false,
+                _ => d,
+            };
+            match k.trim() {
+                "render_distance" => s.render_distance = v.parse().unwrap_or(s.render_distance),
+                "fov" => s.fov = num(s.fov),
+                "sensitivity" => s.sensitivity = num(s.sensitivity),
+                "fullscreen" => s.fullscreen = flag(s.fullscreen),
+                "volume" => s.volume = num(s.volume),
+                "music" => s.music_on = flag(s.music_on),
+                "name" => s.mp_name = clean(v, 16),
+                "server" => s.mp_addr = clean(v, 128),
+                _ => {}
+            }
+        }
+        s.render_distance = s.render_distance.clamp(3, 16);
+        s.fov = s.fov.clamp(50.0, 110.0);
+        s.sensitivity = s.sensitivity.clamp(0.1, 3.0);
+        s.volume = s.volume.clamp(0.0, 1.0);
+        if s.mp_addr.is_empty() {
+            s.mp_addr = Settings::default().mp_addr;
+        }
+        s
+    }
+
+    /// Missing or unreadable: the defaults.
+    pub fn load(path: &Path) -> Settings {
+        std::fs::read_to_string(path).map(|t| Settings::from_text(&t)).unwrap_or_default()
+    }
+
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, self.to_text())?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_round_trip() {
+        let s = Settings {
+            render_distance: 12,
+            fov: 95.0,
+            sensitivity: 1.7,
+            fullscreen: true,
+            volume: 0.3,
+            music_on: false,
+            mp_name: "Stove42".into(),
+            mp_addr: "[::1]:25565".into(),
+        };
+        assert_eq!(Settings::from_text(&s.to_text()), s);
+        let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(FILE);
+        s.save(&p).unwrap();
+        assert_eq!(Settings::load(&p), s);
+        assert_eq!(Settings::load(&dir.join("nope.txt")), Settings::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nonsense_is_tamed() {
+        let s = Settings::from_text("render_distance=9000\nfov=NaN\nvolume=-3\nmusic=perhaps\nname=a\u{7}b\nserver=\n= \ngarbage\nsensitivity=2");
+        assert_eq!(s.render_distance, 16);
+        assert_eq!(s.fov, 72.0);
+        assert_eq!(s.volume, 0.0);
+        assert!(s.music_on);
+        assert_eq!(s.mp_name, "ab");
+        assert_eq!(s.mp_addr, "127.0.0.1");
+        assert_eq!(s.sensitivity, 2.0);
+        // A name can't smuggle in extra lines.
+        let evil = Settings { mp_name: "x\nfullscreen=true".into(), ..Settings::default() };
+        assert!(!Settings::from_text(&evil.to_text()).fullscreen);
+    }
+}

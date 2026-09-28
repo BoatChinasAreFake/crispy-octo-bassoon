@@ -145,6 +145,23 @@ pub const T_FISH_CHIPS: u16 = 157;
 pub const T_STEW: u16 = 158;
 pub const T_WORM: u16 = 159;
 pub const T_BOBBER: u16 = 160;
+pub const T_CHEST_TOP: u16 = 161;
+pub const T_CHEST_SIDE: u16 = 162;
+pub const T_FURNACE_TOP: u16 = 163;
+pub const T_FURNACE_SIDE: u16 = 164;
+pub const T_FURNACE_LIT: u16 = 165;
+pub const T_COOKED_CHOP: u16 = 166;
+pub const T_COOKED_MUTTON: u16 = 167;
+pub const T_COOKED_CLUCKETS: u16 = 168;
+pub const T_STEAK: u16 = 169;
+pub const T_COOKED_COD: u16 = 170;
+pub const T_COOKED_SALMON: u16 = 171;
+pub const T_BAKED_POTATO: u16 = 172;
+pub const T_COOKED_PUFFER: u16 = 173;
+pub const T_COOKED_BOOT: u16 = 174;
+/// UI: the furnace's flame and progress arrow.
+pub const T_FLAME: u16 = 175;
+pub const T_ARROW_UI: u16 = 176;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -223,6 +240,11 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("pointy_stick", T_ARROW),
     ("string", T_STRING),
     ("bow", T_BOW),
+    ("chest_top", T_CHEST_TOP),
+    ("chest_side", T_CHEST_SIDE),
+    ("furnace_top", T_FURNACE_TOP),
+    ("furnace_side", T_FURNACE_SIDE),
+    ("furnace_lit", T_FURNACE_LIT),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -1606,6 +1628,55 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.sprite(T_STEW, &BOWL, &[('#', rgb(80, 55, 25)), ('w', rgb(140, 100, 50)), ('s', rgb(120, 80, 60)), ('m', rgb(200, 40, 35)), ('r', rgb(220, 30, 30))]);
     a.sprite(T_WORM, &WORM, &[('p', rgb(230, 130, 140)), ('k', rgb(40, 20, 20))]);
     a.each(T_BOBBER, |_, y, _, _| if y < 8 { rgb(220, 30, 30) } else { rgb(245, 245, 245) });
+
+    // ---- Chests, furnaces and cooking
+    a.each(T_CHEST_SIDE, |x, y, r, _| {
+        let band = y == 0 || y == 15 || y == 5 || y == 6 || x == 0 || x == 15;
+        let latch = (6..10).contains(&x) && (4..9).contains(&y);
+        if latch {
+            if (7..9).contains(&x) && y == 6 { rgb(40, 40, 40) } else { shade(rgb(200, 200, 205), r.range(0.9, 1.05)) }
+        } else if band {
+            shade(rgb(90, 60, 30), r.range(0.9, 1.05))
+        } else {
+            shade(rgb(165, 115, 60), r.range(0.88, 1.06) * if y % 4 == 0 { 0.9 } else { 1.0 })
+        }
+    });
+    a.each(T_CHEST_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        if edge { shade(rgb(90, 60, 30), r.range(0.9, 1.05)) } else { shade(rgb(165, 115, 60), r.range(0.88, 1.06) * if x % 5 == 0 { 0.9 } else { 1.0 }) }
+    });
+    a.copy(T_STONE_BRICKS, T_FURNACE_TOP);
+    a.copy(T_COBBLE, T_FURNACE_SIDE);
+    a.copy(T_COBBLE, T_FURNACE_LIT);
+    for y in 8..14 {
+        for x in 3..13 {
+            let edge = x == 3 || x == 12 || y == 8 || y == 13;
+            a.set(T_FURNACE_SIDE, x, y, if edge { rgb(60, 60, 60) } else { rgb(25, 25, 25) });
+            let fire = if edge { rgb(60, 60, 60) } else if (x + y) % 3 == 0 { rgb(255, 230, 120) } else if y > 10 { rgb(240, 120, 20) } else { rgb(250, 170, 40) };
+            a.set(T_FURNACE_LIT, x, y, fire);
+        }
+    }
+    let cooked = |raw: Rgba| shade([raw[0] / 2 + 70, raw[1] / 2 + 40, raw[2] / 3 + 20, 255], 1.0);
+    a.sprite(T_COOKED_CHOP, &PORK, &[('#', rgb(60, 30, 15)), ('p', cooked(rgb(230, 110, 110))), ('P', cooked(rgb(245, 150, 150))), ('w', rgb(230, 200, 160)), ('b', rgb(230, 225, 200))]);
+    a.sprite(T_COOKED_MUTTON, &PORK, &[('#', rgb(50, 25, 10)), ('p', cooked(rgb(200, 60, 60))), ('P', cooked(rgb(225, 90, 85))), ('w', rgb(220, 190, 150)), ('b', rgb(230, 225, 200))]);
+    a.sprite(T_COOKED_CLUCKETS, &DRUMSTICK, &[('#', rgb(90, 50, 20)), ('p', rgb(200, 130, 60)), ('P', rgb(225, 160, 80)), ('w', rgb(245, 200, 130)), ('b', rgb(235, 230, 210))]);
+    a.sprite(T_STEAK, &PORK, &[('#', rgb(40, 15, 5)), ('p', rgb(110, 60, 30)), ('P', rgb(140, 80, 40)), ('w', rgb(200, 160, 120)), ('b', rgb(230, 225, 200))]);
+    let fish = |body: Rgba, fin: Rgba, belly: Rgba| [('#', shade(body, 0.45)), ('f', body), ('F', fin), ('b', belly), ('w', rgb(255, 255, 255)), ('k', rgb(10, 10, 10))];
+    a.sprite(T_COOKED_COD, &FISH, &fish(rgb(210, 170, 100), rgb(170, 130, 70), rgb(240, 210, 160)));
+    a.sprite(T_COOKED_SALMON, &FISH, &fish(rgb(220, 120, 70), rgb(170, 80, 50), rgb(245, 180, 130)));
+    a.sprite(T_COOKED_PUFFER, &FISH, &fish(rgb(200, 150, 50), rgb(160, 110, 30), rgb(230, 200, 120)));
+    a.sprite(T_BAKED_POTATO, &SPUD, &[('#', rgb(70, 40, 15)), ('b', rgb(215, 160, 80)), ('d', rgb(170, 110, 50))]);
+    a.sprite(T_COOKED_BOOT, &BOOT, &[('#', rgb(20, 10, 5)), ('b', rgb(70, 40, 20)), ('d', rgb(45, 25, 10)), ('w', rgb(120, 120, 120))]);
+    a.each(T_FLAME, |x, y, _, _| {
+        let cx = (x as f32 - 7.5).abs();
+        let top = 3.0 + cx * 1.6;
+        if (y as f32) < top || cx > 6.0 { [0, 0, 0, 0] } else if cx < 2.5 && y > 9 { rgb(255, 240, 150) } else { rgb(250, 140, 30) }
+    });
+    a.each(T_ARROW_UI, |x, y, _, _| {
+        let shaft = (6..10).contains(&y) && x < 10;
+        let head = x >= 10 && (y as i32 - 7).unsigned_abs() as usize + x <= 17;
+        if shaft || head { rgb(255, 255, 255) } else { [0, 0, 0, 0] }
+    });
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));

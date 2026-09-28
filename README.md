@@ -29,7 +29,7 @@ Run the tests with `cargo test --release`.
 - **Dynamic lighting.** Torches and Glowrock light the area around them, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
-- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 48 crafting recipes, food, beds, a bow, farming, fishing, death and respawn.
+- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 50 crafting recipes, food, cooking, chests, beds, a bow, farming, fishing, death and respawn.
 - **Creative mode.** Flight, instant breaking, infinite blocks, pick-block and a full item palette.
 - **Mobs** (legally distinct):
   - **Oinker**: wanders around, runs when hit, drops Raw Oinkchop.
@@ -59,6 +59,7 @@ Run the tests with `cargo test --release`.
 
   Meanwhile weeds sprout on bare farmland and steal nutrients, Clucksters peck at seedlings unless a **Scarecrow** is nearby, jumping on farmland tramples it, and dry, unused farmland turns back into dirt. A **Soil Probe** explains all of it in one long sentence. Wheat makes **Bread** and **Hay Bales** (which soften falls).
 - **Fishing (also over-engineered).** Cast a **Fishing Stick** and wait. Fish nibble first (reel in then and you scare them off), then really bite, and you get a moment to reel in. Big fish start a tug-of-war: hold right-click to reel, but ease off before the line tension snaps it. What you catch depends on the biome, the time of day (dawn and dusk are best), the water's size and depth (puddles give boots), bait (**Wiggly Worms**, dug up from dirt) and your **Angler level**. Catches include cod, salmon, tropical fish, pufferfish (don't eat it), junk, treasure, and one legendary fish. The **Fishing Log** in the pause menu keeps count and records the biggest.
+- **Chests and furnaces.** A **Chest (Latches on Every Side)** (8 planks) holds 27 stacks. A **Furnace** (8 cobblestone) has an input, a fuel slot and a take-only output. It cooks one item every 8 seconds while it has fuel, and it glows while lit. It turns raw meat and fish into cooked versions, potatoes into Baked Potatoes, sand into glass, cobblestone into stone, and logs into (legally distinct) coal. Coal, wood, sticks, hay and wooden tools all burn. Cooking a Pufferfish only halves the damage, and a Cooked Boot is still a boot. Right-click to open either one (sneak to place blocks against it), and shift-click to move whole stacks. Furnaces keep cooking while you're away, as long as their chunk is loaded. Breaking either one hands you what was inside. Everything is saved with the world.
 - **More blocks:** Sandstone (under deserts), Stone Bricks, Mossy Cobblestun, Hay Bale, Bookshelf, Lantern, Mushroom (in forests; two make a Suspicious Stew), Scarecrow and Weeds.
 - **Advancements.** 40 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
@@ -68,6 +69,7 @@ Run the tests with `cargo test --release`.
 - **Code mods (scripting).** Mods can also include sandboxed [Rhai](https://rhai.rs) scripts, which react to events (chat commands, breaking and placing blocks, item use, joins, mob deaths, ticks) and call a game API (blocks, items, health, teleport, explosions, mobs, time, messages). Scripts run on the machine that owns the world, including dedicated servers. See **[SCRIPTING.md](SCRIPTING.md)** and `example-mods/commands`.
 - **Multiple worlds.** **Singleplayer** on the title screen opens a world list with each world's name, mode, seed, when it was last played, and size. You can play, create (with a name, game mode and optional seed; any text works as a seed), rename or delete worlds. Each world is its own folder, `saves/<world>/`. Only your edits are stored, and the terrain regenerates from the seed. A save from before world slots (`saves/world.mncr`) is moved in automatically as "My World".
 - First-person hand and held item, third-person view, block-breaking cracks, particles, screen shake, a panoramic title screen with splash texts, and options for render distance, FOV, sensitivity and fullscreen.
+- **Saved settings.** Render distance, FOV, sensitivity, fullscreen, volume, music, and your multiplayer name and last server are kept in `settings.txt` next to the game. It's plain `key=value` text: edit it by hand if you like, and anything it can't make sense of falls back to the default.
 
 ## Controls
 
@@ -79,7 +81,7 @@ Run the tests with `cargo test --release`.
 | Shift | Sneak / fly down |
 | Ctrl or R | Sprint |
 | Left mouse | Mine / attack |
-| Right mouse | Place block / eat / light TNT / fire a bow |
+| Right mouse | Place block / eat / light TNT / fire a bow / open a chest or furnace |
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |
@@ -152,13 +154,14 @@ On a cloud server, allow TCP port 25565 in its firewall or security group.
   - Placing, planting, crafting, shooting, fishing and fertilising all need the items in the ledger. Hoes, rods and probes must be owned, and a sword only hits harder if you really have it.
   - Mining can't go faster than the tools you really own allow.
   - Every few seconds each player's game compares counts with the host. If a modified client has conjured items, the host's numbers win.
+  - Chests and furnaces live on the host. Players see a copy of whatever they have open, and every move in or out is checked against both the container and the ledger. You can't put in what you don't own, take what isn't there, or reach into a chest from across the map. Whoever breaks a container gets its contents from the host.
   - Creative worlds skip all of this, since everything is free there anyway.
 - **Saving and leaving:** only the host or server saves. Players' inventories and positions are not saved on the server (a player who rejoins starts fresh). If the host leaves, everyone returns to the title screen.
 - **Addresses:** the host listens on IPv4 and, where available, IPv6. Addresses can be `IP`, `IP:port`, `[IPv6]:port` or a hostname like `play.example.com`.
 
 ## Getting started in survival
 
-Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then a **Wooden Pickaxe**. From there, stone gives you a stone pickaxe, iron gives you an iron pickaxe, and iron is what you need to mine **Dimonds**. Coal plus a stick makes torches. Crafting works anywhere, so the crafting table is purely decorative.
+Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then a **Wooden Pickaxe**. From there, stone gives you a stone pickaxe, iron gives you an iron pickaxe, and iron is what you need to mine **Dimonds**. Coal plus a stick makes torches, and eight cobblestone make a **Furnace**, which turns raw food into much better food. Crafting works anywhere, so the crafting table is purely decorative.
 
 ## Code map
 
@@ -176,6 +179,8 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/mods.rs` | Mod loader (`mod.txt` parser, textures, mod packs) |
 | `src/scripting.rs` | Script mods: sandboxed Rhai engine, events and game API |
 | `src/inventory.rs` | Inventory and crafting |
+| `src/containers.rs` | Chests and furnaces: contents, cooking, host-checked moves |
+| `src/settings.rs` | `settings.txt` |
 | `src/save.rs` | Binary save format |
 | `src/net.rs` | Network protocol and non-blocking TCP |
 | `src/multiplayer.rs` | Host and client sync logic |
@@ -185,6 +190,6 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase|worlds|createform|newworld [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
 
 Not affiliated with any block-game company.

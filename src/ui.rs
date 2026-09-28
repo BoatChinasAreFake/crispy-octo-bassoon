@@ -100,6 +100,26 @@ impl Ui {
         draw_texture_ex(&self.tex, x, y, color, DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Self::tile_src(tile)), ..Default::default() });
     }
 
+    #[allow(clippy::too_many_arguments)]
+    /// Part of a tile: `fx` of it from the left (`up`: `fx` of it from the bottom). For gauges.
+    pub fn tile_part(&self, tile: u16, x: f32, y: f32, size: f32, fx: f32, up: bool, color: Color) {
+        let f = fx.clamp(0.0, 1.0);
+        if f <= 0.0 {
+            return;
+        }
+        let mut src = Self::tile_src(tile);
+        let (dx, dy, dw, dh) = if up {
+            let cut = src.h * (1.0 - f);
+            src.y += cut;
+            src.h -= cut;
+            (x, y + size * (1.0 - f), size, size * f)
+        } else {
+            src.w *= f;
+            (x, y, size * f, size)
+        };
+        draw_texture_ex(&self.tex, dx, dy, color, DrawTextureParams { dest_size: Some(vec2(dw, dh)), source: Some(src), ..Default::default() });
+    }
+
     /// Item icon: blocks become a little isometric cube, everything else a flat sprite.
     pub fn icon(&self, item: Id, x: f32, y: f32, size: f32) {
         if is_block_item(item) && block(item).model == Model::Cube {
