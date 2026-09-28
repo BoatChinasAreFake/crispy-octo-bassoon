@@ -3,7 +3,7 @@
 
 use crate::noise::{Perlin, Rng};
 
-/// 64x64 tiles: the base game uses the first 96, mods get the rest.
+/// 64x64 tiles: the base game keeps the first 256, mods get the rest.
 pub const ATLAS: usize = 1024;
 pub const TILE: usize = 16;
 pub const TILES_PER_ROW: u16 = (ATLAS / TILE) as u16;
@@ -89,9 +89,28 @@ pub const T_FLUFF_SKIN: u16 = 87;
 pub const T_STARER_SKIN: u16 = 88;
 pub const T_STARER_FACE: u16 = 89;
 pub const T_TROPHY: u16 = 90;
+pub const T_CLUCK_BODY: u16 = 96;
+pub const T_CLUCK_FACE: u16 = 97;
+pub const T_CLUCK_LEG: u16 = 98;
+pub const T_MOO_SKIN: u16 = 99;
+pub const T_MOO_FACE: u16 = 100;
+pub const T_BONE: u16 = 101;
+pub const T_RATTLER_FACE: u16 = 102;
+pub const T_WEB_SKIN: u16 = 103;
+pub const T_WEB_FACE: u16 = 104;
+pub const T_BLOOP: u16 = 105;
+pub const T_BLOOP_FACE: u16 = 106;
+pub const T_FEATHER: u16 = 107;
+pub const T_CLUCKETS: u16 = 108;
+pub const T_MOO_STEAK: u16 = 109;
+pub const T_BONE_ITEM: u16 = 110;
+pub const T_ARROW: u16 = 111;
+pub const T_STRING: u16 = 112;
+pub const T_BOW: u16 = 113;
 
-/// Mod textures are allocated from here to the end of the atlas.
-pub const FIRST_MOD_TILE: u16 = 96;
+/// Mod textures are allocated from here to the end of the atlas (the base game
+/// keeps the first 256 tiles; mods look textures up by name, so this can move).
+pub const FIRST_MOD_TILE: u16 = 256;
 
 /// Names mods can use to refer to built-in textures.
 pub const BASE_TEXTURES: &[(&str, u16)] = &[
@@ -158,6 +177,13 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("golden_oinkchop", T_GOLD_CHOP),
     ("stare_pearl", T_PEARL),
     ("mutton", T_MUTTON),
+    ("feather", T_FEATHER),
+    ("cluckets", T_CLUCKETS),
+    ("moo_steak", T_MOO_STEAK),
+    ("bone", T_BONE_ITEM),
+    ("pointy_stick", T_ARROW),
+    ("string", T_STRING),
+    ("bow", T_BOW),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -561,6 +587,120 @@ const JACK_FACE: [&str; 16] = [
     "................",
 ];
 
+const FEATHER: [&str; 16] = [
+    "................",
+    "............ww..",
+    "...........wWw..",
+    "..........wWww..",
+    ".........wWwwg..",
+    "........wWwwg...",
+    ".......wWwwg....",
+    "......wWwwg.....",
+    ".....wWwwg......",
+    "....wWwwg.......",
+    "....wWwg........",
+    "...wwgg.........",
+    "..#g............",
+    ".#..............",
+    "#...............",
+    "................",
+];
+
+const DRUMSTICK: [&str; 16] = [
+    "................",
+    "................",
+    ".....######.....",
+    "....#pppPPp#....",
+    "...#pPPPPPPp#...",
+    "...#pPPwPPPp#...",
+    "...#pPPPPPPp#...",
+    "....#pPPPPp#....",
+    ".....#pppp#.....",
+    "......#pp#......",
+    ".......#bb#.....",
+    "........#bb#....",
+    ".........bbbb...",
+    "........bb..bb..",
+    ".........b...b..",
+    "................",
+];
+
+const BONE: [&str; 16] = [
+    "................",
+    "..##............",
+    ".#ww#...........",
+    ".#wwwd..........",
+    "..#wwwd.........",
+    "...dwwwd........",
+    "....dwwwd.......",
+    ".....dwwwd......",
+    "......dwwwd.....",
+    ".......dwwwd....",
+    "........dwwwd...",
+    ".........dwww#..",
+    "..........wwww#.",
+    "...........#ww#.",
+    "............##..",
+    "................",
+];
+
+const POINTY_STICK: [&str; 16] = [
+    "................",
+    "............sss.",
+    "............sSs.",
+    "...........#sss.",
+    "..........#o#...",
+    ".........#o#....",
+    "........#o#.....",
+    ".......#o#......",
+    "......#o#.......",
+    ".....#o#........",
+    "..ff#o#.........",
+    ".fffo#..........",
+    "..fff...........",
+    ".f.ff...........",
+    "................",
+    "................",
+];
+
+const STRING: [&str; 16] = [
+    "................",
+    "................",
+    "..........ww....",
+    "........ww..w...",
+    ".......w.....w..",
+    "......w.......w.",
+    ".....w..........",
+    "....w...........",
+    "....w...........",
+    ".....w..........",
+    "......ww........",
+    "........w.......",
+    ".........w......",
+    "..........w.....",
+    "...........w....",
+    "................",
+];
+
+const BOW: [&str; 16] = [
+    "................",
+    "..........###s..",
+    "........##oo#s..",
+    ".......#oo##.s..",
+    "......#o#....s..",
+    ".....#o#.....s..",
+    ".....#o#.....s..",
+    "....#o#......s..",
+    "....#o#......s..",
+    ".....#o#.....s..",
+    ".....#o#.....s..",
+    "......#o#....s..",
+    ".......#oo##.s..",
+    "........##oo#s..",
+    "..........###s..",
+    "................",
+];
+
 pub fn build_atlas(seed: u64) -> Vec<u8> {
     let mut a = Atlas { px: vec![0u8; ATLAS * ATLAS * 4], rng: Rng::new(seed), perlin: Perlin::new(seed) };
 
@@ -961,6 +1101,83 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let c = if x == 3 || x == 12 { rgb(250, 200, 255) } else { rgb(200, 80, 240) };
         a.set(T_STARER_FACE, x, 8, c);
     }
+
+    // ---- The "More Mobs" update
+    a.each(T_CLUCK_BODY, |x, y, r, _| shade(rgb(245, 245, 240), r.range(0.9, 1.03) * if (x + 2 * y) % 5 == 0 { 0.93 } else { 1.0 }));
+    a.copy(T_CLUCK_BODY, T_CLUCK_FACE);
+    for (x, y, c) in [(3, 4, rgb(20, 20, 20)), (12, 4, rgb(20, 20, 20))] {
+        a.set(T_CLUCK_FACE, x, y, c);
+        a.set(T_CLUCK_FACE, x, y + 1, c);
+    }
+    for y in 6..10 {
+        for x in 5..11 {
+            a.set(T_CLUCK_FACE, x, y, if y < 8 { rgb(240, 170, 40) } else { rgb(220, 140, 30) }); // beak
+        }
+    }
+    for y in 10..14 {
+        for x in 6..10 {
+            a.set(T_CLUCK_FACE, x, y, rgb(210, 30, 30)); // wattle
+        }
+    }
+    a.speckle(T_CLUCK_LEG, rgb(235, 180, 50), 0.08);
+
+    let cow_pts = a.random_points(7);
+    a.each(T_MOO_SKIN, |x, y, r, _| {
+        let (id, _) = Atlas::cells(&cow_pts, x, y);
+        shade(if id % 3 == 0 { rgb(35, 30, 30) } else { rgb(240, 240, 235) }, r.range(0.92, 1.04))
+    });
+    a.copy(T_MOO_SKIN, T_MOO_FACE);
+    for (x, c) in [(3usize, rgb(20, 20, 20)), (12, rgb(20, 20, 20))] {
+        a.set(T_MOO_FACE, x, 5, c);
+        a.set(T_MOO_FACE, x, 6, c);
+    }
+    for y in 9..15 {
+        for x in 3..13 {
+            let nostril = y == 11 && (x == 5 || x == 10);
+            a.set(T_MOO_FACE, x, y, if nostril { rgb(90, 50, 50) } else { rgb(230, 170, 160) }); // muzzle
+        }
+    }
+
+    a.each(T_BONE, |x, y, r, _| shade(rgb(215, 215, 205), r.range(0.9, 1.05) * if (x * 3 + y) % 7 == 0 { 0.85 } else { 1.0 }));
+    a.copy(T_BONE, T_RATTLER_FACE);
+    for (x0, y0) in [(2usize, 5usize), (10, 5)] {
+        for y in y0..y0 + 3 {
+            for x in x0..x0 + 4 {
+                a.set(T_RATTLER_FACE, x, y, rgb(25, 25, 25)); // eye sockets
+            }
+        }
+    }
+    a.set(T_RATTLER_FACE, 7, 9, rgb(40, 40, 40));
+    a.set(T_RATTLER_FACE, 8, 9, rgb(40, 40, 40));
+    for x in (3..13).step_by(2) {
+        a.set(T_RATTLER_FACE, x, 12, rgb(40, 40, 40)); // teeth gaps
+    }
+
+    a.each(T_WEB_SKIN, |_, _, r, _| {
+        let v = r.f32();
+        if v < 0.15 { rgb(70, 55, 45) } else if v < 0.6 { rgb(45, 35, 30) } else { rgb(30, 25, 22) }
+    });
+    a.copy(T_WEB_SKIN, T_WEB_FACE);
+    for (x, y) in [(3usize, 6usize), (4, 6), (11, 6), (12, 6), (5, 4), (10, 4), (6, 8), (9, 8)] {
+        a.set(T_WEB_FACE, x, y, rgb(220, 20, 20)); // so many eyes
+    }
+
+    a.each(T_BLOOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if edge { rgb(60, 150, 60) } else { rgb(110, 200, 100) }, r.range(0.94, 1.05))
+    });
+    a.copy(T_BLOOP, T_BLOOP_FACE);
+    for (x, y) in [(3usize, 5usize), (4, 5), (3, 6), (4, 6), (11, 5), (12, 5), (11, 6), (12, 6), (7, 10), (8, 10)] {
+        a.set(T_BLOOP_FACE, x, y, rgb(25, 60, 25));
+    }
+
+    a.sprite(T_FEATHER, &FEATHER, &[('#', rgb(90, 90, 90)), ('w', rgb(245, 245, 245)), ('W', rgb(255, 255, 255)), ('g', rgb(200, 200, 200))]);
+    a.sprite(T_CLUCKETS, &DRUMSTICK, &[('#', rgb(110, 60, 40)), ('p', rgb(240, 170, 150)), ('P', rgb(250, 195, 175)), ('w', rgb(255, 235, 225)), ('b', rgb(235, 230, 210))]);
+    a.sprite(T_MOO_STEAK, &PORK, &[('#', rgb(70, 15, 15)), ('p', rgb(180, 40, 40)), ('P', rgb(210, 60, 55)), ('w', rgb(250, 230, 220)), ('b', rgb(230, 225, 200))]);
+    a.sprite(T_BONE_ITEM, &BONE, &[('#', rgb(120, 120, 110)), ('w', rgb(240, 240, 230)), ('d', rgb(190, 190, 180))]);
+    a.sprite(T_ARROW, &POINTY_STICK, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(150, 150, 150)), ('S', rgb(220, 220, 220)), ('f', rgb(245, 245, 245))]);
+    a.sprite(T_STRING, &STRING, &[('w', rgb(235, 235, 235))]);
+    a.sprite(T_BOW, &BOW, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(230, 230, 230))]);
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));

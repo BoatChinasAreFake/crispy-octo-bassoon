@@ -260,6 +260,13 @@ fn register_api(e: &mut Engine) {
             "warp" => Sfx::Warp,
             "fanfare" => Sfx::Fanfare,
             "boing" => Sfx::Boing,
+            "cluck" => Sfx::Cluck,
+            "moo" => Sfx::Moo,
+            "rattle" => Sfx::Rattle,
+            "skitter" => Sfx::Skitter,
+            "bloop" => Sfx::Bloop,
+            "twang" => Sfx::Twang,
+            "thunk" => Sfx::Thunk,
             other => return err(format!("unknown sound \"{other}\"")),
         };
         push(Cmd::Sound(s, Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))

@@ -70,8 +70,15 @@ pub const GOLD_INGOT: Id = FIRST_ITEM + 18;
 pub const GOLDEN_CHOP: Id = FIRST_ITEM + 19;
 pub const PEARL: Id = FIRST_ITEM + 20;
 pub const MUTTON: Id = FIRST_ITEM + 21;
+pub const FEATHER: Id = FIRST_ITEM + 22;
+pub const CLUCKETS: Id = FIRST_ITEM + 23;
+pub const MOO_STEAK: Id = FIRST_ITEM + 24;
+pub const BONE: Id = FIRST_ITEM + 25;
+pub const ARROW: Id = FIRST_ITEM + 26;
+pub const STRING: Id = FIRST_ITEM + 27;
+pub const BOW: Id = FIRST_ITEM + 28;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 22;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 29;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -339,6 +346,13 @@ impl Registry {
             ItemDef { food: Some(20.0), stack: 16, ..item("golden_oinkchop", "Suspiciously Golden Oinkchop", T_GOLD_CHOP) },
             ItemDef { stack: 16, ..item("stare_pearl", "Stare Pearl (Throw to Teleport)", T_PEARL) },
             ItemDef { food: Some(5.0), ..item("mutton", "Raw Baa-con", T_MUTTON) },
+            item("feather", "Feather (Ticklish)", T_FEATHER),
+            ItemDef { food: Some(3.0), ..item("cluckets", "Raw Cluckets", T_CLUCKETS) },
+            ItemDef { food: Some(7.0), ..item("moo_steak", "Raw Moo-steak", T_MOO_STEAK) },
+            item("bone", "Bone (Previously Owned)", T_BONE_ITEM),
+            item("pointy_stick", "Pointy Stick", T_ARROW),
+            item("string", "String (Not Spaghetti)", T_STRING),
+            ItemDef { stack: 1, ..item("bow", "Bow (Twangy)", T_BOW) },
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -368,6 +382,10 @@ impl Registry {
             r(&[(WOOL, 2), (GOO, 2)], (SPONGE, 1)),
             r(&[(PORKCHOP, 1), (GOLD_INGOT, 4)], (GOLDEN_CHOP, 1)),
             r(&[(GOLD_INGOT, 3), (STICK, 2)], (PICK_WOOD, 1)),
+            r(&[(STICK, 3), (STRING, 3)], (BOW, 1)),
+            r(&[(STICK, 1), (FEATHER, 1), (COBBLE, 1)], (ARROW, 4)),
+            r(&[(BONE, 1), (FEATHER, 1)], (ARROW, 2)),
+            r(&[(STRING, 4)], (WOOL, 1)),
         ];
         Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new() }
     }

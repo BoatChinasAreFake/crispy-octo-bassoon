@@ -29,7 +29,7 @@ Run the tests with `cargo test --release`.
 - **Dynamic lighting.** Torches and Glowrock light the area around them, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
-- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 24 crafting recipes, food, beds, death and respawn.
+- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 28 crafting recipes, food, beds, a bow, death and respawn.
 - **Creative mode.** Flight, instant breaking, infinite blocks, pick-block and a full item palette.
 - **Mobs** (legally distinct):
   - **Oinker**: wanders around, runs when hit, drops Raw Oinkchop.
@@ -37,6 +37,12 @@ Run the tests with `cargo test --release`.
   - **Groaner**: chases you at night, bites, and burns in sunlight. Drops Groaner Goo.
   - **Fluffer**: a woolly wanderer that baas. Drops Wool and Raw Baa-con.
   - **Starer**: very tall, very dark, keeps monster hours. Harmless until you look it in the eye or hit it; then it vibrates with rage, teleports after you and hits hard. Hates water. Drops the Stare Pearl.
+  - **Cluckster**: a nervous little bird that flutters down instead of falling. Drops Feathers and Raw Cluckets.
+  - **Mooer**: large, calm, black and white. Drops Raw Moo-steak.
+  - **Rattler**: a bony archer that comes out at night, keeps its distance and shoots Pointy Sticks (arcing them for range). Burns in sunlight. Drops Bones and spare Pointy Sticks.
+  - **Webber**: eight legs, eight eyes, walks straight up walls. Hunts at night; in daylight it leaves you alone unless you hit it. Drops String.
+  - **Bloop**: a hopping cube in three sizes. Big and medium ones hurt on contact, and killing one splits it into two to four smaller Bloops. Only the smallest drop Groaner Goo.
+- **Bow (Twangy).** Craft it from sticks and string, then right-click to fire Pointy Sticks (crafted from a stick, a feather and cobblestone, or a bone and a feather). Arrows arc, stick in walls, and work in multiplayer.
 - **More parody blocks and items:**
   - **Bed (One Block, Budget Cuts)**: right-click at night to skip to morning and set your spawn. It refuses if monsters are nearby.
   - **Cake (Not a Lie)**: place it, then right-click to eat the whole thing in one bite.
@@ -44,9 +50,9 @@ Run the tests with `cargo test --release`.
   - **Gold (Shiny, Useless)**: too soft for tools. Crafting a "gold pickaxe" gets you a wooden one. It does make a **Suspiciously Golden Oinkchop** that fully heals you.
   - **Pumpkin** and **Jack o'Lantern** (a light source with a face on every side), **Pokey Plant** (don't hug it), **Ice** (fast underfoot, melts when broken), **Bouncy Goo Block** (sneak to land softly), **Sponge** (soaks up nearby water when placed) and **Wool**.
   - Sneak to place blocks against beds and cakes instead of using them.
-- **Advancements.** 24 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
+- **Advancements.** 30 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
-- **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, baas, groans, Hisser hisses, Starer warps, boings, an advancement fanfare, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
+- **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, baas, clucks, moos, rattles, skittering, bloops, bow twangs, groans, Hisser hisses, Starer warps, boings, an advancement fanfare, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
 - **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day and chat. Servers can require a password, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
 - **Mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants and simple effects (bouncy or fast blocks, items that heal, launch, explode, give things or spawn mobs). Servers send their mods to players automatically. See **[MODDING.md](MODDING.md)** and `example-mods/cheese`.
 - **Code mods (scripting).** Mods can also include sandboxed [Rhai](https://rhai.rs) scripts, which react to events (chat commands, breaking and placing blocks, item use, joins, mob deaths, ticks) and call a game API (blocks, items, health, teleport, explosions, mobs, time, messages). Scripts run on the machine that owns the world, including dedicated servers. See **[SCRIPTING.md](SCRIPTING.md)** and `example-mods/commands`.
@@ -63,7 +69,7 @@ Run the tests with `cargo test --release`.
 | Shift | Sneak / fly down |
 | Ctrl or R | Sprint |
 | Left mouse | Mine / attack |
-| Right mouse | Place block / eat / light TNT |
+| Right mouse | Place block / eat / light TNT / fire a bow |
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |

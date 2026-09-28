@@ -1443,8 +1443,8 @@ impl App {
             "",
             "Survival tips: punch a Tree Chunk, craft Planks, then Sticks, then a Wooden Pickaxe.",
             "Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier.",
-            "Hissers explode. Groaners bite and burn in daylight. Oinkers and Fluffers are friends (and food).",
-            "Never look a Starer in the eye. Right-click a bed at night to skip it. Pokey Plants poke.",
+            "Hissers explode. Groaners and Rattlers burn in daylight. Bloops split. Webbers climb. Farm animals are friends (and food).",
+            "Never look a Starer in the eye. Beds skip the night. Bows need Pointy Sticks. Pokey Plants poke.",
             "Crafting works anywhere. The crafting table is purely decorative. Satire!",
             "Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.",
         ];
@@ -1783,6 +1783,13 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
+            "zoo" => {
+                // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.2);
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "advancements" => {
                 let mut g = Game::new(424242, false, false);
                 for a in advancements::ALL.iter().step_by(3) {
@@ -1875,6 +1882,49 @@ async fn game_main() {
             }
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
+            }
+            if s.mode == "zoo" && frames == 120 {
+                // A flat, clear stone floor in front of the camera.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y0 = p.y.floor() as i32 - 1;
+                for x in p.x as i32 - 26..p.x as i32 + 26 {
+                    for z in p.z as i32 - 26..p.z as i32 + 26 {
+                        let d = Vec3::new(x as f32 + 0.5, p.y, z as f32 + 0.5) - p;
+                        if !(1.0..22.0).contains(&d.dot(fwd)) || d.dot(right).abs() > 15.0 {
+                            continue;
+                        }
+                        app.game.world.set(x, y0, z, block::STONE);
+                        for y in y0 + 1..y0 + 14 {
+                            app.game.world.set(x, y, z, block::AIR);
+                        }
+                    }
+                }
+            }
+            if s.mode == "zoo" && frames == 150 {
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(9);
+                for (i, kind) in entity::MobKind::ALL.into_iter().enumerate() {
+                    // The five newest in front, the originals behind (offset so they show between).
+                    let (row, col) = (1 - i / 5, i % 5);
+                    let off = if row == 1 { 0.5 } else { 0.0 };
+                    let at = p + fwd * (6.0 + row as f32 * 5.0) + right * ((col as f32 - 2.0 + off) * 2.8) + Vec3::Y * 2.0;
+                    let mut m = entity::Mob::new(kind, at, &mut rng).with_size(if kind == entity::MobKind::Bloop { 2 } else { 1 });
+                    m.yaw = s.yaw + std::f32::consts::PI;
+                    m.id = 1000 + i as u32;
+                    app.game.mobs.push(m);
+                }
+            }
+            if s.mode == "zoo" && frames > 150 {
+                // Hold still for the photo.
+                for m in app.game.mobs.iter_mut() {
+                    m.yaw = s.yaw + std::f32::consts::PI;
+                    m.body.vel.x = 0.0;
+                    m.body.vel.z = 0.0;
+                }
             }
             if matches!(s.mode.as_str(), "survival" | "creative" | "parody") && frames == 150 {
                 let p = app.game.player.body.pos;

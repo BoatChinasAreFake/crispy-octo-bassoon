@@ -59,6 +59,10 @@ impl Sfx {
         match kind {
             crate::entity::MobKind::Oinker => Sfx::Oink,
             crate::entity::MobKind::Fluffer => Sfx::Baa,
+            crate::entity::MobKind::Cluckster => Sfx::Cluck,
+            crate::entity::MobKind::Mooer => Sfx::Moo,
+            crate::entity::MobKind::Rattler => Sfx::Rattle,
+            crate::entity::MobKind::Bloop => Sfx::Bloop,
             _ => Sfx::MobHurt,
         }
     }
@@ -90,6 +94,17 @@ pub enum Sfx {
     /// "Advancement Made!" fanfare.
     Fanfare,
     Boing,
+    Cluck,
+    Moo,
+    /// Rattler bones clattering.
+    Rattle,
+    /// Webber legs.
+    Skitter,
+    Bloop,
+    /// A bow (or a Rattler) firing.
+    Twang,
+    /// An arrow hitting something.
+    Thunk,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -393,6 +408,59 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             tone(&mut v, 0.0, 0.38, 180.0 * p, 520.0 * p, 7.0, 1.0, &[1.0, 0.3]);
             finish(v, 1.0)
         }
+        Sfx::Cluck => {
+            // Three quick, pinched bawks.
+            let mut v = vec![0.0; samples(0.45)];
+            let p = rng.range(0.9, 1.15);
+            for k in 0..3 {
+                let at = k as f32 * 0.12 + rng.range(0.0, 0.02);
+                voice(&mut v, at, 0.07, 700.0 * p, 520.0 * p, 2400.0, 0.02, 1.0, rng);
+            }
+            finish(v, 1.1)
+        }
+        Sfx::Moo => {
+            let mut v = vec![0.0; samples(1.2)];
+            let p = rng.range(0.9, 1.1);
+            voice(&mut v, 0.0, 1.1, 110.0 * p, 85.0 * p, 450.0, 0.03, 1.0, rng);
+            voice(&mut v, 0.0, 1.1, 220.0 * p, 170.0 * p, 700.0, 0.03, 0.35, rng);
+            finish(v, 1.1)
+        }
+        Sfx::Rattle => {
+            let mut v = vec![0.0; samples(0.4)];
+            for _ in 0..9 {
+                let f = rng.range(900.0, 1800.0);
+                tone(&mut v, rng.range(0.0, 0.3), 0.05, f, f * 0.9, 60.0, 0.6, &[1.0, 0.5]);
+                burst(&mut v, rng.range(0.0, 0.3), 0.03, 90.0, 1200.0, 5000.0, 0.4, rng);
+            }
+            finish(v, 1.1)
+        }
+        Sfx::Skitter => {
+            let mut v = vec![0.0; samples(0.5)];
+            for k in 0..12 {
+                burst(&mut v, k as f32 * 0.035 + rng.range(0.0, 0.01), 0.02, 120.0, 2000.0, 7000.0, rng.range(0.3, 0.8), rng);
+            }
+            finish(v, 1.0)
+        }
+        Sfx::Bloop => {
+            let mut v = vec![0.0; samples(0.3)];
+            let p = rng.range(0.85, 1.2);
+            tone(&mut v, 0.0, 0.25, 320.0 * p, 140.0 * p, 12.0, 1.0, &[1.0, 0.4]);
+            burst(&mut v, 0.0, 0.08, 40.0, 200.0, 1200.0, 0.3, rng);
+            finish(v, 1.1)
+        }
+        Sfx::Twang => {
+            let mut v = vec![0.0; samples(0.4)];
+            let p = rng.range(0.95, 1.05);
+            tone(&mut v, 0.0, 0.35, 190.0 * p, 170.0 * p, 9.0, 1.0, &[1.0, 0.6, 0.4, 0.2]);
+            burst(&mut v, 0.0, 0.05, 60.0, 1500.0, 6000.0, 0.5, rng);
+            finish(v, 1.0)
+        }
+        Sfx::Thunk => {
+            let mut v = vec![0.0; samples(0.2)];
+            tone(&mut v, 0.0, 0.15, 260.0, 180.0, 30.0, 1.0, &[1.0, 0.4]);
+            burst(&mut v, 0.0, 0.05, 70.0, 300.0, 2500.0, 0.6, rng);
+            finish(v, 1.2)
+        }
     }
 }
 
@@ -488,6 +556,13 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Warp,
         Sfx::Fanfare,
         Sfx::Boing,
+        Sfx::Cluck,
+        Sfx::Moo,
+        Sfx::Rattle,
+        Sfx::Skitter,
+        Sfx::Bloop,
+        Sfx::Twang,
+        Sfx::Thunk,
     ]);
     v
 }
@@ -531,7 +606,7 @@ impl Audio {
             Sfx::Pop => 0.45,
             Sfx::Explode => 1.0,
             // Voices are dense; keep them level with the percussive sounds.
-            Sfx::Groan | Sfx::Oink | Sfx::Baa => 0.4,
+            Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck => 0.4,
             Sfx::Fanfare => 0.5,
             Sfx::Hurt | Sfx::MobHurt => 0.5,
             _ => 0.8,
