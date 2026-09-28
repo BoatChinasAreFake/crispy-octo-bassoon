@@ -4,14 +4,17 @@
 use crate::block::Id;
 use macroquad::math::Vec3;
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_PORT: u16 = 25565;
 /// v2: challenge/response login. v3: the host sends its mods to joining players.
 /// v4: script effects (UseItem, Effect). v5: two-byte block/item ids, new mobs.
 /// v6: mob sizes, arrows in flight, and the bow (Shoot).
-pub const PROTOCOL: u32 = 6;
+/// v7: farming and fishing (Interact, Catch), stricter hosts, and host-checked
+/// inventories (held item in PlayerState, Craft, Consume, InventoryCheck, Inventory).
+pub const PROTOCOL: u32 = 7;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -19,7 +22,19 @@ pub const SYSTEM: u32 = u32::MAX;
 pub const TIMEOUT_SECS: f32 = 30.0;
 /// A connection must finish logging in within this time.
 pub const LOGIN_SECS: f32 = 15.0;
+/// Largest message a host will send (mod packs can be big).
 const MAX_FRAME: usize = 8 << 20;
+/// Largest message a host accepts from a player: nothing a real client sends is close.
+const CLIENT_MAX_FRAME: usize = 256 << 10;
+/// Per poll, stop reading after this much is buffered and decode at most this
+/// many messages, so one flooding connection can't stall everyone else.
+const POLL_READ_CAP: usize = 1 << 20;
+const POLL_MSG_CAP: usize = 512;
+/// Connections from one address (loopback is exempt, for same-computer play).
+const MAX_PER_IP: usize = 3;
+/// Wrong passwords from one address before it's locked out, and for how long.
+const MAX_LOGIN_FAILURES: u32 = 5;
+const LOCKOUT: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MobSnap {
@@ -48,7 +63,8 @@ pub enum Msg {
     PlayerJoin { id: u32, name: String },
     PlayerLeave { id: u32 },
     /// Both directions; the host fills in `id` when relaying.
-    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8 },
+    /// `held` is the item in hand (the host only believes it if the player owns one).
+    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id },
     /// Mobs, primed TNT (position, fuse) and arrows in flight (position, velocity).
     Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)> },
     /// client -> host
@@ -73,6 +89,18 @@ pub enum Msg {
     UseItem { item: Id },
     /// client -> host: fire a bow from `pos` in direction `dir`.
     Shoot { pos: Vec3, dir: Vec3 },
+    /// client -> host: fertiliser or Soil Probe used on the block at x, y, z.
+    Interact { x: i32, y: i32, z: i32, item: Id },
+    /// client -> host: reeled in a fish at `pos` (the host decides what it is).
+    Catch { pos: Vec3, bait: bool },
+    /// client -> host: crafted recipe number `recipe` this many times.
+    Craft { recipe: u16, times: u8 },
+    /// client -> host: used up items (eating, a pearl, yeeting with Q, ...).
+    Consume { item: Id, n: u8 },
+    /// client -> host: "here's what I think I have" (item counts).
+    InventoryCheck { items: Vec<(Id, u32)> },
+    /// host -> client: what you actually have (sent when a check doesn't match).
+    Inventory { items: Vec<(Id, u32)> },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -215,13 +243,14 @@ impl Msg {
                 w.u8(6);
                 w.u32(*id);
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held } => {
                 w.u8(7);
                 w.u32(*id);
                 w.v3(*pos);
                 w.f32(*yaw);
                 w.f32(*pitch);
                 w.u8(*flags);
+                w.u16(*held);
             }
             Msg::Mobs { mobs, tnts, arrows } => {
                 w.u8(8);
@@ -324,6 +353,36 @@ impl Msg {
                 w.v3(*pos);
                 w.v3(*dir);
             }
+            Msg::Interact { x, y, z, item } => {
+                w.u8(23);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+            }
+            Msg::Catch { pos, bait } => {
+                w.u8(24);
+                w.v3(*pos);
+                w.u8(*bait as u8);
+            }
+            Msg::Craft { recipe, times } => {
+                w.u8(25);
+                w.u16(*recipe);
+                w.u8(*times);
+            }
+            Msg::Consume { item, n } => {
+                w.u8(26);
+                w.u16(*item);
+                w.u8(*n);
+            }
+            Msg::InventoryCheck { items } | Msg::Inventory { items } => {
+                w.u8(if matches!(self, Msg::InventoryCheck { .. }) { 27 } else { 28 });
+                w.u32(items.len() as u32);
+                for &(id, n) in items {
+                    w.u16(id);
+                    w.u32(n);
+                }
+            }
         }
         w.0
     }
@@ -353,7 +412,7 @@ impl Msg {
             }
             5 => Msg::PlayerJoin { id: r.u32()?, name: r.str()? },
             6 => Msg::PlayerLeave { id: r.u32()? },
-            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()? },
+            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()? },
             8 => {
                 let n = r.count(31)?;
                 let mut mobs = Vec::with_capacity(n);
@@ -395,6 +454,21 @@ impl Msg {
                 Msg::Effect { heal, teleport: has_t.then_some(t), launch: has_l.then_some(l), take: has_take.then_some((a, b)) }
             }
             22 => Msg::Shoot { pos: r.v3()?, dir: r.v3()? },
+            23 => Msg::Interact { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()? },
+            24 => Msg::Catch { pos: r.v3()?, bait: r.u8()? != 0 },
+            25 => Msg::Craft { recipe: r.u16()?, times: r.u8()? },
+            26 => Msg::Consume { item: r.u16()?, n: r.u8()? },
+            t @ (27 | 28) => {
+                let n = r.count(6)?;
+                if n > 4096 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "inventory too long"));
+                }
+                let mut items = Vec::with_capacity(n);
+                for _ in 0..n {
+                    items.push((r.u16()?, r.u32()?));
+                }
+                if t == 27 { Msg::InventoryCheck { items } } else { Msg::Inventory { items } }
+            }
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -411,6 +485,8 @@ pub struct Conn {
     pub closed: Option<String>,
     pub opened: Instant,
     last_recv: Instant,
+    /// Biggest frame accepted from the other end.
+    max_frame: usize,
 }
 
 impl Conn {
@@ -418,7 +494,7 @@ impl Conn {
         stream.set_nonblocking(true)?;
         stream.set_nodelay(true)?;
         let now = Instant::now();
-        Ok(Conn { stream, rbuf: Vec::new(), wbuf: Vec::new(), closed: None, opened: now, last_recv: now })
+        Ok(Conn { stream, rbuf: Vec::new(), wbuf: Vec::new(), closed: None, opened: now, last_recv: now, max_frame: MAX_FRAME })
     }
 
     /// Seconds since anything arrived.
@@ -428,6 +504,10 @@ impl Conn {
 
     pub fn peer_addr(&self) -> String {
         self.stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "?".into())
+    }
+
+    pub fn peer_ip(&self) -> Option<IpAddr> {
+        self.stream.peer_addr().ok().map(|a| canonical_ip(a.ip()))
     }
 
     /// Connect to "host", "host:port" or "ip:port" (blocks for at most a few seconds).
@@ -472,7 +552,7 @@ impl Conn {
     /// Read everything available and return complete messages.
     pub fn poll(&mut self) -> Vec<Msg> {
         let mut buf = [0u8; 16384];
-        while self.closed.is_none() {
+        while self.closed.is_none() && self.rbuf.len() < POLL_READ_CAP {
             match self.stream.read(&mut buf) {
                 Ok(0) => self.closed = Some("connection closed".into()),
                 Ok(n) => {
@@ -486,9 +566,9 @@ impl Conn {
         }
         let mut out = Vec::new();
         let mut at = 0;
-        while self.rbuf.len() - at >= 4 {
+        while self.rbuf.len() - at >= 4 && out.len() < POLL_MSG_CAP {
             let len = u32::from_le_bytes(self.rbuf[at..at + 4].try_into().unwrap()) as usize;
-            if len > MAX_FRAME {
+            if len > self.max_frame {
                 self.closed = Some("oversized message".into());
                 break;
             }
@@ -528,6 +608,20 @@ pub struct Server {
     next_id: u32,
     pub password: Option<String>,
     pub max_players: usize,
+    /// Addresses that may not connect at all (the dedicated server's ban list).
+    pub banned: HashSet<IpAddr>,
+    /// Recent wrong passwords per address: (count, first failure).
+    failures: HashMap<IpAddr, (u32, Instant)>,
+    /// Addresses locked out after too many wrong passwords, until when.
+    lockouts: HashMap<IpAddr, Instant>,
+}
+
+/// IPv4 addresses arriving on a dual-stack socket look like ::ffff:1.2.3.4.
+fn canonical_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(ip),
+        v4 => v4,
+    }
 }
 
 impl Server {
@@ -550,7 +644,17 @@ impl Server {
                 for l in &listeners {
                     l.set_nonblocking(true)?;
                 }
-                return Ok(Server { listeners, port, clients: Vec::new(), next_id: 1, password: None, max_players: 8 });
+                return Ok(Server {
+                    listeners,
+                    port,
+                    clients: Vec::new(),
+                    next_id: 1,
+                    password: None,
+                    max_players: 8,
+                    banned: HashSet::new(),
+                    failures: HashMap::new(),
+                    lockouts: HashMap::new(),
+                });
             }
         }
         Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::AddrInUse, "no free port")))
@@ -565,12 +669,31 @@ impl Server {
                 streams.push(stream);
             }
         }
+        let now = Instant::now();
+        self.lockouts.retain(|_, until| *until > now);
         for stream in streams {
             // Hard cap on half-open logins so a flood can't exhaust us.
             if self.clients.len() >= self.max_players + 8 {
                 continue;
             }
-            if let Ok(conn) = Conn::new(stream) {
+            if let Ok(mut conn) = Conn::new(stream) {
+                conn.max_frame = CLIENT_MAX_FRAME;
+                if let Some(ip) = conn.peer_ip() {
+                    let refuse = if self.banned.contains(&ip) {
+                        Some("You are banned from this server.")
+                    } else if self.lockouts.contains_key(&ip) {
+                        Some("Too many wrong passwords. Try again in a few minutes.")
+                    } else if !ip.is_loopback() && self.clients.iter().filter(|c| c.conn.peer_ip() == Some(ip)).count() >= MAX_PER_IP {
+                        Some("Too many connections from your address.")
+                    } else {
+                        None
+                    };
+                    if let Some(reason) = refuse {
+                        conn.send(&Msg::Kick { reason: reason.into() });
+                        conn.flush();
+                        continue;
+                    }
+                }
                 let id = self.next_id;
                 self.next_id += 1;
                 self.clients.push(Client { id, name: String::new(), conn, nonce: None, joined: false, edit_budget: 200.0 });
@@ -578,6 +701,28 @@ impl Server {
             }
         }
         new
+    }
+
+    /// Note a wrong password from this client's address; enough of them locks it out.
+    /// Returns true if the address is now locked out.
+    pub fn record_failure(&mut self, id: u32) -> bool {
+        let Some(ip) = self.get(id).and_then(|c| c.conn.peer_ip()) else { return false };
+        let now = Instant::now();
+        let e = self.failures.entry(ip).or_insert((0, now));
+        if now.duration_since(e.1) > LOCKOUT {
+            *e = (0, now);
+        }
+        e.0 += 1;
+        if e.0 >= MAX_LOGIN_FAILURES {
+            self.failures.remove(&ip);
+            self.lockouts.insert(ip, now + LOCKOUT);
+            return true;
+        }
+        false
+    }
+
+    pub fn ip_of(&mut self, id: u32) -> Option<IpAddr> {
+        self.get(id).and_then(|c| c.conn.peer_ip())
     }
 
     pub fn joined_count(&self) -> usize {
@@ -749,7 +894,11 @@ mod tests {
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0) },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
-            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING },
+            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003 },
+            Msg::Craft { recipe: 12, times: 64 },
+            Msg::Consume { item: 0x8005, n: 1 },
+            Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },
+            Msg::Inventory { items: vec![] },
             Msg::Mobs {
                 mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4 }],
                 tnts: vec![(Vec3::Z, 2.0)],
@@ -762,6 +911,8 @@ mod tests {
             Msg::ModPack { data: vec![1, 2, 3] },
             Msg::UseItem { item: 7 },
             Msg::Shoot { pos: Vec3::ONE, dir: -Vec3::Z },
+            Msg::Interact { x: -3, y: 60, z: 9, item: 0x8022 },
+            Msg::Catch { pos: Vec3::new(1.5, 39.9, -2.0), bait: true },
             Msg::Effect { heal: 2.0, teleport: Some(Vec3::new(1.0, 70.0, -3.0)), launch: None, take: Some((DIAMOND_TEST, 2)) },
             Msg::Effect { heal: 0.0, teleport: None, launch: Some(12.0), take: None },
         ];

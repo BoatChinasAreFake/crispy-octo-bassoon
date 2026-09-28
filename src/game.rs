@@ -101,6 +101,13 @@ pub struct Game {
     pub advancements: Progress,
     /// "Advancement Made!" toasts on screen: (advancement, seconds left).
     pub toasts: Vec<(&'static Advancement, f32)>,
+    /// The Fishing Stick's bobber, when cast (see fishing.rs).
+    pub bobber: Option<crate::fishing::Bobber>,
+    pub fish_log: crate::fishing::FishLog,
+    /// Seconds since the last farm tick (see farming.rs).
+    pub farm_timer: f32,
+    /// Joined players: keeping our inventory in step with the host's ledger (see ledger.rs).
+    pub inv_sync: crate::ledger::InvSync,
 }
 
 impl Game {
@@ -164,6 +171,10 @@ impl Game {
             saved_script_vars: Vec::new(),
             advancements: Progress::default(),
             toasts: Vec::new(),
+            bobber: None,
+            fish_log: Default::default(),
+            farm_timer: 0.0,
+            inv_sync: Default::default(),
         }
     }
 
@@ -171,6 +182,8 @@ impl Game {
         let mut g = Game::new(d.seed, d.creative, false);
         g.saved_script_vars = d.script_vars.clone();
         g.advancements = Progress::from_keys(&d.advancements);
+        g.world.farm = crate::farming::decode(&d.farm);
+        g.fish_log = crate::fishing::FishLog::decode(&d.fish_log);
         let remap = palette_remap(reg(), &d.palette);
         g.world.mods = d.mods;
         if let Some(remap) = &remap {
@@ -214,6 +227,8 @@ impl Game {
             palette: mod_palette(reg()),
             script_vars: self.export_script_vars(),
             advancements: self.advancements.earned.clone(),
+            farm: crate::farming::encode(&self.world.farm),
+            fish_log: self.fish_log.encode(),
         }
     }
 
@@ -414,7 +429,20 @@ impl Game {
             return;
         }
 
-        let fall = self.player.update(dt, &c.input, &self.world, self.creative);
+        let mut fall = self.player.update(dt, &c.input, &self.world, self.creative);
+        let landed = self.player.landed.take();
+        let feet = self.player.body.pos - Vec3::Y * 0.05;
+        let under = ivec3(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
+        if let Some(height) = landed {
+            if self.world.get_v(under) == HAY {
+                // Hay bales: nature's crash mat.
+                fall = (fall * 0.2).floor();
+                if height > 5.0 {
+                    self.advance("hay_there");
+                }
+            }
+            self.trample(under, height);
+        }
         if fall > 0.0 {
             self.sfx(Sfx::Thud, None);
             self.hurt_player(fall, "hit the ground too hard (the ground is fine)");
@@ -429,6 +457,8 @@ impl Game {
         self.attack_cd = (self.attack_cd - dt).max(0.0);
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
+        self.update_fishing(dt, c.use_held);
+        self.inventory_sync_tick(dt);
         self.update_entities(dt);
         self.script_tick(dt);
     }
@@ -538,14 +568,14 @@ impl Game {
                     if self.is_local_player(&p) {
                         self.give(item, n);
                     } else if let Some(id) = self.peer_by_name(&p) {
-                        self.net_send_to(id, Msg::Give { item, n });
+                        self.give_peer(id, item, n);
                     }
                 }
                 Cmd::Take(p, item, n) => {
                     if self.is_local_player(&p) {
                         self.inv.remove(item, n as u32);
                     } else if let Some(id) = self.peer_by_name(&p) {
-                        self.net_send_to(id, effect(0.0, None, None, Some((item, n))));
+                        self.take_peer(id, item, n);
                     }
                 }
                 Cmd::Heal(p, n) => {
@@ -712,7 +742,7 @@ impl Game {
         self.hurt_player(2.0, "teleported directly into a bad decision");
         self.advance("rude_teleport");
         if !self.creative {
-            self.inv.consume_held();
+            self.use_up_held();
         }
     }
 
@@ -942,7 +972,7 @@ impl Game {
         if c.drop {
             let held = self.inv.held();
             if held != AIR {
-                self.inv.consume_held();
+                self.use_up_held();
                 self.msg(format!("Yeeted 1x {} into the void.", item_name(held)));
             }
         }
@@ -960,17 +990,62 @@ impl Game {
                 }
             }
         }
+        // Planting, tilling and soil science come before eating (carrots are both).
+        if let Some(Target::Block(h)) = &self.target {
+            let pos = h.pos;
+            if self.farm_use(held, pos) {
+                return;
+            }
+        }
+        if held == PUFFER {
+            self.use_up_held();
+            self.sfx(Sfx::Eat, None);
+            self.player.hurt = 0.0;
+            self.hurt_player(4.0, "ate a Pufferfish. It said 'Do Not Eat' right on it");
+            self.msg("You ate a Pufferfish. Bold. Very bold. Ow.");
+            return;
+        }
+        if held == STEW {
+            // Suspicious for a reason.
+            let heal = self.rng.range(-3.0, 8.0).round();
+            self.use_up_held();
+            self.sfx(Sfx::Eat, None);
+            if heal < 0.0 {
+                self.player.hurt = 0.0;
+                self.hurt_player(-heal, "ate a Suspicious Stew. It was, in fact, suspicious");
+                self.msg("The stew was... suspicious. Your stomach files a complaint.");
+            } else {
+                self.player.health = (self.player.health + heal).min(MAX_HEALTH);
+                self.msg(format!("The stew was surprisingly fine. +{heal} health."));
+            }
+            return;
+        }
+        if held == BOTTLE {
+            let m = crate::fishing::BOTTLE_MESSAGES[self.rng.int(0, crate::fishing::BOTTLE_MESSAGES.len() as i32 - 1) as usize];
+            self.msg(format!("The message reads: {m}"));
+            if !self.creative {
+                self.use_up_held();
+            }
+            return;
+        }
         if let Some(heal) = food_value(held) {
             if self.player.health < MAX_HEALTH || self.creative {
                 self.player.health = (self.player.health + heal).min(MAX_HEALTH);
                 if !self.creative {
-                    self.inv.consume_held();
+                    self.use_up_held();
                 }
                 self.sfx(Sfx::Eat, None);
                 self.msg(match held {
                     GOO => "You ate Groaner Goo. You feel... gooey.",
                     MUTTON => "Raw Baa-con. Crunchy? No. Wool-adjacent? Yes.",
                     GOLDEN_CHOP => "You feel golden. Also slightly metallic. Fully healed!",
+                    BREAD => "Bread! Civilisation has arrived.",
+                    CARROT => "Crunch. You can see slightly better. (You can't.)",
+                    POTATO => "A raw potato. Nobody asked for this. Least of all you.",
+                    FISH_CHIPS => "Fish n' Chips. Legally distinct, emotionally identical.",
+                    BIG_BOB => "You ate Big Bob. You monster. Fully healed, though.",
+                    COD | SALMON | TROPICAL => "Raw fish. Sushi, technically.",
+                    CLUCKETS | MOO_STEAK => "Raw meat. Furnaces are a future update.",
                     _ => "*nom* Oinkchop acquired (internally).",
                 });
                 if held == GOLDEN_CHOP {
@@ -984,7 +1059,7 @@ impl Game {
             self.run_actions(actions, at);
             self.player.swing = 1.0;
             if consume && !self.creative {
-                self.inv.consume_held();
+                self.use_up_held();
             }
             return;
         }
@@ -995,6 +1070,10 @@ impl Game {
         }
         if held == BOW {
             self.shoot_bow();
+            return;
+        }
+        if held == ROD {
+            self.use_rod();
             return;
         }
         let Some(Target::Block(h)) = &self.target else { return };
@@ -1109,13 +1188,19 @@ impl Game {
             if d != AIR {
                 self.give(d, 1);
             }
-            if id == LEAVES && self.rng.chance(0.08) {
-                self.give(STICK, 1);
+            // The random extras are rolled where the world lives; joined players
+            // get theirs from the host (see ledger.rs).
+            if !self.is_client() {
+                for (item, n) in crate::farming::random_drops(id, &mut self.rng) {
+                    match item {
+                        COAL => self.msg("Found coal in the gravel. Don't ask."),
+                        BAIT => self.msg("You found a Wiggly Worm. The fish will love it."),
+                        _ => {}
+                    }
+                    self.give(item, n);
+                }
             }
-            if id == GRAVEL && self.rng.chance(0.1) {
-                self.give(COAL, 1);
-                self.msg("Found coal in the gravel. Don't ask.");
-            }
+            self.farm_break_effects(pos, id);
         }
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
@@ -1155,7 +1240,9 @@ impl Game {
                     self.player.fall_start = self.player.body.pos.y;
                 }
                 Action::Message(m) => self.msg(*m),
-                Action::Give(item, n) => self.give(*item, *n),
+                // Joined players' items come from the host, which runs the same action.
+                Action::Give(item, n) if !self.is_client() => self.give(*item, *n),
+                Action::Give(..) => {}
                 Action::SetTime(t) => {
                     if self.is_client() {
                         self.msg("Only the host can change the time.");
@@ -1488,7 +1575,7 @@ impl Game {
                     for (item, n) in drops.into_iter().flatten() {
                         if remote {
                             if !self.creative {
-                                self.net_send_to(m.last_attacker, Msg::Give { item, n });
+                                self.give_peer(m.last_attacker, item, n);
                             }
                         } else if !self.creative {
                             self.msg(format!("{} dropped {}x {}", m.kind.name(), n, item_name(item)));
@@ -1527,6 +1614,7 @@ impl Game {
             self.spawn_timer = 1.0;
             self.try_spawn();
         }
+        self.farm_tick(dt);
     }
 
     fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
@@ -1664,6 +1752,30 @@ impl Game {
             g.begin(Pass::Opaque, [1.0; 4], false);
             for a in self.arrows.iter().filter(|a| a.pos.distance(eye) < (render_distance * 16) as f32) {
                 a.draw(&mut g, &self.world);
+            }
+        }
+        // The fishing line and bobber
+        if let Some(b) = &self.bobber {
+            let at = b.draw_pos(self.clock);
+            let sky = self.world.sky_light(at.x.floor() as i32, at.y.floor() as i32 + 1, at.z.floor() as i32);
+            g.begin(Pass::Opaque, [1.0; 4], false);
+            let m = Mat4::from_translation(at - Vec3::new(0.08, 0.0, 0.08)) * Mat4::from_scale(Vec3::new(0.16, 0.16, 0.16));
+            g.cube(&m, [T_BOBBER; 6], sky, [0.0, 0.0, 1.0, 1.0]);
+            // A sagging line from the rod tip (roughly where the held item is).
+            let dir = self.player.look_dir();
+            let right = dir.cross(Vec3::Y).normalize_or_zero();
+            let tip = self.player.eye() + dir * 0.8 + right * 0.3 - Vec3::Y * 0.12;
+            let span = at + Vec3::Y * 0.16 - tip;
+            let slack = if b.fight.is_some() { 0.0 } else { (span.length() * 0.08).min(1.5) };
+            let point = |t: f32| tip + span * t - Vec3::Y * slack * 4.0 * t * (1.0 - t);
+            g.begin(Pass::Opaque, [0.9, 0.9, 0.9, 1.0], false);
+            let segments = 16;
+            for i in 0..segments {
+                let (a, b) = (point(i as f32 / segments as f32), point((i + 1) as f32 / segments as f32));
+                let d = b - a;
+                let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, d.normalize_or(Vec3::Z));
+                let m = Mat4::from_translation(a) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.01, -0.01, 0.0)) * Mat4::from_scale(Vec3::new(0.02, 0.02, d.length()));
+                g.cube(&m, [T_WHITE; 6], sky, [0.0, 0.0, 1.0, 1.0]);
             }
         }
         // Other players
@@ -1879,13 +1991,16 @@ mod tests {
     use super::*;
     use crate::inventory::Inventory;
 
+    /// A world with the 3x3 chunks around the origin generated (x and z in -16..32).
     fn loaded_world(seed: u32) -> World {
         let mut w = World::new(seed);
         let start = std::time::Instant::now();
-        while w.chunks.len() < 9 && start.elapsed().as_secs() < 20 {
+        let ready = |w: &World| (-1..=1).all(|cz| (-1..=1).all(|cx| w.chunks.contains_key(&(cx, cz))));
+        while !ready(&w) && start.elapsed().as_secs() < 20 {
             w.stream(&[(Vec3::ZERO, 1)]);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(ready(&w), "chunks never generated");
         w
     }
 
@@ -2184,6 +2299,131 @@ mod tests {
             top = top.max(g.mobs[0].body.pos.y);
         }
         assert!(top > 53.0, "climbed to {top}");
+    }
+
+    #[test]
+    fn farming_from_seed_to_bread() {
+        use crate::farming::Crop;
+        let mut g = arena(31);
+        g.time = 0.25; // noon
+        let (soil, water) = (IVec3::new(0, 49, -3), IVec3::new(2, 49, -3));
+        g.world.set_v(soil, DIRT);
+        g.world.set_v(water, WATER);
+        g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+        g.inv.slots[g.inv.selected] = Some((HOE, 1));
+        assert!(g.farm_use(HOE, soil));
+        assert_eq!(g.world.get_v(soil), FARMLAND);
+        assert!(g.world.farm.contains_key(&soil), "tilling makes a soil record");
+        g.inv.slots[g.inv.selected] = Some((WHEAT_SEEDS, 2));
+        assert!(g.farm_use(WHEAT_SEEDS, soil));
+        let above = soil + IVec3::Y;
+        assert_eq!(g.world.get_v(above), Crop::Wheat.block(0));
+        assert_eq!(g.inv.count(WHEAT_SEEDS), 1);
+
+        // Water nearby hydrates it; sun, water, food and company grow it in a few minutes.
+        for _ in 0..200 {
+            g.farm_tick(1.0);
+        }
+        assert_eq!(g.world.get_v(soil), FARMLAND_WET);
+        assert_eq!(g.world.get_v(above), Crop::Wheat.block(3), "{}", g.world.farm[&soil].report(1.0, true));
+        assert!(g.world.farm[&soil].nutrients[0] < 60.0, "wheat ate some nitrogen");
+        g.break_block(above, true);
+        assert!(g.inv.count(WHEAT) >= 1 && g.advancements.has("green_thumb"));
+        g.farm_tick(1.0);
+        assert_eq!(g.world.farm[&soil].last, Some(Crop::Wheat));
+
+        // A different crop next: rotation bonus.
+        g.world.set_v(above, Crop::Carrot.block(0));
+        g.farm_tick(1.0);
+        assert!(g.world.farm[&soil].rotated());
+        let report = g.farm_interact(soil, SOIL_PROBE).unwrap();
+        assert!(report.contains("rotation bonus"), "{report}");
+        assert!(g.farm_interact(soil, COMPOST).unwrap().contains("Nitrogen"));
+
+        // Clucksters eat seedlings, unless there's a Scarecrow.
+        g.alloc_mob(MobKind::Cluckster, above.as_vec3() + Vec3::new(1.0, 0.0, 0.5));
+        g.world.set_v(IVec3::new(-4, 50, -6), SCARECROW);
+        for _ in 0..60 {
+            g.farm_tick(1.0);
+            g.mobs[0].body.pos = above.as_vec3() + Vec3::new(1.0, 0.0, 0.5);
+        }
+        assert!(Crop::of_block(g.world.get_v(above)).is_some(), "the Scarecrow kept watch");
+        g.world.set_v(IVec3::new(-4, 50, -6), AIR);
+        g.world.set_v(above, Crop::Carrot.block(0));
+        for _ in 0..200 {
+            if g.world.get_v(above) == AIR {
+                break;
+            }
+            g.world.set_v(above, Crop::Carrot.block(0)); // keep it a seedling
+            g.world.farm.get_mut(&soil).unwrap().progress = 0.0;
+            g.farm_tick(1.0);
+            g.mobs[0].body.pos = above.as_vec3() + Vec3::new(1.0, 0.0, 0.5);
+        }
+        assert_eq!(g.world.get_v(above), AIR, "pecked");
+
+        // Jumping on farmland tramples it; dry, bare farmland gives up on its own.
+        g.trample(soil, 2.0);
+        assert_eq!(g.world.get_v(soil), DIRT);
+        assert!(!g.world.farm.contains_key(&soil));
+        let dry = IVec3::new(-6, 49, 6);
+        g.world.set_v(dry, FARMLAND);
+        for _ in 0..130 {
+            g.farm_tick(1.0);
+            if g.world.get_v(dry + IVec3::Y) == WEEDS {
+                g.world.set_v(dry + IVec3::Y, AIR);
+            }
+        }
+        assert_eq!(g.world.get_v(dry), DIRT);
+    }
+
+    #[test]
+    fn fishing_catches_things() {
+        use crate::fishing::{Bobber, BobberState};
+        let mut g = arena(32);
+        // A 6x6 pond, 3 deep.
+        for x in 2..8 {
+            for z in -8..-2 {
+                for y in 47..50 {
+                    g.world.set(x, y, z, WATER);
+                }
+            }
+        }
+        g.inv.slots[g.inv.selected] = Some((ROD, 1));
+        let spot = Vec3::new(4.5, 49.9, -5.5);
+        // Reeling in on a nibble is too early.
+        g.bobber = Some(Bobber { pos: spot, vel: Vec3::ZERO, state: BobberState::Floating { wait: 5.0, nibble: 2.0 }, fight: None, since_nibble: 0.1, bait: false });
+        g.use_rod();
+        assert!(g.bobber.is_none() && g.messages.iter().any(|m| m.0.contains("Too early")));
+
+        // A real bite: reel in, and win the tug-of-war if it's a big one.
+        for _ in 0..5 {
+            g.bobber = Some(Bobber { pos: spot, vel: Vec3::ZERO, state: BobberState::Biting { window: 1.0 }, fight: None, since_nibble: 9.0, bait: false });
+            g.use_rod();
+            for _ in 0..3000 {
+                let Some(b) = &g.bobber else { break };
+                let easy = b.fight.map(|f| f.tension < 0.45).unwrap_or(false);
+                g.update_fishing(0.02, easy);
+            }
+            assert!(g.bobber.is_none());
+        }
+        assert!(g.fish_log.xp > 0, "{:?}", g.messages);
+        assert!(g.advancements.has("gone_fishin"));
+        let caught: u32 = g.fish_log.species.values().map(|v| v.0).sum();
+        assert_eq!(caught, 5);
+
+        // Casting for real: the bobber flies, lands in the pond, and floats.
+        g.player.body.pos = Vec3::new(0.5, 50.0, -5.5);
+        g.player.yaw = std::f32::consts::FRAC_PI_2; // +X, toward the pond
+        g.player.pitch = -0.3;
+        g.use_rod();
+        for _ in 0..200 {
+            g.update_fishing(0.02, false);
+        }
+        assert!(matches!(g.bobber.as_ref().map(|b| b.state), Some(BobberState::Floating { .. } | BobberState::Biting { .. })));
+        // Switching away from the rod reels it in.
+        g.inv.slots[g.inv.selected] = None;
+        g.update_fishing(0.02, false);
+        assert!(g.bobber.is_none());
     }
 
     #[test]

@@ -8,6 +8,7 @@ use crate::game::Game;
 use crate::net::*;
 use crate::player::Player;
 use crate::sound::Sfx;
+use std::collections::HashMap;
 use macroquad::math::{IVec3, Vec3};
 
 pub enum Net {
@@ -25,13 +26,19 @@ pub struct Peer {
     pub pitch: f32,
     pub flags: u8,
     pub anim: f32,
-    /// Game clock time of their last bow shot (anti-spam).
-    last_shot: f32,
+    /// Game clock time each rate-limited action was last allowed (see `peer_rate_ok`).
+    last: HashMap<&'static str, f32>,
+    /// Chat allowance: refills at one message a second, up to five.
+    chat_tokens: f32,
+    /// Messages that made no sense (kicked after too many).
+    strikes: u32,
+    /// What the host knows they own (see ledger.rs).
+    pub ledger: crate::ledger::Ledger,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, anim: 0.0, last_shot: f32::NEG_INFINITY }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & FLAG_DEAD == 0
@@ -49,9 +56,17 @@ fn forwarded(s: Sfx) -> bool {
 }
 
 pub fn sanitize_name(name: &str) -> String {
-    let n: String = name.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').take(16).collect();
-    if n.is_empty() { "Stove".into() } else { n }
+    let n: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').take(16).collect();
+    // Nobody gets to be "Server" (script messages and the console use that name).
+    let reserved = ["server", "host", "console", "admin", "system"];
+    if n.is_empty() || reserved.contains(&n.to_ascii_lowercase().as_str()) { "Stove".into() } else { n }
 }
+
+/// How far a player can reach to break, place, hit or poke things (a little
+/// more than the local limit, to allow for lag).
+const REACH: f32 = 10.0;
+/// Nonsense messages tolerated before a kick.
+const MAX_STRIKES: u32 = 20;
 
 impl Game {
     pub fn is_host(&self) -> bool {
@@ -241,7 +256,7 @@ impl Game {
         }
 
         let mut inbox: Vec<(u32, Msg)> = std::mem::take(&mut self.pending_msgs).into_iter().map(|m| (0, m)).collect();
-        let mut left: Vec<(u32, String)> = Vec::new();
+        let mut left: Vec<(u32, String, String)> = Vec::new();
         match &mut self.net {
             None => return,
             Some(Net::Client(c)) => {
@@ -257,6 +272,9 @@ impl Game {
                 for c in s.clients.iter_mut() {
                     inbox.extend(c.conn.poll().into_iter().map(|m| (c.id, m)));
                     c.edit_budget = (c.edit_budget + dt * 60.0).min(200.0);
+                    if let Some(p) = self.peers.get_mut(&c.id) {
+                        p.chat_tokens = (p.chat_tokens + dt).min(5.0);
+                    }
                     if c.conn.closed.is_none() {
                         if !c.joined && c.conn.opened.elapsed().as_secs_f32() > LOGIN_SECS {
                             c.conn.closed = Some("login timed out".into());
@@ -267,16 +285,21 @@ impl Game {
                 }
                 for c in s.clients.iter().filter(|c| c.conn.closed.is_some()) {
                     if c.joined {
-                        left.push((c.id, c.name.clone()));
+                        left.push((c.id, c.name.clone(), c.conn.closed.clone().unwrap_or_default()));
                     }
                 }
                 s.clients.retain(|c| c.conn.closed.is_none());
             }
         }
-        for (id, name) in left {
+        for (id, name, why) in left {
             self.peers.remove(&id);
             self.net_broadcast(Msg::PlayerLeave { id });
-            self.msg(format!("{name} left the game"));
+            // Ordinary goodbyes stay short; anything odd is worth a line in the log.
+            if why == "connection closed" || why.starts_with("kicked") {
+                self.msg(format!("{name} left the game"));
+            } else {
+                self.msg(format!("{name} left the game ({why})"));
+            }
             self.fire("on_player_leave", vec![name.into()]);
         }
         for (from, m) in inbox {
@@ -321,8 +344,12 @@ impl Game {
                     if let Some(pw) = pw {
                         if !proof_matches(&proof, &auth_proof(&nonce, &pw)) {
                             let who = c.conn.peer_addr();
+                            let locked = server.record_failure(from);
                             server.kick(from, "Wrong password.");
                             self.msg(format!("Rejected a login from {who} (wrong password)"));
+                            if locked {
+                                self.msg(format!("Locked out {who} for 10 minutes after repeated wrong passwords"));
+                            }
                             return;
                         }
                     }
@@ -397,6 +424,17 @@ impl Game {
                     }
                     budget -= 1.0;
                     let old = self.world.get(x, y, z);
+                    // Only changes the game's rules allow (no stone-to-diamond, no bedrock breaking).
+                    if old != id && !self.edit_allowed(x, y, z, old, id) {
+                        corrections.push((x, y, z, old));
+                        self.strike(from);
+                        continue;
+                    }
+                    // And only with items they really have, at the speed their tools allow.
+                    if old != id && !self.ledger_edit(from, old, id) {
+                        corrections.push((x, y, z, old));
+                        continue;
+                    }
                     // Scripts may veto what remote players do, just like the host's own actions.
                     if old != id && self.scripts.is_some() {
                         let who = self.peer_name(from);
@@ -422,24 +460,44 @@ impl Game {
                     }
                 }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, .. } => {
-                if let Some(p) = self.peers.get_mut(&from) {
-                    p.target = pos;
-                    p.yaw = yaw;
-                    p.pitch = pitch;
-                    p.flags = flags;
+            Msg::PlayerState { pos, yaw, pitch, flags, held, .. } => {
+                self.set_peer_held(from, held);
+                let Some(p) = self.peers.get_mut(&from) else { return };
+                // No NaNs, nothing absurd, and no teleporting across the map (the
+                // host's own teleports move `target` first, so they pass).
+                let sane = pos.is_finite() && yaw.is_finite() && pitch.is_finite() && (-64.0..512.0).contains(&pos.y);
+                if !sane || pos.distance(p.target) > 64.0 {
+                    let back = p.target;
+                    self.net_send_to(from, Msg::Effect { heal: 0.0, teleport: Some(back), launch: None, take: None });
+                    self.strike(from);
+                    return;
                 }
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags });
+                p.target = pos;
+                p.yaw = yaw;
+                p.pitch = pitch.clamp(-1.6, 1.6);
+                p.flags = flags;
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held });
             }
-            Msg::Attack { mob, dmg, from: at } => {
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
-                    m.damage(dmg.clamp(0.0, 12.0), at);
+            Msg::Attack { mob, dmg, .. } => {
+                // Hits come from where the player actually is, within reach, at a human pace.
+                let Some(eye) = self.peers.get(&from).map(|p| p.target + Vec3::Y * 1.6) else { return };
+                if !self.peer_rate_ok(from, "attack", 0.2) || !dmg.is_finite() {
+                    return;
+                }
+                // No harder than the weapon they really own (x1.5 for a falling crit).
+                let dmg = dmg.clamp(0.0, attack_damage(self.verified_held(from)) * 1.5);
+                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
+                    m.damage(dmg, eye);
                     m.last_attacker = from;
                     let (kind, pos) = (m.kind, m.body.pos);
                     self.sfx(Sfx::hurt_of(kind), Some(pos));
                 }
             }
             Msg::Ignite { x, y, z } => {
+                let near = self.peers.get(&from).map(|p| (p.target + Vec3::Y * 1.6).distance(Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)) <= REACH).unwrap_or(false);
+                if !near || !self.peer_rate_ok(from, "ignite", 0.25) {
+                    return;
+                }
                 if self.world.get(x, y, z) == TNT {
                     self.world.set(x, y, z, AIR);
                     let pos = Vec3::new(x as f32, y as f32, z as f32);
@@ -450,12 +508,22 @@ impl Game {
             // A mod item/block effect on a client that wants an explosion.
             Msg::Explosion { at, r } => {
                 let near = self.peers.get(&from).map(|p| p.target.distance(at) < 12.0).unwrap_or(false);
-                if near {
+                if near && r.is_finite() && self.peer_rate_ok(from, "explosion", 1.0) {
                     self.explode(at, r.clamp(0.5, 6.0), "was caught in a modded explosion");
                 }
             }
             Msg::Chat { text, .. } => {
-                let text: String = text.chars().take(200).collect();
+                // No control characters (they'd mess up everyone's chat), and no floods.
+                let text: String = text.chars().filter(|c| !c.is_control()).take(200).collect::<String>().trim().to_string();
+                if text.is_empty() {
+                    return;
+                }
+                let Some(p) = self.peers.get_mut(&from) else { return };
+                if p.chat_tokens < 1.0 {
+                    self.system_message(Some(from), "You're sending messages too fast. Take a breath.");
+                    return;
+                }
+                p.chat_tokens -= 1.0;
                 let who = self.peer_name(from);
                 if !self.fire("on_chat", vec![who.clone().into(), text.clone().into()]) {
                     return;
@@ -469,22 +537,104 @@ impl Game {
                 self.relay(from, Msg::Chat { from, text });
             }
             Msg::UseItem { item } => {
-                if valid_item(item) {
+                if valid_item(item) && self.peer_rate_ok(from, "use", 0.1) && self.peer_has(from, item) {
                     let who = self.peer_name(from);
                     self.fire("on_use_item", vec![who.into(), reg().key_of(item).into()]);
+                    // Mod items that give things: the host hands them over (and notes it).
+                    if let Some((actions, _)) = use_actions(item) {
+                        for a in actions {
+                            if let Action::Give(i, n) = a {
+                                self.give_peer(from, *i, *n);
+                            }
+                        }
+                    }
                 }
             }
             Msg::Shoot { pos, dir } => {
                 // Only from roughly where they are, in a real direction, at a bow's pace.
-                let clock = self.clock;
-                let Some(p) = self.peers.get_mut(&from) else { return };
-                let near = pos.distance(p.target + Vec3::Y * 1.6) < 3.0;
-                if near && dir.is_finite() && dir.length() > 0.5 && clock - p.last_shot > 0.4 {
-                    p.last_shot = clock;
+                let Some(p) = self.peers.get(&from) else { return };
+                let near = pos.is_finite() && pos.distance(p.target + Vec3::Y * 1.6) < 3.0;
+                let armed = self.peer_has(from, BOW);
+                if near && armed && dir.is_finite() && dir.length() > 0.5 && self.peer_rate_ok(from, "shoot", 0.4) && self.peer_take(from, ARROW, 1) {
                     self.spawn_arrow(pos, dir.normalize() * Arrow::SPEED * 1.2, Some(from));
                 }
             }
-            _ => {}
+            Msg::Interact { x, y, z, item } => {
+                let at = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
+                let near = self.peers.get(&from).map(|p| (p.target + Vec3::Y * 1.6).distance(at) <= REACH).unwrap_or(false);
+                let tool = matches!(item, BONE_DUST | COMPOST | WOOD_ASH | SOIL_PROBE);
+                // The probe is kept; fertiliser is used up (and must really be theirs).
+                if near
+                    && tool
+                    && self.peer_has(from, item)
+                    && self.peer_rate_ok(from, "interact", 0.2)
+                    && (item == SOIL_PROBE || self.peer_take(from, item, 1))
+                    && let Some(reply) = self.farm_interact(IVec3::new(x, y, z), item)
+                {
+                    self.system_message(Some(from), &reply);
+                }
+            }
+            Msg::Catch { pos, bait } => self.host_catch(from, pos, bait),
+            Msg::Craft { recipe, times } => self.host_craft(from, recipe, times),
+            Msg::Consume { item, n } => self.host_consume(from, item, n),
+            Msg::InventoryCheck { items } => {
+                if self.peer_rate_ok(from, "check", 1.0) {
+                    self.host_inventory_check(from, items);
+                }
+            }
+            // Joined players have no business sending anything else.
+            _ => self.strike(from),
+        }
+    }
+
+    /// Allow `what` from this player at most once per `secs` (by the game clock).
+    pub fn peer_rate_ok(&mut self, from: u32, what: &'static str, secs: f32) -> bool {
+        let clock = self.clock;
+        let Some(p) = self.peers.get_mut(&from) else { return false };
+        let last = p.last.entry(what).or_insert(f32::NEG_INFINITY);
+        if clock - *last < secs {
+            return false;
+        }
+        *last = clock;
+        true
+    }
+
+    /// Count a message that broke the rules; too many and they're kicked.
+    fn strike(&mut self, from: u32) {
+        let Some(p) = self.peers.get_mut(&from) else { return };
+        p.strikes += 1;
+        if p.strikes == MAX_STRIKES + 1 {
+            let name = p.name.clone();
+            if let Some(Net::Host(s)) = &mut self.net {
+                s.kick(from, "Too many invalid actions.");
+            }
+            self.msg(format!("Kicked {name}: too many invalid actions"));
+        }
+    }
+
+    /// The game's rules for a joined player turning `old` into `new` at x, y, z.
+    /// (Their own game follows the same rules; this stops modified clients.)
+    pub fn edit_allowed(&self, x: i32, y: i32, z: i32, old: Id, new: Id) -> bool {
+        use crate::farming::{is_farmland, Crop};
+        // Unbreakable stays unbroken (placing into water is fine: it's replaceable).
+        if block(old).hardness < 0.0 && !replaceable(old) {
+            return false;
+        }
+        let p = IVec3::new(x, y, z);
+        // Crops only appear on farmland, and only as seedlings: the host grows them.
+        if let Some((_, stage)) = Crop::of_block(new) {
+            let on_farmland = is_farmland(self.world.get(x, y - 1, z));
+            return replaceable(old) && on_farmland && (stage == 0 || (self.creative && block(new).creative));
+        }
+        match new {
+            AIR => true,
+            // Melting ice, or water running into a hole next to water.
+            WATER => old == ICE || [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z, IVec3::Y].iter().any(|d| self.world.get_v(p + *d) == WATER),
+            // Tilling, and trampling.
+            n if is_farmland(n) => matches!(old, GRASS | DIRT | SNOW_GRASS),
+            DIRT if is_farmland(old) => true,
+            // Placing: only into an empty-ish cell, and only blocks a player could have.
+            _ => replaceable(old) && block(new).creative,
         }
     }
 
@@ -529,7 +679,7 @@ impl Game {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, .. } => {
                 if let Some(p) = self.peers.get_mut(&id) {
                     p.target = pos;
                     p.yaw = yaw;
@@ -547,8 +697,10 @@ impl Game {
                 if valid_item(item) && n > 0 {
                     self.msg(format!("Loot: {n}x {}", item_name(item)));
                     self.give(item, n);
+                    self.inv_sync.note_host(item, n as i64);
                 }
             }
+            Msg::Inventory { items } => self.apply_inventory(items),
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
@@ -579,9 +731,10 @@ impl Game {
                 }
                 if let Some((item, n)) = take {
                     self.inv.remove(item, n as u32);
+                    self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } => {}
         }
     }
 
@@ -670,7 +823,7 @@ impl Game {
             if p.hurt > 0.2 {
                 flags |= FLAG_HURT;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held() };
             self.net_send_msg(m);
         }
         if self.is_host() {
@@ -859,4 +1012,207 @@ mod tests {
         assert!(host.peers.is_empty(), "host never noticed the client leaving");
         assert!(host.messages.iter().any(|m| m.0 == "Clienty left the game"));
     }
+
+    /// Log in over a real socket and return the client's game.
+    fn join(host: &mut Game, port: u16, name: &str, password: &str) -> Result<Game, String> {
+        let mut conn = Conn::connect(&format!("127.0.0.1:{port}")).map_err(|e| e.to_string())?;
+        conn.send(&Msg::Hello { protocol: PROTOCOL, name: name.into() });
+        conn.flush();
+        let start = Instant::now();
+        let (welcome, leftover) = loop {
+            host.update(0.016, &idle());
+            let mut msgs = conn.poll();
+            if let Some(Msg::Kick { reason }) = msgs.iter().find(|m| matches!(m, Msg::Kick { .. })) {
+                return Err(reason.clone());
+            }
+            if let Some(Msg::Challenge { nonce, .. }) = msgs.iter().find(|m| matches!(m, Msg::Challenge { .. })) {
+                conn.send(&Msg::Auth { proof: auth_proof(nonce, password) });
+                conn.flush();
+            }
+            if let Some(i) = msgs.iter().position(|m| matches!(m, Msg::Welcome { .. })) {
+                let rest = msgs.split_off(i + 1);
+                break (msgs.pop().unwrap(), rest);
+            }
+            if conn.closed.is_some() || start.elapsed() > Duration::from_secs(10) {
+                return Err(conn.closed.clone().unwrap_or_else(|| "no welcome".into()));
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        };
+        let Msg::Welcome { id, seed, time, creative, spawn } = welcome else { unreachable!() };
+        let mut client = Game::new_client(id, seed, time, creative, spawn, conn, name, leftover);
+        load_around(&mut client, spawn);
+        Ok(client)
+    }
+
+    #[test]
+    fn hosts_enforce_the_rules() {
+        let mut host = Game::new(778, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Sneaky", "").unwrap();
+        let id = client.my_id;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.contains_key(&id)));
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].target.distance(spawn) < 1.0));
+
+        // The rules themselves.
+        let (x, z) = (spawn.x.floor() as i32 + 2, spawn.z.floor() as i32);
+        let ground = host.world.surface_y(x, z);
+        assert!(host.edit_allowed(x, ground + 1, z, AIR, BRICK), "placing into air");
+        assert!(host.edit_allowed(x, ground, z, host.world.get(x, ground, z), AIR), "breaking");
+        assert!(!host.edit_allowed(x, ground + 1, z, AIR, BEDROCK), "bedrock isn't placeable");
+        assert!(!host.edit_allowed(x, 0, z, BEDROCK, AIR), "bedrock isn't breakable");
+        assert!(!host.edit_allowed(x, ground, z, STONE, DIAMOND_ORE), "no alchemy");
+        assert!(host.edit_allowed(x, ground, z, GRASS, FARMLAND), "tilling");
+        assert!(!host.edit_allowed(x, ground + 1, z, AIR, WHEAT_0), "crops need farmland");
+        assert!(!host.edit_allowed(x, ground + 1, z, AIR, WHEAT_0 + 3), "and grow on the host, not the client");
+
+        // A modified client trying to turn a block into diamond ore is corrected.
+        let (tx, ty, tz) = (x, ground, z);
+        let before = host.world.get(tx, ty, tz);
+        client.world.set_remote(tx, ty, tz, DIAMOND_ORE);
+        client.net_send_msg(Msg::Blocks(vec![(tx, ty, tz, DIAMOND_ORE)]));
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get(tx, ty, tz) == before));
+        assert_eq!(host.world.get(tx, ty, tz), before);
+
+        // Teleporting across the map is refused and the client is put back.
+        // (NaN positions never get this far: the decoder drops the connection.)
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0 });
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(host.peers[&id].target.is_finite() && host.peers[&id].target.distance(spawn) < 5.0);
+
+        // Chat floods are throttled.
+        for i in 0..15 {
+            client.net_send_msg(Msg::Chat { from: id, text: format!("spam {i}") });
+        }
+        client.net_send_msg(Msg::Chat { from: id, text: "\u{7}\n".into() });
+        let _ = pump(&mut host, &mut client, |_, c| c.messages.iter().any(|m| m.0.contains("too fast")));
+        let got = host.messages.iter().filter(|m| m.0.contains("spam")).count();
+        assert!((1..=6).contains(&got), "{got} spam lines got through");
+
+        // Soil lives on the host: a probe from the client is answered in chat.
+        let (fx, fy, fz) = (x, ground, z + 1);
+        host.world.set(fx, fy, fz, FARMLAND);
+        client.world.set_remote(fx, fy, fz, FARMLAND);
+        client.net_send_msg(Msg::Interact { x: fx, y: fy, z: fz, item: SOIL_PROBE });
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(!client.messages.iter().any(|m| m.0.contains("N 60")), "no probe, no reading");
+        host.give_peer(id, SOIL_PROBE, 1);
+        client.net_send_msg(Msg::Interact { x: fx, y: fy, z: fz, item: SOIL_PROBE });
+        assert!(pump(&mut host, &mut client, |_, c| c.messages.iter().any(|m| m.0.contains("N 60 P 60 K 60"))));
+
+        // Messages a client has no business sending earn strikes, then a kick.
+        for _ in 0..=MAX_STRIKES {
+            client.net_send_msg(Msg::Time(0.5));
+        }
+        assert!(pump(&mut host, &mut client, |h, c| !h.peers.contains_key(&id) && c.net_error.is_some()));
+    }
+
+    #[test]
+    fn repeated_wrong_passwords_lock_you_out() {
+        let mut host = Game::new(779, true, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", Some("correct horse".into())).unwrap();
+        for _ in 0..5 {
+            assert_eq!(join(&mut host, port, "Guesser", "hunter2").err().as_deref(), Some("Wrong password."));
+        }
+        let locked = join(&mut host, port, "Guesser", "correct horse").err().unwrap_or_default();
+        assert!(locked.contains("Too many wrong passwords"), "{locked}");
+    }
+
+
+    #[test]
+    fn inventories_are_checked_by_the_host() {
+        let mut host = Game::new(780, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Crafty", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).map(|p| p.target.distance(spawn) < 1.0).unwrap_or(false)));
+        let (x, z) = (spawn.x.floor() as i32 + 1, spawn.z.floor() as i32 + 1);
+        let top = host.world.surface_y(x, z);
+        for y in top + 1..top + 4 {
+            host.world.set(x, y, z, AIR);
+            client.world.set_remote(x, y, z, AIR);
+        }
+
+        // Placing a block they don't have: refused and undone.
+        client.inv.slots[0] = Some((BRICK, 5)); // conjured by a modified client
+        client.world.set(x, top + 1, z, BRICK);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get(x, top + 1, z) == AIR));
+        assert_eq!(host.world.get(x, top + 1, z), AIR);
+
+        // ...and the next inventory check takes the fake bricks away.
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BRICK) == 0), "fake items survived the check");
+
+        // Items the host really gave can be placed, and are used up in its ledger.
+        host.give_peer(id, DIRT, 3);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DIRT) == 3));
+        client.world.set(x, top + 1, z, DIRT);
+        client.inv.remove(DIRT, 1);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == DIRT));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIRT), 2);
+
+        // Breaking pays out the block's drop on both sides (dirt digs quickly by hand).
+        client.break_block(IVec3::new(x, top + 1, z), true);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == AIR));
+        assert!(host.peers[&id].ledger.bag.count(DIRT) >= 3);
+        assert_eq!(client.inv.count(DIRT), 3);
+
+        // Mining faster than bare hands allow is refused: stone takes ~7.5s by hand.
+        let stone = IVec3::new(x, top - 1, z);
+        host.world.set_v(stone, STONE);
+        client.world.set_remote(stone.x, stone.y, stone.z, STONE);
+        client.world.set_v(stone - IVec3::Y, AIR); // an instant first dig...
+        client.world.set_v(stone, AIR); // ...then the stone straight away
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(stone) == STONE), "insta-mined stone stuck");
+        assert_eq!(host.world.get_v(stone), STONE);
+
+        // Crafting with conjured ingredients doesn't count; the check corrects it.
+        client.inv.add(DIAMOND, 3);
+        client.inv.add(STICK, 2);
+        let recipe = recipes().iter().position(|r| r.output.0 == PICK_DIAMOND).unwrap();
+        assert!(client.inv.craft(&recipes()[recipe]));
+        client.net_send_msg(Msg::Craft { recipe: recipe as u16, times: 1 });
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(PICK_DIAMOND) == 0 && c.inv.count(DIAMOND) == 0));
+        assert_eq!(host.peers[&id].ledger.bag.count(PICK_DIAMOND), 0);
+
+        // Honest crafting goes through: 1 log -> 4 planks.
+        host.give_peer(id, LOG, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(LOG) == 1));
+        let recipe = recipes().iter().position(|r| r.inputs == vec![(LOG, 1)]).unwrap();
+        assert!(client.inv.craft(&recipes()[recipe]));
+        client.net_send_msg(Msg::Craft { recipe: recipe as u16, times: 1 });
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.bag.count(PLANKS) == 4));
+        // Nothing to correct: the counts agree after a few checks.
+        for _ in 0..400 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(client.inv.count(PLANKS), 4);
+        assert_eq!(client.inv.counts(), host.peers[&id].ledger.bag.items().into_iter().collect(), "client and host agree");
+
+        // A sword they don't own doesn't hit any harder than a fist.
+        client.inv.slots[client.inv.selected] = Some((SWORD_DIAMOND, 1)); // conjured
+        let mut m = Mob::new(MobKind::Mooer, spawn + Vec3::new(1.5, 0.0, 0.0), &mut host.rng);
+        m.id = 777;
+        host.mobs.push(m);
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.held == SWORD_DIAMOND));
+        let before = host.mobs.iter().find(|m| m.id == 777).unwrap().health;
+        client.net_send_msg(Msg::Attack { mob: 777, dmg: 12.0, from: spawn });
+        assert!(pump(&mut host, &mut client, |h, _| h.mobs.iter().find(|m| m.id == 777).map(|m| m.health < before).unwrap_or(true)));
+        let after = host.mobs.iter().find(|m| m.id == 777).map(|m| m.health).unwrap_or(before - 99.0);
+        assert!(before - after <= attack_damage(AIR) * 1.5 + 1e-3, "hit for {}", before - after);
+    }
+
 }

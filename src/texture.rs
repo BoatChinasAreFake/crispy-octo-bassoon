@@ -107,6 +107,45 @@ pub const T_BONE_ITEM: u16 = 110;
 pub const T_ARROW: u16 = 111;
 pub const T_STRING: u16 = 112;
 pub const T_BOW: u16 = 113;
+pub const T_SANDSTONE: u16 = 114;
+pub const T_SANDSTONE_TOP: u16 = 115;
+pub const T_STONE_BRICKS: u16 = 116;
+pub const T_MOSSY: u16 = 117;
+pub const T_HAY_TOP: u16 = 118;
+pub const T_HAY_SIDE: u16 = 119;
+pub const T_BOOKSHELF: u16 = 120;
+pub const T_LANTERN: u16 = 121;
+pub const T_MUSHROOM: u16 = 122;
+pub const T_SCARECROW: u16 = 123;
+pub const T_WEEDS: u16 = 124;
+pub const T_FARMLAND: u16 = 125;
+pub const T_FARMLAND_WET: u16 = 126;
+pub const T_CROP_WHEAT: u16 = 127;
+pub const T_CROP_CARROT: u16 = 131;
+pub const T_CROP_POTATO: u16 = 135;
+pub const T_HOE: u16 = 139;
+pub const T_SEEDS: u16 = 140;
+pub const T_WHEAT_ITEM: u16 = 141;
+pub const T_CARROT_ITEM: u16 = 142;
+pub const T_POTATO_ITEM: u16 = 143;
+pub const T_BONE_DUST: u16 = 144;
+pub const T_COMPOST: u16 = 145;
+pub const T_WOOD_ASH: u16 = 146;
+pub const T_SOIL_PROBE: u16 = 147;
+pub const T_BREAD: u16 = 148;
+pub const T_ROD: u16 = 149;
+pub const T_COD: u16 = 150;
+pub const T_SALMON: u16 = 151;
+pub const T_PUFFER: u16 = 152;
+pub const T_TROPICAL: u16 = 153;
+pub const T_BIG_BOB: u16 = 154;
+pub const T_BOOT: u16 = 155;
+pub const T_BOTTLE: u16 = 156;
+pub const T_FISH_CHIPS: u16 = 157;
+pub const T_STEW: u16 = 158;
+pub const T_WORM: u16 = 159;
+pub const T_BOBBER: u16 = 160;
+// Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
 /// keeps the first 256 tiles; mods look textures up by name, so this can move).
@@ -701,6 +740,234 @@ const BOW: [&str; 16] = [
     "................",
 ];
 
+const HOE: [&str; 16] = [
+    "................",
+    "....hhhhhh......",
+    "...hHHHHHHh.....",
+    "..hHhhhh#oh.....",
+    "........#o#.....",
+    ".......#o#......",
+    "......#o#.......",
+    ".....#o#........",
+    "....#o#.........",
+    "...#o#..........",
+    "..#o#...........",
+    ".#o#............",
+    ".##.............",
+    "................",
+    "................",
+    "................",
+];
+
+const LOAF: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    ".....######.....",
+    "...##bbbbbb##...",
+    "..#bbBbbBbbbb#..",
+    ".#bbbbBbbbBbbb#.",
+    ".#bBbbbbBbbbbb#.",
+    ".#bbbbbbbbbbBb#.",
+    ".#dbbbbbbbbbbd#.",
+    "..#dddddddddd#..",
+    "...##########...",
+    "................",
+    "................",
+    "................",
+];
+
+const FISH: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "......####......",
+    "....##ffffF#..##",
+    "...#fwffffFF##F#",
+    "..#fkwfffffFFFF#",
+    "..#ffffffffFFF#.",
+    "...#bbbbbbFF##F#",
+    "....##bbbbF#..##",
+    "......####......",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
+const BOOT: [&str; 16] = [
+    "................",
+    "................",
+    "....#######.....",
+    "....#bbbbb#.....",
+    "....#bdbdb#.....",
+    "....#bbbbb#.....",
+    "....#bdbdb#.....",
+    "....#bbbbb#.....",
+    "....#bbbbb#.....",
+    "....#bbbbb####..",
+    "....#bbbbbbbbb#.",
+    "....#bbbbbbbbb#.",
+    "....#ddddddddd#.",
+    "....###########.",
+    "......w....w....",
+    "................",
+];
+
+const BOTTLE: [&str; 16] = [
+    "................",
+    "......##........",
+    "......cc........",
+    ".....#gg#.......",
+    ".....#gg#.......",
+    "....#gggg#......",
+    "...#gggggg#.....",
+    "...#gwppgg#.....",
+    "...#gwpppg#.....",
+    "...#ggpppg#.....",
+    "...#ggpppg#.....",
+    "...#gggggg#.....",
+    "...#gggggg#.....",
+    "....######......",
+    "................",
+    "................",
+];
+
+const BOWL: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "....r..m.r......",
+    "..############..",
+    "..#ssmssrsssm#..",
+    "..#wwwwwwwwww#..",
+    "...#wwwwwwww#...",
+    "....#wwwwww#....",
+    ".....######.....",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
+const ROD: [&str; 16] = [
+    "................",
+    "............##s.",
+    "...........#o#s.",
+    "..........#o#.s.",
+    ".........#o#..s.",
+    "........#o#...s.",
+    ".......#o#....s.",
+    "......#o#.....s.",
+    ".....#o#......s.",
+    "....#o#.......s.",
+    "...#o#........s.",
+    "..#o#.........k.",
+    ".#o#..........k.",
+    ".##.............",
+    "................",
+    "................",
+];
+
+const PROBE: [&str; 16] = [
+    "................",
+    "...........###..",
+    "..........#ggg#.",
+    "..........#gwg#.",
+    "..........#ggg#.",
+    "...........#i#..",
+    "..........#i#...",
+    ".........#i#....",
+    "........#o#.....",
+    ".......#o#......",
+    "......#o#.......",
+    ".....#o#........",
+    "....#o#.........",
+    "...#i#..........",
+    "...##...........",
+    "................",
+];
+
+const CARROT: [&str; 16] = [
+    "................",
+    "...........g.g..",
+    "..........ggg...",
+    "..........gg.g..",
+    ".........##g....",
+    "........#oo#....",
+    ".......#oOo#....",
+    "......#oOoo#....",
+    ".....#ooOo#.....",
+    "....#oOoo#......",
+    "...#ooo#........",
+    "...#oo#.........",
+    "..#o#...........",
+    "..##............",
+    "................",
+    "................",
+];
+
+const SPUD: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    ".....######.....",
+    "...##bbbbbb##...",
+    "..#bbdbbbbbbb#..",
+    "..#bbbbbbbdbb#..",
+    ".#bbbbbbbbbbbb#.",
+    ".#bbbdbbbbbbbb#.",
+    "..#bbbbbbbbdb#..",
+    "...##bbbbbb##...",
+    ".....######.....",
+    "................",
+    "................",
+    "................",
+];
+
+const SHEAF: [&str; 16] = [
+    "................",
+    ".....y..y..y....",
+    "....yYy.yY.yY...",
+    ".....yYyYyYy....",
+    "......yYyYy.....",
+    ".......yYy......",
+    "........g.......",
+    "......bbbbb.....",
+    "........g.......",
+    ".......g.g......",
+    "......g...g.....",
+    ".....g.....g....",
+    "....g.......g...",
+    "................",
+    "................",
+    "................",
+];
+
+const WORM: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "..........pp....",
+    ".........p..p...",
+    "..pp....p....p..",
+    ".p..p..p.....k..",
+    "p....pp.........",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
 pub fn build_atlas(seed: u64) -> Vec<u8> {
     let mut a = Atlas { px: vec![0u8; ATLAS * ATLAS * 4], rng: Rng::new(seed), perlin: Perlin::new(seed) };
 
@@ -1178,6 +1445,167 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.sprite(T_ARROW, &POINTY_STICK, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(150, 150, 150)), ('S', rgb(220, 220, 220)), ('f', rgb(245, 245, 245))]);
     a.sprite(T_STRING, &STRING, &[('w', rgb(235, 235, 235))]);
     a.sprite(T_BOW, &BOW, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(230, 230, 230))]);
+
+    // ---- The "Farming, Fishing and Fancy Blocks" update
+    a.each(T_SANDSTONE, |_, y, r, _| {
+        let band = if y % 5 == 4 { 0.86 } else { 1.0 };
+        shade(rgb(222, 205, 150), band * r.range(0.95, 1.04))
+    });
+    a.speckle(T_SANDSTONE_TOP, rgb(225, 210, 155), 0.05);
+    a.each(T_STONE_BRICKS, |x, y, r, _| {
+        let off = if (y / 8) % 2 == 0 { 0 } else { 8 };
+        let mortar = y % 8 == 7 || (x + off) % 16 == 15;
+        if mortar { shade(rgb(90, 90, 90), r.range(0.9, 1.05)) } else { shade(rgb(135, 135, 135), r.range(0.92, 1.05)) }
+    });
+    a.copy(T_COBBLE, T_MOSSY);
+    for _ in 0..70 {
+        let (x, y) = (a.rng.int(0, 15) as usize, a.rng.int(0, 15) as usize);
+        let c = shade(rgb(80, 130, 50), a.rng.range(0.8, 1.15));
+        a.set(T_MOSSY, x, y, c);
+    }
+    a.each(T_HAY_SIDE, |x, y, r, _| {
+        let tie = (3..5).contains(&y) || (11..13).contains(&y);
+        if tie { shade(rgb(130, 70, 30), r.range(0.9, 1.05)) } else { shade(rgb(215, 185, 70), r.range(0.85, 1.08) * if x % 3 == 0 { 0.9 } else { 1.0 }) }
+    });
+    a.each(T_HAY_TOP, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        shade(rgb(205, 175, 65), r.range(0.85, 1.05) * if (d as i32) % 3 == 0 { 0.88 } else { 1.0 })
+    });
+    a.copy(T_PLANKS, T_BOOKSHELF);
+    let spines = [rgb(150, 40, 40), rgb(40, 80, 140), rgb(50, 110, 50), rgb(170, 140, 60), rgb(100, 50, 110)];
+    for shelf in [1usize, 9] {
+        let mut x = 1;
+        while x < 15 {
+            let w = 1 + a.rng.int(0, 1) as usize;
+            let c = spines[a.rng.int(0, 4) as usize];
+            let top = shelf + a.rng.int(0, 1) as usize;
+            for bx in x..(x + w).min(15) {
+                for y in top..shelf + 6 {
+                    let cc = shade(c, a.rng.range(0.85, 1.05));
+                    a.set(T_BOOKSHELF, bx, y, cc);
+                }
+            }
+            x += w + 1;
+        }
+    }
+    a.each(T_LANTERN, |x, y, r, _| {
+        let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14 || x == 7 || x == 8;
+        if frame { shade(rgb(55, 55, 65), r.range(0.9, 1.1)) } else { shade(rgb(255, 205, 110), r.range(0.9, 1.05)) }
+    });
+    a.each(T_MUSHROOM, |x, y, _, _| {
+        let cap = (3..9).contains(&y) && (3..13).contains(&x) && !(y == 3 && (x == 3 || x == 12));
+        let stalk = (9..16).contains(&y) && (6..10).contains(&x);
+        if cap { if (x + y) % 5 == 0 { rgb(250, 240, 230) } else { rgb(200, 40, 35) } } else if stalk { rgb(235, 225, 205) } else { [0, 0, 0, 0] }
+    });
+    a.copy(T_PUMPKIN_SIDE, T_SCARECROW);
+    for (x, y) in [(4usize, 5usize), (5, 5), (10, 5), (11, 5), (7, 8), (8, 8)] {
+        a.set(T_SCARECROW, x, y, rgb(30, 20, 10));
+    }
+    for x in 4..12 {
+        a.set(T_SCARECROW, x, 11, rgb(30, 20, 10)); // a flat, unconvincing smile
+    }
+    for x in 0..16 {
+        for y in 0..16 {
+            a.set(T_WEEDS, x, y, [0, 0, 0, 0]);
+        }
+    }
+    for blade in 0..9 {
+        let bx = 1 + blade + a.rng.int(0, 5) as usize;
+        let top = a.rng.int(5, 11) as usize;
+        for y in top..16 {
+            let lean = ((16 - y) as f32 * a.rng.range(-0.3, 0.3)) as i32;
+            let x = (bx as i32 + lean).clamp(0, 15) as usize;
+            let c = shade(rgb(110, 125, 40), a.rng.range(0.7, 1.1));
+            a.set(T_WEEDS, x, y, c);
+        }
+    }
+    for (tile, base) in [(T_FARMLAND, rgb(120, 85, 55)), (T_FARMLAND_WET, rgb(75, 50, 32))] {
+        a.each(tile, |_, y, r, _| {
+            let furrow = y % 4 == 0;
+            shade(base, r.range(0.85, 1.1) * if furrow { 0.72 } else { 1.0 })
+        });
+    }
+
+    // Crops: four stages each, drawn as little plants on a clear background.
+    for t in T_CROP_WHEAT..T_CROP_POTATO + 4 {
+        for x in 0..16 {
+            for y in 0..16 {
+                a.set(t, x, y, [0, 0, 0, 0]);
+            }
+        }
+    }
+    for stage in 0..4u16 {
+        let height = 4 + stage as usize * 3; // pixels tall
+        // Wheat: thin stalks, going golden with heads at the end.
+        for i in 0..6usize {
+            let x = 1 + i * 3 - (i % 2);
+            let top = 16 - height - a.rng.int(0, 1) as usize;
+            for y in top..16 {
+                let c = if stage == 3 { shade(rgb(200, 170, 60), a.rng.range(0.85, 1.05)) } else { shade(rgb(80, 150, 50), a.rng.range(0.8, 1.05)) };
+                a.set(T_CROP_WHEAT + stage, x, y, c);
+            }
+            if stage >= 2 {
+                for y in top..top + 3 {
+                    let c = if stage == 3 { rgb(230, 200, 90) } else { rgb(150, 170, 70) };
+                    a.set(T_CROP_WHEAT + stage, x + 1, y, c);
+                }
+            }
+        }
+        // Carrots and potatoes: leafy tufts; carrots show orange shoulders when ready.
+        for (tile, leaf) in [(T_CROP_CARROT, rgb(70, 160, 50)), (T_CROP_POTATO, rgb(60, 130, 45))] {
+            for i in 0..4usize {
+                let cx = 2 + i * 4;
+                let top = 16 - height;
+                for y in top..16 {
+                    let spread = (y - top) / 3;
+                    for dx in [0i32, -(spread as i32).min(1), (spread as i32).min(1)] {
+                        let x = (cx as i32 + dx).clamp(0, 15) as usize;
+                        let c = shade(leaf, a.rng.range(0.75, 1.1));
+                        a.set(tile + stage, x, y, c);
+                    }
+                }
+                if stage == 3 {
+                    let c = if tile == T_CROP_CARROT { rgb(240, 130, 30) } else { rgb(190, 150, 90) };
+                    for x in cx.saturating_sub(1)..=(cx + 1).min(15) {
+                        a.set(tile + stage, x, 15, c);
+                        a.set(tile + stage, x, 14, shade(c, 0.9));
+                    }
+                }
+            }
+        }
+    }
+
+    let wood = [('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('H', rgb(150, 150, 150)), ('h', rgb(90, 90, 90))];
+    a.sprite(T_HOE, &HOE, &wood);
+    a.sprite(T_SEEDS, &POWDER, &[('g', rgb(120, 170, 60)), ('d', rgb(90, 130, 40)), ('k', rgb(60, 90, 30))]);
+    a.sprite(T_WHEAT_ITEM, &SHEAF, &[('y', rgb(220, 190, 80)), ('Y', rgb(240, 215, 110)), ('g', rgb(190, 160, 60)), ('b', rgb(130, 90, 40))]);
+    a.sprite(T_CARROT_ITEM, &CARROT, &[('#', rgb(140, 60, 10)), ('o', rgb(240, 130, 30)), ('O', rgb(255, 170, 70)), ('g', rgb(70, 160, 50))]);
+    a.sprite(T_POTATO_ITEM, &SPUD, &[('#', rgb(90, 60, 30)), ('b', rgb(190, 150, 90)), ('d', rgb(140, 105, 60))]);
+    a.sprite(T_BONE_DUST, &POWDER, &[('g', rgb(240, 240, 230)), ('d', rgb(210, 210, 200)), ('k', rgb(180, 180, 170))]);
+    a.sprite(T_COMPOST, &POWDER, &[('g', rgb(100, 70, 40)), ('d', rgb(70, 50, 30)), ('k', rgb(60, 100, 40))]);
+    a.sprite(T_WOOD_ASH, &POWDER, &[('g', rgb(160, 160, 160)), ('d', rgb(120, 120, 120)), ('k', rgb(80, 80, 80))]);
+    a.sprite(T_SOIL_PROBE, &PROBE, &[('#', rgb(50, 50, 60)), ('g', rgb(150, 220, 240)), ('w', rgb(240, 255, 255)), ('i', rgb(200, 200, 200)), ('o', rgb(137, 103, 39))]);
+    a.sprite(T_BREAD, &LOAF, &[('#', rgb(100, 60, 20)), ('b', rgb(200, 140, 60)), ('B', rgb(230, 180, 100)), ('d', rgb(160, 100, 40))]);
+    a.sprite(T_ROD, &ROD, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(230, 230, 230)), ('k', rgb(150, 150, 150))]);
+    let fish = |body: Rgba, fin: Rgba, belly: Rgba| [('#', shade(body, 0.45)), ('f', body), ('F', fin), ('b', belly), ('w', rgb(255, 255, 255)), ('k', rgb(10, 10, 10))];
+    a.sprite(T_COD, &FISH, &fish(rgb(190, 170, 130), rgb(160, 140, 100), rgb(230, 220, 200)));
+    a.sprite(T_SALMON, &FISH, &fish(rgb(200, 80, 70), rgb(150, 60, 60), rgb(240, 170, 150)));
+    a.sprite(T_PUFFER, &FISH, &fish(rgb(240, 210, 60), rgb(200, 170, 40), rgb(250, 240, 180)));
+    for (x, y) in [(6usize, 3usize), (9, 3), (5, 12), (10, 12), (3, 6), (3, 9)] {
+        a.set(T_PUFFER, x, y, rgb(90, 70, 20)); // spikes
+    }
+    a.sprite(T_TROPICAL, &FISH, &fish(rgb(255, 140, 40), rgb(60, 120, 230), rgb(255, 255, 255)));
+    a.sprite(T_BIG_BOB, &FISH, &fish(rgb(240, 190, 40), rgb(255, 230, 120), rgb(255, 245, 200)));
+    a.sprite(T_BOOT, &BOOT, &[('#', rgb(40, 25, 15)), ('b', rgb(100, 65, 35)), ('d', rgb(70, 45, 25)), ('w', rgb(90, 140, 230))]);
+    a.sprite(T_BOTTLE, &BOTTLE, &[('#', rgb(40, 80, 60)), ('g', rgb(120, 190, 150)), ('w', rgb(220, 255, 240)), ('p', rgb(240, 230, 200)), ('c', rgb(150, 110, 60))]);
+    a.sprite(T_FISH_CHIPS, &FISH, &fish(rgb(210, 160, 70), rgb(190, 140, 60), rgb(230, 190, 110)));
+    for (x, y) in [(2usize, 13usize), (4, 12), (6, 13), (8, 12), (10, 13), (12, 12), (3, 14), (7, 14), (11, 14)] {
+        a.set(T_FISH_CHIPS, x, y, rgb(250, 220, 90)); // the chips
+        a.set(T_FISH_CHIPS, x, y - 1, rgb(240, 200, 70));
+    }
+    a.sprite(T_STEW, &BOWL, &[('#', rgb(80, 55, 25)), ('w', rgb(140, 100, 50)), ('s', rgb(120, 80, 60)), ('m', rgb(200, 40, 35)), ('r', rgb(220, 30, 30))]);
+    a.sprite(T_WORM, &WORM, &[('p', rgb(230, 130, 140)), ('k', rgb(40, 20, 20))]);
+    a.each(T_BOBBER, |_, y, _, _| if y < 8 { rgb(220, 30, 30) } else { rgb(245, 245, 245) });
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));
