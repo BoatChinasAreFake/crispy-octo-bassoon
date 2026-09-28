@@ -31,8 +31,18 @@ pub const GLOWROCK: u8 = 20;
 pub const TORCH: u8 = 21;
 pub const FLOWER: u8 = 22;
 pub const TALL_GRASS: u8 = 23;
+pub const GOLD_ORE: u8 = 24;
+pub const PUMPKIN: u8 = 25;
+pub const JACK: u8 = 26;
+pub const CACTUS: u8 = 27;
+pub const ICE: u8 = 28;
+pub const BOUNCY: u8 = 29;
+pub const BED: u8 = 30;
+pub const CAKE: u8 = 31;
+pub const SPONGE: u8 = 32;
+pub const WOOL: u8 = 33;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: u8 = 24;
+pub const NUM_BLOCKS: u8 = 34;
 pub const FIRST_ITEM: u8 = 100;
 
 pub const STICK: u8 = 100;
@@ -50,8 +60,12 @@ pub const SWORD_WOOD: u8 = 114;
 pub const SWORD_STONE: u8 = 115;
 pub const SWORD_IRON: u8 = 116;
 pub const SWORD_DIAMOND: u8 = 117;
+pub const GOLD_INGOT: u8 = 118;
+pub const GOLDEN_CHOP: u8 = 119;
+pub const PEARL: u8 = 120;
+pub const MUTTON: u8 = 121;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: u8 = 118;
+pub const FIRST_MOD_ITEM: u8 = 122;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -70,7 +84,7 @@ pub enum Action {
     Message(&'static str),
     Give(u8, u8),
     SetTime(f32),
-    /// Mob kind index: 0 oinker, 1 hisser, 2 groaner.
+    /// Mob kind index (`MobKind::ALL`): 0 oinker, 1 hisser, 2 groaner, 3 fluffer, 4 starer.
     Spawn(u8),
 }
 
@@ -271,8 +285,20 @@ impl Registry {
             def("torch", "Torch", Cross, false, false, [T_TORCH; 3], 0.0, 0, false, TORCH, 8.0, S_WOOD),
             def("flower", "Poppy-ish", Cross, false, false, [T_FLOWER; 3], 0.0, 0, false, FLOWER, 0.0, S_GRASS),
             def("tall_grass", "Tall Grass", Cross, false, false, [T_TALLGRASS; 3], 0.0, 0, false, AIR, 0.0, S_GRASS),
+            def("gold_ore", "Gold Ore (Shiny, Useless)", Cube, true, true, [T_GOLD_ORE; 3], 3.0, 3, true, GOLD_INGOT, 0.0, S_STONE),
+            def("pumpkin", "Pumpkin (Fruit? Vegetable? Yes.)", Cube, true, true, [T_PUMPKIN_TOP, T_PUMPKIN_SIDE, T_PUMPKIN_TOP], 1.0, 0, false, PUMPKIN, 0.0, S_WOOD),
+            def("jack_o_lantern", "Jack o'Lantern (Faces Everywhere)", Cube, true, true, [T_PUMPKIN_TOP, T_JACK_FACE, T_PUMPKIN_TOP], 1.0, 0, false, JACK, 12.0, S_WOOD),
+            def("cactus", "Pokey Plant (Do Not Hug)", Cube, true, true, [T_CACTUS_TOP, T_CACTUS_SIDE, T_CACTUS_TOP], 0.4, 0, false, CACTUS, 0.0, S_GRASS),
+            def("ice", "Ice (Nature's Floor Wax)", Cube, true, true, [T_ICE; 3], 0.5, 0, false, AIR, 0.0, S_GLASS),
+            def("bouncy_goo", "Bouncy Goo Block", Cube, true, true, [T_BOUNCY; 3], 0.3, 0, false, BOUNCY, 0.0, S_GRASS),
+            def("bed", "Bed (One Block, Budget Cuts)", Cube, true, true, [T_BED_TOP, T_BED_SIDE, T_PLANKS], 0.4, 0, false, BED, 0.0, S_WOOD),
+            def("cake", "Cake (Not a Lie)", Cube, true, true, [T_CAKE_TOP, T_CAKE_SIDE, T_CAKE_SIDE], 0.5, 0, false, CAKE, 0.0, S_GRASS),
+            def("sponge", "Sponge (Very Thirsty)", Cube, true, true, [T_SPONGE; 3], 0.6, 0, false, SPONGE, 0.0, S_GRASS),
+            def("wool", "Wool (Ethically Sheared)", Cube, true, true, [T_WOOL; 3], 0.8, 0, false, WOOL, 0.0, S_GRASS),
         ];
         blocks[GLASS as usize].see_through = true;
+        blocks[ICE as usize].speed = 1.6;
+        blocks[BOUNCY as usize].bounce = 0.85;
         for id in [AIR, WATER, BEDROCK] {
             blocks[id as usize].creative = false;
         }
@@ -302,6 +328,12 @@ impl Registry {
         for (i, (k, n)) in tiers.iter().enumerate() {
             items.push(ItemDef { stack: 1, damage: 4.0 + i as f32, ..item(leak(&format!("{k}_sword")), leak(&format!("{n} Sword")), T_SWORD0 + i as u16) });
         }
+        items.extend([
+            item("gold", "Gold Ingot (Too Soft for Anything)", T_GOLD),
+            ItemDef { food: Some(20.0), stack: 16, ..item("golden_oinkchop", "Suspiciously Golden Oinkchop", T_GOLD_CHOP) },
+            ItemDef { stack: 16, ..item("stare_pearl", "Stare Pearl (Throw to Teleport)", T_PEARL) },
+            ItemDef { food: Some(5.0), ..item("mutton", "Raw Baa-con", T_MUTTON) },
+        ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(u8, u8)], output: (u8, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -323,6 +355,13 @@ impl Registry {
             r(&[(DIRT, 4), (COAL, 1)], (BRICK, 4)),
             r(&[(GUNPOWDER, 5), (SAND, 4)], (TNT, 1)),
             r(&[(TORCH, 4), (GLASS, 1)], (GLOWROCK, 1)),
+            r(&[(PUMPKIN, 1), (TORCH, 1)], (JACK, 1)),
+            r(&[(GOO, 4)], (BOUNCY, 1)),
+            r(&[(WOOL, 3), (PLANKS, 3)], (BED, 1)),
+            r(&[(PORKCHOP, 1), (MUTTON, 1), (SAND, 2)], (CAKE, 1)),
+            r(&[(WOOL, 2), (GOO, 2)], (SPONGE, 1)),
+            r(&[(PORKCHOP, 1), (GOLD_INGOT, 4)], (GOLDEN_CHOP, 1)),
+            r(&[(GOLD_INGOT, 3), (STICK, 2)], (PICK_WOOD, 1)),
         ];
         Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new() }
     }

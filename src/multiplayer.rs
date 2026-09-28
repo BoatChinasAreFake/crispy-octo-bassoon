@@ -41,11 +41,9 @@ impl Peer {
     }
 }
 
-const MOB_KINDS: [MobKind; 3] = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner];
-
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt)
+    matches!(s, Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -436,7 +434,7 @@ impl Game {
                     m.damage(dmg.clamp(0.0, 12.0), at);
                     m.last_attacker = from;
                     let (kind, pos) = (m.kind, m.body.pos);
-                    self.sfx(if kind == MobKind::Oinker { Sfx::Oink } else { Sfx::MobHurt }, Some(pos));
+                    self.sfx(Sfx::hurt_of(kind), Some(pos));
                 }
             }
             Msg::Ignite { x, y, z } => {
@@ -535,9 +533,8 @@ impl Game {
             }
             Msg::Give { item, n } => {
                 if valid_item(item) && n > 0 {
-                    self.inv.add(item, n);
-                    self.sfx(Sfx::Pop, None);
                     self.msg(format!("Loot: {n}x {}", item_name(item)));
+                    self.give(item, n);
                 }
             }
             Msg::Explosion { at, r } => {
@@ -581,7 +578,7 @@ impl Game {
         let mut next = Vec::with_capacity(snaps.len());
         let mut old: Vec<Mob> = std::mem::take(&mut self.mobs);
         for s in snaps {
-            let Some(&kind) = MOB_KINDS.get(s.kind as usize) else { continue };
+            let Some(kind) = MobKind::from_index(s.kind) else { continue };
             let mut m = match old.iter().position(|m| m.id == s.id) {
                 Some(i) => old.swap_remove(i),
                 None => {
@@ -592,7 +589,9 @@ impl Game {
             };
             m.net_pos = s.pos;
             m.yaw = s.yaw;
-            m.fuse = s.fuse;
+            // Starers reuse the fuse field for "angry".
+            m.angry = kind == MobKind::Starer && s.fuse > 0.0;
+            m.fuse = if m.angry { 0.0 } else { s.fuse };
             m.hurt = m.hurt.max(s.hurt);
             m.burning = s.burning;
             next.push(m);
@@ -664,10 +663,10 @@ impl Game {
                     .iter()
                     .map(|m| MobSnap {
                         id: m.id,
-                        kind: MOB_KINDS.iter().position(|k| *k == m.kind).unwrap_or(0) as u8,
+                        kind: m.kind.index(),
                         pos: m.body.pos,
                         yaw: m.yaw,
-                        fuse: m.fuse,
+                        fuse: if m.angry { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                     })

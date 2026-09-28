@@ -235,13 +235,10 @@ fn register_api(e: &mut Engine) {
         push(Cmd::Explode(Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32), num(&r)?.clamp(0.5, 8.0) as f32))
     });
     e.register_fn("spawn_mob", |kind: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Res<()> {
-        let k = match kind.to_ascii_lowercase().as_str() {
-            "oinker" | "pig" => 0,
-            "hisser" => 1,
-            "groaner" | "zombie" => 2,
-            other => return err(format!("unknown mob \"{other}\" (oinker, hisser, groaner)")),
+        let Some(k) = crate::entity::MobKind::from_name(kind) else {
+            return err(format!("unknown mob \"{kind}\" (oinker, hisser, groaner, fluffer, starer)"));
         };
-        push(Cmd::Spawn(k, Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))
+        push(Cmd::Spawn(k.index(), Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))
     });
     e.register_fn("set_time", |t: Dynamic| -> Res<()> { push(Cmd::SetTime(num(&t)?.rem_euclid(1.0) as f32)) });
     e.register_fn("play_sound", |name: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Res<()> {
@@ -259,6 +256,10 @@ fn register_api(e: &mut Engine) {
             "eat" => Sfx::Eat,
             "break" => Sfx::Break(Mat::Stone),
             "glass" => Sfx::Break(Mat::Glass),
+            "baa" => Sfx::Baa,
+            "warp" => Sfx::Warp,
+            "fanfare" => Sfx::Fanfare,
+            "boing" => Sfx::Boing,
             other => return err(format!("unknown sound \"{other}\"")),
         };
         push(Cmd::Sound(s, Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))

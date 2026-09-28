@@ -91,7 +91,7 @@ Separate several actions with `;`, for example `on_use = launch 18; message Whee
 | `message Some text` | Show a chat message |
 | `give slice 2` | Give items |
 | `time day` / `night` / `noon` / `midnight` / `0.0`–`1.0` | Set the time (host only) |
-| `spawn oinker` / `hisser` / `groaner` | Spawn a mob (host only) |
+| `spawn oinker` / `hisser` / `groaner` / `fluffer` / `starer` | Spawn a mob (host only). The names they parody (`pig`, `creeper`, `zombie`, `sheep`, `enderman`) work too |
 
 ### `[texture <name>]`
 
@@ -131,7 +131,7 @@ color # = 200,20,40
 **A PNG file** in the mod folder, any size (it's scaled to 16×16). Either reference it directly as `texture = ruby.png`, or declare it with `[texture ruby]` and `file = ruby.png`.
 
 Base-game texture names you can use anywhere a texture is expected:
-`grass_top grass_side dirt stone cobblestone sand gravel water log_side log_top leaves planks glass bedrock coal_ore iron_ore diamond_ore snow snow_side bricks tnt_side tnt_top tnt_bottom crafting_table_top crafting_table_side glowrock torch flower tall_grass stick coal iron diamond gunpowder porkchop goo wooden_pickaxe stone_pickaxe iron_pickaxe diamond_pickaxe wooden_sword stone_sword iron_sword diamond_sword white`.
+`grass_top grass_side dirt stone cobblestone sand gravel water log_side log_top leaves planks glass bedrock coal_ore iron_ore diamond_ore snow snow_side bricks tnt_side tnt_top tnt_bottom crafting_table_top crafting_table_side glowrock torch flower tall_grass stick coal iron diamond gunpowder porkchop goo wooden_pickaxe stone_pickaxe iron_pickaxe diamond_pickaxe wooden_sword stone_sword iron_sword diamond_sword white gold_ore pumpkin_top pumpkin_side jack_o_lantern cactus_top cactus_side ice bouncy_goo bed_top bed_side cake_top cake_side sponge wool gold golden_oinkchop stare_pearl mutton`.
 
 ### `[recipe]`
 
@@ -176,7 +176,7 @@ Each line is an extra title-screen splash text.
 
 ## Limits
 
-- Up to **76 mod blocks**, **138 mod items** and **160 mod textures**, across all mods together.
+- Up to **66 mod blocks**, **134 mod items** and **160 mod textures**, across all mods together.
 - 1 MB per file, and 4 MB for all of a server's mods together.
 
 ## Worlds and multiplayer

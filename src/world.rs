@@ -123,6 +123,11 @@ impl Generator {
         (h, biome)
     }
 
+    /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
+    fn cold(&self, x: i32, z: i32) -> bool {
+        self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
+    }
+
     fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32)> {
         let (h, biome) = self.column(x, z);
         let density = match biome {
@@ -206,6 +211,8 @@ impl Generator {
                             b[i] = IRON_ORE;
                         } else if y < 18 && (0.019..0.0215).contains(&r) && r2 < 0.5 {
                             b[i] = DIAMOND_ORE;
+                        } else if y < 32 && (0.0215..0.0245).contains(&r) && r2 < 0.55 {
+                            b[i] = GOLD_ORE;
                         }
                     }
                     for (oi, ore) in self.ores.iter().enumerate() {
@@ -227,7 +234,20 @@ impl Generator {
                         b[idx(lx, top, lz)] = FLOWER;
                     } else if r < 0.11 {
                         b[idx(lx, top, lz)] = TALL_GRASS;
+                    } else if r < 0.1125 && biome == Biome::Plains {
+                        b[idx(lx, top, lz)] = PUMPKIN;
                     }
+                }
+                // Pokey Plants in the desert, 1-3 tall.
+                if biome == Biome::Desert && top + 3 < CH && b[idx(lx, h, lz)] == SAND && hash2(s ^ 0xCAC, x, z) < 0.005 {
+                    let tall = 1 + (hash2(s ^ 0xCAD, x, z) * 3.0) as i32;
+                    for y in top..top + tall.min(3) {
+                        b[idx(lx, y, lz)] = CACTUS;
+                    }
+                }
+                // Cold seas freeze over.
+                if h < SEA && b[idx(lx, SEA, lz)] == WATER && self.cold(x, z) {
+                    b[idx(lx, SEA, lz)] = ICE;
                 }
                 if top < CH && b[idx(lx, top, lz)] == AIR {
                     let below = b[idx(lx, h, lz)];

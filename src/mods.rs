@@ -365,12 +365,7 @@ impl Ctx<'_> {
                     "midnight" => Some(Action::SetTime(0.75)),
                     x => x.parse::<f32>().ok().map(|t| Action::SetTime(t.rem_euclid(1.0))),
                 },
-                "spawn" => match arg.to_ascii_lowercase().as_str() {
-                    "oinker" | "pig" => Some(Action::Spawn(0)),
-                    "hisser" => Some(Action::Spawn(1)),
-                    "groaner" | "zombie" => Some(Action::Spawn(2)),
-                    _ => None,
-                },
+                "spawn" => crate::entity::MobKind::from_name(arg).map(|k| Action::Spawn(k.index())),
                 _ => None,
             };
             match a {

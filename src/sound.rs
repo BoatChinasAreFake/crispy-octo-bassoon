@@ -54,6 +54,14 @@ impl Sfx {
     pub fn from_u8(v: u8) -> Option<Sfx> {
         all_sfx().get(v as usize).copied()
     }
+    /// What a mob sounds like when hit.
+    pub fn hurt_of(kind: crate::entity::MobKind) -> Sfx {
+        match kind {
+            crate::entity::MobKind::Oinker => Sfx::Oink,
+            crate::entity::MobKind::Fluffer => Sfx::Baa,
+            _ => Sfx::MobHurt,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -76,6 +84,12 @@ pub enum Sfx {
     Splash,
     Craft,
     Thud,
+    Baa,
+    /// A Starer (or a player with a Stare Pearl) teleporting.
+    Warp,
+    /// "Advancement Made!" fanfare.
+    Fanfare,
+    Boing,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -346,6 +360,39 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             burst(&mut v, 0.0, 0.1, 40.0, 60.0, 500.0, 0.8, rng);
             finish(v, 1.6)
         }
+        Sfx::Baa => {
+            // Heavy vibrato is what makes it a bleat rather than a moan.
+            let mut v = vec![0.0; samples(0.7)];
+            let p = rng.range(0.9, 1.15);
+            voice(&mut v, 0.0, 0.65, 310.0 * p, 270.0 * p, 1500.0, 0.09, 1.0, rng);
+            voice(&mut v, 0.0, 0.65, 620.0 * p, 540.0 * p, 2200.0, 0.09, 0.3, rng);
+            finish(v, 1.1)
+        }
+        Sfx::Warp => {
+            let mut v = vec![0.0; samples(0.6)];
+            let p = rng.range(0.9, 1.1);
+            tone(&mut v, 0.0, 0.5, 900.0 * p, 120.0 * p, 5.0, 0.8, &[1.0, 0.5, 0.3]);
+            tone(&mut v, 0.0, 0.5, 1210.0 * p, 160.0 * p, 5.0, 0.4, &[1.0]);
+            burst(&mut v, 0.0, 0.3, 10.0, 800.0, 5000.0, 0.3, rng);
+            finish(v, 1.0)
+        }
+        Sfx::Fanfare => {
+            // Da-da-da-DAAA. Deeply original.
+            let mut v = vec![0.0; samples(1.1)];
+            let h = [1.0, 0.45, 0.25, 0.12];
+            for (i, f) in [523.0, 659.0, 784.0].iter().enumerate() {
+                tone(&mut v, i as f32 * 0.1, 0.18, *f, *f, 14.0, 0.8, &h);
+            }
+            tone(&mut v, 0.3, 0.8, 1047.0, 1047.0, 3.5, 1.0, &h);
+            tone(&mut v, 0.3, 0.8, 784.0, 784.0, 3.5, 0.5, &h);
+            finish(v, 0.9)
+        }
+        Sfx::Boing => {
+            let mut v = vec![0.0; samples(0.4)];
+            let p = rng.range(0.9, 1.1);
+            tone(&mut v, 0.0, 0.38, 180.0 * p, 520.0 * p, 7.0, 1.0, &[1.0, 0.3]);
+            finish(v, 1.0)
+        }
     }
 }
 
@@ -436,6 +483,11 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Splash,
         Sfx::Craft,
         Sfx::Thud,
+        // Appended only: the index is the multiplayer wire encoding.
+        Sfx::Baa,
+        Sfx::Warp,
+        Sfx::Fanfare,
+        Sfx::Boing,
     ]);
     v
 }
@@ -453,7 +505,7 @@ impl Audio {
         if !AUDIO_DEAD.load(Ordering::Relaxed) {
             for s in all_sfx() {
                 // Several variants per effect: quad-snd has no pitch control, so variety is baked in.
-                let n = if matches!(s, Sfx::Explode | Sfx::Hiss | Sfx::Click | Sfx::Craft) { 1 } else { VARIANTS };
+                let n = if matches!(s, Sfx::Explode | Sfx::Hiss | Sfx::Click | Sfx::Craft | Sfx::Fanfare) { 1 } else { VARIANTS };
                 let mut sounds = Vec::new();
                 for _ in 0..n {
                     if let Ok(snd) = load_sound_from_bytes(&wav(&synth(s, &mut rng))).await {
@@ -479,7 +531,8 @@ impl Audio {
             Sfx::Pop => 0.45,
             Sfx::Explode => 1.0,
             // Voices are dense; keep them level with the percussive sounds.
-            Sfx::Groan | Sfx::Oink => 0.4,
+            Sfx::Groan | Sfx::Oink | Sfx::Baa => 0.4,
+            Sfx::Fanfare => 0.5,
             Sfx::Hurt | Sfx::MobHurt => 0.5,
             _ => 0.8,
         }

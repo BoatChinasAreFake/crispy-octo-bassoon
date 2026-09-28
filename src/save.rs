@@ -8,8 +8,8 @@ use std::time::SystemTime;
 
 const MAGIC: &[u8; 4] = b"MNCR";
 /// v2 adds the mod palette (names of mod blocks/items); v3 adds script mod
-/// variables. Older saves still load.
-const VERSION: u32 = 3;
+/// variables; v4 adds earned advancements. Older saves still load.
+const VERSION: u32 = 4;
 
 pub struct SaveData {
     pub seed: u32,
@@ -26,6 +26,8 @@ pub struct SaveData {
     pub palette: Vec<(u8, String)>,
     /// Script mod variables: (mod id, encoded variables) (save v3+).
     pub script_vars: Vec<(String, Vec<u8>)>,
+    /// Keys of the advancements earned in this world (save v4+).
+    pub advancements: Vec<String>,
 }
 
 
@@ -121,6 +123,11 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
         w.u32(blob.len() as u32);
         w.0.extend_from_slice(blob);
     }
+    w.u32(d.advancements.len() as u32);
+    for key in &d.advancements {
+        w.u32(key.len() as u32);
+        w.0.extend_from_slice(key.as_bytes());
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -185,7 +192,13 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
             script_vars.push((String::from_utf8_lossy(&id).into_owned(), blob));
         }
     }
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars })
+    let mut advancements = Vec::new();
+    if version >= 4 {
+        for _ in 0..r.u32()? {
+            advancements.push(String::from_utf8_lossy(&r.bytes(256)?).into_owned());
+        }
+    }
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -387,7 +400,19 @@ mod tests {
             mods: HashMap::new(),
             palette: Vec::new(),
             script_vars: Vec::new(),
+            advancements: Vec::new(),
         }
+    }
+
+    #[test]
+    fn advancements_round_trip() {
+        let root = tmp("adv");
+        let path = root.join("w.mncr");
+        let mut d = data(5, false);
+        d.advancements = vec!["getting_wood".into(), "dimonds".into()];
+        write_to(&path, &d).unwrap();
+        assert_eq!(read_from(&path).unwrap().advancements, d.advancements);
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

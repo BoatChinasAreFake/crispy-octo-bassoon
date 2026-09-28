@@ -33,6 +33,8 @@ pub struct Player {
     pub swing: f32,
     /// Speed multiplier from the block underfoot (mod blocks can change it).
     pub ground_speed: f32,
+    /// Set when a bouncy block launched us (the game plays a sound and clears it).
+    pub bounced: bool,
 }
 
 impl Player {
@@ -52,6 +54,7 @@ impl Player {
             regen: 0.0,
             swing: 0.0,
             ground_speed: 1.0,
+            bounced: false,
         }
     }
 
@@ -155,6 +158,7 @@ impl Player {
                 b.vel.y = falling_speed * def.bounce;
                 b.on_ground = false;
                 self.fall_start = b.pos.y;
+                self.bounced = true;
             }
         }
         // Hop out of water onto a ledge.

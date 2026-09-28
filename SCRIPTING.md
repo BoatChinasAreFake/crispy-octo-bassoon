@@ -30,7 +30,8 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `on_block_place(player, x, y, z, block)` | A player placed a block | yes |
 | `on_use_item(player, item)` | Right-click with an item | yes, for the host's own player; for joined players the event still runs but their game has already done the normal thing |
 | `on_player_join(player)` / `on_player_leave(player)` | Multiplayer joins and leaves | |
-| `on_mob_death(kind, x, y, z, killer)` | A mob died (`kind` is `oinker`, `hisser` or `groaner`; `killer` is a player name or `""`) | |
+| `on_mob_death(kind, x, y, z, killer)` | A mob died (`kind` is `oinker`, `hisser`, `groaner`, `fluffer` or `starer`; `killer` is a player name or `""`) | |
+| `on_advancement(player, key)` | The world's player earned an advancement (`key` is like `"getting_wood"` or `"dimonds"`). Advancements belong to the world's own player, so this runs in single player and for the host | |
 
 - **Names:** blocks and items are passed as names: `"stone"`, `"glass"`, `"cheese:wheel"`.
 - **Players** are passed by name. On a dedicated server, console commands arrive as chat from `"Server"`.
@@ -66,9 +67,9 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `heal(player, n)`, `damage(player, n)` | Health (20 = full) |
 | `teleport(player, x, y, z)`, `launch(player, speed)` | Move a player |
 | `explode(x, y, z, radius)` | Boom (radius up to 8) |
-| `spawn_mob(kind, x, y, z)` | Spawn an `oinker`, `hisser` or `groaner` |
+| `spawn_mob(kind, x, y, z)` | Spawn an `oinker`, `hisser`, `groaner`, `fluffer` or `starer` |
 | `set_time(t)` | Set the time of day (0–1) for everyone |
-| `play_sound(name, x, y, z)` | `explode hiss oink groan pop click splash craft hurt eat break glass` |
+| `play_sound(name, x, y, z)` | `explode hiss oink groan pop click splash craft hurt eat break glass baa warp fanfare boing` |
 | `log(text)` / `print(text)` | Debug output: chat in single player, the console on a server |
 
 - **Timing:** changes are queued, so `get_block` right after `set_block` in the same event still sees the old block.
