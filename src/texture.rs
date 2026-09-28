@@ -490,7 +490,8 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
 
     a.each(T_LEAVES, |_, _, r, _| {
-        if r.chance(0.22) { [0, 0, 0, 0] } else { shade(rgb(58, 130, 40), r.range(0.7, 1.15)) }
+        // Holes keep the leaf colour (alpha 0) so mipmaps don't blend in black fringes.
+        if r.chance(0.22) { [58, 130, 40, 0] } else { shade(rgb(58, 130, 40), r.range(0.7, 1.15)) }
     });
     a.each(T_GLASS, |x, y, r, _| {
         let edge = x == 0 || y == 0 || x == 15 || y == 15;

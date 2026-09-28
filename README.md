@@ -77,6 +77,6 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night [--frames N] [--time 0..1]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
 
 Not affiliated with any block-game company.

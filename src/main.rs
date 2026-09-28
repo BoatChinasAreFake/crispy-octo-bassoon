@@ -715,6 +715,9 @@ struct ShotArgs {
     mode: String,
     frames: u32,
     time: Option<f32>,
+    yaw: f32,
+    pitch: f32,
+    pos: Option<Vec3>,
 }
 
 fn parse_args() -> Option<ShotArgs> {
@@ -725,6 +728,12 @@ fn parse_args() -> Option<ShotArgs> {
         mode: get("--mode").unwrap_or_else(|| "title".into()),
         frames: get("--frames").and_then(|f| f.parse().ok()).unwrap_or(240),
         time: get("--time").and_then(|f| f.parse().ok()),
+        yaw: get("--yaw").and_then(|f| f.parse().ok()).unwrap_or(2.4),
+        pitch: get("--pitch").and_then(|f| f.parse().ok()).unwrap_or(-0.25),
+        pos: get("--pos").and_then(|p| {
+            let v: Vec<f32> = p.split(',').filter_map(|x| x.parse().ok()).collect();
+            (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
+        }),
     })
 }
 
@@ -783,8 +792,13 @@ async fn main() {
         if let Some(s) = &shot {
             if s.mode != "title" && s.mode != "inventory" {
                 // Keep the demo camera looking at something interesting.
-                app.game.player.pitch = -0.25;
-                app.game.player.yaw = 2.4;
+                app.game.player.pitch = s.pitch;
+                app.game.player.yaw = s.yaw;
+                if let Some(p) = s.pos {
+                    app.game.player.body.pos = p;
+                    app.game.player.body.vel = Vec3::ZERO;
+                    app.game.player.flying = true;
+                }
             }
             if (s.mode == "survival" || s.mode == "creative") && frames == 150 {
                 let p = app.game.player.body.pos;

@@ -815,12 +815,13 @@ impl Game {
                 (h.pos.as_vec3(), h.pos.as_vec3() + Vec3::ONE)
             };
             g.begin(Pass::Blend, [0.0, 0.0, 0.0, 0.55], true);
-            outline(&mut g, min - Vec3::splat(0.004), max + Vec3::splat(0.004), 0.012);
+            // Edges sit entirely outside the block so the (now depth-tested) outline never z-fights.
+            outline(&mut g, min - Vec3::splat(0.014), max + Vec3::splat(0.014), 0.012);
             if let Some((bp, prog)) = self.breaking {
                 if bp == h.pos {
                     let stage = ((prog * 5.0) as u16).min(4);
                     g.begin(Pass::Blend, [1.0; 4], false);
-                    let m = Mat4::from_translation(min - Vec3::splat(0.003)) * Mat4::from_scale(max - min + Vec3::splat(0.006));
+                    let m = Mat4::from_translation(min - Vec3::splat(0.006)) * Mat4::from_scale(max - min + Vec3::splat(0.012));
                     g.cube(&m, [T_CRACK0 + stage; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
                 }
             }
@@ -848,8 +849,15 @@ impl Game {
         let tint = if self.player.hurt > 0.3 { [1.0, 0.6, 0.6, 1.0] } else { [1.0; 4] };
         g.begin(Pass::Overlay, tint, false);
         if held == AIR {
-            let m = basis * local * Mat4::from_rotation_x(0.3) * Mat4::from_translation(Vec3::new(-0.07, -0.1, -0.4)) * Mat4::from_scale(Vec3::new(0.14, 0.14, 0.48));
-            g.cube(&m, [T_SKIN; 6], sky.max(0.2), [0.0, 0.0, 1.0, 1.0]);
+            // A short forearm poking in from the bottom-right corner, angled up and inward,
+            // with a shirt sleeve at the near end so it reads as an arm rather than a plank.
+            let arm = basis * local * Mat4::from_translation(Vec3::new(0.1, -0.1, 0.1)) * Mat4::from_rotation_y(0.35) * Mat4::from_rotation_x(0.6);
+            let w = 0.16;
+            let sleeve = arm * Mat4::from_translation(Vec3::new(-w / 2.0 - 0.006, -w / 2.0 - 0.006, 0.0)) * Mat4::from_scale(Vec3::new(w + 0.012, w + 0.012, 0.25));
+            let hand = arm * Mat4::from_translation(Vec3::new(-w / 2.0, -w / 2.0, -0.3)) * Mat4::from_scale(Vec3::new(w, w, 0.3));
+            let light = sky.max(0.2);
+            g.cube(&sleeve, [T_STOVE_SHIRT; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            g.cube(&hand, [T_SKIN; 6], light, [0.0, 0.0, 1.0, 1.0]);
         } else if is_block_item(held) && block(held).model == Model::Cube {
             let tiles = {
                 let t = block(held).tex;

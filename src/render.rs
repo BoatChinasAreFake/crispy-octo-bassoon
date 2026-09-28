@@ -258,7 +258,10 @@ impl Renderer {
         let blend = pipe(PipelineParams {
             cull_face: CullFace::Nothing,
             depth_test: Comparison::LessOrEqual,
-            depth_write: false,
+            // miniquad disables the depth *test* whenever depth_write is false, which let
+            // water, clouds and outlines show through terrain. Keep the test on here and
+            // mask depth writes by hand around the translucent pass instead.
+            depth_write: true,
             color_blend: alpha,
             alpha_blend: alpha,
             ..Default::default()
@@ -401,6 +404,7 @@ impl Renderer {
         // Water, far to near
         visible.sort_by(|a, b| b.1.total_cmp(&a.1));
         ctx.apply_pipeline(&self.blend);
+        set_depth_writes(false);
         ctx.apply_uniforms(UniformsSource::table(&base));
         for (k, _) in &visible {
             if let Some(m) = self.chunks.get(k).and_then(|c| c.water.as_ref()) {
@@ -410,10 +414,17 @@ impl Renderer {
         }
 
         draw_batches(ctx, Pass::Blend, &self.blend);
+        // Restore before anything else (including macroquad's clears) touches depth.
+        set_depth_writes(true);
         draw_batches(ctx, Pass::Overlay, &self.overlay);
 
         ctx.end_render_pass();
     }
+}
+
+/// miniquad never changes the depth mask itself, so this sticks until restored.
+fn set_depth_writes(on: bool) {
+    unsafe { gl::glDepthMask(if on { gl::GL_TRUE } else { gl::GL_FALSE } as _) }
 }
 
 fn frustum_planes(m: &Mat4) -> [Vec4; 6] {
