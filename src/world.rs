@@ -75,6 +75,9 @@ pub struct Generator {
     cave_a: Perlin,
     cave_b: Perlin,
     cavern: Perlin,
+    /// Mod world generation, copied from the registry when the world is created.
+    ores: Vec<OreGen>,
+    plants: Vec<PlantGen>,
 }
 
 impl Generator {
@@ -90,6 +93,8 @@ impl Generator {
             cave_a: Perlin::new(s + 5),
             cave_b: Perlin::new(s + 6),
             cavern: Perlin::new(s + 7),
+            ores: reg().ores.clone(),
+            plants: reg().plants.clone(),
         }
     }
 
@@ -203,6 +208,16 @@ impl Generator {
                             b[i] = DIAMOND_ORE;
                         }
                     }
+                    for (oi, ore) in self.ores.iter().enumerate() {
+                        if b[i] == ore.replace && (ore.min_y..=ore.max_y).contains(&y) {
+                            let salt = 0x5100 + oi as u32 * 7;
+                            // Small 2x2x2-ish veins; roughly `chance` of the eligible blocks.
+                            if hash3(s ^ salt, x >> 1, y >> 1, z >> 1) < ore.chance * 3.0 && hash3(s ^ (salt + 1), x, y, z) < 0.4 {
+                                b[i] = ore.block;
+                                break;
+                            }
+                        }
+                    }
                 }
                 // Plants on grass
                 let top = h + 1;
@@ -212,6 +227,15 @@ impl Generator {
                         b[idx(lx, top, lz)] = FLOWER;
                     } else if r < 0.11 {
                         b[idx(lx, top, lz)] = TALL_GRASS;
+                    }
+                }
+                if top < CH && b[idx(lx, top, lz)] == AIR {
+                    let below = b[idx(lx, h, lz)];
+                    for (pi, p) in self.plants.iter().enumerate() {
+                        if below == p.on && hash2(s ^ (0x9100 + pi as u32 * 13), x, z) < p.chance {
+                            b[idx(lx, top, lz)] = p.block;
+                            break;
+                        }
                     }
                 }
             }
@@ -267,6 +291,9 @@ pub struct World {
     /// Chunks whose mesh is stale.
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
+    /// Local edits waiting to be sent to other players (only filled when `log_edits`).
+    pub edit_log: Vec<(i32, i32, i32, u8)>,
+    pub log_edits: bool,
     req_tx: Option<Sender<(i32, i32)>>,
     res_rx: Receiver<(i32, i32, Vec<u8>)>,
 }
@@ -280,7 +307,9 @@ impl World {
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).saturating_sub(1).clamp(1, 6);
         for _ in 0..workers {
             let (rx, tx, g) = (req_rx.clone(), res_tx.clone(), generator.clone());
-            std::thread::spawn(move || loop {
+            // Named so the panic hook can tell them apart from the (unnamed) audio thread.
+            let builder = std::thread::Builder::new().name("chunkgen".into());
+            let _ = builder.spawn(move || loop {
                 let job = rx.lock().ok().and_then(|r| r.recv().ok());
                 let Some((cx, cz)) = job else { return };
                 if tx.send((cx, cz, g.generate(cx, cz))).is_err() {
@@ -294,6 +323,8 @@ impl World {
             mods: HashMap::new(),
             dirty: HashSet::new(),
             pending: HashSet::new(),
+            edit_log: Vec::new(),
+            log_edits: false,
             req_tx: Some(req_tx),
             res_rx,
         }
@@ -305,7 +336,9 @@ impl World {
 
     /// Queue generation for chunks around a point and absorb finished ones.
     /// Returns the chunk keys that were unloaded.
-    pub fn stream(&mut self, center: Vec3, radius: i32) -> Vec<(i32, i32)> {
+    /// `centers` are (position, radius) pairs: the local player plus, when hosting,
+    /// the remote players, so mobs and physics keep working around them.
+    pub fn stream(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
         while let Ok((cx, cz, blocks)) = self.res_rx.try_recv() {
             self.pending.remove(&(cx, cz));
             let mut chunk = Chunk { blocks, heights: [0; 256] };
@@ -325,20 +358,25 @@ impl World {
             }
         }
 
-        let (pcx, pcz) = ((center.x / CW as f32).floor() as i32, (center.z / CW as f32).floor() as i32);
+        let chunk_of = |p: Vec3| ((p.x / CW as f32).floor() as i32, (p.z / CW as f32).floor() as i32);
         let mut wanted: Vec<(i32, i32, i32)> = Vec::new();
-        for dz in -radius - 1..=radius + 1 {
-            for dx in -radius - 1..=radius + 1 {
-                let d2 = dx * dx + dz * dz;
-                if d2 <= (radius + 1) * (radius + 1) {
-                    let k = (pcx + dx, pcz + dz);
-                    if !self.chunks.contains_key(&k) && !self.pending.contains(&k) {
-                        wanted.push((d2, k.0, k.1));
+        for (ci, &(center, radius)) in centers.iter().enumerate() {
+            let (pcx, pcz) = chunk_of(center);
+            for dz in -radius - 1..=radius + 1 {
+                for dx in -radius - 1..=radius + 1 {
+                    let d2 = dx * dx + dz * dz;
+                    if d2 <= (radius + 1) * (radius + 1) {
+                        let k = (pcx + dx, pcz + dz);
+                        if !self.chunks.contains_key(&k) && !self.pending.contains(&k) {
+                            // The local player (first center) always goes first.
+                            wanted.push((d2 + if ci == 0 { 0 } else { 4 }, k.0, k.1));
+                        }
                     }
                 }
             }
         }
         wanted.sort_unstable();
+        wanted.dedup_by_key(|w| (w.1, w.2));
         let budget = 24usize.saturating_sub(self.pending.len());
         if let Some(tx) = &self.req_tx {
             for &(_, cx, cz) in wanted.iter().take(budget) {
@@ -348,11 +386,15 @@ impl World {
             }
         }
 
-        let keep = (radius + 3) * (radius + 3);
         let gone: Vec<(i32, i32)> = self
             .chunks
             .keys()
-            .filter(|&&(cx, cz)| (cx - pcx).pow(2) + (cz - pcz).pow(2) > keep)
+            .filter(|&&(cx, cz)| {
+                centers.iter().all(|&(c, r)| {
+                    let (pcx, pcz) = chunk_of(c);
+                    (cx - pcx).pow(2) + (cz - pcz).pow(2) > (r + 3) * (r + 3)
+                })
+            })
             .copied()
             .collect();
         for k in &gone {
@@ -404,15 +446,37 @@ impl World {
     }
 
     pub fn set(&mut self, x: i32, y: i32, z: i32, id: u8) {
+        if self.set_inner(x, y, z, id).is_some() && self.log_edits {
+            self.edit_log.push((x, y, z, id));
+        }
+    }
+
+    /// Apply an edit that came from another player: not echoed back out.
+    /// Returns the previous block if anything changed.
+    pub fn set_remote(&mut self, x: i32, y: i32, z: i32, id: u8) -> Option<u8> {
+        if !valid_block(id) {
+            return None;
+        }
+        if !self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) && (0..CH).contains(&y) {
+            // Not loaded here: remember it so the chunk is right when it generates.
+            let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
+            self.mods.entry((cx, cz)).or_default().insert(idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
+            return None;
+        }
+        self.set_inner(x, y, z, id)
+    }
+
+    fn set_inner(&mut self, x: i32, y: i32, z: i32, id: u8) -> Option<u8> {
         if !(0..CH).contains(&y) {
-            return;
+            return None;
         }
         let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
         let (lx, lz) = (x.rem_euclid(CW), z.rem_euclid(CW));
-        let Some(c) = self.chunks.get_mut(&(cx, cz)) else { return };
+        let c = self.chunks.get_mut(&(cx, cz))?;
         let i = idx(lx, y, lz);
-        if c.blocks[i] == id {
-            return;
+        let old = c.blocks[i];
+        if old == id {
+            return None;
         }
         c.blocks[i] = id;
         c.recompute_height(lx, lz);
@@ -422,6 +486,21 @@ impl World {
         for &dx in xs {
             for &dz in zs {
                 self.dirty.insert((cx + dx, cz + dz));
+            }
+        }
+        Some(old)
+    }
+
+    /// Set a block even if its chunk isn't loaded here (it's applied when the
+    /// chunk generates), and share it with other players. Used by scripts.
+    pub fn set_or_record(&mut self, x: i32, y: i32, z: i32, id: u8) {
+        if self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) {
+            self.set(x, y, z, id);
+        } else if (0..CH).contains(&y) && valid_block(id) {
+            let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
+            self.mods.entry((cx, cz)).or_default().insert(idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
+            if self.log_edits {
+                self.edit_log.push((x, y, z, id));
             }
         }
     }

@@ -177,7 +177,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         for (f, (n, corners, shade)) in FACES.iter().enumerate() {
                             let (nx, ny, nz) = (lx + n[0], y + n[1], lz + n[2]);
                             let nb = hood.get(nx, ny, nz);
-                            if is_opaque(nb) || (nb == id && id == GLASS) {
+                            if is_opaque(nb) || (nb == id && def.see_through) {
                                 continue;
                             }
                             let tile = face_tile(id, f);

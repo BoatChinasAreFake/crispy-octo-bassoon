@@ -7,10 +7,17 @@ mod entity;
 mod game;
 mod inventory;
 mod mesher;
+mod mods;
+mod multiplayer;
+mod net;
 mod noise;
 mod player;
 mod render;
 mod save;
+mod scripting;
+mod server;
+mod upnp;
+mod sound;
 mod texture;
 mod ui;
 mod world;
@@ -20,6 +27,7 @@ use game::{Controls, Game};
 use macroquad::prelude::*;
 use player::Input;
 use render::Renderer;
+use sound::{Audio, Sfx};
 use ui::Ui;
 
 const SPLASHES: &[&str] = &[
@@ -52,6 +60,8 @@ enum Screen {
     Dead,
     Options { from_title: bool },
     Help { from_title: bool },
+    Multiplayer,
+    Mods,
 }
 
 struct Settings {
@@ -74,6 +84,61 @@ struct App {
     quit: bool,
     status: Option<(String, f32)>,
     fps: f32,
+    audio: Audio,
+    // ---- multiplayer
+    mp_name: String,
+    mp_addr: String,
+    mp_focus: usize,
+    /// Address to connect to on the next frame (so "Connecting..." gets drawn first).
+    connect_next: Option<String>,
+    /// Connected, waiting for the host's Welcome.
+    joining: Option<(net::Conn, f64)>,
+    /// Chat line being typed, if the chat box is open.
+    chat: Option<String>,
+    last_view_proj: Mat4,
+    lan_addr: Option<String>,
+    /// Password for joining, and for hosting if set.
+    mp_password: String,
+    /// UPnP request running in the background.
+    upnp_job: Option<std::sync::mpsc::Receiver<Result<upnp::Mapping, String>>>,
+    upnp_mapping: Option<upnp::Mapping>,
+    internet_status: Option<String>,
+    // ---- mods
+    /// The procedurally painted base atlas; mod textures are layered on a copy.
+    base_atlas: Vec<u8>,
+    /// Registry generation the GPU atlas was built from.
+    atlas_gen: u32,
+    mods_scroll: usize,
+    /// Joined a server, so its mods (not ours) are active.
+    using_server_mods: bool,
+}
+
+/// A random splash text, including ones added by mods.
+fn pick_splash() -> &'static str {
+    let extra = &block::reg().splashes;
+    let n = SPLASHES.len() + extra.len();
+    let i = (random_seed() as usize) % n;
+    if i < SPLASHES.len() { SPLASHES[i] } else { extra[i - SPLASHES.len()].as_str() }
+}
+
+/// Feed typed characters into a text buffer.
+fn type_into(buf: &mut String, max: usize) {
+    while let Some(c) = get_char_pressed() {
+        if !c.is_control() && buf.chars().count() < max {
+            buf.push(c);
+        }
+    }
+    if is_key_pressed(KeyCode::Backspace) {
+        buf.pop();
+    }
+}
+
+fn players(n: usize) -> String {
+    if n == 1 { "1 player".into() } else { format!("{n} players") }
+}
+
+fn drain_chars() {
+    while get_char_pressed().is_some() {}
 }
 
 fn window_conf() -> Conf {
@@ -100,7 +165,7 @@ fn grab(on: bool) {
 
 impl App {
     fn set_screen(&mut self, s: Screen) {
-        let playing = s == Screen::Playing;
+        let playing = s == Screen::Playing && self.chat.is_none();
         grab(playing);
         self.last_mouse = None;
         if matches!(self.screen, Screen::Inventory) && s != Screen::Inventory {
@@ -124,22 +189,41 @@ impl App {
         } else {
             "Survival mode: punch a tree. Press E to craft. Avoid anything that hisses."
         });
+        g.start_scripts();
         self.start_game(g);
     }
 
     fn back_to_title(&mut self) {
-        if !self.game.menu {
+        if !self.game.menu && !self.game.is_client() {
             self.save();
+        }
+        self.game.disconnect();
+        self.chat = None;
+        self.lan_addr = None;
+        self.internet_status = None;
+        self.upnp_job = None;
+        if let Some(m) = self.upnp_mapping.take() {
+            // Tidy up the router's port forward without blocking the menu.
+            std::thread::spawn(move || upnp::close(&m));
         }
         let mut gl = unsafe { get_internal_gl() };
         gl.flush();
         self.renderer.clear(gl.quad_context);
+        if self.using_server_mods {
+            // Back to our own mods after playing on someone else's server.
+            self.using_server_mods = false;
+            mods::install_local();
+        }
         self.game = Game::new(random_seed(), true, true);
-        self.splash = SPLASHES[(random_seed() as usize) % SPLASHES.len()];
+        self.splash = pick_splash();
         self.set_screen(Screen::Title);
     }
 
     fn save(&mut self) {
+        if self.game.is_client() {
+            self.status = Some(("Only the host can save this world.".into(), 3.0));
+            return;
+        }
         let data = self.game.to_save();
         match save::write(&data) {
             Ok(()) => self.status = Some(("World saved.".into(), 3.0)),
@@ -148,7 +232,7 @@ impl App {
     }
 
     fn controls(&mut self) -> Controls {
-        let playing = self.screen == Screen::Playing;
+        let playing = self.screen == Screen::Playing && self.chat.is_none();
         let key = |k: KeyCode| playing && is_key_down(k);
         let mut forward = 0.0;
         let mut strafe = 0.0;
@@ -201,8 +285,47 @@ impl App {
     }
 
     fn handle_keys(&mut self) {
+        if let Some(line) = &mut self.chat {
+            type_into(line, 200);
+            if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                let text = line.clone();
+                self.chat = None;
+                self.game.send_chat(&text);
+                self.set_screen(Screen::Playing);
+            } else if is_key_pressed(KeyCode::Escape) {
+                self.chat = None;
+                self.set_screen(Screen::Playing);
+            }
+            return;
+        }
+        if self.screen == Screen::Multiplayer {
+            let (buf, max) = match self.mp_focus {
+                0 => (&mut self.mp_name, 16),
+                1 => (&mut self.mp_addr, 128),
+                _ => (&mut self.mp_password, 64),
+            };
+            type_into(buf, max);
+            if is_key_pressed(KeyCode::Tab) {
+                self.mp_focus = (self.mp_focus + 1) % 3;
+            }
+            if is_key_pressed(KeyCode::Escape) {
+                self.joining = None;
+                self.set_screen(Screen::Title);
+            }
+            if is_key_pressed(KeyCode::Enter) && self.joining.is_none() && self.connect_next.is_none() {
+                self.connect_next = Some(self.mp_addr.clone());
+            }
+            return;
+        }
         match self.screen {
             Screen::Playing => {
+                if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Slash) {
+                    drain_chars();
+                    let start = if is_key_pressed(KeyCode::Slash) { "/" } else { "" };
+                    self.chat = Some(start.to_string());
+                    self.set_screen(Screen::Playing);
+                    return;
+                }
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
                 } else if is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
@@ -241,6 +364,11 @@ impl App {
                     self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
                 }
             }
+            Screen::Mods => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Title);
+                }
+            }
             _ => {}
         }
         if is_key_pressed(KeyCode::F3) {
@@ -260,10 +388,17 @@ impl App {
         self.mouse_look();
 
         let controls = self.controls();
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Title | Screen::Dead);
+        // Multiplayer worlds never pause: other people are still in them.
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Title | Screen::Dead) || self.game.net.is_some();
         if simulate {
             self.game.update(dt, &controls);
         }
+        if let Some(e) = self.game.net_error.take() {
+            self.back_to_title();
+            self.status = Some((e, 8.0));
+        }
+        self.update_joining();
+        self.poll_upnp();
         if self.game.dead.is_some() && self.screen != Screen::Dead {
             self.set_screen(Screen::Dead);
         }
@@ -272,6 +407,16 @@ impl App {
             if *t <= 0.0 {
                 self.status = None;
             }
+        }
+
+        // Mods changed (reload, or joined a server with mods): repaint the atlas.
+        if block::generation() != self.atlas_gen {
+            self.atlas_gen = block::generation();
+            let mut atlas = self.base_atlas.clone();
+            texture::apply_mod_textures(&mut atlas);
+            let gl = unsafe { get_internal_gl() };
+            self.renderer.update_atlas(gl.quad_context, &atlas);
+            self.ui.tex.update_from_bytes(texture::ATLAS as u32, texture::ATLAS as u32, &atlas);
         }
 
         // 3D world
@@ -284,6 +429,7 @@ impl App {
             self.game.stream(&mut self.renderer, gl.quad_context, rd);
             let aspect = screen_width() / screen_height().max(1.0);
             let cam = self.game.camera(aspect, self.settings.fov);
+            self.last_view_proj = cam.view_proj;
             let geo = self.game.build_geo(&cam, rd);
             let fp = self.game.frame_params(&cam, &self.renderer, rd);
             self.renderer.draw(gl.quad_context, &fp, &geo);
@@ -291,6 +437,302 @@ impl App {
 
         set_default_camera();
         self.draw_ui();
+        self.play_sounds(dt);
+    }
+
+    /// Drive the connect -> Hello -> Welcome handshake without freezing the menu.
+    fn update_joining(&mut self) {
+        if let Some(addr) = self.connect_next.take() {
+            match net::Conn::connect(&addr) {
+                Ok(mut conn) => {
+                    conn.send(&net::Msg::Hello { protocol: net::PROTOCOL, name: multiplayer::sanitize_name(&self.mp_name) });
+                    conn.flush();
+                    self.joining = Some((conn, get_time()));
+                }
+                Err(e) => self.status = Some((format!("Couldn't connect to {addr}: {e}"), 6.0)),
+            }
+        }
+        let Some((conn, started)) = &mut self.joining else { return };
+        let mut msgs = conn.poll();
+        if let Some(net::Msg::ModPack { data }) = msgs.iter().find(|m| matches!(m, net::Msg::ModPack { .. })) {
+            match mods::decode_pack(data) {
+                Ok(pack) => {
+                    let n = pack.len();
+                    mods::install_sources(pack, &[]);
+                    self.using_server_mods = true;
+                    if n > 0 {
+                        self.status = Some((format!("Loaded {n} mod(s) from the server."), 5.0));
+                    }
+                }
+                Err(e) => {
+                    self.joining = None;
+                    self.status = Some((format!("The server sent broken mods: {e}"), 6.0));
+                    return;
+                }
+            }
+        }
+        if let Some(net::Msg::Challenge { nonce, password }) = msgs.iter().find(|m| matches!(m, net::Msg::Challenge { .. })) {
+            if *password && self.mp_password.is_empty() {
+                self.joining = None;
+                self.status = Some(("This server needs a password. Type it in the Password box.".into(), 6.0));
+                return;
+            }
+            conn.send(&net::Msg::Auth { proof: net::auth_proof(nonce, &self.mp_password) });
+        }
+        conn.flush();
+        if let Some(i) = msgs.iter().position(|m| matches!(m, net::Msg::Welcome { .. })) {
+            let leftover = msgs.split_off(i + 1);
+            let Some(net::Msg::Welcome { id, seed, time, creative, spawn }) = msgs.pop() else { return };
+            let (conn, _) = self.joining.take().unwrap();
+            let g = Game::new_client(id, seed, time, creative, spawn, conn, &self.mp_name, leftover);
+            self.start_game(g);
+            return;
+        }
+        let failure = if let Some(net::Msg::Kick { reason }) = msgs.iter().find(|m| matches!(m, net::Msg::Kick { .. })) {
+            Some(format!("Kicked: {reason}"))
+        } else if let Some(e) = &conn.closed {
+            Some(format!("Connection failed: {e}"))
+        } else if get_time() - *started > 10.0 {
+            Some("The host didn't answer. Check the address, and that the world is open / the port is forwarded.".into())
+        } else {
+            None
+        };
+        if let Some(f) = failure {
+            self.joining = None;
+            self.status = Some((f, 6.0));
+        }
+    }
+
+    fn multiplayer_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Multiplayer", w / 2.0, h * 0.11, 16.0, WHITE);
+        let bw = (240.0 * s).min(w * 0.85);
+        let bh = 20.0 * s;
+        let x = w / 2.0 - bw / 2.0;
+        let mut y = h * 0.19;
+        let masked = "*".repeat(self.mp_password.chars().count());
+        let fields: [(&str, &str); 3] = [
+            ("Your name", &self.mp_name),
+            ("Server address: IP, IP:port, [IPv6]:port or a hostname", &self.mp_addr),
+            ("Password (leave empty if the server has none)", &masked),
+        ];
+        let mut clicked = None;
+        for (i, (label, value)) in fields.iter().enumerate() {
+            self.ui.text(label, x, y - 3.0 * s, 9.0, GRAY);
+            if self.ui.text_field(Rect::new(x, y, bw, bh), value, self.mp_focus == i) {
+                clicked = Some(i);
+            }
+            y += bh + 14.0 * s;
+        }
+        if let Some(i) = clicked {
+            self.mp_focus = i;
+        }
+        y -= 4.0 * s;
+        let busy = self.joining.is_some() || self.connect_next.is_some();
+        let label = if busy { "Connecting..." } else { "Join Server" };
+        if self.ui.button(Rect::new(x, y, bw, bh), label, !busy) {
+            self.connect_next = Some(self.mp_addr.clone());
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Back", true) {
+            self.joining = None;
+            self.set_screen(Screen::Title);
+        }
+        y += bh + 14.0 * s;
+        for line in [
+            "Host from a world: Esc > \"Open to LAN\" or \"Open to Internet\". Your password above protects it.",
+            "Or run a dedicated server: minceraft --server --password <pw>. Default port 25565.",
+            "Tab switches fields. Enter joins.",
+        ] {
+            self.ui.text_centered(line, w / 2.0, y, 9.0, Color::new(0.85, 0.85, 0.85, 1.0));
+            y += 12.0 * s;
+        }
+    }
+
+    fn reload_mods(&mut self) {
+        let infos = mods::install_local();
+        let problems: usize = infos.iter().filter(|m| m.enabled).map(|m| m.errors.len()).sum();
+        let on = infos.iter().filter(|m| m.enabled).count();
+        self.status = Some((format!("Reloaded: {on} mod(s) on{}", if problems > 0 { format!(", {problems} problem(s)") } else { String::new() }), 5.0));
+        // The title-screen world was generated with the old mods.
+        let mut gl = unsafe { get_internal_gl() };
+        gl.flush();
+        self.renderer.clear(gl.quad_context);
+        self.game = Game::new(random_seed(), true, true);
+        self.splash = pick_splash();
+    }
+
+    fn mods_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Mods", w / 2.0, h * 0.08, 16.0, WHITE);
+        let dir = std::fs::canonicalize(mods::mods_dir()).unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join("mods"));
+        self.ui.text_centered(&format!("Folder: {}", dir.display()), w / 2.0, h * 0.08 + 14.0 * s, 8.0, GRAY);
+
+        let infos = block::reg().mods.clone();
+        let pw = (320.0 * s).min(w * 0.92);
+        let x = w / 2.0 - pw / 2.0;
+        let row_h = 38.0 * s;
+        let top = h * 0.08 + 22.0 * s;
+        let bottom = h - 34.0 * s;
+        let rows = (((bottom - top) / row_h).floor() as usize).max(1);
+        if infos.is_empty() {
+            let lines = [
+                "No mods installed yet.",
+                "A mod is a folder with a mod.txt inside, placed in the folder above.",
+                "Try the example: copy example-mods/cheese into mods/, then press Reload.",
+                "MODDING.md explains everything a mod can add.",
+            ];
+            for (i, l) in lines.iter().enumerate() {
+                self.ui.text_centered(l, w / 2.0, top + (20.0 + i as f32 * 13.0) * s, 10.0, WHITE);
+            }
+        }
+        let wheel = mouse_wheel().1;
+        if wheel.abs() > 0.1 {
+            let max = infos.len().saturating_sub(rows);
+            self.mods_scroll = if wheel > 0.0 { self.mods_scroll.saturating_sub(1) } else { (self.mods_scroll + 1).min(max) };
+        }
+        let mut toggle: Option<(String, bool)> = None;
+        for (i, m) in infos.iter().enumerate().skip(self.mods_scroll).take(rows) {
+            let y = top + (i - self.mods_scroll) as f32 * row_h;
+            draw_rectangle(x, y, pw, row_h - 3.0 * s, Color::new(0.12, 0.12, 0.15, 0.95));
+            draw_rectangle_lines(x, y, pw, row_h - 3.0 * s, s, if m.enabled { Color::new(0.4, 0.8, 0.4, 1.0) } else { GRAY });
+            let title = format!("{}{}{}", m.name, if m.version.is_empty() { String::new() } else { format!(" v{}", m.version) }, if m.author.is_empty() { String::new() } else { format!(" by {}", m.author) });
+            let text_w = pw - 75.0 * s;
+            self.ui.text(&self.ui.fit(&title, 10.0, text_w), x + 5.0 * s, y + 11.0 * s, 10.0, if m.enabled { WHITE } else { GRAY });
+            let detail = if !m.enabled {
+                "Disabled".to_string()
+            } else {
+                let (b, it, r) = m.added;
+                let desc = if m.description.is_empty() { String::new() } else { format!("{}  -  ", m.description) };
+                let scripts = if m.scripts > 0 { format!(", {} script(s)", m.scripts) } else { String::new() };
+                format!("{desc}{b} blocks, {it} items, {r} recipes{scripts}")
+            };
+            self.ui.text(&self.ui.fit(&detail, 8.0, text_w), x + 5.0 * s, y + 22.0 * s, 8.0, Color::new(0.8, 0.8, 0.8, 1.0));
+            if let Some(e) = m.errors.first() {
+                let more = if m.errors.len() > 1 { format!("  (+{} more)", m.errors.len() - 1) } else { String::new() };
+                self.ui.text(&self.ui.fit(&format!("! {e}{more}"), 8.0, pw - 10.0 * s), x + 5.0 * s, y + 32.0 * s, 8.0, Color::new(1.0, 0.5, 0.4, 1.0));
+            }
+            let bw = 60.0 * s;
+            let label = if m.enabled { "On" } else { "Off" };
+            if self.ui.button(Rect::new(x + pw - bw - 5.0 * s, y + 6.0 * s, bw, 18.0 * s), label, true) {
+                toggle = Some((m.id.clone(), !m.enabled));
+            }
+        }
+        if let Some((id, on)) = toggle {
+            match mods::set_enabled(&mods::mods_dir(), &id, on) {
+                Ok(()) => self.reload_mods(),
+                Err(e) => self.status = Some((format!("Couldn't save mod settings: {e}"), 5.0)),
+            }
+        }
+        let bw = (120.0 * s).min(pw / 2.0 - 4.0 * s);
+        let by = h - 28.0 * s;
+        if self.ui.button(Rect::new(w / 2.0 - bw - 4.0 * s, by, bw, 20.0 * s), "Reload Mods", true) {
+            self.reload_mods();
+        }
+        if self.ui.button(Rect::new(w / 2.0 + 4.0 * s, by, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Title);
+        }
+    }
+
+    /// Start hosting (if not already). Returns the port.
+    fn host_now(&mut self) -> Option<u16> {
+        if self.game.is_host() {
+            if let Some(multiplayer::Net::Host(srv)) = &self.game.net {
+                return Some(srv.port);
+            }
+        }
+        let pw = Some(self.mp_password.clone()).filter(|p| !p.is_empty());
+        match self.game.open_lan(&self.mp_name, pw) {
+            Ok(port) => {
+                let ip = net::lan_ip().unwrap_or_else(|| "this computer's IP".into());
+                let addr = format!("{ip}:{port}");
+                self.status = Some((format!("Hosting! Friends on your network can join at {addr}"), 8.0));
+                self.lan_addr = Some(addr);
+                Some(port)
+            }
+            Err(e) => {
+                self.status = Some((format!("Couldn't start hosting: {e}"), 6.0));
+                None
+            }
+        }
+    }
+
+    fn open_to_internet(&mut self) {
+        let Some(port) = self.host_now() else { return };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(upnp::open_port(port));
+        });
+        self.upnp_job = Some(rx);
+        self.internet_status = Some("Asking your router to open the port (UPnP)...".into());
+    }
+
+    fn poll_upnp(&mut self) {
+        let Some(rx) = &self.upnp_job else { return };
+        let Ok(result) = rx.try_recv() else { return };
+        self.upnp_job = None;
+        let port = match &self.game.net {
+            Some(multiplayer::Net::Host(s)) => s.port,
+            _ => net::DEFAULT_PORT,
+        };
+        let v6 = net::public_ipv6().map(|ip| format!("  or  [{ip}]:{port}")).unwrap_or_default();
+        self.internet_status = Some(match result {
+            Ok(m) => {
+                let text = match &m.external_ip {
+                    Some(ip) if m.behind_second_nat() => format!(
+                        "Port opened, but your ISP puts you behind a second NAT ({ip}), so outsiders can't reach you.{}",
+                        if v6.is_empty() { " Try a dedicated server on a VPS.".to_string() } else { format!(" Share IPv6 instead:{v6}") }
+                    ),
+                    Some(ip) => format!("Online! Friends can join at {ip}:{port}{v6}"),
+                    None => format!("Port {port} opened. Share your public IP (search \"what is my IP\"){v6}"),
+                };
+                self.upnp_mapping = Some(m);
+                text
+            }
+            Err(e) => format!("{e} Forward TCP port {port} to this computer in your router settings.{v6}"),
+        });
+        if let (Some(t), Some(_)) = (&self.internet_status, &self.upnp_mapping) {
+            self.game.msg(t.clone());
+        }
+    }
+
+    /// Names floating above other players' heads.
+    fn name_tags(&self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let eye = self.game.player.eye();
+        for p in self.game.peers.values().filter(|p| p.alive()) {
+            let at = p.pos + Vec3::Y * 2.15;
+            if at.distance(eye) > 64.0 {
+                continue;
+            }
+            let clip = self.last_view_proj * at.extend(1.0);
+            if clip.w < 0.1 {
+                continue;
+            }
+            let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
+            let tw = self.ui.text_width(&p.name, 9.0);
+            draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 10.0 * s, tw + 6.0 * s, 12.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+            self.ui.text_centered(&p.name, sx, sy, 9.0, WHITE);
+        }
+    }
+
+    fn play_sounds(&mut self, dt: f32) {
+        let listener = self.game.player.eye();
+        if self.ui.pressed.replace(false) {
+            self.audio.play(Sfx::Click, None, listener);
+        }
+        // Keep the game world quiet while paused or in menus layered over it.
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Help { .. });
+        for (s, at) in std::mem::take(&mut self.game.sounds) {
+            if world_audible || s == Sfx::Craft {
+                self.audio.play(s, at, listener);
+            }
+        }
+        let in_game = !self.game.menu && self.screen != Screen::Dead;
+        self.audio.update_music(dt, in_game);
     }
 
     fn draw_ui(&mut self) {
@@ -305,6 +747,14 @@ impl App {
             Screen::Help { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.help_screen(from_title);
+            }
+            Screen::Mods => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
+                self.mods_screen();
+            }
+            Screen::Multiplayer => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+                self.multiplayer_screen();
             }
             _ => {
                 self.hud();
@@ -340,6 +790,7 @@ impl App {
         if self.screen == Screen::Playing {
             self.ui.crosshair();
         }
+        self.name_tags();
 
         // Hotbar
         let slot = 20.0 * s;
@@ -364,13 +815,21 @@ impl App {
             }
         }
 
-        // Chat-ish messages
+        // Chat-ish messages (all recent ones stay visible while typing)
+        let typing = self.chat.is_some();
         for (i, (m, t)) in g.messages.iter().rev().enumerate() {
-            let a = t.min(1.0);
+            let a = if typing { 1.0 } else { t.min(1.0) };
             let y = h - 40.0 * s - i as f32 * 11.0 * s;
             let tw = self.ui.text_width(m, 9.0);
             draw_rectangle(4.0 * s, y - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4 * a));
             self.ui.text(m, 7.0 * s, y, 9.0, Color::new(1.0, 1.0, 1.0, a));
+        }
+
+        if let Some(line) = &self.chat {
+            let y = h - 30.0 * s;
+            draw_rectangle(4.0 * s, y - 10.0 * s, w - 8.0 * s, 13.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+            let caret = if (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { " " };
+            self.ui.text(&format!("> {line}{caret}"), 7.0 * s, y, 9.0, WHITE);
         }
 
         if self.show_debug {
@@ -388,6 +847,11 @@ impl App {
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
                 format!("Seed: {}  Mode: {}", g.world.seed(), if g.creative { "Creative" } else { "Survival" }),
                 format!("Blocks broken: {}", g.stat_blocks_broken),
+                match &g.net {
+                    None => "Network: single player".to_string(),
+                    Some(multiplayer::Net::Host(srv)) => format!("Network: hosting on port {} ({} players)", srv.port, g.player_count()),
+                    Some(multiplayer::Net::Client(_)) => format!("Network: connected as {} ({} players)", g.player_name, g.player_count()),
+                },
             ];
             for (i, l) in lines.iter().enumerate() {
                 self.ui.text(l, 4.0 * s, (12.0 + i as f32 * 10.0) * s, 9.0, WHITE);
@@ -410,12 +874,13 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.45;
+        let mut y = h * 0.40;
         let has_save = save::exists();
         if self.ui.button(Rect::new(x, y, bw, bh), "Continue Saved World", has_save) {
             match save::read() {
                 Ok(d) => {
-                    let g = Game::from_save(d);
+                    let mut g = Game::from_save(d);
+                    g.start_scripts();
                     self.start_game(g);
                 }
                 Err(e) => self.status = Some((format!("Couldn't load save: {e}"), 5.0)),
@@ -429,6 +894,20 @@ impl App {
         y += bh + 5.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "New Creative World", true) {
             self.new_world(true);
+            return;
+        }
+        y += bh + 5.0 * s;
+        let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y, half, bh), "Multiplayer", true) {
+            drain_chars();
+            self.set_screen(Screen::Multiplayer);
+            return;
+        }
+        let n_mods = block::reg().mods.iter().filter(|m| m.enabled).count();
+        let mods_label = if n_mods > 0 { format!("Mods ({n_mods})") } else { "Mods".to_string() };
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), &mods_label, true) {
+            self.mods_scroll = 0;
+            self.set_screen(Screen::Mods);
             return;
         }
         y += bh + 5.0 * s;
@@ -457,12 +936,38 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.35;
+        let mut y = h * 0.29;
         if self.ui.button(Rect::new(x, y, bw, bh), "Back to Game", true) {
             self.set_screen(Screen::Playing);
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Save World", true) {
+        let client = self.game.is_client();
+        if client {
+            let host = self.game.peers.get(&0).map(|p| format!("{}'s world", p.name)).unwrap_or_else(|| "a dedicated server".into());
+            self.ui.text_centered(&format!("Playing on {host} ({})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GRAY);
+        } else if self.game.is_host() {
+            let addr = self.lan_addr.clone().unwrap_or_default();
+            let lock = if self.game.has_password() { ", password protected" } else { ", no password" };
+            self.ui.text_centered(&format!("Hosting at {addr}  ({}{lock})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GOLD);
+        } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to LAN", true) {
+            self.host_now();
+        }
+        if !client {
+            y += bh + 5.0 * s;
+            if let Some(t) = &self.internet_status {
+                // Long messages wrap onto two lines.
+                let (a, b) = match t.char_indices().filter(|(_, c)| *c == ' ').map(|(i, _)| i).find(|&i| i > 60) {
+                    Some(i) if t.len() > 80 => (&t[..i], &t[i + 1..]),
+                    _ => (t.as_str(), ""),
+                };
+                self.ui.text_centered(a, w / 2.0, y + bh * 0.4, 9.0, Color::new(0.7, 0.9, 1.0, 1.0));
+                self.ui.text_centered(b, w / 2.0, y + bh * 0.4 + 11.0 * s, 9.0, Color::new(0.7, 0.9, 1.0, 1.0));
+            } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to Internet", true) {
+                self.open_to_internet();
+            }
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Save World", !client) {
             self.save();
         }
         y += bh + 5.0 * s;
@@ -474,7 +979,8 @@ impl App {
             self.set_screen(Screen::Help { from_title: false });
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Save and Quit to Title", true) {
+        let quit_label = if client { "Disconnect" } else { "Save and Quit to Title" };
+        if self.ui.button(Rect::new(x, y, bw, bh), quit_label, true) {
             self.back_to_title();
         }
     }
@@ -508,6 +1014,16 @@ impl App {
         y += bh + 5.0 * s;
         st.sensitivity = (st.sensitivity + 0.1 * row(&self.ui, format!("Mouse Sensitivity: {:.0}%", st.sensitivity * 100.0), y) as f32).clamp(0.1, 3.0);
         y += bh + 5.0 * s;
+        let vol = &mut self.audio.volume;
+        *vol = (*vol + 0.1 * row(&self.ui, format!("Sound Volume: {:.0}%", *vol * 100.0), y) as f32).clamp(0.0, 1.0);
+        *vol = (*vol * 10.0).round() / 10.0;
+        y += bh + 5.0 * s;
+        let music = if self.audio.music_on { "Music: ON (occasionally, tastefully)" } else { "Music: OFF" };
+        if self.ui.button(Rect::new(x, y, bw, bh), music, true) {
+            self.audio.music_on = !self.audio.music_on;
+        }
+        y += bh + 5.0 * s;
+        let st = &mut self.settings;
         let fs = if st.fullscreen { "Fullscreen: ON (F11)" } else { "Fullscreen: OFF (F11)" };
         if self.ui.button(Rect::new(x, y, bw, bh), fs, true) {
             self.settings.fullscreen = !self.settings.fullscreen;
@@ -536,12 +1052,13 @@ impl App {
             "Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier.",
             "Hissers explode. Groaners bite and burn in daylight. Oinkers are friends (and food).",
             "Crafting works anywhere. The crafting table is purely decorative. Satire!",
+            "Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.",
         ];
         for (i, l) in lines.iter().enumerate() {
             self.ui.text_centered(l, w / 2.0, h * 0.2 + i as f32 * 13.0 * s, 9.0, if l.is_empty() { WHITE } else { Color::new(0.9, 0.9, 0.9, 1.0) });
         }
         let bw = (160.0 * s).min(w * 0.8);
-        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.2 + 13.0 * 13.0 * s, bw, 20.0 * s), "Got it", true) {
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.2 + 14.0 * 13.0 * s, bw, 20.0 * s), "Got it", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
         }
     }
@@ -651,7 +1168,7 @@ impl App {
             let row_h = 22.0 * s;
             let list_top = y0 + 18.0 * s;
             let visible_rows = ((panel_h - 22.0 * s) / row_h).floor() as usize;
-            let max_scroll = RECIPES.len().saturating_sub(visible_rows) as f32;
+            let max_scroll = recipes().len().saturating_sub(visible_rows) as f32;
             if self.ui.hovered(Rect::new(rx, y0, right_w, panel_h)) {
                 let wheel = mouse_wheel().1;
                 if wheel.abs() > 0.1 {
@@ -660,10 +1177,10 @@ impl App {
             }
             let first = self.recipe_scroll as usize;
             // Craftable recipes first so progress is obvious.
-            let mut order: Vec<usize> = (0..RECIPES.len()).collect();
-            order.sort_by_key(|&i| !self.game.inv.can_craft(&RECIPES[i]));
+            let mut order: Vec<usize> = (0..recipes().len()).collect();
+            order.sort_by_key(|&i| !self.game.inv.can_craft(&recipes()[i]));
             for (row, &ri) in order.iter().skip(first).take(visible_rows).enumerate() {
-                let r = &RECIPES[ri];
+                let r = &recipes()[ri];
                 let ok = self.game.inv.can_craft(r);
                 let ry = list_top + row as f32 * row_h;
                 let rect = Rect::new(rx + 4.0 * s, ry, right_w - 8.0 * s, row_h - 2.0 * s);
@@ -675,7 +1192,7 @@ impl App {
                 let mut ix = rect.x + isz + 6.0 * s;
                 self.ui.text("<", ix, rect.y + rect.h * 0.65, 9.0, GRAY);
                 ix += 8.0 * s;
-                for &(item, n) in r.inputs {
+                for &(item, n) in &r.inputs {
                     let have = self.game.inv.count(item) >= n as u32;
                     self.ui.icon(item, ix, rect.y + 3.0 * s, isz * 0.8);
                     self.ui.text(&format!("{n}"), ix + isz * 0.8, rect.y + rect.h * 0.8, 8.0, if have { WHITE } else { Color::new(1.0, 0.4, 0.4, 1.0) });
@@ -692,6 +1209,7 @@ impl App {
                             }
                         }
                         self.game.msg(format!("Crafted {}. Nobody knows how.", item_name(r.output.0)));
+                        self.game.sfx(Sfx::Craft, None);
                     }
                 }
             }
@@ -709,12 +1227,18 @@ impl App {
     }
 }
 
-/// Headless-ish verification helper: `--screenshot out.png [--mode title|survival|creative] [--frames N]`.
+/// Headless-ish verification helper: `--screenshot out.png [--mode title|survival|creative|inventory|night|options] [--frames N]`.
 struct ShotArgs {
     path: String,
     mode: String,
     frames: u32,
     time: Option<f32>,
+    yaw: f32,
+    pitch: f32,
+    pos: Option<Vec3>,
+    addr: String,
+    password: String,
+    chat: Vec<String>,
 }
 
 fn parse_args() -> Option<ShotArgs> {
@@ -725,18 +1249,65 @@ fn parse_args() -> Option<ShotArgs> {
         mode: get("--mode").unwrap_or_else(|| "title".into()),
         frames: get("--frames").and_then(|f| f.parse().ok()).unwrap_or(240),
         time: get("--time").and_then(|f| f.parse().ok()),
+        addr: get("--addr").unwrap_or_else(|| "127.0.0.1".into()),
+        password: get("--password").unwrap_or_default(),
+        chat: args.windows(2).filter(|w| w[0] == "--chat").map(|w| w[1].clone()).collect(),
+        yaw: get("--yaw").and_then(|f| f.parse().ok()).unwrap_or(2.4),
+        pitch: get("--pitch").and_then(|f| f.parse().ok()).unwrap_or(-0.25),
+        pos: get("--pos").and_then(|p| {
+            let v: Vec<f32> = p.split(',').filter_map(|x| x.parse().ok()).collect();
+            (v.len() == 3).then(|| Vec3::new(v[0], v[1], v[2]))
+        }),
     })
 }
 
-#[macroquad::main(window_conf)]
-async fn main() {
-    let atlas = texture::build_atlas(1337);
+/// The platform audio backend panics on its own thread when there's no sound device.
+/// Treat that as "no audio" instead of printing a scary backtrace and spamming errors.
+fn install_audio_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let name = std::thread::current().name().map(str::to_owned);
+        if name.is_none() {
+            if !sound::AUDIO_DEAD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("Minceraft: no usable audio device ({info}). Continuing in silence.");
+            }
+            return;
+        }
+        default(info)
+    }));
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    // Headless modes run before any window (or GPU) is touched.
+    if args.iter().any(|a| a == "--server") {
+        std::process::exit(server::run(&args));
+    }
+    if let Some(i) = args.iter().position(|a| a == "--export-sounds") {
+        let dir = args.get(i + 1).map(String::as_str).unwrap_or("sounds");
+        match sound::export_wavs(std::path::Path::new(dir)) {
+            Ok(n) => println!("Wrote {n} sounds to {dir}/"),
+            Err(e) => eprintln!("Couldn't export sounds: {e}"),
+        }
+        return;
+    }
+    macroquad::Window::from_config(window_conf(), game_main());
+}
+
+async fn game_main() {
+    let mod_infos = mods::install_local();
+    let base_atlas = texture::build_atlas(1337);
+    let mut atlas = base_atlas.clone();
+    texture::apply_mod_textures(&mut atlas);
     let renderer = {
         let gl = unsafe { get_internal_gl() };
         Renderer::new(gl.quad_context, &atlas)
     };
     let tex = Texture2D::from_rgba8(texture::ATLAS as u16, texture::ATLAS as u16, &atlas);
     tex.set_filter(FilterMode::Nearest);
+
+    install_audio_panic_hook();
+    let audio = Audio::load().await;
 
     let shot = parse_args();
     let mut app = App {
@@ -745,14 +1316,35 @@ async fn main() {
         renderer,
         ui: Ui::new(tex),
         settings: Settings { render_distance: 8, fov: 72.0, sensitivity: 1.0, fullscreen: false },
-        splash: SPLASHES[(random_seed() as usize) % SPLASHES.len()],
+        splash: pick_splash(),
         last_mouse: None,
         show_debug: false,
         recipe_scroll: 0.0,
         quit: false,
         status: None,
         fps: 60.0,
+        audio,
+        mp_name: format!("Stove{}", random_seed() % 1000),
+        mp_addr: "127.0.0.1".into(),
+        mp_focus: 1,
+        connect_next: None,
+        joining: None,
+        chat: None,
+        last_view_proj: Mat4::IDENTITY,
+        lan_addr: None,
+        mp_password: String::new(),
+        upnp_job: None,
+        upnp_mapping: None,
+        internet_status: None,
+        base_atlas,
+        atlas_gen: block::generation(),
+        mods_scroll: 0,
+        using_server_mods: false,
     };
+    let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
+    if let Some(m) = broken.first() {
+        app.status = Some((format!("Mod \"{}\" has {} problem(s): see the Mods screen.", m.name, m.errors.len()), 8.0));
+    }
 
     if let Some(s) = &shot {
         match s.mode.as_str() {
@@ -766,11 +1358,46 @@ async fn main() {
                 if let Some(t) = s.time {
                     g.time = t;
                 }
+                g.start_scripts();
                 app.start_game(g);
                 app.show_debug = true;
                 if s.mode == "inventory" {
                     app.set_screen(Screen::Inventory);
                 }
+            }
+            "host" => {
+                app.start_game(Game::new(424242, true, false));
+                app.game.open_lan("Hosty", None).expect("open to LAN");
+                app.show_debug = true;
+            }
+            "showcase" => {
+                app.start_game(Game::new(424242, true, false));
+                app.game.open_lan("Hosty", None).expect("open to LAN");
+                app.show_debug = false;
+            }
+            "mods" => {
+                app.game = Game::new(424242, true, true);
+                app.set_screen(Screen::Mods);
+            }
+            "palette" => {
+                app.start_game(Game::new(424242, true, false));
+                app.set_screen(Screen::Inventory);
+            }
+            "internet" => {
+                app.start_game(Game::new(424242, true, false));
+                app.mp_password = "sekrit".into();
+                app.open_to_internet();
+                app.set_screen(Screen::Paused);
+            }
+            "join" => {
+                app.mp_name = "Joiny".into();
+                app.mp_password = s.password.clone();
+                app.connect_next = Some(s.addr.clone());
+                app.set_screen(Screen::Multiplayer);
+            }
+            "options" => {
+                app.game = Game::new(424242, true, true);
+                app.set_screen(Screen::Options { from_title: true });
             }
             _ => {
                 app.game = Game::new(424242, true, true);
@@ -781,10 +1408,33 @@ async fn main() {
     let mut frames = 0u32;
     loop {
         if let Some(s) = &shot {
-            if s.mode != "title" && s.mode != "inventory" {
+            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette") || (s.mode == "join" && app.game.is_client()) {
                 // Keep the demo camera looking at something interesting.
-                app.game.player.pitch = -0.25;
-                app.game.player.yaw = 2.4;
+                app.game.player.pitch = s.pitch;
+                app.game.player.yaw = s.yaw;
+                if let Some(p) = s.pos {
+                    app.game.player.body.pos = p;
+                    app.game.player.body.vel = Vec3::ZERO;
+                    app.game.player.flying = true;
+                }
+            }
+            if frames >= 150 && frames < 150 + s.chat.len() as u32 {
+                // Type the scripted chat lines one per frame.
+                let line = s.chat[(frames - 150) as usize].clone();
+                app.game.send_chat(&line);
+            }
+            if s.mode == "showcase" && frames == 120 {
+                // A little display of every mod block, on a stone plinth in front of the player.
+                let p = app.game.player.body.pos;
+                let (fx, fz) = (2.4f32.sin(), -2.4f32.cos());
+                let r = block::reg();
+                for (i, id) in (block::NUM_BLOCKS..r.blocks.len() as u8).enumerate() {
+                    let side = i as f32 * 1.6 - 3.0;
+                    let at = p + Vec3::new(fx * 5.0 - fz * side, 0.0, fz * 5.0 + fx * side);
+                    let (x, y, z) = (at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
+                    app.game.world.set(x, y, z, block::STONE);
+                    app.game.world.set(x, y + 1, z, id);
+                }
             }
             if (s.mode == "survival" || s.mode == "creative") && frames == 150 {
                 let p = app.game.player.body.pos;
@@ -805,9 +1455,10 @@ async fn main() {
             }
         }
         if app.quit || is_quit_requested() {
-            if !app.game.menu {
+            if !app.game.menu && !app.game.is_client() {
                 app.save();
             }
+            app.game.disconnect();
             break;
         }
         next_frame().await;

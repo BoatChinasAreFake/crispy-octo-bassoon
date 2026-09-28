@@ -6,7 +6,9 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 const MAGIC: &[u8; 4] = b"MNCR";
-const VERSION: u32 = 1;
+/// v2 adds the mod palette (names of mod blocks/items); v3 adds script mod
+/// variables. Older saves still load.
+const VERSION: u32 = 3;
 
 pub struct SaveData {
     pub seed: u32,
@@ -19,6 +21,10 @@ pub struct SaveData {
     pub spawn: [f32; 3],
     pub slots: Vec<Option<(u8, u8)>>,
     pub mods: HashMap<(i32, i32), HashMap<u32, u8>>,
+    /// Ids of mod-added blocks/items and their names (save v2+).
+    pub palette: Vec<(u8, String)>,
+    /// Script mod variables: (mod id, encoded variables) (save v3+).
+    pub script_vars: Vec<(String, Vec<u8>)>,
 }
 
 pub fn save_path() -> PathBuf {
@@ -67,9 +73,27 @@ impl R<'_> {
     fn f32(&mut self) -> io::Result<f32> {
         Ok(f32::from_le_bytes(self.take()?))
     }
+    /// A u32 length followed by that many bytes, at most `max`.
+    fn bytes(&mut self, max: usize) -> io::Result<Vec<u8>> {
+        let n = self.u32()? as usize;
+        if n > max || n > self.0.len() {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "save file damaged (bad length)"));
+        }
+        let (a, b) = self.0.split_at(n);
+        self.0 = b;
+        Ok(a.to_vec())
+    }
 }
 
 pub fn write(d: &SaveData) -> io::Result<()> {
+    write_to(&save_path(), d)
+}
+
+pub fn read() -> io::Result<SaveData> {
+    read_from(&save_path())
+}
+
+pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     let mut w = W(Vec::new());
     w.0.extend_from_slice(MAGIC);
     w.u32(VERSION);
@@ -98,18 +122,37 @@ pub fn write(d: &SaveData) -> io::Result<()> {
             w.u8(id);
         }
     }
-    std::fs::create_dir_all("saves")?;
-    let tmp = save_path().with_extension("tmp");
+    w.u32(d.palette.len() as u32);
+    for (id, key) in &d.palette {
+        w.u8(*id);
+        w.u32(key.len() as u32);
+        w.0.extend_from_slice(key.as_bytes());
+    }
+    w.u32(d.script_vars.len() as u32);
+    for (id, blob) in &d.script_vars {
+        w.u32(id.len() as u32);
+        w.0.extend_from_slice(id.as_bytes());
+        w.u32(blob.len() as u32);
+        w.0.extend_from_slice(blob);
+    }
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("tmp");
     std::fs::File::create(&tmp)?.write_all(&w.0)?;
-    std::fs::rename(tmp, save_path())
+    std::fs::rename(tmp, path)
 }
 
-pub fn read() -> io::Result<SaveData> {
+pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     let mut buf = Vec::new();
-    std::fs::File::open(save_path())?.read_to_end(&mut buf)?;
+    std::fs::File::open(path)?.read_to_end(&mut buf)?;
     let mut r = R(&buf);
-    if &r.take::<4>()? != MAGIC || r.u32()? != VERSION {
+    if &r.take::<4>()? != MAGIC {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "not a Minceraft save"));
+    }
+    let version = r.u32()?;
+    if !(1..=VERSION).contains(&version) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("save is from a newer version ({version})")));
     }
     let seed = r.u32()?;
     let creative = r.u8()? != 0;
@@ -133,5 +176,28 @@ pub fn read() -> io::Result<SaveData> {
         }
         mods.insert(key, m);
     }
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods })
+    let mut palette = Vec::new();
+    if version >= 2 {
+        for _ in 0..r.u32()? {
+            let id = r.u8()?;
+            let len = r.u32()? as usize;
+            if len > 256 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "bad palette entry"));
+            }
+            let mut key = Vec::with_capacity(len);
+            for _ in 0..len {
+                key.push(r.u8()?);
+            }
+            palette.push((id, String::from_utf8_lossy(&key).into_owned()));
+        }
+    }
+    let mut script_vars = Vec::new();
+    if version >= 3 {
+        for _ in 0..r.u32()? {
+            let id = r.bytes(256)?;
+            let blob = r.bytes(8 << 20)?;
+            script_vars.push((String::from_utf8_lossy(&id).into_owned(), blob));
+        }
+    }
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars })
 }

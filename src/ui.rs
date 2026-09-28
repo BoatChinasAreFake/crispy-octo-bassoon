@@ -11,6 +11,8 @@ pub struct Ui {
     pub s: f32,
     pub clicked: bool,
     pub rclicked: bool,
+    /// Set whenever a button fires this frame, so the app can play a click.
+    pub pressed: std::cell::Cell<bool>,
 }
 
 pub const PANEL: Color = Color::new(0.08, 0.08, 0.1, 0.88);
@@ -18,7 +20,7 @@ pub const SLOT_BG: Color = Color::new(0.25, 0.25, 0.28, 0.9);
 
 impl Ui {
     pub fn new(tex: Texture2D) -> Self {
-        Ui { tex, s: 2.0, clicked: false, rclicked: false }
+        Ui { tex, s: 2.0, clicked: false, rclicked: false, pressed: std::cell::Cell::new(false) }
     }
 
     pub fn begin_frame(&mut self) {
@@ -41,6 +43,18 @@ impl Ui {
 
     pub fn text_width(&self, t: &str, px: f32) -> f32 {
         measure_text(t, None, self.font(px), 1.0).width
+    }
+
+    /// Shorten text with "..." so it fits in `max` pixels.
+    pub fn fit(&self, t: &str, px: f32, max: f32) -> String {
+        if self.text_width(t, px) <= max {
+            return t.to_string();
+        }
+        let mut s: String = t.to_string();
+        while !s.is_empty() && self.text_width(&format!("{s}..."), px) > max {
+            s.pop();
+        }
+        format!("{s}...")
     }
 
     pub fn text_centered(&self, t: &str, cx: f32, y: f32, px: f32, color: Color) {
@@ -70,7 +84,11 @@ impl Ui {
         let size = 10.0;
         let dims = measure_text(label, None, self.font(size), 1.0);
         self.text(label, r.x + (r.w - dims.width) / 2.0, r.y + r.h / 2.0 + dims.offset_y / 2.0 - b, size, col);
-        hov && self.clicked
+        let fired = hov && self.clicked;
+        if fired {
+            self.pressed.set(true);
+        }
+        fired
     }
 
     fn tile_src(tile: u16) -> Rect {
@@ -137,6 +155,17 @@ impl Ui {
         }
         self.stack(stack, x, y, size, true);
         (hov && self.clicked, hov && self.rclicked, hov)
+    }
+
+    /// A single-line text box; returns true when clicked (to take focus).
+    pub fn text_field(&self, r: Rect, text: &str, focused: bool) -> bool {
+        let hov = self.hovered(r);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.05, 0.05, 0.06, 0.95));
+        let border = if focused { WHITE } else if hov { LIGHTGRAY } else { GRAY };
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, self.s * 1.5, border);
+        let caret = if focused && (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+        self.text(&format!("{text}{caret}"), r.x + 5.0 * self.s, r.y + r.h * 0.68, 10.0, WHITE);
+        hov && self.clicked
     }
 
     pub fn tooltip(&self, text: &str) {

@@ -31,6 +31,8 @@ pub struct Player {
     pub last_jump_press: f64,
     pub regen: f32,
     pub swing: f32,
+    /// Speed multiplier from the block underfoot (mod blocks can change it).
+    pub ground_speed: f32,
 }
 
 impl Player {
@@ -49,6 +51,7 @@ impl Player {
             last_jump_press: -10.0,
             regen: 0.0,
             swing: 0.0,
+            ground_speed: 1.0,
         }
     }
 
@@ -118,7 +121,7 @@ impl Player {
         } else {
             4.3
         };
-        let target = wish * speed;
+        let target = wish * speed * if b.on_ground { self.ground_speed } else { 1.0 };
         let accel = if b.on_ground || in_water { 14.0 } else { 3.0 };
         let k = (dt * accel).min(1.0);
         b.vel.x += (target.x - b.vel.x) * k;
@@ -141,7 +144,19 @@ impl Player {
             }
         }
         let was_ground = b.on_ground;
+        let falling_speed = -b.vel.y;
         move_body(world, b, dt, self.sneaking && was_ground);
+        if b.on_ground {
+            let under = world.get(b.pos.x.floor() as i32, (b.pos.y - 0.05).floor() as i32, b.pos.z.floor() as i32);
+            let def = block(under);
+            self.ground_speed = def.speed;
+            // Bouncy blocks: sneak to land softly.
+            if def.bounce > 0.0 && falling_speed > 3.0 && !self.sneaking {
+                b.vel.y = falling_speed * def.bounce;
+                b.on_ground = false;
+                self.fall_start = b.pos.y;
+            }
+        }
         // Hop out of water onto a ledge.
         if in_water && b.hit_wall && input.jump {
             b.vel.y = 6.0;

@@ -4,14 +4,20 @@ use crate::block::*;
 use crate::entity::*;
 use crate::inventory::Inventory;
 use crate::mesher::mesh_chunk;
+use crate::multiplayer::{Net, Peer};
+use crate::net::Msg;
 use crate::noise::{hash2, Perlin, Rng};
 use crate::player::{Input, Player, MAX_HEALTH};
 use crate::render::{DynGeo, FrameParams, Pass, Renderer};
 use crate::save::SaveData;
+use crate::scripting::{Cmd, ScriptHost};
+use rhai::{Dynamic, INT};
+use crate::sound::{material, Sfx};
 use crate::texture::*;
 use crate::world::{Hit, World, CH, SEA};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
 use macroquad::miniquad::RenderingBackend;
+use std::collections::BTreeMap;
 use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 600.0;
@@ -66,6 +72,29 @@ pub struct Game {
     stars: Vec<Vec3>,
     clouds: Perlin,
     pub stat_blocks_broken: u32,
+    /// Sound effects requested this frame (effect, world position if positional).
+    pub sounds: Vec<(Sfx, Option<Vec3>)>,
+    dig_tick: f32,
+    step_dist: f32,
+    was_in_water: bool,
+    // ---- multiplayer (see multiplayer.rs)
+    pub net: Option<Net>,
+    /// Other players, keyed by id (0 is the host).
+    pub peers: BTreeMap<u32, Peer>,
+    pub my_id: u32,
+    pub player_name: String,
+    pub next_mob_id: u32,
+    pub net_timers: [f32; 3],
+    /// Messages that arrived together with the Welcome, handled on the first update.
+    pub pending_msgs: Vec<Msg>,
+    /// Set when the connection drops; the app returns to the title screen.
+    pub net_error: Option<String>,
+    /// Headless `--server`: no local player at all.
+    pub dedicated: bool,
+    /// Script mods (only where the world lives: single player, host, server).
+    pub scripts: Option<ScriptHost>,
+    /// Script variables loaded from the save, handed to the scripts when they start.
+    saved_script_vars: Vec<(String, Vec<u8>)>,
 }
 
 impl Game {
@@ -111,12 +140,36 @@ impl Game {
             stars,
             clouds: Perlin::new(seed as u64 ^ 0xC10D),
             stat_blocks_broken: 0,
+            sounds: Vec::new(),
+            dig_tick: 0.0,
+            step_dist: 0.0,
+            was_in_water: false,
+            net: None,
+            peers: BTreeMap::new(),
+            my_id: 0,
+            player_name: "Stove".into(),
+            next_mob_id: 1,
+            net_timers: [0.0; 3],
+            pending_msgs: Vec::new(),
+            net_error: None,
+            dedicated: false,
+            scripts: None,
+            saved_script_vars: Vec::new(),
         }
     }
 
     pub fn from_save(d: SaveData) -> Self {
         let mut g = Game::new(d.seed, d.creative, false);
+        g.saved_script_vars = d.script_vars.clone();
+        let remap = palette_remap(reg(), &d.palette);
         g.world.mods = d.mods;
+        if let Some(remap) = &remap {
+            for m in g.world.mods.values_mut() {
+                for id in m.values_mut() {
+                    *id = remap[*id as usize];
+                }
+            }
+        }
         g.time = d.time;
         g.player.body.pos = Vec3::from_array(d.pos);
         g.player.fall_start = d.pos[1];
@@ -126,7 +179,10 @@ impl Game {
         g.spawn = Vec3::from_array(d.spawn);
         g.inv.slots = [None; 36];
         for (i, s) in d.slots.into_iter().take(36).enumerate() {
-            g.inv.slots[i] = s;
+            g.inv.slots[i] = match (s, &remap) {
+                (Some((id, n)), Some(r)) => Some((r[id as usize], n)).filter(|(id, _)| *id != AIR),
+                (s, _) => s,
+            };
         }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
@@ -145,11 +201,17 @@ impl Game {
             spawn: self.spawn.to_array(),
             slots: self.inv.slots.to_vec(),
             mods: self.world.mods.clone(),
+            palette: mod_palette(reg()),
+            script_vars: self.export_script_vars(),
         }
     }
 
     pub fn msg(&mut self, s: impl Into<String>) {
-        self.messages.push((s.into(), 7.0));
+        let s = s.into();
+        if self.dedicated {
+            println!("[{}] {s}", crate::server::timestamp());
+        }
+        self.messages.push((s, 7.0));
         if self.messages.len() > 6 {
             self.messages.remove(0);
         }
@@ -189,15 +251,21 @@ impl Game {
     /// Stream chunks and upload fresh meshes. Returns true once the player's area is ready.
     pub fn stream(&mut self, renderer: &mut Renderer, ctx: &mut dyn RenderingBackend, radius: i32) {
         let center = self.player.body.pos;
-        for k in self.world.stream(center, radius) {
+        let mut centers = vec![(center, radius)];
+        if self.is_host() {
+            // Keep the world simulated around remote players too.
+            centers.extend(self.peers.values().map(|p| (p.target, radius.min(5))));
+        }
+        for k in self.world.stream(&centers) {
             renderer.drop_chunk(ctx, k);
         }
         let (pcx, pcz) = ((center.x / 16.0).floor() as i32, (center.z / 16.0).floor() as i32);
+        let near = (radius + 1) * (radius + 1);
         let mut dirty: Vec<(i32, (i32, i32))> = self
             .world
             .dirty
             .iter()
-            .filter(|&&(cx, cz)| self.world.neighbours_ready(cx, cz))
+            .filter(|&&(cx, cz)| (cx - pcx).pow(2) + (cz - pcz).pow(2) <= near && self.world.neighbours_ready(cx, cz))
             .map(|&(cx, cz)| ((cx - pcx).pow(2) + (cz - pcz).pow(2), (cx, cz)))
             .collect();
         dirty.sort_unstable();
@@ -263,6 +331,12 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32, c: &Controls) {
+        self.net_receive(dt);
+        self.update_local(dt, c);
+        self.net_send(dt);
+    }
+
+    fn update_local(&mut self, dt: f32, c: &Controls) {
         self.clock += dt;
         self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         self.shake = (self.shake - dt * 1.5).max(0.0);
@@ -281,8 +355,10 @@ impl Game {
 
         let fall = self.player.update(dt, &c.input, &self.world, self.creative);
         if fall > 0.0 {
+            self.sfx(Sfx::Thud, None);
             self.hurt_player(fall, "hit the ground too hard (the ground is fine)");
         }
+        self.footsteps(dt);
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
@@ -292,6 +368,201 @@ impl Game {
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
         self.update_entities(dt);
+        self.script_tick(dt);
+    }
+
+    // ------------------------------------------------------------ scripting
+
+    /// Load the active mods' scripts and run their `on_load`.
+    pub fn start_scripts(&mut self) {
+        self.start_scripts_with(&crate::mods::active_sources());
+    }
+
+    pub fn start_scripts_with(&mut self, sources: &[crate::mods::ModSource]) {
+        if self.is_client() || self.menu || self.scripts.is_some() {
+            return;
+        }
+        let (mut host, mut problems) = ScriptHost::new(sources);
+        // Variables saved with this world come back before on_load runs.
+        problems.extend(host.import_vars(&std::mem::take(&mut self.saved_script_vars)));
+        for p in problems {
+            self.msg(format!("Script error {p}"));
+        }
+        if host.is_empty() {
+            // No scripts running, but keep any saved variables for next time.
+            self.saved_script_vars = host.export_vars().0;
+        } else {
+            let ids = host.mod_ids().join(", ");
+            self.scripts = Some(host);
+            if self.dedicated {
+                self.msg(format!("Scripts running: {ids}"));
+            }
+            self.fire("on_load", vec![]);
+        }
+    }
+
+    /// Script variables for the save file (running mods plus kept data of absent ones).
+    fn export_script_vars(&mut self) -> Vec<(String, Vec<u8>)> {
+        let Some(host) = &self.scripts else { return self.saved_script_vars.clone() };
+        let (vars, skipped) = host.export_vars();
+        for s in skipped {
+            self.msg(format!("Script variable not saved: {s}"));
+        }
+        vars
+    }
+
+    /// Run a script event. Returns false if a script cancelled the default action.
+    pub fn fire(&mut self, hook: &str, args: Vec<Dynamic>) -> bool {
+        let Some(mut host) = self.scripts.take() else { return true };
+        let r = host.call(self, hook, args);
+        self.scripts = Some(host);
+        for line in r.log {
+            self.msg(line);
+        }
+        for e in r.errors {
+            eprintln!("script error: {e}");
+            self.msg(format!("Script error {e}"));
+        }
+        self.apply_cmds(r.cmds);
+        r.allow
+    }
+
+    fn script_tick(&mut self, dt: f32) {
+        let Some(host) = &mut self.scripts else { return };
+        host.tick_acc += dt;
+        if host.tick_acc < crate::scripting::TICK {
+            return;
+        }
+        host.tick_acc -= crate::scripting::TICK;
+        self.fire("on_tick", vec![Dynamic::from(crate::scripting::TICK as rhai::FLOAT)]);
+    }
+
+    pub fn is_local_player(&self, name: &str) -> bool {
+        !self.dedicated && (name.is_empty() || name.eq_ignore_ascii_case(&self.player_name))
+    }
+
+    pub fn player_names(&self) -> Vec<String> {
+        let mut v = if self.dedicated { vec![] } else { vec![self.player_name.clone()] };
+        v.extend(self.peers.values().map(|p| p.name.clone()));
+        v
+    }
+
+    pub fn player_position(&self, name: &str) -> Option<Vec3> {
+        if self.is_local_player(name) {
+            return Some(self.player.body.pos);
+        }
+        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.target)
+    }
+
+    fn apply_cmds(&mut self, cmds: Vec<Cmd>) {
+        let effect = |heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(u8, u8)>| Msg::Effect { heal, teleport, launch, take };
+        for c in cmds {
+            match c {
+                Cmd::SetBlock(x, y, z, id) => self.world.set_or_record(x, y, z, id),
+                Cmd::Broadcast(t) => {
+                    self.msg(t.clone());
+                    self.system_message(None, &t);
+                }
+                Cmd::Message(p, t) => {
+                    if self.is_local_player(&p) {
+                        self.msg(t);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.system_message(Some(id), &t);
+                    } else if self.dedicated && p.eq_ignore_ascii_case("server") {
+                        self.msg(t);
+                    }
+                }
+                Cmd::Give(p, item, n) => {
+                    if self.is_local_player(&p) {
+                        self.give(item, n);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, Msg::Give { item, n });
+                    }
+                }
+                Cmd::Take(p, item, n) => {
+                    if self.is_local_player(&p) {
+                        self.inv.remove(item, n as u32);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(0.0, None, None, Some((item, n))));
+                    }
+                }
+                Cmd::Heal(p, n) => {
+                    if self.is_local_player(&p) {
+                        self.player.health = (self.player.health + n).min(MAX_HEALTH);
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(n, None, None, None));
+                    }
+                }
+                Cmd::Damage(p, n) => {
+                    if self.is_local_player(&p) {
+                        self.player.hurt = 0.0;
+                        self.hurt_player(n, "was smitten by a script");
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.hurt_peer(id, n, "was smitten by a script", Vec3::ZERO);
+                    }
+                }
+                Cmd::Teleport(p, to) => {
+                    if self.is_local_player(&p) {
+                        self.player.body.pos = to;
+                        self.player.body.vel = Vec3::ZERO;
+                        self.player.fall_start = to.y;
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(0.0, Some(to), None, None));
+                        if let Some(peer) = self.peers.get_mut(&id) {
+                            peer.target = to;
+                        }
+                    }
+                }
+                Cmd::Launch(p, v) => {
+                    if self.is_local_player(&p) {
+                        self.player.body.vel.y = v;
+                        self.player.fall_start = self.player.body.pos.y;
+                    } else if let Some(id) = self.peer_by_name(&p) {
+                        self.net_send_to(id, effect(0.0, None, Some(v), None));
+                    }
+                }
+                Cmd::Explode(at, r) => self.explode(at, r, "was blown up by a script"),
+                Cmd::Spawn(k, at) => {
+                    let kind = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner][(k as usize).min(2)];
+                    self.alloc_mob(kind, at);
+                }
+                Cmd::SetTime(t) => {
+                    self.time = t;
+                    self.net_broadcast(Msg::Time(t));
+                }
+                Cmd::Sound(s, at) => {
+                    self.sfx(s, Some(at));
+                    self.net_broadcast(Msg::Sound { sfx: s.to_u8(), at });
+                }
+            }
+        }
+    }
+
+    pub fn sfx(&mut self, s: Sfx, at: Option<Vec3>) {
+        if !self.menu {
+            self.sounds.push((s, at));
+        }
+    }
+
+    fn footsteps(&mut self, dt: f32) {
+        let in_water = self.player.body.in_water;
+        if in_water && !self.was_in_water {
+            self.sfx(Sfx::Splash, None);
+        }
+        self.was_in_water = in_water;
+        let b = &self.player.body;
+        if !b.on_ground || in_water || self.player.flying {
+            return;
+        }
+        self.step_dist += Vec3::new(b.vel.x, 0.0, b.vel.z).length() * dt;
+        if self.step_dist > 1.9 {
+            self.step_dist = 0.0;
+            let feet = b.pos - Vec3::Y * 0.2;
+            let under = self.world.get(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
+            if is_solid(under) {
+                self.sfx(Sfx::Step(material(under)), None);
+            }
+        }
     }
 
     fn reach(&self) -> f32 {
@@ -335,7 +606,17 @@ impl Game {
                     let i = *i;
                     let dmg = attack_damage(held) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
                     let from = self.player.body.pos;
-                    self.mobs[i].damage(dmg, from);
+                    if self.is_client() {
+                        // The host owns mobs: ask it to apply the hit (it echoes the sound back).
+                        let mob = self.mobs[i].id;
+                        self.net_send_msg(Msg::Attack { mob, dmg, from });
+                        self.mobs[i].hurt = 0.5;
+                    } else {
+                        self.mobs[i].damage(dmg, from);
+                        self.mobs[i].last_attacker = 0;
+                        let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
+                        self.sfx(if kind == MobKind::Oinker { Sfx::Oink } else { Sfx::MobHurt }, Some(at));
+                    }
                     self.attack_cd = 0.35;
                 }
             }
@@ -357,6 +638,11 @@ impl Game {
                         let progress = if t <= 0.0 { 1.0 } else { progress + dt / t };
                         if self.rng.chance(dt * 10.0) {
                             self.block_particles(pos, 1);
+                        }
+                        self.dig_tick -= dt;
+                        if self.dig_tick <= 0.0 {
+                            self.dig_tick = 0.25;
+                            self.sfx(Sfx::Hit(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
                         }
                         if progress >= 1.0 {
                             let (_, drops) = break_time(id, held);
@@ -405,22 +691,49 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        if held != AIR {
+            if self.is_client() {
+                self.net_send_msg(Msg::UseItem { item: held });
+            } else {
+                let me = self.player_name.clone();
+                if !self.fire("on_use_item", vec![me.into(), reg().key_of(held).into()]) {
+                    return;
+                }
+            }
+        }
         if let Some(heal) = food_value(held) {
             if self.player.health < MAX_HEALTH || self.creative {
                 self.player.health = (self.player.health + heal).min(MAX_HEALTH);
                 if !self.creative {
                     self.inv.consume_held();
                 }
+                self.sfx(Sfx::Eat, None);
                 self.msg(if held == GOO { "You ate Groaner Goo. You feel... gooey." } else { "*nom* Oinkchop acquired (internally)." });
                 return;
             }
+        }
+        if let Some((actions, consume)) = use_actions(held) {
+            let at = self.player.eye() + self.player.look_dir() * 2.0;
+            self.run_actions(actions, at);
+            self.player.swing = 1.0;
+            if consume && !self.creative {
+                self.inv.consume_held();
+            }
+            return;
         }
         let Some(Target::Block(h)) = &self.target else { return };
         let (hit_pos, normal) = (h.pos, h.normal);
         let hit_id = self.world.get_v(hit_pos);
         if hit_id == TNT && (held == TORCH || held == AIR) {
+            if self.is_client() {
+                self.world.set_remote(hit_pos.x, hit_pos.y, hit_pos.z, AIR);
+                self.net_send_msg(Msg::Ignite { x: hit_pos.x, y: hit_pos.y, z: hit_pos.z });
+                self.msg("Hisss... wait, that's the TNT. RUN.");
+                return;
+            }
             self.world.set_v(hit_pos, AIR);
             self.tnts.push(PrimedTnt { pos: hit_pos.as_vec3(), fuse: 3.0 });
+            self.sfx(Sfx::Hiss, Some(hit_pos.as_vec3() + Vec3::splat(0.5)));
             self.msg("Hisss... wait, that's the TNT. RUN.");
             return;
         }
@@ -448,8 +761,18 @@ impl Game {
             if self.mobs.iter().any(|m| m.body.intersects_block(place.x, place.y, place.z)) {
                 return;
             }
+            if self.peers.values().any(|p| p.intersects_block(place)) {
+                return;
+            }
+        }
+        if !self.is_client() {
+            let args = vec![self.player_name.clone().into(), (place.x as INT).into(), (place.y as INT).into(), (place.z as INT).into(), reg().key_of(held).into()];
+            if !self.fire("on_block_place", args) {
+                return;
+            }
         }
         self.world.set_v(place, held);
+        self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
         if !self.creative {
             self.inv.consume_held();
@@ -461,8 +784,19 @@ impl Game {
         if !targetable(id) || block(id).hardness < 0.0 {
             return;
         }
-        self.world.set_v(pos, AIR);
+        if !self.is_client() {
+            let args = vec![self.player_name.clone().into(), (pos.x as INT).into(), (pos.y as INT).into(), (pos.z as INT).into(), reg().key_of(id).into()];
+            if !self.fire("on_block_break", args) {
+                return;
+            }
+        }
         self.block_particles(pos, 14);
+        self.world.set_v(pos, AIR);
+        self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
+        let on_break: &'static [Action] = &block(id).on_break;
+        if !on_break.is_empty() {
+            self.run_actions(on_break, pos.as_vec3() + Vec3::splat(0.5));
+        }
         self.stat_blocks_broken += 1;
         if drops && !self.creative {
             let d = block(id).drop;
@@ -495,7 +829,49 @@ impl Game {
         }
     }
 
+    /// Carry out mod-defined behaviour (see MODDING.md).
+    pub fn run_actions(&mut self, actions: &[Action], at: Vec3) {
+        for a in actions {
+            match a {
+                Action::Heal(n) => {
+                    self.player.health = (self.player.health + n).min(MAX_HEALTH);
+                    self.sfx(Sfx::Eat, None);
+                }
+                Action::Explode(r) => {
+                    if self.is_client() {
+                        self.net_send_msg(Msg::Explosion { at, r: *r });
+                    } else {
+                        self.explode(at, *r, "was blown up by a mod");
+                    }
+                }
+                Action::Launch(v) => {
+                    self.player.body.vel.y = *v;
+                    self.player.fall_start = self.player.body.pos.y;
+                }
+                Action::Message(m) => self.msg(*m),
+                Action::Give(item, n) => self.give(*item, *n),
+                Action::SetTime(t) => {
+                    if self.is_client() {
+                        self.msg("Only the host can change the time.");
+                    } else {
+                        self.time = *t;
+                        self.net_broadcast(Msg::Time(*t));
+                    }
+                }
+                Action::Spawn(k) => {
+                    if self.is_client() {
+                        self.msg("Only the host can spawn mobs.");
+                    } else {
+                        let kind = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner][(*k as usize).min(2)];
+                        self.alloc_mob(kind, at + Vec3::Y * 0.5);
+                    }
+                }
+            }
+        }
+    }
+
     fn give(&mut self, item: u8, n: u8) {
+        self.sfx(Sfx::Pop, None);
         if self.inv.add(item, n) > 0 {
             self.msg("Inventory full. The item has been respectfully ignored.");
         }
@@ -503,7 +879,13 @@ impl Game {
 
     fn block_particles(&mut self, pos: IVec3, n: usize) {
         let id = self.world.get_v(pos);
-        let tile = block(id).tex[1];
+        self.block_particles_tile(pos, block(id).tex[1], n);
+    }
+
+    fn block_particles_tile(&mut self, pos: IVec3, tile: u16, n: usize) {
+        if self.dedicated {
+            return;
+        }
         for _ in 0..n {
             let r = &mut self.rng;
             let p = pos.as_vec3() + Vec3::new(r.range(0.1, 0.9), r.range(0.1, 0.9), r.range(0.1, 0.9));
@@ -520,6 +902,9 @@ impl Game {
     }
 
     fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
+        if self.dedicated {
+            return;
+        }
         for _ in 0..n {
             let r = &mut self.rng;
             self.particles.push(Particle {
@@ -540,6 +925,7 @@ impl Game {
         }
         self.player.health -= amount;
         self.player.hurt = 0.5;
+        self.sfx(Sfx::Hurt, None);
         if self.player.health <= 0.0 {
             self.player.health = 0.0;
             self.dead = Some(format!("Stove {cause}"));
@@ -547,6 +933,9 @@ impl Game {
     }
 
     pub fn explode(&mut self, at: Vec3, r: f32, cause: &str) {
+        self.sfx(Sfx::Explode, Some(at));
+        self.net_broadcast(Msg::Explosion { at, r });
+        self.hurt_peers_in_blast(at, r, cause);
         let c = ivec3(at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
         let ri = r.ceil() as i32;
         for dy in -ri..=ri {
@@ -575,16 +964,15 @@ impl Game {
                 }
             }
         }
-        self.smoke(at, 45, r * 0.6);
+        self.explosion_effects(at, r);
         let pd = (self.player.body.pos + Vec3::Y * 0.9).distance(at);
-        if pd < r * 2.0 {
+        if pd < r * 2.0 && !self.dedicated {
             let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
             self.player.hurt = 0.0;
             self.hurt_player(dmg, cause);
             let push = (self.player.body.pos - at).normalize_or_zero() * (1.0 - pd / (r * 2.0)) * 14.0;
             self.player.body.vel += push + Vec3::Y * 4.0;
         }
-        self.shake = (self.shake + (1.0 - (pd / 40.0).min(1.0)) * 1.2).min(1.5);
         for m in self.mobs.iter_mut() {
             let d = (m.body.pos + Vec3::Y * 0.5).distance(at);
             if d < r * 2.0 {
@@ -594,17 +982,96 @@ impl Game {
         }
     }
 
+    /// Mob AI targets and damage recipients: (player id, chest position).
+    pub fn player_targets(&self) -> Vec<(u32, Vec3)> {
+        let mut t = Vec::new();
+        if self.dead.is_none() && !self.dedicated {
+            t.push((self.my_id, self.player.body.pos + Vec3::Y * 0.9));
+        }
+        t.extend(self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target + Vec3::Y * 0.9)));
+        t
+    }
+
+    /// Smoke and screen shake (also used when a remote explosion is reported).
+    pub fn explosion_effects(&mut self, at: Vec3, r: f32) {
+        self.smoke(at, 45, r * 0.6);
+        let pd = (self.player.body.pos + Vec3::Y * 0.9).distance(at);
+        self.shake = (self.shake + (1.0 - (pd / 40.0).min(1.0)) * 1.2).min(1.5);
+    }
+
+    /// Particles and sound for a block someone else changed.
+    pub fn block_change_feedback(&mut self, pos: IVec3, old: u8, new: u8) {
+        let center = pos.as_vec3() + Vec3::splat(0.5);
+        if new == AIR || new == WATER {
+            if targetable(old) {
+                let tile = block(old).tex[1];
+                self.block_particles_tile(pos, tile, 10);
+                self.sfx(Sfx::Break(material(old)), Some(center));
+            }
+        } else {
+            self.sfx(Sfx::Place(material(new)), Some(center));
+        }
+    }
+
+    /// One tick of a headless dedicated server.
+    pub fn server_tick(&mut self, dt: f32) {
+        self.net_receive(dt);
+        self.clock += dt;
+        self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+        for m in self.messages.iter_mut() {
+            m.1 -= dt;
+        }
+        self.messages.retain(|m| m.1 > 0.0);
+        let centers: Vec<(Vec3, i32)> = self.peers.values().map(|p| (p.target, 4)).collect();
+        self.world.stream(&centers);
+        self.world.dirty.clear(); // nothing to draw
+        if !self.peers.is_empty() {
+            self.update_entities(dt);
+        }
+        self.script_tick(dt);
+        self.net_send(dt);
+        self.sounds.clear();
+    }
+
     fn update_entities(&mut self, dt: f32) {
+        if self.is_client() {
+            self.client_entities(dt);
+            return;
+        }
         let ppos = self.player.body.pos + Vec3::Y * 0.9;
+        let targets = self.player_targets();
         let visible = !self.creative;
         let daylight = self.daylight();
         let mut events = Vec::new();
+        let mut noises = Vec::new();
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
                 continue;
             }
-            events.extend(m.update(dt, &self.world, ppos, visible, daylight, &mut self.rng));
+            let fuse_before = m.fuse;
+            // Chase whoever is closest.
+            let (target_id, target) = targets
+                .iter()
+                .copied()
+                .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
+                .unwrap_or((u32::MAX, ppos));
+            let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
+            events.extend(evs.into_iter().map(|e| (target_id, target, e)));
+            if fuse_before == 0.0 && m.fuse > 0.0 {
+                noises.push((Sfx::Hiss, m.body.pos));
+            }
+            // Idle chatter.
+            if self.rng.chance(dt * 0.1) && targets.iter().any(|t| m.body.pos.distance(t.1) < 20.0) {
+                match m.kind {
+                    MobKind::Oinker => noises.push((Sfx::Oink, m.body.pos)),
+                    MobKind::Groaner => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::Hisser => {}
+                }
+            }
+        }
+        for (s, at) in noises {
+            self.sfx(s, Some(at));
         }
         // Keep mobs from stacking inside each other.
         for i in 0..self.mobs.len() {
@@ -620,8 +1087,12 @@ impl Game {
                 }
             }
         }
-        for e in events {
+        for (target_id, target, e) in events {
             match e {
+                MobEvent::HurtPlayer(d, cause) if target_id != self.my_id => {
+                    self.hurt_peer(target_id, d, cause, Vec3::Y * 3.0);
+                    let _ = target;
+                }
                 MobEvent::HurtPlayer(d, cause) => {
                     self.hurt_player(d, cause);
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
@@ -634,14 +1105,21 @@ impl Game {
         let mut i = 0;
         while i < self.mobs.len() {
             let m = &self.mobs[i];
-            let far = m.body.pos.distance(self.player.body.pos) > 110.0;
+            let far = (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
                 if m.health <= 0.0 && m.health > -50.0 {
                     let at = m.body.pos + Vec3::Y * 0.5;
                     self.smoke(at, 10, 0.3);
+                    let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
+                    let args = vec![m.kind.name().to_ascii_lowercase().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
+                    self.fire("on_mob_death", args);
                     if let Some((item, n)) = m.loot(&mut self.rng) {
-                        if !self.creative {
+                        if m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker) {
+                            if !self.creative {
+                                self.net_send_to(m.last_attacker, Msg::Give { item, n });
+                            }
+                        } else if !self.creative {
                             self.give(item, n);
                             self.msg(format!("{} dropped {}x {}", m.kind.name(), n, item_name(item)));
                         }
@@ -677,8 +1155,21 @@ impl Game {
         }
     }
 
+    fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
+        let mut m = Mob::new(kind, pos, &mut self.rng);
+        m.id = self.next_mob_id;
+        self.next_mob_id += 1;
+        self.mobs.push(m);
+    }
+
     fn try_spawn(&mut self) {
-        let p = self.player.body.pos;
+        // Spawn around a random player so everyone gets company.
+        let mut centers = if self.dedicated { vec![] } else { vec![self.player.body.pos] };
+        centers.extend(self.peers.values().map(|p| p.target));
+        if centers.is_empty() {
+            return;
+        }
+        let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
         let passive = self.mobs.iter().filter(|m| !m.kind.hostile()).count();
         let hostile = self.mobs.len() - passive;
         let a = self.rng.range(0.0, TAU);
@@ -693,34 +1184,33 @@ impl Game {
         if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
             for i in 0..self.rng.int(1, 3) {
                 let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.7, y as f32 + 1.0, z as f32 + 0.5);
-                let m = Mob::new(MobKind::Oinker, pos, &mut self.rng);
-                self.mobs.push(m);
+                self.alloc_mob(MobKind::Oinker, pos);
             }
             return;
         }
-        if hostile >= 12 {
+        if hostile >= 12 + 4 * self.peers.len() {
             return;
         }
         let kind = if self.rng.chance(0.45) { MobKind::Hisser } else { MobKind::Groaner };
         if self.is_night() && is_solid(top) && clear(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
-            let m = Mob::new(kind, pos, &mut self.rng);
-            self.mobs.push(m);
+            self.alloc_mob(kind, pos);
             return;
         }
         // Caves are always spooky.
         let cy = self.rng.int(4, y.max(5));
         if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 {
             let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
-            let m = Mob::new(kind, pos, &mut self.rng);
-            self.mobs.push(m);
+            self.alloc_mob(kind, pos);
         }
     }
 
     pub fn respawn(&mut self) {
         self.dead = None;
         self.player = Player::new(self.spawn);
-        self.mobs.retain(|m| !m.kind.hostile());
+        if self.net.is_none() {
+            self.mobs.retain(|m| !m.kind.hostile());
+        }
         self.ready = false;
         self.msg("Respawned. Inventory kept, because we're nice.");
     }
@@ -778,6 +1268,15 @@ impl Game {
                 m.draw(&mut g, &self.world);
             }
         }
+        // Other players
+        for p in self.peers.values().filter(|p| p.alive()) {
+            let sky = self.world.sky_light(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
+            let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
+            g.begin(Pass::Opaque, tint, false);
+            let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
+            let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw);
+            draw_model(&mut g, &root, &STOVE, p.anim, sky, true);
+        }
         // The player, in third person
         if self.third_person && !self.menu {
             let p = &self.player;
@@ -815,12 +1314,13 @@ impl Game {
                 (h.pos.as_vec3(), h.pos.as_vec3() + Vec3::ONE)
             };
             g.begin(Pass::Blend, [0.0, 0.0, 0.0, 0.55], true);
-            outline(&mut g, min - Vec3::splat(0.004), max + Vec3::splat(0.004), 0.012);
+            // Edges sit entirely outside the block so the (now depth-tested) outline never z-fights.
+            outline(&mut g, min - Vec3::splat(0.014), max + Vec3::splat(0.014), 0.012);
             if let Some((bp, prog)) = self.breaking {
                 if bp == h.pos {
                     let stage = ((prog * 5.0) as u16).min(4);
                     g.begin(Pass::Blend, [1.0; 4], false);
-                    let m = Mat4::from_translation(min - Vec3::splat(0.003)) * Mat4::from_scale(max - min + Vec3::splat(0.006));
+                    let m = Mat4::from_translation(min - Vec3::splat(0.006)) * Mat4::from_scale(max - min + Vec3::splat(0.012));
                     g.cube(&m, [T_CRACK0 + stage; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
                 }
             }
@@ -848,8 +1348,15 @@ impl Game {
         let tint = if self.player.hurt > 0.3 { [1.0, 0.6, 0.6, 1.0] } else { [1.0; 4] };
         g.begin(Pass::Overlay, tint, false);
         if held == AIR {
-            let m = basis * local * Mat4::from_rotation_x(0.3) * Mat4::from_translation(Vec3::new(-0.07, -0.1, -0.4)) * Mat4::from_scale(Vec3::new(0.14, 0.14, 0.48));
-            g.cube(&m, [T_SKIN; 6], sky.max(0.2), [0.0, 0.0, 1.0, 1.0]);
+            // A short forearm poking in from the bottom-right corner, angled up and inward,
+            // with a shirt sleeve at the near end so it reads as an arm rather than a plank.
+            let arm = basis * local * Mat4::from_translation(Vec3::new(0.1, -0.1, 0.1)) * Mat4::from_rotation_y(0.35) * Mat4::from_rotation_x(0.6);
+            let w = 0.16;
+            let sleeve = arm * Mat4::from_translation(Vec3::new(-w / 2.0 - 0.006, -w / 2.0 - 0.006, 0.0)) * Mat4::from_scale(Vec3::new(w + 0.012, w + 0.012, 0.25));
+            let hand = arm * Mat4::from_translation(Vec3::new(-w / 2.0, -w / 2.0, -0.3)) * Mat4::from_scale(Vec3::new(w, w, 0.3));
+            let light = sky.max(0.2);
+            g.cube(&sleeve, [T_STOVE_SHIRT; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            g.cube(&hand, [T_SKIN; 6], light, [0.0, 0.0, 1.0, 1.0]);
         } else if is_block_item(held) && block(held).model == Model::Cube {
             let tiles = {
                 let t = block(held).tex;
@@ -886,6 +1393,32 @@ impl Game {
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
         FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), lights }
     }
+}
+
+/// Names of every mod-added block and item, so saves survive mods being added or removed.
+fn mod_palette(r: &Registry) -> Vec<(u8, String)> {
+    let blocks = (NUM_BLOCKS..r.blocks.len() as u8).map(|id| (id, r.blocks[id as usize].key.to_string()));
+    let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as u8, r.key_of(id as u8).to_string()));
+    blocks.chain(items).collect()
+}
+
+/// Map ids in a save to ids in the current registry. Mod things that no longer
+/// exist become air (blocks) or vanish (items). None when nothing needs changing.
+fn palette_remap(r: &Registry, palette: &[(u8, String)]) -> Option<Vec<u8>> {
+    let mut map: Vec<u8> = (0..=255u8).collect();
+    // Any mod-range id the save doesn't mention is unknown.
+    for id in NUM_BLOCKS..FIRST_ITEM {
+        map[id as usize] = AIR;
+    }
+    for id in FIRST_MOD_ITEM..=255 {
+        map[id as usize] = AIR;
+    }
+    for (old, key) in palette {
+        map[*old as usize] = r.lookup(key).unwrap_or(AIR);
+    }
+    // Only the ids the save actually uses matter.
+    let unchanged = palette.iter().all(|(old, key)| r.lookup(key) == Some(*old));
+    (!unchanged).then_some(map)
 }
 
 fn sky_quad(g: &mut DynGeo, center: Vec3, dir: Vec3, size: f32, tile: u16) {
@@ -952,7 +1485,7 @@ mod tests {
         let mut w = World::new(seed);
         let start = std::time::Instant::now();
         while w.chunks.len() < 9 && start.elapsed().as_secs() < 20 {
-            w.stream(Vec3::ZERO, 1);
+            w.stream(&[(Vec3::ZERO, 1)]);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         w
@@ -981,7 +1514,7 @@ mod tests {
     fn crafting_consumes_inputs() {
         let mut inv = Inventory::new();
         inv.add(LOG, 1);
-        let planks = RECIPES.iter().find(|r| r.output.0 == PLANKS).unwrap();
+        let planks = recipes().iter().find(|r| r.output.0 == PLANKS).unwrap();
         assert!(inv.craft(planks));
         assert_eq!(inv.count(LOG), 0);
         assert_eq!(inv.count(PLANKS), 4);
@@ -1011,16 +1544,169 @@ mod tests {
     }
 
     #[test]
+    fn saves_survive_mods_changing() {
+        use crate::mods::{build, ModSource};
+        let mk = |text: &str| {
+            let mut files = std::collections::BTreeMap::new();
+            files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+            files
+        };
+        let a = ModSource { id: "aaa".into(), files: mk("[block one]\n[block two]\n[item gem]\n") };
+        let b = ModSource { id: "bbb".into(), files: mk("[block red]\n") };
+        let with_both = build(&[a.clone(), b.clone()], &[]);
+        let palette = mod_palette(&with_both);
+        let red = with_both.lookup("bbb:red").unwrap();
+        let gem = with_both.lookup("aaa:gem").unwrap();
+        assert_eq!(red, NUM_BLOCKS + 2);
+
+        // Same mods: nothing to do.
+        assert!(palette_remap(&with_both, &palette).is_none());
+        // Mod "aaa" removed: "red" moves down to the first mod slot, aaa's things vanish.
+        let only_b = build(&[b], &[]);
+        let map = palette_remap(&only_b, &palette).unwrap();
+        assert_eq!(map[red as usize], NUM_BLOCKS);
+        assert_eq!(map[(NUM_BLOCKS) as usize], AIR);
+        assert_eq!(map[gem as usize], AIR);
+        assert_eq!(map[STONE as usize], STONE);
+        assert_eq!(map[DIAMOND as usize], DIAMOND);
+    }
+
+    #[test]
+    fn mod_actions_do_things() {
+        let mut g = Game::new(9, false, false);
+        g.world = loaded_world(9);
+        g.player.health = 5.0;
+        g.run_actions(&[Action::Heal(4.0), Action::Launch(15.0), Action::Give(DIAMOND, 2), Action::Message("hi")], g.spawn);
+        assert_eq!(g.player.health, 9.0);
+        assert_eq!(g.player.body.vel.y, 15.0);
+        assert_eq!(g.inv.count(DIAMOND), 2);
+        assert!(g.messages.iter().any(|m| m.0 == "hi"));
+        let top = g.world.surface_y(0, 0);
+        let solid = |g: &Game| (-1..=1).filter(|&x| is_solid(g.world.get(x, top, 0))).count();
+        let before = solid(&g);
+        g.run_actions(&[Action::Explode(3.0)], Vec3::new(0.5, top as f32 + 0.5, 0.5));
+        assert!(solid(&g) < before);
+    }
+
+    #[test]
+    fn scripts_drive_the_game() {
+        use crate::mods::ModSource;
+        let mut files = std::collections::BTreeMap::new();
+        files.insert(
+            "main.rhai".to_string(),
+            br#"
+            fn on_load() { set_var("loaded", true); }
+            fn on_chat(player, text) {
+                if text == "/tower" {
+                    let p = player_pos(player);
+                    fill(p[0] + 2, p[1], p[2], p[0] + 2, p[1] + 4, p[2], "glass");
+                    give(player, "diamond", 5);
+                    message(player, "Tower built!");
+                    return false;
+                }
+                if text == "/loaded" { message(player, `loaded=${get_var("loaded")}`); return false; }
+            }
+            fn on_block_break(player, x, y, z, block) {
+                if block == "glass" { message(player, "The glass is protected."); return false; }
+            }
+            fn on_use_item(player, item) { if item == "diamond" { launch(player, 20); } }
+            "#
+            .to_vec(),
+        );
+        let (host, problems) = ScriptHost::new(&[ModSource { id: "cmds".into(), files }]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut g = Game::new(21, false, false);
+        g.world = loaded_world(21);
+        let top = g.world.surface_y(0, 0);
+        g.player.body.pos = Vec3::new(0.5, top as f32 + 1.0, 0.5);
+        g.scripts = Some(host);
+        g.fire("on_load", vec![]);
+
+        g.send_chat("/tower");
+        for dy in 0..5 {
+            assert_eq!(g.world.get(2, top + 1 + dy, 0), GLASS);
+        }
+        assert_eq!(g.inv.count(DIAMOND), 5);
+        assert!(g.messages.iter().any(|m| m.0 == "Tower built!"));
+        // The command wasn't echoed as chat.
+        assert!(!g.messages.iter().any(|m| m.0.contains("/tower")));
+        g.send_chat("/loaded");
+        assert!(g.messages.iter().any(|m| m.0 == "loaded=true"));
+        g.send_chat("/nope");
+        assert!(g.messages.iter().any(|m| m.0.starts_with("Unknown command /nope")));
+
+        // Cancelling a block break.
+        g.break_block(ivec3(2, top + 1, 0), true);
+        assert_eq!(g.world.get(2, top + 1, 0), GLASS);
+        // Item use.
+        g.inv.selected = g.inv.slots.iter().position(|s| s.map(|s| s.0) == Some(DIAMOND)).unwrap();
+        g.use_item();
+        assert_eq!(g.player.body.vel.y, 20.0);
+    }
+
+    #[test]
+    fn script_variables_survive_saving_and_loading() {
+        use crate::mods::ModSource;
+        let mut files = std::collections::BTreeMap::new();
+        files.insert(
+            "main.rhai".to_string(),
+            br#"
+            fn on_load() {
+                let loads = get_var("loads");
+                if loads == () { loads = 0; }
+                set_var("loads", loads + 1);
+            }
+            fn on_chat(player, text) {
+                if text == "/sethome" { set_var(`home_${player}`, [10.5, 70.0, -4.5]); return false; }
+                if text == "/home" {
+                    let h = get_var(`home_${player}`);
+                    if h == () { message(player, "no home"); } else { teleport(player, h[0], h[1], h[2]); }
+                    message(player, `loads=${get_var("loads")}`);
+                    return false;
+                }
+            }
+            "#
+            .to_vec(),
+        );
+        let src = vec![ModSource { id: "homes".into(), files }];
+        let dir = std::env::temp_dir().join(format!("minceraft-vars-{}", std::process::id()));
+        let path = dir.join("world.mncr");
+
+        let mut g = Game::new(33, false, false);
+        g.start_scripts_with(&src);
+        g.send_chat("/sethome");
+        crate::save::write_to(&path, &g.to_save()).unwrap();
+
+        // Reopen the world: the home and the load counter are still there.
+        let mut back = Game::from_save(crate::save::read_from(&path).unwrap());
+        back.start_scripts_with(&src);
+        back.send_chat("/home");
+        assert_eq!(back.player.body.pos, Vec3::new(10.5, 70.0, -4.5));
+        assert!(back.messages.iter().any(|m| m.0 == "loads=2"), "{:?}", back.messages);
+
+        // Opened once with the mod switched off, then saved: the data must survive.
+        let mut without = Game::from_save(crate::save::read_from(&path).unwrap());
+        without.start_scripts_with(&[]);
+        crate::save::write_to(&path, &without.to_save()).unwrap();
+        let mut again = Game::from_save(crate::save::read_from(&path).unwrap());
+        again.start_scripts_with(&src);
+        again.send_chat("/home");
+        // Loaded by the first save (1), the mod-less session didn't run on_load, now 2.
+        assert!(again.messages.iter().any(|m| m.0 == "loads=2"), "{:?}", again.messages);
+        assert_eq!(again.player.body.pos, Vec3::new(10.5, 70.0, -4.5));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn save_round_trip() {
         let dir = std::env::temp_dir().join(format!("minceraft-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_current_dir(&dir).unwrap();
+        let path = dir.join("world.mncr");
         let mut g = Game::new(1234, false, false);
         g.inv.add(DIAMOND, 7);
         g.world.mods.entry((2, -3)).or_default().insert(99, TNT);
         g.time = 0.4;
-        crate::save::write(&g.to_save()).unwrap();
-        let back = Game::from_save(crate::save::read().unwrap());
+        crate::save::write_to(&path, &g.to_save()).unwrap();
+        let back = Game::from_save(crate::save::read_from(&path).unwrap());
         assert_eq!(back.world.seed(), 1234);
         assert_eq!(back.inv.count(DIAMOND), 7);
         assert_eq!(back.world.mods[&(2, -3)][&99], TNT);
