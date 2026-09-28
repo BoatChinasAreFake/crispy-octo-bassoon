@@ -82,6 +82,8 @@ pub struct Ledger {
     pub held: Id,
     /// Game clock of their last block break, and spare mining time carried over.
     last_break: f32,
+    /// Uses of each kind of tool since one last wore out (see `host_wear`).
+    uses: HashMap<Id, u32>,
     carry: f32,
 }
 
@@ -144,13 +146,18 @@ impl Game {
 
     /// Give a joined player items: into the ledger, then over the network.
     pub fn give_peer(&mut self, from: u32, item: Id, n: u8) {
+        self.give_peer_worn(from, item, n, 0);
+    }
+
+    /// The same, for a used tool or piece of armour.
+    pub fn give_peer_worn(&mut self, from: u32, item: Id, n: u8, wear: u16) {
         if n == 0 || !valid_item(item) {
             return;
         }
         if let Some(l) = self.ledger(from) {
             l.bag.add(item, n as u32);
         }
-        self.net_send_to(from, Msg::Give { item, n });
+        self.net_send_to(from, Msg::Give { item, n, wear });
     }
 
     /// Take items from a joined player (scripts' `take`): the ledger, then theirs.
@@ -189,6 +196,7 @@ impl Game {
             }
             l.last_break = clock;
             l.carry = (available - needed).min(MINING_CARRY);
+            self.host_wear(from, held, dig_wear(held, old));
             // The drops land on the ground here; they get them by walking into them.
             if drops {
                 let center = at.as_vec3() + macroquad::math::Vec3::splat(0.5);
@@ -215,7 +223,11 @@ impl Game {
             return self.peer_take(from, slab(m, false), 1);
         }
         if is_farmland(new) && !is_farmland(old) {
-            return self.peer_has(from, HOE);
+            let ok = self.peer_has(from, HOE);
+            if ok {
+                self.host_wear(from, HOE, 1);
+            }
+            return ok;
         }
         if let Some((crop, 0)) = Crop::of_block(new) {
             return self.peer_take(from, seed_of(crop), 1);
@@ -229,6 +241,28 @@ impl Game {
         }
         // Trampling, melting, water flowing, sponges drinking: nothing to pay.
         true
+    }
+
+    /// A joined player used a tool `amount` times. The host can't see which of
+    /// their pickaxes they held, so it counts uses per kind of tool: every
+    /// `durability` uses, one of that kind is worn out and leaves the ledger.
+    /// Their own game breaks the same tool at the same moment; if a modified
+    /// one doesn't, the next inventory check takes it anyway.
+    pub fn host_wear(&mut self, from: u32, item: Id, amount: u16) {
+        let Some(max) = durability(item) else { return };
+        if amount == 0 || self.creative {
+            return;
+        }
+        let Some(l) = self.ledger(from) else { return };
+        if !l.bag.has(item) {
+            return;
+        }
+        let u = l.uses.entry(item).or_insert(0);
+        *u += amount as u32;
+        if *u >= max as u32 {
+            *u -= max as u32;
+            l.bag.take(item, 1);
+        }
     }
 
     /// A joined player crafted: apply it to the ledger, as far as their items allow.

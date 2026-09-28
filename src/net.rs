@@ -17,7 +17,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v8: chests and furnaces (OpenContainer, CloseContainer, ContainerMove, Container).
 /// v9: items on the ground (Drops, Pickup, DropItem), armour in PlayerState,
 /// slabs, stairs and doors.
-pub const PROTOCOL: u32 = 9;
+/// v10: tool and armour wear (Give, DropItem, ContainerMove, Container), death
+/// drops (DropItem.scatter) and the keep-inventory rule (Welcome).
+pub const PROTOCOL: u32 = 10;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -57,7 +59,7 @@ pub enum Msg {
     /// client -> host
     Hello { protocol: u32, name: String },
     /// host -> client, first reply
-    Welcome { id: u32, seed: u32, time: f32, creative: bool, spawn: Vec3 },
+    Welcome { id: u32, seed: u32, time: f32, creative: bool, spawn: Vec3, keep_inventory: bool },
     Kick { reason: String },
     /// Player edits for one chunk (sent on join).
     Mods { cx: i32, cz: i32, entries: Vec<(u32, Id)> },
@@ -77,7 +79,8 @@ pub enum Msg {
     /// host -> client
     HurtYou { dmg: f32, cause: String, knock: Vec3 },
     /// host -> client: loot from a mob you killed.
-    Give { item: Id, n: u8 },
+    /// `wear`: how used it is, for tools and armour.
+    Give { item: Id, n: u8, wear: u16 },
     Explosion { at: Vec3, r: f32 },
     Sound { sfx: u8, at: Vec3 },
     Time(f32),
@@ -108,15 +111,16 @@ pub enum Msg {
     OpenContainer { x: i32, y: i32, z: i32 },
     CloseContainer { x: i32, y: i32, z: i32 },
     /// client -> host: I moved `n` of `item` into (`put`) or out of a container slot.
-    ContainerMove { x: i32, y: i32, z: i32, slot: u8, item: Id, n: u8, put: bool },
+    ContainerMove { x: i32, y: i32, z: i32, slot: u8, item: Id, n: u8, put: bool, wear: u16 },
     /// host -> client: what's in the container you have open, and its furnace gauges (0..1).
-    Container { x: i32, y: i32, z: i32, slots: Vec<(Id, u8)>, burn: f32, cook: f32 },
+    Container { x: i32, y: i32, z: i32, slots: Vec<(Id, u8, u16)>, burn: f32, cook: f32 },
     /// host -> client: every item on the ground: (id, position, item, count).
     Drops(Vec<(u32, Vec3, Id, u8)>),
     /// client -> host: I walked into drop `id` and have room for this many.
     Pickup { id: u32, room: u8 },
-    /// client -> host: I threw these (Q), or they didn't fit in my inventory.
-    DropItem { item: Id, n: u8 },
+    /// client -> host: I threw these (Q), or they didn't fit in my inventory, or
+    /// (`scatter`) I died and they fell out of my pockets.
+    DropItem { item: Id, n: u8, wear: u16, scatter: bool },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -218,13 +222,14 @@ impl Msg {
                 w.u32(*protocol);
                 w.str(name);
             }
-            Msg::Welcome { id, seed, time, creative, spawn } => {
+            Msg::Welcome { id, seed, time, creative, spawn, keep_inventory } => {
                 w.u8(1);
                 w.u32(*id);
                 w.u32(*seed);
                 w.f32(*time);
                 w.u8(*creative as u8);
                 w.v3(*spawn);
+                w.u8(*keep_inventory as u8);
             }
             Msg::Kick { reason } => {
                 w.u8(2);
@@ -311,10 +316,11 @@ impl Msg {
                 w.str(cause);
                 w.v3(*knock);
             }
-            Msg::Give { item, n } => {
+            Msg::Give { item, n, wear } => {
                 w.u8(12);
                 w.u16(*item);
                 w.u8(*n);
+                w.u16(*wear);
             }
             Msg::Explosion { at, r } => {
                 w.u8(13);
@@ -406,7 +412,7 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
-            Msg::ContainerMove { x, y, z, slot, item, n, put } => {
+            Msg::ContainerMove { x, y, z, slot, item, n, put, wear } => {
                 w.u8(31);
                 w.i32(*x);
                 w.i32(*y);
@@ -415,6 +421,7 @@ impl Msg {
                 w.u16(*item);
                 w.u8(*n);
                 w.u8(*put as u8);
+                w.u16(*wear);
             }
             Msg::Container { x, y, z, slots, burn, cook } => {
                 w.u8(32);
@@ -422,9 +429,10 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
                 w.u8(slots.len() as u8);
-                for &(id, n) in slots {
+                for &(id, n, wear) in slots {
                     w.u16(id);
                     w.u8(n);
+                    w.u16(wear);
                 }
                 w.f32(*burn);
                 w.f32(*cook);
@@ -444,10 +452,12 @@ impl Msg {
                 w.u32(*id);
                 w.u8(*room);
             }
-            Msg::DropItem { item, n } => {
+            Msg::DropItem { item, n, wear, scatter } => {
                 w.u8(35);
                 w.u16(*item);
                 w.u8(*n);
+                w.u16(*wear);
+                w.u8(*scatter as u8);
             }
         }
         w.0
@@ -457,7 +467,7 @@ impl Msg {
         let mut r = R(b);
         let m = match r.u8()? {
             0 => Msg::Hello { protocol: r.u32()?, name: r.str()? },
-            1 => Msg::Welcome { id: r.u32()?, seed: r.u32()?, time: r.f32()?, creative: r.u8()? != 0, spawn: r.v3()? },
+            1 => Msg::Welcome { id: r.u32()?, seed: r.u32()?, time: r.f32()?, creative: r.u8()? != 0, spawn: r.v3()?, keep_inventory: r.u8()? != 0 },
             2 => Msg::Kick { reason: r.str()? },
             3 => {
                 let (cx, cz) = (r.i32()?, r.i32()?);
@@ -500,7 +510,7 @@ impl Msg {
             9 => Msg::Attack { mob: r.u32()?, dmg: r.f32()?, from: r.v3()? },
             10 => Msg::Ignite { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             11 => Msg::HurtYou { dmg: r.f32()?, cause: r.str()?, knock: r.v3()? },
-            12 => Msg::Give { item: r.u16()?, n: r.u8()? },
+            12 => Msg::Give { item: r.u16()?, n: r.u8()?, wear: r.u16()? },
             13 => Msg::Explosion { at: r.v3()?, r: r.f32()? },
             14 => Msg::Sound { sfx: r.u8()?, at: r.v3()? },
             15 => Msg::Time(r.f32()?),
@@ -537,13 +547,13 @@ impl Msg {
             }
             29 => Msg::OpenContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             30 => Msg::CloseContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
-            31 => Msg::ContainerMove { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
+            31 => Msg::ContainerMove { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0, wear: r.u16()? },
             32 => {
                 let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
                 let n = r.u8()? as usize;
                 let mut slots = Vec::with_capacity(n);
                 for _ in 0..n {
-                    slots.push((r.u16()?, r.u8()?));
+                    slots.push((r.u16()?, r.u8()?, r.u16()?));
                 }
                 Msg::Container { x, y, z, slots, burn: r.f32()?, cook: r.f32()? }
             }
@@ -556,7 +566,7 @@ impl Msg {
                 Msg::Drops(list)
             }
             34 => Msg::Pickup { id: r.u32()?, room: r.u8()? },
-            35 => Msg::DropItem { item: r.u16()?, n: r.u8()? },
+            35 => Msg::DropItem { item: r.u16()?, n: r.u8()?, wear: r.u16()?, scatter: r.u8()? != 0 },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -979,7 +989,7 @@ mod tests {
     fn messages_round_trip() {
         let msgs = vec![
             Msg::Hello { protocol: PROTOCOL, name: "Stove".into() },
-            Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0) },
+            Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0), keep_inventory: true },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
             Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, armor: 0x4102 },
@@ -990,10 +1000,10 @@ mod tests {
             Msg::OpenContainer { x: -4, y: 60, z: 9 },
             Msg::Drops(vec![(7, Vec3::new(1.0, 64.5, -3.25), 0x8003, 12), (8, Vec3::ZERO, 4, 1)]),
             Msg::Pickup { id: 7, room: 64 },
-            Msg::DropItem { item: 0x8010, n: 3 },
+            Msg::DropItem { item: 0x8010, n: 3, wear: 40, scatter: true },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
-            Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true },
-            Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1), (0, 0), (0x8001, 64)], burn: 0.5, cook: 0.25 },
+            Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },
+            Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1, 0), (0, 0, 0), (0x800c, 1, 99)], burn: 0.5, cook: 0.25 },
             Msg::Mobs {
                 mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4 }],
                 tnts: vec![(Vec3::Z, 2.0)],

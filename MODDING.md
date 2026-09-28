@@ -73,7 +73,7 @@ description = One line shown on the Mods screen.
 | `name` | Display name | the section name |
 | `texture` | Icon and in-hand sprite | white |
 | `stack` | Max stack size (1–64) | `64` |
-| `food` | Health restored when eaten (right-click) | not edible |
+| `food` | Hunger points restored when eaten (right-click; 2 points = one drumstick) | not edible |
 | `pickaxe` | Works as a pickaxe of this tier (1–4) | `0` |
 | `damage` | Attack damage (hand = 1, dimond sword = 7) | `1` |
 | `on_use` | Actions on right-click (see below) | |
@@ -174,7 +174,7 @@ Each line is an extra title-screen splash text.
 - **Blocks:** `grass dirt stone cobblestone sand gravel water log leaves planks glass bedrock coal_ore iron_ore diamond_ore snowy_grass bricks tnt crafting_table glowrock torch flower tall_grass gold_ore pumpkin jack_o_lantern cactus ice bouncy_goo bed cake sponge wool sandstone stone_bricks mossy_cobblestone hay_bale bookshelf lantern mushroom scarecrow weeds farmland farmland_wet wheat_0..wheat_3 carrots_0..carrots_3 potatoes_0..potatoes_3 chest furnace furnace_lit planks_slab cobblestone_slab stone_brick_slab planks_stairs cobblestone_stairs stone_brick_stairs` (plus their upside-down and turned variants, and the door halves, which players don't hold)
 - **Items:** `stick coal iron diamond gunpowder porkchop goo wooden_pickaxe stone_pickaxe iron_pickaxe diamond_pickaxe wooden_sword stone_sword iron_sword diamond_sword gold golden_oinkchop stare_pearl mutton feather cluckets moo_steak bone pointy_stick string bow hoe wheat_seeds wheat carrot potato bone_dust compost wood_ash soil_probe bread fishing_rod cod salmon pufferfish tropical_fish big_bob soggy_boot message_bottle fish_and_chips suspicious_stew worm cooked_oinkchop cooked_mutton cooked_cluckets steak cooked_cod cooked_salmon baked_potato cooked_pufferfish cooked_boot door wool_helmet wool_chestplate wool_leggings wool_boots iron_helmet iron_chestplate iron_leggings iron_boots golden_helmet golden_chestplate golden_leggings golden_boots diamond_helmet diamond_chestplate diamond_leggings diamond_boots`
 
-Furnaces only cook, and only burn, the base-game things listed in the README. Mod items can't be smelted or used as fuel yet.
+Furnaces only cook, and only burn, the base-game things listed in the README. Mod items can't be smelted or used as fuel yet. Mod tools and weapons never wear out, and they can't be worn as armour.
 
 ## Limits
 

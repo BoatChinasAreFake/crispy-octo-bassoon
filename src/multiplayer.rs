@@ -376,7 +376,7 @@ impl Game {
             if taken(&name) {
                 name = format!("{}{}", name.chars().take(13).collect::<String>(), from);
             }
-            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.creative, spawn: self.spawn };
+            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.creative, spawn: self.spawn, keep_inventory: self.keep_inventory };
             let mods: Vec<Msg> = self
                 .world
                 .mods
@@ -504,6 +504,8 @@ impl Game {
                     m.last_attacker = from;
                     let (kind, pos) = (m.kind, m.body.pos);
                     self.sfx(Sfx::hurt_of(kind), Some(pos));
+                    let held = self.verified_held(from);
+                    self.host_wear(from, held, hit_wear(held));
                 }
             }
             Msg::Ignite { x, y, z } => {
@@ -570,6 +572,7 @@ impl Game {
                 let armed = self.peer_has(from, BOW);
                 if near && armed && dir.is_finite() && dir.length() > 0.5 && self.peer_rate_ok(from, "shoot", 0.4) && self.peer_take(from, ARROW, 1) {
                     self.spawn_arrow(pos, dir.normalize() * Arrow::SPEED * 1.2, Some(from));
+                    self.host_wear(from, BOW, 1);
                 }
             }
             Msg::Interact { x, y, z, item } => {
@@ -597,12 +600,13 @@ impl Game {
             }
             Msg::CloseContainer { x, y, z } => self.host_close(from, IVec3::new(x, y, z)),
             Msg::Pickup { id, room } => self.host_pickup(from, id, room),
-            Msg::DropItem { item, n } => {
-                if self.peer_rate_ok(from, "throw", 0.05) {
-                    self.host_throw(from, item, n);
+            Msg::DropItem { item, n, wear, scatter } => {
+                // Dying drops a whole inventory at once; throwing is one at a time.
+                if scatter || self.peer_rate_ok(from, "throw", 0.05) {
+                    self.host_throw(from, item, n, wear, scatter);
                 }
             }
-            Msg::ContainerMove { x, y, z, slot, item, n, put } => self.host_container_move(from, IVec3::new(x, y, z), slot as usize, item, n, put),
+            Msg::ContainerMove { x, y, z, slot, item, n, put, wear } => self.host_container_move(from, IVec3::new(x, y, z), slot as usize, item, n, put, wear),
             Msg::InventoryCheck { items } => {
                 if self.peer_rate_ok(from, "check", 1.0) {
                     self.host_inventory_check(from, items);
@@ -731,9 +735,9 @@ impl Game {
                 self.hurt_player_armored(dmg, &cause);
                 self.player.body.vel += knock;
             }
-            Msg::Give { item, n } => {
+            Msg::Give { item, n, wear } => {
                 if valid_item(item) && n > 0 {
-                    self.give(item, n);
+                    self.give_worn(item, n, wear);
                     self.inv_sync.note_host(item, n as i64);
                 }
             }
@@ -938,6 +942,23 @@ mod tests {
         g.ready = true;
     }
 
+    /// Keep the client standing on the host's `item` drop (it may still be
+    /// flying) until they hold `want` of them.
+    fn walk_to_drop(host: &mut Game, client: &mut Game, item: Id, want: u32) {
+        for _ in 0..600 {
+            if let Some(d) = host.drops.iter().find(|d| d.item == item) {
+                client.player.body.pos = d.body.pos;
+            }
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+            if client.inv.count(item) == want {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        panic!("never picked up {}", item_name(item));
+    }
+
     /// Tick both sides until `done` holds (or give up).
     fn pump(host: &mut Game, client: &mut Game, mut done: impl FnMut(&Game, &Game) -> bool) -> bool {
         let start = Instant::now();
@@ -1002,7 +1023,7 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(10), "no welcome");
             std::thread::sleep(Duration::from_millis(4));
         };
-        let Msg::Welcome { id, seed, time, creative, spawn: cspawn } = welcome else { unreachable!() };
+        let Msg::Welcome { id, seed, time, creative, spawn: cspawn, .. } = welcome else { unreachable!() };
         assert_eq!(seed, 777);
         let mut client = Game::new_client(id, seed, time, creative, cspawn, conn, "Clienty", leftover);
         load_around(&mut client, cspawn);
@@ -1080,7 +1101,7 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(4));
         };
-        let Msg::Welcome { id, seed, time, creative, spawn } = welcome else { unreachable!() };
+        let Msg::Welcome { id, seed, time, creative, spawn, .. } = welcome else { unreachable!() };
         let mut client = Game::new_client(id, seed, time, creative, spawn, conn, name, leftover);
         load_around(&mut client, spawn);
         Ok(client)
@@ -1210,9 +1231,8 @@ mod tests {
         assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == AIR && !h.drops.is_empty()));
         assert_eq!(client.inv.count(DIRT), 2, "nothing until it's picked up");
         // ...and walking into it picks it up, through the ledger.
-        assert!(pump(&mut host, &mut client, |_, c| !c.drops.is_empty()));
-        client.player.body.pos = host.drops[0].body.pos;
-        assert!(pump(&mut host, &mut client, |h, c| c.inv.count(DIRT) == 3 && h.drops.is_empty()));
+        walk_to_drop(&mut host, &mut client, DIRT, 3);
+        assert!(host.drops.is_empty());
         assert_eq!(host.peers[&id].ledger.bag.count(DIRT), 3);
         client.player.body.pos = spawn;
 
@@ -1315,7 +1335,7 @@ mod tests {
         assert!(pump(&mut host, &mut client, |h, _| h.drops.iter().any(|d| d.item == stairs(0, 0) && d.n == 2)));
         assert_eq!(host.peers[&id].ledger.bag.count(stairs(0, 0)), 0);
         // Throwing what you don't have makes nothing.
-        client.net_send_msg(Msg::DropItem { item: DIAMOND, n: 64 });
+        client.net_send_msg(Msg::DropItem { item: DIAMOND, n: 64, wear: 0, scatter: false });
         for _ in 0..30 {
             host.update(0.016, &idle());
             client.update(0.016, &idle());
@@ -1341,6 +1361,51 @@ mod tests {
         client.break_block(bottom, true);
         assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(bottom) == AIR && h.world.get_v(top) == AIR));
         assert_eq!(host.drops.iter().filter(|d| d.item == DOOR).count(), 1);
+    }
+
+    #[test]
+    fn wear_and_death_through_the_host() {
+        let mut host = Game::new(783, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Clumsy", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).map(|p| p.target.distance(spawn) < 1.0).unwrap_or(false)));
+
+        // The host counts uses per kind of tool: 59 uses wear out one wooden pickaxe.
+        host.give_peer(id, PICK_WOOD, 1);
+        host.host_wear(id, PICK_WOOD, 30);
+        assert_eq!(host.peers[&id].ledger.bag.count(PICK_WOOD), 1);
+        host.host_wear(id, PICK_WOOD, 30);
+        assert_eq!(host.peers[&id].ledger.bag.count(PICK_WOOD), 0, "worn out on the host too");
+        // Tools you don't own don't count.
+        host.host_wear(id, PICK_DIAMOND, 5000);
+
+        // A used sword keeps its wear on the ground and back in your hands.
+        host.give_peer(id, SWORD_STONE, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(SWORD_STONE) == 1));
+        let slot = client.inv.slots.iter().position(|s| *s == Some((SWORD_STONE, 1))).unwrap();
+        client.inv.selected = slot;
+        client.inv.wear[slot] = 77;
+        client.throw_held(false);
+        assert!(pump(&mut host, &mut client, |h, _| h.drops.iter().any(|d| d.item == SWORD_STONE && d.wear == 77)));
+        walk_to_drop(&mut host, &mut client, SWORD_STONE, 1);
+        let slot = client.inv.slots.iter().position(|s| *s == Some((SWORD_STONE, 1))).unwrap();
+        assert_eq!(client.inv.wear[slot], 77);
+
+        // Dying drops everything on the host's ground, out of the ledger.
+        host.drops.clear();
+        host.give_peer(id, DIAMOND, 4);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DIAMOND) == 4));
+        client.player.hurt = 0.0;
+        client.hurt_player(100.0, "fell over in a test");
+        assert!(client.inv.counts().is_empty());
+        assert!(pump(&mut host, &mut client, |h, _| h.drops.iter().any(|d| d.item == DIAMOND && d.n == 4) && h.drops.iter().any(|d| d.item == SWORD_STONE)));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 0);
+        assert_eq!(host.peers[&id].ledger.bag.count(SWORD_STONE), 0);
+        client.respawn();
     }
 
     #[test]
@@ -1382,8 +1447,8 @@ mod tests {
         assert!(pump(&mut host, &mut client, |_, c| c.world.containers[&pos].slots[2].is_none()));
         assert!(host.world.containers[&pos].slots[2].is_none());
         // Nor can they take what isn't there.
-        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 5, item: DIAMOND, n: 60, put: false });
-        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 9, item: DIAMOND, n: 1, put: false });
+        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 5, item: DIAMOND, n: 60, put: false, wear: 0 });
+        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 9, item: DIAMOND, n: 1, put: false, wear: 0 });
         for _ in 0..30 {
             host.update(0.016, &idle());
             client.update(0.016, &idle());
@@ -1395,7 +1460,7 @@ mod tests {
         client.inv.cursor = None;
         client.close_container();
         assert!(pump(&mut host, &mut client, |h, _| h.viewers.is_empty()));
-        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 5, item: DIAMOND, n: 1, put: false });
+        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 5, item: DIAMOND, n: 1, put: false, wear: 0 });
         for _ in 0..30 {
             host.update(0.016, &idle());
             client.update(0.016, &idle());

@@ -27,6 +27,8 @@ pub const COOK_SECS: f32 = 8.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Container {
     pub slots: Vec<Stack>,
+    /// Wear of any tools or armour stored here (see `durability`).
+    pub wear: Vec<u16>,
     /// Furnace: seconds of fuel left, how long the current fuel lasts, and
     /// progress on the current item (seconds).
     pub burn: f32,
@@ -91,12 +93,12 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
 impl Container {
     pub fn for_block(id: Id) -> Container {
         let n = if is_furnace(id) { 3 } else { CHEST_SLOTS };
-        Container { slots: vec![None; n], burn: 0.0, burn_total: 0.0, cook: 0.0 }
+        Container { slots: vec![None; n], wear: vec![0; n], burn: 0.0, burn_total: 0.0, cook: 0.0 }
     }
 
-    /// Everything inside (for spilling when it's broken).
-    pub fn contents(&self) -> Vec<(Id, u8)> {
-        self.slots.iter().flatten().copied().collect()
+    /// Everything inside, with its wear (for spilling when it's broken).
+    pub fn contents(&self) -> Vec<(Id, u8, u16)> {
+        self.slots.iter().zip(&self.wear).filter_map(|(s, w)| s.map(|(id, n)| (id, n, *w))).collect()
     }
 
     /// Furnace: can the input be cooked into the output right now?
@@ -176,6 +178,7 @@ pub fn moves(before: Stack, after: Stack) -> Vec<(Id, u8, bool)> {
 
 // ------------------------------------------------------------------ saving
 
+/// Save format: v7 saves had no wear, v9 adds two bytes of it per slot.
 pub fn encode(containers: &std::collections::HashMap<IVec3, Container>) -> Vec<u8> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = containers.iter().collect();
@@ -188,17 +191,19 @@ pub fn encode(containers: &std::collections::HashMap<IVec3, Container>) -> Vec<u
             out.extend_from_slice(&v.to_le_bytes());
         }
         out.push(c.slots.len() as u8);
-        for s in &c.slots {
+        for (s, w) in c.slots.iter().zip(&c.wear) {
             let (id, n) = s.unwrap_or((0, 0));
             out.extend_from_slice(&id.to_le_bytes());
             out.push(n);
+            out.extend_from_slice(&w.to_le_bytes());
         }
     }
     out
 }
 
-/// Unpack `encode`'s output; stops at anything malformed.
-pub fn decode(b: &[u8]) -> std::collections::HashMap<IVec3, Container> {
+/// Unpack `encode`'s output (`with_wear`: from a v9+ save); stops at anything malformed.
+pub fn decode(b: &[u8], with_wear: bool) -> std::collections::HashMap<IVec3, Container> {
+    let per = if with_wear { 5 } else { 3 };
     let mut map = std::collections::HashMap::new();
     let mut i = 0;
     let rd = |o: usize, b: &[u8]| -> Option<[u8; 4]> { b.get(o..o + 4)?.try_into().ok() };
@@ -208,19 +213,20 @@ pub fn decode(b: &[u8]) -> std::collections::HashMap<IVec3, Container> {
         let (burn, burn_total, cook) = (f(i + 12), f(i + 16), f(i + 20));
         let n = b[i + 24] as usize;
         i += 25;
-        if n > CHEST_SLOTS || i + n * 3 > b.len() {
+        if n > CHEST_SLOTS || i + n * per > b.len() {
             break;
         }
         let slots = (0..n)
             .map(|k| {
-                let o = i + k * 3;
+                let o = i + k * per;
                 let id = u16::from_le_bytes([b[o], b[o + 1]]);
                 let c = b[o + 2];
                 (c > 0 && valid_item(id)).then_some((id, c.min(64)))
             })
             .collect();
-        i += n * 3;
-        map.insert(IVec3::new(i32::from_le_bytes(x), i32::from_le_bytes(y), i32::from_le_bytes(z)), Container { slots, burn, burn_total, cook });
+        let wear = (0..n).map(|k| if with_wear { u16::from_le_bytes([b[i + k * per + 3], b[i + k * per + 4]]) } else { 0 }).collect();
+        i += n * per;
+        map.insert(IVec3::new(i32::from_le_bytes(x), i32::from_le_bytes(y), i32::from_le_bytes(z)), Container { slots, wear, burn, burn_total, cook });
     }
     map
 }
@@ -259,9 +265,10 @@ impl Game {
         let Some(&before) = c.slots.get(slot) else { return };
         let mut s = before;
         let mut cursor = self.inv.cursor;
+        let before_cursor = cursor;
         if shift {
             if let Some((id, n)) = s {
-                let left = self.inv.add(id, n);
+                let left = self.inv.add_worn(id, n, c.wear[slot]);
                 s = if left > 0 { Some((id, left)) } else { None };
             }
         } else {
@@ -293,10 +300,14 @@ impl Game {
         }
         c.slots[slot] = s;
         self.inv.cursor = cursor;
+        if !shift {
+            crate::inventory::wear_follow((before, before_cursor), (s, cursor), &mut c.wear[slot], &mut self.inv.cursor_wear);
+        }
+        let wear = c.wear[slot];
         self.dirty_containers.insert(pos);
         if self.is_client() {
             for (item, n, put) in moves(before, s) {
-                self.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: slot as u8, item, n, put });
+                self.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: slot as u8, item, n, put, wear });
             }
         }
     }
@@ -330,17 +341,20 @@ impl Game {
             let put = left.min(max_stack(id).saturating_sub(have));
             if put > 0 {
                 c.slots[i] = Some((id, have + put));
+                if have == 0 {
+                    c.wear[i] = self.inv.wear[inv_slot];
+                }
                 left -= put;
                 changed.push((i, before));
             }
         }
-        let after: Vec<(usize, Stack, Stack)> = changed.iter().map(|&(i, b)| (i, b, c.slots[i])).collect();
+        let after: Vec<(usize, Stack, Stack, u16)> = changed.iter().map(|&(i, b)| (i, b, c.slots[i], c.wear[i])).collect();
         self.inv.slots[inv_slot] = if left > 0 { Some((id, left)) } else { None };
         self.dirty_containers.insert(pos);
         if self.is_client() {
-            for (i, b, a) in after {
+            for (i, b, a, wear) in after {
                 for (item, n, put) in moves(b, a) {
-                    self.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: i as u8, item, n, put });
+                    self.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: i as u8, item, n, put, wear });
                 }
             }
         }
@@ -356,8 +370,9 @@ impl Game {
         let Some(c) = self.world.containers.get_mut(&pos) else { return };
         let contents = c.contents();
         c.slots.iter_mut().for_each(|s| *s = None);
-        for (item, n) in contents {
-            self.pop_drop(pos.as_vec3() + Vec3::splat(0.5), item, n);
+        c.wear.iter_mut().for_each(|w| *w = 0);
+        for (item, n, wear) in contents {
+            self.pop_drop_worn(pos.as_vec3() + Vec3::splat(0.5), item, n, wear);
         }
     }
 
@@ -391,7 +406,7 @@ impl Game {
     pub fn send_container(&mut self, p: IVec3, only: Option<u32>) {
         let Some(c) = self.world.containers.get(&p) else { return };
         let (burn, cook) = c.gauges();
-        let slots = c.slots.iter().map(|s| s.unwrap_or((AIR, 0))).collect();
+        let slots = c.slots.iter().zip(&c.wear).map(|(s, w)| s.map(|(id, n)| (id, n, *w)).unwrap_or((AIR, 0, 0))).collect();
         let msg = Msg::Container { x: p.x, y: p.y, z: p.z, slots, burn, cook };
         let viewers: Vec<u32> = match only {
             Some(id) => vec![id],
@@ -434,11 +449,12 @@ impl Game {
     /// A joined player moved items into or out of a container slot. Checked
     /// against the container and the player's ledger; on any refusal they get
     /// the true contents back (and the next inventory check fixes their side).
-    pub fn host_container_move(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8, put: bool) {
+    #[allow(clippy::too_many_arguments)]
+    pub fn host_container_move(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8, put: bool, wear: u16) {
         let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
         let kind = self.world.get_v(p);
         let ok = open && self.peer_near(from, p) && n > 0 && valid_item(item) && self.world.containers.get(&p).map(|c| slot < c.slots.len()).unwrap_or(false);
-        let done = ok && if put { self.container_put(from, p, kind, slot, item, n) } else { self.container_take(from, p, slot, item, n) };
+        let done = ok && if put { self.container_put(from, p, kind, slot, item, n, wear) } else { self.container_take(from, p, slot, item, n) };
         if done {
             // Everyone else looking sees it too.
             self.dirty_containers.insert(p);
@@ -447,7 +463,8 @@ impl Game {
         }
     }
 
-    fn container_put(&mut self, from: u32, p: IVec3, kind: Id, slot: usize, item: Id, n: u8) -> bool {
+    #[allow(clippy::too_many_arguments)]
+    fn container_put(&mut self, from: u32, p: IVec3, kind: Id, slot: usize, item: Id, n: u8, wear: u16) -> bool {
         if !accepts(kind, slot, item) {
             return false;
         }
@@ -461,6 +478,10 @@ impl Game {
         let c = self.world.containers.get_mut(&p).expect("checked");
         let have = c.slots[slot].map(|s| s.1).unwrap_or(0);
         c.slots[slot] = Some((item, have + n));
+        if have == 0 {
+            // Their word for how worn it is (wear is only cosmetic to the host: see `host_wear`).
+            c.wear[slot] = durability(item).map(|d| wear.min(d - 1)).unwrap_or(0);
+        }
         true
     }
 
@@ -481,10 +502,11 @@ impl Game {
     }
 
     /// Joined players: the host's copy of what's in a container.
-    pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8)>, burn: f32, cook: f32) {
+    pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, u16)>, burn: f32, cook: f32) {
         let kind = self.world.get_v(p);
         let c = self.world.containers.entry(p).or_insert_with(|| Container::for_block(kind));
-        c.slots = slots.into_iter().map(|(id, n)| (n > 0 && valid_item(id)).then_some((id, n.min(64)))).collect();
+        c.wear = slots.iter().map(|s| s.2).collect();
+        c.slots = slots.into_iter().map(|(id, n, _)| (n > 0 && valid_item(id)).then_some((id, n.min(64)))).collect();
         // Gauges come as fractions; show them against nominal totals.
         c.burn_total = 1.0;
         c.burn = burn.clamp(0.0, 1.0);
@@ -554,7 +576,9 @@ mod tests {
         f.burn_total = 80.0;
         f.cook = 3.5;
         map.insert(IVec3::new(0, 1, 2), f);
-        assert_eq!(decode(&encode(&map)), map);
-        assert!(decode(&[1, 2, 3]).is_empty());
+        map.get_mut(&IVec3::new(-3, 60, 1_000_000)).unwrap().slots[5] = Some((PICK_IRON, 1));
+        map.get_mut(&IVec3::new(-3, 60, 1_000_000)).unwrap().wear[5] = 123;
+        assert_eq!(decode(&encode(&map), true), map);
+        assert!(decode(&[1, 2, 3], true).is_empty());
     }
 }

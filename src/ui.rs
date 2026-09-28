@@ -167,8 +167,27 @@ impl Ui {
         }
     }
 
+    /// A stack with its durability bar, if it's a used tool or piece of armour.
+    pub fn stack_worn(&self, stack: Option<(Id, u8)>, wear: u16, x: f32, y: f32, size: f32, show_count: bool) {
+        self.stack(stack, x, y, size, show_count);
+        let Some(max) = stack.and_then(|(id, _)| durability(id)) else { return };
+        if wear == 0 {
+            return;
+        }
+        let left = 1.0 - wear as f32 / max as f32;
+        let (bx, by, bw, bh) = (x + size * 0.15, y + size * 0.8, size * 0.7, (size * 0.08).max(self.s));
+        draw_rectangle(bx, by, bw, bh, Color::new(0.0, 0.0, 0.0, 0.85));
+        let c = Color::new((2.0 * (1.0 - left)).min(1.0), (2.0 * left).min(1.0), 0.1, 1.0);
+        draw_rectangle(bx, by, bw * left, bh * 0.6, c);
+    }
+
     /// Returns (clicked, right-clicked, hovered).
     pub fn slot(&self, stack: Option<(Id, u8)>, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
+        self.slot_worn(stack, 0, x, y, size, selected)
+    }
+
+    /// `slot`, showing how worn a tool is.
+    pub fn slot_worn(&self, stack: Option<(Id, u8)>, wear: u16, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
         let r = Rect::new(x, y, size, size);
         let hov = self.hovered(r);
         draw_rectangle(x, y, size, size, if hov { Color::new(0.45, 0.45, 0.5, 0.95) } else { SLOT_BG });
@@ -176,7 +195,7 @@ impl Ui {
         if selected {
             draw_rectangle_lines(x - self.s, y - self.s, size + 2.0 * self.s, size + 2.0 * self.s, self.s * 1.5, WHITE);
         }
-        self.stack(stack, x, y, size, true);
+        self.stack_worn(stack, wear, x, y, size, true);
         (hov && self.clicked, hov && self.rclicked, hov)
     }
 
@@ -214,6 +233,17 @@ impl Ui {
                 T_HEART_EMPTY
             };
             self.tile(tile, hx, y, size, WHITE);
+        }
+    }
+
+    /// The hunger bar: ten drumsticks from the right, each worth two points.
+    pub fn hunger_bar(&self, food: f32, right: f32, y: f32) {
+        let size = 9.0 * self.s;
+        for i in 0..10 {
+            let hx = right - (i + 1) as f32 * (size - self.s);
+            let v = food - i as f32 * 2.0;
+            self.tile(T_HUNGER_ICON, hx, y, size, Color::new(0.25, 0.25, 0.25, 0.6));
+            self.tile_part(T_HUNGER_ICON, hx, y, size, (v / 2.0).clamp(0.0, 1.0), false, WHITE);
         }
     }
 

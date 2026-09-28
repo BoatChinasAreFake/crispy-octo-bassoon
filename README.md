@@ -29,7 +29,10 @@ Run the tests with `cargo test --release`.
 - **Dynamic lighting.** Torches and Glowrock light the area around them, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
-- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 73 crafting recipes, food, cooking, chests, armour, beds, a bow, farming, fishing, death and respawn.
+- **Survival mode.** Health, hunger, mining times that depend on your tool, pickaxe tiers that gate ore drops, tools that wear out, 73 crafting recipes, food, cooking, chests, armour, beds, a bow, farming, fishing, death (which drops your things) and respawn.
+- **Hunger.** A food bar of ten drumsticks, with Minecraft's rules. Sprinting, jumping, swimming, fighting, digging and getting hurt use up hidden saturation first, then food. With a full bar you heal quickly; at 18 points or more you heal slowly. At 6 points or less you're too hungry to sprint, and on an empty bar you starve down to half a heart (dramatic, but not fatal). Food fills the bar: raw food barely helps, cooked food keeps you full much longer. You can't eat when you're full, except legendary snacks (Suspiciously Golden Oinkchop, Big Bob), which also heal you outright. Cake is 7 drumsticks in one bite.
+- **Durability.** Pickaxes, swords, the hoe, the bow, the Fishing Stick and armour wear out, with Minecraft's numbers: 59 uses for wood, 131 for stone, 250 for iron and 1561 for Dimond. A bar under the item shows how worn it is, and the tooltip counts the uses left. Breaking a block uses a tool once (swords twice, and blocks that break instantly not at all). Hitting a mob uses a sword once and anything else twice. Every bow shot, catch and tilled block counts too. Each piece of armour takes a quarter of every hit it softens. Wear stays with the item in chests, on the ground and in saves.
+- **Death drops.** Dying drops your whole inventory, armour included, where you fell. The death screen tells you where, and it all waits five minutes. Worlds created with **Keep Inventory** on (a toggle on the Create World screen, or `--keep-inventory` for servers) let you keep everything instead.
 - **Creative mode.** Flight, instant breaking, infinite blocks, pick-block and a full item palette.
 - **Mobs** (legally distinct):
   - **Oinker**: wanders around, runs when hit, drops Raw Oinkchop.
@@ -84,7 +87,7 @@ Run the tests with `cargo test --release`.
 | Shift | Sneak / fly down |
 | Ctrl or R | Sprint |
 | Left mouse | Mine / attack |
-| Right mouse | Place block / eat / light TNT / fire a bow / open a chest, furnace or door / put on armour |
+| Right mouse | Place block / eat (when hungry) / light TNT / fire a bow / open a chest, furnace or door / put on armour |
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |
@@ -127,6 +130,7 @@ The server has no window and needs no GPU or sound card. Options:
 - `--port N`: TCP port to listen on (default 25565).
 - `--world FILE`: the world save (default `saves/server.mncr`, created if missing).
 - `--seed N` and `--creative`: settings for a new world.
+- `--keep-inventory`: players keep their things when they die.
 - `--max-players N`: player limit (default 16).
 - `--upnp`: ask the router to forward the port, for servers at home.
 
@@ -158,6 +162,8 @@ On a cloud server, allow TCP port 25565 in its firewall or security group.
   - Mining can't go faster than the tools you really own allow.
   - Every few seconds each player's game compares counts with the host. If a modified client has conjured items, the host's numbers win.
   - Items on the ground live on the host too. Breaking a block puts its drops on the host's ground, and players pick things up by asking the host, which checks they're close enough and have room, then hands them over through the ledger. Throwing (Q) takes the items from the ledger before they land, so you can't throw what you don't have.
+  - Tools wear out on the host too. It can't see which of your pickaxes you're holding, so it counts uses per kind of tool; every time those add up to one tool's durability, one leaves the ledger. Your own game breaks the same tool at the same moment, and a modified one that doesn't loses it at the next check anyway.
+  - Dying drops everything through the host, like throwing: it takes the items from the ledger and puts them on its ground.
   - Doors and slabs follow the same rules: a door's top half only goes on its own bottom half, opening one is free, and placing stairs, slabs or doors costs the item.
   - Chests and furnaces live on the host. Players see a copy of whatever they have open, and every move in or out is checked against both the container and the ledger. You can't put in what you don't own, take what isn't there, or reach into a chest from across the map. A broken container spills its contents on the host's ground.
   - Creative worlds skip all of this, since everything is free there anyway.

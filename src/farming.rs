@@ -570,6 +570,7 @@ impl Game {
             self.world.set_v(pos, FARMLAND);
             self.sfx(Sfx::Place(Mat::Grass), Some(pos.as_vec3() + Vec3::splat(0.5)));
             self.player.swing = 1.0;
+            self.use_tool(1);
             return true;
         }
         if let Some(crop) = Crop::from_item(held)
