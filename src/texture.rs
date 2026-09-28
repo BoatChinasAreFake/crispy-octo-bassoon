@@ -173,6 +173,8 @@ pub const T_ARMOR_ITEMS: u16 = 180;
 pub const T_ARMOR_WORN: u16 = 196;
 /// HUD: one armour point pair.
 pub const T_ARMOR_ICON: u16 = 200;
+/// HUD: two hunger points.
+pub const T_HUNGER_ICON: u16 = 201;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1798,6 +1800,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             shade(base, r.range(0.9, 1.05) * if rim { 0.7 } else if knit { 0.85 } else { 1.0 })
         });
     }
+    a.sprite(T_HUNGER_ICON, &DRUMSTICK, &[('#', rgb(60, 30, 10)), ('p', rgb(170, 95, 40)), ('P', rgb(205, 130, 60)), ('w', rgb(235, 190, 120)), ('b', rgb(235, 230, 210))]);
     a.sprite(T_ARMOR_ICON, &CHESTPLATE, &[('#', rgb(30, 30, 30)), ('b', rgb(210, 210, 215)), ('d', rgb(150, 150, 155)), ('h', rgb(245, 245, 250))]);
 
     let cooked = |raw: Rgba| shade([raw[0] / 2 + 70, raw[1] / 2 + 40, raw[2] / 3 + 20, 255], 1.0);

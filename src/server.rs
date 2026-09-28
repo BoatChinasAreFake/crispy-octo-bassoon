@@ -25,6 +25,7 @@ OPTIONS:
     --world <FILE>      World save file (default saves/server.mncr; created if missing)
     --seed <N>          Seed for a new world
     --creative          New worlds are creative (default survival)
+    --keep-inventory    Players keep their things when they die (default: they drop them)
     --max-players <N>   Player limit (default 16)
     --upnp              Ask your router to forward the port (for home servers)
     --help              Show this help
@@ -94,6 +95,9 @@ pub fn run(args: &[String]) -> i32 {
             Game::new(seed, creative, false)
         }
     };
+    if args.iter().any(|a| a == "--keep-inventory") {
+        game.keep_inventory = true;
+    }
     game.dedicated = true;
     game.ready = true;
     game.messages.clear();

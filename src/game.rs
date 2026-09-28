@@ -123,6 +123,8 @@ pub struct Game {
     pub drop_timer: f32,
     pub drop_sync: f32,
     pub drops_sent_empty: bool,
+    /// World rule: keep everything when you die (off: it falls on the ground).
+    pub keep_inventory: bool,
 }
 
 impl Game {
@@ -199,6 +201,7 @@ impl Game {
             drop_timer: 0.0,
             drop_sync: 0.0,
             drops_sent_empty: true,
+            keep_inventory: false,
         }
     }
 
@@ -218,7 +221,8 @@ impl Game {
             }
         }
         // After the edits: replaying them makes empty containers, these fill them.
-        let containers = crate::containers::decode(&d.containers);
+        let worn = d.version >= 9;
+        let containers = crate::containers::decode(&d.containers, worn);
         for (p, mut c) in containers {
             if let Some(r) = &remap {
                 for s in c.slots.iter_mut() {
@@ -227,9 +231,9 @@ impl Game {
             }
             g.world.containers.insert(p, c);
         }
-        for (pos, item, n, age) in crate::drops::decode(&d.drops) {
+        for (pos, item, n, age, wear) in crate::drops::decode(&d.drops, worn) {
             let item = remap.as_ref().map(|r| r[item as usize]).unwrap_or(item);
-            g.spawn_drop(pos, item, n, Vec3::ZERO, 0.0);
+            g.spawn_drop(pos, item, n, wear, Vec3::ZERO, 0.0);
             if let Some(last) = g.drops.last_mut() {
                 last.age = age;
             }
@@ -247,12 +251,18 @@ impl Game {
                 (Some((id, n)), Some(r)) => Some((r[id as usize], n)).filter(|(id, _)| *id != AIR),
                 (s, _) => s,
             };
+            let wear = d.wear.get(i).copied().unwrap_or(0);
+            let wear = s.and_then(|(id, _)| durability(id)).map(|max| wear.min(max - 1)).unwrap_or(0);
             if i < 36 {
                 g.inv.slots[i] = s;
+                g.inv.wear[i] = wear;
             } else if s.is_some_and(|(id, _)| armor_of(id).map(|(slot, _)| slot) == Some(i - 36)) {
                 g.inv.armor[i - 36] = s;
+                g.inv.armor_wear[i - 36] = wear;
             }
         }
+        g.player.hunger = crate::hunger::Hunger::new(d.food, d.saturation);
+        g.keep_inventory = d.keep_inventory;
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -278,6 +288,11 @@ impl Game {
             fish_log: self.fish_log.encode(),
             containers: crate::containers::encode(&self.world.containers),
             drops: crate::drops::encode(&self.drops),
+            wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).copied().collect(),
+            food: self.player.hunger.food,
+            saturation: self.player.hunger.saturation,
+            keep_inventory: self.keep_inventory,
+            version: crate::save::VERSION,
         }
     }
 
@@ -485,6 +500,7 @@ impl Game {
             }
         }
         let mut fall = self.player.update(dt, &c.input, &self.world, self.creative);
+        self.hunger_tick(dt);
         let landed = self.player.landed.take();
         let feet = self.player.body.pos - Vec3::Y * 0.05;
         let under = ivec3(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
@@ -810,6 +826,7 @@ impl Game {
         if !self.creative {
             self.inv.remove(ARROW, 1);
         }
+        self.use_tool(1);
         let dir = self.player.look_dir();
         let pos = self.player.eye() + dir * 0.5;
         self.player.swing = 1.0;
@@ -949,6 +966,10 @@ impl Game {
                 if c.attack_pressed && self.attack_cd <= 0.0 {
                     let i = *i;
                     let dmg = attack_damage(held) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
+                    self.use_tool(hit_wear(held));
+                    if !self.creative {
+                        self.player.hunger.exhaust(crate::hunger::ATTACK);
+                    }
                     let from = self.player.body.pos;
                     if self.is_client() {
                         // The host owns mobs: ask it to apply the hit (it echoes the sound back).
@@ -1070,6 +1091,7 @@ impl Game {
             self.sfx(Sfx::Eat, None);
             self.player.hurt = 0.0;
             self.hurt_player(4.0, "ate a Pufferfish. It said 'Do Not Eat' right on it");
+            self.player.hunger.eat(1.0, 0.1);
             self.msg("You ate a Pufferfish. Bold. Very bold. Ow.");
             return;
         }
@@ -1078,6 +1100,7 @@ impl Game {
             self.sfx(Sfx::Eat, None);
             self.player.hurt = 0.0;
             self.hurt_player(2.0, "ate a Cooked Pufferfish. Cooking it did not help");
+            self.player.hunger.eat(2.0, 0.3);
             self.msg("Cooking it only halved the problem. Still ow.");
             return;
         }
@@ -1086,6 +1109,7 @@ impl Game {
             let heal = self.rng.range(-3.0, 8.0).round();
             self.use_up_held();
             self.sfx(Sfx::Eat, None);
+            self.player.hunger.eat(6.0, 0.6);
             if heal < 0.0 {
                 self.player.hurt = 0.0;
                 self.hurt_player(-heal, "ate a Suspicious Stew. It was, in fact, suspicious");
@@ -1104,9 +1128,15 @@ impl Game {
             }
             return;
         }
-        if let Some(heal) = food_value(held) {
-            if self.player.health < MAX_HEALTH || self.creative {
-                self.player.health = (self.player.health + heal).min(MAX_HEALTH);
+        // Food fills the hunger bar (a full bar is what heals you). Legendary
+        // food can be eaten any time, and heals you outright.
+        if let Some(points) = food_value(held) {
+            let legendary = matches!(held, GOLDEN_CHOP | BIG_BOB);
+            if !self.player.hunger.full() || legendary || self.creative {
+                self.player.hunger.eat(points, food_quality(held));
+                if legendary {
+                    self.player.health = MAX_HEALTH;
+                }
                 if !self.creative {
                     self.use_up_held();
                 }
@@ -1171,11 +1201,11 @@ impl Game {
             return;
         }
         if hit_id == CAKE && !self.player.sneaking {
-            if self.player.health >= MAX_HEALTH && !self.creative {
+            if self.player.hunger.full() && !self.creative {
                 self.msg("You're full. Even for cake. Impressive restraint.");
                 return;
             }
-            self.player.health = (self.player.health + 8.0).min(MAX_HEALTH);
+            self.player.hunger.eat(14.0, 0.1);
             self.world.set_v(hit_pos, AIR);
             self.block_particles_tile(hit_pos, T_CAKE_SIDE, 12);
             self.sfx(Sfx::Eat, None);
@@ -1255,6 +1285,10 @@ impl Game {
             }
         }
         self.block_particles(pos, 14);
+        if !self.creative && drops {
+            self.use_tool(dig_wear(self.inv.held(), id));
+            self.player.hunger.exhaust(crate::hunger::DIG);
+        }
         if is_door(id) {
             self.remove_door_partner(pos, id);
         }
@@ -1360,16 +1394,21 @@ impl Game {
     }
 
     pub fn give(&mut self, item: Id, n: u8) {
+        self.give_worn(item, n, 0);
+    }
+
+    /// Give items, a used tool keeping its wear.
+    pub fn give_worn(&mut self, item: Id, n: u8, wear: u16) {
         self.sfx(Sfx::Pop, None);
-        let left = self.inv.add(item, n);
+        let left = self.inv.add_worn(item, n, wear);
         if left > 0 {
             self.msg("Inventory full. It's on the floor now.");
             if self.is_client() {
                 // The host already counted it as ours: it puts it on the ground for us.
-                self.net_send_msg(Msg::DropItem { item, n: left });
+                self.net_send_msg(Msg::DropItem { item, n: left, wear, scatter: false });
             } else {
                 let at = self.player.body.pos + Vec3::Y * 0.5;
-                self.spawn_drop(at, item, left, Vec3::ZERO, crate::drops::THROW_DELAY);
+                self.spawn_drop(at, item, left, wear, Vec3::ZERO, crate::drops::THROW_DELAY);
             }
         }
         self.item_advancements(item);
@@ -1417,22 +1456,61 @@ impl Game {
         }
     }
 
-    /// Damage that armour softens (mobs, arrows, explosions): 4% less per armour point.
+    /// Hunger over time: healing when well fed, starving when empty.
+    fn hunger_tick(&mut self, dt: f32) {
+        if self.creative || self.dead.is_some() {
+            return;
+        }
+        let change = self.player.hunger.tick(dt, self.player.health);
+        if change > 0.0 {
+            self.player.health = (self.player.health + change).min(MAX_HEALTH);
+        } else if change < 0.0 {
+            self.player.hurt = 0.0;
+            self.hurt_player(-change, "starved. Should have packed a lunch");
+        }
+    }
+
+    /// Damage that armour softens (mobs, arrows, explosions): 4% less per armour
+    /// point. Each worn piece takes a quarter of the hit (at least 1) as wear.
     pub fn hurt_player_armored(&mut self, amount: f32, cause: &str) {
+        let blocked = self.creative || self.dead.is_some() || self.player.hurt > 0.0;
         let cut = (self.inv.armor_points() as f32 * 0.04).min(0.8);
         self.hurt_player(amount * (1.0 - cut), cause);
+        if !blocked && amount > 0.0 {
+            for id in self.inv.wear_armor((amount / 4.0).max(1.0) as u16) {
+                self.sfx(Sfx::Break(crate::sound::Mat::Glass), None);
+                self.msg(format!("Your {} fell apart. It died doing what it loved.", item_name(id)));
+            }
+        }
+    }
+
+    /// Use the held tool, weapon, bow or rod (survival only); it may break.
+    pub fn use_tool(&mut self, amount: u16) {
+        if self.creative || amount == 0 {
+            return;
+        }
+        if let Some(id) = self.inv.wear_held(amount) {
+            self.sfx(Sfx::Break(crate::sound::Mat::Glass), None);
+            self.msg(format!("Your {} broke. It had a good life.", item_name(id)));
+            self.held_name = 0.0;
+        }
     }
 
     pub fn hurt_player(&mut self, amount: f32, cause: &str) {
         if self.creative || self.dead.is_some() || self.player.hurt > 0.0 {
             return;
         }
+        self.player.hunger.exhaust(crate::hunger::HURT);
         self.player.health -= amount;
         self.player.hurt = 0.5;
         self.sfx(Sfx::Hurt, None);
         if self.player.health <= 0.0 {
             self.player.health = 0.0;
             self.dead = Some(format!("Stove {cause}"));
+            // Everything falls out of your pockets, unless the world says otherwise.
+            if !self.keep_inventory {
+                self.drop_everything();
+            }
         }
     }
 
@@ -1799,7 +1877,16 @@ impl Game {
             self.mobs.retain(|m| !m.kind.hostile());
         }
         self.ready = false;
-        self.msg("Respawned. Inventory kept, because we're nice.");
+        self.msg(if self.keep_inventory {
+            "Respawned. Inventory kept, because this world is nice."
+        } else {
+            "Respawned. Your stuff is where you fell. It'll wait five minutes. Probably."
+        });
+    }
+
+    /// Where the player died, if they did (for the death screen).
+    pub fn death_spot(&self) -> Option<IVec3> {
+        self.dead.as_ref().map(|_| ivec3(self.player.body.pos.x.floor() as i32, self.player.body.pos.y.floor() as i32, self.player.body.pos.z.floor() as i32))
     }
 
     /// Build all per-frame geometry: sky, clouds, entities, highlights, hand.
@@ -2268,13 +2355,13 @@ mod tests {
         g.give(LOG, 1);
         assert_eq!(g.toasts.len(), 1, "only once");
 
-        // Cake heals and disappears.
+        // Cake fills you up and disappears.
         g.world.set_v(base, CAKE);
-        g.player.health = 5.0;
+        g.player.hunger.food = 4.0;
         g.target = Some(Target::Block(crate::world::Hit { pos: base, normal: IVec3::Y, dist: 1.0 }));
         g.use_item();
         assert_eq!(g.world.get_v(base), AIR);
-        assert_eq!(g.player.health, 13.0);
+        assert_eq!(g.player.hunger.food, 18.0);
         assert!(g.advancements.has("cake"));
 
         // Beds skip the night (and not the day).
@@ -2569,6 +2656,144 @@ mod tests {
         }
         g.drops_tick(0.1);
         assert!(g.drops.is_empty());
+    }
+
+    #[test]
+    fn tools_and_armour_wear_out() {
+        let mut g = arena(51);
+        // A wooden pickaxe lasts 59 blocks; this one is on its last two.
+        g.inv.slots[g.inv.selected] = Some((PICK_WOOD, 1));
+        g.inv.wear[g.inv.selected] = 57;
+        g.world.set(2, 50, 2, STONE);
+        g.break_block(IVec3::new(2, 50, 2), true);
+        assert_eq!(g.inv.wear[g.inv.selected], 58);
+        // Things that break instantly don't wear it.
+        g.world.set(3, 50, 2, TORCH);
+        g.break_block(IVec3::new(3, 50, 2), true);
+        assert_eq!(g.inv.wear[g.inv.selected], 58);
+        g.world.set(2, 50, 2, STONE);
+        g.break_block(IVec3::new(2, 50, 2), true);
+        assert_eq!(g.inv.held(), AIR, "worn out");
+        assert!(g.messages.iter().any(|m| m.0.contains("broke")));
+        // Swords are bad shovels.
+        g.inv.slots[g.inv.selected] = Some((SWORD_IRON, 1));
+        g.world.set(2, 50, 2, DIRT);
+        g.break_block(IVec3::new(2, 50, 2), true);
+        assert_eq!(g.inv.wear[g.inv.selected], 2);
+
+        // Wear follows the item: onto the cursor, into another slot, into a chest and back.
+        g.inv.click(g.inv.selected);
+        assert_eq!((g.inv.cursor, g.inv.cursor_wear), (Some((SWORD_IRON, 1)), 2));
+        g.inv.click(20);
+        assert_eq!((g.inv.slots[20], g.inv.wear[20]), (Some((SWORD_IRON, 1)), 2));
+        let chest = IVec3::new(-2, 50, 0);
+        g.world.set_v(chest, CHEST);
+        g.open = Some(chest);
+        g.container_quick_put(20);
+        assert_eq!(g.world.containers[&chest].wear[0], 2);
+        g.container_click(0, false, true);
+        let slot = g.inv.slots.iter().position(|s| *s == Some((SWORD_IRON, 1))).unwrap();
+        assert_eq!(g.inv.wear[slot], 2);
+        g.close_container();
+        // ...and onto the ground and back, and through a save.
+        g.inv.selected = slot;
+        g.throw_held(false);
+        assert_eq!(g.drops.iter().find(|d| d.item == SWORD_IRON).map(|d| d.wear), Some(2));
+        collect(&mut g);
+        let slot = g.inv.slots.iter().position(|s| *s == Some((SWORD_IRON, 1))).unwrap();
+        assert_eq!(g.inv.wear[slot], 2);
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.inv.wear[slot], 2);
+
+        // Armour wears a little with every hit it softens.
+        let boots = ARMOR_FIRST + BOOTS as Id; // Woolly Socks: 65 uses
+        g.inv.armor[BOOTS] = Some((boots, 1));
+        g.inv.armor_wear[BOOTS] = 63;
+        g.hurt_player_armored(4.0, "tested");
+        assert_eq!(g.inv.armor_wear[BOOTS], 64);
+        g.player.hurt = 0.0;
+        g.hurt_player_armored(4.0, "tested");
+        assert_eq!(g.inv.armor[BOOTS], None, "the socks gave up");
+        // Creative never wears anything.
+        g.creative = true;
+        g.inv.slots[0] = Some((PICK_STONE, 1));
+        g.inv.selected = 0;
+        g.inv.wear[0] = 0;
+        g.use_tool(5);
+        assert_eq!(g.inv.wear[0], 0);
+    }
+
+    #[test]
+    fn hunger_and_food() {
+        let mut g = arena(53);
+        // Eating fills the bar, not your health.
+        g.player.hunger.food = 10.0;
+        g.player.health = 10.0;
+        g.inv.slots[g.inv.selected] = Some((COOKED_CHOP, 2));
+        g.use_item();
+        assert_eq!((g.player.hunger.food, g.player.health), (18.0, 10.0));
+        // Full means full (except for legendary snacks, which also heal).
+        g.player.hunger.food = 20.0;
+        g.use_item();
+        assert_eq!(g.inv.count(COOKED_CHOP), 1, "not hungry");
+        g.inv.slots[g.inv.selected] = Some((GOLDEN_CHOP, 1));
+        g.use_item();
+        assert_eq!(g.player.health, MAX_HEALTH);
+        // A full stomach heals...
+        g.player.health = 10.0;
+        g.player.hunger.saturation = 5.0;
+        for _ in 0..50 {
+            g.hunger_tick(0.1);
+        }
+        assert!(g.player.health > 12.0, "{}", g.player.health);
+        // ...an empty one hurts, down to half a heart.
+        g.player.hunger = crate::hunger::Hunger::new(0.0, 0.0);
+        g.player.health = 3.0;
+        for _ in 0..200 {
+            g.hunger_tick(0.1);
+            g.player.hurt = 0.0;
+        }
+        assert_eq!(g.player.health, 1.0);
+        assert!(g.dead.is_none());
+        // Hunger is saved.
+        g.player.hunger = crate::hunger::Hunger::new(7.0, 2.0);
+        let back = Game::from_save(g.to_save());
+        assert_eq!((back.player.hunger.food, back.player.hunger.saturation), (7.0, 2.0));
+        // Too hungry to sprint.
+        let run = Input { forward: 1.0, strafe: 0.0, jump: false, jump_pressed: false, sneak: false, sprint: true };
+        g.player.hunger.food = 4.0;
+        g.player.update(0.05, &run, &g.world, false);
+        assert!(!g.player.sprinting);
+        g.player.hunger.food = 20.0;
+        g.player.update(0.05, &run, &g.world, false);
+        assert!(g.player.sprinting);
+    }
+
+    #[test]
+    fn dying_drops_everything() {
+        let mut g = arena(57);
+        g.inv.slots[0] = Some((DIAMOND, 5));
+        g.inv.slots[3] = Some((PICK_IRON, 1));
+        g.inv.wear[3] = 40;
+        g.inv.armor[HELMET] = Some((ARMOR_FIRST + 4 + HELMET as Id, 1));
+        g.player.hurt = 0.0;
+        g.hurt_player(100.0, "was tested to destruction");
+        assert!(g.dead.is_some());
+        assert!(g.inv.counts().is_empty(), "pockets emptied");
+        let mut on_floor: Vec<(Id, u8, u16)> = g.drops.iter().map(|d| (d.item, d.n, d.wear)).collect();
+        on_floor.sort();
+        assert_eq!(on_floor, vec![(DIAMOND, 5, 0), (PICK_IRON, 1, 40), (ARMOR_FIRST + 4, 1, 0)]);
+        assert!(g.death_spot().is_some());
+        g.respawn();
+        assert_eq!(g.player.hunger.food, crate::hunger::MAX_FOOD, "respawn with a full stomach");
+        // Keep-inventory worlds are kinder.
+        let mut g = arena(59);
+        g.keep_inventory = true;
+        g.inv.slots[0] = Some((DIAMOND, 5));
+        g.hurt_player(100.0, "was tested gently");
+        assert_eq!(g.inv.count(DIAMOND), 5);
+        assert!(g.drops.is_empty());
+        assert!(Game::from_save(g.to_save()).keep_inventory);
     }
 
     /// Walk over every item on the ground (then back).

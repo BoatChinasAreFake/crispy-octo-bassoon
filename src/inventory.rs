@@ -13,11 +13,16 @@ pub struct Inventory {
     pub cursor: Stack,
     /// Worn armour: helmet, chestplate, leggings, boots.
     pub armor: [Stack; 4],
+    /// Uses so far of whatever durable thing is in each slot (see `durability`).
+    /// Only meaningful while the slot holds a tool, weapon or armour.
+    pub wear: [u16; 36],
+    pub armor_wear: [u16; 4],
+    pub cursor_wear: u16,
 }
 
 impl Inventory {
     pub fn new() -> Self {
-        Inventory { slots: [None; 36], selected: 0, cursor: None, armor: [None; 4] }
+        Inventory { slots: [None; 36], selected: 0, cursor: None, armor: [None; 4], wear: [0; 36], armor_wear: [0; 4], cursor_wear: 0 }
     }
 
     pub fn held(&self) -> Id {
@@ -39,10 +44,11 @@ impl Inventory {
                 }
             }
         }
-        for s in self.slots.iter_mut() {
+        for (i, s) in self.slots.iter_mut().enumerate() {
             if s.is_none() {
                 let put = count.min(max);
                 *s = Some((item, put));
+                self.wear[i] = 0;
                 count -= put;
                 if count == 0 {
                     return 0;
@@ -50,6 +56,47 @@ impl Inventory {
             }
         }
         count
+    }
+
+    /// Add one used tool (or anything else, `wear` is ignored for things that don't wear).
+    pub fn add_worn(&mut self, item: Id, n: u8, wear: u16) -> u8 {
+        if wear == 0 || durability(item).is_none() {
+            return self.add(item, n);
+        }
+        let Some(i) = self.slots.iter().position(|s| s.is_none()) else { return n };
+        self.slots[i] = Some((item, 1));
+        self.wear[i] = wear;
+        n - 1
+    }
+
+    /// Use the held tool `amount` times. Returns the item if that broke it.
+    pub fn wear_held(&mut self, amount: u16) -> Option<Id> {
+        let held = self.held();
+        let max = durability(held)?;
+        let w = &mut self.wear[self.selected];
+        *w = w.saturating_add(amount);
+        if *w >= max {
+            *w = 0;
+            self.slots[self.selected] = None;
+            return Some(held);
+        }
+        None
+    }
+
+    /// Worn armour takes a hit. Returns whatever broke.
+    pub fn wear_armor(&mut self, amount: u16) -> Vec<Id> {
+        let mut broke = Vec::new();
+        for (s, w) in self.armor.iter_mut().zip(self.armor_wear.iter_mut()) {
+            let Some((id, _)) = *s else { continue };
+            let Some(max) = durability(id) else { continue };
+            *w = w.saturating_add(amount);
+            if *w >= max {
+                *w = 0;
+                *s = None;
+                broke.push(id);
+            }
+        }
+        broke
     }
 
     /// How many more of `item` would fit.
@@ -72,7 +119,8 @@ impl Inventory {
     /// Take items away: from the inventory first, then (for the host's
     /// corrections and scripts) from what's worn.
     pub fn remove(&mut self, item: Id, mut count: u32) {
-        for s in self.slots.iter_mut().rev().chain(self.armor.iter_mut()) {
+        let wear = self.wear.iter_mut().rev().chain(self.armor_wear.iter_mut());
+        for (s, w) in self.slots.iter_mut().rev().chain(self.armor.iter_mut()).zip(wear) {
             if let Some((id, n)) = s {
                 if *id == item {
                     let take = (count.min(*n as u32)) as u8;
@@ -80,6 +128,7 @@ impl Inventory {
                     count -= take as u32;
                     if *n == 0 {
                         *s = None;
+                        *w = 0;
                     }
                     if count == 0 {
                         return;
@@ -94,6 +143,7 @@ impl Inventory {
             *n -= 1;
             if *n == 0 {
                 self.slots[self.selected] = None;
+                self.wear[self.selected] = 0;
             }
         }
     }
@@ -121,12 +171,16 @@ impl Inventory {
 
     /// Left click on a slot: pick up, put down, merge or swap with the cursor.
     pub fn click(&mut self, i: usize) {
+        let before = (self.slots[i], self.cursor);
         click_stack(&mut self.slots[i], &mut self.cursor);
+        wear_follow(before, (self.slots[i], self.cursor), &mut self.wear[i], &mut self.cursor_wear);
     }
 
     /// Right click: take half, or drop a single item.
     pub fn right_click(&mut self, i: usize) {
+        let before = (self.slots[i], self.cursor);
         right_click_stack(&mut self.slots[i], &mut self.cursor);
+        wear_follow(before, (self.slots[i], self.cursor), &mut self.wear[i], &mut self.cursor_wear);
     }
 
     /// How many of each item (the cursor included). Slot layout doesn't matter to the host.
@@ -173,6 +227,7 @@ impl Inventory {
         let Some((id, _)) = self.slots[i] else { return false };
         let Some((slot, _)) = armor_of(id) else { return false };
         std::mem::swap(&mut self.slots[i], &mut self.armor[slot]);
+        std::mem::swap(&mut self.wear[i], &mut self.armor_wear[slot]);
         true
     }
 
@@ -182,6 +237,7 @@ impl Inventory {
             return;
         }
         std::mem::swap(&mut self.armor[slot], &mut self.cursor);
+        std::mem::swap(&mut self.armor_wear[slot], &mut self.cursor_wear);
     }
 
     /// Worn tiers for other players to see: 4 bits per slot, tier + 1 (0 = nothing).
@@ -192,9 +248,26 @@ impl Inventory {
     /// Put whatever the cursor holds back into the inventory.
     pub fn return_cursor(&mut self) {
         if let Some((id, n)) = self.cursor.take() {
-            self.add(id, n);
+            self.add_worn(id, n, self.cursor_wear);
         }
+        self.cursor_wear = 0;
     }
+}
+
+/// After a click moved stacks between a slot and the cursor, move their wear
+/// with them: each side keeps its own if it holds the same thing as before,
+/// takes the other's if it now holds what the other had, and is fresh otherwise.
+pub fn wear_follow(before: (Stack, Stack), after: (Stack, Stack), slot_wear: &mut u16, cursor_wear: &mut u16) {
+    let id = |s: Stack| s.map(|s| s.0);
+    let (sw, cw) = (*slot_wear, *cursor_wear);
+    let pick = |now: Stack, own: Stack, other: Stack, own_w: u16, other_w: u16| match id(now) {
+        None => 0,
+        n if n == id(own) => own_w,
+        n if n == id(other) => other_w,
+        _ => 0,
+    };
+    *slot_wear = pick(after.0, before.0, before.1, sw, cw);
+    *cursor_wear = pick(after.1, before.1, before.0, cw, sw);
 }
 
 /// Left click on any slot (inventory, chest, furnace): pick up, put down,

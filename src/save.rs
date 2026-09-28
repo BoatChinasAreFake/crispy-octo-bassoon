@@ -11,8 +11,9 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// v2 adds the mod palette (names of mod blocks/items); v3 adds script mod
 /// variables; v4 adds earned advancements; v5 widens block/item ids to two
 /// bytes; v6 adds farm soil and the fishing log; v7 adds what's in chests and
-/// furnaces; v8 adds items lying on the ground. Older saves still load.
-const VERSION: u32 = 8;
+/// furnaces; v8 adds items lying on the ground; v9 adds tool and armour wear,
+/// hunger and the keep-inventory rule. Older saves still load.
+pub const VERSION: u32 = 9;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -44,6 +45,15 @@ pub struct SaveData {
     pub containers: Vec<u8>,
     /// Items on the ground, packed by `drops::encode` (save v8+).
     pub drops: Vec<u8>,
+    /// Wear of whatever's in each of `slots` (save v9+; see `block::durability`).
+    pub wear: Vec<u16>,
+    /// Hunger and saturation (save v9+; older saves start full).
+    pub food: f32,
+    pub saturation: f32,
+    /// World rule: keep your things when you die (save v9+).
+    pub keep_inventory: bool,
+    /// The format version it was read from (the container and drop blobs changed in v9).
+    pub version: u32,
 }
 
 
@@ -154,6 +164,13 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
         w.u32(blob.len() as u32);
         w.0.extend_from_slice(blob);
     }
+    w.u32(d.wear.len() as u32);
+    for v in &d.wear {
+        w.u16(*v);
+    }
+    w.f32(d.food);
+    w.f32(d.saturation);
+    w.u8(d.keep_inventory as u8);
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -230,7 +247,22 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     let (farm, fish_log) = if version >= 6 { (r.bytes(64 << 20)?, r.bytes(1 << 20)?) } else { (Vec::new(), Vec::new()) };
     let containers = if version >= 7 { r.bytes(64 << 20)? } else { Vec::new() };
     let drops = if version >= 8 { r.bytes(16 << 20)? } else { Vec::new() };
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops })
+    let (mut wear, mut food, mut saturation, mut keep_inventory) = (Vec::new(), 20.0, 5.0, false);
+    if version >= 9 {
+        let n = r.u32()? as usize;
+        if n > 4096 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "bad wear list"));
+        }
+        for _ in 0..n {
+            wear.push(r.u16()?);
+        }
+        food = r.f32()?;
+        saturation = r.f32()?;
+        keep_inventory = r.u8()? != 0;
+    }
+    let ok = |v: f32, d: f32| if v.is_finite() { v.clamp(0.0, 20.0) } else { d };
+    let (food, saturation) = (ok(food, 20.0), ok(saturation, 5.0));
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, version })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -437,6 +469,11 @@ mod tests {
             fish_log: Vec::new(),
             containers: Vec::new(),
             drops: Vec::new(),
+            wear: Vec::new(),
+            food: 20.0,
+            saturation: 5.0,
+            keep_inventory: false,
+            version: VERSION,
         }
     }
 

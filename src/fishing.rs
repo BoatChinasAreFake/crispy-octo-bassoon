@@ -463,6 +463,9 @@ impl Game {
 
     /// Reeled something in at `p`: the world's owner decides what it is.
     fn land_catch(&mut self, p: Vec3) {
+        if self.inv.held() == ROD {
+            self.use_tool(1);
+        }
         let bait = self.inv.count(BAIT) > 0;
         if bait && !self.creative {
             self.inv.remove(BAIT, 1);
@@ -512,6 +515,7 @@ impl Game {
         let c = roll_catch(&self.world, pos, self.time, 0, bait, &mut self.rng);
         self.system_message(Some(from), &catch_line(&c, false));
         self.give_peer(from, c.item, c.n);
+        self.host_wear(from, ROD, 1);
     }
 }
 

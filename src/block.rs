@@ -165,6 +165,44 @@ pub fn armor_of(id: Id) -> Option<(usize, usize)> {
     (ARMOR_FIRST..ARMOR_FIRST + 16).contains(&id).then(|| (((id - ARMOR_FIRST) % 4) as usize, ((id - ARMOR_FIRST) / 4) as usize))
 }
 
+/// How many uses a tool, weapon or piece of armour survives (Minecraft's numbers;
+/// wool armour takes leather's). None: it never wears out.
+pub fn durability(id: Id) -> Option<u16> {
+    const ARMOR: [[u16; 4]; 4] = [[55, 80, 75, 65], [165, 240, 225, 195], [77, 112, 105, 91], [363, 528, 495, 429]];
+    if let Some((slot, tier)) = armor_of(id) {
+        return Some(ARMOR[tier][slot]);
+    }
+    Some(match id {
+        PICK_WOOD | SWORD_WOOD | HOE => 59,
+        PICK_STONE | SWORD_STONE => 131,
+        PICK_IRON | SWORD_IRON => 250,
+        PICK_DIAMOND | SWORD_DIAMOND => 1561,
+        BOW => 384,
+        ROD => 64,
+        _ => return None,
+    })
+}
+
+pub fn is_sword(id: Id) -> bool {
+    matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND)
+}
+
+/// Wear from breaking a block with `held` (swords aren't meant for digging).
+pub fn dig_wear(held: Id, broken: Id) -> u16 {
+    if durability(held).is_none() || armor_of(held).is_some() || block(broken).hardness <= 0.0 {
+        return 0;
+    }
+    if is_sword(held) { 2 } else { 1 }
+}
+
+/// Wear from hitting a mob with `held` (anything but a sword is a clumsy weapon).
+pub fn hit_wear(held: Id) -> u16 {
+    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD) {
+        return 0;
+    }
+    if is_sword(held) { 1 } else { 2 }
+}
+
 pub fn armor_points(id: Id) -> u8 {
     armor_of(id).map(|(slot, tier)| ARMOR_POINTS[tier][slot]).unwrap_or(0)
 }
@@ -583,8 +621,8 @@ impl Registry {
             item("iron", "Iron Chunk", T_IRON),
             item("diamond", "Dimond", T_DIAMOND),
             item("gunpowder", "Hisspowder", T_GUNPOWDER),
-            ItemDef { food: Some(6.0), ..item("porkchop", "Raw Oinkchop", T_PORK) },
-            ItemDef { food: Some(1.0), ..item("goo", "Groaner Goo", T_GOO) },
+            ItemDef { food: Some(3.0), ..item("porkchop", "Raw Oinkchop", T_PORK) },
+            ItemDef { food: Some(4.0), ..item("goo", "Groaner Goo", T_GOO) },
             gap(),
             gap(),
             gap(),
@@ -603,12 +641,12 @@ impl Registry {
         }
         items.extend([
             item("gold", "Gold Ingot (Too Soft for Anything)", T_GOLD),
-            ItemDef { food: Some(20.0), stack: 16, ..item("golden_oinkchop", "Suspiciously Golden Oinkchop", T_GOLD_CHOP) },
+            ItemDef { food: Some(8.0), stack: 16, ..item("golden_oinkchop", "Suspiciously Golden Oinkchop", T_GOLD_CHOP) },
             ItemDef { stack: 16, ..item("stare_pearl", "Stare Pearl (Throw to Teleport)", T_PEARL) },
-            ItemDef { food: Some(5.0), ..item("mutton", "Raw Baa-con", T_MUTTON) },
+            ItemDef { food: Some(2.0), ..item("mutton", "Raw Baa-con", T_MUTTON) },
             item("feather", "Feather (Ticklish)", T_FEATHER),
-            ItemDef { food: Some(3.0), ..item("cluckets", "Raw Cluckets", T_CLUCKETS) },
-            ItemDef { food: Some(7.0), ..item("moo_steak", "Raw Moo-steak", T_MOO_STEAK) },
+            ItemDef { food: Some(2.0), ..item("cluckets", "Raw Cluckets", T_CLUCKETS) },
+            ItemDef { food: Some(3.0), ..item("moo_steak", "Raw Moo-steak", T_MOO_STEAK) },
             item("bone", "Bone (Previously Owned)", T_BONE_ITEM),
             item("pointy_stick", "Pointy Stick", T_ARROW),
             item("string", "String (Not Spaghetti)", T_STRING),
@@ -622,25 +660,25 @@ impl Registry {
             item("compost", "Compost (Nitrogen!)", T_COMPOST),
             item("wood_ash", "Wood Ash (Potassium!)", T_WOOD_ASH),
             ItemDef { stack: 1, ..item("soil_probe", "Soil Probe (Science!)", T_SOIL_PROBE) },
-            ItemDef { food: Some(6.0), ..item("bread", "Bread (Finally)", T_BREAD) },
+            ItemDef { food: Some(5.0), ..item("bread", "Bread (Finally)", T_BREAD) },
             ItemDef { stack: 1, ..item("fishing_rod", "Fishing Stick (Advanced)", T_ROD) },
-            ItemDef { food: Some(3.0), ..item("cod", "Raw Cod-ish", T_COD) },
-            ItemDef { food: Some(4.0), ..item("salmon", "Raw Salmon-ish", T_SALMON) },
+            ItemDef { food: Some(2.0), ..item("cod", "Raw Cod-ish", T_COD) },
+            ItemDef { food: Some(2.0), ..item("salmon", "Raw Salmon-ish", T_SALMON) },
             ItemDef { food: Some(-4.0), ..item("pufferfish", "Pufferfish (Do Not Eat)", T_PUFFER) },
-            ItemDef { food: Some(2.0), ..item("tropical_fish", "Tropical Fish (Suspiciously Colorful)", T_TROPICAL) },
+            ItemDef { food: Some(1.0), ..item("tropical_fish", "Tropical Fish (Suspiciously Colorful)", T_TROPICAL) },
             ItemDef { food: Some(20.0), stack: 1, ..item("big_bob", "Big Bob (Legendary Carp)", T_BIG_BOB) },
             ItemDef { stack: 1, ..item("soggy_boot", "Soggy Boot (Left Only)", T_BOOT) },
             item("message_bottle", "Message in a Bottle", T_BOTTLE),
-            ItemDef { food: Some(12.0), ..item("fish_and_chips", "Fish n' Chips (Legally Distinct)", T_FISH_CHIPS) },
+            ItemDef { food: Some(10.0), ..item("fish_and_chips", "Fish n' Chips (Legally Distinct)", T_FISH_CHIPS) },
             ItemDef { food: Some(0.0), stack: 1, ..item("suspicious_stew", "Suspicious Stew", T_STEW) },
             item("worm", "Wiggly Worm (Bait)", T_WORM),
             ItemDef { food: Some(8.0), ..item("cooked_oinkchop", "Cooked Oinkchop", T_COOKED_CHOP) },
-            ItemDef { food: Some(7.0), ..item("cooked_mutton", "Cooked Baa-con (Crispy)", T_COOKED_MUTTON) },
+            ItemDef { food: Some(6.0), ..item("cooked_mutton", "Cooked Baa-con (Crispy)", T_COOKED_MUTTON) },
             ItemDef { food: Some(6.0), ..item("cooked_cluckets", "Cooked Cluckets", T_COOKED_CLUCKETS) },
-            ItemDef { food: Some(9.0), ..item("steak", "Moo-steak (Well Done, Sorry)", T_STEAK) },
-            ItemDef { food: Some(6.0), ..item("cooked_cod", "Cooked Cod-ish", T_COOKED_COD) },
-            ItemDef { food: Some(7.0), ..item("cooked_salmon", "Cooked Salmon-ish", T_COOKED_SALMON) },
-            ItemDef { food: Some(6.0), ..item("baked_potato", "Baked Spud (Redeemed)", T_BAKED_POTATO) },
+            ItemDef { food: Some(8.0), ..item("steak", "Moo-steak (Well Done, Sorry)", T_STEAK) },
+            ItemDef { food: Some(5.0), ..item("cooked_cod", "Cooked Cod-ish", T_COOKED_COD) },
+            ItemDef { food: Some(6.0), ..item("cooked_salmon", "Cooked Salmon-ish", T_COOKED_SALMON) },
+            ItemDef { food: Some(5.0), ..item("baked_potato", "Baked Spud (Redeemed)", T_BAKED_POTATO) },
             ItemDef { food: Some(-2.0), ..item("cooked_pufferfish", "Cooked Pufferfish (Still Do Not Eat)", T_COOKED_PUFFER) },
             ItemDef { food: Some(1.0), stack: 1, ..item("cooked_boot", "Cooked Boot (Chewy)", T_COOKED_BOOT) },
             ItemDef { stack: 16, ..item("door", "Door (Opens Both Ways, Emotionally)", T_DOOR_ITEM) },
@@ -831,9 +869,20 @@ pub fn attack_damage(id: Id) -> f32 {
     item_def(id).map(|i| i.damage).unwrap_or(1.0)
 }
 
-/// Health restored when eaten, if edible.
+/// Hunger points restored when eaten, if edible.
 pub fn food_value(id: Id) -> Option<f32> {
     item_def(id).and_then(|i| i.food)
+}
+
+/// How long a food keeps you full (its saturation per point, Minecraft style).
+pub fn food_quality(id: Id) -> f32 {
+    match id {
+        PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COD | SALMON | TROPICAL | POTATO => 0.3,
+        GOO | COOKED_BOOT => 0.1,
+        CARROT | BREAD => 0.6,
+        GOLDEN_CHOP | BIG_BOB => 1.2,
+        _ => 0.8,
+    }
 }
 
 /// Mod-defined behaviour when the item is used: (actions, consumes one).

@@ -11,6 +11,7 @@ mod entity;
 mod farming;
 mod fishing;
 mod game;
+mod hunger;
 mod inventory;
 mod ledger;
 mod mesher;
@@ -143,6 +144,7 @@ struct App {
     form_name: String,
     form_seed: String,
     form_creative: bool,
+    form_keep: bool,
     form_focus: usize,
 }
 
@@ -273,13 +275,14 @@ impl App {
         }
         let seed = save::parse_seed(&self.form_seed, random_seed());
         self.current_world = Some(id);
-        self.new_world(self.form_creative, seed);
+        self.new_world(self.form_creative, self.form_keep, seed);
         // Save straight away so it's in the list even if the game is closed abruptly.
         self.save_quietly();
     }
 
-    fn new_world(&mut self, creative: bool, seed: u32) {
+    fn new_world(&mut self, creative: bool, keep_inventory: bool, seed: u32) {
         let mut g = Game::new(seed, creative, false);
+        g.keep_inventory = keep_inventory;
         g.msg(if creative {
             "Creative mode: infinite blocks, zero consequences. Double-tap Space to fly."
         } else {
@@ -649,9 +652,10 @@ impl App {
         conn.flush();
         if let Some(i) = msgs.iter().position(|m| matches!(m, net::Msg::Welcome { .. })) {
             let leftover = msgs.split_off(i + 1);
-            let Some(net::Msg::Welcome { id, seed, time, creative, spawn }) = msgs.pop() else { return };
+            let Some(net::Msg::Welcome { id, seed, time, creative, spawn, keep_inventory }) = msgs.pop() else { return };
             let (conn, _) = self.joining.take().unwrap();
-            let g = Game::new_client(id, seed, time, creative, spawn, conn, &self.mp_name, leftover);
+            let mut g = Game::new_client(id, seed, time, creative, spawn, conn, &self.mp_name, leftover);
+            g.keep_inventory = keep_inventory;
             self.start_game(g);
             return;
         }
@@ -745,6 +749,7 @@ impl App {
             self.form_name = "New World".into();
             self.form_seed.clear();
             self.form_creative = false;
+            self.form_keep = false;
             self.form_focus = 0;
             drain_chars();
             self.set_screen(Screen::CreateWorld);
@@ -790,6 +795,11 @@ impl App {
         let mode = if self.form_creative { "Game Mode: Creative" } else { "Game Mode: Survival" };
         if self.ui.button(Rect::new(x, y, bw, bh), mode, true) {
             self.form_creative = !self.form_creative;
+        }
+        y += bh + 4.0 * s;
+        let keep = if self.form_keep { "Keep Inventory: ON (dying costs nothing)" } else { "Keep Inventory: OFF (you drop everything)" };
+        if self.ui.button(Rect::new(x, y, bw, bh), keep, true) {
+            self.form_keep = !self.form_keep;
         }
         y += bh + 2.0 * s;
         let hint = if self.form_creative { "Fly, infinite blocks, no damage." } else { "Gather, craft, and try not to get hissed at." };
@@ -1174,7 +1184,7 @@ impl App {
         for i in 0..9 {
             let x = x0 + i as f32 * slot;
             draw_rectangle_lines(x, y0, slot, slot, s, Color::new(0.6, 0.6, 0.6, 0.6));
-            self.ui.stack(g.inv.slots[i], x, y0, slot, !g.creative);
+            self.ui.stack_worn(g.inv.slots[i], g.inv.wear[i], x, y0, slot, !g.creative);
         }
         let sel = x0 + g.inv.selected as f32 * slot;
         draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
@@ -1184,6 +1194,7 @@ impl App {
             if points > 0 {
                 self.ui.armor_bar(points, x0, y0 - 23.0 * s);
             }
+            self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 12.0 * s);
         }
         if g.held_name > 0.0 {
             let held = g.inv.held();
@@ -1547,7 +1558,7 @@ impl App {
             "Creative: double-tap Space to fly, Shift to descend.",
             "",
             "Survival tips: punch a Tree Chunk, craft Planks, then Sticks, then a Wooden Pickaxe.",
-            "Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier.",
+            "Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier. Tools wear out. Eat to heal.",
             "Hissers explode. Groaners and Rattlers burn in daylight. Bloops split. Webbers climb. Farm animals are friends (and food).",
             "Never look a Starer in the eye. Beds skip the night. Bows need Pointy Sticks. Pokey Plants poke.",
             "Farming: hoe the dirt, plant, keep it watered and lit, feed the soil, rotate crops. A Soil Probe explains.",
@@ -1571,6 +1582,14 @@ impl App {
         self.ui.text_centered("You died! (skill issue)", w / 2.0, h * 0.3, 20.0, WHITE);
         if let Some(d) = &self.game.dead {
             self.ui.text_centered(d, w / 2.0, h * 0.3 + 20.0 * s, 10.0, Color::new(1.0, 0.85, 0.85, 1.0));
+        }
+        if let Some(p) = self.game.death_spot() {
+            let line = if self.game.keep_inventory || self.game.creative {
+                "Your inventory is safe. This world is kind.".to_string()
+            } else {
+                format!("Your things are on the ground at {}, {}, {} for five minutes.", p.x, p.y, p.z)
+            };
+            self.ui.text_centered(&line, w / 2.0, h * 0.3 + 34.0 * s, 9.0, Color::new(1.0, 0.95, 0.7, 1.0));
         }
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
@@ -1604,7 +1623,6 @@ impl App {
         let sx = x0 + 6.0 * s;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         let mut tooltip: Option<String> = None;
-        let name = |st: Option<(Id, u8)>| st.map(|st| item_name(st.0).to_string());
         self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
         let top = y0 + 18.0 * s;
         // (slot index, x, y) for the container's own slots.
@@ -1615,9 +1633,9 @@ impl App {
             (0..containers::CHEST_SLOTS).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
         };
         for &(i, x, y) in &spots {
-            let (l, r, hov) = self.ui.slot(c.slots[i], x, y, slot, false);
+            let (l, r, hov) = self.ui.slot_worn(c.slots[i], c.wear[i], x, y, slot, false);
             if hov {
-                tooltip = name(c.slots[i]);
+                tooltip = label(c.slots[i], c.wear[i]);
             }
             if l || r {
                 self.game.container_click(i, r, shift && l);
@@ -1644,23 +1662,23 @@ impl App {
         for i in 9..36 {
             let j = i - 9;
             let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
-            let (l, r, hov) = self.ui.slot(self.game.inv.slots[i], cx, cy, slot, false);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
             if hov {
-                tooltip = name(self.game.inv.slots[i]);
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
             self.inventory_slot_click(i, l, r, shift);
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot(self.game.inv.slots[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
-                tooltip = name(self.game.inv.slots[i]);
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
             self.inventory_slot_click(i, l, r, shift);
         }
         if let Some(cur) = self.game.inv.cursor {
             let (mx, my) = mouse_position();
-            self.ui.stack(Some(cur), mx - slot / 2.0, my - slot / 2.0, slot, true);
+            self.ui.stack_worn(Some(cur), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
         } else if let Some(t) = tooltip {
             self.ui.tooltip(&t);
         }
@@ -1703,7 +1721,7 @@ impl App {
         for i in 0..4 {
             let (sx, sy) = (ax + 6.0 * s, y0 + 18.0 * s + i as f32 * slot);
             let worn = self.game.inv.armor[i];
-            let (l, r, hov) = self.ui.slot(worn, sx, sy, slot, false);
+            let (l, r, hov) = self.ui.slot_worn(worn, self.game.inv.armor_wear[i], sx, sy, slot, false);
             if worn.is_none() {
                 // A faint outline of what goes here.
                 let pad = slot * 0.12;
@@ -1711,7 +1729,7 @@ impl App {
             }
             if hov {
                 tooltip = Some(match worn {
-                    Some((id, _)) => format!("{} (+{} armour)", item_name(id), armor_points(id)),
+                    Some((id, _)) => format!("{} (+{} armour){}", item_name(id), armor_points(id), durability(id).map(|d| format!(", {}/{d} left", d - self.game.inv.armor_wear[i])).unwrap_or_default()),
                     None => ["Helmet", "Chestplate", "Leggings", "Boots"][i].to_string(),
                 });
             }
@@ -1745,9 +1763,9 @@ impl App {
             for i in 9..36 {
                 let j = i - 9;
                 let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_top + (j / 9) as f32 * slot);
-                let (l, r, hov) = self.ui.slot(self.game.inv.slots[i], cx, cy, slot, false);
+                let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
                 if hov {
-                    tooltip = self.game.inv.slots[i].map(|s| item_name(s.0).to_string());
+                    tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
                 }
                 if l && !(shift && self.game.inv.equip(i)) {
                     self.game.inv.click(i);
@@ -1761,9 +1779,9 @@ impl App {
         self.ui.text("Hotbar", sx, hot_y - 3.0 * s, 9.0, GRAY);
         for i in 0..9 {
             let cx = sx + i as f32 * slot;
-            let (l, r, hov) = self.ui.slot(self.game.inv.slots[i], cx, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, hot_y, slot, i == self.game.inv.selected);
             if hov {
-                tooltip = self.game.inv.slots[i].map(|s| item_name(s.0).to_string());
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
             if l {
                 if creative && self.game.inv.cursor.is_none() {
@@ -1783,7 +1801,8 @@ impl App {
                 if creative {
                     self.game.inv.cursor = None;
                 } else if let Some((item, n)) = self.game.inv.cursor.take() {
-                    self.game.throw_stack(item, n);
+                    let wear = std::mem::take(&mut self.game.inv.cursor_wear);
+                    self.game.throw_stack(item, n, wear);
                 }
             }
         }
@@ -1855,7 +1874,7 @@ impl App {
 
         if let Some(c) = self.game.inv.cursor {
             let (mx, my) = mouse_position();
-            self.ui.stack(Some(c), mx - slot / 2.0, my - slot / 2.0, slot, true);
+            self.ui.stack_worn(Some(c), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
         } else if let Some(t) = tooltip {
             self.ui.tooltip(&t);
         }
@@ -1910,6 +1929,15 @@ fn install_audio_panic_hook() {
         }
         default(info)
     }));
+}
+
+/// Tooltip text for a slot: its name, and how many uses are left for tools.
+fn label(stack: Option<(Id, u8)>, wear: u16) -> Option<String> {
+    let (id, _) = stack?;
+    Some(match durability(id) {
+        Some(max) => format!("{} ({}/{max} uses left)", item_name(id), max.saturating_sub(wear)),
+        None => item_name(id).to_string(),
+    })
 }
 
 fn main() {
@@ -1985,6 +2013,7 @@ async fn game_main() {
         form_name: String::new(),
         form_seed: String::new(),
         form_creative: false,
+        form_keep: false,
         form_focus: 0,
     };
     // Screenshots always use the defaults, whatever the player last picked.
@@ -2008,7 +2037,7 @@ async fn game_main() {
 
     if let Some(s) = &shot {
         match s.mode.as_str() {
-            "survival" | "creative" | "inventory" | "night" => {
+            "survival" | "creative" | "inventory" | "night" | "death" => {
                 let mut g = Game::new(424242, s.mode == "creative", false);
                 if s.mode == "inventory" {
                     for (item, n) in [(LOG, 12), (COBBLE, 20), (COAL, 5), (IRON, 3), (DIAMOND, 2), (GUNPOWDER, 5), (SAND, 9), (PORKCHOP, 3), (block::stairs(1, 0), 8), (block::slab(0, false), 12), (block::DOOR, 2)] {
@@ -2017,6 +2046,14 @@ async fn game_main() {
                     g.inv.add(block::ARMOR_FIRST + 8, 1);
                     g.inv.armor[1] = Some((block::ARMOR_FIRST + 4 + 1, 1));
                     g.inv.armor[3] = Some((block::ARMOR_FIRST + 3, 1));
+                    g.inv.armor_wear[1] = 150;
+                    // Some well-used tools.
+                    for (item, wear) in [(block::PICK_IRON, 60), (block::SWORD_STONE, 110), (block::BOW, 20)] {
+                        g.inv.add(item, 1);
+                        let i = g.inv.slots.iter().position(|s| *s == Some((item, 1))).unwrap();
+                        g.inv.wear[i] = wear;
+                    }
+                    g.player.hunger.food = 13.0;
                 }
                 if let Some(t) = s.time {
                     g.time = t;
@@ -2325,7 +2362,7 @@ async fn game_main() {
                 let loot = [(block::DIAMOND, 3), (block::COBBLE, 12), (block::PORKCHOP, 1), (block::stairs(0, 0), 4), (block::ARMOR_FIRST + 4, 1), (block::DOOR, 1), (block::TORCH, 5)];
                 for (i, (item, n)) in loot.into_iter().enumerate() {
                     let v = p + fwd * (2.5 + (i % 3) as f32 * 0.7) + right * ((i as f32 - 3.0) * 0.6);
-                    app.game.spawn_drop(Vec3::new(v.x, y as f32, v.z), item, n, Vec3::ZERO, 60.0);
+                    app.game.spawn_drop(Vec3::new(v.x, y as f32, v.z), item, n, 0, Vec3::ZERO, 60.0);
                 }
                 if s.mode == "armour" {
                     for slot in 0..4 {
@@ -2335,6 +2372,11 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "death" && frames == 150 {
+                app.game.inv.add(block::DIAMOND, 3);
+                app.game.player.hurt = 0.0;
+                app.game.hurt_player(100.0, "was defeated by a screenshot");
             }
             if s.mode == "zoo" && frames > 150 {
                 // Hold still for the photo.

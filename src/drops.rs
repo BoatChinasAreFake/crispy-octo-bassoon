@@ -35,6 +35,8 @@ pub struct ItemDrop {
     pub age: f32,
     /// Seconds (of age) before it can be picked up.
     pub delay: f32,
+    /// A used tool or piece of armour keeps its wear on the ground.
+    pub wear: u16,
     /// Joined players: the host's latest position, and when we last asked for it.
     pub net_pos: Vec3,
     pub asked: f32,
@@ -44,7 +46,7 @@ impl ItemDrop {
     pub fn new(id: u32, item: Id, n: u8, pos: Vec3, vel: Vec3, delay: f32) -> ItemDrop {
         let mut body = Body::new(pos, 0.125, 0.25);
         body.vel = vel;
-        ItemDrop { id, item, n, body, age: 0.0, delay, net_pos: pos, asked: 0.0 }
+        ItemDrop { id, item, n, body, age: 0.0, delay, wear: 0, net_pos: pos, asked: 0.0 }
     }
 
     fn update(&mut self, dt: f32, world: &World) {
@@ -116,6 +118,7 @@ pub fn draw_item(g: &mut DynGeo, root: &Mat4, item: Id, size: f32, sky: f32) {
 
 // ------------------------------------------------------------------ saving
 
+/// Save format: v8 saves had 19 bytes per drop, v9 adds two of wear.
 pub fn encode(drops: &[ItemDrop]) -> Vec<u8> {
     let mut out = Vec::new();
     for d in drops {
@@ -124,33 +127,40 @@ pub fn encode(drops: &[ItemDrop]) -> Vec<u8> {
         }
         out.extend_from_slice(&d.item.to_le_bytes());
         out.push(d.n);
+        out.extend_from_slice(&d.wear.to_le_bytes());
     }
     out
 }
 
-/// (position, item, count, age) for each saved drop; stops at anything malformed.
-pub fn decode(b: &[u8]) -> Vec<(Vec3, Id, u8, f32)> {
+/// A saved drop: position, item, count, age and wear.
+pub type SavedDrop = (Vec3, Id, u8, f32, u16);
+
+/// Unpack `encode`'s output (`with_wear`: from a v9+ save); stops at anything malformed.
+pub fn decode(b: &[u8], with_wear: bool) -> Vec<SavedDrop> {
     let mut v = Vec::new();
-    for c in b.chunks_exact(19) {
+    for c in b.chunks_exact(if with_wear { 21 } else { 19 }) {
         let f = |o: usize| f32::from_le_bytes([c[o], c[o + 1], c[o + 2], c[o + 3]]);
         let (pos, age) = (Vec3::new(f(0), f(4), f(8)), f(12));
         let (item, n) = (u16::from_le_bytes([c[16], c[17]]), c[18]);
         if !pos.is_finite() || !age.is_finite() || n == 0 {
             break;
         }
-        v.push((pos, item, n.min(64), age.clamp(0.0, DESPAWN_SECS)));
+        let wear = if with_wear { u16::from_le_bytes([c[19], c[20]]) } else { 0 };
+        v.push((pos, item, n.min(64), age.clamp(0.0, DESPAWN_SECS), wear));
     }
     v
 }
 
 impl Game {
     /// Put items on the ground (where the world lives; joined players never call this).
-    pub fn spawn_drop(&mut self, at: Vec3, item: Id, n: u8, vel: Vec3, delay: f32) {
+    pub fn spawn_drop(&mut self, at: Vec3, item: Id, n: u8, wear: u16, vel: Vec3, delay: f32) {
         if n == 0 || !valid_item(item) || self.is_client() {
             return;
         }
         self.next_drop_id = self.next_drop_id.wrapping_add(1).max(1);
-        self.drops.push(ItemDrop::new(self.next_drop_id, item, n, at, vel, delay));
+        let mut d = ItemDrop::new(self.next_drop_id, item, n, at, vel, delay);
+        d.wear = durability(item).map(|max| wear.min(max - 1)).unwrap_or(0);
+        self.drops.push(d);
         if self.drops.len() > MAX_DROPS {
             self.drops.remove(0);
         }
@@ -158,42 +168,77 @@ impl Game {
 
     /// Items popping out of something at `at` in a random direction.
     pub fn pop_drop(&mut self, at: Vec3, item: Id, n: u8) {
+        self.pop_drop_worn(at, item, n, 0);
+    }
+
+    pub fn pop_drop_worn(&mut self, at: Vec3, item: Id, n: u8, wear: u16) {
+        let vel = self.pop_velocity();
+        self.spawn_drop(at - Vec3::Y * 0.125, item, n, wear, vel, DROP_DELAY);
+    }
+
+    fn pop_velocity(&mut self) -> Vec3 {
         let r = &mut self.rng;
-        let vel = Vec3::new(r.range(-1.5, 1.5), r.range(3.0, 5.0), r.range(-1.5, 1.5));
-        self.spawn_drop(at - Vec3::Y * 0.125, item, n, vel, DROP_DELAY);
+        Vec3::new(r.range(-1.5, 1.5), r.range(3.0, 5.0), r.range(-1.5, 1.5))
     }
 
     /// Q: throw one of the held item (or the whole stack) the way we're looking.
     pub fn throw_held(&mut self, all: bool) {
         let Some((item, count)) = self.inv.slots[self.inv.selected] else { return };
         let n = if all { count } else { 1 };
+        let wear = self.inv.wear[self.inv.selected];
         self.inv.slots[self.inv.selected] = if count > n { Some((item, count - n)) } else { None };
-        self.throw_stack(item, n);
+        self.throw_stack(item, n, wear);
     }
 
     /// Throw items that have already left the inventory (held, or on the cursor).
-    pub fn throw_stack(&mut self, item: Id, n: u8) {
+    pub fn throw_stack(&mut self, item: Id, n: u8, wear: u16) {
         self.player.swing = 1.0;
         self.advance("butterfingers");
         if self.is_client() {
             // The host takes them from its ledger and puts them on the ground.
             if !self.creative {
-                self.net_send_msg(Msg::DropItem { item, n });
+                self.net_send_msg(Msg::DropItem { item, n, wear, scatter: false });
             }
             return;
         }
         let (eye, dir) = (self.player.eye(), self.player.look_dir());
-        self.spawn_drop(eye - Vec3::Y * 0.3 + dir * 0.3, item, n, dir * 6.0 + Vec3::Y * 1.5, THROW_DELAY);
+        self.spawn_drop(eye - Vec3::Y * 0.3 + dir * 0.3, item, n, wear, dir * 6.0 + Vec3::Y * 1.5, THROW_DELAY);
     }
 
-    /// A joined player threw something (Q, or their inventory overflowed).
-    pub fn host_throw(&mut self, from: u32, item: Id, n: u8) {
+    /// Died without keep-inventory: everything (armour and the cursor too) falls out.
+    pub fn drop_everything(&mut self) {
+        let inv = &mut self.inv;
+        let mut stacks: Vec<(Id, u8, u16)> = Vec::new();
+        for (s, w) in inv.slots.iter_mut().zip(inv.wear.iter_mut()).chain(inv.armor.iter_mut().zip(inv.armor_wear.iter_mut())).chain(std::iter::once((&mut inv.cursor, &mut inv.cursor_wear))) {
+            if let Some((id, n)) = s.take() {
+                stacks.push((id, n, *w));
+            }
+            *w = 0;
+        }
+        let at = self.player.body.pos + Vec3::Y * 0.6;
+        for (item, n, wear) in stacks {
+            if self.is_client() {
+                self.net_send_msg(Msg::DropItem { item, n, wear, scatter: true });
+            } else {
+                let vel = self.pop_velocity() * 0.8;
+                self.spawn_drop(at, item, n, wear, vel, THROW_DELAY);
+            }
+        }
+    }
+
+    /// A joined player threw something (Q, a full inventory), or died (`scatter`).
+    pub fn host_throw(&mut self, from: u32, item: Id, n: u8, wear: u16, scatter: bool) {
         let Some((pos, yaw, pitch)) = self.peers.get(&from).map(|p| (p.target, p.yaw, p.pitch)) else { return };
         if n == 0 || !valid_item(item) || !self.peer_take(from, item, n as u32) {
             return;
         }
+        if scatter {
+            let vel = self.pop_velocity() * 0.8;
+            self.spawn_drop(pos + Vec3::Y * 0.6, item, n, wear, vel, THROW_DELAY);
+            return;
+        }
         let dir = Vec3::new(yaw.sin() * pitch.cos(), pitch.sin(), -yaw.cos() * pitch.cos());
-        self.spawn_drop(pos + Vec3::Y * 1.3 + dir * 0.3, item, n, dir * 6.0 + Vec3::Y * 1.5, THROW_DELAY);
+        self.spawn_drop(pos + Vec3::Y * 1.3 + dir * 0.3, item, n, wear, dir * 6.0 + Vec3::Y * 1.5, THROW_DELAY);
     }
 
     /// Where the world lives: move, merge, expire, and let the local player pick up.
@@ -221,7 +266,7 @@ impl Game {
             if room == 0 {
                 continue;
             }
-            self.inv.add(d.item, room);
+            self.inv.add_worn(d.item, room, d.wear);
             d.n -= room;
             got.push(d.item);
         }
@@ -244,12 +289,12 @@ impl Game {
             return;
         }
         let n = room.min(d.n);
-        let item = d.item;
+        let (item, wear) = (d.item, d.wear);
         d.n -= n;
         if d.n == 0 {
             self.drops.remove(i);
         }
-        self.give_peer(from, item, n);
+        self.give_peer_worn(from, item, n, wear);
     }
 
     /// The host tells joined players what's on the ground, a few times a second.
@@ -345,9 +390,10 @@ mod tests {
     fn drops_save_and_merge() {
         let mut v = vec![ItemDrop::new(1, DIRT, 3, Vec3::new(1.0, 60.0, -2.5), Vec3::ZERO, 0.0), ItemDrop::new(2, DIAMOND, 1, Vec3::new(9.0, 61.0, 4.0), Vec3::ZERO, 0.0)];
         v[1].age = 12.5;
-        let back = decode(&encode(&v));
-        assert_eq!(back, vec![(Vec3::new(1.0, 60.0, -2.5), DIRT, 3, 0.0), (Vec3::new(9.0, 61.0, 4.0), DIAMOND, 1, 12.5)]);
-        assert!(decode(&[1, 2, 3]).is_empty());
+        v[1].wear = 9;
+        let back = decode(&encode(&v), true);
+        assert_eq!(back, vec![(Vec3::new(1.0, 60.0, -2.5), DIRT, 3, 0.0, 0), (Vec3::new(9.0, 61.0, 4.0), DIAMOND, 1, 12.5, 9)]);
+        assert!(decode(&[1, 2, 3], true).is_empty());
         // Neighbouring dirt merges; the far diamond and a full stack don't.
         v.push(ItemDrop::new(3, DIRT, 5, Vec3::new(1.5, 60.0, -2.5), Vec3::ZERO, 0.0));
         v.push(ItemDrop::new(4, DIRT, 64, Vec3::new(1.2, 60.0, -2.5), Vec3::ZERO, 0.0));

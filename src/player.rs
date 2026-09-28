@@ -29,7 +29,8 @@ pub struct Player {
     pub sneaking: bool,
     pub bob: f32,
     pub last_jump_press: f64,
-    pub regen: f32,
+    /// Food, saturation and exhaustion (see hunger.rs).
+    pub hunger: crate::hunger::Hunger,
     pub swing: f32,
     /// Speed multiplier from the block underfoot (mod blocks can change it).
     pub ground_speed: f32,
@@ -53,7 +54,7 @@ impl Player {
             sneaking: false,
             bob: 0.0,
             last_jump_press: -10.0,
-            regen: 0.0,
+            hunger: Default::default(),
             swing: 0.0,
             ground_speed: 1.0,
             bounced: false,
@@ -85,7 +86,7 @@ impl Player {
         if wish.length_squared() > 1.0 {
             wish = wish.normalize();
         }
-        self.sprinting = input.sprint && input.forward > 0.0 && !input.sneak;
+        self.sprinting = input.sprint && input.forward > 0.0 && !input.sneak && (creative || self.hunger.can_sprint());
         self.sneaking = input.sneak && !self.flying;
 
         if creative && input.jump_pressed {
@@ -147,11 +148,23 @@ impl Player {
                     b.vel.x += fwd.x * 1.5;
                     b.vel.z += fwd.z * 1.5;
                 }
+                if !creative {
+                    self.hunger.exhaust(if self.sprinting { crate::hunger::SPRINT_JUMP } else { crate::hunger::JUMP });
+                }
             }
         }
         let was_ground = b.on_ground;
         let falling_speed = -b.vel.y;
+        let before = b.pos;
         move_body(world, b, dt, self.sneaking && was_ground);
+        if !creative {
+            let moved = Vec3::new(b.pos.x - before.x, 0.0, b.pos.z - before.z).length();
+            if in_water {
+                self.hunger.exhaust(moved * crate::hunger::SWIM_PER_BLOCK);
+            } else if self.sprinting {
+                self.hunger.exhaust(moved * crate::hunger::SPRINT_PER_BLOCK);
+            }
+        }
         if b.on_ground {
             let under = world.get(b.pos.x.floor() as i32, (b.pos.y - 0.05).floor() as i32, b.pos.z.floor() as i32);
             let def = block(under);
@@ -188,14 +201,6 @@ impl Player {
         let moving = Vec3::new(b.vel.x, 0.0, b.vel.z).length();
         if b.on_ground {
             self.bob += moving * dt * 2.2;
-        }
-
-        if !creative && self.health < MAX_HEALTH && self.health > 0.0 {
-            self.regen += dt;
-            if self.regen > 4.0 {
-                self.regen = 0.0;
-                self.health = (self.health + 1.0).min(MAX_HEALTH);
-            }
         }
         dmg
     }
