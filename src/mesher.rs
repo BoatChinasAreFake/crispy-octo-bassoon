@@ -54,7 +54,7 @@ const AO_CURVE: [f32; 4] = [0.5, 0.68, 0.84, 1.0];
 /// Tiny inset keeps nearest-neighbour sampling inside the tile.
 const UV_EPS: f32 = 1.0 / 4096.0;
 
-pub fn face_tile(id: u8, face: usize) -> u16 {
+pub fn face_tile(id: Id, face: usize) -> u16 {
     let t = block(id).tex;
     match face {
         2 => t[0],
@@ -75,7 +75,7 @@ impl<'a> Hood<'a> {
         (self.c[((oz + 1) * 3 + ox + 1) as usize], lx.rem_euclid(CW), lz.rem_euclid(CW))
     }
     #[inline]
-    fn get(&self, lx: i32, y: i32, lz: i32) -> u8 {
+    fn get(&self, lx: i32, y: i32, lz: i32) -> Id {
         if y < 0 {
             return BEDROCK;
         }

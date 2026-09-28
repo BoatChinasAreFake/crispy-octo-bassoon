@@ -32,11 +32,11 @@ pub const TICK: f32 = 0.05;
 /// A world change requested by a script.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cmd {
-    SetBlock(i32, i32, i32, u8),
+    SetBlock(i32, i32, i32, Id),
     Message(String, String),
     Broadcast(String),
-    Give(String, u8, u8),
-    Take(String, u8, u8),
+    Give(String, Id, u8),
+    Take(String, Id, u8),
     Heal(String, f32),
     Damage(String, f32),
     Teleport(String, Vec3),
@@ -109,13 +109,13 @@ fn coord(d: &Dynamic) -> Res<i32> {
     if v.abs() > 30_000_000.0 { err("coordinate out of range") } else { Ok(v as i32) }
 }
 
-fn lookup(name: &str) -> Res<u8> {
+fn lookup(name: &str) -> Res<Id> {
     let r = reg();
     let n = name.trim().to_ascii_lowercase();
-    r.lookup(&n).or_else(|| r.blocks.iter().position(|b| b.key.ends_with(&format!(":{n}"))).map(|i| i as u8)).map(Ok).unwrap_or_else(|| err(format!("unknown block or item \"{name}\"")))
+    r.lookup(&n).or_else(|| r.blocks.iter().position(|b| b.key.ends_with(&format!(":{n}"))).map(|i| i as Id)).map(Ok).unwrap_or_else(|| err(format!("unknown block or item \"{name}\"")))
 }
 
-fn block_id(name: &str) -> Res<u8> {
+fn block_id(name: &str) -> Res<Id> {
     let id = lookup(name)?;
     if id >= FIRST_ITEM { err(format!("\"{name}\" is an item, not a block")) } else { Ok(id) }
 }

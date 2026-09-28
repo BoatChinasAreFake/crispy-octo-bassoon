@@ -2,7 +2,7 @@
 
 use crate::block::*;
 
-pub type Stack = Option<(u8, u8)>;
+pub type Stack = Option<(Id, u8)>;
 
 pub struct Inventory {
     pub slots: [Stack; 36],
@@ -16,12 +16,12 @@ impl Inventory {
         Inventory { slots: [None; 36], selected: 0, cursor: None }
     }
 
-    pub fn held(&self) -> u8 {
+    pub fn held(&self) -> Id {
         self.slots[self.selected].map(|s| s.0).unwrap_or(AIR)
     }
 
     /// Add items; returns how many didn't fit.
-    pub fn add(&mut self, item: u8, mut count: u8) -> u8 {
+    pub fn add(&mut self, item: Id, mut count: u8) -> u8 {
         let max = max_stack(item);
         for s in self.slots.iter_mut() {
             if let Some((id, n)) = s {
@@ -48,11 +48,11 @@ impl Inventory {
         count
     }
 
-    pub fn count(&self, item: u8) -> u32 {
+    pub fn count(&self, item: Id) -> u32 {
         self.slots.iter().flatten().filter(|s| s.0 == item).map(|s| s.1 as u32).sum()
     }
 
-    pub fn remove(&mut self, item: u8, mut count: u32) {
+    pub fn remove(&mut self, item: Id, mut count: u32) {
         for s in self.slots.iter_mut().rev() {
             if let Some((id, n)) = s {
                 if *id == item {

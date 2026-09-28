@@ -409,7 +409,7 @@ impl Mob {
     }
 
     /// Items dropped on death.
-    pub fn loot(&self, rng: &mut Rng) -> Option<(u8, u8)> {
+    pub fn loot(&self, rng: &mut Rng) -> Option<(Id, u8)> {
         let n = rng.int(0, 2) as u8;
         match self.kind {
             MobKind::Oinker => Some((PORKCHOP, n.max(1))),
@@ -422,7 +422,7 @@ impl Mob {
     }
 
     /// Anything dropped besides `loot` (Fluffers also give Baa-con).
-    pub fn extra_loot(&self, rng: &mut Rng) -> Option<(u8, u8)> {
+    pub fn extra_loot(&self, rng: &mut Rng) -> Option<(Id, u8)> {
         match self.kind {
             MobKind::Fluffer if rng.chance(0.7) => Some((MUTTON, 1)),
             _ => None,

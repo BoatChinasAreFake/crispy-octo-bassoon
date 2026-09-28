@@ -3,7 +3,8 @@
 
 use crate::noise::{Perlin, Rng};
 
-pub const ATLAS: usize = 256;
+/// 64x64 tiles: the base game uses the first 96, mods get the rest.
+pub const ATLAS: usize = 1024;
 pub const TILE: usize = 16;
 pub const TILES_PER_ROW: u16 = (ATLAS / TILE) as u16;
 

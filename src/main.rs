@@ -1856,7 +1856,7 @@ async fn game_main() {
                 let p = app.game.player.body.pos;
                 let (fx, fz) = (2.4f32.sin(), -2.4f32.cos());
                 let r = block::reg();
-                let ids = if s.mode == "parody" { block::GOLD_ORE..block::NUM_BLOCKS } else { block::NUM_BLOCKS..r.blocks.len() as u8 };
+                let ids = if s.mode == "parody" { block::GOLD_ORE..block::NUM_BLOCKS } else { block::NUM_BLOCKS..r.blocks.len() as block::Id };
                 let n = ids.len() as f32;
                 for (i, id) in ids.enumerate() {
                     let side = if s.mode == "parody" { (i as f32 - (n - 1.0) / 2.0) * 1.3 } else { i as f32 * 1.6 - 3.0 };

@@ -171,12 +171,12 @@ Each line is an extra title-screen splash text.
 
 ## Base-game names
 
-- **Blocks:** `grass dirt stone cobblestone sand gravel water log leaves planks glass bedrock coal_ore iron_ore diamond_ore snowy_grass bricks tnt crafting_table glowrock torch flower tall_grass`
-- **Items:** `stick coal iron diamond gunpowder porkchop goo wooden_pickaxe stone_pickaxe iron_pickaxe diamond_pickaxe wooden_sword stone_sword iron_sword diamond_sword`
+- **Blocks:** `grass dirt stone cobblestone sand gravel water log leaves planks glass bedrock coal_ore iron_ore diamond_ore snowy_grass bricks tnt crafting_table glowrock torch flower tall_grass gold_ore pumpkin jack_o_lantern cactus ice bouncy_goo bed cake sponge wool`
+- **Items:** `stick coal iron diamond gunpowder porkchop goo wooden_pickaxe stone_pickaxe iron_pickaxe diamond_pickaxe wooden_sword stone_sword iron_sword diamond_sword gold golden_oinkchop stare_pearl mutton`
 
 ## Limits
 
-- Up to **66 mod blocks**, **134 mod items** and **160 mod textures**, across all mods together.
+- Up to **32,000 mod blocks**, **32,000 mod items** and **4,000 mod textures**, across all mods together.
 - 1 MB per file, and 4 MB for all of a server's mods together.
 
 ## Worlds and multiplayer

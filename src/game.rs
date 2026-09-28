@@ -231,7 +231,7 @@ impl Game {
     }
 
     /// Advancements for getting hold of an item.
-    fn item_advancements(&mut self, item: u8) {
+    fn item_advancements(&mut self, item: Id) {
         let key = match item {
             LOG => "getting_wood",
             COBBLE => "stone_age",
@@ -247,7 +247,7 @@ impl Game {
     }
 
     /// Called by the crafting screen after a successful craft.
-    pub fn on_crafted(&mut self, output: u8, via_gold: bool) {
+    pub fn on_crafted(&mut self, output: Id, via_gold: bool) {
         if via_gold {
             self.msg("Gold is too soft for tools, so you got a wooden one. Economics!");
         } else {
@@ -512,7 +512,7 @@ impl Game {
     }
 
     fn apply_cmds(&mut self, cmds: Vec<Cmd>) {
-        let effect = |heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(u8, u8)>| Msg::Effect { heal, teleport, launch, take };
+        let effect = |heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)>| Msg::Effect { heal, teleport, launch, take };
         for c in cmds {
             match c {
                 Cmd::SetBlock(x, y, z, id) => self.world.set_or_record(x, y, z, id),
@@ -1079,7 +1079,7 @@ impl Game {
         }
     }
 
-    pub fn give(&mut self, item: u8, n: u8) {
+    pub fn give(&mut self, item: Id, n: u8) {
         self.sfx(Sfx::Pop, None);
         if self.inv.add(item, n) > 0 {
             self.msg("Inventory full. The item has been respectfully ignored.");
@@ -1210,7 +1210,7 @@ impl Game {
     }
 
     /// Particles and sound for a block someone else changed.
-    pub fn block_change_feedback(&mut self, pos: IVec3, old: u8, new: u8) {
+    pub fn block_change_feedback(&mut self, pos: IVec3, old: Id, new: Id) {
         let center = pos.as_vec3() + Vec3::splat(0.5);
         if new == AIR || new == WATER {
             if targetable(old) {
@@ -1659,21 +1659,21 @@ impl Game {
 }
 
 /// Names of every mod-added block and item, so saves survive mods being added or removed.
-fn mod_palette(r: &Registry) -> Vec<(u8, String)> {
-    let blocks = (NUM_BLOCKS..r.blocks.len() as u8).map(|id| (id, r.blocks[id as usize].key.to_string()));
-    let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as u8, r.key_of(id as u8).to_string()));
+fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
+    let blocks = (NUM_BLOCKS..r.blocks.len() as Id).map(|id| (id, r.blocks[id as usize].key.to_string()));
+    let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as Id, r.key_of(id as Id).to_string()));
     blocks.chain(items).collect()
 }
 
 /// Map ids in a save to ids in the current registry. Mod things that no longer
 /// exist become air (blocks) or vanish (items). None when nothing needs changing.
-fn palette_remap(r: &Registry, palette: &[(u8, String)]) -> Option<Vec<u8>> {
-    let mut map: Vec<u8> = (0..=255u8).collect();
+fn palette_remap(r: &Registry, palette: &[(Id, String)]) -> Option<Vec<Id>> {
+    let mut map: Vec<Id> = (0..=Id::MAX).collect();
     // Any mod-range id the save doesn't mention is unknown.
     for id in NUM_BLOCKS..FIRST_ITEM {
         map[id as usize] = AIR;
     }
-    for id in FIRST_MOD_ITEM..=255 {
+    for id in FIRST_MOD_ITEM..=Id::MAX {
         map[id as usize] = AIR;
     }
     for (old, key) in palette {
@@ -1840,13 +1840,17 @@ mod tests {
         let mut files = std::collections::BTreeMap::new();
         files.insert("mod.txt".to_string(), b"[block one]\n[item gem]\n".to_vec());
         let r = build(&[ModSource { id: "aaa".into(), files }], &[]);
-        // Before this update, the first mod block was id 24 and the first mod item 118.
-        let old_palette = vec![(24u8, "aaa:one".to_string()), (118u8, "aaa:gem".to_string())];
+        // Before the parody update, the first mod block was id 24 and the first mod
+        // item one-byte id 118 (widened on load like everything in an old save).
+        let gem_old = crate::save::legacy_id(118);
+        let old_palette = vec![(24, "aaa:one".to_string()), (gem_old, "aaa:gem".to_string())];
         let map = palette_remap(&r, &old_palette).expect("ids moved");
         assert_eq!(map[24], r.lookup("aaa:one").unwrap());
         assert_eq!(map[24], NUM_BLOCKS);
-        assert_eq!(map[118], r.lookup("aaa:gem").unwrap());
-        assert_eq!(map[118], FIRST_MOD_ITEM);
+        assert_eq!(map[gem_old as usize], r.lookup("aaa:gem").unwrap());
+        assert_eq!(map[gem_old as usize], FIRST_MOD_ITEM);
+        assert_eq!(map[PEARL as usize], PEARL, "base items the palette doesn't mention stay put");
+        assert_eq!(map[FIRST_MOD_ITEM as usize + 5], AIR, "unknown mod ids become nothing");
         assert_eq!(map[DIAMOND_ORE as usize], DIAMOND_ORE);
     }
 

@@ -36,7 +36,7 @@ pub enum Mat {
     Glass,
 }
 
-pub fn material(block_id: u8) -> Mat {
+pub fn material(block_id: Id) -> Mat {
     match block(block_id).sound {
         0 => Mat::Stone,
         1 => Mat::Wood,

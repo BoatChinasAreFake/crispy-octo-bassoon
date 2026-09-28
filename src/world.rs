@@ -18,7 +18,7 @@ pub fn idx(lx: i32, y: i32, lz: i32) -> usize {
 }
 
 pub struct Chunk {
-    pub blocks: Vec<u8>,
+    pub blocks: Vec<Id>,
     /// Per column: one above the highest sky-blocking block.
     pub heights: [u8; 256],
 }
@@ -160,7 +160,7 @@ impl Generator {
         y < 36 && self.cavern.noise3(fx / 55.0, fy / 28.0, fz / 55.0) > 0.42
     }
 
-    pub fn generate(&self, cx: i32, cz: i32) -> Vec<u8> {
+    pub fn generate(&self, cx: i32, cz: i32) -> Vec<Id> {
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -265,7 +265,7 @@ impl Generator {
             for tx in cx * CW - 3..cx * CW + CW + 3 {
                 let Some((h, trunk)) = self.tree_at(tx, tz) else { continue };
                 let top = h + trunk;
-                let mut put = |x: i32, y: i32, z: i32, id: u8, force: bool| {
+                let mut put = |x: i32, y: i32, z: i32, id: Id, force: bool| {
                     let (lx, lz) = (x - cx * CW, z - cz * CW);
                     if !(0..CW).contains(&lx) || !(0..CW).contains(&lz) || !(0..CH).contains(&y) {
                         return;
@@ -307,15 +307,15 @@ pub struct World {
     pub generator: Arc<Generator>,
     pub chunks: HashMap<(i32, i32), Chunk>,
     /// Player edits, keyed by chunk then block index. Re-applied when chunks regenerate.
-    pub mods: HashMap<(i32, i32), HashMap<u32, u8>>,
+    pub mods: HashMap<(i32, i32), HashMap<u32, Id>>,
     /// Chunks whose mesh is stale.
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
-    pub edit_log: Vec<(i32, i32, i32, u8)>,
+    pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
     req_tx: Option<Sender<(i32, i32)>>,
-    res_rx: Receiver<(i32, i32, Vec<u8>)>,
+    res_rx: Receiver<(i32, i32, Vec<Id>)>,
 }
 
 impl World {
@@ -434,7 +434,7 @@ impl World {
     }
 
     #[inline]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub fn get(&self, x: i32, y: i32, z: i32) -> Id {
         if y < 0 {
             return BEDROCK;
         }
@@ -447,7 +447,7 @@ impl World {
         }
     }
 
-    pub fn get_v(&self, p: IVec3) -> u8 {
+    pub fn get_v(&self, p: IVec3) -> Id {
         self.get(p.x, p.y, p.z)
     }
 
@@ -465,7 +465,7 @@ impl World {
         if y >= h { 1.0 } else { (1.0 - (h - y) as f32 * 0.09).max(0.0) }
     }
 
-    pub fn set(&mut self, x: i32, y: i32, z: i32, id: u8) {
+    pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
         if self.set_inner(x, y, z, id).is_some() && self.log_edits {
             self.edit_log.push((x, y, z, id));
         }
@@ -473,7 +473,7 @@ impl World {
 
     /// Apply an edit that came from another player: not echoed back out.
     /// Returns the previous block if anything changed.
-    pub fn set_remote(&mut self, x: i32, y: i32, z: i32, id: u8) -> Option<u8> {
+    pub fn set_remote(&mut self, x: i32, y: i32, z: i32, id: Id) -> Option<Id> {
         if !valid_block(id) {
             return None;
         }
@@ -486,7 +486,7 @@ impl World {
         self.set_inner(x, y, z, id)
     }
 
-    fn set_inner(&mut self, x: i32, y: i32, z: i32, id: u8) -> Option<u8> {
+    fn set_inner(&mut self, x: i32, y: i32, z: i32, id: Id) -> Option<Id> {
         if !(0..CH).contains(&y) {
             return None;
         }
@@ -513,7 +513,7 @@ impl World {
 
     /// Set a block even if its chunk isn't loaded here (it's applied when the
     /// chunk generates), and share it with other players. Used by scripts.
-    pub fn set_or_record(&mut self, x: i32, y: i32, z: i32, id: u8) {
+    pub fn set_or_record(&mut self, x: i32, y: i32, z: i32, id: Id) {
         if self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) {
             self.set(x, y, z, id);
         } else if (0..CH).contains(&y) && valid_block(id) {
@@ -525,7 +525,7 @@ impl World {
         }
     }
 
-    pub fn set_v(&mut self, p: IVec3, id: u8) {
+    pub fn set_v(&mut self, p: IVec3, id: Id) {
         self.set(p.x, p.y, p.z, id)
     }
 
