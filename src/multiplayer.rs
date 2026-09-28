@@ -32,11 +32,13 @@ pub struct Peer {
     chat_tokens: f32,
     /// Messages that made no sense (kicked after too many).
     strikes: u32,
+    /// What the host knows they own (see ledger.rs).
+    pub ledger: crate::ledger::Ledger,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0 }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & FLAG_DEAD == 0
@@ -428,6 +430,11 @@ impl Game {
                         self.strike(from);
                         continue;
                     }
+                    // And only with items they really have, at the speed their tools allow.
+                    if old != id && !self.ledger_edit(from, old, id) {
+                        corrections.push((x, y, z, old));
+                        continue;
+                    }
                     // Scripts may veto what remote players do, just like the host's own actions.
                     if old != id && self.scripts.is_some() {
                         let who = self.peer_name(from);
@@ -453,7 +460,8 @@ impl Game {
                     }
                 }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, .. } => {
+            Msg::PlayerState { pos, yaw, pitch, flags, held, .. } => {
+                self.set_peer_held(from, held);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // No NaNs, nothing absurd, and no teleporting across the map (the
                 // host's own teleports move `target` first, so they pass).
@@ -468,7 +476,7 @@ impl Game {
                 p.yaw = yaw;
                 p.pitch = pitch.clamp(-1.6, 1.6);
                 p.flags = flags;
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags });
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held });
             }
             Msg::Attack { mob, dmg, .. } => {
                 // Hits come from where the player actually is, within reach, at a human pace.
@@ -476,8 +484,10 @@ impl Game {
                 if !self.peer_rate_ok(from, "attack", 0.2) || !dmg.is_finite() {
                     return;
                 }
+                // No harder than the weapon they really own (x1.5 for a falling crit).
+                let dmg = dmg.clamp(0.0, attack_damage(self.verified_held(from)) * 1.5);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
-                    m.damage(dmg.clamp(0.0, 12.0), eye);
+                    m.damage(dmg, eye);
                     m.last_attacker = from;
                     let (kind, pos) = (m.kind, m.body.pos);
                     self.sfx(Sfx::hurt_of(kind), Some(pos));
@@ -527,16 +537,25 @@ impl Game {
                 self.relay(from, Msg::Chat { from, text });
             }
             Msg::UseItem { item } => {
-                if valid_item(item) && self.peer_rate_ok(from, "use", 0.1) {
+                if valid_item(item) && self.peer_rate_ok(from, "use", 0.1) && self.peer_has(from, item) {
                     let who = self.peer_name(from);
                     self.fire("on_use_item", vec![who.into(), reg().key_of(item).into()]);
+                    // Mod items that give things: the host hands them over (and notes it).
+                    if let Some((actions, _)) = use_actions(item) {
+                        for a in actions {
+                            if let Action::Give(i, n) = a {
+                                self.give_peer(from, *i, *n);
+                            }
+                        }
+                    }
                 }
             }
             Msg::Shoot { pos, dir } => {
                 // Only from roughly where they are, in a real direction, at a bow's pace.
                 let Some(p) = self.peers.get(&from) else { return };
                 let near = pos.is_finite() && pos.distance(p.target + Vec3::Y * 1.6) < 3.0;
-                if near && dir.is_finite() && dir.length() > 0.5 && self.peer_rate_ok(from, "shoot", 0.4) {
+                let armed = self.peer_has(from, BOW);
+                if near && armed && dir.is_finite() && dir.length() > 0.5 && self.peer_rate_ok(from, "shoot", 0.4) && self.peer_take(from, ARROW, 1) {
                     self.spawn_arrow(pos, dir.normalize() * Arrow::SPEED * 1.2, Some(from));
                 }
             }
@@ -544,15 +563,25 @@ impl Game {
                 let at = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
                 let near = self.peers.get(&from).map(|p| (p.target + Vec3::Y * 1.6).distance(at) <= REACH).unwrap_or(false);
                 let tool = matches!(item, BONE_DUST | COMPOST | WOOD_ASH | SOIL_PROBE);
+                // The probe is kept; fertiliser is used up (and must really be theirs).
                 if near
                     && tool
+                    && self.peer_has(from, item)
                     && self.peer_rate_ok(from, "interact", 0.2)
+                    && (item == SOIL_PROBE || self.peer_take(from, item, 1))
                     && let Some(reply) = self.farm_interact(IVec3::new(x, y, z), item)
                 {
                     self.system_message(Some(from), &reply);
                 }
             }
             Msg::Catch { pos, bait } => self.host_catch(from, pos, bait),
+            Msg::Craft { recipe, times } => self.host_craft(from, recipe, times),
+            Msg::Consume { item, n } => self.host_consume(from, item, n),
+            Msg::InventoryCheck { items } => {
+                if self.peer_rate_ok(from, "check", 1.0) {
+                    self.host_inventory_check(from, items);
+                }
+            }
             // Joined players have no business sending anything else.
             _ => self.strike(from),
         }
@@ -650,7 +679,7 @@ impl Game {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, .. } => {
                 if let Some(p) = self.peers.get_mut(&id) {
                     p.target = pos;
                     p.yaw = yaw;
@@ -668,8 +697,10 @@ impl Game {
                 if valid_item(item) && n > 0 {
                     self.msg(format!("Loot: {n}x {}", item_name(item)));
                     self.give(item, n);
+                    self.inv_sync.note_host(item, n as i64);
                 }
             }
+            Msg::Inventory { items } => self.apply_inventory(items),
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
@@ -700,9 +731,10 @@ impl Game {
                 }
                 if let Some((item, n)) = take {
                     self.inv.remove(item, n as u32);
+                    self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } => {}
         }
     }
 
@@ -791,7 +823,7 @@ impl Game {
             if p.hurt > 0.2 {
                 flags |= FLAG_HURT;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held() };
             self.net_send_msg(m);
         }
         if self.is_host() {
@@ -1046,7 +1078,7 @@ mod tests {
 
         // Teleporting across the map is refused and the client is put back.
         // (NaN positions never get this far: the decoder drops the connection.)
-        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0 });
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0 });
         for _ in 0..20 {
             host.update(0.016, &idle());
             std::thread::sleep(Duration::from_millis(4));
@@ -1066,6 +1098,13 @@ mod tests {
         let (fx, fy, fz) = (x, ground, z + 1);
         host.world.set(fx, fy, fz, FARMLAND);
         client.world.set_remote(fx, fy, fz, FARMLAND);
+        client.net_send_msg(Msg::Interact { x: fx, y: fy, z: fz, item: SOIL_PROBE });
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(!client.messages.iter().any(|m| m.0.contains("N 60")), "no probe, no reading");
+        host.give_peer(id, SOIL_PROBE, 1);
         client.net_send_msg(Msg::Interact { x: fx, y: fy, z: fz, item: SOIL_PROBE });
         assert!(pump(&mut host, &mut client, |_, c| c.messages.iter().any(|m| m.0.contains("N 60 P 60 K 60"))));
 
@@ -1087,6 +1126,93 @@ mod tests {
         }
         let locked = join(&mut host, port, "Guesser", "correct horse").err().unwrap_or_default();
         assert!(locked.contains("Too many wrong passwords"), "{locked}");
+    }
+
+
+    #[test]
+    fn inventories_are_checked_by_the_host() {
+        let mut host = Game::new(780, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Crafty", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).map(|p| p.target.distance(spawn) < 1.0).unwrap_or(false)));
+        let (x, z) = (spawn.x.floor() as i32 + 1, spawn.z.floor() as i32 + 1);
+        let top = host.world.surface_y(x, z);
+        for y in top + 1..top + 4 {
+            host.world.set(x, y, z, AIR);
+            client.world.set_remote(x, y, z, AIR);
+        }
+
+        // Placing a block they don't have: refused and undone.
+        client.inv.slots[0] = Some((BRICK, 5)); // conjured by a modified client
+        client.world.set(x, top + 1, z, BRICK);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get(x, top + 1, z) == AIR));
+        assert_eq!(host.world.get(x, top + 1, z), AIR);
+
+        // ...and the next inventory check takes the fake bricks away.
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BRICK) == 0), "fake items survived the check");
+
+        // Items the host really gave can be placed, and are used up in its ledger.
+        host.give_peer(id, DIRT, 3);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DIRT) == 3));
+        client.world.set(x, top + 1, z, DIRT);
+        client.inv.remove(DIRT, 1);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == DIRT));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIRT), 2);
+
+        // Breaking pays out the block's drop on both sides (dirt digs quickly by hand).
+        client.break_block(IVec3::new(x, top + 1, z), true);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get(x, top + 1, z) == AIR));
+        assert!(host.peers[&id].ledger.bag.count(DIRT) >= 3);
+        assert_eq!(client.inv.count(DIRT), 3);
+
+        // Mining faster than bare hands allow is refused: stone takes ~7.5s by hand.
+        let stone = IVec3::new(x, top - 1, z);
+        host.world.set_v(stone, STONE);
+        client.world.set_remote(stone.x, stone.y, stone.z, STONE);
+        client.world.set_v(stone - IVec3::Y, AIR); // an instant first dig...
+        client.world.set_v(stone, AIR); // ...then the stone straight away
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(stone) == STONE), "insta-mined stone stuck");
+        assert_eq!(host.world.get_v(stone), STONE);
+
+        // Crafting with conjured ingredients doesn't count; the check corrects it.
+        client.inv.add(DIAMOND, 3);
+        client.inv.add(STICK, 2);
+        let recipe = recipes().iter().position(|r| r.output.0 == PICK_DIAMOND).unwrap();
+        assert!(client.inv.craft(&recipes()[recipe]));
+        client.net_send_msg(Msg::Craft { recipe: recipe as u16, times: 1 });
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(PICK_DIAMOND) == 0 && c.inv.count(DIAMOND) == 0));
+        assert_eq!(host.peers[&id].ledger.bag.count(PICK_DIAMOND), 0);
+
+        // Honest crafting goes through: 1 log -> 4 planks.
+        host.give_peer(id, LOG, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(LOG) == 1));
+        let recipe = recipes().iter().position(|r| r.inputs == vec![(LOG, 1)]).unwrap();
+        assert!(client.inv.craft(&recipes()[recipe]));
+        client.net_send_msg(Msg::Craft { recipe: recipe as u16, times: 1 });
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.bag.count(PLANKS) == 4));
+        // Nothing to correct: the counts agree after a few checks.
+        for _ in 0..400 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(client.inv.count(PLANKS), 4);
+        assert_eq!(client.inv.counts(), host.peers[&id].ledger.bag.items().into_iter().collect(), "client and host agree");
+
+        // A sword they don't own doesn't hit any harder than a fist.
+        client.inv.slots[client.inv.selected] = Some((SWORD_DIAMOND, 1)); // conjured
+        let mut m = Mob::new(MobKind::Mooer, spawn + Vec3::new(1.5, 0.0, 0.0), &mut host.rng);
+        m.id = 777;
+        host.mobs.push(m);
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.held == SWORD_DIAMOND));
+        let before = host.mobs.iter().find(|m| m.id == 777).unwrap().health;
+        client.net_send_msg(Msg::Attack { mob: 777, dmg: 12.0, from: spawn });
+        assert!(pump(&mut host, &mut client, |h, _| h.mobs.iter().find(|m| m.id == 777).map(|m| m.health < before).unwrap_or(true)));
+        let after = host.mobs.iter().find(|m| m.id == 777).map(|m| m.health).unwrap_or(before - 99.0);
+        assert!(before - after <= attack_damage(AIR) * 1.5 + 1e-3, "hit for {}", before - after);
     }
 
 }

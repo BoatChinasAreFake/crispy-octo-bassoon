@@ -12,7 +12,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v2: challenge/response login. v3: the host sends its mods to joining players.
 /// v4: script effects (UseItem, Effect). v5: two-byte block/item ids, new mobs.
 /// v6: mob sizes, arrows in flight, and the bow (Shoot).
-/// v7: farming and fishing (Interact, Catch), stricter hosts.
+/// v7: farming and fishing (Interact, Catch), stricter hosts, and host-checked
+/// inventories (held item in PlayerState, Craft, Consume, InventoryCheck, Inventory).
 pub const PROTOCOL: u32 = 7;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
@@ -62,7 +63,8 @@ pub enum Msg {
     PlayerJoin { id: u32, name: String },
     PlayerLeave { id: u32 },
     /// Both directions; the host fills in `id` when relaying.
-    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8 },
+    /// `held` is the item in hand (the host only believes it if the player owns one).
+    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id },
     /// Mobs, primed TNT (position, fuse) and arrows in flight (position, velocity).
     Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)> },
     /// client -> host
@@ -91,6 +93,14 @@ pub enum Msg {
     Interact { x: i32, y: i32, z: i32, item: Id },
     /// client -> host: reeled in a fish at `pos` (the host decides what it is).
     Catch { pos: Vec3, bait: bool },
+    /// client -> host: crafted recipe number `recipe` this many times.
+    Craft { recipe: u16, times: u8 },
+    /// client -> host: used up items (eating, a pearl, yeeting with Q, ...).
+    Consume { item: Id, n: u8 },
+    /// client -> host: "here's what I think I have" (item counts).
+    InventoryCheck { items: Vec<(Id, u32)> },
+    /// host -> client: what you actually have (sent when a check doesn't match).
+    Inventory { items: Vec<(Id, u32)> },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -233,13 +243,14 @@ impl Msg {
                 w.u8(6);
                 w.u32(*id);
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held } => {
                 w.u8(7);
                 w.u32(*id);
                 w.v3(*pos);
                 w.f32(*yaw);
                 w.f32(*pitch);
                 w.u8(*flags);
+                w.u16(*held);
             }
             Msg::Mobs { mobs, tnts, arrows } => {
                 w.u8(8);
@@ -354,6 +365,24 @@ impl Msg {
                 w.v3(*pos);
                 w.u8(*bait as u8);
             }
+            Msg::Craft { recipe, times } => {
+                w.u8(25);
+                w.u16(*recipe);
+                w.u8(*times);
+            }
+            Msg::Consume { item, n } => {
+                w.u8(26);
+                w.u16(*item);
+                w.u8(*n);
+            }
+            Msg::InventoryCheck { items } | Msg::Inventory { items } => {
+                w.u8(if matches!(self, Msg::InventoryCheck { .. }) { 27 } else { 28 });
+                w.u32(items.len() as u32);
+                for &(id, n) in items {
+                    w.u16(id);
+                    w.u32(n);
+                }
+            }
         }
         w.0
     }
@@ -383,7 +412,7 @@ impl Msg {
             }
             5 => Msg::PlayerJoin { id: r.u32()?, name: r.str()? },
             6 => Msg::PlayerLeave { id: r.u32()? },
-            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()? },
+            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()? },
             8 => {
                 let n = r.count(31)?;
                 let mut mobs = Vec::with_capacity(n);
@@ -427,6 +456,19 @@ impl Msg {
             22 => Msg::Shoot { pos: r.v3()?, dir: r.v3()? },
             23 => Msg::Interact { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()? },
             24 => Msg::Catch { pos: r.v3()?, bait: r.u8()? != 0 },
+            25 => Msg::Craft { recipe: r.u16()?, times: r.u8()? },
+            26 => Msg::Consume { item: r.u16()?, n: r.u8()? },
+            t @ (27 | 28) => {
+                let n = r.count(6)?;
+                if n > 4096 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "inventory too long"));
+                }
+                let mut items = Vec::with_capacity(n);
+                for _ in 0..n {
+                    items.push((r.u16()?, r.u32()?));
+                }
+                if t == 27 { Msg::InventoryCheck { items } } else { Msg::Inventory { items } }
+            }
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -852,7 +894,11 @@ mod tests {
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0) },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
-            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING },
+            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003 },
+            Msg::Craft { recipe: 12, times: 64 },
+            Msg::Consume { item: 0x8005, n: 1 },
+            Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },
+            Msg::Inventory { items: vec![] },
             Msg::Mobs {
                 mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4 }],
                 tnts: vec![(Vec3::Z, 2.0)],

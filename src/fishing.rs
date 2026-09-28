@@ -500,16 +500,18 @@ impl Game {
         let Some(peer) = self.peers.get(&from) else { return };
         let near = peer.target.distance(pos) < 42.0;
         let wet = (0..2).any(|dy| self.world.get(pos.x.floor() as i32, pos.y.floor() as i32 - dy, pos.z.floor() as i32) == WATER);
-        if !near || !wet || !pos.is_finite() {
+        if !near || !wet || !pos.is_finite() || !self.peer_has(from, ROD) {
             return;
         }
         // Real fishing takes a few seconds per fish.
         if !self.peer_rate_ok(from, "catch", 2.5) {
             return;
         }
+        // Bait only counts if they really had some (and then it's used up).
+        let bait = bait && self.peer_take(from, BAIT, 1);
         let c = roll_catch(&self.world, pos, self.time, 0, bait, &mut self.rng);
         self.system_message(Some(from), &catch_line(&c, false));
-        self.net_send_to(from, Msg::Give { item: c.item, n: c.n });
+        self.give_peer(from, c.item, c.n);
     }
 }
 

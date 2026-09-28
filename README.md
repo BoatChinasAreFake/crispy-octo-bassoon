@@ -148,8 +148,12 @@ On a cloud server, allow TCP port 25565 in its firewall or security group.
   - At most three connections per address (except from the same computer).
   - Five wrong passwords lock an address out for ten minutes.
   - Connections that go silent for 30 seconds, or don't finish logging in within 15 seconds, are dropped.
-- **Still trusted:** each player's inventory lives on their own machine, so a modified client can still place blocks it doesn't really have (within the rules above). Don't run a public server for people you'd never trust with creative mode.
-- **Saving and leaving:** only the host or server saves. Players' inventories and positions are not saved on the server. If the host leaves, everyone returns to the title screen.
+- **Inventories:** each player's inventory lives on their own machine, so using it feels instant, but the host keeps a ledger of what every player really owns. It builds the ledger only from what it has seen happen: blocks they broke (the host rolls the random drops), loot and catches it sent, recipes it let them craft, blocks they placed, arrows they shot and food they ate.
+  - Placing, planting, crafting, shooting, fishing and fertilising all need the items in the ledger. Hoes, rods and probes must be owned, and a sword only hits harder if you really have it.
+  - Mining can't go faster than the tools you really own allow.
+  - Every few seconds each player's game compares counts with the host. If a modified client has conjured items, the host's numbers win.
+  - Creative worlds skip all of this, since everything is free there anyway.
+- **Saving and leaving:** only the host or server saves. Players' inventories and positions are not saved on the server (a player who rejoins starts fresh). If the host leaves, everyone returns to the title screen.
 - **Addresses:** the host listens on IPv4 and, where available, IPv6. Addresses can be `IP`, `IP:port`, `[IPv6]:port` or a hostname like `play.example.com`.
 
 ## Getting started in survival

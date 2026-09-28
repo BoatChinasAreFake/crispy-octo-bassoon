@@ -1,6 +1,7 @@
 //! 36-slot inventory (first 9 are the hotbar) and shapeless crafting.
 
 use crate::block::*;
+use std::collections::BTreeMap;
 
 pub type Stack = Option<(Id, u8)>;
 
@@ -134,6 +135,39 @@ impl Inventory {
                 self.cursor = if n > 1 { Some((id, n - 1)) } else { None };
             }
             _ => {}
+        }
+    }
+
+    /// How many of each item (the cursor included). Slot layout doesn't matter to the host.
+    pub fn counts(&self) -> BTreeMap<Id, u32> {
+        let mut c = BTreeMap::new();
+        for (id, n) in self.slots.iter().chain(std::iter::once(&self.cursor)).flatten() {
+            *c.entry(*id).or_insert(0) += *n as u32;
+        }
+        c
+    }
+
+    /// Add or remove items until the counts match `target` (the host's word).
+    /// Existing stacks stay where they are as far as possible.
+    pub fn set_counts(&mut self, target: &BTreeMap<Id, u32>) {
+        self.return_cursor();
+        let have = self.counts();
+        for (&id, &n) in &have {
+            let want = target.get(&id).copied().unwrap_or(0);
+            if n > want {
+                self.remove(id, n - want);
+            }
+        }
+        for (&id, &want) in target {
+            let n = have.get(&id).copied().unwrap_or(0);
+            let mut missing = want.saturating_sub(n);
+            while missing > 0 && valid_item(id) {
+                let batch = missing.min(64) as u8;
+                if self.add(id, batch) > 0 {
+                    break; // full
+                }
+                missing -= batch as u32;
+            }
         }
     }
 

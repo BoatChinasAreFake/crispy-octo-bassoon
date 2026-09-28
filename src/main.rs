@@ -9,6 +9,7 @@ mod farming;
 mod fishing;
 mod game;
 mod inventory;
+mod ledger;
 mod mesher;
 mod mods;
 mod multiplayer;
@@ -1668,10 +1669,16 @@ impl App {
                     tooltip = Some(format!("{}x {}  <=  {}", r.output.1, item_name(r.output.0), ins.join(" + ")));
                     if self.ui.clicked && ok {
                         let times = if is_key_down(KeyCode::LeftShift) { 64 } else { 1 };
+                        let mut made = 0u8;
                         for _ in 0..times {
                             if !self.game.inv.craft(r) {
                                 break;
                             }
+                            made += 1;
+                        }
+                        // Joined players: the host checks the ingredients against its ledger.
+                        if self.game.is_client() && !self.game.creative && made > 0 {
+                            self.game.net_send_msg(net::Msg::Craft { recipe: ri as u16, times: made });
                         }
                         let via_gold = r.inputs.iter().any(|&(i, _)| i == GOLD_INGOT) && r.output.0 == PICK_WOOD;
                         self.game.on_crafted(r.output.0, via_gold);

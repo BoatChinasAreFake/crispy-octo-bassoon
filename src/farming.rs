@@ -320,6 +320,26 @@ pub fn decode(b: &[u8]) -> std::collections::HashMap<IVec3, Soil> {
     farm
 }
 
+/// The random part of what breaking a block gives (on top of its fixed drop):
+/// sticks from leaves, coal from gravel, seeds from grass, worms from dirt, and
+/// crop harvests. Rolled wherever the world lives, for everyone.
+pub fn random_drops(id: Id, rng: &mut Rng) -> Vec<(Id, u8)> {
+    if let Some((crop, stage)) = Crop::of_block(id) {
+        return crop.harvest(stage, rng);
+    }
+    let r = rng.f32();
+    match id {
+        LEAVES if r < 0.08 => vec![(STICK, 1)],
+        GRAVEL if r < 0.1 => vec![(COAL, 1)],
+        TALL_GRASS if r < 0.12 => vec![(WHEAT_SEEDS, 1)],
+        TALL_GRASS if r < 0.15 => vec![(CARROT, 1)],
+        TALL_GRASS if r < 0.18 => vec![(POTATO, 1)],
+        WEEDS if r < 0.25 => vec![(WHEAT_SEEDS, 1)],
+        GRASS | DIRT | FARMLAND | FARMLAND_WET if r < 0.04 => vec![(BAIT, 1)],
+        _ => vec![],
+    }
+}
+
 /// Offsets checked for hydrating water: 4 blocks around, level or one up.
 pub fn water_offsets() -> impl Iterator<Item = IVec3> {
     (0..=1).flat_map(|dy| (-4..=4).flat_map(move |dz| (-4..=4).map(move |dx| ivec3(dx, dy, dz))))
@@ -586,10 +606,11 @@ impl Game {
         false
     }
 
-    /// Extra drops when the local player breaks farm-ish things.
-    pub fn farm_drops(&mut self, pos: IVec3, id: Id) -> Vec<(Id, u8)> {
-        if let Some((crop, stage)) = Crop::of_block(id) {
-            if stage == 3 {
+    /// Advancements and remarks when the local player breaks farm-ish things
+    /// (the drops themselves come from `random_drops`).
+    pub fn farm_break_effects(&mut self, pos: IVec3, id: Id) {
+        match Crop::of_block(id) {
+            Some((_, 3)) => {
                 self.advance("green_thumb");
                 let rotated = self.world.farm.get(&(pos - IVec3::Y)).map(|s| s.rotated()).unwrap_or(false);
                 if rotated {
@@ -597,22 +618,8 @@ impl Game {
                     self.msg("Crop rotation bonus! The soil appreciates the variety.");
                 }
             }
-            return crop.harvest(stage, &mut self.rng);
-        }
-        let r = self.rng.f32();
-        match id {
-            TALL_GRASS if r < 0.12 => vec![(WHEAT_SEEDS, 1)],
-            TALL_GRASS if r < 0.15 => vec![(CARROT, 1)],
-            TALL_GRASS if r < 0.18 => vec![(POTATO, 1)],
-            WEEDS => {
-                self.advance("weed_whacker");
-                if r < 0.25 { vec![(WHEAT_SEEDS, 1)] } else { vec![] }
-            }
-            GRASS | DIRT | FARMLAND | FARMLAND_WET if r < 0.04 => {
-                self.msg("You found a Wiggly Worm. The fish will love it.");
-                vec![(BAIT, 1)]
-            }
-            _ => vec![],
+            _ if id == WEEDS => self.advance("weed_whacker"),
+            _ => {}
         }
     }
 

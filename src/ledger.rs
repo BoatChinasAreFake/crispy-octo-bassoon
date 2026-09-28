@@ -1,0 +1,335 @@
+//! Host-checked inventories.
+//!
+//! Each player's inventory lives on their own machine (so using it feels
+//! instant), but the host keeps a *ledger* of how many of each item every
+//! joined player really has, built only from things the host saw happen:
+//! blocks they broke (the host decides the drops), loot and catches it sent
+//! them, recipes it let them craft, blocks they placed, arrows they shot, food
+//! they ate. Anything a player tries that needs an item (placing a block,
+//! planting, crafting, shooting, fishing, fertilising, even hitting harder
+//! with a sword) is checked against the ledger, so a modified client can't
+//! conjure items from nowhere.
+//!
+//! Every few seconds a client reports its counts. If they don't match, the
+//! host sends the true counts back and the client adopts them, keeping any of
+//! its own actions that were still on their way to the host (so nothing
+//! flickers or duplicates when a check and an action cross in flight).
+//!
+//! Creative worlds skip all of this: everything is free there anyway.
+
+use crate::block::*;
+use crate::farming::{is_farmland, Crop};
+use crate::game::Game;
+use crate::net::Msg;
+use std::collections::{BTreeMap, HashMap};
+
+/// Seconds between a client's inventory checks.
+pub const CHECK_SECS: f32 = 3.0;
+/// Mining may run this much faster than the block's break time (lag, rounding).
+const MINING_SLACK: f32 = 0.75;
+/// Leftover mining time carried from one break to the next (batching over TCP).
+const MINING_CARRY: f32 = 1.0;
+
+/// What the host believes one player owns.
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct Bag(HashMap<Id, u32>);
+
+impl Bag {
+    pub fn count(&self, id: Id) -> u32 {
+        self.0.get(&id).copied().unwrap_or(0)
+    }
+    pub fn has(&self, id: Id) -> bool {
+        id != AIR && self.count(id) > 0
+    }
+    pub fn add(&mut self, id: Id, n: u32) {
+        if id != AIR && n > 0 {
+            *self.0.entry(id).or_insert(0) += n;
+        }
+    }
+    /// Remove `n` if they're all there. Returns whether it could.
+    pub fn take(&mut self, id: Id, n: u32) -> bool {
+        match self.0.get_mut(&id) {
+            Some(c) if *c >= n => {
+                *c -= n;
+                if *c == 0 {
+                    self.0.remove(&id);
+                }
+                true
+            }
+            _ => n == 0,
+        }
+    }
+    /// Remove up to `n` (used-up items: never an advantage, so no check needed).
+    pub fn discard(&mut self, id: Id, n: u32) {
+        let have = self.count(id);
+        self.take(id, have.min(n));
+    }
+    pub fn items(&self) -> Vec<(Id, u32)> {
+        let mut v: Vec<(Id, u32)> = self.0.iter().map(|(&k, &n)| (k, n)).collect();
+        v.sort_unstable();
+        v
+    }
+    pub fn matches(&self, items: &[(Id, u32)]) -> bool {
+        items.iter().filter(|(_, n)| *n > 0).count() == self.0.len() && items.iter().all(|&(id, n)| n == 0 || self.count(id) == n)
+    }
+}
+
+/// Per joined player, on the host.
+#[derive(Default)]
+pub struct Ledger {
+    pub bag: Bag,
+    /// What they say they're holding.
+    pub held: Id,
+    /// Game clock of their last block break, and spare mining time carried over.
+    last_break: f32,
+    carry: f32,
+}
+
+/// Client side: bookkeeping for reconciling with the host's counts.
+#[derive(Default)]
+pub struct InvSync {
+    timer: f32,
+    /// Our counts when we sent the last check.
+    at_check: BTreeMap<Id, u32>,
+    /// Items the host gave (+) or took (-) since then.
+    host_delta: BTreeMap<Id, i64>,
+}
+
+impl InvSync {
+    /// The host just gave or took items (they're already in its counts).
+    pub fn note_host(&mut self, id: Id, delta: i64) {
+        *self.host_delta.entry(id).or_insert(0) += delta;
+    }
+}
+
+/// Is turning `old` into `new` breaking something (as opposed to placing, tilling, ...)?
+pub fn is_break(old: Id, new: Id) -> bool {
+    matches!(new, AIR | WATER) && targetable(old) && old != WATER
+}
+
+/// The seed item a crop block is planted from.
+fn seed_of(crop: Crop) -> Id {
+    match crop {
+        Crop::Wheat => WHEAT_SEEDS,
+        Crop::Carrot => CARROT,
+        Crop::Potato => POTATO,
+    }
+}
+
+impl Game {
+    fn ledger(&mut self, from: u32) -> Option<&mut Ledger> {
+        self.peers.get_mut(&from).map(|p| &mut p.ledger)
+    }
+
+    /// The item a player is holding, if they really own one (else bare hands).
+    pub fn verified_held(&self, from: u32) -> Id {
+        match self.peers.get(&from) {
+            Some(p) if self.creative || p.ledger.bag.has(p.ledger.held) => p.ledger.held,
+            _ => AIR,
+        }
+    }
+
+    /// Does this player own at least one? (Always yes in creative.)
+    pub fn peer_has(&self, from: u32, id: Id) -> bool {
+        self.creative || self.peers.get(&from).map(|p| p.ledger.bag.has(id)).unwrap_or(false)
+    }
+
+    /// Use up one of the player's items; false if they don't have it. (Free in creative.)
+    pub fn peer_take(&mut self, from: u32, id: Id, n: u32) -> bool {
+        if self.creative {
+            return true;
+        }
+        self.ledger(from).map(|l| l.bag.take(id, n)).unwrap_or(false)
+    }
+
+    /// Give a joined player items: into the ledger, then over the network.
+    pub fn give_peer(&mut self, from: u32, item: Id, n: u8) {
+        if n == 0 || !valid_item(item) {
+            return;
+        }
+        if let Some(l) = self.ledger(from) {
+            l.bag.add(item, n as u32);
+        }
+        self.net_send_to(from, Msg::Give { item, n });
+    }
+
+    /// Take items from a joined player (scripts' `take`): the ledger, then theirs.
+    pub fn take_peer(&mut self, from: u32, item: Id, n: u8) {
+        if let Some(l) = self.ledger(from) {
+            l.bag.discard(item, n as u32);
+        }
+        self.net_send_to(from, Msg::Effect { heal: 0.0, teleport: None, launch: None, take: Some((item, n)) });
+    }
+
+    pub fn set_peer_held(&mut self, from: u32, held: Id) {
+        if let Some(l) = self.ledger(from) {
+            l.held = held;
+        }
+    }
+
+    /// Check a joined player's block edit against what they own, and account
+    /// for it: breaking pays out drops (at no more than mining speed), placing
+    /// and planting cost the item, tilling needs a hoe. False: refuse the edit.
+    pub fn ledger_edit(&mut self, from: u32, old: Id, new: Id) -> bool {
+        if self.creative {
+            return true;
+        }
+        let held = self.verified_held(from);
+        if is_break(old, new) {
+            let (t, drops) = break_time(old, held);
+            if !t.is_finite() {
+                return false;
+            }
+            let clock = self.clock;
+            let Some(l) = self.ledger(from) else { return false };
+            let available = (clock - l.last_break).max(0.0) + l.carry;
+            let needed = t * MINING_SLACK;
+            if available < needed {
+                return false; // faster than their tools allow
+            }
+            l.last_break = clock;
+            l.carry = (available - needed).min(MINING_CARRY);
+            // The same drop their game gives itself, into the ledger...
+            if drops {
+                l.bag.add(block(old).drop, 1);
+            }
+            // ...and anything random is rolled here and sent to them.
+            if drops {
+                for (item, n) in crate::farming::random_drops(old, &mut self.rng) {
+                    self.give_peer(from, item, n);
+                }
+                let on_break: &'static [Action] = &block(old).on_break;
+                for a in on_break {
+                    if let Action::Give(item, n) = a {
+                        self.give_peer(from, *item, *n);
+                    }
+                }
+            }
+            return true;
+        }
+        if is_farmland(new) && !is_farmland(old) {
+            return self.peer_has(from, HOE);
+        }
+        if let Some((crop, 0)) = Crop::of_block(new) {
+            return self.peer_take(from, seed_of(crop), 1);
+        }
+        if replaceable(old) && !matches!(new, AIR | WATER) {
+            return self.peer_take(from, new, 1);
+        }
+        // Trampling, melting, water flowing, sponges drinking: nothing to pay.
+        true
+    }
+
+    /// A joined player crafted: apply it to the ledger, as far as their items allow.
+    pub fn host_craft(&mut self, from: u32, recipe: u16, times: u8) {
+        if self.creative {
+            return;
+        }
+        let Some(r) = recipes().get(recipe as usize) else { return };
+        let r = r.clone();
+        let Some(l) = self.ledger(from) else { return };
+        for _ in 0..times.min(64) {
+            if !r.inputs.iter().all(|&(id, n)| l.bag.count(id) >= n as u32) {
+                break;
+            }
+            for &(id, n) in &r.inputs {
+                l.bag.take(id, n as u32);
+            }
+            l.bag.add(r.output.0, r.output.1 as u32);
+        }
+    }
+
+    /// A joined player used things up (eating, yeeting, ...).
+    pub fn host_consume(&mut self, from: u32, item: Id, n: u8) {
+        if let Some(l) = self.ledger(from) {
+            l.bag.discard(item, n as u32);
+        }
+    }
+
+    /// A joined player's periodic "here's what I have": correct them if they're wrong.
+    pub fn host_inventory_check(&mut self, from: u32, items: Vec<(Id, u32)>) {
+        if self.creative {
+            return;
+        }
+        let Some(l) = self.ledger(from) else { return };
+        if !l.bag.matches(&items) {
+            let items = l.bag.items();
+            self.net_send_to(from, Msg::Inventory { items });
+        }
+    }
+
+    // ---------------------------------------------------------- client side
+
+    /// Use up the held item (eating, throwing, yeeting). Joined players tell the
+    /// host, which keeps its ledger in step.
+    pub fn use_up_held(&mut self) {
+        let held = self.inv.held();
+        if held == AIR {
+            return;
+        }
+        self.inv.consume_held();
+        if self.is_client() && !self.creative {
+            self.net_send_msg(Msg::Consume { item: held, n: 1 });
+        }
+    }
+
+    /// Joined players in survival: send our counts every few seconds.
+    pub fn inventory_sync_tick(&mut self, dt: f32) {
+        if !self.is_client() || self.creative {
+            return;
+        }
+        self.inv_sync.timer += dt;
+        if self.inv_sync.timer < CHECK_SECS {
+            return;
+        }
+        self.inv_sync.timer = 0.0;
+        let counts = self.inv.counts();
+        let items = counts.iter().map(|(&k, &n)| (k, n)).collect();
+        self.inv_sync.at_check = counts;
+        self.inv_sync.host_delta.clear();
+        self.net_send_msg(Msg::InventoryCheck { items });
+    }
+
+    /// The host says our counts were wrong: adopt its numbers, plus whatever we've
+    /// done ourselves since the check (still on its way to the host).
+    pub fn apply_inventory(&mut self, items: Vec<(Id, u32)>) {
+        let now = self.inv.counts();
+        let mut target: BTreeMap<Id, u32> = items.into_iter().filter(|(id, _)| valid_item(*id)).collect();
+        let keys: Vec<Id> = now.keys().chain(self.inv_sync.at_check.keys()).chain(self.inv_sync.host_delta.keys()).copied().collect();
+        for id in keys {
+            let ours = now.get(&id).copied().unwrap_or(0) as i64
+                - self.inv_sync.at_check.get(&id).copied().unwrap_or(0) as i64
+                - self.inv_sync.host_delta.get(&id).copied().unwrap_or(0);
+            if ours != 0 {
+                let e = target.entry(id).or_insert(0);
+                *e = (*e as i64 + ours).max(0) as u32;
+            }
+        }
+        target.retain(|_, n| *n > 0);
+        self.inv.set_counts(&target);
+        self.inv_sync.at_check = self.inv.counts();
+        self.inv_sync.host_delta.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bags_count() {
+        let mut b = Bag::default();
+        b.add(COBBLE, 3);
+        assert!(b.take(COBBLE, 2));
+        assert!(!b.take(COBBLE, 2), "not enough");
+        assert_eq!(b.count(COBBLE), 1);
+        b.discard(COBBLE, 5);
+        assert!(!b.has(COBBLE));
+        b.add(STICK, 4);
+        assert!(b.matches(&[(STICK, 4)]));
+        assert!(b.matches(&[(STICK, 4), (DIRT, 0)]));
+        assert!(!b.matches(&[(STICK, 4), (DIRT, 1)]));
+        assert!(!b.matches(&[]));
+        assert!(!b.has(AIR));
+    }
+}

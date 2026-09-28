@@ -106,6 +106,8 @@ pub struct Game {
     pub fish_log: crate::fishing::FishLog,
     /// Seconds since the last farm tick (see farming.rs).
     pub farm_timer: f32,
+    /// Joined players: keeping our inventory in step with the host's ledger (see ledger.rs).
+    pub inv_sync: crate::ledger::InvSync,
 }
 
 impl Game {
@@ -172,6 +174,7 @@ impl Game {
             bobber: None,
             fish_log: Default::default(),
             farm_timer: 0.0,
+            inv_sync: Default::default(),
         }
     }
 
@@ -455,6 +458,7 @@ impl Game {
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
         self.update_fishing(dt, c.use_held);
+        self.inventory_sync_tick(dt);
         self.update_entities(dt);
         self.script_tick(dt);
     }
@@ -564,14 +568,14 @@ impl Game {
                     if self.is_local_player(&p) {
                         self.give(item, n);
                     } else if let Some(id) = self.peer_by_name(&p) {
-                        self.net_send_to(id, Msg::Give { item, n });
+                        self.give_peer(id, item, n);
                     }
                 }
                 Cmd::Take(p, item, n) => {
                     if self.is_local_player(&p) {
                         self.inv.remove(item, n as u32);
                     } else if let Some(id) = self.peer_by_name(&p) {
-                        self.net_send_to(id, effect(0.0, None, None, Some((item, n))));
+                        self.take_peer(id, item, n);
                     }
                 }
                 Cmd::Heal(p, n) => {
@@ -738,7 +742,7 @@ impl Game {
         self.hurt_player(2.0, "teleported directly into a bad decision");
         self.advance("rude_teleport");
         if !self.creative {
-            self.inv.consume_held();
+            self.use_up_held();
         }
     }
 
@@ -968,7 +972,7 @@ impl Game {
         if c.drop {
             let held = self.inv.held();
             if held != AIR {
-                self.inv.consume_held();
+                self.use_up_held();
                 self.msg(format!("Yeeted 1x {} into the void.", item_name(held)));
             }
         }
@@ -994,7 +998,7 @@ impl Game {
             }
         }
         if held == PUFFER {
-            self.inv.consume_held();
+            self.use_up_held();
             self.sfx(Sfx::Eat, None);
             self.player.hurt = 0.0;
             self.hurt_player(4.0, "ate a Pufferfish. It said 'Do Not Eat' right on it");
@@ -1004,7 +1008,7 @@ impl Game {
         if held == STEW {
             // Suspicious for a reason.
             let heal = self.rng.range(-3.0, 8.0).round();
-            self.inv.consume_held();
+            self.use_up_held();
             self.sfx(Sfx::Eat, None);
             if heal < 0.0 {
                 self.player.hurt = 0.0;
@@ -1020,7 +1024,7 @@ impl Game {
             let m = crate::fishing::BOTTLE_MESSAGES[self.rng.int(0, crate::fishing::BOTTLE_MESSAGES.len() as i32 - 1) as usize];
             self.msg(format!("The message reads: {m}"));
             if !self.creative {
-                self.inv.consume_held();
+                self.use_up_held();
             }
             return;
         }
@@ -1028,7 +1032,7 @@ impl Game {
             if self.player.health < MAX_HEALTH || self.creative {
                 self.player.health = (self.player.health + heal).min(MAX_HEALTH);
                 if !self.creative {
-                    self.inv.consume_held();
+                    self.use_up_held();
                 }
                 self.sfx(Sfx::Eat, None);
                 self.msg(match held {
@@ -1055,7 +1059,7 @@ impl Game {
             self.run_actions(actions, at);
             self.player.swing = 1.0;
             if consume && !self.creative {
-                self.inv.consume_held();
+                self.use_up_held();
             }
             return;
         }
@@ -1184,16 +1188,19 @@ impl Game {
             if d != AIR {
                 self.give(d, 1);
             }
-            if id == LEAVES && self.rng.chance(0.08) {
-                self.give(STICK, 1);
+            // The random extras are rolled where the world lives; joined players
+            // get theirs from the host (see ledger.rs).
+            if !self.is_client() {
+                for (item, n) in crate::farming::random_drops(id, &mut self.rng) {
+                    match item {
+                        COAL => self.msg("Found coal in the gravel. Don't ask."),
+                        BAIT => self.msg("You found a Wiggly Worm. The fish will love it."),
+                        _ => {}
+                    }
+                    self.give(item, n);
+                }
             }
-            if id == GRAVEL && self.rng.chance(0.1) {
-                self.give(COAL, 1);
-                self.msg("Found coal in the gravel. Don't ask.");
-            }
-            for (item, n) in self.farm_drops(pos, id) {
-                self.give(item, n);
-            }
+            self.farm_break_effects(pos, id);
         }
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
@@ -1233,7 +1240,9 @@ impl Game {
                     self.player.fall_start = self.player.body.pos.y;
                 }
                 Action::Message(m) => self.msg(*m),
-                Action::Give(item, n) => self.give(*item, *n),
+                // Joined players' items come from the host, which runs the same action.
+                Action::Give(item, n) if !self.is_client() => self.give(*item, *n),
+                Action::Give(..) => {}
                 Action::SetTime(t) => {
                     if self.is_client() {
                         self.msg("Only the host can change the time.");
@@ -1566,7 +1575,7 @@ impl Game {
                     for (item, n) in drops.into_iter().flatten() {
                         if remote {
                             if !self.creative {
-                                self.net_send_to(m.last_attacker, Msg::Give { item, n });
+                                self.give_peer(m.last_attacker, item, n);
                             }
                         } else if !self.creative {
                             self.msg(format!("{} dropped {}x {}", m.kind.name(), n, item_name(item)));
