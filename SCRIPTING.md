@@ -52,7 +52,7 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `time()`, `is_night()` | Time of day 0–1 (0 = sunrise, 0.25 = noon, 0.5 = sunset) |
 | `mobs_near(x, y, z, radius)` | Number of mobs within the radius |
 | `random()`, `random_int(lo, hi)` | Random numbers |
-| `get_var(key)`, `set_var(key, value)` | Your mod's memory: any value, kept until the world closes |
+| `get_var(key)`, `set_var(key, value)` | Your mod's memory, **saved with the world** (see below). `get_var` returns `()` for a key that was never set |
 
 **Changing the world** (applied right after your event function returns):
 
@@ -73,6 +73,27 @@ Define any of these functions and the game calls them. Returning `false` from th
 
 - **Timing:** changes are queued, so `get_block` right after `set_block` in the same event still sees the old block.
 - **Errors throw changes away:** if an event hits an error, none of its queued changes are applied, so a crash halfway through can't leave half a building behind.
+
+## Saved variables
+
+- **What's saved:** everything a mod stores with `set_var` is written into the world's save file and restored before `on_load` the next time the world opens. That makes homes, kill counts, "already claimed" flags, quest progress and so on permanent.
+- **When it's saved:** whenever the world is:
+  - in single player: **Save World**, or quitting;
+  - on a multiplayer host: the host saving;
+  - on a dedicated server: every 5 minutes, and on `stop`.
+- **What can be saved:** `()`, true/false, whole numbers, decimals, text, single characters, blobs, arrays and maps, nested inside each other up to 32 levels, and up to 8 MB per mod.
+- **What can't:** function pointers and closures (`Fn("name")`, `|x| ...`). Variables holding them are skipped with a chat message rather than failing the save.
+- **Mods switched off:** variables belong to the mod's folder name. If a mod is switched off or missing when a world loads, its saved variables are kept and written back untouched, so turning a mod off for a while doesn't lose its data. Renaming a mod's folder does start it fresh.
+- **Starting over:** to reset a mod's data, overwrite each variable, for example with `set_var("key", ())`.
+
+```rust
+fn on_chat(player, text) {
+    if text == "/sethome" {
+        set_var(`home_${player}`, player_pos(player));   // survives restarts
+        return false;
+    }
+}
+```
 
 ## Rhai in 30 seconds
 
@@ -105,6 +126,5 @@ Errors appear in chat, in the console, and on the Mods screen (errors when loadi
 
 ## Limitations
 
-- **Memory isn't saved:** `get_var`/`set_var` memory lasts until the world closes, so homes and kill counts reset on restart.
 - **Joined players:** scripts can read a joined player's position but not their inventory or health.
 - **Scripts can't define new mob types, UI screens or rendering.** Those need a Rust change.

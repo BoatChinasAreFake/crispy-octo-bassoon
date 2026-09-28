@@ -93,6 +93,8 @@ pub struct Game {
     pub dedicated: bool,
     /// Script mods (only where the world lives: single player, host, server).
     pub scripts: Option<ScriptHost>,
+    /// Script variables loaded from the save, handed to the scripts when they start.
+    saved_script_vars: Vec<(String, Vec<u8>)>,
 }
 
 impl Game {
@@ -152,11 +154,13 @@ impl Game {
             net_error: None,
             dedicated: false,
             scripts: None,
+            saved_script_vars: Vec::new(),
         }
     }
 
     pub fn from_save(d: SaveData) -> Self {
         let mut g = Game::new(d.seed, d.creative, false);
+        g.saved_script_vars = d.script_vars.clone();
         let remap = palette_remap(reg(), &d.palette);
         g.world.mods = d.mods;
         if let Some(remap) = &remap {
@@ -198,6 +202,7 @@ impl Game {
             slots: self.inv.slots.to_vec(),
             mods: self.world.mods.clone(),
             palette: mod_palette(reg()),
+            script_vars: self.export_script_vars(),
         }
     }
 
@@ -370,14 +375,23 @@ impl Game {
 
     /// Load the active mods' scripts and run their `on_load`.
     pub fn start_scripts(&mut self) {
+        self.start_scripts_with(&crate::mods::active_sources());
+    }
+
+    pub fn start_scripts_with(&mut self, sources: &[crate::mods::ModSource]) {
         if self.is_client() || self.menu || self.scripts.is_some() {
             return;
         }
-        let (host, problems) = ScriptHost::new(&crate::mods::active_sources());
+        let (mut host, mut problems) = ScriptHost::new(sources);
+        // Variables saved with this world come back before on_load runs.
+        problems.extend(host.import_vars(&std::mem::take(&mut self.saved_script_vars)));
         for p in problems {
             self.msg(format!("Script error {p}"));
         }
-        if !host.is_empty() {
+        if host.is_empty() {
+            // No scripts running, but keep any saved variables for next time.
+            self.saved_script_vars = host.export_vars().0;
+        } else {
             let ids = host.mod_ids().join(", ");
             self.scripts = Some(host);
             if self.dedicated {
@@ -385,6 +399,16 @@ impl Game {
             }
             self.fire("on_load", vec![]);
         }
+    }
+
+    /// Script variables for the save file (running mods plus kept data of absent ones).
+    fn export_script_vars(&mut self) -> Vec<(String, Vec<u8>)> {
+        let Some(host) = &self.scripts else { return self.saved_script_vars.clone() };
+        let (vars, skipped) = host.export_vars();
+        for s in skipped {
+            self.msg(format!("Script variable not saved: {s}"));
+        }
+        vars
     }
 
     /// Run a script event. Returns false if a script cancelled the default action.
@@ -1618,6 +1642,59 @@ mod tests {
         g.inv.selected = g.inv.slots.iter().position(|s| s.map(|s| s.0) == Some(DIAMOND)).unwrap();
         g.use_item();
         assert_eq!(g.player.body.vel.y, 20.0);
+    }
+
+    #[test]
+    fn script_variables_survive_saving_and_loading() {
+        use crate::mods::ModSource;
+        let mut files = std::collections::BTreeMap::new();
+        files.insert(
+            "main.rhai".to_string(),
+            br#"
+            fn on_load() {
+                let loads = get_var("loads");
+                if loads == () { loads = 0; }
+                set_var("loads", loads + 1);
+            }
+            fn on_chat(player, text) {
+                if text == "/sethome" { set_var(`home_${player}`, [10.5, 70.0, -4.5]); return false; }
+                if text == "/home" {
+                    let h = get_var(`home_${player}`);
+                    if h == () { message(player, "no home"); } else { teleport(player, h[0], h[1], h[2]); }
+                    message(player, `loads=${get_var("loads")}`);
+                    return false;
+                }
+            }
+            "#
+            .to_vec(),
+        );
+        let src = vec![ModSource { id: "homes".into(), files }];
+        let dir = std::env::temp_dir().join(format!("minceraft-vars-{}", std::process::id()));
+        let path = dir.join("world.mncr");
+
+        let mut g = Game::new(33, false, false);
+        g.start_scripts_with(&src);
+        g.send_chat("/sethome");
+        crate::save::write_to(&path, &g.to_save()).unwrap();
+
+        // Reopen the world: the home and the load counter are still there.
+        let mut back = Game::from_save(crate::save::read_from(&path).unwrap());
+        back.start_scripts_with(&src);
+        back.send_chat("/home");
+        assert_eq!(back.player.body.pos, Vec3::new(10.5, 70.0, -4.5));
+        assert!(back.messages.iter().any(|m| m.0 == "loads=2"), "{:?}", back.messages);
+
+        // Opened once with the mod switched off, then saved: the data must survive.
+        let mut without = Game::from_save(crate::save::read_from(&path).unwrap());
+        without.start_scripts_with(&[]);
+        crate::save::write_to(&path, &without.to_save()).unwrap();
+        let mut again = Game::from_save(crate::save::read_from(&path).unwrap());
+        again.start_scripts_with(&src);
+        again.send_chat("/home");
+        // Loaded by the first save (1), the mod-less session didn't run on_load, now 2.
+        assert!(again.messages.iter().any(|m| m.0 == "loads=2"), "{:?}", again.messages);
+        assert_eq!(again.player.body.pos, Vec3::new(10.5, 70.0, -4.5));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

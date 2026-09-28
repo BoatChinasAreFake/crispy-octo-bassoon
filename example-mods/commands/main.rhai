@@ -2,6 +2,8 @@
 // Scripts run where the world lives (single player, the host, or a dedicated
 // server), so these commands work for everyone in multiplayer too.
 // Language: Rhai (https://rhai.rs/book). Game API: SCRIPTING.md.
+// Everything stored with set_var (homes, kits taken, kill counts) is saved
+// with the world, so it's still there after a restart.
 
 fn on_load() {
     log("Handy Commands loaded. Type /help in chat.");
