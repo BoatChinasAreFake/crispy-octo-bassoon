@@ -446,7 +446,12 @@ pub fn is_solid(id: Id) -> bool {
 #[inline]
 pub fn blocks_sky(id: Id) -> bool {
     let b = block(id);
-    !matches!(b.model, Empty | Cross) && !b.see_through
+    !matches!(b.model, Empty | Cross) && !b.see_through && !dapples_sky(id)
+}
+/// Foliage: lets dappled sunlight through instead of blocking it (see `world::exposure`).
+#[inline]
+pub fn dapples_sky(id: Id) -> bool {
+    id == LEAVES
 }
 /// Can the player point at it (and break it)?
 #[inline]

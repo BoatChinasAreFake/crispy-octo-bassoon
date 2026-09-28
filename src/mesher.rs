@@ -3,7 +3,7 @@
 
 use crate::block::*;
 use crate::texture::tile_uv;
-use crate::world::{idx, Chunk, World, CH, CW};
+use crate::world::{exposure, idx, Chunk, World, CH, CW};
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -51,6 +51,11 @@ pub const FACES: [([i32; 3], [[f32; 3]; 4], f32); 6] = [
 ];
 const CORNER_UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
 const AO_CURVE: [f32; 4] = [0.5, 0.68, 0.84, 1.0];
+/// Face shading for foliage (same order as `FACES`). Light scatters through
+/// leaves, so their sides and undersides are much less dark than solid blocks',
+/// which keeps the dark bottom face and the brighter faces seen through its holes
+/// from clashing.
+const FOLIAGE_SHADE: [f32; 6] = [0.9, 0.9, 1.0, 0.8, 0.95, 0.95];
 /// Tiny inset keeps nearest-neighbour sampling inside the tile.
 const UV_EPS: f32 = 1.0 / 4096.0;
 
@@ -94,11 +99,13 @@ impl<'a> Hood<'a> {
     }
     #[inline]
     fn sky(&self, lx: i32, y: i32, lz: i32) -> f32 {
-        let h = match self.chunk_of(lx, lz) {
-            (Some(c), x, z) => c.heights[(z * CW + x) as usize] as i32,
-            _ => 0,
-        };
-        if y >= h { 1.0 } else { (1.0 - (h - y) as f32 * 0.09).max(0.0) }
+        match self.chunk_of(lx, lz) {
+            (Some(c), x, z) => {
+                let i = (z * CW + x) as usize;
+                exposure(c.heights[i] as i32, c.canopy[i] as i32, y)
+            }
+            _ => 1.0,
+        }
     }
 }
 
@@ -124,7 +131,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
 
     // Only walk the vertical span that contains anything.
     let mut max_y = 0;
-    for h in me.heights.iter() {
+    for h in me.canopy.iter() {
         max_y = max_y.max(*h as i32);
     }
     let max_y = (max_y + 2).min(CH);
@@ -192,6 +199,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 continue;
                             }
                             let tile = face_tile(id, f);
+                            let shade = if dapples_sky(id) { &FOLIAGE_SHADE[f] } else { shade };
                             let axis = if n[0] != 0 { 0 } else if n[1] != 0 { 1 } else { 2 };
                             let (t1, t2) = match axis {
                                 0 => (1, 2),

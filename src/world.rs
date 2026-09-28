@@ -23,18 +23,47 @@ pub struct Chunk {
     pub blocks: PalettedBlocks,
     /// Per column: one above the highest sky-blocking block.
     pub heights: [u8; 256],
+    /// Per column: one above the highest block that blocks or dapples sunlight
+    /// (so at least `heights`; higher where there are leaves).
+    pub canopy: [u8; 256],
 }
 
+/// How much sky a cell sees, from its column's heights: full sky above everything,
+/// dappled shade under foliage, and fading light below solid blocks.
+#[inline]
+pub fn exposure(height: i32, canopy: i32, y: i32) -> f32 {
+    if y < height {
+        (1.0 - (height - y) as f32 * 0.09).max(0.0)
+    } else if y < canopy {
+        CANOPY_SHADE
+    } else {
+        1.0
+    }
+}
+
+/// Light under leaves. Foliage scatters light rather than stopping it, so shade
+/// under a tree is gentle (and the undersides of leaves aren't pitch black at dusk).
+pub const CANOPY_SHADE: f32 = 0.8;
+
 impl Chunk {
+    /// A chunk whose heightmaps still need `recompute_heights`.
+    pub fn new(blocks: PalettedBlocks) -> Chunk {
+        Chunk { blocks, heights: [0; 256], canopy: [0; 256] }
+    }
     fn recompute_height(&mut self, lx: i32, lz: i32) {
-        let mut h = 0;
+        let (mut h, mut canopy) = (0, 0);
         for y in (0..CH).rev() {
-            if blocks_sky(self.blocks.get(idx(lx, y, lz))) {
+            let id = self.blocks.get(idx(lx, y, lz));
+            if canopy == 0 && (blocks_sky(id) || dapples_sky(id)) {
+                canopy = y + 1;
+            }
+            if blocks_sky(id) {
                 h = y + 1;
                 break;
             }
         }
         self.heights[(lz * CW + lx) as usize] = h as u8;
+        self.canopy[(lz * CW + lx) as usize] = canopy as u8;
     }
     fn recompute_heights(&mut self) {
         for lz in 0..CW {
@@ -364,7 +393,7 @@ impl World {
     pub fn stream(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
         while let Ok((cx, cz, blocks)) = self.res_rx.try_recv() {
             self.pending.remove(&(cx, cz));
-            let mut chunk = Chunk { blocks, heights: [0; 256] };
+            let mut chunk = Chunk::new(blocks);
             if let Some(m) = self.mods.get(&(cx, cz)) {
                 for (&i, &id) in m {
                     chunk.blocks.set(i as usize, id);
@@ -454,18 +483,15 @@ impl World {
         self.get(p.x, p.y, p.z)
     }
 
-    /// Height of the first air above the highest sky-blocking block.
-    pub fn sky_height(&self, x: i32, z: i32) -> i32 {
-        match self.chunks.get(&(x.div_euclid(CW), z.div_euclid(CW))) {
-            Some(c) => c.heights[(z.rem_euclid(CW) * CW + x.rem_euclid(CW)) as usize] as i32,
-            None => 0,
-        }
-    }
-
     /// 0..1 sky exposure of a cell, used for lighting and mob burning/spawning.
     pub fn sky_light(&self, x: i32, y: i32, z: i32) -> f32 {
-        let h = self.sky_height(x, z);
-        if y >= h { 1.0 } else { (1.0 - (h - y) as f32 * 0.09).max(0.0) }
+        match self.chunks.get(&(x.div_euclid(CW), z.div_euclid(CW))) {
+            Some(c) => {
+                let i = (z.rem_euclid(CW) * CW + x.rem_euclid(CW)) as usize;
+                exposure(c.heights[i] as i32, c.canopy[i] as i32, y)
+            }
+            None => 1.0,
+        }
     }
 
     pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
