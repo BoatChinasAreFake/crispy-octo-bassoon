@@ -1,4 +1,5 @@
-//! 36-slot inventory (first 9 are the hotbar) and shapeless crafting.
+//! 36-slot inventory (first 9 are the hotbar), four armour slots, and
+//! shapeless crafting.
 
 use crate::block::*;
 use std::collections::BTreeMap;
@@ -10,11 +11,13 @@ pub struct Inventory {
     pub selected: usize,
     /// Stack held by the mouse cursor while the inventory screen is open.
     pub cursor: Stack,
+    /// Worn armour: helmet, chestplate, leggings, boots.
+    pub armor: [Stack; 4],
 }
 
 impl Inventory {
     pub fn new() -> Self {
-        Inventory { slots: [None; 36], selected: 0, cursor: None }
+        Inventory { slots: [None; 36], selected: 0, cursor: None, armor: [None; 4] }
     }
 
     pub fn held(&self) -> Id {
@@ -49,12 +52,27 @@ impl Inventory {
         count
     }
 
+    /// How many more of `item` would fit.
+    pub fn room_for(&self, item: Id) -> u32 {
+        let max = max_stack(item) as u32;
+        self.slots
+            .iter()
+            .map(|s| match s {
+                None => max,
+                Some((id, n)) if *id == item => max.saturating_sub(*n as u32),
+                _ => 0,
+            })
+            .sum()
+    }
+
     pub fn count(&self, item: Id) -> u32 {
         self.slots.iter().flatten().filter(|s| s.0 == item).map(|s| s.1 as u32).sum()
     }
 
+    /// Take items away: from the inventory first, then (for the host's
+    /// corrections and scripts) from what's worn.
     pub fn remove(&mut self, item: Id, mut count: u32) {
-        for s in self.slots.iter_mut().rev() {
+        for s in self.slots.iter_mut().rev().chain(self.armor.iter_mut()) {
             if let Some((id, n)) = s {
                 if *id == item {
                     let take = (count.min(*n as u32)) as u8;
@@ -114,7 +132,7 @@ impl Inventory {
     /// How many of each item (the cursor included). Slot layout doesn't matter to the host.
     pub fn counts(&self) -> BTreeMap<Id, u32> {
         let mut c = BTreeMap::new();
-        for (id, n) in self.slots.iter().chain(std::iter::once(&self.cursor)).flatten() {
+        for (id, n) in self.slots.iter().chain(std::iter::once(&self.cursor)).chain(self.armor.iter()).flatten() {
             *c.entry(*id).or_insert(0) += *n as u32;
         }
         c
@@ -142,6 +160,33 @@ impl Inventory {
                 missing -= batch as u32;
             }
         }
+    }
+
+    /// Total armour points being worn.
+    pub fn armor_points(&self) -> u32 {
+        self.armor.iter().flatten().map(|(id, _)| armor_points(*id) as u32).sum()
+    }
+
+    /// Wear the armour in inventory slot `i` (swapping out whatever was worn there).
+    /// Returns whether it was armour.
+    pub fn equip(&mut self, i: usize) -> bool {
+        let Some((id, _)) = self.slots[i] else { return false };
+        let Some((slot, _)) = armor_of(id) else { return false };
+        std::mem::swap(&mut self.slots[i], &mut self.armor[slot]);
+        true
+    }
+
+    /// Clicked armour slot `slot`: only the right kind of armour goes in.
+    pub fn click_armor(&mut self, slot: usize) {
+        if self.cursor.is_some_and(|(id, _)| armor_of(id).map(|(s, _)| s) != Some(slot)) {
+            return;
+        }
+        std::mem::swap(&mut self.armor[slot], &mut self.cursor);
+    }
+
+    /// Worn tiers for other players to see: 4 bits per slot, tier + 1 (0 = nothing).
+    pub fn armor_look(&self) -> u16 {
+        self.armor.iter().enumerate().map(|(i, s)| s.and_then(|(id, _)| armor_of(id)).map(|(_, t)| (t as u16 + 1) << (i * 4)).unwrap_or(0)).sum()
     }
 
     /// Put whatever the cursor holds back into the inventory.

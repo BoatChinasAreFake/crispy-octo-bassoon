@@ -36,13 +36,23 @@ impl Body {
     }
 }
 
-fn collides(world: &World, min: Vec3, max: Vec3) -> Option<(i32, i32, i32)> {
+/// The first block box overlapping the box `min..max`, in world coordinates.
+fn collides(world: &World, min: Vec3, max: Vec3) -> Option<(Vec3, Vec3)> {
     const E: f32 = 1e-4;
     for y in (min.y + E).floor() as i32..=(max.y - E).floor() as i32 {
         for z in (min.z + E).floor() as i32..=(max.z - E).floor() as i32 {
             for x in (min.x + E).floor() as i32..=(max.x - E).floor() as i32 {
-                if is_solid(world.get(x, y, z)) {
-                    return Some((x, y, z));
+                let id = world.get(x, y, z);
+                if !is_solid(id) {
+                    continue;
+                }
+                let cell = Vec3::new(x as f32, y as f32, z as f32);
+                let (boxes, n) = block_boxes(id);
+                for &(a, b) in &boxes[..n] {
+                    let (bmin, bmax) = (cell + Vec3::from_array(a), cell + Vec3::from_array(b));
+                    if min.x < bmax.x - E && max.x > bmin.x + E && min.y < bmax.y - E && max.y > bmin.y + E && min.z < bmax.z - E && max.z > bmin.z + E {
+                        return Some((bmin, bmax));
+                    }
                 }
             }
         }
@@ -59,20 +69,40 @@ fn move_axis(world: &World, b: &mut Body, axis: usize, d: f32) -> bool {
     let mut blocked = false;
     // A few iterations handle standing on block corners.
     for _ in 0..3 {
-        let Some((x, y, z)) = collides(world, b.min(), b.max()) else { break };
+        let Some((bmin, bmax)) = collides(world, b.min(), b.max()) else { break };
         blocked = true;
-        let cell = [x, y, z][axis] as f32;
         let (neg, pos_ext) = if axis == 1 { (0.0, b.height) } else { (b.half, b.half) };
         if d > 0.0 {
-            b.pos[axis] = cell - pos_ext - 1e-3;
+            b.pos[axis] = bmin[axis] - pos_ext - 1e-3;
         } else {
-            b.pos[axis] = cell + 1.0 + neg + 1e-3;
+            b.pos[axis] = bmax[axis] + neg + 1e-3;
         }
     }
     if blocked {
         b.vel[axis] = 0.0;
     }
     blocked
+}
+
+/// Walking into something at most this tall (a slab, a stair) climbs it.
+pub const STEP_UP: f32 = 0.55;
+
+/// Try a horizontal move lifted by up to `STEP_UP`; keeps it only if that got further.
+fn step_up(world: &World, b: &mut Body, axis: usize, d: f32) -> bool {
+    let before = b.clone();
+    b.pos.y += STEP_UP;
+    if collides(world, b.min(), b.max()).is_some() {
+        *b = before;
+        return false;
+    }
+    let blocked = move_axis(world, b, axis, d);
+    if blocked || (b.pos[axis] - before.pos[axis]).abs() < 1e-3 {
+        *b = before;
+        return false;
+    }
+    // Settle back down onto the step.
+    move_axis(world, b, 1, -STEP_UP);
+    true
 }
 
 pub fn has_support(world: &World, pos: Vec3, half: f32) -> bool {
@@ -92,10 +122,17 @@ pub fn move_body(world: &World, b: &mut Body, dt: f32, edge_guard: bool) {
         if move_axis(world, b, 1, sd.y) && sd.y < 0.0 {
             b.on_ground = true;
         }
+        let grounded = b.on_ground || has_support(world, b.pos, b.half);
         for axis in [0, 2] {
             let before = b.pos;
+            let snapshot = b.clone();
             if move_axis(world, b, axis, sd[axis]) {
-                b.hit_wall = true;
+                let mut lifted = snapshot;
+                if grounded && step_up(world, &mut lifted, axis, sd[axis]) {
+                    *b = lifted;
+                } else {
+                    b.hit_wall = true;
+                }
             }
             if edge_guard && !has_support(world, b.pos, b.half * 0.9) && has_support(world, before, b.half * 0.9) {
                 b.pos = before;
@@ -787,6 +824,49 @@ pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky:
             * Mat4::from_scale(Vec3::from_array(p.size));
         geo.cube(&m, p.tiles, sky, [0.0, 0.0, 1.0, 1.0]);
     }
+}
+
+/// One box of worn armour: min, size, pivot, and the limb it follows.
+type ArmorPiece = ([f32; 3], [f32; 3], [f32; 3], Limb);
+
+/// Worn armour over the player model (`look` from `Inventory::armor_look`):
+/// slightly larger boxes that follow the same limbs.
+pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, anim: f32, sky: f32) {
+    if look == 0 {
+        return;
+    }
+    let tier = |slot: usize| (look >> (slot * 4)) & 0xF;
+    let mut parts = Vec::new();
+    let mut add = |slot: usize, list: &[ArmorPiece]| {
+        let t = tier(slot);
+        if t == 0 || t > 4 {
+            return;
+        }
+        for &(min, size, pivot, limb) in list {
+            parts.push(part(min, size, pivot, limb, [T_ARMOR_WORN + t - 1; 6]));
+        }
+    };
+    let arm = [0.0, 1.4, 0.0];
+    let hip = [0.0, 0.75, 0.0];
+    add(HELMET, &[([-0.3, 1.45, -0.3], [0.6, 0.6, 0.6], [0.0; 3], Limb::Fixed)]);
+    add(
+        CHESTPLATE,
+        &[
+            ([-0.29, 0.73, -0.165], [0.58, 0.79, 0.33], [0.0; 3], Limb::Fixed),
+            ([-0.54, 1.1, -0.165], [0.33, 0.42, 0.33], arm, Limb::Swing(-1.0)),
+            ([0.21, 1.1, -0.165], [0.33, 0.42, 0.33], arm, Limb::Swing(1.0)),
+        ],
+    );
+    add(
+        LEGGINGS,
+        &[
+            ([-0.28, 0.66, -0.155], [0.56, 0.12, 0.31], [0.0; 3], Limb::Fixed),
+            ([-0.28, 0.3, -0.155], [0.31, 0.48, 0.31], hip, Limb::Swing(1.0)),
+            ([-0.03, 0.3, -0.155], [0.31, 0.48, 0.31], hip, Limb::Swing(-1.0)),
+        ],
+    );
+    add(BOOTS, &[([-0.29, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(1.0)), ([-0.04, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(-1.0))]);
+    draw_model(geo, root, &parts, anim, sky, true);
 }
 
 pub struct Particle {

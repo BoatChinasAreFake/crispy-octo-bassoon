@@ -65,8 +65,14 @@ pub const CHEST: Id = 57;
 pub const FURNACE: Id = 58;
 /// A furnace while it's burning (it glows); the same container.
 pub const FURNACE_LIT: Id = 59;
+/// Slabs: `SLAB_FIRST + material * 2 + top` (see `MATERIALS`). The bottom one is the item.
+pub const SLAB_FIRST: Id = 60;
+/// Stairs: `STAIRS_FIRST + material * 4 + facing`. The north-facing one is the item.
+pub const STAIRS_FIRST: Id = 66;
+/// Door halves: `DOOR_FIRST + facing * 4 + open * 2 + top`. Placed with the `DOOR` item.
+pub const DOOR_FIRST: Id = 78;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 60;
+pub const NUM_BLOCKS: Id = 94;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -126,8 +132,135 @@ pub const COOKED_SALMON: Id = FIRST_ITEM + 55;
 pub const BAKED_POTATO: Id = FIRST_ITEM + 56;
 pub const COOKED_PUFFER: Id = FIRST_ITEM + 57;
 pub const COOKED_BOOT: Id = FIRST_ITEM + 58;
+pub const DOOR: Id = FIRST_ITEM + 59;
+/// Armour: `ARMOR_FIRST + tier * 4 + slot` (see `armor_of`).
+pub const ARMOR_FIRST: Id = FIRST_ITEM + 60;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 59;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 76;
+
+/// What slabs and stairs are made of: the full block, and its name.
+pub const MATERIALS: [(Id, &str); 3] = [(PLANKS, "Planks"), (COBBLE, "Cobblestun"), (STONE_BRICKS, "Stone Brick")];
+
+pub const fn slab(material: usize, top: bool) -> Id {
+    SLAB_FIRST + material as Id * 2 + top as Id
+}
+pub const fn stairs(material: usize, facing: u8) -> Id {
+    STAIRS_FIRST + material as Id * 4 + facing as Id
+}
+pub const fn door(facing: u8, open: bool, top: bool) -> Id {
+    DOOR_FIRST + facing as Id * 4 + open as Id * 2 + top as Id
+}
+
+/// Armour slots, in order.
+pub const HELMET: usize = 0;
+pub const CHESTPLATE: usize = 1;
+pub const LEGGINGS: usize = 2;
+pub const BOOTS: usize = 3;
+/// Armour points per tier (wool, iron, gold, dimond) and slot. 20 points is
+/// Minecraft's full dimond set; each point takes 4% off most damage.
+pub const ARMOR_POINTS: [[u8; 4]; 4] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3]];
+
+/// (slot, tier) of an armour item.
+pub fn armor_of(id: Id) -> Option<(usize, usize)> {
+    (ARMOR_FIRST..ARMOR_FIRST + 16).contains(&id).then(|| (((id - ARMOR_FIRST) % 4) as usize, ((id - ARMOR_FIRST) / 4) as usize))
+}
+
+pub fn armor_points(id: Id) -> u8 {
+    armor_of(id).map(|(slot, tier)| ARMOR_POINTS[tier][slot]).unwrap_or(0)
+}
+
+/// Facings: 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shape {
+    Full,
+    Slab { top: bool },
+    /// `facing` is the side the high step is on.
+    Stairs { facing: u8 },
+    /// Closed, the panel sits on the `facing` side of its cell.
+    Door { facing: u8, open: bool, top: bool },
+}
+
+/// An axis-aligned box inside a block cell, in 0..1 coordinates.
+pub type Aabb = ([f32; 3], [f32; 3]);
+
+const DOOR_T: f32 = 3.0 / 16.0;
+
+/// The thin panel along one side of a cell.
+fn side_box(facing: u8) -> Aabb {
+    match facing % 4 {
+        0 => ([0.0, 0.0, 0.0], [1.0, 1.0, DOOR_T]),
+        1 => ([1.0 - DOOR_T, 0.0, 0.0], [1.0, 1.0, 1.0]),
+        2 => ([0.0, 0.0, 1.0 - DOOR_T], [1.0, 1.0, 1.0]),
+        _ => ([0.0, 0.0, 0.0], [DOOR_T, 1.0, 1.0]),
+    }
+}
+
+/// The half of a cell toward `facing`, between heights `y0` and `y1`.
+fn half_box(facing: u8, y0: f32, y1: f32) -> Aabb {
+    match facing % 4 {
+        0 => ([0.0, y0, 0.0], [1.0, y1, 0.5]),
+        1 => ([0.5, y0, 0.0], [1.0, y1, 1.0]),
+        2 => ([0.0, y0, 0.5], [1.0, y1, 1.0]),
+        _ => ([0.0, y0, 0.0], [0.5, y1, 1.0]),
+    }
+}
+
+impl Shape {
+    /// Up to two boxes (the count is the second value).
+    pub fn boxes(self) -> ([Aabb; 2], usize) {
+        let full = ([0.0; 3], [1.0; 3]);
+        match self {
+            Shape::Full => ([full, full], 1),
+            Shape::Slab { top: false } => ([([0.0; 3], [1.0, 0.5, 1.0]), full], 1),
+            Shape::Slab { top: true } => ([([0.0, 0.5, 0.0], [1.0; 3]), full], 1),
+            Shape::Stairs { facing } => ([([0.0; 3], [1.0, 0.5, 1.0]), half_box(facing, 0.5, 1.0)], 2),
+            Shape::Door { facing, open, .. } => ([side_box(if open { facing + 3 } else { facing }), full], 1),
+        }
+    }
+}
+
+/// Collision and targeting boxes of a block (a full cube for most).
+#[inline]
+pub fn block_boxes(id: Id) -> ([Aabb; 2], usize) {
+    block(id).shape.boxes()
+}
+
+pub fn is_door(id: Id) -> bool {
+    (DOOR_FIRST..DOOR_FIRST + 16).contains(&id)
+}
+
+/// A door half's (facing, open, top).
+pub fn door_state(id: Id) -> Option<(u8, bool, bool)> {
+    is_door(id).then(|| {
+        let k = id - DOOR_FIRST;
+        ((k / 4) as u8, k & 2 != 0, k & 1 != 0)
+    })
+}
+
+/// A slab's (material, top).
+pub fn slab_of(id: Id) -> Option<(usize, bool)> {
+    (SLAB_FIRST..STAIRS_FIRST).contains(&id).then(|| (((id - SLAB_FIRST) / 2) as usize, (id - SLAB_FIRST) % 2 == 1))
+}
+
+/// A stair's (material, facing).
+pub fn stairs_of(id: Id) -> Option<(usize, u8)> {
+    (STAIRS_FIRST..DOOR_FIRST).contains(&id).then(|| (((id - STAIRS_FIRST) / 4) as usize, ((id - STAIRS_FIRST) % 4) as u8))
+}
+
+/// The item a player spends to place block `id` (None: not something players
+/// place directly; door tops come free with their bottom half).
+pub fn placing_item(id: Id) -> Option<Id> {
+    if let Some((m, _)) = slab_of(id) {
+        return Some(slab(m, false));
+    }
+    if let Some((m, _)) = stairs_of(id) {
+        return Some(stairs(m, 0));
+    }
+    if let Some((_, _, top)) = door_state(id) {
+        return (!top).then_some(DOOR);
+    }
+    (id != AIR && valid_block(id) && block(id).creative).then_some(id)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -135,6 +268,8 @@ pub enum Model {
     Cube,
     Cross,
     Liquid,
+    /// Slabs, stairs and doors: the boxes of its `shape`.
+    Shaped,
 }
 
 /// Something a mod can make happen when an item is used or a block is broken.
@@ -181,6 +316,8 @@ pub struct BlockDef {
     pub on_break: Vec<Action>,
     /// Shown in the creative palette.
     pub creative: bool,
+    /// Its boxes, for `Model::Shaped` blocks (everything else is a full cube).
+    pub shape: Shape,
 }
 
 pub struct ItemDef {
@@ -307,6 +444,7 @@ pub(crate) fn def(key: &'static str, name: &'static str, model: Model, solid: bo
         speed: 1.0,
         on_break: Vec::new(),
         creative: true,
+        shape: Shape::Full,
     }
 }
 
@@ -384,6 +522,51 @@ impl Registry {
         let mut lit = def("furnace_lit", "Furnace (Toasty)", Cube, true, true, [T_FURNACE_TOP, T_FURNACE_LIT, T_FURNACE_TOP], 3.5, 1, true, FURNACE, 13.0, S_STONE);
         lit.creative = false;
         blocks.push(lit);
+        // Slabs and stairs of each material: they look like it and dig like it.
+        let props: Vec<([u16; 3], f32, u8, bool, u8)> = MATERIALS
+            .iter()
+            .map(|(full, _)| {
+                let b = &blocks[*full as usize];
+                (b.tex, b.hardness, b.pick_tier, b.pick_block, b.sound)
+            })
+            .collect();
+        let variant = |m: usize, key: String, name: String, shape: Shape, creative: bool| {
+            let (tex, hardness, tier, pick, sound) = props[m];
+            let mut d = def(leak(&key), leak(&name), Shaped, true, false, tex, hardness, tier, pick, AIR, 0.0, sound);
+            d.shape = shape;
+            d.creative = creative;
+            d
+        };
+        let base_key = ["planks", "cobblestone", "stone_brick"];
+        for (m, (_, name)) in MATERIALS.iter().enumerate() {
+            for top in [false, true] {
+                let key = format!("{}_slab{}", base_key[m], if top { "_top" } else { "" });
+                let label = format!("{name} Slab{}", if top { " (Upside Down)" } else { " (Half the Commitment)" });
+                let mut d = variant(m, key, label, Shape::Slab { top }, !top);
+                d.drop = slab(m, false);
+                blocks.push(d);
+            }
+        }
+        for (m, (_, name)) in MATERIALS.iter().enumerate() {
+            for facing in 0..4u8 {
+                let key = format!("{}_stairs{}", base_key[m], ["", "_east", "_south", "_west"][facing as usize]);
+                let mut d = variant(m, key, format!("{name} Stairs (Up, Mostly)"), Shape::Stairs { facing }, facing == 0);
+                d.drop = stairs(m, 0);
+                blocks.push(d);
+            }
+        }
+        for facing in 0..4u8 {
+            for open in [false, true] {
+                for top in [false, true] {
+                    let key = format!("door_{}_{}_{}", ["north", "east", "south", "west"][facing as usize], if open { "open" } else { "closed" }, if top { "top" } else { "bottom" });
+                    let tile = if top { T_DOOR_TOP } else { T_DOOR_BOTTOM };
+                    let mut d = def(leak(&key), "Door (Opens Both Ways, Emotionally)", Shaped, true, false, [tile; 3], 1.5, 0, false, DOOR, 0.0, S_WOOD);
+                    d.shape = Shape::Door { facing, open, top };
+                    d.creative = false;
+                    blocks.push(d);
+                }
+            }
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
@@ -460,7 +643,19 @@ impl Registry {
             ItemDef { food: Some(6.0), ..item("baked_potato", "Baked Spud (Redeemed)", T_BAKED_POTATO) },
             ItemDef { food: Some(-2.0), ..item("cooked_pufferfish", "Cooked Pufferfish (Still Do Not Eat)", T_COOKED_PUFFER) },
             ItemDef { food: Some(1.0), stack: 1, ..item("cooked_boot", "Cooked Boot (Chewy)", T_COOKED_BOOT) },
+            ItemDef { stack: 16, ..item("door", "Door (Opens Both Ways, Emotionally)", T_DOOR_ITEM) },
         ]);
+        let armor_names = [
+            ["Woolly Hat (Hand-Knitted)", "Woolly Jumper (Itchy)", "Woolly Trousers (Very Itchy)", "Woolly Socks (For Sandals)"],
+            ["Iron Helmet (Bucket With Ambition)", "Iron Chestplate (Clanky)", "Iron Leggings (Squeaky)", "Iron Boots (Loud Walking)"],
+            ["Golden Helmet (Crown-Adjacent)", "Golden Chestplate (Soft, Shiny)", "Golden Leggings (Why)", "Golden Boots (Bling Toes)"],
+            ["Dimond Helmet (Flex)", "Dimond Chestplate (Maximum Flex)", "Dimond Leggings (Rich Knees)", "Dimond Boots (Sparkly Stomping)"],
+        ];
+        for (t, tier) in ["wool", "iron", "golden", "diamond"].iter().enumerate() {
+            for (slot, part) in ["helmet", "chestplate", "leggings", "boots"].iter().enumerate() {
+                items.push(ItemDef { stack: 1, ..item(leak(&format!("{tier}_{part}")), armor_names[t][slot], T_ARMOR_ITEMS + (t * 4 + slot) as u16) });
+            }
+        }
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -514,7 +709,19 @@ impl Registry {
             r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),
             r(&[(PLANKS, 8)], (CHEST, 1)),
             r(&[(COBBLE, 8)], (FURNACE, 1)),
+            r(&[(PLANKS, 6)], (DOOR, 3)),
         ];
+        let mut recipes = recipes;
+        for (m, (full, _)) in MATERIALS.iter().enumerate() {
+            recipes.push(r(&[(*full, 3)], (slab(m, false), 6)));
+            recipes.push(r(&[(*full, 6)], (stairs(m, 0), 4)));
+        }
+        // Minecraft's amounts: 5 for a helmet, 8 chestplate, 7 leggings, 4 boots.
+        for (t, material) in [WOOL, IRON, GOLD_INGOT, DIAMOND].into_iter().enumerate() {
+            for (slot, n) in [5, 8, 7, 4].into_iter().enumerate() {
+                recipes.push(r(&[(material, n)], (ARMOR_FIRST + (t * 4 + slot) as Id, 1)));
+            }
+        }
         Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new() }
     }
 
@@ -574,7 +781,7 @@ pub fn is_solid(id: Id) -> bool {
 #[inline]
 pub fn blocks_sky(id: Id) -> bool {
     let b = block(id);
-    !matches!(b.model, Empty | Cross) && !b.see_through && !dapples_sky(id)
+    !matches!(b.model, Empty | Cross) && !b.see_through && !dapples_sky(id) && !is_door(id)
 }
 /// Foliage: lets dappled sunlight through instead of blocking it (see `world::exposure`).
 #[inline]

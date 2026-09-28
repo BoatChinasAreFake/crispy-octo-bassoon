@@ -29,7 +29,7 @@ Run the tests with `cargo test --release`.
 - **Dynamic lighting.** Torches and Glowrock light the area around them, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
-- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 50 crafting recipes, food, cooking, chests, beds, a bow, farming, fishing, death and respawn.
+- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 73 crafting recipes, food, cooking, chests, armour, beds, a bow, farming, fishing, death and respawn.
 - **Creative mode.** Flight, instant breaking, infinite blocks, pick-block and a full item palette.
 - **Mobs** (legally distinct):
   - **Oinker**: wanders around, runs when hit, drops Raw Oinkchop.
@@ -59,9 +59,12 @@ Run the tests with `cargo test --release`.
 
   Meanwhile weeds sprout on bare farmland and steal nutrients, Clucksters peck at seedlings unless a **Scarecrow** is nearby, jumping on farmland tramples it, and dry, unused farmland turns back into dirt. A **Soil Probe** explains all of it in one long sentence. Wheat makes **Bread** and **Hay Bales** (which soften falls).
 - **Fishing (also over-engineered).** Cast a **Fishing Stick** and wait. Fish nibble first (reel in then and you scare them off), then really bite, and you get a moment to reel in. Big fish start a tug-of-war: hold right-click to reel, but ease off before the line tension snaps it. What you catch depends on the biome, the time of day (dawn and dusk are best), the water's size and depth (puddles give boots), bait (**Wiggly Worms**, dug up from dirt) and your **Angler level**. Catches include cod, salmon, tropical fish, pufferfish (don't eat it), junk, treasure, and one legendary fish. The **Fishing Log** in the pause menu keeps count and records the biggest.
-- **Chests and furnaces.** A **Chest (Latches on Every Side)** (8 planks) holds 27 stacks. A **Furnace** (8 cobblestone) has an input, a fuel slot and a take-only output. It cooks one item every 8 seconds while it has fuel, and it glows while lit. It turns raw meat and fish into cooked versions, potatoes into Baked Potatoes, sand into glass, cobblestone into stone, and logs into (legally distinct) coal. Coal, wood, sticks, hay and wooden tools all burn. Cooking a Pufferfish only halves the damage, and a Cooked Boot is still a boot. Right-click to open either one (sneak to place blocks against it), and shift-click to move whole stacks. Furnaces keep cooking while you're away, as long as their chunk is loaded. Breaking either one hands you what was inside. Everything is saved with the world.
+- **Items on the ground.** Broken blocks, mob loot, explosions and broken chests leave their items on the ground, where they bob, slide, merge with matching items nearby, float in water and vanish after five minutes. Walk into them to pick them up (if there's room). **Q** throws one of the held item, **Ctrl+Q** the whole stack, and clicking outside the inventory screen throws whatever's on the cursor. When your inventory is full, new things land at your feet instead of disappearing. Items on the ground are saved with the world.
+- **Armour.** Four slots (helmet, chestplate, leggings, boots) in four tiers: **Woolly** (from wool; the Woolly Socks are for sandals), **Iron** ("Bucket With Ambition"), **Golden** (soft, shiny, why) and **Dimond** ("Maximum Flex"). The recipes use Minecraft's amounts: 5 of the material for a helmet, 8 for a chestplate, 7 for leggings and 4 for boots. Right-click to put a piece on, shift-click it in the inventory, or drop it into its slot beside the inventory. Every armour point takes 4% off damage from mobs, arrows and explosions, up to 80% (a full Dimond set is 20 points). Falling, cactus hugs and poisonous snacks still hurt as usual. Worn armour shows on your character, to other players too, and there's an armour bar above your hearts.
+- **Slabs, stairs and doors.** Slabs and stairs come in Planks, Cobblestun and Stone Brick. Three blocks make 6 slabs and six make 4 stairs. Slabs go on top when you aim at the upper half of something, and a slab placed on a matching slab makes the full block. Stairs face away from you. You walk up slabs and stairs without jumping, and only their real shape gets in your way or gets hit. **Doors** (6 planks make 3) are two blocks tall: right-click to open or close them (sneak to place against one), and breaking either half takes the whole door. Wooden ones burn in furnaces.
+- **Chests and furnaces.** A **Chest (Latches on Every Side)** (8 planks) holds 27 stacks. A **Furnace** (8 cobblestone) has an input, a fuel slot and a take-only output. It cooks one item every 8 seconds while it has fuel, and it glows while lit. It turns raw meat and fish into cooked versions, potatoes into Baked Potatoes, sand into glass, cobblestone into stone, and logs into (legally distinct) coal. Coal, wood, sticks, hay and wooden tools all burn. Cooking a Pufferfish only halves the damage, and a Cooked Boot is still a boot. Right-click to open either one (sneak to place blocks against it), and shift-click to move whole stacks. Furnaces keep cooking while you're away, as long as their chunk is loaded. Breaking either one spills what was inside onto the ground. Everything is saved with the world.
 - **More blocks:** Sandstone (under deserts), Stone Bricks, Mossy Cobblestun, Hay Bale, Bookshelf, Lantern, Mushroom (in forests; two make a Suspicious Stew), Scarecrow and Weeds.
-- **Advancements.** 40 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
+- **Advancements.** 44 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
 - **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, baas, clucks, moos, rattles, skittering, bloops, bow twangs, groans, Hisser hisses, Starer warps, boings, an advancement fanfare, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
 - **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day and chat. Servers can require a password, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
@@ -81,12 +84,12 @@ Run the tests with `cargo test --release`.
 | Shift | Sneak / fly down |
 | Ctrl or R | Sprint |
 | Left mouse | Mine / attack |
-| Right mouse | Place block / eat / light TNT / fire a bow / open a chest or furnace |
+| Right mouse | Place block / eat / light TNT / fire a bow / open a chest, furnace or door / put on armour |
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |
 | T or Enter | Chat, and `/commands` from script mods |
-| Q | Drop (yeet) the held item |
+| Q / Ctrl+Q | Throw one of the held item / the whole stack |
 | F5 | Toggle third person |
 | F3 | Debug info |
 | F11 | Fullscreen |
@@ -154,7 +157,9 @@ On a cloud server, allow TCP port 25565 in its firewall or security group.
   - Placing, planting, crafting, shooting, fishing and fertilising all need the items in the ledger. Hoes, rods and probes must be owned, and a sword only hits harder if you really have it.
   - Mining can't go faster than the tools you really own allow.
   - Every few seconds each player's game compares counts with the host. If a modified client has conjured items, the host's numbers win.
-  - Chests and furnaces live on the host. Players see a copy of whatever they have open, and every move in or out is checked against both the container and the ledger. You can't put in what you don't own, take what isn't there, or reach into a chest from across the map. Whoever breaks a container gets its contents from the host.
+  - Items on the ground live on the host too. Breaking a block puts its drops on the host's ground, and players pick things up by asking the host, which checks they're close enough and have room, then hands them over through the ledger. Throwing (Q) takes the items from the ledger before they land, so you can't throw what you don't have.
+  - Doors and slabs follow the same rules: a door's top half only goes on its own bottom half, opening one is free, and placing stairs, slabs or doors costs the item.
+  - Chests and furnaces live on the host. Players see a copy of whatever they have open, and every move in or out is checked against both the container and the ledger. You can't put in what you don't own, take what isn't there, or reach into a chest from across the map. A broken container spills its contents on the host's ground.
   - Creative worlds skip all of this, since everything is free there anyway.
 - **Saving and leaving:** only the host or server saves. Players' inventories and positions are not saved on the server (a player who rejoins starts fresh). If the host leaves, everyone returns to the title screen.
 - **Addresses:** the host listens on IPv4 and, where available, IPv6. Addresses can be `IP`, `IP:port`, `[IPv6]:port` or a hostname like `play.example.com`.
@@ -180,6 +185,8 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/scripting.rs` | Script mods: sandboxed Rhai engine, events and game API |
 | `src/inventory.rs` | Inventory and crafting |
 | `src/containers.rs` | Chests and furnaces: contents, cooking, host-checked moves |
+| `src/drops.rs` | Items on the ground: physics, merging, pickups, network sync |
+| `src/building.rs` | Slabs, stairs and doors: facing, merging, opening |
 | `src/settings.rs` | `settings.txt` |
 | `src/save.rs` | Binary save format |
 | `src/net.rs` | Network protocol and non-blocking TCP |
@@ -190,6 +197,6 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
 
 Not affiliated with any block-game company.

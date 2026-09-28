@@ -170,7 +170,7 @@ impl Game {
     /// Check a joined player's block edit against what they own, and account
     /// for it: breaking pays out drops (at no more than mining speed), placing
     /// and planting cost the item, tilling needs a hoe. False: refuse the edit.
-    pub fn ledger_edit(&mut self, from: u32, old: Id, new: Id) -> bool {
+    pub fn ledger_edit(&mut self, from: u32, at: macroquad::math::IVec3, old: Id, new: Id) -> bool {
         if self.creative {
             return true;
         }
@@ -189,14 +189,12 @@ impl Game {
             }
             l.last_break = clock;
             l.carry = (available - needed).min(MINING_CARRY);
-            // The same drop their game gives itself, into the ledger...
+            // The drops land on the ground here; they get them by walking into them.
             if drops {
-                l.bag.add(block(old).drop, 1);
-            }
-            // ...and anything random is rolled here and sent to them.
-            if drops {
+                let center = at.as_vec3() + macroquad::math::Vec3::splat(0.5);
+                self.pop_drop(center, block(old).drop, 1);
                 for (item, n) in crate::farming::random_drops(old, &mut self.rng) {
-                    self.give_peer(from, item, n);
+                    self.pop_drop(center, item, n);
                 }
                 let on_break: &'static [Action] = &block(old).on_break;
                 for a in on_break {
@@ -207,6 +205,15 @@ impl Game {
             }
             return true;
         }
+        // Doors swing for free; a slab onto a slab costs the second slab.
+        if is_door(old) && is_door(new) {
+            return true;
+        }
+        if let Some((m, _)) = slab_of(old)
+            && new == MATERIALS[m].0
+        {
+            return self.peer_take(from, slab(m, false), 1);
+        }
         if is_farmland(new) && !is_farmland(old) {
             return self.peer_has(from, HOE);
         }
@@ -214,7 +221,11 @@ impl Game {
             return self.peer_take(from, seed_of(crop), 1);
         }
         if replaceable(old) && !matches!(new, AIR | WATER) {
-            return self.peer_take(from, new, 1);
+            return match placing_item(new) {
+                Some(item) => self.peer_take(from, item, 1),
+                // A door's top half comes with the bottom (edit_allowed checked it's there).
+                None => is_door(new),
+            };
         }
         // Trampling, melting, water flowing, sponges drinking: nothing to pay.
         true

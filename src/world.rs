@@ -596,8 +596,26 @@ impl World {
         let mut normal = IVec3::ZERO;
         let mut t = 0.0;
         while t <= max {
-            if targetable(self.get_v(p)) {
-                return Some(Hit { pos: p, normal, dist: t });
+            let id = self.get_v(p);
+            if targetable(id) {
+                if block(id).model != Model::Shaped {
+                    return Some(Hit { pos: p, normal, dist: t });
+                }
+                // Slabs, stairs, doors: only their boxes count, with the face actually hit.
+                let cell = p.as_vec3();
+                let (boxes, n) = block_boxes(id);
+                let mut best: Option<(f32, IVec3)> = None;
+                for &(a, b) in &boxes[..n] {
+                    if let Some((bt, bn)) = ray_box(origin, dir, cell + Vec3::from_array(a), cell + Vec3::from_array(b))
+                        && bt <= max
+                        && best.map(|(t0, _)| bt < t0).unwrap_or(true)
+                    {
+                        best = Some((bt, bn));
+                    }
+                }
+                if let Some((bt, bn)) = best {
+                    return Some(Hit { pos: p, normal: bn, dist: bt });
+                }
             }
             let axis = if t_max[0] < t_max[1] { if t_max[0] < t_max[2] { 0 } else { 2 } } else if t_max[1] < t_max[2] { 1 } else { 2 };
             t = t_max[axis];
@@ -652,4 +670,35 @@ impl Drop for World {
         // Closing the request channel lets the worker threads exit.
         self.req_tx = None;
     }
+}
+
+/// Ray against a box: distance along `dir` and the normal of the face entered.
+/// A ray starting inside reports distance 0 and a zero normal.
+pub fn ray_box(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<(f32, IVec3)> {
+    let (mut t0, mut t1) = (0.0f32, f32::MAX);
+    let mut normal = IVec3::ZERO;
+    for i in 0..3 {
+        if d[i].abs() < 1e-9 {
+            if o[i] < min[i] || o[i] > max[i] {
+                return None;
+            }
+            continue;
+        }
+        let inv = 1.0 / d[i];
+        let (mut a, mut b) = ((min[i] - o[i]) * inv, (max[i] - o[i]) * inv);
+        let mut n = IVec3::ZERO;
+        n[i] = if d[i] > 0.0 { -1 } else { 1 };
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        if a > t0 {
+            t0 = a;
+            normal = n;
+        }
+        t1 = t1.min(b);
+        if t0 > t1 {
+            return None;
+        }
+    }
+    Some((t0, normal))
 }

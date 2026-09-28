@@ -68,6 +68,9 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
         LOG | PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
         HAY => 45.0,
         STICK | WHEAT => 5.0,
+        DOOR => 10.0,
+        id if slab_of(id).is_some_and(|(m, _)| MATERIALS[m].0 == PLANKS) => 7.5,
+        id if stairs_of(id).is_some_and(|(m, _)| MATERIALS[m].0 == PLANKS) => 15.0,
         BOW | ROD | HOE | PICK_WOOD | SWORD_WOOD => 10.0,
         _ => return None,
     })
@@ -348,16 +351,13 @@ impl Game {
         self.open.map(|p| is_container(self.world.get_v(p))).unwrap_or(false)
     }
 
-    /// Breaking a container hands its contents to whoever broke it.
-    pub fn spill_container(&mut self, pos: IVec3, to_peer: Option<u32>) {
+    /// Breaking a container spills what was inside onto the ground.
+    pub fn spill_container(&mut self, pos: IVec3) {
         let Some(c) = self.world.containers.get_mut(&pos) else { return };
         let contents = c.contents();
         c.slots.iter_mut().for_each(|s| *s = None);
         for (item, n) in contents {
-            match to_peer {
-                Some(id) => self.give_peer(id, item, n),
-                None => self.give(item, n),
-            }
+            self.pop_drop(pos.as_vec3() + Vec3::splat(0.5), item, n);
         }
     }
 

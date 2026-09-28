@@ -120,30 +120,33 @@ impl Ui {
         draw_texture_ex(&self.tex, dx, dy, color, DrawTextureParams { dest_size: Some(vec2(dw, dh)), source: Some(src), ..Default::default() });
     }
 
-    /// Item icon: blocks become a little isometric cube, everything else a flat sprite.
+    /// Item icon: blocks become a little isometric block (slabs and stairs keep
+    /// their shape), everything else a flat sprite.
     pub fn icon(&self, item: Id, x: f32, y: f32, size: f32) {
-        if is_block_item(item) && block(item).model == Model::Cube {
+        if is_block_item(item) && matches!(block(item).model, Model::Cube | Model::Shaped) {
             let t = block(item).tex;
-            let cx = x + size / 2.0;
-            let p = |fx: f32, fy: f32| vec2(x + size * fx, y + size * fy);
-            let top = [p(0.5, 0.04), p(0.95, 0.27), p(0.5, 0.5), p(0.05, 0.27)];
-            let left = [p(0.05, 0.27), p(0.5, 0.5), p(0.5, 0.96), p(0.05, 0.73)];
-            let right = [p(0.5, 0.5), p(0.95, 0.27), p(0.95, 0.73), p(0.5, 0.96)];
-            let _ = cx;
-            let mut verts = Vec::with_capacity(12);
-            let mut idx: Vec<u16> = Vec::with_capacity(18);
-            for (quad, tile, shade, uvs) in [
-                (top, t[0], 1.0, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
-                (left, t[1], 0.78, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
-                (right, t[1], 0.6, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]),
-            ] {
-                let (u0, v0, s) = tile_uv(tile);
-                let b = verts.len() as u16;
-                for (i, q) in quad.iter().enumerate() {
-                    let c = Color::new(shade, shade, shade, 1.0);
-                    verts.push(Vertex::new(q.x, q.y, 0.0, u0 + uvs[i][0] * s, v0 + uvs[i][1] * s, c));
+            // Isometric projection of a point in the unit cell.
+            let p = |bx: f32, by: f32, bz: f32| vec2(x + size * (0.5 + 0.45 * (bx - bz)), y + size * (0.04 + 0.23 * (bx + bz) + 0.46 * (1.0 - by)));
+            let mut verts = Vec::with_capacity(24);
+            let mut idx: Vec<u16> = Vec::with_capacity(36);
+            let (boxes, n) = block_boxes(item);
+            for &(a, b) in &boxes[..n] {
+                // Visible faces: top, the +z side (left) and the +x side (right),
+                // with the part of the tile that box covers.
+                let faces = [
+                    ([p(a[0], b[1], a[2]), p(b[0], b[1], a[2]), p(b[0], b[1], b[2]), p(a[0], b[1], b[2])], t[0], 1.0, [[a[0], a[2]], [b[0], a[2]], [b[0], b[2]], [a[0], b[2]]]),
+                    ([p(a[0], b[1], b[2]), p(b[0], b[1], b[2]), p(b[0], a[1], b[2]), p(a[0], a[1], b[2])], t[1], 0.78, [[a[0], 1.0 - b[1]], [b[0], 1.0 - b[1]], [b[0], 1.0 - a[1]], [a[0], 1.0 - a[1]]]),
+                    ([p(b[0], b[1], b[2]), p(b[0], b[1], a[2]), p(b[0], a[1], a[2]), p(b[0], a[1], b[2])], t[1], 0.6, [[1.0 - b[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - a[1]], [1.0 - b[2], 1.0 - a[1]]]),
+                ];
+                for (quad, tile, shade, uvs) in faces {
+                    let (u0, v0, s) = tile_uv(tile);
+                    let base = verts.len() as u16;
+                    for (i, q) in quad.iter().enumerate() {
+                        let c = Color::new(shade, shade, shade, 1.0);
+                        verts.push(Vertex::new(q.x, q.y, 0.0, u0 + uvs[i][0] * s, v0 + uvs[i][1] * s, c));
+                    }
+                    idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
-                idx.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
             }
             draw_mesh(&Mesh { vertices: verts, indices: idx, texture: Some(self.tex.clone()) });
         } else {
@@ -211,6 +214,17 @@ impl Ui {
                 T_HEART_EMPTY
             };
             self.tile(tile, hx, y, size, WHITE);
+        }
+    }
+
+    /// The armour bar: ten little chestplates, each worth two points.
+    pub fn armor_bar(&self, points: u32, x: f32, y: f32) {
+        let size = 9.0 * self.s;
+        for i in 0..10 {
+            let ax = x + i as f32 * (size - self.s);
+            let v = points as f32 - i as f32 * 2.0;
+            self.tile(T_ARMOR_ICON, ax, y, size, Color::new(0.25, 0.25, 0.25, 0.6));
+            self.tile_part(T_ARMOR_ICON, ax, y, size, (v / 2.0).clamp(0.0, 1.0), false, WHITE);
         }
     }
 
