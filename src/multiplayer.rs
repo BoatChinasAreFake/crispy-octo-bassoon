@@ -376,7 +376,7 @@ impl Game {
             if taken(&name) {
                 name = format!("{}{}", name.chars().take(13).collect::<String>(), from);
             }
-            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.creative, spawn: self.spawn, keep_inventory: self.keep_inventory };
+            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.creative, spawn: self.spawn, keep_inventory: self.rules.keep_inventory };
             let mods: Vec<Msg> = self
                 .world
                 .mods
@@ -388,6 +388,7 @@ impl Game {
                 roster.push(Msg::PlayerJoin { id: self.my_id, name: self.player_name.clone() });
             }
             roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
+            roster.push(self.rules_msg());
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -404,6 +405,21 @@ impl Game {
             self.msg(format!("{name} joined the game"));
             self.fire("on_player_join", vec![name.clone().into()]);
         }
+    }
+
+    fn rules_msg(&self) -> Msg {
+        let r = self.rules;
+        Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle }
+    }
+
+    /// Change the world's rules (the owner's World Settings) and tell everyone.
+    pub fn set_rules(&mut self, rules: crate::rules::WorldRules) {
+        if self.is_client() {
+            return;
+        }
+        self.rules = rules;
+        let m = self.rules_msg();
+        self.net_broadcast(m);
     }
 
     fn host_handle_joined(&mut self, from: u32, m: Msg) {
@@ -474,6 +490,12 @@ impl Game {
             }
             Msg::PlayerState { pos, yaw, pitch, flags, held, armor, .. } => {
                 self.set_peer_held(from, held);
+                let Some(p) = self.peers.get_mut(&from) else { return };
+                // Just died: their experience spills (items come separately, see `drop_everything`).
+                if p.alive() && flags & FLAG_DEAD != 0 {
+                    p.flags = flags;
+                    self.peer_died(from);
+                }
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // No NaNs, nothing absurd, and no teleporting across the map (the
                 // host's own teleports move `target` first, so they pass).
@@ -600,6 +622,11 @@ impl Game {
             }
             Msg::CloseContainer { x, y, z } => self.host_close(from, IVec3::new(x, y, z)),
             Msg::Pickup { id, room } => self.host_pickup(from, id, room),
+            Msg::Repair { x, y, z, item, material, used, combine } => {
+                if self.peer_rate_ok(from, "repair", 0.2) {
+                    self.host_repair(from, IVec3::new(x, y, z), item, material, used, combine);
+                }
+            }
             Msg::DropItem { item, n, wear, scatter } => {
                 // Dying drops a whole inventory at once; throwing is one at a time.
                 if scatter || self.peer_rate_ok(from, "throw", 0.05) {
@@ -744,6 +771,11 @@ impl Game {
             Msg::Inventory { items } => self.apply_inventory(items),
             Msg::Container { x, y, z, slots, burn, cook } => self.apply_container(IVec3::new(x, y, z), slots, burn, cook),
             Msg::Drops(list) => self.apply_drops(list),
+            Msg::Orbs(list) => self.apply_orbs(list),
+            Msg::Xp { points } => self.xp = points.min(1 << 24),
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle } => {
+                self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle };
+            }
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
@@ -777,7 +809,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } => {}
         }
     }
 
@@ -834,6 +866,7 @@ impl Game {
         }
         self.particles.retain(|p| p.life > 0.0);
         self.client_drops(dt);
+        self.client_orbs(dt);
     }
 
     // ------------------------------------------------------------ send
@@ -892,6 +925,7 @@ impl Game {
                 self.net_broadcast(Msg::Mobs { mobs, tnts, arrows });
             }
             self.send_drops(dt);
+            self.send_orbs(dt);
             if self.net_timers[2] <= 0.0 {
                 self.net_timers[2] = 2.0;
                 self.net_broadcast(Msg::Time(self.time));
@@ -943,11 +977,13 @@ mod tests {
     }
 
     /// Keep the client standing on the host's `item` drop (it may still be
-    /// flying) until they hold `want` of them.
+    /// flying) until they hold `want` of them. The host's own player is kept
+    /// well away, or it could get there first.
     fn walk_to_drop(host: &mut Game, client: &mut Game, item: Id, want: u32) {
         for _ in 0..600 {
             if let Some(d) = host.drops.iter().find(|d| d.item == item) {
                 client.player.body.pos = d.body.pos;
+                host.player.body.pos = d.body.pos + Vec3::new(0.0, 0.0, 12.0);
             }
             host.update(0.016, &idle());
             client.update(0.016, &idle());
@@ -1406,6 +1442,84 @@ mod tests {
         assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 0);
         assert_eq!(host.peers[&id].ledger.bag.count(SWORD_STONE), 0);
         client.respawn();
+    }
+
+    #[test]
+    fn experience_anvils_and_rules_through_the_host() {
+        use crate::xp::{level_of, points_for_level};
+        let mut host = Game::new(784, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Smithy", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).map(|p| p.target.distance(spawn) < 1.0).unwrap_or(false)));
+        host.player.body.pos = spawn + Vec3::new(0.0, 0.0, 20.0); // out of the orbs' way
+
+        // Rules come with joining, and follow changes.
+        let mut rules = host.rules;
+        rules.difficulty = crate::rules::Difficulty::Hard;
+        rules.keep_inventory = true;
+        host.set_rules(rules);
+        assert!(pump(&mut host, &mut client, |_, c| c.rules == rules));
+
+        // Orbs near the client are theirs, counted by the host.
+        host.spawn_orbs(spawn + Vec3::new(2.0, 1.0, 0.0), 120);
+        assert!(pump(&mut host, &mut client, |h, c| h.orbs.is_empty() && c.xp == 120));
+        assert_eq!(host.peers[&id].ledger.xp, 120);
+
+        // An anvil repair: the host takes the iron and the levels.
+        let (x, z) = (spawn.x.floor() as i32 + 1, spawn.z.floor() as i32);
+        let anvil = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        host.world.set_v(anvil, ANVIL);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(anvil) == ANVIL));
+        host.give_peer(id, PICK_IRON, 1);
+        host.give_peer(id, IRON, 3);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(PICK_IRON) == 1 && c.inv.count(IRON) == 3));
+        client.open_anvil(anvil);
+        let slot = client.inv.slots.iter().position(|s| *s == Some((PICK_IRON, 1))).unwrap();
+        client.inv.wear[slot] = 120;
+        client.inv.click(slot);
+        client.anvil_click(0, false);
+        let slot = client.inv.slots.iter().position(|s| *s == Some((IRON, 3))).unwrap();
+        client.inv.click(slot);
+        client.anvil_click(1, false);
+        let before = level_of(client.xp).0;
+        client.anvil_take();
+        assert_eq!(client.inv.cursor_wear, 0);
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.bag.count(IRON) == 1));
+        assert_eq!(level_of(host.peers[&id].ledger.xp).0, before - 2);
+        assert!(pump(&mut host, &mut client, |h, c| c.xp == h.peers[&id].ledger.xp));
+        client.inv.cursor = None;
+        client.close_anvil();
+
+        // A repair they can't afford (or with iron they don't have) is refused.
+        host.peers.get_mut(&id).unwrap().ledger.xp = points_for_level(1);
+        for _ in 0..20 {
+            host.update(0.016, &idle()); // past the repair rate limit
+            client.update(0.016, &idle());
+        }
+        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: PICK_IRON, material: IRON, used: 4, combine: false });
+        assert!(pump(&mut host, &mut client, |_, c| c.xp == points_for_level(1)));
+        assert_eq!(host.peers[&id].ledger.bag.count(IRON), 1);
+
+        // Keep-inventory worlds keep experience too; otherwise dying spills it.
+        client.player.hurt = 0.0;
+        client.hurt_player(100.0, "fell on an anvil");
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(host.orbs.is_empty() && host.peers[&id].ledger.xp == points_for_level(1));
+        client.respawn();
+        rules.keep_inventory = false;
+        host.set_rules(rules);
+        assert!(pump(&mut host, &mut client, |h, c| !c.rules.keep_inventory && h.peers[&id].alive()));
+        host.peers.get_mut(&id).unwrap().ledger.xp = points_for_level(3);
+        client.player.hurt = 0.0;
+        client.hurt_player(100.0, "fell on an anvil again");
+        assert!(pump(&mut host, &mut client, |h, c| h.peers[&id].ledger.xp == 0 && c.xp == 0 && !h.orbs.is_empty()));
     }
 
     #[test]

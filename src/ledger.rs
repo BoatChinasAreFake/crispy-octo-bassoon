@@ -85,6 +85,8 @@ pub struct Ledger {
     /// Uses of each kind of tool since one last wore out (see `host_wear`).
     uses: HashMap<Id, u32>,
     carry: f32,
+    /// Their experience points (the host's word; see xp.rs).
+    pub xp: u32,
 }
 
 /// Client side: bookkeeping for reconciling with the host's counts.
@@ -201,6 +203,8 @@ impl Game {
             if drops {
                 let center = at.as_vec3() + macroquad::math::Vec3::splat(0.5);
                 self.pop_drop(center, block(old).drop, 1);
+                let points = crate::xp::ore_xp(old, &mut self.rng);
+                self.spawn_orbs(center, points);
                 for (item, n) in crate::farming::random_drops(old, &mut self.rng) {
                     self.pop_drop(center, item, n);
                 }
@@ -248,6 +252,14 @@ impl Game {
     /// `durability` uses, one of that kind is worn out and leaves the ledger.
     /// Their own game breaks the same tool at the same moment; if a modified
     /// one doesn't, the next inventory check takes it anyway.
+    /// A repair at an anvil gave back `restored` uses of this kind of tool.
+    pub fn host_unwear(&mut self, from: u32, item: Id, restored: u32) {
+        if let Some(l) = self.ledger(from) {
+            let u = l.uses.entry(item).or_insert(0);
+            *u = u.saturating_sub(restored);
+        }
+    }
+
     pub fn host_wear(&mut self, from: u32, item: Id, amount: u16) {
         let Some(max) = durability(item) else { return };
         if amount == 0 || self.creative {

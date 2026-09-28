@@ -26,6 +26,7 @@ OPTIONS:
     --seed <N>          Seed for a new world
     --creative          New worlds are creative (default survival)
     --keep-inventory    Players keep their things when they die (default: they drop them)
+    --difficulty <D>    peaceful, easy, normal or hard (default: the world's own, normal if new)
     --max-players <N>   Player limit (default 16)
     --upnp              Ask your router to forward the port (for home servers)
     --help              Show this help
@@ -96,7 +97,13 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     if args.iter().any(|a| a == "--keep-inventory") {
-        game.keep_inventory = true;
+        game.rules.keep_inventory = true;
+    }
+    if let Some(d) = get("--difficulty") {
+        match crate::rules::Difficulty::ALL.iter().find(|x| x.name().to_lowercase().starts_with(&d.to_lowercase())) {
+            Some(x) => game.rules.difficulty = *x,
+            None => log(&format!("Unknown difficulty '{d}' (try peaceful, easy, normal or hard); keeping {}", game.rules.difficulty.name())),
+        }
     }
     game.dedicated = true;
     game.ready = true;

@@ -241,6 +241,14 @@ impl MobKind {
             MobKind::Bloop => 1.0, // times size squared
         }
     }
+    /// Experience for defeating one (`size`: a Bloop's size).
+    pub fn xp_value(self, size: f32, rng: &mut Rng) -> u32 {
+        match self {
+            MobKind::Bloop => size as u32,
+            k if k.passive() => rng.int(1, 3) as u32,
+            _ => 5,
+        }
+    }
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {

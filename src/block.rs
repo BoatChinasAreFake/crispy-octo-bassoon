@@ -71,8 +71,12 @@ pub const SLAB_FIRST: Id = 60;
 pub const STAIRS_FIRST: Id = 66;
 /// Door halves: `DOOR_FIRST + facing * 4 + open * 2 + top`. Placed with the `DOOR` item.
 pub const DOOR_FIRST: Id = 78;
+/// Anvils, from new to nearly broken (each use may knock it down a stage; see anvil.rs).
+pub const ANVIL: Id = 94;
+pub const ANVIL_CHIPPED: Id = 95;
+pub const ANVIL_DAMAGED: Id = 96;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 94;
+pub const NUM_BLOCKS: Id = 97;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -216,6 +220,7 @@ pub enum Shape {
     Stairs { facing: u8 },
     /// Closed, the panel sits on the `facing` side of its cell.
     Door { facing: u8, open: bool, top: bool },
+    Anvil,
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -244,22 +249,24 @@ fn half_box(facing: u8, y0: f32, y1: f32) -> Aabb {
 }
 
 impl Shape {
-    /// Up to two boxes (the count is the second value).
-    pub fn boxes(self) -> ([Aabb; 2], usize) {
+    /// Up to three boxes (the count is the second value).
+    pub fn boxes(self) -> ([Aabb; 3], usize) {
         let full = ([0.0; 3], [1.0; 3]);
         match self {
-            Shape::Full => ([full, full], 1),
-            Shape::Slab { top: false } => ([([0.0; 3], [1.0, 0.5, 1.0]), full], 1),
-            Shape::Slab { top: true } => ([([0.0, 0.5, 0.0], [1.0; 3]), full], 1),
-            Shape::Stairs { facing } => ([([0.0; 3], [1.0, 0.5, 1.0]), half_box(facing, 0.5, 1.0)], 2),
-            Shape::Door { facing, open, .. } => ([side_box(if open { facing + 3 } else { facing }), full], 1),
+            Shape::Full => ([full; 3], 1),
+            Shape::Slab { top: false } => ([([0.0; 3], [1.0, 0.5, 1.0]), full, full], 1),
+            Shape::Slab { top: true } => ([([0.0, 0.5, 0.0], [1.0; 3]), full, full], 1),
+            Shape::Stairs { facing } => ([([0.0; 3], [1.0, 0.5, 1.0]), half_box(facing, 0.5, 1.0), full], 2),
+            Shape::Door { facing, open, .. } => ([side_box(if open { facing + 3 } else { facing }), full, full], 1),
+            // A foot, a waist and a long top, lengthways along x.
+            Shape::Anvil => ([([0.125, 0.0, 0.125], [0.875, 0.25, 0.875]), ([0.25, 0.25, 0.3125], [0.75, 0.625, 0.6875]), ([0.0, 0.625, 0.1875], [1.0, 1.0, 0.8125])], 3),
         }
     }
 }
 
 /// Collision and targeting boxes of a block (a full cube for most).
 #[inline]
-pub fn block_boxes(id: Id) -> ([Aabb; 2], usize) {
+pub fn block_boxes(id: Id) -> ([Aabb; 3], usize) {
     block(id).shape.boxes()
 }
 
@@ -605,6 +612,14 @@ impl Registry {
                 }
             }
         }
+        let anvils = [("anvil", "Anvil (Drops Ominously)", T_ANVIL_TOP), ("anvil_chipped", "Chipped Anvil (Still Ominous)", T_ANVIL_TOP_CHIPPED), ("anvil_damaged", "Damaged Anvil (Living on Borrowed Time)", T_ANVIL_TOP_DAMAGED)];
+        for (i, (key, name, top)) in anvils.into_iter().enumerate() {
+            let id = ANVIL + i as Id;
+            let mut d = def(key, name, Shaped, true, false, [top, T_ANVIL_SIDE, T_ANVIL_SIDE], 5.0, 1, true, id, 0.0, S_STONE);
+            d.shape = Shape::Anvil;
+            d.creative = i == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
@@ -748,6 +763,8 @@ impl Registry {
             r(&[(PLANKS, 8)], (CHEST, 1)),
             r(&[(COBBLE, 8)], (FURNACE, 1)),
             r(&[(PLANKS, 6)], (DOOR, 3)),
+            // A real anvil takes 31 iron. This one is a bargain.
+            r(&[(IRON, 10)], (ANVIL, 1)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {

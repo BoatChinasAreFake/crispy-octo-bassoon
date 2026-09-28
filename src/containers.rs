@@ -309,6 +309,13 @@ impl Game {
             for (item, n, put) in moves(before, s) {
                 self.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: slot as u8, item, n, put, wear });
             }
+        } else if is_furnace(kind) && slot == OUTPUT
+            && let Some((id, had)) = before
+        {
+            // Cooking pays a little experience when you take the results.
+            let taken = had - s.map(|s| s.1).unwrap_or(0);
+            let points = crate::xp::roll(crate::xp::smelt_xp(id) * taken as f32, &mut self.rng);
+            self.add_xp(points);
         }
     }
 
@@ -417,7 +424,7 @@ impl Game {
         }
     }
 
-    fn peer_near(&self, from: u32, p: IVec3) -> bool {
+    pub fn peer_near(&self, from: u32, p: IVec3) -> bool {
         self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH).unwrap_or(false)
     }
 
@@ -486,6 +493,7 @@ impl Game {
     }
 
     fn container_take(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8) -> bool {
+        let furnace = is_furnace(self.world.get_v(p));
         let Some(c) = self.world.containers.get_mut(&p) else { return false };
         match c.slots[slot] {
             Some((id, have)) if id == item && have >= n => {
@@ -497,6 +505,11 @@ impl Game {
             && let Some(peer) = self.peers.get_mut(&from)
         {
             peer.ledger.bag.add(item, n as u32);
+        }
+        // Cooking pays a little experience when the results are taken.
+        if furnace && slot == OUTPUT {
+            let points = crate::xp::roll(crate::xp::smelt_xp(item) * n as f32, &mut self.rng);
+            self.give_peer_xp(from, points);
         }
         true
     }

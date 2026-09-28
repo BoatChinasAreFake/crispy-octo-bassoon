@@ -19,7 +19,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// slabs, stairs and doors.
 /// v10: tool and armour wear (Give, DropItem, ContainerMove, Container), death
 /// drops (DropItem.scatter) and the keep-inventory rule (Welcome).
-pub const PROTOCOL: u32 = 10;
+/// v11: experience (Xp, Orbs), anvils (Repair) and world rules (Rules).
+pub const PROTOCOL: u32 = 11;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -121,6 +122,15 @@ pub enum Msg {
     /// client -> host: I threw these (Q), or they didn't fit in my inventory, or
     /// (`scatter`) I died and they fell out of my pockets.
     DropItem { item: Id, n: u8, wear: u16, scatter: bool },
+    /// host -> client: your experience points (the host keeps count).
+    Xp { points: u32 },
+    /// host -> client: experience orbs floating around: (id, position, value).
+    Orbs(Vec<(u32, Vec3, u16)>),
+    /// host -> client: the world's rules (on joining, and whenever they change).
+    Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool },
+    /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
+    /// `material` (or, `combine`, by merging two of them).
+    Repair { x: i32, y: i32, z: i32, item: Id, material: Id, used: u8, combine: bool },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -459,6 +469,35 @@ impl Msg {
                 w.u16(*wear);
                 w.u8(*scatter as u8);
             }
+            Msg::Xp { points } => {
+                w.u8(36);
+                w.u32(*points);
+            }
+            Msg::Orbs(list) => {
+                w.u8(37);
+                w.u32(list.len() as u32);
+                for &(id, pos, value) in list {
+                    w.u32(id);
+                    w.v3(pos);
+                    w.u16(value);
+                }
+            }
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle } => {
+                w.u8(38);
+                w.u8(*keep_inventory as u8);
+                w.u8(*difficulty);
+                w.u8(*daylight_cycle as u8);
+            }
+            Msg::Repair { x, y, z, item, material, used, combine } => {
+                w.u8(39);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+                w.u16(*material);
+                w.u8(*used);
+                w.u8(*combine as u8);
+            }
         }
         w.0
     }
@@ -567,6 +606,17 @@ impl Msg {
             }
             34 => Msg::Pickup { id: r.u32()?, room: r.u8()? },
             35 => Msg::DropItem { item: r.u16()?, n: r.u8()?, wear: r.u16()?, scatter: r.u8()? != 0 },
+            36 => Msg::Xp { points: r.u32()? },
+            37 => {
+                let n = r.count(18)?;
+                let mut list = Vec::with_capacity(n);
+                for _ in 0..n {
+                    list.push((r.u32()?, r.v3()?, r.u16()?));
+                }
+                Msg::Orbs(list)
+            }
+            38 => Msg::Rules { keep_inventory: r.u8()? != 0, difficulty: r.u8()?, daylight_cycle: r.u8()? != 0 },
+            39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0 },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -1001,6 +1051,10 @@ mod tests {
             Msg::Drops(vec![(7, Vec3::new(1.0, 64.5, -3.25), 0x8003, 12), (8, Vec3::ZERO, 4, 1)]),
             Msg::Pickup { id: 7, room: 64 },
             Msg::DropItem { item: 0x8010, n: 3, wear: 40, scatter: true },
+            Msg::Xp { points: 1507 },
+            Msg::Orbs(vec![(3, Vec3::new(1.0, 2.0, 3.0), 17)]),
+            Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false },
+            Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },
             Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1, 0), (0, 0, 0), (0x800c, 1, 99)], burn: 0.5, cook: 0.25 },

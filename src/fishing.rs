@@ -481,6 +481,8 @@ impl Game {
         let line = catch_line(&c, best);
         self.msg(line);
         self.give(c.item, c.n);
+        let points = self.rng.int(1, 6) as u32;
+        self.add_xp(points);
         self.catch_advancements(c.item, c.category);
         let new_level = self.fish_log.level();
         if new_level > level {
@@ -516,6 +518,8 @@ impl Game {
         self.system_message(Some(from), &catch_line(&c, false));
         self.give_peer(from, c.item, c.n);
         self.host_wear(from, ROD, 1);
+        let points = self.rng.int(1, 6) as u32;
+        self.give_peer_xp(from, points);
     }
 }
 
