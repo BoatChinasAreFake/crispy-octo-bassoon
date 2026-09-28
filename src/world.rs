@@ -75,6 +75,9 @@ pub struct Generator {
     cave_a: Perlin,
     cave_b: Perlin,
     cavern: Perlin,
+    /// Mod world generation, copied from the registry when the world is created.
+    ores: Vec<OreGen>,
+    plants: Vec<PlantGen>,
 }
 
 impl Generator {
@@ -90,6 +93,8 @@ impl Generator {
             cave_a: Perlin::new(s + 5),
             cave_b: Perlin::new(s + 6),
             cavern: Perlin::new(s + 7),
+            ores: reg().ores.clone(),
+            plants: reg().plants.clone(),
         }
     }
 
@@ -203,6 +208,16 @@ impl Generator {
                             b[i] = DIAMOND_ORE;
                         }
                     }
+                    for (oi, ore) in self.ores.iter().enumerate() {
+                        if b[i] == ore.replace && (ore.min_y..=ore.max_y).contains(&y) {
+                            let salt = 0x5100 + oi as u32 * 7;
+                            // Small 2x2x2-ish veins; roughly `chance` of the eligible blocks.
+                            if hash3(s ^ salt, x >> 1, y >> 1, z >> 1) < ore.chance * 3.0 && hash3(s ^ (salt + 1), x, y, z) < 0.4 {
+                                b[i] = ore.block;
+                                break;
+                            }
+                        }
+                    }
                 }
                 // Plants on grass
                 let top = h + 1;
@@ -212,6 +227,15 @@ impl Generator {
                         b[idx(lx, top, lz)] = FLOWER;
                     } else if r < 0.11 {
                         b[idx(lx, top, lz)] = TALL_GRASS;
+                    }
+                }
+                if top < CH && b[idx(lx, top, lz)] == AIR {
+                    let below = b[idx(lx, h, lz)];
+                    for (pi, p) in self.plants.iter().enumerate() {
+                        if below == p.on && hash2(s ^ (0x9100 + pi as u32 * 13), x, z) < p.chance {
+                            b[idx(lx, top, lz)] = p.block;
+                            break;
+                        }
                     }
                 }
             }
@@ -430,7 +454,7 @@ impl World {
     /// Apply an edit that came from another player: not echoed back out.
     /// Returns the previous block if anything changed.
     pub fn set_remote(&mut self, x: i32, y: i32, z: i32, id: u8) -> Option<u8> {
-        if id >= NUM_BLOCKS {
+        if !valid_block(id) {
             return None;
         }
         if !self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) && (0..CH).contains(&y) {

@@ -6,7 +6,8 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 const MAGIC: &[u8; 4] = b"MNCR";
-const VERSION: u32 = 1;
+/// v2 adds the mod palette (names of mod blocks/items); v1 saves still load.
+const VERSION: u32 = 2;
 
 pub struct SaveData {
     pub seed: u32,
@@ -19,6 +20,8 @@ pub struct SaveData {
     pub spawn: [f32; 3],
     pub slots: Vec<Option<(u8, u8)>>,
     pub mods: HashMap<(i32, i32), HashMap<u32, u8>>,
+    /// Ids of mod-added blocks/items and their names (save v2+).
+    pub palette: Vec<(u8, String)>,
 }
 
 pub fn save_path() -> PathBuf {
@@ -106,6 +109,12 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
             w.u8(id);
         }
     }
+    w.u32(d.palette.len() as u32);
+    for (id, key) in &d.palette {
+        w.u8(*id);
+        w.u32(key.len() as u32);
+        w.0.extend_from_slice(key.as_bytes());
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -118,8 +127,12 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     let mut buf = Vec::new();
     std::fs::File::open(path)?.read_to_end(&mut buf)?;
     let mut r = R(&buf);
-    if &r.take::<4>()? != MAGIC || r.u32()? != VERSION {
+    if &r.take::<4>()? != MAGIC {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "not a Minceraft save"));
+    }
+    let version = r.u32()?;
+    if !(1..=VERSION).contains(&version) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("save is from a newer version ({version})")));
     }
     let seed = r.u32()?;
     let creative = r.u8()? != 0;
@@ -143,5 +156,20 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
         }
         mods.insert(key, m);
     }
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods })
+    let mut palette = Vec::new();
+    if version >= 2 {
+        for _ in 0..r.u32()? {
+            let id = r.u8()?;
+            let len = r.u32()? as usize;
+            if len > 256 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "bad palette entry"));
+            }
+            let mut key = Vec::with_capacity(len);
+            for _ in 0..len {
+                key.push(r.u8()?);
+            }
+            palette.push((id, String::from_utf8_lossy(&key).into_owned()));
+        }
+    }
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette })
 }

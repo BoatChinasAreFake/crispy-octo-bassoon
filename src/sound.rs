@@ -37,11 +37,11 @@ pub enum Mat {
 }
 
 pub fn material(block_id: u8) -> Mat {
-    match block_id {
-        STONE | COBBLE | BEDROCK | COAL_ORE | IRON_ORE | DIAMOND_ORE | BRICK | GLOWROCK => Mat::Stone,
-        LOG | PLANKS | TABLE | TORCH => Mat::Wood,
-        SAND | GRAVEL => Mat::Sand,
-        GLASS => Mat::Glass,
+    match block(block_id).sound {
+        0 => Mat::Stone,
+        1 => Mat::Wood,
+        3 => Mat::Sand,
+        4 => Mat::Glass,
         _ => Mat::Grass,
     }
 }

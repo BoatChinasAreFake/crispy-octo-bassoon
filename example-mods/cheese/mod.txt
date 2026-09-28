@@ -1,0 +1,217 @@
+// The Cheese Mod: an example showing everything a Minceraft mod can do.
+// Copy this whole folder into mods/ (next to where you run the game),
+// then open Mods on the title screen and press Reload.
+// Lines starting with // are comments. See MODDING.md for the full reference.
+
+[mod]
+name = Cheese Mod
+version = 1.0
+author = The Minceraft Dairy Council
+description = Cheese blocks, cheese ore, cheese tools. Bouncy.
+
+// ---------------------------------------------------------------- textures
+// Pixel art: 16 rows of 16 characters, each defined by a "color" line.
+// '.' means transparent (or "keep the base texture" when base = is set).
+[texture wheel_top]
+color # = 245,205,70
+color o = 215,165,40
+color r = 200,120,30
+rrrrrrrrrrrrrrrr
+r##############r
+r##oo######o###r
+r##oo##########r
+r#######oo#####r
+r#######oo#####r
+r###o##########r
+r##########oo##r
+r##########oo##r
+r####oo########r
+r####oo####o###r
+r##############r
+r######o#######r
+r#oo###########r
+r##############r
+rrrrrrrrrrrrrrrr
+
+// Speckled noise from a single colour.
+[texture butter]
+noise = #fff2a0
+variation = 0.06
+
+[texture slice]
+color # = 245,205,70
+color o = 215,165,40
+color d = 150,100,20
+................
+................
+................
+................
+..............d.
+............dd#d
+..........dd###d
+........dd##o##d
+......dd#######d
+....dd####o####d
+..dd###########d
+dd#o######o####d
+d##############d
+dddddddddddddddd
+................
+................
+
+// Start from a built-in texture and paint over it: good for ores.
+[texture cheese_ore]
+base = stone
+color # = 245,205,70
+color o = 200,150,30
+................
+................
+...##...........
+..#o##......#...
+...##......###..
+...........#o#..
+.....#......#...
+....###.........
+....#o#.........
+.....#.......##.
+............#o#.
+...##........#..
+..##o#..........
+...##...........
+................
+................
+
+[texture cheese_flower]
+color s = 60,140,40
+color # = 245,205,70
+color o = 215,165,40
+................
+................
+......####......
+.....##o###.....
+....###o####....
+....##o###o#....
+.....#######....
+......####......
+.......ss.......
+.......ss.......
+.....s.ss.......
+......sss.......
+.......ss.s.....
+.......sss......
+.......ss.......
+.......ss.......
+
+// ---------------------------------------------------------------- blocks
+[block wheel]
+name = Cheese Wheel
+top = wheel_top
+bottom = wheel_top
+side = wheel_side.png
+hardness = 0.8
+sound = wood
+// Landing on it bounces you back up (sneak to land softly).
+bounce = 0.85
+
+[block butter]
+name = Block of Butter
+texture = butter
+hardness = 0.4
+sound = sand
+// Walk on it to go fast.
+speed = 1.8
+
+[block cheese_ore]
+name = Cheese Ore
+texture = cheese_ore
+hardness = 2.5
+tool = pickaxe
+tier = 1
+drops = slice
+on_break = message The ore smells... aged.
+
+[block cheese_flower]
+name = Cheese Flower
+model = cross
+texture = cheese_flower
+hardness = 0
+drops = slice
+
+[block stinky_cheese]
+name = Stinky Cheese (do not break)
+texture = wheel_top
+hardness = 1
+on_break = message That was a mistake.; explode 2.5
+
+// ---------------------------------------------------------------- items
+[item slice]
+name = Cheese Slice
+texture = slice
+food = 3
+
+[item cheese_pickaxe]
+name = Cheese Pickaxe (Surprisingly Hard)
+texture = iron_pickaxe
+stack = 1
+pickaxe = 3
+damage = 5
+
+[item launcher]
+name = Wheel of Launching
+texture = slice
+stack = 1
+consume = false
+on_use = launch 18; message Wheeeeee!
+
+[item summoning_brie]
+name = Summoning Brie
+texture = slice
+on_use = spawn oinker; message An Oinker smelled the brie.
+
+// ---------------------------------------------------------------- recipes
+// Inputs: up to 6 "item count" pairs. Base-game items use their plain names.
+[recipe]
+inputs = slice 4
+output = wheel 1
+
+[recipe]
+inputs = wheel 1
+output = slice 4
+
+[recipe]
+inputs = slice 2, sand 1
+output = butter 2
+
+[recipe]
+inputs = wheel 3, stick 2
+output = cheese_pickaxe 1
+
+[recipe]
+inputs = wheel 1, gunpowder 1
+output = launcher 1
+
+[recipe]
+inputs = slice 1, porkchop 1
+output = summoning_brie 2
+
+[recipe]
+inputs = wheel 1, dirt 1
+output = stinky_cheese 1
+
+// ---------------------------------------------------------------- world generation
+[ore cheese_vein]
+block = cheese_ore
+replace = stone
+min_y = 5
+max_y = 50
+chance = 0.006
+
+[plant cheese_flowers]
+block = cheese_flower
+on = grass
+chance = 0.01
+
+[splashes]
+Now with 100% more cheese!
+Cheddar than ever!
+Brie-lliant!

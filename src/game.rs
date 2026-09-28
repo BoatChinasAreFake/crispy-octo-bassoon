@@ -152,7 +152,15 @@ impl Game {
 
     pub fn from_save(d: SaveData) -> Self {
         let mut g = Game::new(d.seed, d.creative, false);
+        let remap = palette_remap(reg(), &d.palette);
         g.world.mods = d.mods;
+        if let Some(remap) = &remap {
+            for m in g.world.mods.values_mut() {
+                for id in m.values_mut() {
+                    *id = remap[*id as usize];
+                }
+            }
+        }
         g.time = d.time;
         g.player.body.pos = Vec3::from_array(d.pos);
         g.player.fall_start = d.pos[1];
@@ -162,7 +170,10 @@ impl Game {
         g.spawn = Vec3::from_array(d.spawn);
         g.inv.slots = [None; 36];
         for (i, s) in d.slots.into_iter().take(36).enumerate() {
-            g.inv.slots[i] = s;
+            g.inv.slots[i] = match (s, &remap) {
+                (Some((id, n)), Some(r)) => Some((r[id as usize], n)).filter(|(id, _)| *id != AIR),
+                (s, _) => s,
+            };
         }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
@@ -181,6 +192,7 @@ impl Game {
             spawn: self.spawn.to_array(),
             slots: self.inv.slots.to_vec(),
             mods: self.world.mods.clone(),
+            palette: mod_palette(reg()),
         }
     }
 
@@ -512,6 +524,15 @@ impl Game {
                 return;
             }
         }
+        if let Some((actions, consume)) = use_actions(held) {
+            let at = self.player.eye() + self.player.look_dir() * 2.0;
+            self.run_actions(actions, at);
+            self.player.swing = 1.0;
+            if consume && !self.creative {
+                self.inv.consume_held();
+            }
+            return;
+        }
         let Some(Target::Block(h)) = &self.target else { return };
         let (hit_pos, normal) = (h.pos, h.normal);
         let hit_id = self.world.get_v(hit_pos);
@@ -572,6 +593,10 @@ impl Game {
         self.block_particles(pos, 14);
         self.world.set_v(pos, AIR);
         self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
+        let on_break: &'static [Action] = &block(id).on_break;
+        if !on_break.is_empty() {
+            self.run_actions(on_break, pos.as_vec3() + Vec3::splat(0.5));
+        }
         self.stat_blocks_broken += 1;
         if drops && !self.creative {
             let d = block(id).drop;
@@ -600,6 +625,47 @@ impl Game {
             if self.world.get_v(pos + n) == WATER && pos.y <= SEA {
                 self.world.set_v(pos, WATER);
                 break;
+            }
+        }
+    }
+
+    /// Carry out mod-defined behaviour (see MODDING.md).
+    pub fn run_actions(&mut self, actions: &[Action], at: Vec3) {
+        for a in actions {
+            match a {
+                Action::Heal(n) => {
+                    self.player.health = (self.player.health + n).min(MAX_HEALTH);
+                    self.sfx(Sfx::Eat, None);
+                }
+                Action::Explode(r) => {
+                    if self.is_client() {
+                        self.net_send_msg(Msg::Explosion { at, r: *r });
+                    } else {
+                        self.explode(at, *r, "was blown up by a mod");
+                    }
+                }
+                Action::Launch(v) => {
+                    self.player.body.vel.y = *v;
+                    self.player.fall_start = self.player.body.pos.y;
+                }
+                Action::Message(m) => self.msg(*m),
+                Action::Give(item, n) => self.give(*item, *n),
+                Action::SetTime(t) => {
+                    if self.is_client() {
+                        self.msg("Only the host can change the time.");
+                    } else {
+                        self.time = *t;
+                        self.net_broadcast(Msg::Time(*t));
+                    }
+                }
+                Action::Spawn(k) => {
+                    if self.is_client() {
+                        self.msg("Only the host can spawn mobs.");
+                    } else {
+                        let kind = [MobKind::Oinker, MobKind::Hisser, MobKind::Groaner][(*k as usize).min(2)];
+                        self.alloc_mob(kind, at + Vec3::Y * 0.5);
+                    }
+                }
             }
         }
     }
@@ -1125,6 +1191,32 @@ impl Game {
     }
 }
 
+/// Names of every mod-added block and item, so saves survive mods being added or removed.
+fn mod_palette(r: &Registry) -> Vec<(u8, String)> {
+    let blocks = (NUM_BLOCKS..r.blocks.len() as u8).map(|id| (id, r.blocks[id as usize].key.to_string()));
+    let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as u8, r.key_of(id as u8).to_string()));
+    blocks.chain(items).collect()
+}
+
+/// Map ids in a save to ids in the current registry. Mod things that no longer
+/// exist become air (blocks) or vanish (items). None when nothing needs changing.
+fn palette_remap(r: &Registry, palette: &[(u8, String)]) -> Option<Vec<u8>> {
+    let mut map: Vec<u8> = (0..=255u8).collect();
+    // Any mod-range id the save doesn't mention is unknown.
+    for id in NUM_BLOCKS..FIRST_ITEM {
+        map[id as usize] = AIR;
+    }
+    for id in FIRST_MOD_ITEM..=255 {
+        map[id as usize] = AIR;
+    }
+    for (old, key) in palette {
+        map[*old as usize] = r.lookup(key).unwrap_or(AIR);
+    }
+    // Only the ids the save actually uses matter.
+    let unchanged = palette.iter().all(|(old, key)| r.lookup(key) == Some(*old));
+    (!unchanged).then_some(map)
+}
+
 fn sky_quad(g: &mut DynGeo, center: Vec3, dir: Vec3, size: f32, tile: u16) {
     let u = Vec3::Z.cross(dir).normalize_or_zero();
     let u = if u.length_squared() < 0.5 { Vec3::X } else { u };
@@ -1218,7 +1310,7 @@ mod tests {
     fn crafting_consumes_inputs() {
         let mut inv = Inventory::new();
         inv.add(LOG, 1);
-        let planks = RECIPES.iter().find(|r| r.output.0 == PLANKS).unwrap();
+        let planks = recipes().iter().find(|r| r.output.0 == PLANKS).unwrap();
         assert!(inv.craft(planks));
         assert_eq!(inv.count(LOG), 0);
         assert_eq!(inv.count(PLANKS), 4);
@@ -1248,16 +1340,60 @@ mod tests {
     }
 
     #[test]
+    fn saves_survive_mods_changing() {
+        use crate::mods::{build, ModSource};
+        let mk = |text: &str| {
+            let mut files = std::collections::BTreeMap::new();
+            files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+            files
+        };
+        let a = ModSource { id: "aaa".into(), files: mk("[block one]\n[block two]\n[item gem]\n") };
+        let b = ModSource { id: "bbb".into(), files: mk("[block red]\n") };
+        let with_both = build(&[a.clone(), b.clone()], &[]);
+        let palette = mod_palette(&with_both);
+        let red = with_both.lookup("bbb:red").unwrap();
+        let gem = with_both.lookup("aaa:gem").unwrap();
+        assert_eq!(red, NUM_BLOCKS + 2);
+
+        // Same mods: nothing to do.
+        assert!(palette_remap(&with_both, &palette).is_none());
+        // Mod "aaa" removed: "red" moves down to the first mod slot, aaa's things vanish.
+        let only_b = build(&[b], &[]);
+        let map = palette_remap(&only_b, &palette).unwrap();
+        assert_eq!(map[red as usize], NUM_BLOCKS);
+        assert_eq!(map[(NUM_BLOCKS) as usize], AIR);
+        assert_eq!(map[gem as usize], AIR);
+        assert_eq!(map[STONE as usize], STONE);
+        assert_eq!(map[DIAMOND as usize], DIAMOND);
+    }
+
+    #[test]
+    fn mod_actions_do_things() {
+        let mut g = Game::new(9, false, false);
+        g.world = loaded_world(9);
+        g.player.health = 5.0;
+        g.run_actions(&[Action::Heal(4.0), Action::Launch(15.0), Action::Give(DIAMOND, 2), Action::Message("hi")], g.spawn);
+        assert_eq!(g.player.health, 9.0);
+        assert_eq!(g.player.body.vel.y, 15.0);
+        assert_eq!(g.inv.count(DIAMOND), 2);
+        assert!(g.messages.iter().any(|m| m.0 == "hi"));
+        let top = g.world.surface_y(0, 0);
+        let solid = |g: &Game| (-1..=1).filter(|&x| is_solid(g.world.get(x, top, 0))).count();
+        let before = solid(&g);
+        g.run_actions(&[Action::Explode(3.0)], Vec3::new(0.5, top as f32 + 0.5, 0.5));
+        assert!(solid(&g) < before);
+    }
+
+    #[test]
     fn save_round_trip() {
         let dir = std::env::temp_dir().join(format!("minceraft-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_current_dir(&dir).unwrap();
+        let path = dir.join("world.mncr");
         let mut g = Game::new(1234, false, false);
         g.inv.add(DIAMOND, 7);
         g.world.mods.entry((2, -3)).or_default().insert(99, TNT);
         g.time = 0.4;
-        crate::save::write(&g.to_save()).unwrap();
-        let back = Game::from_save(crate::save::read().unwrap());
+        crate::save::write_to(&path, &g.to_save()).unwrap();
+        let back = Game::from_save(crate::save::read_from(&path).unwrap());
         assert_eq!(back.world.seed(), 1234);
         assert_eq!(back.inv.count(DIAMOND), 7);
         assert_eq!(back.world.mods[&(2, -3)][&99], TNT);

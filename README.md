@@ -35,6 +35,7 @@ Run the tests with `cargo test --release`.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
 - **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, groans, Hisser hisses, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
 - **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day and chat. Servers can require a password, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
+- **Mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants and simple effects (bouncy or fast blocks, items that heal, launch, explode, give things or spawn mobs). Mods are data, not code, so servers send theirs to players automatically. See **[MODDING.md](MODDING.md)** and the example in `example-mods/cheese`.
 - **Saving and loading.** Only your edits are stored (`saves/world.mncr`); the terrain regenerates from the seed.
 - First-person hand and held item, third-person view, block-breaking cracks, particles, screen shake, a panoramic title screen with splash texts, and options for render distance, FOV, sensitivity and fullscreen.
 
@@ -129,7 +130,8 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/entity.rs` | Physics, mobs, models, particles |
 | `src/player.rs` | Player controller |
 | `src/texture.rs` | Procedural texture atlas |
-| `src/block.rs` | Blocks, items, tools, recipes |
+| `src/block.rs` | Block and item registry, tools, recipes |
+| `src/mods.rs` | Mod loader (`mod.txt` parser, textures, mod packs) |
 | `src/inventory.rs` | Inventory and crafting |
 | `src/save.rs` | Binary save format |
 | `src/net.rs` | Network protocol and non-blocking TCP |
@@ -140,6 +142,6 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
 
 Not affiliated with any block-game company.

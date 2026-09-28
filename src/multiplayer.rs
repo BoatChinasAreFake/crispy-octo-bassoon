@@ -332,6 +332,8 @@ impl Game {
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
                 c.joined = true;
+                // Mods first: the client needs them before it builds its world.
+                c.conn.send(&Msg::ModPack { data: crate::mods::active_pack() });
                 c.conn.send(&welcome);
                 for m in mods.iter().chain(roster.iter()) {
                     c.conn.send(m);
@@ -358,7 +360,7 @@ impl Game {
                 for (x, y, z, id) in list {
                     let center = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
                     let in_reach = eye.map(|e| e.distance(center) <= 10.0).unwrap_or(false);
-                    if id >= NUM_BLOCKS || !in_reach || budget < 1.0 {
+                    if !valid_block(id) || !in_reach || budget < 1.0 {
                         corrections.push((x, y, z, self.world.get(x, y, z)));
                         continue;
                     }
@@ -402,6 +404,13 @@ impl Game {
                     let pos = Vec3::new(x as f32, y as f32, z as f32);
                     self.tnts.push(PrimedTnt { pos, fuse: 3.0 });
                     self.sfx(Sfx::Hiss, Some(pos + Vec3::splat(0.5)));
+                }
+            }
+            // A mod item/block effect on a client that wants an explosion.
+            Msg::Explosion { at, r } => {
+                let near = self.peers.get(&from).map(|p| p.target.distance(at) < 12.0).unwrap_or(false);
+                if near {
+                    self.explode(at, r.clamp(0.5, 6.0), "was caught in a modded explosion");
                 }
             }
             Msg::Chat { text, .. } => {
@@ -469,7 +478,7 @@ impl Game {
                 self.player.body.vel += knock;
             }
             Msg::Give { item, n } => {
-                if (item < NUM_BLOCKS || item >= crate::block::STICK) && n > 0 {
+                if valid_item(item) && n > 0 {
                     self.inv.add(item, n);
                     self.sfx(Sfx::Pop, None);
                     self.msg(format!("Loot: {n}x {}", item_name(item)));
@@ -489,7 +498,7 @@ impl Game {
                 let name = self.peer_name(from);
                 self.msg(format!("<{name}> {text}"));
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } => {}
         }
     }
 

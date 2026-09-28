@@ -7,6 +7,7 @@ mod entity;
 mod game;
 mod inventory;
 mod mesher;
+mod mods;
 mod multiplayer;
 mod net;
 mod noise;
@@ -59,6 +60,7 @@ enum Screen {
     Options { from_title: bool },
     Help { from_title: bool },
     Multiplayer,
+    Mods,
 }
 
 struct Settings {
@@ -100,6 +102,22 @@ struct App {
     upnp_job: Option<std::sync::mpsc::Receiver<Result<upnp::Mapping, String>>>,
     upnp_mapping: Option<upnp::Mapping>,
     internet_status: Option<String>,
+    // ---- mods
+    /// The procedurally painted base atlas; mod textures are layered on a copy.
+    base_atlas: Vec<u8>,
+    /// Registry generation the GPU atlas was built from.
+    atlas_gen: u32,
+    mods_scroll: usize,
+    /// Joined a server, so its mods (not ours) are active.
+    using_server_mods: bool,
+}
+
+/// A random splash text, including ones added by mods.
+fn pick_splash() -> &'static str {
+    let extra = &block::reg().splashes;
+    let n = SPLASHES.len() + extra.len();
+    let i = (random_seed() as usize) % n;
+    if i < SPLASHES.len() { SPLASHES[i] } else { extra[i - SPLASHES.len()].as_str() }
 }
 
 /// Feed typed characters into a text buffer.
@@ -189,8 +207,13 @@ impl App {
         let mut gl = unsafe { get_internal_gl() };
         gl.flush();
         self.renderer.clear(gl.quad_context);
+        if self.using_server_mods {
+            // Back to our own mods after playing on someone else's server.
+            self.using_server_mods = false;
+            mods::install_local();
+        }
         self.game = Game::new(random_seed(), true, true);
-        self.splash = SPLASHES[(random_seed() as usize) % SPLASHES.len()];
+        self.splash = pick_splash();
         self.set_screen(Screen::Title);
     }
 
@@ -339,6 +362,11 @@ impl App {
                     self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
                 }
             }
+            Screen::Mods => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Title);
+                }
+            }
             _ => {}
         }
         if is_key_pressed(KeyCode::F3) {
@@ -379,6 +407,16 @@ impl App {
             }
         }
 
+        // Mods changed (reload, or joined a server with mods): repaint the atlas.
+        if block::generation() != self.atlas_gen {
+            self.atlas_gen = block::generation();
+            let mut atlas = self.base_atlas.clone();
+            texture::apply_mod_textures(&mut atlas);
+            let gl = unsafe { get_internal_gl() };
+            self.renderer.update_atlas(gl.quad_context, &atlas);
+            self.ui.tex.update_from_bytes(texture::ATLAS as u32, texture::ATLAS as u32, &atlas);
+        }
+
         // 3D world
         let sky = self.game.sky_color();
         clear_background(Color::new(sky[0], sky[1], sky[2], 1.0));
@@ -414,6 +452,23 @@ impl App {
         }
         let Some((conn, started)) = &mut self.joining else { return };
         let mut msgs = conn.poll();
+        if let Some(net::Msg::ModPack { data }) = msgs.iter().find(|m| matches!(m, net::Msg::ModPack { .. })) {
+            match mods::decode_pack(data) {
+                Ok(pack) => {
+                    let n = pack.len();
+                    mods::install_sources(pack, &[]);
+                    self.using_server_mods = true;
+                    if n > 0 {
+                        self.status = Some((format!("Loaded {n} mod(s) from the server."), 5.0));
+                    }
+                }
+                Err(e) => {
+                    self.joining = None;
+                    self.status = Some((format!("The server sent broken mods: {e}"), 6.0));
+                    return;
+                }
+            }
+        }
         if let Some(net::Msg::Challenge { nonce, password }) = msgs.iter().find(|m| matches!(m, net::Msg::Challenge { .. })) {
             if *password && self.mp_password.is_empty() {
                 self.joining = None;
@@ -490,6 +545,91 @@ impl App {
         ] {
             self.ui.text_centered(line, w / 2.0, y, 9.0, Color::new(0.85, 0.85, 0.85, 1.0));
             y += 12.0 * s;
+        }
+    }
+
+    fn reload_mods(&mut self) {
+        let infos = mods::install_local();
+        let problems: usize = infos.iter().filter(|m| m.enabled).map(|m| m.errors.len()).sum();
+        let on = infos.iter().filter(|m| m.enabled).count();
+        self.status = Some((format!("Reloaded: {on} mod(s) on{}", if problems > 0 { format!(", {problems} problem(s)") } else { String::new() }), 5.0));
+        // The title-screen world was generated with the old mods.
+        let mut gl = unsafe { get_internal_gl() };
+        gl.flush();
+        self.renderer.clear(gl.quad_context);
+        self.game = Game::new(random_seed(), true, true);
+        self.splash = pick_splash();
+    }
+
+    fn mods_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Mods", w / 2.0, h * 0.08, 16.0, WHITE);
+        let dir = std::fs::canonicalize(mods::mods_dir()).unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join("mods"));
+        self.ui.text_centered(&format!("Folder: {}", dir.display()), w / 2.0, h * 0.08 + 14.0 * s, 8.0, GRAY);
+
+        let infos = block::reg().mods.clone();
+        let pw = (320.0 * s).min(w * 0.92);
+        let x = w / 2.0 - pw / 2.0;
+        let row_h = 38.0 * s;
+        let top = h * 0.08 + 22.0 * s;
+        let bottom = h - 34.0 * s;
+        let rows = (((bottom - top) / row_h).floor() as usize).max(1);
+        if infos.is_empty() {
+            let lines = [
+                "No mods installed yet.",
+                "A mod is a folder with a mod.txt inside, placed in the folder above.",
+                "Try the example: copy example-mods/cheese into mods/, then press Reload.",
+                "MODDING.md explains everything a mod can add.",
+            ];
+            for (i, l) in lines.iter().enumerate() {
+                self.ui.text_centered(l, w / 2.0, top + (20.0 + i as f32 * 13.0) * s, 10.0, WHITE);
+            }
+        }
+        let wheel = mouse_wheel().1;
+        if wheel.abs() > 0.1 {
+            let max = infos.len().saturating_sub(rows);
+            self.mods_scroll = if wheel > 0.0 { self.mods_scroll.saturating_sub(1) } else { (self.mods_scroll + 1).min(max) };
+        }
+        let mut toggle: Option<(String, bool)> = None;
+        for (i, m) in infos.iter().enumerate().skip(self.mods_scroll).take(rows) {
+            let y = top + (i - self.mods_scroll) as f32 * row_h;
+            draw_rectangle(x, y, pw, row_h - 3.0 * s, Color::new(0.12, 0.12, 0.15, 0.95));
+            draw_rectangle_lines(x, y, pw, row_h - 3.0 * s, s, if m.enabled { Color::new(0.4, 0.8, 0.4, 1.0) } else { GRAY });
+            let title = format!("{}{}{}", m.name, if m.version.is_empty() { String::new() } else { format!(" v{}", m.version) }, if m.author.is_empty() { String::new() } else { format!(" by {}", m.author) });
+            let text_w = pw - 75.0 * s;
+            self.ui.text(&self.ui.fit(&title, 10.0, text_w), x + 5.0 * s, y + 11.0 * s, 10.0, if m.enabled { WHITE } else { GRAY });
+            let detail = if !m.enabled {
+                "Disabled".to_string()
+            } else {
+                let (b, it, r) = m.added;
+                let desc = if m.description.is_empty() { String::new() } else { format!("{}  -  ", m.description) };
+                format!("{desc}{b} blocks, {it} items, {r} recipes")
+            };
+            self.ui.text(&self.ui.fit(&detail, 8.0, text_w), x + 5.0 * s, y + 22.0 * s, 8.0, Color::new(0.8, 0.8, 0.8, 1.0));
+            if let Some(e) = m.errors.first() {
+                let more = if m.errors.len() > 1 { format!("  (+{} more)", m.errors.len() - 1) } else { String::new() };
+                self.ui.text(&self.ui.fit(&format!("! {e}{more}"), 8.0, pw - 10.0 * s), x + 5.0 * s, y + 32.0 * s, 8.0, Color::new(1.0, 0.5, 0.4, 1.0));
+            }
+            let bw = 60.0 * s;
+            let label = if m.enabled { "On" } else { "Off" };
+            if self.ui.button(Rect::new(x + pw - bw - 5.0 * s, y + 6.0 * s, bw, 18.0 * s), label, true) {
+                toggle = Some((m.id.clone(), !m.enabled));
+            }
+        }
+        if let Some((id, on)) = toggle {
+            match mods::set_enabled(&mods::mods_dir(), &id, on) {
+                Ok(()) => self.reload_mods(),
+                Err(e) => self.status = Some((format!("Couldn't save mod settings: {e}"), 5.0)),
+            }
+        }
+        let bw = (120.0 * s).min(pw / 2.0 - 4.0 * s);
+        let by = h - 28.0 * s;
+        if self.ui.button(Rect::new(w / 2.0 - bw - 4.0 * s, by, bw, 20.0 * s), "Reload Mods", true) {
+            self.reload_mods();
+        }
+        if self.ui.button(Rect::new(w / 2.0 + 4.0 * s, by, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Title);
         }
     }
 
@@ -604,6 +744,10 @@ impl App {
             Screen::Help { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.help_screen(from_title);
+            }
+            Screen::Mods => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
+                self.mods_screen();
             }
             Screen::Multiplayer => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
@@ -749,9 +893,17 @@ impl App {
             return;
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Multiplayer (LAN)", true) {
+        let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y, half, bh), "Multiplayer", true) {
             drain_chars();
             self.set_screen(Screen::Multiplayer);
+            return;
+        }
+        let n_mods = block::reg().mods.iter().filter(|m| m.enabled).count();
+        let mods_label = if n_mods > 0 { format!("Mods ({n_mods})") } else { "Mods".to_string() };
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), &mods_label, true) {
+            self.mods_scroll = 0;
+            self.set_screen(Screen::Mods);
             return;
         }
         y += bh + 5.0 * s;
@@ -1012,7 +1164,7 @@ impl App {
             let row_h = 22.0 * s;
             let list_top = y0 + 18.0 * s;
             let visible_rows = ((panel_h - 22.0 * s) / row_h).floor() as usize;
-            let max_scroll = RECIPES.len().saturating_sub(visible_rows) as f32;
+            let max_scroll = recipes().len().saturating_sub(visible_rows) as f32;
             if self.ui.hovered(Rect::new(rx, y0, right_w, panel_h)) {
                 let wheel = mouse_wheel().1;
                 if wheel.abs() > 0.1 {
@@ -1021,10 +1173,10 @@ impl App {
             }
             let first = self.recipe_scroll as usize;
             // Craftable recipes first so progress is obvious.
-            let mut order: Vec<usize> = (0..RECIPES.len()).collect();
-            order.sort_by_key(|&i| !self.game.inv.can_craft(&RECIPES[i]));
+            let mut order: Vec<usize> = (0..recipes().len()).collect();
+            order.sort_by_key(|&i| !self.game.inv.can_craft(&recipes()[i]));
             for (row, &ri) in order.iter().skip(first).take(visible_rows).enumerate() {
-                let r = &RECIPES[ri];
+                let r = &recipes()[ri];
                 let ok = self.game.inv.can_craft(r);
                 let ry = list_top + row as f32 * row_h;
                 let rect = Rect::new(rx + 4.0 * s, ry, right_w - 8.0 * s, row_h - 2.0 * s);
@@ -1036,7 +1188,7 @@ impl App {
                 let mut ix = rect.x + isz + 6.0 * s;
                 self.ui.text("<", ix, rect.y + rect.h * 0.65, 9.0, GRAY);
                 ix += 8.0 * s;
-                for &(item, n) in r.inputs {
+                for &(item, n) in &r.inputs {
                     let have = self.game.inv.count(item) >= n as u32;
                     self.ui.icon(item, ix, rect.y + 3.0 * s, isz * 0.8);
                     self.ui.text(&format!("{n}"), ix + isz * 0.8, rect.y + rect.h * 0.8, 8.0, if have { WHITE } else { Color::new(1.0, 0.4, 0.4, 1.0) });
@@ -1137,7 +1289,10 @@ fn main() {
 }
 
 async fn game_main() {
-    let atlas = texture::build_atlas(1337);
+    let mod_infos = mods::install_local();
+    let base_atlas = texture::build_atlas(1337);
+    let mut atlas = base_atlas.clone();
+    texture::apply_mod_textures(&mut atlas);
     let renderer = {
         let gl = unsafe { get_internal_gl() };
         Renderer::new(gl.quad_context, &atlas)
@@ -1155,7 +1310,7 @@ async fn game_main() {
         renderer,
         ui: Ui::new(tex),
         settings: Settings { render_distance: 8, fov: 72.0, sensitivity: 1.0, fullscreen: false },
-        splash: SPLASHES[(random_seed() as usize) % SPLASHES.len()],
+        splash: pick_splash(),
         last_mouse: None,
         show_debug: false,
         recipe_scroll: 0.0,
@@ -1175,7 +1330,15 @@ async fn game_main() {
         upnp_job: None,
         upnp_mapping: None,
         internet_status: None,
+        base_atlas,
+        atlas_gen: block::generation(),
+        mods_scroll: 0,
+        using_server_mods: false,
     };
+    let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
+    if let Some(m) = broken.first() {
+        app.status = Some((format!("Mod \"{}\" has {} problem(s): see the Mods screen.", m.name, m.errors.len()), 8.0));
+    }
 
     if let Some(s) = &shot {
         match s.mode.as_str() {
@@ -1199,6 +1362,19 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.game.open_lan("Hosty", None).expect("open to LAN");
                 app.show_debug = true;
+            }
+            "showcase" => {
+                app.start_game(Game::new(424242, true, false));
+                app.game.open_lan("Hosty", None).expect("open to LAN");
+                app.show_debug = false;
+            }
+            "mods" => {
+                app.game = Game::new(424242, true, true);
+                app.set_screen(Screen::Mods);
+            }
+            "palette" => {
+                app.start_game(Game::new(424242, true, false));
+                app.set_screen(Screen::Inventory);
             }
             "internet" => {
                 app.start_game(Game::new(424242, true, false));
@@ -1225,7 +1401,7 @@ async fn game_main() {
     let mut frames = 0u32;
     loop {
         if let Some(s) = &shot {
-            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet") || (s.mode == "join" && app.game.is_client()) {
+            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette") || (s.mode == "join" && app.game.is_client()) {
                 // Keep the demo camera looking at something interesting.
                 app.game.player.pitch = s.pitch;
                 app.game.player.yaw = s.yaw;
@@ -1233,6 +1409,19 @@ async fn game_main() {
                     app.game.player.body.pos = p;
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
+                }
+            }
+            if s.mode == "showcase" && frames == 120 {
+                // A little display of every mod block, on a stone plinth in front of the player.
+                let p = app.game.player.body.pos;
+                let (fx, fz) = (2.4f32.sin(), -2.4f32.cos());
+                let r = block::reg();
+                for (i, id) in (block::NUM_BLOCKS..r.blocks.len() as u8).enumerate() {
+                    let side = i as f32 * 1.6 - 3.0;
+                    let at = p + Vec3::new(fx * 5.0 - fz * side, 0.0, fz * 5.0 + fx * side);
+                    let (x, y, z) = (at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
+                    app.game.world.set(x, y, z, block::STONE);
+                    app.game.world.set(x, y + 1, z, id);
                 }
             }
             if (s.mode == "survival" || s.mode == "creative") && frames == 150 {

@@ -54,6 +54,15 @@ pub fn run(args: &[String]) -> i32 {
     let max_players: usize = get("--max-players").and_then(|p| p.parse().ok()).unwrap_or(16);
     let creative = args.iter().any(|a| a == "--creative");
 
+    let infos = crate::mods::install_local();
+    for m in infos.iter().filter(|m| m.enabled) {
+        let (b, i, r) = m.added;
+        log(&format!("Mod {} {}: {b} blocks, {i} items, {r} recipes (sent to players when they join)", m.name, m.version));
+        for e in &m.errors {
+            log(&format!("  mod {} problem: {e}", m.id));
+        }
+    }
+
     let mut game = match save::read_from(&world_path) {
         Ok(d) => {
             log(&format!("Loaded world {} (seed {})", world_path.display(), d.seed));

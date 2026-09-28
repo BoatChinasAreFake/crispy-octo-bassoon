@@ -66,6 +66,84 @@ pub const T_STOVE_SHIRT: u16 = 80;
 pub const T_STOVE_PANTS: u16 = 81;
 pub const T_HALF_HEART: u16 = 82;
 
+/// Mod textures are allocated from here to the end of the atlas.
+pub const FIRST_MOD_TILE: u16 = 96;
+
+/// Names mods can use to refer to built-in textures.
+pub const BASE_TEXTURES: &[(&str, u16)] = &[
+    ("grass_top", T_GRASS_TOP),
+    ("grass_side", T_GRASS_SIDE),
+    ("dirt", T_DIRT),
+    ("stone", T_STONE),
+    ("cobblestone", T_COBBLE),
+    ("sand", T_SAND),
+    ("gravel", T_GRAVEL),
+    ("water", T_WATER),
+    ("log_side", T_LOG_SIDE),
+    ("log_top", T_LOG_TOP),
+    ("leaves", T_LEAVES),
+    ("planks", T_PLANKS),
+    ("glass", T_GLASS),
+    ("bedrock", T_BEDROCK),
+    ("coal_ore", T_COAL_ORE),
+    ("iron_ore", T_IRON_ORE),
+    ("diamond_ore", T_DIAMOND_ORE),
+    ("snow", T_SNOW),
+    ("snow_side", T_SNOW_SIDE),
+    ("bricks", T_BRICK),
+    ("tnt_side", T_TNT_SIDE),
+    ("tnt_top", T_TNT_TOP),
+    ("tnt_bottom", T_TNT_BOTTOM),
+    ("crafting_table_top", T_TABLE_TOP),
+    ("crafting_table_side", T_TABLE_SIDE),
+    ("glowrock", T_GLOW),
+    ("torch", T_TORCH),
+    ("flower", T_FLOWER),
+    ("tall_grass", T_TALLGRASS),
+    ("stick", T_STICK),
+    ("coal", T_COAL),
+    ("iron", T_IRON),
+    ("diamond", T_DIAMOND),
+    ("gunpowder", T_GUNPOWDER),
+    ("porkchop", T_PORK),
+    ("goo", T_GOO),
+    ("wooden_pickaxe", T_PICK0),
+    ("stone_pickaxe", T_PICK0 + 1),
+    ("iron_pickaxe", T_PICK0 + 2),
+    ("diamond_pickaxe", T_PICK0 + 3),
+    ("wooden_sword", T_SWORD0),
+    ("stone_sword", T_SWORD0 + 1),
+    ("iron_sword", T_SWORD0 + 2),
+    ("diamond_sword", T_SWORD0 + 3),
+    ("white", T_WHITE),
+];
+
+pub fn base_texture(name: &str) -> Option<u16> {
+    BASE_TEXTURES.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
+}
+
+/// Copy one tile's 16x16 RGBA out of an atlas.
+pub fn tile_pixels(atlas: &[u8], tile: u16) -> Vec<u8> {
+    let (tx, ty) = ((tile % TILES_PER_ROW) as usize * TILE, (tile / TILES_PER_ROW) as usize * TILE);
+    let mut out = Vec::with_capacity(TILE * TILE * 4);
+    for y in 0..TILE {
+        let i = ((ty + y) * ATLAS + tx) * 4;
+        out.extend_from_slice(&atlas[i..i + TILE * 4]);
+    }
+    out
+}
+
+/// Paint mod textures from the active registry over a base atlas.
+pub fn apply_mod_textures(atlas: &mut [u8]) {
+    for (tile, px) in &crate::block::reg().textures {
+        let (tx, ty) = ((tile % TILES_PER_ROW) as usize * TILE, (tile / TILES_PER_ROW) as usize * TILE);
+        for y in 0..TILE {
+            let i = ((ty + y) * ATLAS + tx) * 4;
+            atlas[i..i + TILE * 4].copy_from_slice(&px[y * TILE * 4..(y + 1) * TILE * 4]);
+        }
+    }
+}
+
 /// Top-left UV of a tile plus its size, in 0..1 atlas space.
 pub fn tile_uv(tile: u16) -> (f32, f32, f32) {
     let s = 1.0 / TILES_PER_ROW as f32;

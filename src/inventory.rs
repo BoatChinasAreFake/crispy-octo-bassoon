@@ -87,7 +87,7 @@ impl Inventory {
         if !self.can_craft(r) {
             return false;
         }
-        for &(item, n) in r.inputs {
+        for &(item, n) in &r.inputs {
             self.remove(item, n as u32);
         }
         let left = self.add(r.output.0, r.output.1);

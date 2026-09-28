@@ -7,8 +7,8 @@ use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_PORT: u16 = 25565;
-/// v2: challenge/response login, used for internet play.
-pub const PROTOCOL: u32 = 2;
+/// v2: challenge/response login. v3: the host sends its mods to joining players.
+pub const PROTOCOL: u32 = 3;
 /// Drop a connection that has been silent this long (mob snapshots and player
 /// states flow many times a second, so silence means the link is dead).
 pub const TIMEOUT_SECS: f32 = 30.0;
@@ -59,6 +59,8 @@ pub enum Msg {
     Challenge { nonce: [u8; 16], password: bool },
     /// client -> host: sha256(nonce || password).
     Auth { proof: [u8; 32] },
+    /// host -> client, just before Welcome: the host's mods (see mods::encode_pack).
+    ModPack { data: Vec<u8> },
 }
 
 pub const FLAG_SNEAK: u8 = 1;
@@ -270,6 +272,11 @@ impl Msg {
                 w.u8(18);
                 w.bytes(proof);
             }
+            Msg::ModPack { data } => {
+                w.u8(19);
+                w.u32(data.len() as u32);
+                w.bytes(data);
+            }
         }
         w.0
     }
@@ -323,6 +330,10 @@ impl Msg {
             16 => Msg::Chat { from: r.u32()?, text: r.str()? },
             17 => Msg::Challenge { nonce: r.arr()?, password: r.u8()? != 0 },
             18 => Msg::Auth { proof: r.arr()? },
+            19 => {
+                let n = r.count(1)?;
+                Msg::ModPack { data: r.take(n)?.to_vec() }
+            }
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -684,6 +695,7 @@ mod tests {
             Msg::Chat { from: 0, text: "hello 🧱".into() },
             Msg::Challenge { nonce: [7; 16], password: true },
             Msg::Auth { proof: [9; 32] },
+            Msg::ModPack { data: vec![1, 2, 3] },
         ];
         for m in msgs {
             assert_eq!(Msg::decode(&m.encode()).unwrap(), m);

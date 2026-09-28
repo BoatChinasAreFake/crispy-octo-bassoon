@@ -296,6 +296,12 @@ impl Renderer {
         self.chunks.insert(key, g);
     }
 
+    /// Replace the texture atlas (after mods change) and rebuild its mipmaps.
+    pub fn update_atlas(&mut self, ctx: &mut dyn RenderingBackend, atlas: &[u8]) {
+        ctx.texture_update(self.texture, atlas);
+        ctx.texture_generate_mipmaps(self.texture);
+    }
+
     pub fn drop_chunk(&mut self, ctx: &mut dyn RenderingBackend, key: (i32, i32)) {
         if let Some(old) = self.chunks.remove(&key) {
             free(ctx, old.opaque);

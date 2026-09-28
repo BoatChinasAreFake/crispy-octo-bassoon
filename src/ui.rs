@@ -45,6 +45,18 @@ impl Ui {
         measure_text(t, None, self.font(px), 1.0).width
     }
 
+    /// Shorten text with "..." so it fits in `max` pixels.
+    pub fn fit(&self, t: &str, px: f32, max: f32) -> String {
+        if self.text_width(t, px) <= max {
+            return t.to_string();
+        }
+        let mut s: String = t.to_string();
+        while !s.is_empty() && self.text_width(&format!("{s}..."), px) > max {
+            s.pop();
+        }
+        format!("{s}...")
+    }
+
     pub fn text_centered(&self, t: &str, cx: f32, y: f32, px: f32, color: Color) {
         let w = self.text_width(t, px);
         self.text(t, cx - w / 2.0, y, px, color);
