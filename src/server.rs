@@ -31,7 +31,25 @@ OPTIONS:
 
 CONSOLE COMMANDS:
     list, say <text>, kick <name>, save, time <day|night|0.0-1.0>,
-    password <pw|off>, help, stop";
+    password <pw|off>, ban <name|ip>, unban <ip>, bans, help, stop
+
+Bans are by IP address and kept in banned-ips.txt next to the server.
+Five wrong passwords from one address lock it out for ten minutes.";
+
+const BAN_FILE: &str = "banned-ips.txt";
+
+fn load_bans() -> Vec<std::net::IpAddr> {
+    std::fs::read_to_string(BAN_FILE).unwrap_or_default().lines().filter_map(|l| l.split('#').next()?.trim().parse().ok()).collect()
+}
+
+fn save_bans(bans: &std::collections::HashSet<std::net::IpAddr>) {
+    let mut list: Vec<String> = bans.iter().map(|ip| ip.to_string()).collect();
+    list.sort();
+    let text = format!("# One IP address per line. Managed by the server's ban/unban commands.\n{}\n", list.join("\n"));
+    if let Err(e) = std::fs::write(BAN_FILE, text) {
+        log(&format!("Couldn't write {BAN_FILE}: {e}"));
+    }
+}
 
 pub fn timestamp() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -89,6 +107,13 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     log(&format!("Listening on TCP port {port} (IPv4{}), max {max_players} players", if crate::net::public_ipv6().is_some() { " + IPv6" } else { "" }));
+    let bans = load_bans();
+    if !bans.is_empty() {
+        log(&format!("{} banned address(es) loaded from {BAN_FILE}", bans.len()));
+    }
+    if let Some(Net::Host(s)) = &mut game.net {
+        s.banned.extend(bans);
+    }
     log(if password.is_some() { "Password required to join" } else { "No password: anyone who can reach this port can join (use --password)" });
     if let Some(ip) = crate::net::lan_ip() {
         log(&format!("LAN address: {ip}:{port}"));
@@ -178,6 +203,45 @@ pub fn run(args: &[String]) -> i32 {
                             log(&format!("Time set to {:.2}", game.time));
                         }
                         None => log("Usage: time <day|noon|night|midnight|0.0-1.0>"),
+                    }
+                }
+                "ban" if !rest.is_empty() => {
+                    // A player's name, or an address.
+                    let by_name = game.peer_by_name(rest);
+                    if let Some(Net::Host(s)) = &mut game.net {
+                        let ip = match by_name {
+                            Some(id) => s.ip_of(id),
+                            None => rest.parse().ok(),
+                        };
+                        match ip {
+                            Some(ip) => {
+                                s.banned.insert(ip);
+                                save_bans(&s.banned);
+                                let ids: Vec<u32> = s.clients.iter().filter(|c| c.conn.peer_ip() == Some(ip)).map(|c| c.id).collect();
+                                for id in ids {
+                                    s.kick(id, "You have been banned from this server.");
+                                }
+                                log(&format!("Banned {ip}"));
+                            }
+                            None => log(&format!("No player or address called {rest}")),
+                        }
+                    }
+                }
+                "unban" if !rest.is_empty() => {
+                    if let Some(Net::Host(s)) = &mut game.net {
+                        match rest.parse::<std::net::IpAddr>() {
+                            Ok(ip) if s.banned.remove(&ip) => {
+                                save_bans(&s.banned);
+                                log(&format!("Unbanned {ip}"));
+                            }
+                            _ => log(&format!("{rest} isn't banned (unban takes an IP address; see 'bans')")),
+                        }
+                    }
+                }
+                "bans" => {
+                    if let Some(Net::Host(s)) = &game.net {
+                        let list: Vec<String> = s.banned.iter().map(|ip| ip.to_string()).collect();
+                        log(&format!("{} banned: {}", list.len(), list.join(", ")));
                     }
                 }
                 "password" => {

@@ -5,6 +5,8 @@
 mod advancements;
 mod block;
 mod entity;
+mod farming;
+mod fishing;
 mod game;
 mod inventory;
 mod mesher;
@@ -71,6 +73,7 @@ enum Screen {
     Options { from_title: bool },
     Help { from_title: bool },
     Advancements,
+    FishLog,
     Multiplayer,
     Mods,
     Worlds,
@@ -487,7 +490,7 @@ impl App {
                     self.set_screen(Screen::Playing);
                 }
             }
-            Screen::Advancements => {
+            Screen::Advancements | Screen::FishLog => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
                 }
@@ -1053,7 +1056,7 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Help { .. } | Screen::Advancements);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Help { .. } | Screen::Advancements | Screen::FishLog);
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
                 self.audio.play(s, at, listener);
@@ -1098,6 +1101,7 @@ impl App {
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
                     Screen::Advancements => self.advancements_screen(),
+                    Screen::FishLog => self.fish_log_screen(),
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
@@ -1201,6 +1205,7 @@ impl App {
                 self.ui.text(l, 4.0 * s, (12.0 + i as f32 * 10.0) * s, 9.0, WHITE);
             }
         }
+        self.fishing_hud();
         self.toast();
     }
 
@@ -1299,9 +1304,13 @@ impl App {
             self.save();
         }
         y += bh + 5.0 * s;
+        let half = (bw - 5.0 * s) / 2.0;
         let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::ALL.len());
-        if self.ui.button(Rect::new(x, y, bw, bh), &adv, true) {
+        if self.ui.button(Rect::new(x, y, half, bh), &adv, true) {
             self.set_screen(Screen::Advancements);
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Fishing Log", true) {
+            self.set_screen(Screen::FishLog);
         }
         y += bh + 5.0 * s;
         let half = (bw - 5.0 * s) / 2.0;
@@ -1357,6 +1366,66 @@ impl App {
         let bw = (160.0 * s).min(w * 0.8);
         if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
             self.set_screen(Screen::Paused);
+        }
+    }
+
+    fn fish_log_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+        let log = &self.game.fish_log;
+        self.ui.text_centered("Fishing Log", w / 2.0, h * 0.1, 16.0, WHITE);
+        let sub = format!("Angler level {}  ({} xp)  -  lines snapped: {}  (they were THIS big)", log.level(), log.xp, log.snapped);
+        self.ui.text_centered(&sub, w / 2.0, h * 0.1 + 16.0 * s, 9.0, GOLD);
+        let pw = (320.0 * s).min(w - 20.0 * s);
+        let x = w / 2.0 - pw / 2.0;
+        let mut y = h * 0.1 + 30.0 * s;
+        if log.species.is_empty() {
+            self.ui.text_centered("Nothing yet. Craft a Fishing Stick (3 sticks, 2 string) and find some water.", w / 2.0, y + 12.0 * s, 9.0, GRAY);
+        }
+        let row_h = 20.0 * s;
+        for (key, (count, best)) in &log.species {
+            if y > h * 0.8 {
+                break;
+            }
+            let id = block::reg().lookup(key).unwrap_or(AIR);
+            draw_rectangle(x, y, pw, row_h - 2.0 * s, Color::new(0.12, 0.14, 0.2, 0.9));
+            self.ui.icon(id, x + 3.0 * s, y + 1.0 * s, row_h - 4.0 * s);
+            self.ui.text(&self.ui.fit(item_name(id), 9.0, pw * 0.55), x + row_h + 4.0 * s, y + 13.0 * s, 9.0, WHITE);
+            let stats = if *best > 0.0 { format!("x{count}   best {best:.0}cm") } else { format!("x{count}") };
+            let sw = self.ui.text_width(&stats, 9.0);
+            self.ui.text(&stats, x + pw - sw - 6.0 * s, y + 13.0 * s, 9.0, GOLD);
+            y += row_h;
+        }
+        let tips = "Tips: dawn and dusk are best. Deep, wide water beats puddles. Worms help. Don't reel in on a nibble.";
+        self.ui.text_centered(tips, w / 2.0, h * 0.84, 8.0, Color::new(0.7, 0.85, 1.0, 1.0));
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Paused);
+        }
+    }
+
+    /// While fishing: the bite alert and, with a big one on the line, the tug-of-war bars.
+    fn fishing_hud(&self) {
+        let Some(b) = &self.game.bobber else { return };
+        let (w, h, s) = (screen_width(), screen_height(), self.ui.s);
+        if matches!(b.state, fishing::BobberState::Biting { .. }) && b.fight.is_none() {
+            let pulse = 1.0 + (get_time() * 18.0).sin().abs() as f32 * 0.3;
+            self.ui.text_centered("!", w / 2.0, h / 2.0 - 16.0 * s, 26.0 * pulse, Color::new(1.0, 0.9, 0.2, 1.0));
+        }
+        if let Some(f) = &b.fight {
+            let bw = (180.0 * s).min(w * 0.6);
+            let x = w / 2.0 - bw / 2.0;
+            let y = h * 0.62;
+            let bar = |y: f32, v: f32, col: Color, label: &str| {
+                draw_rectangle(x - 2.0 * s, y - 2.0 * s, bw + 4.0 * s, 10.0 * s + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+                draw_rectangle(x, y, bw * v.clamp(0.0, 1.0), 10.0 * s, col);
+                self.ui.text(label, x, y - 4.0 * s, 8.0, WHITE);
+            };
+            let t = f.tension;
+            let tcol = if t > 0.75 { Color::new(0.95, 0.2, 0.15, 1.0) } else if t > 0.5 { Color::new(0.95, 0.7, 0.2, 1.0) } else { Color::new(0.4, 0.85, 0.4, 1.0) };
+            bar(y, f.progress, Color::new(0.3, 0.6, 1.0, 1.0), "Reel it in (hold right-click)");
+            bar(y + 26.0 * s, t, tcol, if t > 0.75 { "LINE TENSION - EASE OFF!" } else { "Line tension" });
         }
     }
 
@@ -1445,14 +1514,16 @@ impl App {
             "Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier.",
             "Hissers explode. Groaners and Rattlers burn in daylight. Bloops split. Webbers climb. Farm animals are friends (and food).",
             "Never look a Starer in the eye. Beds skip the night. Bows need Pointy Sticks. Pokey Plants poke.",
+            "Farming: hoe the dirt, plant, keep it watered and lit, feed the soil, rotate crops. A Soil Probe explains.",
+            "Fishing: cast, wait for the real bite (not the nibbles!), reel in. Big fish: mind the line tension.",
             "Crafting works anywhere. The crafting table is purely decorative. Satire!",
             "Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.",
         ];
         for (i, l) in lines.iter().enumerate() {
-            self.ui.text_centered(l, w / 2.0, h * 0.2 + i as f32 * 13.0 * s, 9.0, if l.is_empty() { WHITE } else { Color::new(0.9, 0.9, 0.9, 1.0) });
+            self.ui.text_centered(l, w / 2.0, h * 0.18 + i as f32 * 11.5 * s, 9.0, if l.is_empty() { WHITE } else { Color::new(0.9, 0.9, 0.9, 1.0) });
         }
         let bw = (160.0 * s).min(w * 0.8);
-        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.2 + 15.0 * 13.0 * s, bw, 20.0 * s), "Got it", true) {
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.18 + 17.5 * 11.5 * s, bw, 20.0 * s), "Got it", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
         }
     }
@@ -1783,6 +1854,15 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
+            "farm" | "fish" => {
+                let mut g = Game::new(424242, s.mode == "farm", false);
+                g.time = s.time.unwrap_or(0.2);
+                if s.mode == "fish" {
+                    g.inv.slots[0] = Some((block::ROD, 1));
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "zoo" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
@@ -1883,7 +1963,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if s.mode == "zoo" && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1901,6 +1981,70 @@ async fn game_main() {
                         }
                     }
                 }
+            }
+            if s.mode == "farm" && frames == 125 {
+                // A little farm: three crops at every stage, watered down the middle,
+                // with a Scarecrow, and the new decorative blocks along the back.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y0 = p.y.floor() as i32 - 1;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    (v.x.floor() as i32, v.z.floor() as i32)
+                };
+                let crops = [block::WHEAT_0, block::CARROT_0, block::POTATO_0];
+                for (row, base) in crops.iter().enumerate() {
+                    for col in 0..8 {
+                        let (x, z) = at(4.0 + row as f32, col as f32 - 3.5);
+                        let water = col == 4;
+                        app.game.world.set(x, y0, z, if water { block::WATER } else { block::FARMLAND_WET });
+                        if !water {
+                            let stage = (col.min(7) as u16 / 2).min(3);
+                            app.game.world.set(x, y0 + 1, z, base + stage);
+                        }
+                    }
+                }
+                let (x, z) = at(3.0, 5.5);
+                app.game.world.set(x, y0 + 1, z, block::SCARECROW);
+                let showcase = [block::SANDSTONE, block::STONE_BRICKS, block::MOSSY_COBBLE, block::HAY, block::BOOKSHELF, block::LANTERN, block::MUSHROOM, block::WEEDS];
+                for (i, id) in showcase.into_iter().enumerate() {
+                    let (x, z) = at(9.0, i as f32 * 1.2 - 4.2);
+                    if matches!(id, block::MUSHROOM | block::WEEDS) {
+                        app.game.world.set(x, y0, z, block::GRASS);
+                    }
+                    app.game.world.set(x, y0 + 1, z, id);
+                }
+            }
+            if s.mode == "fish" && frames == 125 {
+                // A pond, and a big one on the line.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y0 = p.y.floor() as i32 - 1;
+                for x in p.x as i32 - 14..p.x as i32 + 14 {
+                    for z in p.z as i32 - 14..p.z as i32 + 14 {
+                        let d = Vec3::new(x as f32 + 0.5, p.y, z as f32 + 0.5) - p;
+                        if (3.0..12.0).contains(&d.dot(fwd)) && d.dot(right).abs() < 4.5 {
+                            for y in y0 - 2..=y0 {
+                                app.game.world.set(x, y, z, block::WATER);
+                            }
+                        }
+                    }
+                }
+            }
+            if s.mode == "fish" && frames >= 160 {
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let spot = Vec3::new(p.x, p.y.floor() - 0.1, p.z) + fwd * 8.0;
+                app.game.bobber = Some(fishing::Bobber {
+                    pos: spot,
+                    vel: Vec3::ZERO,
+                    state: fishing::BobberState::Biting { window: 1.0 },
+                    fight: Some(fishing::Fight::new(0.55, 0.8)),
+                    since_nibble: 9.0,
+                    bait: false,
+                });
             }
             if s.mode == "zoo" && frames == 150 {
                 let p = app.game.player.body.pos;

@@ -10,8 +10,8 @@ use std::time::SystemTime;
 const MAGIC: &[u8; 4] = b"MNCR";
 /// v2 adds the mod palette (names of mod blocks/items); v3 adds script mod
 /// variables; v4 adds earned advancements; v5 widens block/item ids to two
-/// bytes. Older saves still load.
-const VERSION: u32 = 5;
+/// bytes; v6 adds farm soil and the fishing log. Older saves still load.
+const VERSION: u32 = 6;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -35,6 +35,10 @@ pub struct SaveData {
     pub script_vars: Vec<(String, Vec<u8>)>,
     /// Keys of the advancements earned in this world (save v4+).
     pub advancements: Vec<String>,
+    /// Soil records for tilled blocks, packed by `farming::encode` (save v6+).
+    pub farm: Vec<u8>,
+    /// The fishing log, packed by `FishLog::encode` (save v6+).
+    pub fish_log: Vec<u8>,
 }
 
 
@@ -141,6 +145,10 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
         w.u32(key.len() as u32);
         w.0.extend_from_slice(key.as_bytes());
     }
+    for blob in [&d.farm, &d.fish_log] {
+        w.u32(blob.len() as u32);
+        w.0.extend_from_slice(blob);
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -214,7 +222,8 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
             advancements.push(String::from_utf8_lossy(&r.bytes(256)?).into_owned());
         }
     }
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements })
+    let (farm, fish_log) = if version >= 6 { (r.bytes(64 << 20)?, r.bytes(1 << 20)?) } else { (Vec::new(), Vec::new()) };
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -417,6 +426,8 @@ mod tests {
             palette: Vec::new(),
             script_vars: Vec::new(),
             advancements: Vec::new(),
+            farm: Vec::new(),
+            fish_log: Vec::new(),
         }
     }
 

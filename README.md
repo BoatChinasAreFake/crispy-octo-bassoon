@@ -29,7 +29,7 @@ Run the tests with `cargo test --release`.
 - **Dynamic lighting.** Torches and Glowrock light the area around them, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
-- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 28 crafting recipes, food, beds, a bow, death and respawn.
+- **Survival mode.** Health, natural regen, mining times that depend on your tool, pickaxe tiers that gate ore drops, 48 crafting recipes, food, beds, a bow, farming, fishing, death and respawn.
 - **Creative mode.** Flight, instant breaking, infinite blocks, pick-block and a full item palette.
 - **Mobs** (legally distinct):
   - **Oinker**: wanders around, runs when hit, drops Raw Oinkchop.
@@ -50,7 +50,17 @@ Run the tests with `cargo test --release`.
   - **Gold (Shiny, Useless)**: too soft for tools. Crafting a "gold pickaxe" gets you a wooden one. It does make a **Suspiciously Golden Oinkchop** that fully heals you.
   - **Pumpkin** and **Jack o'Lantern** (a light source with a face on every side), **Pokey Plant** (don't hug it), **Ice** (fast underfoot, melts when broken), **Bouncy Goo Block** (sneak to land softly), **Sponge** (soaks up nearby water when placed) and **Wool**.
   - Sneak to place blocks against beds and cakes instead of using them.
-- **Advancements.** 30 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
+- **Farming (deliberately over-engineered).** Till grass or dirt with a **Hoe**, plant **Wheat Seeds** (from tall grass), **Carrots** or **Potatoes**, and watch four growth stages. Every tilled block has its own soil, and growth multiplies together:
+  - **water** within 4 blocks (hydrated farmland turns dark);
+  - **light**: sunshine or a torch or lantern nearby (crops don't grow in the dark);
+  - **nutrients**: wheat eats nitrogen, carrots phosphorus, potatoes potassium. Top them up with **Compost**, **Bone Dust** and **Wood Ash**;
+  - **crop rotation**: a bonus for planting something different, "soil fatigue" for the same crop three times running;
+  - **company**: crops grow 20% faster with a player nearby.
+
+  Meanwhile weeds sprout on bare farmland and steal nutrients, Clucksters peck at seedlings unless a **Scarecrow** is nearby, jumping on farmland tramples it, and dry, unused farmland turns back into dirt. A **Soil Probe** explains all of it in one long sentence. Wheat makes **Bread** and **Hay Bales** (which soften falls).
+- **Fishing (also over-engineered).** Cast a **Fishing Stick** and wait. Fish nibble first (reel in then and you scare them off), then really bite, and you get a moment to reel in. Big fish start a tug-of-war: hold right-click to reel, but ease off before the line tension snaps it. What you catch depends on the biome, the time of day (dawn and dusk are best), the water's size and depth (puddles give boots), bait (**Wiggly Worms**, dug up from dirt) and your **Angler level**. Catches include cod, salmon, tropical fish, pufferfish (don't eat it), junk, treasure, and one legendary fish. The **Fishing Log** in the pause menu keeps count and records the biggest.
+- **More blocks:** Sandstone (under deserts), Stone Bricks, Mossy Cobblestun, Hay Bale, Bookshelf, Lantern, Mushroom (in forests; two make a Suspicious Stew), Scarecrow and Weeds.
+- **Advancements.** 40 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
 - **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, baas, clucks, moos, rattles, skittering, bloops, bow twangs, groans, Hisser hisses, Starer warps, boings, an advancement fanfare, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
 - **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day and chat. Servers can require a password, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
@@ -115,7 +125,7 @@ The server has no window and needs no GPU or sound card. Options:
 - `--max-players N`: player limit (default 16).
 - `--upnp`: ask the router to forward the port, for servers at home.
 
-Console commands: `list`, `say <text>`, `kick <name>`, `time <day|night>`, `password <pw|off>`, `save`, `stop`.
+Console commands: `list`, `say <text>`, `kick <name>`, `ban <name|ip>`, `unban <ip>`, `bans`, `time <day|night>`, `password <pw|off>`, `save`, `stop`. Bans are by IP address and are kept in `banned-ips.txt`.
 
 The world autosaves every 5 minutes and when you type `stop`. Stopping with Ctrl+C loses anything since the last autosave.
 
@@ -127,10 +137,18 @@ On a cloud server, allow TCP port 25565 in its firewall or security group.
 - **Joining:** a joining player gets the world seed plus every block edit so far, so only the changes travel over the network, never whole chunks.
 - **Passwords:** checked with a challenge-response using SHA-256, so the password itself is never sent over the network.
 - **Everything else is unencrypted:** chat and game traffic can be read by anyone on the path, so don't share secrets in chat.
-- **Anti-grief:**
-  - a player's block edits must be within reach of where the server thinks they are, and at a human rate;
-  - rejected edits are undone on their screen;
-  - connections that go silent for 30 seconds, or don't finish logging in within 15 seconds, are dropped.
+- **Anti-cheat and anti-grief:** the host doesn't take a player's game at its word.
+  - **Block edits** must be within reach of where the server thinks the player is, at a human rate, and follow the game's rules: you can break things, place blocks into empty space, till and trample farmland, but not turn stone into diamond ore, break bedrock, place bedrock, or grow crops yourself. Rejected edits are undone on the player's screen.
+  - **Movement:** positions must make sense. Jumping across the map puts you back where you were.
+  - **Attacks, TNT, farming and fishing:** hits, ignitions, fertiliser and Soil Probe use must be within reach and at a human pace. Fish are rolled by the host, so a modified client can't award itself a legendary one.
+  - **Chat:** rate-limited (a burst of five, then one a second), with control characters stripped. Nobody can call themselves "Server".
+  - **Strikes:** players who keep sending things a real game wouldn't are kicked.
+- **Connection limits:**
+  - Messages from players are capped at 256 KB, and the host reads a bounded amount from each connection per frame, so one flooding connection can't stall everyone.
+  - At most three connections per address (except from the same computer).
+  - Five wrong passwords lock an address out for ten minutes.
+  - Connections that go silent for 30 seconds, or don't finish logging in within 15 seconds, are dropped.
+- **Still trusted:** each player's inventory lives on their own machine, so a modified client can still place blocks it doesn't really have (within the rules above). Don't run a public server for people you'd never trust with creative mode.
 - **Saving and leaving:** only the host or server saves. Players' inventories and positions are not saved on the server. If the host leaves, everyone returns to the title screen.
 - **Addresses:** the host listens on IPv4 and, where available, IPv6. Addresses can be `IP`, `IP:port`, `[IPv6]:port` or a hostname like `play.example.com`.
 

@@ -2,6 +2,7 @@
 
 use crate::block::*;
 use crate::noise::{hash2, hash3, Perlin};
+use crate::farming::{is_farmland, Soil};
 use crate::palette::PalettedBlocks;
 use macroquad::math::{ivec3, IVec3, Vec3};
 use std::collections::{HashMap, HashSet};
@@ -205,7 +206,8 @@ impl Generator {
                     let id = if y == 0 || (y <= 2 && hash3(s, x, y, z) < 0.5) {
                         BEDROCK
                     } else if y < h - 3 {
-                        STONE
+                        // Deserts sit on a few layers of sandstone.
+                        if biome == Biome::Desert && y >= h - 8 { SANDSTONE } else { STONE }
                     } else if y < h {
                         if biome == Biome::Desert || beach { SAND } else { DIRT }
                     } else if y == h {
@@ -267,6 +269,8 @@ impl Generator {
                         b[idx(lx, top, lz)] = TALL_GRASS;
                     } else if r < 0.1125 && biome == Biome::Plains {
                         b[idx(lx, top, lz)] = PUMPKIN;
+                    } else if r < 0.125 && biome == Biome::Forest {
+                        b[idx(lx, top, lz)] = MUSHROOM;
                     }
                 }
                 // Pokey Plants in the desert, 1-3 tall.
@@ -342,6 +346,8 @@ pub struct World {
     /// Chunks whose mesh is stale.
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
+    /// Soil records for every tilled block (see farming.rs); kept in step with the blocks.
+    pub farm: HashMap<IVec3, Soil>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -374,6 +380,7 @@ impl World {
             chunks: HashMap::new(),
             mods: HashMap::new(),
             dirty: HashSet::new(),
+            farm: HashMap::new(),
             pending: HashSet::new(),
             edit_log: Vec::new(),
             log_edits: false,
@@ -396,7 +403,10 @@ impl World {
             let mut chunk = Chunk::new(blocks);
             if let Some(m) = self.mods.get(&(cx, cz)) {
                 for (&i, &id) in m {
-                    chunk.blocks.set(i as usize, id);
+                    // Saves and hosts can't be trusted to stay in bounds.
+                    if (i as usize) < CHUNK_VOL && valid_block(id) {
+                        chunk.blocks.set(i as usize, id);
+                    }
                 }
             }
             chunk.recompute_heights();
@@ -527,6 +537,13 @@ impl World {
             return None;
         }
         let old = c.blocks.set(i, id);
+        // Tilling makes a soil record; anything else replacing farmland removes it.
+        let p = ivec3(x, y, z);
+        if is_farmland(id) {
+            self.farm.entry(p).or_default();
+        } else if is_farmland(old) {
+            self.farm.remove(&p);
+        }
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
         let xs: &[i32] = if lx == 0 { &[-1, 0] } else if lx == CW - 1 { &[0, 1] } else { &[0] };

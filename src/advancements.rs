@@ -43,6 +43,16 @@ pub const ALL: &[Advancement] = &[
     adv("arachno", "Arachno-no-bia", "Defeat a Webber. Eight legs, zero chances."),
     adv("split_decision", "Split Decision", "Defeat a Bloop. Watch it become several Bloops."),
     adv("robin_hood", "Robin Hood (Legally Distinct)", "Hit a mob with a Pointy Stick from a bow."),
+    adv("green_thumb", "Green Thumb", "Harvest a fully grown crop. Farming simulator unlocked."),
+    adv("crop_rotation", "Crop Rotation Enthusiast", "Harvest a crop grown where a different one grew before."),
+    adv("soil_scientist", "Soil Scientist", "Use a Soil Probe. Nitrogen, phosphorus, potassium, bafflement."),
+    adv("weed_whacker", "Weed Whacker", "Pull some weeds. Satisfying."),
+    adv("hay_there", "Hay There", "Survive a long fall by landing on a Hay Bale."),
+    adv("gone_fishin", "Gone Fishin'", "Catch anything at all with a Fishing Stick."),
+    adv("one_that_got_away", "The One That Got Away", "Snap your line fighting a big fish. It was THIS big."),
+    adv("bootiful", "Boot-iful", "Fish up a Soggy Boot. Just the left one."),
+    adv("sunken_treasure", "Sunken Treasure", "Fish up something valuable."),
+    adv("big_bob", "Big Bob", "Catch the legendary Big Bob. Dawn or dusk, deep ocean. Good luck."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

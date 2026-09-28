@@ -46,8 +46,23 @@ pub const BED: Id = 30;
 pub const CAKE: Id = 31;
 pub const SPONGE: Id = 32;
 pub const WOOL: Id = 33;
+pub const SANDSTONE: Id = 34;
+pub const STONE_BRICKS: Id = 35;
+pub const MOSSY_COBBLE: Id = 36;
+pub const HAY: Id = 37;
+pub const BOOKSHELF: Id = 38;
+pub const LANTERN: Id = 39;
+pub const MUSHROOM: Id = 40;
+pub const SCARECROW: Id = 41;
+pub const WEEDS: Id = 42;
+pub const FARMLAND: Id = 43;
+pub const FARMLAND_WET: Id = 44;
+/// Crops: four growth stages each, in order (see farming.rs).
+pub const WHEAT_0: Id = 45;
+pub const CARROT_0: Id = 49;
+pub const POTATO_0: Id = 53;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 34;
+pub const NUM_BLOCKS: Id = 57;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -77,8 +92,29 @@ pub const BONE: Id = FIRST_ITEM + 25;
 pub const ARROW: Id = FIRST_ITEM + 26;
 pub const STRING: Id = FIRST_ITEM + 27;
 pub const BOW: Id = FIRST_ITEM + 28;
+pub const HOE: Id = FIRST_ITEM + 29;
+pub const WHEAT_SEEDS: Id = FIRST_ITEM + 30;
+pub const WHEAT: Id = FIRST_ITEM + 31;
+pub const CARROT: Id = FIRST_ITEM + 32;
+pub const POTATO: Id = FIRST_ITEM + 33;
+pub const BONE_DUST: Id = FIRST_ITEM + 34;
+pub const COMPOST: Id = FIRST_ITEM + 35;
+pub const WOOD_ASH: Id = FIRST_ITEM + 36;
+pub const SOIL_PROBE: Id = FIRST_ITEM + 37;
+pub const BREAD: Id = FIRST_ITEM + 38;
+pub const ROD: Id = FIRST_ITEM + 39;
+pub const COD: Id = FIRST_ITEM + 40;
+pub const SALMON: Id = FIRST_ITEM + 41;
+pub const PUFFER: Id = FIRST_ITEM + 42;
+pub const TROPICAL: Id = FIRST_ITEM + 43;
+pub const BIG_BOB: Id = FIRST_ITEM + 44;
+pub const BOOT: Id = FIRST_ITEM + 45;
+pub const BOTTLE: Id = FIRST_ITEM + 46;
+pub const FISH_CHIPS: Id = FIRST_ITEM + 47;
+pub const STEW: Id = FIRST_ITEM + 48;
+pub const BAIT: Id = FIRST_ITEM + 49;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 29;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 50;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -308,10 +344,33 @@ impl Registry {
             def("cake", "Cake (Not a Lie)", Cube, true, true, [T_CAKE_TOP, T_CAKE_SIDE, T_CAKE_SIDE], 0.5, 0, false, CAKE, 0.0, S_GRASS),
             def("sponge", "Sponge (Very Thirsty)", Cube, true, true, [T_SPONGE; 3], 0.6, 0, false, SPONGE, 0.0, S_GRASS),
             def("wool", "Wool (Ethically Sheared)", Cube, true, true, [T_WOOL; 3], 0.8, 0, false, WOOL, 0.0, S_GRASS),
+            def("sandstone", "Sandstone (Sand, But Committed)", Cube, true, true, [T_SANDSTONE_TOP, T_SANDSTONE, T_SANDSTONE_TOP], 1.2, 1, true, SANDSTONE, 0.0, S_STONE),
+            def("stone_bricks", "Stone Bricks (Fancy Rocks)", Cube, true, true, [T_STONE_BRICKS; 3], 1.8, 1, true, STONE_BRICKS, 0.0, S_STONE),
+            def("mossy_cobblestone", "Mossy Cobblestun (Vintage)", Cube, true, true, [T_MOSSY; 3], 2.0, 1, true, MOSSY_COBBLE, 0.0, S_STONE),
+            def("hay_bale", "Hay Bale (Soft Landing)", Cube, true, true, [T_HAY_TOP, T_HAY_SIDE, T_HAY_TOP], 0.5, 0, false, HAY, 0.0, S_GRASS),
+            def("bookshelf", "Bookshelf (Unread)", Cube, true, true, [T_PLANKS, T_BOOKSHELF, T_PLANKS], 1.5, 0, false, BOOKSHELF, 0.0, S_WOOD),
+            def("lantern", "Lantern (Fancy Torch)", Cube, true, false, [T_LANTERN; 3], 0.8, 0, false, LANTERN, 14.0, S_GLASS),
+            def("mushroom", "Mushroom (Probably Fine)", Cross, false, false, [T_MUSHROOM; 3], 0.0, 0, false, MUSHROOM, 0.0, S_GRASS),
+            def("scarecrow", "Scarecrow (Unconvincing)", Cube, true, true, [T_PUMPKIN_TOP, T_SCARECROW, T_HAY_TOP], 0.8, 0, false, SCARECROW, 0.0, S_WOOD),
+            def("weeds", "Weeds (Unwelcome)", Cross, false, false, [T_WEEDS; 3], 0.0, 0, false, AIR, 0.0, S_GRASS),
+            def("farmland", "Farmland (Thirsty)", Cube, true, true, [T_FARMLAND, T_DIRT, T_DIRT], 0.5, 0, false, DIRT, 0.0, S_GRASS),
+            def("farmland_wet", "Farmland (Hydrated)", Cube, true, true, [T_FARMLAND_WET, T_DIRT, T_DIRT], 0.5, 0, false, DIRT, 0.0, S_GRASS),
         ];
+        // Crops: drops are decided by farming.rs when they're broken.
+        let crops = [("wheat", "Wheat", T_CROP_WHEAT), ("carrots", "Carrots", T_CROP_CARROT), ("potatoes", "Potatoes", T_CROP_POTATO)];
+        for (key, name, tile) in crops {
+            for stage in 0..4u16 {
+                let label = ["Sprouting", "Growing", "Nearly There", "Ready"][stage as usize];
+                let mut b = def(leak(&format!("{key}_{stage}")), leak(&format!("{name} ({label})")), Cross, false, false, [tile + stage; 3], 0.0, 0, false, AIR, 0.0, S_GRASS);
+                b.creative = stage == 3;
+                blocks.push(b);
+            }
+        }
+        debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
         blocks[BOUNCY as usize].bounce = 0.85;
+        blocks[LANTERN as usize].see_through = true;
         for id in [AIR, WATER, BEDROCK] {
             blocks[id as usize].creative = false;
         }
@@ -353,6 +412,27 @@ impl Registry {
             item("pointy_stick", "Pointy Stick", T_ARROW),
             item("string", "String (Not Spaghetti)", T_STRING),
             ItemDef { stack: 1, ..item("bow", "Bow (Twangy)", T_BOW) },
+            ItemDef { stack: 1, ..item("hoe", "Hoe (Dirt Scratcher)", T_HOE) },
+            item("wheat_seeds", "Wheat Seeds (Tiny)", T_SEEDS),
+            item("wheat", "Wheat (Bread Pending)", T_WHEAT_ITEM),
+            ItemDef { food: Some(3.0), ..item("carrot", "Carrot (Crunchy)", T_CARROT_ITEM) },
+            ItemDef { food: Some(1.0), ..item("potato", "Raw Spud (Regrettable)", T_POTATO_ITEM) },
+            item("bone_dust", "Bone Dust (Phosphorus!)", T_BONE_DUST),
+            item("compost", "Compost (Nitrogen!)", T_COMPOST),
+            item("wood_ash", "Wood Ash (Potassium!)", T_WOOD_ASH),
+            ItemDef { stack: 1, ..item("soil_probe", "Soil Probe (Science!)", T_SOIL_PROBE) },
+            ItemDef { food: Some(6.0), ..item("bread", "Bread (Finally)", T_BREAD) },
+            ItemDef { stack: 1, ..item("fishing_rod", "Fishing Stick (Advanced)", T_ROD) },
+            ItemDef { food: Some(3.0), ..item("cod", "Raw Cod-ish", T_COD) },
+            ItemDef { food: Some(4.0), ..item("salmon", "Raw Salmon-ish", T_SALMON) },
+            ItemDef { food: Some(-4.0), ..item("pufferfish", "Pufferfish (Do Not Eat)", T_PUFFER) },
+            ItemDef { food: Some(2.0), ..item("tropical_fish", "Tropical Fish (Suspiciously Colorful)", T_TROPICAL) },
+            ItemDef { food: Some(20.0), stack: 1, ..item("big_bob", "Big Bob (Legendary Carp)", T_BIG_BOB) },
+            ItemDef { stack: 1, ..item("soggy_boot", "Soggy Boot (Left Only)", T_BOOT) },
+            item("message_bottle", "Message in a Bottle", T_BOTTLE),
+            ItemDef { food: Some(12.0), ..item("fish_and_chips", "Fish n' Chips (Legally Distinct)", T_FISH_CHIPS) },
+            ItemDef { food: Some(0.0), stack: 1, ..item("suspicious_stew", "Suspicious Stew", T_STEW) },
+            item("worm", "Wiggly Worm (Bait)", T_WORM),
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -386,6 +466,25 @@ impl Registry {
             r(&[(STICK, 1), (FEATHER, 1), (COBBLE, 1)], (ARROW, 4)),
             r(&[(BONE, 1), (FEATHER, 1)], (ARROW, 2)),
             r(&[(STRING, 4)], (WOOL, 1)),
+            r(&[(SAND, 4)], (SANDSTONE, 1)),
+            r(&[(STONE, 4)], (STONE_BRICKS, 4)),
+            r(&[(COBBLE, 1), (WEEDS, 1)], (MOSSY_COBBLE, 1)),
+            r(&[(WHEAT, 9)], (HAY, 1)),
+            r(&[(HAY, 1)], (WHEAT, 9)),
+            r(&[(PLANKS, 6), (FEATHER, 3)], (BOOKSHELF, 1)),
+            r(&[(IRON, 1), (TORCH, 1)], (LANTERN, 1)),
+            r(&[(PUMPKIN, 1), (HAY, 1), (STICK, 2)], (SCARECROW, 1)),
+            r(&[(PLANKS, 2), (STICK, 2)], (HOE, 1)),
+            r(&[(BONE, 1)], (BONE_DUST, 3)),
+            r(&[(GOO, 2), (DIRT, 1)], (COMPOST, 2)),
+            r(&[(WHEAT_SEEDS, 3), (DIRT, 1)], (COMPOST, 1)),
+            r(&[(LOG, 1), (COAL, 1)], (WOOD_ASH, 3)),
+            r(&[(IRON, 1), (STICK, 1), (GLASS, 1)], (SOIL_PROBE, 1)),
+            r(&[(WHEAT, 3)], (BREAD, 1)),
+            r(&[(STICK, 3), (STRING, 2)], (ROD, 1)),
+            r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
+            r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
+            r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),
         ];
         Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new() }
     }
@@ -461,7 +560,7 @@ pub fn targetable(id: Id) -> bool {
 /// Placing into this cell simply replaces it.
 #[inline]
 pub fn replaceable(id: Id) -> bool {
-    matches!(id, AIR | WATER | TALL_GRASS)
+    matches!(id, AIR | WATER | TALL_GRASS | WEEDS)
 }
 
 pub fn is_block_item(id: Id) -> bool {

@@ -35,6 +35,8 @@ pub struct Player {
     pub ground_speed: f32,
     /// Set when a bouncy block launched us (the game plays a sound and clears it).
     pub bounced: bool,
+    /// Set on landing to how far we fell (for trampling and hay bales).
+    pub landed: Option<f32>,
 }
 
 impl Player {
@@ -55,6 +57,7 @@ impl Player {
             swing: 0.0,
             ground_speed: 1.0,
             bounced: false,
+            landed: None,
         }
     }
 
@@ -171,6 +174,9 @@ impl Player {
             self.fall_start = b.pos.y;
         } else if b.on_ground {
             let fall = self.fall_start - b.pos.y;
+            if fall > 0.6 {
+                self.landed = Some(fall);
+            }
             if fall > 3.5 && !creative {
                 dmg = (fall - 3.0).floor();
             }
