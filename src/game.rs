@@ -4,6 +4,8 @@ use crate::block::*;
 use crate::entity::*;
 use crate::inventory::Inventory;
 use crate::mesher::mesh_chunk;
+use crate::multiplayer::{Net, Peer};
+use crate::net::Msg;
 use crate::noise::{hash2, Perlin, Rng};
 use crate::player::{Input, Player, MAX_HEALTH};
 use crate::render::{DynGeo, FrameParams, Pass, Renderer};
@@ -13,6 +15,7 @@ use crate::texture::*;
 use crate::world::{Hit, World, CH, SEA};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
 use macroquad::miniquad::RenderingBackend;
+use std::collections::BTreeMap;
 use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 600.0;
@@ -72,6 +75,18 @@ pub struct Game {
     dig_tick: f32,
     step_dist: f32,
     was_in_water: bool,
+    // ---- multiplayer (see multiplayer.rs)
+    pub net: Option<Net>,
+    /// Other players, keyed by id (0 is the host).
+    pub peers: BTreeMap<u32, Peer>,
+    pub my_id: u32,
+    pub player_name: String,
+    pub next_mob_id: u32,
+    pub net_timers: [f32; 3],
+    /// Messages that arrived together with the Welcome, handled on the first update.
+    pub pending_msgs: Vec<Msg>,
+    /// Set when the connection drops; the app returns to the title screen.
+    pub net_error: Option<String>,
 }
 
 impl Game {
@@ -121,6 +136,14 @@ impl Game {
             dig_tick: 0.0,
             step_dist: 0.0,
             was_in_water: false,
+            net: None,
+            peers: BTreeMap::new(),
+            my_id: 0,
+            player_name: "Stove".into(),
+            next_mob_id: 1,
+            net_timers: [0.0; 3],
+            pending_msgs: Vec::new(),
+            net_error: None,
         }
     }
 
@@ -199,15 +222,21 @@ impl Game {
     /// Stream chunks and upload fresh meshes. Returns true once the player's area is ready.
     pub fn stream(&mut self, renderer: &mut Renderer, ctx: &mut dyn RenderingBackend, radius: i32) {
         let center = self.player.body.pos;
-        for k in self.world.stream(center, radius) {
+        let mut centers = vec![(center, radius)];
+        if self.is_host() {
+            // Keep the world simulated around remote players too.
+            centers.extend(self.peers.values().map(|p| (p.target, radius.min(5))));
+        }
+        for k in self.world.stream(&centers) {
             renderer.drop_chunk(ctx, k);
         }
         let (pcx, pcz) = ((center.x / 16.0).floor() as i32, (center.z / 16.0).floor() as i32);
+        let near = (radius + 1) * (radius + 1);
         let mut dirty: Vec<(i32, (i32, i32))> = self
             .world
             .dirty
             .iter()
-            .filter(|&&(cx, cz)| self.world.neighbours_ready(cx, cz))
+            .filter(|&&(cx, cz)| (cx - pcx).pow(2) + (cz - pcz).pow(2) <= near && self.world.neighbours_ready(cx, cz))
             .map(|&(cx, cz)| ((cx - pcx).pow(2) + (cz - pcz).pow(2), (cx, cz)))
             .collect();
         dirty.sort_unstable();
@@ -273,6 +302,12 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32, c: &Controls) {
+        self.net_receive(dt);
+        self.update_local(dt, c);
+        self.net_send(dt);
+    }
+
+    fn update_local(&mut self, dt: f32, c: &Controls) {
         self.clock += dt;
         self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         self.shake = (self.shake - dt * 1.5).max(0.0);
@@ -374,9 +409,17 @@ impl Game {
                     let i = *i;
                     let dmg = attack_damage(held) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
                     let from = self.player.body.pos;
-                    self.mobs[i].damage(dmg, from);
-                    let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
-                    self.sfx(if kind == MobKind::Oinker { Sfx::Oink } else { Sfx::MobHurt }, Some(at));
+                    if self.is_client() {
+                        // The host owns mobs: ask it to apply the hit (it echoes the sound back).
+                        let mob = self.mobs[i].id;
+                        self.net_send_msg(Msg::Attack { mob, dmg, from });
+                        self.mobs[i].hurt = 0.5;
+                    } else {
+                        self.mobs[i].damage(dmg, from);
+                        self.mobs[i].last_attacker = 0;
+                        let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
+                        self.sfx(if kind == MobKind::Oinker { Sfx::Oink } else { Sfx::MobHurt }, Some(at));
+                    }
                     self.attack_cd = 0.35;
                 }
             }
@@ -466,6 +509,12 @@ impl Game {
         let (hit_pos, normal) = (h.pos, h.normal);
         let hit_id = self.world.get_v(hit_pos);
         if hit_id == TNT && (held == TORCH || held == AIR) {
+            if self.is_client() {
+                self.world.set_remote(hit_pos.x, hit_pos.y, hit_pos.z, AIR);
+                self.net_send_msg(Msg::Ignite { x: hit_pos.x, y: hit_pos.y, z: hit_pos.z });
+                self.msg("Hisss... wait, that's the TNT. RUN.");
+                return;
+            }
             self.world.set_v(hit_pos, AIR);
             self.tnts.push(PrimedTnt { pos: hit_pos.as_vec3(), fuse: 3.0 });
             self.sfx(Sfx::Hiss, Some(hit_pos.as_vec3() + Vec3::splat(0.5)));
@@ -494,6 +543,9 @@ impl Game {
                 return;
             }
             if self.mobs.iter().any(|m| m.body.intersects_block(place.x, place.y, place.z)) {
+                return;
+            }
+            if self.peers.values().any(|p| p.intersects_block(place)) {
                 return;
             }
         }
@@ -554,7 +606,10 @@ impl Game {
 
     fn block_particles(&mut self, pos: IVec3, n: usize) {
         let id = self.world.get_v(pos);
-        let tile = block(id).tex[1];
+        self.block_particles_tile(pos, block(id).tex[1], n);
+    }
+
+    fn block_particles_tile(&mut self, pos: IVec3, tile: u16, n: usize) {
         for _ in 0..n {
             let r = &mut self.rng;
             let p = pos.as_vec3() + Vec3::new(r.range(0.1, 0.9), r.range(0.1, 0.9), r.range(0.1, 0.9));
@@ -600,6 +655,8 @@ impl Game {
 
     pub fn explode(&mut self, at: Vec3, r: f32, cause: &str) {
         self.sfx(Sfx::Explode, Some(at));
+        self.net_broadcast(Msg::Explosion { at, r });
+        self.hurt_peers_in_blast(at, r, cause);
         let c = ivec3(at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
         let ri = r.ceil() as i32;
         for dy in -ri..=ri {
@@ -628,7 +685,7 @@ impl Game {
                 }
             }
         }
-        self.smoke(at, 45, r * 0.6);
+        self.explosion_effects(at, r);
         let pd = (self.player.body.pos + Vec3::Y * 0.9).distance(at);
         if pd < r * 2.0 {
             let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
@@ -637,7 +694,6 @@ impl Game {
             let push = (self.player.body.pos - at).normalize_or_zero() * (1.0 - pd / (r * 2.0)) * 14.0;
             self.player.body.vel += push + Vec3::Y * 4.0;
         }
-        self.shake = (self.shake + (1.0 - (pd / 40.0).min(1.0)) * 1.2).min(1.5);
         for m in self.mobs.iter_mut() {
             let d = (m.body.pos + Vec3::Y * 0.5).distance(at);
             if d < r * 2.0 {
@@ -647,8 +703,44 @@ impl Game {
         }
     }
 
+    /// Mob AI targets and damage recipients: (player id, chest position).
+    pub fn player_targets(&self) -> Vec<(u32, Vec3)> {
+        let mut t = Vec::new();
+        if self.dead.is_none() {
+            t.push((self.my_id, self.player.body.pos + Vec3::Y * 0.9));
+        }
+        t.extend(self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target + Vec3::Y * 0.9)));
+        t
+    }
+
+    /// Smoke and screen shake (also used when a remote explosion is reported).
+    pub fn explosion_effects(&mut self, at: Vec3, r: f32) {
+        self.smoke(at, 45, r * 0.6);
+        let pd = (self.player.body.pos + Vec3::Y * 0.9).distance(at);
+        self.shake = (self.shake + (1.0 - (pd / 40.0).min(1.0)) * 1.2).min(1.5);
+    }
+
+    /// Particles and sound for a block someone else changed.
+    pub fn block_change_feedback(&mut self, pos: IVec3, old: u8, new: u8) {
+        let center = pos.as_vec3() + Vec3::splat(0.5);
+        if new == AIR || new == WATER {
+            if targetable(old) {
+                let tile = block(old).tex[1];
+                self.block_particles_tile(pos, tile, 10);
+                self.sfx(Sfx::Break(material(old)), Some(center));
+            }
+        } else {
+            self.sfx(Sfx::Place(material(new)), Some(center));
+        }
+    }
+
     fn update_entities(&mut self, dt: f32) {
+        if self.is_client() {
+            self.client_entities(dt);
+            return;
+        }
         let ppos = self.player.body.pos + Vec3::Y * 0.9;
+        let targets = self.player_targets();
         let visible = !self.creative;
         let daylight = self.daylight();
         let mut events = Vec::new();
@@ -659,12 +751,19 @@ impl Game {
                 continue;
             }
             let fuse_before = m.fuse;
-            events.extend(m.update(dt, &self.world, ppos, visible, daylight, &mut self.rng));
+            // Chase whoever is closest.
+            let (target_id, target) = targets
+                .iter()
+                .copied()
+                .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
+                .unwrap_or((u32::MAX, ppos));
+            let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
+            events.extend(evs.into_iter().map(|e| (target_id, target, e)));
             if fuse_before == 0.0 && m.fuse > 0.0 {
                 noises.push((Sfx::Hiss, m.body.pos));
             }
             // Idle chatter.
-            if self.rng.chance(dt * 0.1) && m.body.pos.distance(ppos) < 20.0 {
+            if self.rng.chance(dt * 0.1) && targets.iter().any(|t| m.body.pos.distance(t.1) < 20.0) {
                 match m.kind {
                     MobKind::Oinker => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Groaner => noises.push((Sfx::Groan, m.body.pos)),
@@ -689,8 +788,12 @@ impl Game {
                 }
             }
         }
-        for e in events {
+        for (target_id, target, e) in events {
             match e {
+                MobEvent::HurtPlayer(d, cause) if target_id != self.my_id => {
+                    self.hurt_peer(target_id, d, cause, Vec3::Y * 3.0);
+                    let _ = target;
+                }
                 MobEvent::HurtPlayer(d, cause) => {
                     self.hurt_player(d, cause);
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
@@ -703,14 +806,18 @@ impl Game {
         let mut i = 0;
         while i < self.mobs.len() {
             let m = &self.mobs[i];
-            let far = m.body.pos.distance(self.player.body.pos) > 110.0;
+            let far = m.body.pos.distance(self.player.body.pos) > 110.0 && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
                 if m.health <= 0.0 && m.health > -50.0 {
                     let at = m.body.pos + Vec3::Y * 0.5;
                     self.smoke(at, 10, 0.3);
                     if let Some((item, n)) = m.loot(&mut self.rng) {
-                        if !self.creative {
+                        if m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker) {
+                            if !self.creative {
+                                self.net_send_to(m.last_attacker, Msg::Give { item, n });
+                            }
+                        } else if !self.creative {
                             self.give(item, n);
                             self.msg(format!("{} dropped {}x {}", m.kind.name(), n, item_name(item)));
                         }
@@ -746,8 +853,18 @@ impl Game {
         }
     }
 
+    fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
+        let mut m = Mob::new(kind, pos, &mut self.rng);
+        m.id = self.next_mob_id;
+        self.next_mob_id += 1;
+        self.mobs.push(m);
+    }
+
     fn try_spawn(&mut self) {
-        let p = self.player.body.pos;
+        // Spawn around a random player so everyone gets company.
+        let mut centers = vec![self.player.body.pos];
+        centers.extend(self.peers.values().map(|p| p.target));
+        let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
         let passive = self.mobs.iter().filter(|m| !m.kind.hostile()).count();
         let hostile = self.mobs.len() - passive;
         let a = self.rng.range(0.0, TAU);
@@ -762,34 +879,33 @@ impl Game {
         if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
             for i in 0..self.rng.int(1, 3) {
                 let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.7, y as f32 + 1.0, z as f32 + 0.5);
-                let m = Mob::new(MobKind::Oinker, pos, &mut self.rng);
-                self.mobs.push(m);
+                self.alloc_mob(MobKind::Oinker, pos);
             }
             return;
         }
-        if hostile >= 12 {
+        if hostile >= 12 + 4 * self.peers.len() {
             return;
         }
         let kind = if self.rng.chance(0.45) { MobKind::Hisser } else { MobKind::Groaner };
         if self.is_night() && is_solid(top) && clear(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
-            let m = Mob::new(kind, pos, &mut self.rng);
-            self.mobs.push(m);
+            self.alloc_mob(kind, pos);
             return;
         }
         // Caves are always spooky.
         let cy = self.rng.int(4, y.max(5));
         if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 {
             let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
-            let m = Mob::new(kind, pos, &mut self.rng);
-            self.mobs.push(m);
+            self.alloc_mob(kind, pos);
         }
     }
 
     pub fn respawn(&mut self) {
         self.dead = None;
         self.player = Player::new(self.spawn);
-        self.mobs.retain(|m| !m.kind.hostile());
+        if self.net.is_none() {
+            self.mobs.retain(|m| !m.kind.hostile());
+        }
         self.ready = false;
         self.msg("Respawned. Inventory kept, because we're nice.");
     }
@@ -846,6 +962,15 @@ impl Game {
             if m.body.pos.distance(eye) < (render_distance * 16) as f32 {
                 m.draw(&mut g, &self.world);
             }
+        }
+        // Other players
+        for p in self.peers.values().filter(|p| p.alive()) {
+            let sky = self.world.sky_light(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
+            let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
+            g.begin(Pass::Opaque, tint, false);
+            let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
+            let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw);
+            draw_model(&mut g, &root, &STOVE, p.anim, sky, true);
         }
         // The player, in third person
         if self.third_person && !self.menu {
@@ -1029,7 +1154,7 @@ mod tests {
         let mut w = World::new(seed);
         let start = std::time::Instant::now();
         while w.chunks.len() < 9 && start.elapsed().as_secs() < 20 {
-            w.stream(Vec3::ZERO, 1);
+            w.stream(&[(Vec3::ZERO, 1)]);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         w

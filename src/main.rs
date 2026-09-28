@@ -7,6 +7,8 @@ mod entity;
 mod game;
 mod inventory;
 mod mesher;
+mod multiplayer;
+mod net;
 mod noise;
 mod player;
 mod render;
@@ -54,6 +56,7 @@ enum Screen {
     Dead,
     Options { from_title: bool },
     Help { from_title: bool },
+    Multiplayer,
 }
 
 struct Settings {
@@ -77,6 +80,34 @@ struct App {
     status: Option<(String, f32)>,
     fps: f32,
     audio: Audio,
+    // ---- multiplayer
+    mp_name: String,
+    mp_addr: String,
+    mp_focus: usize,
+    /// Address to connect to on the next frame (so "Connecting..." gets drawn first).
+    connect_next: Option<String>,
+    /// Connected, waiting for the host's Welcome.
+    joining: Option<(net::Conn, f64)>,
+    /// Chat line being typed, if the chat box is open.
+    chat: Option<String>,
+    last_view_proj: Mat4,
+    lan_addr: Option<String>,
+}
+
+/// Feed typed characters into a text buffer.
+fn type_into(buf: &mut String, max: usize) {
+    while let Some(c) = get_char_pressed() {
+        if !c.is_control() && buf.chars().count() < max {
+            buf.push(c);
+        }
+    }
+    if is_key_pressed(KeyCode::Backspace) {
+        buf.pop();
+    }
+}
+
+fn drain_chars() {
+    while get_char_pressed().is_some() {}
 }
 
 fn window_conf() -> Conf {
@@ -103,7 +134,7 @@ fn grab(on: bool) {
 
 impl App {
     fn set_screen(&mut self, s: Screen) {
-        let playing = s == Screen::Playing;
+        let playing = s == Screen::Playing && self.chat.is_none();
         grab(playing);
         self.last_mouse = None;
         if matches!(self.screen, Screen::Inventory) && s != Screen::Inventory {
@@ -131,9 +162,12 @@ impl App {
     }
 
     fn back_to_title(&mut self) {
-        if !self.game.menu {
+        if !self.game.menu && !self.game.is_client() {
             self.save();
         }
+        self.game.disconnect();
+        self.chat = None;
+        self.lan_addr = None;
         let mut gl = unsafe { get_internal_gl() };
         gl.flush();
         self.renderer.clear(gl.quad_context);
@@ -143,6 +177,10 @@ impl App {
     }
 
     fn save(&mut self) {
+        if self.game.is_client() {
+            self.status = Some(("Only the host can save this world.".into(), 3.0));
+            return;
+        }
         let data = self.game.to_save();
         match save::write(&data) {
             Ok(()) => self.status = Some(("World saved.".into(), 3.0)),
@@ -151,7 +189,7 @@ impl App {
     }
 
     fn controls(&mut self) -> Controls {
-        let playing = self.screen == Screen::Playing;
+        let playing = self.screen == Screen::Playing && self.chat.is_none();
         let key = |k: KeyCode| playing && is_key_down(k);
         let mut forward = 0.0;
         let mut strafe = 0.0;
@@ -204,8 +242,43 @@ impl App {
     }
 
     fn handle_keys(&mut self) {
+        if let Some(line) = &mut self.chat {
+            type_into(line, 200);
+            if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                let text = line.clone();
+                self.chat = None;
+                self.game.send_chat(&text);
+                self.set_screen(Screen::Playing);
+            } else if is_key_pressed(KeyCode::Escape) {
+                self.chat = None;
+                self.set_screen(Screen::Playing);
+            }
+            return;
+        }
+        if self.screen == Screen::Multiplayer {
+            let buf = if self.mp_focus == 0 { &mut self.mp_name } else { &mut self.mp_addr };
+            type_into(buf, if self.mp_focus == 0 { 16 } else { 64 });
+            if is_key_pressed(KeyCode::Tab) {
+                self.mp_focus = 1 - self.mp_focus;
+            }
+            if is_key_pressed(KeyCode::Escape) {
+                self.joining = None;
+                self.set_screen(Screen::Title);
+            }
+            if is_key_pressed(KeyCode::Enter) && self.joining.is_none() && self.connect_next.is_none() {
+                self.connect_next = Some(self.mp_addr.clone());
+            }
+            return;
+        }
         match self.screen {
             Screen::Playing => {
+                if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Slash) {
+                    drain_chars();
+                    let start = if is_key_pressed(KeyCode::Slash) { "/" } else { "" };
+                    self.chat = Some(start.to_string());
+                    self.set_screen(Screen::Playing);
+                    return;
+                }
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
                 } else if is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
@@ -263,10 +336,16 @@ impl App {
         self.mouse_look();
 
         let controls = self.controls();
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Title | Screen::Dead);
+        // Multiplayer worlds never pause: other people are still in them.
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Title | Screen::Dead) || self.game.net.is_some();
         if simulate {
             self.game.update(dt, &controls);
         }
+        if let Some(e) = self.game.net_error.take() {
+            self.back_to_title();
+            self.status = Some((e, 8.0));
+        }
+        self.update_joining();
         if self.game.dead.is_some() && self.screen != Screen::Dead {
             self.set_screen(Screen::Dead);
         }
@@ -287,6 +366,7 @@ impl App {
             self.game.stream(&mut self.renderer, gl.quad_context, rd);
             let aspect = screen_width() / screen_height().max(1.0);
             let cam = self.game.camera(aspect, self.settings.fov);
+            self.last_view_proj = cam.view_proj;
             let geo = self.game.build_geo(&cam, rd);
             let fp = self.game.frame_params(&cam, &self.renderer, rd);
             self.renderer.draw(gl.quad_context, &fp, &geo);
@@ -295,6 +375,104 @@ impl App {
         set_default_camera();
         self.draw_ui();
         self.play_sounds(dt);
+    }
+
+    /// Drive the connect -> Hello -> Welcome handshake without freezing the menu.
+    fn update_joining(&mut self) {
+        if let Some(addr) = self.connect_next.take() {
+            match net::Conn::connect(&addr) {
+                Ok(mut conn) => {
+                    conn.send(&net::Msg::Hello { protocol: net::PROTOCOL, name: multiplayer::sanitize_name(&self.mp_name) });
+                    conn.flush();
+                    self.joining = Some((conn, get_time()));
+                }
+                Err(e) => self.status = Some((format!("Couldn't connect to {addr}: {e}"), 6.0)),
+            }
+        }
+        let Some((conn, started)) = &mut self.joining else { return };
+        let mut msgs = conn.poll();
+        conn.flush();
+        if let Some(i) = msgs.iter().position(|m| matches!(m, net::Msg::Welcome { .. })) {
+            let leftover = msgs.split_off(i + 1);
+            let Some(net::Msg::Welcome { id, seed, time, creative, spawn }) = msgs.pop() else { return };
+            let (conn, _) = self.joining.take().unwrap();
+            let g = Game::new_client(id, seed, time, creative, spawn, conn, &self.mp_name, leftover);
+            self.start_game(g);
+            return;
+        }
+        let failure = if let Some(net::Msg::Kick { reason }) = msgs.iter().find(|m| matches!(m, net::Msg::Kick { .. })) {
+            Some(format!("Kicked: {reason}"))
+        } else if let Some(e) = &conn.closed {
+            Some(format!("Connection failed: {e}"))
+        } else if get_time() - *started > 10.0 {
+            Some("The host didn't answer. Is the world open to LAN?".into())
+        } else {
+            None
+        };
+        if let Some(f) = failure {
+            self.joining = None;
+            self.status = Some((f, 6.0));
+        }
+    }
+
+    fn multiplayer_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Multiplayer (LAN)", w / 2.0, h * 0.14, 16.0, WHITE);
+        let bw = (220.0 * s).min(w * 0.85);
+        let bh = 20.0 * s;
+        let x = w / 2.0 - bw / 2.0;
+        let mut y = h * 0.24;
+        self.ui.text("Your name", x, y - 3.0 * s, 9.0, GRAY);
+        if self.ui.text_field(Rect::new(x, y, bw, bh), &self.mp_name, self.mp_focus == 0) {
+            self.mp_focus = 0;
+        }
+        y += bh + 14.0 * s;
+        self.ui.text("Server address (IP or IP:port)", x, y - 3.0 * s, 9.0, GRAY);
+        if self.ui.text_field(Rect::new(x, y, bw, bh), &self.mp_addr, self.mp_focus == 1) {
+            self.mp_focus = 1;
+        }
+        y += bh + 10.0 * s;
+        let busy = self.joining.is_some() || self.connect_next.is_some();
+        let label = if busy { "Connecting..." } else { "Join Server" };
+        if self.ui.button(Rect::new(x, y, bw, bh), label, !busy) {
+            self.connect_next = Some(self.mp_addr.clone());
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Back", true) {
+            self.joining = None;
+            self.set_screen(Screen::Title);
+        }
+        y += bh + 14.0 * s;
+        for line in [
+            "To host: start or continue a world, press Esc, then \"Open to LAN\".",
+            "The host's address is shown in their pause menu. Default port 25565.",
+            "Everyone on the same network can join. Tab switches fields.",
+        ] {
+            self.ui.text_centered(line, w / 2.0, y, 9.0, Color::new(0.85, 0.85, 0.85, 1.0));
+            y += 12.0 * s;
+        }
+    }
+
+    /// Names floating above other players' heads.
+    fn name_tags(&self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let eye = self.game.player.eye();
+        for p in self.game.peers.values().filter(|p| p.alive()) {
+            let at = p.pos + Vec3::Y * 2.15;
+            if at.distance(eye) > 64.0 {
+                continue;
+            }
+            let clip = self.last_view_proj * at.extend(1.0);
+            if clip.w < 0.1 {
+                continue;
+            }
+            let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
+            let tw = self.ui.text_width(&p.name, 9.0);
+            draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 10.0 * s, tw + 6.0 * s, 12.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+            self.ui.text_centered(&p.name, sx, sy, 9.0, WHITE);
+        }
     }
 
     fn play_sounds(&mut self, dt: f32) {
@@ -325,6 +503,10 @@ impl App {
             Screen::Help { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.help_screen(from_title);
+            }
+            Screen::Multiplayer => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+                self.multiplayer_screen();
             }
             _ => {
                 self.hud();
@@ -360,6 +542,7 @@ impl App {
         if self.screen == Screen::Playing {
             self.ui.crosshair();
         }
+        self.name_tags();
 
         // Hotbar
         let slot = 20.0 * s;
@@ -384,13 +567,21 @@ impl App {
             }
         }
 
-        // Chat-ish messages
+        // Chat-ish messages (all recent ones stay visible while typing)
+        let typing = self.chat.is_some();
         for (i, (m, t)) in g.messages.iter().rev().enumerate() {
-            let a = t.min(1.0);
+            let a = if typing { 1.0 } else { t.min(1.0) };
             let y = h - 40.0 * s - i as f32 * 11.0 * s;
             let tw = self.ui.text_width(m, 9.0);
             draw_rectangle(4.0 * s, y - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4 * a));
             self.ui.text(m, 7.0 * s, y, 9.0, Color::new(1.0, 1.0, 1.0, a));
+        }
+
+        if let Some(line) = &self.chat {
+            let y = h - 30.0 * s;
+            draw_rectangle(4.0 * s, y - 10.0 * s, w - 8.0 * s, 13.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+            let caret = if (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { " " };
+            self.ui.text(&format!("> {line}{caret}"), 7.0 * s, y, 9.0, WHITE);
         }
 
         if self.show_debug {
@@ -408,6 +599,11 @@ impl App {
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
                 format!("Seed: {}  Mode: {}", g.world.seed(), if g.creative { "Creative" } else { "Survival" }),
                 format!("Blocks broken: {}", g.stat_blocks_broken),
+                match &g.net {
+                    None => "Network: single player".to_string(),
+                    Some(multiplayer::Net::Host(srv)) => format!("Network: hosting on port {} ({} players)", srv.port, g.player_count()),
+                    Some(multiplayer::Net::Client(_)) => format!("Network: connected as {} ({} players)", g.player_name, g.player_count()),
+                },
             ];
             for (i, l) in lines.iter().enumerate() {
                 self.ui.text(l, 4.0 * s, (12.0 + i as f32 * 10.0) * s, 9.0, WHITE);
@@ -430,7 +626,7 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.45;
+        let mut y = h * 0.40;
         let has_save = save::exists();
         if self.ui.button(Rect::new(x, y, bw, bh), "Continue Saved World", has_save) {
             match save::read() {
@@ -449,6 +645,12 @@ impl App {
         y += bh + 5.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "New Creative World", true) {
             self.new_world(true);
+            return;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Multiplayer (LAN)", true) {
+            drain_chars();
+            self.set_screen(Screen::Multiplayer);
             return;
         }
         y += bh + 5.0 * s;
@@ -477,12 +679,31 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.35;
+        let mut y = h * 0.32;
         if self.ui.button(Rect::new(x, y, bw, bh), "Back to Game", true) {
             self.set_screen(Screen::Playing);
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Save World", true) {
+        let client = self.game.is_client();
+        if client {
+            let host = self.game.peers.get(&0).map(|p| p.name.clone()).unwrap_or_else(|| "the host".into());
+            self.ui.text_centered(&format!("Playing on {host}'s world ({} players)", self.game.player_count()), w / 2.0, y + bh * 0.65, 10.0, GRAY);
+        } else if self.game.is_host() {
+            let addr = self.lan_addr.clone().unwrap_or_default();
+            self.ui.text_centered(&format!("Open to LAN at {addr}  ({} players)", self.game.player_count()), w / 2.0, y + bh * 0.65, 10.0, GOLD);
+        } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to LAN", true) {
+            match self.game.open_lan(&self.mp_name) {
+                Ok(port) => {
+                    let ip = net::lan_ip().unwrap_or_else(|| "this computer's IP".into());
+                    let addr = format!("{ip}:{port}");
+                    self.status = Some((format!("Hosting! Friends can join at {addr}"), 8.0));
+                    self.lan_addr = Some(addr);
+                }
+                Err(e) => self.status = Some((format!("Couldn't open to LAN: {e}"), 6.0)),
+            }
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Save World", !client) {
             self.save();
         }
         y += bh + 5.0 * s;
@@ -494,7 +715,8 @@ impl App {
             self.set_screen(Screen::Help { from_title: false });
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Save and Quit to Title", true) {
+        let quit_label = if client { "Disconnect" } else { "Save and Quit to Title" };
+        if self.ui.button(Rect::new(x, y, bw, bh), quit_label, true) {
             self.back_to_title();
         }
     }
@@ -566,12 +788,13 @@ impl App {
             "Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier.",
             "Hissers explode. Groaners bite and burn in daylight. Oinkers are friends (and food).",
             "Crafting works anywhere. The crafting table is purely decorative. Satire!",
+            "Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.",
         ];
         for (i, l) in lines.iter().enumerate() {
             self.ui.text_centered(l, w / 2.0, h * 0.2 + i as f32 * 13.0 * s, 9.0, if l.is_empty() { WHITE } else { Color::new(0.9, 0.9, 0.9, 1.0) });
         }
         let bw = (160.0 * s).min(w * 0.8);
-        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.2 + 13.0 * 13.0 * s, bw, 20.0 * s), "Got it", true) {
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.2 + 14.0 * 13.0 * s, bw, 20.0 * s), "Got it", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
         }
     }
@@ -749,6 +972,7 @@ struct ShotArgs {
     yaw: f32,
     pitch: f32,
     pos: Option<Vec3>,
+    addr: String,
 }
 
 fn parse_args() -> Option<ShotArgs> {
@@ -759,6 +983,7 @@ fn parse_args() -> Option<ShotArgs> {
         mode: get("--mode").unwrap_or_else(|| "title".into()),
         frames: get("--frames").and_then(|f| f.parse().ok()).unwrap_or(240),
         time: get("--time").and_then(|f| f.parse().ok()),
+        addr: get("--addr").unwrap_or_else(|| "127.0.0.1".into()),
         yaw: get("--yaw").and_then(|f| f.parse().ok()).unwrap_or(2.4),
         pitch: get("--pitch").and_then(|f| f.parse().ok()).unwrap_or(-0.25),
         pos: get("--pos").and_then(|p| {
@@ -821,6 +1046,14 @@ async fn main() {
         status: None,
         fps: 60.0,
         audio,
+        mp_name: format!("Stove{}", random_seed() % 1000),
+        mp_addr: "127.0.0.1".into(),
+        mp_focus: 1,
+        connect_next: None,
+        joining: None,
+        chat: None,
+        last_view_proj: Mat4::IDENTITY,
+        lan_addr: None,
     };
 
     if let Some(s) = &shot {
@@ -841,6 +1074,16 @@ async fn main() {
                     app.set_screen(Screen::Inventory);
                 }
             }
+            "host" => {
+                app.start_game(Game::new(424242, true, false));
+                app.game.open_lan("Hosty").expect("open to LAN");
+                app.show_debug = true;
+            }
+            "join" => {
+                app.mp_name = "Joiny".into();
+                app.connect_next = Some(s.addr.clone());
+                app.set_screen(Screen::Multiplayer);
+            }
             "options" => {
                 app.game = Game::new(424242, true, true);
                 app.set_screen(Screen::Options { from_title: true });
@@ -854,7 +1097,7 @@ async fn main() {
     let mut frames = 0u32;
     loop {
         if let Some(s) = &shot {
-            if s.mode != "title" && s.mode != "inventory" {
+            if !matches!(s.mode.as_str(), "title" | "inventory" | "join") || (s.mode == "join" && app.game.is_client()) {
                 // Keep the demo camera looking at something interesting.
                 app.game.player.pitch = s.pitch;
                 app.game.player.yaw = s.yaw;
@@ -883,9 +1126,10 @@ async fn main() {
             }
         }
         if app.quit || is_quit_requested() {
-            if !app.game.menu {
+            if !app.game.menu && !app.game.is_client() {
                 app.save();
             }
+            app.game.disconnect();
             break;
         }
         next_frame().await;

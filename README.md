@@ -34,6 +34,7 @@ Run the tests with `cargo test --release`.
   - **Groaner**: chases you at night, bites, and burns in sunlight. Drops Groaner Goo.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
 - **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, groans, Hisser hisses, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
+- **LAN multiplayer.** Open any world to your network from the pause menu, and friends join from the title screen. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day and chat. Everything uses plain TCP from the Rust standard library, with no servers or accounts.
 - **Saving and loading.** Only your edits are stored (`saves/world.mncr`); the terrain regenerates from the seed.
 - First-person hand and held item, third-person view, block-breaking cracks, particles, screen shake, a panoramic title screen with splash texts, and options for render distance, FOV, sensitivity and fullscreen.
 
@@ -51,11 +52,25 @@ Run the tests with `cargo test --release`.
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |
+| T or Enter | Chat (multiplayer) |
 | Q | Drop (yeet) the held item |
 | F5 | Toggle third person |
 | F3 | Debug info |
 | F11 | Fullscreen |
 | Esc | Pause menu |
+
+## Multiplayer
+
+1. **Host:** start or continue a world, press **Esc**, then click **Open to LAN**. The pause menu shows your address, for example `192.168.1.20:25565`.
+2. **Friends:** on the title screen, click **Multiplayer (LAN)**, type a name and the host's address, then click **Join Server**. For a second copy on the same computer, use `127.0.0.1`.
+3. Press **T** to chat.
+
+How it works:
+- The host's computer runs the world: mobs, TNT, the time of day and saving. Everyone else mirrors it and sends their edits, movement and attacks to the host, which passes them on to everyone.
+- Joining players get the world seed plus every block edit so far, so only the changes travel over the network, never whole chunks.
+- The host needs to allow incoming connections on TCP port 25565 (or the next free port up to 25574) through their firewall.
+- Only the host can save. If the host leaves, everyone returns to the title screen.
+- There is no password or encryption, so play on networks you trust.
 
 ## Getting started in survival
 
@@ -76,10 +91,12 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/block.rs` | Blocks, items, tools, recipes |
 | `src/inventory.rs` | Inventory and crafting |
 | `src/save.rs` | Binary save format |
+| `src/net.rs` | Network protocol and non-blocking TCP |
+| `src/multiplayer.rs` | Host and client sync logic |
 | `src/sound.rs` | Sound synthesis and playback |
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
 
 Not affiliated with any block-game company.

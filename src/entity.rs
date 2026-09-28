@@ -145,6 +145,12 @@ impl MobKind {
 }
 
 pub struct Mob {
+    /// Stable id for multiplayer sync.
+    pub id: u32,
+    /// Latest position from the host (clients interpolate toward it).
+    pub net_pos: Vec3,
+    /// Player id that last hit this mob (0 = host / single player), for loot.
+    pub last_attacker: u32,
     pub kind: MobKind,
     pub body: Body,
     pub yaw: f32,
@@ -170,6 +176,9 @@ impl Mob {
     pub fn new(kind: MobKind, pos: Vec3, rng: &mut Rng) -> Self {
         let (half, h) = kind.dims();
         Mob {
+            id: 0,
+            net_pos: pos,
+            last_attacker: 0,
             kind,
             body: Body::new(pos, half, h),
             yaw: rng.range(0.0, std::f32::consts::TAU),

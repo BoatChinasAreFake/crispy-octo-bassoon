@@ -46,6 +46,16 @@ pub fn material(block_id: u8) -> Mat {
     }
 }
 
+impl Sfx {
+    /// Wire encoding for multiplayer.
+    pub fn to_u8(self) -> u8 {
+        all_sfx().iter().position(|s| *s == self).unwrap_or(0) as u8
+    }
+    pub fn from_u8(v: u8) -> Option<Sfx> {
+        all_sfx().get(v as usize).copied()
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Sfx {
     /// Block broken.
@@ -408,7 +418,7 @@ pub struct Audio {
     pub music_on: bool,
 }
 
-fn all_sfx() -> Vec<Sfx> {
+pub(crate) fn all_sfx() -> Vec<Sfx> {
     let mut v = Vec::new();
     for m in [Mat::Stone, Mat::Wood, Mat::Grass, Mat::Sand, Mat::Glass] {
         v.extend([Sfx::Break(m), Sfx::Hit(m), Sfx::Place(m), Sfx::Step(m)]);

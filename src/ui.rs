@@ -145,6 +145,17 @@ impl Ui {
         (hov && self.clicked, hov && self.rclicked, hov)
     }
 
+    /// A single-line text box; returns true when clicked (to take focus).
+    pub fn text_field(&self, r: Rect, text: &str, focused: bool) -> bool {
+        let hov = self.hovered(r);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.05, 0.05, 0.06, 0.95));
+        let border = if focused { WHITE } else if hov { LIGHTGRAY } else { GRAY };
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, self.s * 1.5, border);
+        let caret = if focused && (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+        self.text(&format!("{text}{caret}"), r.x + 5.0 * self.s, r.y + r.h * 0.68, 10.0, WHITE);
+        hov && self.clicked
+    }
+
     pub fn tooltip(&self, text: &str) {
         let (mx, my) = mouse_position();
         let w = self.text_width(text, 9.0) + 8.0 * self.s;
