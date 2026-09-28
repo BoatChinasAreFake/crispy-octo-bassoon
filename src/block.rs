@@ -61,8 +61,12 @@ pub const FARMLAND_WET: Id = 44;
 pub const WHEAT_0: Id = 45;
 pub const CARROT_0: Id = 49;
 pub const POTATO_0: Id = 53;
+pub const CHEST: Id = 57;
+pub const FURNACE: Id = 58;
+/// A furnace while it's burning (it glows); the same container.
+pub const FURNACE_LIT: Id = 59;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 57;
+pub const NUM_BLOCKS: Id = 60;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -113,8 +117,17 @@ pub const BOTTLE: Id = FIRST_ITEM + 46;
 pub const FISH_CHIPS: Id = FIRST_ITEM + 47;
 pub const STEW: Id = FIRST_ITEM + 48;
 pub const BAIT: Id = FIRST_ITEM + 49;
+pub const COOKED_CHOP: Id = FIRST_ITEM + 50;
+pub const COOKED_MUTTON: Id = FIRST_ITEM + 51;
+pub const COOKED_CLUCKETS: Id = FIRST_ITEM + 52;
+pub const STEAK: Id = FIRST_ITEM + 53;
+pub const COOKED_COD: Id = FIRST_ITEM + 54;
+pub const COOKED_SALMON: Id = FIRST_ITEM + 55;
+pub const BAKED_POTATO: Id = FIRST_ITEM + 56;
+pub const COOKED_PUFFER: Id = FIRST_ITEM + 57;
+pub const COOKED_BOOT: Id = FIRST_ITEM + 58;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 50;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 59;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
@@ -366,6 +379,11 @@ impl Registry {
                 blocks.push(b);
             }
         }
+        blocks.push(def("chest", "Chest (Latches on Every Side)", Cube, true, true, [T_CHEST_TOP, T_CHEST_SIDE, T_CHEST_TOP], 2.5, 0, false, CHEST, 0.0, S_WOOD));
+        blocks.push(def("furnace", "Furnace (Omnidirectional)", Cube, true, true, [T_FURNACE_TOP, T_FURNACE_SIDE, T_FURNACE_TOP], 3.5, 1, true, FURNACE, 0.0, S_STONE));
+        let mut lit = def("furnace_lit", "Furnace (Toasty)", Cube, true, true, [T_FURNACE_TOP, T_FURNACE_LIT, T_FURNACE_TOP], 3.5, 1, true, FURNACE, 13.0, S_STONE);
+        lit.creative = false;
+        blocks.push(lit);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
@@ -433,6 +451,15 @@ impl Registry {
             ItemDef { food: Some(12.0), ..item("fish_and_chips", "Fish n' Chips (Legally Distinct)", T_FISH_CHIPS) },
             ItemDef { food: Some(0.0), stack: 1, ..item("suspicious_stew", "Suspicious Stew", T_STEW) },
             item("worm", "Wiggly Worm (Bait)", T_WORM),
+            ItemDef { food: Some(8.0), ..item("cooked_oinkchop", "Cooked Oinkchop", T_COOKED_CHOP) },
+            ItemDef { food: Some(7.0), ..item("cooked_mutton", "Cooked Baa-con (Crispy)", T_COOKED_MUTTON) },
+            ItemDef { food: Some(6.0), ..item("cooked_cluckets", "Cooked Cluckets", T_COOKED_CLUCKETS) },
+            ItemDef { food: Some(9.0), ..item("steak", "Moo-steak (Well Done, Sorry)", T_STEAK) },
+            ItemDef { food: Some(6.0), ..item("cooked_cod", "Cooked Cod-ish", T_COOKED_COD) },
+            ItemDef { food: Some(7.0), ..item("cooked_salmon", "Cooked Salmon-ish", T_COOKED_SALMON) },
+            ItemDef { food: Some(6.0), ..item("baked_potato", "Baked Spud (Redeemed)", T_BAKED_POTATO) },
+            ItemDef { food: Some(-2.0), ..item("cooked_pufferfish", "Cooked Pufferfish (Still Do Not Eat)", T_COOKED_PUFFER) },
+            ItemDef { food: Some(1.0), stack: 1, ..item("cooked_boot", "Cooked Boot (Chewy)", T_COOKED_BOOT) },
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -485,6 +512,8 @@ impl Registry {
             r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),
+            r(&[(PLANKS, 8)], (CHEST, 1)),
+            r(&[(COBBLE, 8)], (FURNACE, 1)),
         ];
         Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new() }
     }

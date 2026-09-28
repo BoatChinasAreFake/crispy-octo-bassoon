@@ -14,7 +14,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v6: mob sizes, arrows in flight, and the bow (Shoot).
 /// v7: farming and fishing (Interact, Catch), stricter hosts, and host-checked
 /// inventories (held item in PlayerState, Craft, Consume, InventoryCheck, Inventory).
-pub const PROTOCOL: u32 = 7;
+/// v8: chests and furnaces (OpenContainer, CloseContainer, ContainerMove, Container).
+pub const PROTOCOL: u32 = 8;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -101,6 +102,13 @@ pub enum Msg {
     InventoryCheck { items: Vec<(Id, u32)> },
     /// host -> client: what you actually have (sent when a check doesn't match).
     Inventory { items: Vec<(Id, u32)> },
+    /// client -> host: I opened / closed the chest or furnace here.
+    OpenContainer { x: i32, y: i32, z: i32 },
+    CloseContainer { x: i32, y: i32, z: i32 },
+    /// client -> host: I moved `n` of `item` into (`put`) or out of a container slot.
+    ContainerMove { x: i32, y: i32, z: i32, slot: u8, item: Id, n: u8, put: bool },
+    /// host -> client: what's in the container you have open, and its furnace gauges (0..1).
+    Container { x: i32, y: i32, z: i32, slots: Vec<(Id, u8)>, burn: f32, cook: f32 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -383,6 +391,35 @@ impl Msg {
                     w.u32(n);
                 }
             }
+            Msg::OpenContainer { x, y, z } | Msg::CloseContainer { x, y, z } => {
+                w.u8(if matches!(self, Msg::OpenContainer { .. }) { 29 } else { 30 });
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::ContainerMove { x, y, z, slot, item, n, put } => {
+                w.u8(31);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*slot);
+                w.u16(*item);
+                w.u8(*n);
+                w.u8(*put as u8);
+            }
+            Msg::Container { x, y, z, slots, burn, cook } => {
+                w.u8(32);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(slots.len() as u8);
+                for &(id, n) in slots {
+                    w.u16(id);
+                    w.u8(n);
+                }
+                w.f32(*burn);
+                w.f32(*cook);
+            }
         }
         w.0
     }
@@ -468,6 +505,18 @@ impl Msg {
                     items.push((r.u16()?, r.u32()?));
                 }
                 if t == 27 { Msg::InventoryCheck { items } } else { Msg::Inventory { items } }
+            }
+            29 => Msg::OpenContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            30 => Msg::CloseContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            31 => Msg::ContainerMove { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
+            32 => {
+                let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
+                let n = r.u8()? as usize;
+                let mut slots = Vec::with_capacity(n);
+                for _ in 0..n {
+                    slots.push((r.u16()?, r.u8()?));
+                }
+                Msg::Container { x, y, z, slots, burn: r.f32()?, cook: r.f32()? }
             }
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
@@ -899,6 +948,10 @@ mod tests {
             Msg::Consume { item: 0x8005, n: 1 },
             Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },
             Msg::Inventory { items: vec![] },
+            Msg::OpenContainer { x: -4, y: 60, z: 9 },
+            Msg::CloseContainer { x: 1, y: 2, z: 3 },
+            Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true },
+            Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1), (0, 0), (0x8001, 64)], burn: 0.5, cook: 0.25 },
             Msg::Mobs {
                 mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4 }],
                 tnts: vec![(Vec3::Z, 2.0)],

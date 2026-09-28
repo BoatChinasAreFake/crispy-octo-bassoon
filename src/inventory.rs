@@ -103,39 +103,12 @@ impl Inventory {
 
     /// Left click on a slot: pick up, put down, merge or swap with the cursor.
     pub fn click(&mut self, i: usize) {
-        let slot = self.slots[i];
-        match (self.cursor, slot) {
-            (Some((a, an)), Some((b, bn))) if a == b => {
-                let max = max_stack(a);
-                let put = an.min(max - bn);
-                self.slots[i] = Some((a, bn + put));
-                self.cursor = if an - put > 0 { Some((a, an - put)) } else { None };
-            }
-            _ => {
-                self.slots[i] = self.cursor;
-                self.cursor = slot;
-            }
-        }
+        click_stack(&mut self.slots[i], &mut self.cursor);
     }
 
     /// Right click: take half, or drop a single item.
     pub fn right_click(&mut self, i: usize) {
-        match (self.cursor, self.slots[i]) {
-            (None, Some((id, n))) => {
-                let take = n.div_ceil(2);
-                self.cursor = Some((id, take));
-                self.slots[i] = if n - take > 0 { Some((id, n - take)) } else { None };
-            }
-            (Some((id, n)), None) => {
-                self.slots[i] = Some((id, 1));
-                self.cursor = if n > 1 { Some((id, n - 1)) } else { None };
-            }
-            (Some((id, n)), Some((b, bn))) if id == b && bn < max_stack(id) => {
-                self.slots[i] = Some((id, bn + 1));
-                self.cursor = if n > 1 { Some((id, n - 1)) } else { None };
-            }
-            _ => {}
-        }
+        right_click_stack(&mut self.slots[i], &mut self.cursor);
     }
 
     /// How many of each item (the cursor included). Slot layout doesn't matter to the host.
@@ -176,5 +149,39 @@ impl Inventory {
         if let Some((id, n)) = self.cursor.take() {
             self.add(id, n);
         }
+    }
+}
+
+/// Left click on any slot (inventory, chest, furnace): pick up, put down,
+/// merge or swap with the cursor.
+pub fn click_stack(slot: &mut Stack, cursor: &mut Stack) {
+    match (*cursor, *slot) {
+        (Some((a, an)), Some((b, bn))) if a == b => {
+            let max = max_stack(a);
+            let put = an.min(max.saturating_sub(bn));
+            *slot = Some((a, bn + put));
+            *cursor = if an - put > 0 { Some((a, an - put)) } else { None };
+        }
+        _ => std::mem::swap(slot, cursor),
+    }
+}
+
+/// Right click on any slot: take half, or drop a single item.
+pub fn right_click_stack(slot: &mut Stack, cursor: &mut Stack) {
+    match (*cursor, *slot) {
+        (None, Some((id, n))) => {
+            let take = n.div_ceil(2);
+            *cursor = Some((id, take));
+            *slot = if n - take > 0 { Some((id, n - take)) } else { None };
+        }
+        (Some((id, n)), None) => {
+            *slot = Some((id, 1));
+            *cursor = if n > 1 { Some((id, n - 1)) } else { None };
+        }
+        (Some((id, n)), Some((b, bn))) if id == b && bn < max_stack(id) => {
+            *slot = Some((id, bn + 1));
+            *cursor = if n > 1 { Some((id, n - 1)) } else { None };
+        }
+        _ => {}
     }
 }

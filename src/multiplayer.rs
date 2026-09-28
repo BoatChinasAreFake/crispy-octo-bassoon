@@ -293,6 +293,7 @@ impl Game {
         }
         for (id, name, why) in left {
             self.peers.remove(&id);
+            self.forget_viewer(id);
             self.net_broadcast(Msg::PlayerLeave { id });
             // Ordinary goodbyes stay short; anything odd is worth a line in the log.
             if why == "connection closed" || why.starts_with("kicked") {
@@ -445,6 +446,10 @@ impl Game {
                             continue;
                         }
                     }
+                    // Whoever breaks a chest or furnace gets what was inside.
+                    if crate::containers::is_container(old) && !crate::containers::is_container(id) {
+                        self.spill_container(IVec3::new(x, y, z), Some(from));
+                    }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
                     if !quiet && old != id {
@@ -577,6 +582,13 @@ impl Game {
             Msg::Catch { pos, bait } => self.host_catch(from, pos, bait),
             Msg::Craft { recipe, times } => self.host_craft(from, recipe, times),
             Msg::Consume { item, n } => self.host_consume(from, item, n),
+            Msg::OpenContainer { x, y, z } => {
+                if self.peer_rate_ok(from, "open", 0.1) {
+                    self.host_open(from, IVec3::new(x, y, z));
+                }
+            }
+            Msg::CloseContainer { x, y, z } => self.host_close(from, IVec3::new(x, y, z)),
+            Msg::ContainerMove { x, y, z, slot, item, n, put } => self.host_container_move(from, IVec3::new(x, y, z), slot as usize, item, n, put),
             Msg::InventoryCheck { items } => {
                 if self.peer_rate_ok(from, "check", 1.0) {
                     self.host_inventory_check(from, items);
@@ -701,6 +713,7 @@ impl Game {
                 }
             }
             Msg::Inventory { items } => self.apply_inventory(items),
+            Msg::Container { x, y, z, slots, burn, cook } => self.apply_container(IVec3::new(x, y, z), slots, burn, cook),
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
@@ -734,7 +747,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } => {}
         }
     }
 
@@ -1213,6 +1226,66 @@ mod tests {
         assert!(pump(&mut host, &mut client, |h, _| h.mobs.iter().find(|m| m.id == 777).map(|m| m.health < before).unwrap_or(true)));
         let after = host.mobs.iter().find(|m| m.id == 777).map(|m| m.health).unwrap_or(before - 99.0);
         assert!(before - after <= attack_damage(AIR) * 1.5 + 1e-3, "hit for {}", before - after);
+    }
+
+    #[test]
+    fn chests_are_shared_through_the_host() {
+        let mut host = Game::new(781, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Chesty", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).map(|p| p.target.distance(spawn) < 1.0).unwrap_or(false)));
+        let (x, z) = (spawn.x.floor() as i32 + 1, spawn.z.floor() as i32 + 1);
+        let pos = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        host.world.set_v(pos, CHEST);
+        host.world.containers.get_mut(&pos).unwrap().slots[0] = Some((DIAMOND, 3));
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(pos) == CHEST));
+
+        // Opening it shows the host's contents.
+        client.open_container(pos);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.containers[&pos].slots[0] == Some((DIAMOND, 3))));
+
+        // Taking them: the host's chest empties and its ledger gains them.
+        client.container_click(0, false, false);
+        assert_eq!(client.inv.cursor, Some((DIAMOND, 3)));
+        assert!(pump(&mut host, &mut client, |h, _| h.world.containers[&pos].slots[0].is_none()));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 3);
+
+        // Putting two back, somewhere else: the other way round.
+        client.container_click(5, true, false); // right-click: one at a time
+        client.container_click(5, true, false);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.containers[&pos].slots[5] == Some((DIAMOND, 2))));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 1);
+
+        // Conjured items don't go in: the chest is corrected on their screen.
+        client.inv.cursor = Some((GOLD_INGOT, 10));
+        client.container_click(2, false, false);
+        assert_eq!(client.world.containers[&pos].slots[2], Some((GOLD_INGOT, 10)));
+        assert!(pump(&mut host, &mut client, |_, c| c.world.containers[&pos].slots[2].is_none()));
+        assert!(host.world.containers[&pos].slots[2].is_none());
+        // Nor can they take what isn't there.
+        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 5, item: DIAMOND, n: 60, put: false });
+        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 9, item: DIAMOND, n: 1, put: false });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.world.containers[&pos].slots[5], Some((DIAMOND, 2)));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 1);
+
+        // Closed: moves are no longer accepted at all.
+        client.inv.cursor = None;
+        client.close_container();
+        assert!(pump(&mut host, &mut client, |h, _| h.viewers.is_empty()));
+        client.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: 5, item: DIAMOND, n: 1, put: false });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.world.containers[&pos].slots[5], Some((DIAMOND, 2)));
     }
 
 }

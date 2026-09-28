@@ -18,7 +18,7 @@ use crate::texture::*;
 use crate::world::{Hit, World, CH, SEA};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
 use macroquad::miniquad::RenderingBackend;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 600.0;
@@ -108,6 +108,13 @@ pub struct Game {
     pub farm_timer: f32,
     /// Joined players: keeping our inventory in step with the host's ledger (see ledger.rs).
     pub inv_sync: crate::ledger::InvSync,
+    /// The chest or furnace whose screen is open (see containers.rs).
+    pub open: Option<IVec3>,
+    /// Where the world lives: which joined players have which container open.
+    pub viewers: HashMap<IVec3, HashSet<u32>>,
+    /// Containers whose contents changed since viewers were last told.
+    pub dirty_containers: HashSet<IVec3>,
+    pub container_sync_timer: f32,
 }
 
 impl Game {
@@ -175,6 +182,10 @@ impl Game {
             fish_log: Default::default(),
             farm_timer: 0.0,
             inv_sync: Default::default(),
+            open: None,
+            viewers: HashMap::new(),
+            dirty_containers: HashSet::new(),
+            container_sync_timer: 0.0,
         }
     }
 
@@ -192,6 +203,16 @@ impl Game {
                     *id = remap[*id as usize];
                 }
             }
+        }
+        // After the edits: replaying them makes empty containers, these fill them.
+        let containers = crate::containers::decode(&d.containers);
+        for (p, mut c) in containers {
+            if let Some(r) = &remap {
+                for s in c.slots.iter_mut() {
+                    *s = s.map(|(id, n)| (r[id as usize], n)).filter(|(id, _)| *id != AIR);
+                }
+            }
+            g.world.containers.insert(p, c);
         }
         g.time = d.time;
         g.player.body.pos = Vec3::from_array(d.pos);
@@ -229,6 +250,7 @@ impl Game {
             advancements: self.advancements.earned.clone(),
             farm: crate::farming::encode(&self.world.farm),
             fish_log: self.fish_log.encode(),
+            containers: crate::containers::encode(&self.world.containers),
         }
     }
 
@@ -980,6 +1002,15 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        // Chests and furnaces open (sneak to place against them instead).
+        if let Some(Target::Block(h)) = &self.target
+            && crate::containers::is_container(self.world.get_v(h.pos))
+            && !self.player.sneaking
+        {
+            let pos = h.pos;
+            self.open_container(pos);
+            return;
+        }
         if held != AIR {
             if self.is_client() {
                 self.net_send_msg(Msg::UseItem { item: held });
@@ -1003,6 +1034,14 @@ impl Game {
             self.player.hurt = 0.0;
             self.hurt_player(4.0, "ate a Pufferfish. It said 'Do Not Eat' right on it");
             self.msg("You ate a Pufferfish. Bold. Very bold. Ow.");
+            return;
+        }
+        if held == COOKED_PUFFER {
+            self.use_up_held();
+            self.sfx(Sfx::Eat, None);
+            self.player.hurt = 0.0;
+            self.hurt_player(2.0, "ate a Cooked Pufferfish. Cooking it did not help");
+            self.msg("Cooking it only halved the problem. Still ow.");
             return;
         }
         if held == STEW {
@@ -1045,7 +1084,11 @@ impl Game {
                     FISH_CHIPS => "Fish n' Chips. Legally distinct, emotionally identical.",
                     BIG_BOB => "You ate Big Bob. You monster. Fully healed, though.",
                     COD | SALMON | TROPICAL => "Raw fish. Sushi, technically.",
-                    CLUCKETS | MOO_STEAK => "Raw meat. Furnaces are a future update.",
+                    CLUCKETS | MOO_STEAK => "Raw meat. There's a furnace for that now, you know.",
+                    COOKED_CHOP | STEAK | COOKED_MUTTON | COOKED_CLUCKETS => "Cooked to perfection. By a cube. Of cobblestone.",
+                    COOKED_COD | COOKED_SALMON => "Grilled fish. The Fish Log would be proud.",
+                    BAKED_POTATO => "A baked potato. The potato's redemption arc is complete.",
+                    COOKED_BOOT => "You ate a boot. It was chewy. It's always chewy.",
                     _ => "*nom* Oinkchop acquired (internally).",
                 });
                 if held == GOLDEN_CHOP {
@@ -1169,6 +1212,10 @@ impl Game {
             }
         }
         self.block_particles(pos, 14);
+        // Chests and furnaces hand over what was inside (joined players get it from the host).
+        if !self.is_client() {
+            self.spill_container(pos, None);
+        }
         self.world.set_v(pos, AIR);
         self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
         let on_break: &'static [Action] = &block(id).on_break;
@@ -1615,6 +1662,7 @@ impl Game {
             self.try_spawn();
         }
         self.farm_tick(dt);
+        self.container_tick(dt);
     }
 
     fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
@@ -2208,6 +2256,71 @@ mod tests {
         let d = g.to_save();
         let back = Game::from_save(d);
         assert_eq!(back.advancements.count(), g.advancements.count());
+    }
+
+    #[test]
+    fn chests_hold_things_and_furnaces_cook() {
+        use crate::containers::{FUEL, INPUT, OUTPUT};
+        let mut g = arena(31);
+        let chest = IVec3::new(2, 50, 0);
+        g.world.set_v(chest, CHEST);
+        assert_eq!(g.world.containers[&chest].slots.len(), 27);
+        // Right-clicking it opens it.
+        g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+        g.target = Some(Target::Block(crate::world::Hit { pos: chest, normal: IVec3::NEG_X, dist: 1.5 }));
+        g.use_item();
+        assert_eq!(g.open, Some(chest));
+        // Click a stack in; shift-click another straight in.
+        g.inv.slots[0] = Some((DIAMOND, 5));
+        g.inv.click(0);
+        g.container_click(0, false, false);
+        assert_eq!(g.world.containers[&chest].slots[0], Some((DIAMOND, 5)));
+        g.inv.slots[1] = Some((STICK, 10));
+        g.container_quick_put(1);
+        assert_eq!(g.world.containers[&chest].slots[1], Some((STICK, 10)));
+        assert_eq!(g.inv.count(STICK), 0);
+        // Shift-click back out.
+        g.container_click(1, false, true);
+        assert_eq!(g.inv.count(STICK), 10);
+        g.close_container();
+
+        // It survives saving.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.world.containers[&chest].slots[0], Some((DIAMOND, 5)));
+
+        // Breaking it hands over the contents (and the chest).
+        g.break_block(chest, true);
+        assert!(!g.world.containers.contains_key(&chest));
+        assert_eq!(g.inv.count(DIAMOND), 5);
+        assert_eq!(g.inv.count(CHEST), 1);
+
+        // A furnace: chops on top, coal below, and it lights up while it works.
+        let furnace = IVec3::new(-2, 50, 0);
+        g.world.set_v(furnace, FURNACE);
+        let f = g.world.containers.get_mut(&furnace).unwrap();
+        f.slots[INPUT] = Some((PORKCHOP, 2));
+        f.slots[FUEL] = Some((COAL, 1));
+        for _ in 0..90 {
+            g.container_tick(0.1);
+        }
+        assert_eq!(g.world.get_v(furnace), FURNACE_LIT);
+        assert_eq!(g.world.containers[&furnace].slots[OUTPUT], Some((COOKED_CHOP, 1)));
+        // The output is take-only.
+        g.open = Some(furnace);
+        g.inv.cursor = Some((DIRT, 1));
+        g.container_click(OUTPUT, false, false);
+        assert_eq!(g.inv.cursor, Some((DIRT, 1)));
+        g.inv.cursor = None;
+        g.container_click(OUTPUT, false, false);
+        assert_eq!(g.inv.cursor, Some((COOKED_CHOP, 1)));
+        g.close_container();
+        // Out of things to cook: it goes out once the coal's spent.
+        for _ in 0..900 {
+            g.container_tick(0.1);
+        }
+        assert_eq!(g.world.get_v(furnace), FURNACE);
+        assert_eq!(g.world.containers[&furnace].slots[OUTPUT], Some((COOKED_CHOP, 1)));
+        assert_eq!(g.world.containers[&furnace].slots[INPUT], None);
     }
 
     /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

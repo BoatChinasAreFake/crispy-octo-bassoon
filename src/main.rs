@@ -4,6 +4,7 @@
 
 mod advancements;
 mod block;
+mod containers;
 mod entity;
 mod farming;
 mod fishing;
@@ -21,6 +22,7 @@ mod render;
 mod save;
 mod scripting;
 mod server;
+mod settings;
 mod upnp;
 mod sound;
 mod texture;
@@ -33,6 +35,7 @@ use macroquad::prelude::*;
 use player::Input;
 use render::Renderer;
 use sound::{Audio, Sfx};
+use settings::Settings;
 use ui::Ui;
 
 const SPLASHES: &[&str] = &[
@@ -70,6 +73,8 @@ enum Screen {
     Playing,
     Paused,
     Inventory,
+    /// A chest or furnace is open (see containers.rs).
+    Container,
     Dead,
     Options { from_title: bool },
     Help { from_title: bool },
@@ -83,19 +88,14 @@ enum Screen {
     DeleteWorld,
 }
 
-struct Settings {
-    render_distance: i32,
-    fov: f32,
-    sensitivity: f32,
-    fullscreen: bool,
-}
-
 struct App {
     screen: Screen,
     game: Game,
     renderer: Renderer,
     ui: Ui,
     settings: Settings,
+    /// Screenshot runs neither read nor write settings.txt.
+    no_settings_file: bool,
     splash: &'static str,
     last_mouse: Option<Vec2>,
     show_debug: bool,
@@ -202,7 +202,28 @@ impl App {
         if matches!(self.screen, Screen::Inventory) && s != Screen::Inventory {
             self.game.inv.return_cursor();
         }
+        if self.screen == Screen::Container && s != Screen::Container {
+            self.game.close_container();
+        }
+        // Leaving a screen where settings change: keep them for next time.
+        if matches!(self.screen, Screen::Options { .. } | Screen::Multiplayer) && self.screen != s {
+            self.save_settings();
+        }
         self.screen = s;
+    }
+
+    /// Everything worth remembering between runs, gathered from where it lives.
+    fn current_settings(&self) -> Settings {
+        Settings { volume: self.audio.volume, music_on: self.audio.music_on, mp_name: self.mp_name.clone(), mp_addr: self.mp_addr.clone(), ..self.settings.clone() }
+    }
+
+    fn save_settings(&mut self) {
+        if self.no_settings_file {
+            return;
+        }
+        if let Err(e) = self.current_settings().save(&settings::path()) {
+            self.status = Some((format!("Couldn't save settings: {e}"), 5.0));
+        }
     }
 
     fn start_game(&mut self, game: Game) {
@@ -481,7 +502,7 @@ impl App {
                     self.game.third_person = !self.game.third_person;
                 }
             }
-            Screen::Inventory => {
+            Screen::Inventory | Screen::Container => {
                 if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
                     self.set_screen(Screen::Playing);
                 }
@@ -526,9 +547,15 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Title | Screen::Dead) || self.game.net.is_some();
         if simulate {
             self.game.update(dt, &controls);
+        }
+        // Right-clicked a chest or furnace: show it. Broken under us: close it.
+        if self.game.open.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Container);
+        } else if self.screen == Screen::Container && !self.game.container_still_there() {
+            self.set_screen(Screen::Playing);
         }
         if let Some(e) = self.game.net_error.take() {
             self.back_to_title();
@@ -1104,6 +1131,7 @@ impl App {
                     Screen::Advancements => self.advancements_screen(),
                     Screen::FishLog => self.fish_log_screen(),
                     Screen::Inventory => self.inventory_screen(),
+                    Screen::Container => self.container_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
                 }
@@ -1517,7 +1545,7 @@ impl App {
             "Never look a Starer in the eye. Beds skip the night. Bows need Pointy Sticks. Pokey Plants poke.",
             "Farming: hoe the dirt, plant, keep it watered and lit, feed the soil, rotate crops. A Soil Probe explains.",
             "Fishing: cast, wait for the real bite (not the nibbles!), reel in. Big fish: mind the line tension.",
-            "Crafting works anywhere. The crafting table is purely decorative. Satire!",
+            "Crafting works anywhere (the table is decorative. Satire!). Chests hold things; Furnaces cook with coal or wood.",
             "Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.",
         ];
         for (i, l) in lines.iter().enumerate() {
@@ -1547,6 +1575,97 @@ impl App {
         if self.ui.button(Rect::new(x, h * 0.5 + bh + 5.0 * s, bw, bh), "Rage Quit to Title", true) {
             self.game.respawn();
             self.back_to_title();
+        }
+    }
+
+    fn container_screen(&mut self) {
+        use containers::{FUEL, INPUT, OUTPUT};
+        let Some(pos) = self.game.open else { return };
+        let kind = self.game.world.get_v(pos);
+        let Some(c) = self.game.world.containers.get(&pos).cloned() else { return };
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let slot = 20.0 * s;
+        let top_h = if containers::is_furnace(kind) { slot * 3.2 } else { slot * 3.0 };
+        let panel_w = slot * 9.0 + 12.0 * s;
+        let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
+        let x0 = (w - panel_w) / 2.0;
+        let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
+        let sx = x0 + 6.0 * s;
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        let mut tooltip: Option<String> = None;
+        let name = |st: Option<(Id, u8)>| st.map(|st| item_name(st.0).to_string());
+        self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
+        let top = y0 + 18.0 * s;
+        // (slot index, x, y) for the container's own slots.
+        let spots: Vec<(usize, f32, f32)> = if containers::is_furnace(kind) {
+            let cx = sx + slot * 2.5;
+            vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
+        } else {
+            (0..containers::CHEST_SLOTS).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
+        };
+        for &(i, x, y) in &spots {
+            let (l, r, hov) = self.ui.slot(c.slots[i], x, y, slot, false);
+            if hov {
+                tooltip = name(c.slots[i]);
+            }
+            if l || r {
+                self.game.container_click(i, r, shift && l);
+            }
+        }
+        if containers::is_furnace(kind) {
+            let (burn, cook) = c.gauges();
+            let (fx, fy) = (sx + slot * 2.5, top + slot * 1.1);
+            self.ui.tile(texture::T_FLAME, fx, fy, slot, Color::new(0.3, 0.3, 0.3, 1.0));
+            self.ui.tile_part(texture::T_FLAME, fx, fy, slot, burn, true, WHITE);
+            let ax = sx + slot * 3.9;
+            self.ui.tile(texture::T_ARROW_UI, ax, fy, slot * 1.2, Color::new(0.3, 0.3, 0.3, 1.0));
+            self.ui.tile_part(texture::T_ARROW_UI, ax, fy, slot * 1.2, cook, false, WHITE);
+            let hint = match c.slots[INPUT] {
+                Some((id, _)) if containers::smelt(id).is_none() => format!("{} won't cook. It's been asked.", item_name(id)),
+                Some(_) if burn <= 0.0 && c.slots[FUEL].is_none() => "Needs fuel: coal, wood, sticks...".to_string(),
+                None => "Raw food, sand or cobble goes on top".to_string(),
+                _ => String::new(),
+            };
+            self.ui.text(&hint, sx + slot * 5.0, top + slot * 2.9, 7.0, GRAY);
+        }
+        let inv_y = top + top_h + 14.0 * s;
+        self.ui.text("Inventory (shift-click to move stacks)", sx, inv_y - 4.0 * s, 8.0, GRAY);
+        for i in 9..36 {
+            let j = i - 9;
+            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (l, r, hov) = self.ui.slot(self.game.inv.slots[i], cx, cy, slot, false);
+            if hov {
+                tooltip = name(self.game.inv.slots[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        let hot_y = inv_y + slot * 3.0 + 6.0 * s;
+        for i in 0..9 {
+            let (l, r, hov) = self.ui.slot(self.game.inv.slots[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            if hov {
+                tooltip = name(self.game.inv.slots[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        if let Some(cur) = self.game.inv.cursor {
+            let (mx, my) = mouse_position();
+            self.ui.stack(Some(cur), mx - slot / 2.0, my - slot / 2.0, slot, true);
+        } else if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
+    fn inventory_slot_click(&mut self, i: usize, l: bool, r: bool, shift: bool) {
+        if l && shift {
+            self.game.container_quick_put(i);
+        } else if l {
+            self.game.inv.click(i);
+        } else if r {
+            self.game.inv.right_click(i);
         }
     }
 
@@ -1787,7 +1906,8 @@ async fn game_main() {
         game: Game::new(random_seed(), true, true),
         renderer,
         ui: Ui::new(tex),
-        settings: Settings { render_distance: 8, fov: 72.0, sensitivity: 1.0, fullscreen: false },
+        settings: Settings::default(),
+        no_settings_file: shot.is_some(),
         splash: pick_splash(),
         last_mouse: None,
         show_debug: false,
@@ -1823,6 +1943,20 @@ async fn game_main() {
         form_creative: false,
         form_focus: 0,
     };
+    // Screenshots always use the defaults, whatever the player last picked.
+    if shot.is_none() {
+        let saved = Settings::load(&settings::path());
+        app.audio.volume = saved.volume;
+        app.audio.music_on = saved.music_on;
+        if !saved.mp_name.is_empty() {
+            app.mp_name = saved.mp_name.clone();
+        }
+        app.mp_addr = saved.mp_addr.clone();
+        if saved.fullscreen {
+            set_fullscreen(true);
+        }
+        app.settings = saved;
+    }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {
         app.status = Some((format!("Mod \"{}\" has {} problem(s): see the Mods screen.", m.name, m.errors.len()), 8.0));
@@ -1861,7 +1995,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -1970,7 +2104,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2069,6 +2203,42 @@ async fn game_main() {
                     app.game.mobs.push(m);
                 }
             }
+            if matches!(s.mode.as_str(), "kitchen" | "chest" | "furnace") && frames == 125 {
+                // A chest, a table and a row of furnaces (the middle one busy), a few blocks ahead.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y = p.y.floor() as i32;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y, v.z.floor() as i32)
+                };
+                let row = [block::CHEST, block::TABLE, block::FURNACE, block::FURNACE, block::FURNACE, block::CHEST];
+                for (i, &id) in row.iter().enumerate() {
+                    app.game.world.set_v(at(4.0, i as f32 - 2.5), id);
+                }
+                let busy = at(4.0, 3.0 - 2.5);
+                if let Some(c) = app.game.world.containers.get_mut(&busy) {
+                    c.slots[containers::INPUT] = Some((block::PORKCHOP, 5));
+                    c.slots[containers::FUEL] = Some((block::COAL, 3));
+                    c.slots[containers::OUTPUT] = Some((block::COOKED_CHOP, 2));
+                }
+                let chest = at(4.0, -2.5);
+                if let Some(c) = app.game.world.containers.get_mut(&chest) {
+                    let loot = [(block::DIAMOND, 7), (block::COBBLE, 64), (block::LOG, 23), (block::BREAD, 4), (block::BOOT, 1), (block::COAL, 18), (block::GOLD_INGOT, 3), (block::WHEAT_SEEDS, 12)];
+                    for (i, (item, n)) in loot.into_iter().enumerate() {
+                        c.slots[i * 3 + i / 3] = Some((item, n));
+                    }
+                }
+                for (item, n) in [(block::PORKCHOP, 3), (block::SAND, 16), (block::PLANKS, 20), (block::MUTTON, 2)] {
+                    app.game.give(item, n);
+                }
+                match s.mode.as_str() {
+                    "chest" => app.game.open_container(chest),
+                    "furnace" => app.game.open_container(busy),
+                    _ => {}
+                }
+            }
             if s.mode == "zoo" && frames > 150 {
                 // Hold still for the photo.
                 for m in app.game.mobs.iter_mut() {
@@ -2100,6 +2270,7 @@ async fn game_main() {
             if !app.game.menu && !app.game.is_client() {
                 app.save();
             }
+            app.save_settings();
             app.game.disconnect();
             break;
         }
