@@ -70,11 +70,13 @@ pub struct WorldRules {
     pub difficulty: Difficulty,
     /// Off: the sun stays where it is.
     pub daylight_cycle: bool,
+    /// Off: the weather stays as it is.
+    pub weather_cycle: bool,
 }
 
 impl Default for WorldRules {
     fn default() -> Self {
-        WorldRules { keep_inventory: false, difficulty: Difficulty::Normal, daylight_cycle: true }
+        WorldRules { keep_inventory: false, difficulty: Difficulty::Normal, daylight_cycle: true, weather_cycle: true }
     }
 }
 

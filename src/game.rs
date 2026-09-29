@@ -2,6 +2,7 @@
 
 use crate::advancements::{Advancement, Progress};
 use crate::block::*;
+use crate::enchant::{level, Enchant};
 use crate::entity::*;
 use crate::inventory::Inventory;
 use crate::mesher::mesh_chunk;
@@ -133,6 +134,15 @@ pub struct Game {
     pub orbs_sent_empty: bool,
     /// The anvil screen's inputs while it's open (see anvil.rs).
     pub anvil: Option<crate::anvil::AnvilUi>,
+    /// The enchanting table screen's inputs while it's open (see enchant.rs).
+    pub enchanting: Option<crate::enchant::EnchantUi>,
+    /// How many times we've enchanted something (seeds the table's offers; the host's word when joined).
+    pub enchant_count: u32,
+    /// Joined players we remember, by name (see players.rs).
+    pub saved_players: std::collections::BTreeMap<String, crate::players::PlayerRecord>,
+    pub report_timer: f32,
+    /// Rain, snow, storms (see weather.rs).
+    pub weather: crate::weather::WeatherState,
 }
 
 impl Game {
@@ -216,6 +226,11 @@ impl Game {
             orb_sync: 0.0,
             orbs_sent_empty: true,
             anvil: None,
+            enchanting: None,
+            enchant_count: 0,
+            saved_players: Default::default(),
+            report_timer: 0.0,
+            weather: Default::default(),
         }
     }
 
@@ -235,8 +250,12 @@ impl Game {
             }
         }
         // After the edits: replaying them makes empty containers, these fill them.
-        let worn = d.version >= 9;
-        let containers = crate::containers::decode(&d.containers, worn);
+        let wear_bytes = match d.version {
+            0..=8 => 0,
+            9 | 10 => 2,
+            _ => 4,
+        };
+        let containers = crate::containers::decode(&d.containers, wear_bytes);
         for (p, mut c) in containers {
             if let Some(r) = &remap {
                 for s in c.slots.iter_mut() {
@@ -245,7 +264,7 @@ impl Game {
             }
             g.world.containers.insert(p, c);
         }
-        for (pos, item, n, age, wear) in crate::drops::decode(&d.drops, worn) {
+        for (pos, item, n, age, wear) in crate::drops::decode(&d.drops, wear_bytes) {
             let item = remap.as_ref().map(|r| r[item as usize]).unwrap_or(item);
             g.spawn_drop(pos, item, n, wear, Vec3::ZERO, 0.0);
             if let Some(last) = g.drops.last_mut() {
@@ -266,7 +285,7 @@ impl Game {
                 (s, _) => s,
             };
             let wear = d.wear.get(i).copied().unwrap_or(0);
-            let wear = s.and_then(|(id, _)| durability(id)).map(|max| wear.min(max - 1)).unwrap_or(0);
+            let wear = s.and_then(|(id, _)| durability(id)).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min(max - 1))).unwrap_or(0);
             if i < 36 {
                 g.inv.slots[i] = s;
                 g.inv.wear[i] = wear;
@@ -277,7 +296,27 @@ impl Game {
         }
         g.player.hunger = crate::hunger::Hunger::new(d.food, d.saturation);
         g.xp = d.xp;
-        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle };
+        g.saved_players = crate::players::decode(&d.players);
+        g.weather.kind = crate::weather::Weather::from_index(d.weather);
+        g.weather.timer = d.weather_timer;
+        g.weather.strength = if g.weather.kind.wet() { 1.0 } else { 0.0 };
+        if let Some(r) = &remap {
+            for rec in g.saved_players.values_mut() {
+                for s in rec.report.slots.iter_mut() {
+                    s.0 = r[s.0 as usize];
+                }
+                for b in rec.bag.iter_mut() {
+                    b.0 = r[b.0 as usize];
+                }
+                rec.bag.retain(|b| b.0 != AIR);
+                for e in rec.enchanted.iter_mut() {
+                    e.0 = r[e.0 as usize];
+                }
+                rec.enchanted.retain(|e| e.0 != AIR);
+            }
+        }
+        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle };
+        g.enchant_count = d.enchant_count;
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -309,7 +348,12 @@ impl Game {
             keep_inventory: self.rules.keep_inventory,
             difficulty: self.rules.difficulty.index(),
             daylight_cycle: self.rules.daylight_cycle,
+            weather_cycle: self.rules.weather_cycle,
             xp: self.xp,
+            players: crate::players::encode(&self.all_player_records()),
+            weather: self.weather.kind.index(),
+            weather_timer: self.weather.timer,
+            enchant_count: self.enchant_count,
             version: crate::save::VERSION,
         }
     }
@@ -377,7 +421,8 @@ impl Game {
     pub fn daylight(&self) -> f32 {
         let s = self.sun_angle().sin();
         let t = ((s + 0.15) / 0.4).clamp(0.0, 1.0);
-        0.18 + 0.82 * t * t * (3.0 - 2.0 * t)
+        let clear = 0.18 + 0.82 * t * t * (3.0 - 2.0 * t);
+        (clear * crate::weather::dimming(self.weather.kind, self.weather.strength)).max(0.18)
     }
 
     pub fn is_night(&self) -> bool {
@@ -398,6 +443,12 @@ impl Game {
         c[0] += (1.0 - c[0]) * glow;
         c[1] += (0.55 - c[1]) * glow * 0.6;
         c[2] *= 1.0 - glow * 0.5;
+        // Rain clouds grey it all out.
+        let grey = (c[0] + c[1] + c[2]) / 3.0;
+        let k = self.weather.strength * 0.7;
+        for v in c.iter_mut() {
+            *v += (grey - *v) * k;
+        }
         c
     }
 
@@ -494,6 +545,7 @@ impl Game {
         if self.rules.daylight_cycle {
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         }
+        self.weather_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
@@ -550,6 +602,7 @@ impl Game {
         self.handle_actions(dt, c);
         self.update_fishing(dt, c.use_held);
         self.inventory_sync_tick(dt);
+        self.report_tick(dt);
         self.update_entities(dt);
         self.script_tick(dt);
     }
@@ -797,6 +850,10 @@ impl Game {
             return;
         }
         self.time = 0.01;
+        // Sleeping through the night clears the weather too.
+        if self.weather.kind.wet() {
+            self.set_weather(crate::weather::Weather::Clear);
+        }
         self.net_broadcast(Msg::Time(self.time));
         self.mobs.retain(|m| !m.kind.hostile() || m.body.pos.distance(me) > 64.0);
         self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set.");
@@ -987,7 +1044,7 @@ impl Game {
                 self.breaking = None;
                 if c.attack_pressed && self.attack_cd <= 0.0 {
                     let i = *i;
-                    let dmg = attack_damage(held) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
+                    let dmg = attack_damage_with(held, self.held_level(Enchant::Sharpness)) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
                     self.use_tool(hit_wear(held));
                     if !self.creative {
                         self.player.hunger.exhaust(crate::hunger::ATTACK);
@@ -1017,7 +1074,8 @@ impl Game {
                             self.attack_cd = 0.22;
                         }
                     } else {
-                        let (t, _) = break_time(id, held);
+                        let efficiency = self.held_level(Enchant::Efficiency);
+                        let (t, _) = break_time_with(id, held, efficiency);
                         let progress = match self.breaking {
                             Some((p, prog)) if p == pos => prog,
                             _ => 0.0,
@@ -1032,7 +1090,7 @@ impl Game {
                             self.sfx(Sfx::Hit(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
                         }
                         if progress >= 1.0 {
-                            let (_, drops) = break_time(id, held);
+                            let (_, drops) = break_time_with(id, held, efficiency);
                             self.break_block(pos, drops);
                             self.breaking = None;
                             self.attack_cd = 0.15;
@@ -1085,6 +1143,10 @@ impl Game {
             }
             if crate::anvil::is_anvil(id) {
                 self.open_anvil(pos);
+                return;
+            }
+            if id == ENCHANTING_TABLE {
+                self.open_enchanting(pos);
                 return;
             }
         }
@@ -1344,7 +1406,9 @@ impl Game {
                 let center = pos.as_vec3() + Vec3::splat(0.5);
                 let d = block(id).drop;
                 if d != AIR {
-                    self.pop_drop(center, d, 1);
+                    let roll = self.rng.range(0.0, 1.0);
+                    let n = fortune_count(id, self.held_level(Enchant::Fortune), roll);
+                    self.pop_drop(center, d, n);
                 }
                 for (item, n) in crate::farming::random_drops(id, &mut self.rng) {
                     match item {
@@ -1427,7 +1491,7 @@ impl Game {
     }
 
     /// Give items, a used tool keeping its wear.
-    pub fn give_worn(&mut self, item: Id, n: u8, wear: u16) {
+    pub fn give_worn(&mut self, item: Id, n: u8, wear: crate::inventory::Wear) {
         self.sfx(Sfx::Pop, None);
         let left = self.inv.add_worn(item, n, wear);
         if left > 0 {
@@ -1509,7 +1573,9 @@ impl Game {
     /// point. Each worn piece takes a quarter of the hit (at least 1) as wear.
     pub fn hurt_player_armored(&mut self, amount: f32, cause: &str) {
         let blocked = self.creative || self.dead.is_some() || self.player.hurt > 0.0;
-        let cut = (self.inv.armor_points() as f32 * 0.04).min(0.8);
+        // Protection: another 4% per level on each piece.
+        let protection: u32 = self.inv.armor_wear.iter().map(|&w| level(w, Enchant::Protection) as u32).sum();
+        let cut = ((self.inv.armor_points() + protection) as f32 * 0.04).min(0.8);
         self.hurt_player(amount * (1.0 - cut), cause);
         if !blocked && amount > 0.0 {
             for id in self.inv.wear_armor((amount / 4.0).max(1.0) as u16) {
@@ -1577,6 +1643,10 @@ impl Game {
                         }
                         _ => {
                             self.world.set_v(p, AIR);
+                            // No half doors left standing.
+                            if is_door(id) {
+                                self.remove_door_partner(p, id);
+                            }
                             if !self.creative && self.rng.chance(0.25) && block(id).drop != AIR && block(id).pick_tier <= 1 {
                                 self.pop_drop(p.as_vec3() + Vec3::splat(0.5), block(id).drop, 1);
                             }
@@ -1641,6 +1711,7 @@ impl Game {
         if self.rules.daylight_cycle {
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         }
+        self.weather_tick(dt);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
         }
@@ -1906,7 +1977,9 @@ impl Game {
         // Starers (and big Bloops) are tall: they need an extra block of headroom.
         let tall = kind == MobKind::Starer || size == 4;
         let clear = |w: &World, y: i32| clear(w, y) && (!tall || !is_solid(w.get(x, y + 2, z)));
-        if self.is_night() && is_solid(top) && clear(&self.world, y + 1) {
+        // Night, or a storm dark enough for monsters.
+        let dark = self.is_night() || self.weather.kind == crate::weather::Weather::Thunder;
+        if dark && is_solid(top) && clear(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
             self.alloc_mob_sized(kind, pos, size);
             return;
@@ -2051,6 +2124,8 @@ impl Game {
             let sky = self.world.sky_light(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
+        // Rain, snow and lightning
+        self.draw_weather(&mut g, eye);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
         self.draw_orbs(&mut g, eye, 48.0);
@@ -2830,7 +2905,7 @@ mod tests {
         g.hurt_player(100.0, "was tested to destruction");
         assert!(g.dead.is_some());
         assert!(g.inv.counts().is_empty(), "pockets emptied");
-        let mut on_floor: Vec<(Id, u8, u16)> = g.drops.iter().map(|d| (d.item, d.n, d.wear)).collect();
+        let mut on_floor: Vec<(Id, u8, crate::inventory::Wear)> = g.drops.iter().map(|d| (d.item, d.n, d.wear)).collect();
         on_floor.sort();
         assert_eq!(on_floor, vec![(DIAMOND, 5, 0), (PICK_IRON, 1, 40), (ARMOR_FIRST + 4, 1, 0)]);
         assert!(g.death_spot().is_some());
@@ -2961,7 +3036,7 @@ mod tests {
         assert!(g.dead.is_some());
         // A frozen sun, and all of it saved.
         let mut g = arena(69);
-        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false };
+        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false, weather_cycle: false };
         let t = g.time;
         let idle = Controls { input: Input { forward: 0.0, strafe: 0.0, jump: false, jump_pressed: false, sneak: false, sprint: false }, attack_held: false, attack_pressed: false, use_held: false, use_pressed: false, pick: false, drop: false, drop_all: false };
         for _ in 0..20 {
@@ -2969,6 +3044,51 @@ mod tests {
         }
         assert_eq!(g.time, t);
         assert_eq!(Game::from_save(g.to_save()).rules, g.rules);
+    }
+
+    #[test]
+    fn weather_waters_strikes_and_clears() {
+        use crate::weather::Weather;
+        let mut g = arena(71);
+        g.rules.weather_cycle = false;
+        // Rain on open farmland counts as water.
+        let soil = IVec3::new(3, 49, 3);
+        g.world.set_v(soil, FARMLAND);
+        g.farm_tick(1.0);
+        assert!(!g.world.farm[&soil].wet);
+        g.set_weather(Weather::Rain);
+        g.farm_tick(1.0);
+        assert!(g.world.farm[&soil].wet, "rained on");
+        // Storms are darker than rain, which is darker than clear.
+        g.time = 0.25;
+        g.weather.strength = 1.0;
+        let rainy = g.daylight();
+        g.weather.kind = Weather::Thunder;
+        assert!(g.daylight() < rainy);
+        g.weather.kind = Weather::Clear;
+        assert!(g.daylight() > rainy);
+        // Lightning hurts whoever's under it, and sets off TNT.
+        g.world.set(0, 50, 5, TNT);
+        g.player.health = 20.0;
+        g.lightning_strike(Vec3::new(0.5, 51.0, 5.5));
+        assert!(g.weather.bolt.is_some());
+        assert_eq!(g.tnts.len(), 1);
+        assert_eq!(g.world.get(0, 50, 5), AIR);
+        g.lightning_strike(g.player.body.pos);
+        assert_eq!(g.player.health, 20.0 - crate::weather::LIGHTNING_DAMAGE);
+        // With the cycle off, it stays as it is; saved with the world.
+        g.set_weather(Weather::Thunder);
+        g.weather.timer = 0.0;
+        g.weather_tick(1.0);
+        assert_eq!(g.weather.kind, Weather::Thunder);
+        let back = Game::from_save(g.to_save());
+        assert_eq!((back.weather.kind, back.rules.weather_cycle), (Weather::Thunder, false));
+        // The cycle moves it along.
+        g.rules.weather_cycle = true;
+        g.weather.timer = 0.0;
+        g.weather_tick(1.0);
+        assert_eq!(g.weather.kind, Weather::Clear);
+        assert!(g.weather.timer >= 300.0);
     }
 
     /// Walk over every item on the ground (then back).
@@ -2980,6 +3100,83 @@ mod tests {
             g.drops_tick(0.1);
         }
         g.player.body.pos = home;
+    }
+
+    #[test]
+    fn enchanting_tables_enchant_for_levels_and_gold() {
+        use crate::enchant::{enchants, is_enchanted, level, offers, offer_seed, Enchant};
+        use crate::xp::{level_of, points_for_level};
+        let mut g = arena(66);
+        let pos = IVec3::new(2, 50, 0);
+        g.world.set_v(pos, ENCHANTING_TABLE);
+        aim(&mut g, pos, IVec3::NEG_X);
+        g.use_item();
+        assert!(g.enchanting.is_some(), "right-click opens it");
+        assert_eq!(g.bookshelves(pos), 0);
+        // Bookshelves in the ring around it power it up (at most 15 count).
+        for dx in -2..=2i32 {
+            for dz in -2..=2i32 {
+                if dx.abs().max(dz.abs()) == 2 {
+                    g.world.set_v(pos + IVec3::new(dx, 0, dz), BOOKSHELF);
+                    g.world.set_v(pos + IVec3::new(dx, 1, dz), BOOKSHELF);
+                }
+            }
+        }
+        assert_eq!(g.bookshelves(pos), 15);
+        // Only one thing at a time, only gold in the gold slot.
+        g.inv.cursor = Some((PICK_IRON, 1));
+        g.inv.cursor_wear = 30;
+        g.enchant_click(0, false);
+        g.inv.cursor = Some((DIRT, 5));
+        g.enchant_click(1, false);
+        assert_eq!(g.enchanting.as_ref().unwrap().gold, None);
+        g.inv.cursor = Some((GOLD_INGOT, 5));
+        g.enchant_click(1, false);
+        let o = g.enchant_offers().expect("pickaxes can be enchanted");
+        assert!(o[0].0 <= o[1].0 && o[1].0 <= o[2].0 && o[2].0 >= 30, "{o:?}");
+        assert!(o.iter().all(|x| is_enchanted(x.1)));
+        // The same offers every time, until you enchant something.
+        assert_eq!(Some(o), offers(PICK_IRON, 30, 15, offer_seed(PICK_IRON, 0)));
+        // Not enough levels: nothing happens.
+        g.xp = points_for_level(2);
+        g.enchant_pick(2);
+        assert!(!is_enchanted(g.enchanting.as_ref().unwrap().wear));
+        // Enough: it glows, and levels and gold are spent.
+        g.xp = points_for_level(30);
+        g.enchant_pick(2);
+        let ui = g.enchanting.as_ref().unwrap();
+        assert_eq!(enchants(ui.wear), enchants(o[2].1));
+        assert_eq!(ui.wear & 0xFFFF, 30, "wear is kept");
+        assert_eq!(ui.gold, Some((GOLD_INGOT, 2)));
+        assert_eq!((level_of(g.xp).0, g.enchant_count), (27, 1));
+        assert!(g.advancements.has("enchanter"));
+        // Enchanted things can't be enchanted again; new offers for the next thing.
+        assert!(g.enchant_offers().is_none());
+        assert_ne!(offers(PICK_IRON, 0, 15, offer_seed(PICK_IRON, 1)), Some(o));
+        // Walking away returns both.
+        g.close_enchanting();
+        assert_eq!(g.inv.count(GOLD_INGOT), 2);
+        let slot = g.inv.slots.iter().position(|s| *s == Some((PICK_IRON, 1))).unwrap();
+        assert_eq!(g.inv.wear[slot], o[2].1 | 30);
+
+        // What each enchantment does.
+        assert!(break_time_with(STONE, PICK_IRON, 3).0 < break_time_with(STONE, PICK_IRON, 0).0 / 2.0);
+        assert_eq!(attack_damage_with(SWORD_IRON, 2), attack_damage(SWORD_IRON) + 2.5);
+        assert_eq!(fortune_count(DIAMOND_ORE, 0, 0.99), 1);
+        assert_eq!(fortune_count(DIAMOND_ORE, 3, 0.99), 4);
+        assert_eq!(fortune_count(STONE, 3, 0.99), 1, "only ores");
+        let w = crate::enchant::with_level(0, Enchant::Unbreaking, 2);
+        assert_eq!(crate::inventory::max_uses(PICK_IRON, w), Some(3 * durability(PICK_IRON).unwrap() as u32));
+        assert_eq!(level(w, Enchant::Unbreaking), 2);
+        // Protection softens hits on top of the armour itself.
+        let hit = |prot: u8| {
+            let mut g = arena(67);
+            g.inv.armor[1] = Some((ARMOR_FIRST + 4 + 1, 1));
+            g.inv.armor_wear[1] = crate::enchant::with_level(0, Enchant::Protection, prot);
+            g.hurt_player_armored(10.0, "was tested");
+            20.0 - g.player.health
+        };
+        assert!(hit(4) < hit(0) - 1.0, "{} vs {}", hit(4), hit(0));
     }
 
     /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

@@ -36,7 +36,7 @@ pub struct ItemDrop {
     /// Seconds (of age) before it can be picked up.
     pub delay: f32,
     /// A used tool or piece of armour keeps its wear on the ground.
-    pub wear: u16,
+    pub wear: crate::inventory::Wear,
     /// Joined players: the host's latest position, and when we last asked for it.
     pub net_pos: Vec3,
     pub asked: f32,
@@ -55,8 +55,8 @@ impl ItemDrop {
         if !world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
             return;
         }
-        if self.body.in_water {
-            // Bob to the surface.
+        if self.body.in_water && self.body.vel.y < 1.5 {
+            // Bob to the surface (unless it's flying out, like a catch).
             self.body.vel.y = (self.body.vel.y + 6.0 * dt).min(1.5);
             let k = (1.0 - 3.0 * dt).max(0.0);
             self.body.vel.x *= k;
@@ -118,7 +118,7 @@ pub fn draw_item(g: &mut DynGeo, root: &Mat4, item: Id, size: f32, sky: f32) {
 
 // ------------------------------------------------------------------ saving
 
-/// Save format: v8 saves had 19 bytes per drop, v9 adds two of wear.
+/// Save format: v8 saves had 19 bytes per drop, v9 adds two of wear, v11 four.
 pub fn encode(drops: &[ItemDrop]) -> Vec<u8> {
     let mut out = Vec::new();
     for d in drops {
@@ -133,19 +133,24 @@ pub fn encode(drops: &[ItemDrop]) -> Vec<u8> {
 }
 
 /// A saved drop: position, item, count, age and wear.
-pub type SavedDrop = (Vec3, Id, u8, f32, u16);
+pub type SavedDrop = (Vec3, Id, u8, f32, crate::inventory::Wear);
 
-/// Unpack `encode`'s output (`with_wear`: from a v9+ save); stops at anything malformed.
-pub fn decode(b: &[u8], with_wear: bool) -> Vec<SavedDrop> {
+/// Unpack `encode`'s output (`wear_bytes` per drop: 0 before save v9, 2
+/// before v11, then 4); stops at anything malformed.
+pub fn decode(b: &[u8], wear_bytes: usize) -> Vec<SavedDrop> {
     let mut v = Vec::new();
-    for c in b.chunks_exact(if with_wear { 21 } else { 19 }) {
+    for c in b.chunks_exact(19 + wear_bytes) {
         let f = |o: usize| f32::from_le_bytes([c[o], c[o + 1], c[o + 2], c[o + 3]]);
         let (pos, age) = (Vec3::new(f(0), f(4), f(8)), f(12));
         let (item, n) = (u16::from_le_bytes([c[16], c[17]]), c[18]);
         if !pos.is_finite() || !age.is_finite() || n == 0 {
             break;
         }
-        let wear = if with_wear { u16::from_le_bytes([c[19], c[20]]) } else { 0 };
+        let wear = match wear_bytes {
+            2 => u16::from_le_bytes([c[19], c[20]]) as u32,
+            4 => u32::from_le_bytes([c[19], c[20], c[21], c[22]]),
+            _ => 0,
+        };
         v.push((pos, item, n.min(64), age.clamp(0.0, DESPAWN_SECS), wear));
     }
     v
@@ -153,13 +158,13 @@ pub fn decode(b: &[u8], with_wear: bool) -> Vec<SavedDrop> {
 
 impl Game {
     /// Put items on the ground (where the world lives; joined players never call this).
-    pub fn spawn_drop(&mut self, at: Vec3, item: Id, n: u8, wear: u16, vel: Vec3, delay: f32) {
+    pub fn spawn_drop(&mut self, at: Vec3, item: Id, n: u8, wear: crate::inventory::Wear, vel: Vec3, delay: f32) {
         if n == 0 || !valid_item(item) || self.is_client() {
             return;
         }
         self.next_drop_id = self.next_drop_id.wrapping_add(1).max(1);
         let mut d = ItemDrop::new(self.next_drop_id, item, n, at, vel, delay);
-        d.wear = durability(item).map(|max| wear.min(max - 1)).unwrap_or(0);
+        d.wear = durability(item).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min(max - 1))).unwrap_or(0);
         self.drops.push(d);
         if self.drops.len() > MAX_DROPS {
             self.drops.remove(0);
@@ -171,7 +176,7 @@ impl Game {
         self.pop_drop_worn(at, item, n, 0);
     }
 
-    pub fn pop_drop_worn(&mut self, at: Vec3, item: Id, n: u8, wear: u16) {
+    pub fn pop_drop_worn(&mut self, at: Vec3, item: Id, n: u8, wear: crate::inventory::Wear) {
         let vel = self.pop_velocity();
         self.spawn_drop(at - Vec3::Y * 0.125, item, n, wear, vel, DROP_DELAY);
     }
@@ -191,7 +196,7 @@ impl Game {
     }
 
     /// Throw items that have already left the inventory (held, or on the cursor).
-    pub fn throw_stack(&mut self, item: Id, n: u8, wear: u16) {
+    pub fn throw_stack(&mut self, item: Id, n: u8, wear: crate::inventory::Wear) {
         self.player.swing = 1.0;
         self.advance("butterfingers");
         if self.is_client() {
@@ -208,7 +213,7 @@ impl Game {
     /// Died without keep-inventory: everything (armour and the cursor too) falls out.
     pub fn drop_everything(&mut self) {
         let inv = &mut self.inv;
-        let mut stacks: Vec<(Id, u8, u16)> = Vec::new();
+        let mut stacks: Vec<(Id, u8, crate::inventory::Wear)> = Vec::new();
         for (s, w) in inv.slots.iter_mut().zip(inv.wear.iter_mut()).chain(inv.armor.iter_mut().zip(inv.armor_wear.iter_mut())).chain(std::iter::once((&mut inv.cursor, &mut inv.cursor_wear))) {
             if let Some((id, n)) = s.take() {
                 stacks.push((id, n, *w));
@@ -227,11 +232,12 @@ impl Game {
     }
 
     /// A joined player threw something (Q, a full inventory), or died (`scatter`).
-    pub fn host_throw(&mut self, from: u32, item: Id, n: u8, wear: u16, scatter: bool) {
+    pub fn host_throw(&mut self, from: u32, item: Id, n: u8, wear: crate::inventory::Wear, scatter: bool) {
         let Some((pos, yaw, pitch)) = self.peers.get(&from).map(|p| (p.target, p.yaw, p.pitch)) else { return };
         if n == 0 || !valid_item(item) || !self.peer_take(from, item, n as u32) {
             return;
         }
+        let wear = self.launder(from, item, wear);
         if scatter {
             let vel = self.pop_velocity() * 0.8;
             self.spawn_drop(pos + Vec3::Y * 0.6, item, n, wear, vel, THROW_DELAY);
@@ -391,9 +397,9 @@ mod tests {
         let mut v = vec![ItemDrop::new(1, DIRT, 3, Vec3::new(1.0, 60.0, -2.5), Vec3::ZERO, 0.0), ItemDrop::new(2, DIAMOND, 1, Vec3::new(9.0, 61.0, 4.0), Vec3::ZERO, 0.0)];
         v[1].age = 12.5;
         v[1].wear = 9;
-        let back = decode(&encode(&v), true);
+        let back = decode(&encode(&v), 4);
         assert_eq!(back, vec![(Vec3::new(1.0, 60.0, -2.5), DIRT, 3, 0.0, 0), (Vec3::new(9.0, 61.0, 4.0), DIAMOND, 1, 12.5, 9)]);
-        assert!(decode(&[1, 2, 3], true).is_empty());
+        assert!(decode(&[1, 2, 3], 4).is_empty());
         // Neighbouring dirt merges; the far diamond and a full stack don't.
         v.push(ItemDrop::new(3, DIRT, 5, Vec3::new(1.5, 60.0, -2.5), Vec3::ZERO, 0.0));
         v.push(ItemDrop::new(4, DIRT, 64, Vec3::new(1.2, 60.0, -2.5), Vec3::ZERO, 0.0));

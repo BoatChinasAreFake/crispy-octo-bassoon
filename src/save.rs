@@ -13,8 +13,9 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// bytes; v6 adds farm soil and the fishing log; v7 adds what's in chests and
 /// furnaces; v8 adds items lying on the ground; v9 adds tool and armour wear,
 /// hunger and the keep-inventory rule; v10 adds difficulty, the daylight cycle
-/// rule and experience points. Older saves still load.
-pub const VERSION: u32 = 10;
+/// rule and experience points; v11 widens tool wear to carry enchantments and
+/// adds joined players' records and the weather. Older saves still load.
+pub const VERSION: u32 = 11;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -47,7 +48,7 @@ pub struct SaveData {
     /// Items on the ground, packed by `drops::encode` (save v8+).
     pub drops: Vec<u8>,
     /// Wear of whatever's in each of `slots` (save v9+; see `block::durability`).
-    pub wear: Vec<u16>,
+    pub wear: Vec<u32>,
     /// Hunger and saturation (save v9+; older saves start full).
     pub food: f32,
     pub saturation: f32,
@@ -58,6 +59,14 @@ pub struct SaveData {
     pub daylight_cycle: bool,
     /// Experience points (save v10+).
     pub xp: u32,
+    /// Joined players remembered by name, packed by `players::encode` (save v11+).
+    pub players: Vec<u8>,
+    /// Weather (`weather::Weather` index), seconds until it changes, and whether it changes at all (save v11+).
+    pub weather: u8,
+    pub weather_timer: f32,
+    pub weather_cycle: bool,
+    /// How many times the player has enchanted something (save v11+; seeds the table's offers).
+    pub enchant_count: u32,
     /// The format version it was read from (the container and drop blobs changed in v9).
     pub version: u32,
 }
@@ -172,7 +181,7 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     }
     w.u32(d.wear.len() as u32);
     for v in &d.wear {
-        w.u16(*v);
+        w.u32(*v);
     }
     w.f32(d.food);
     w.f32(d.saturation);
@@ -180,6 +189,12 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     w.u8(d.difficulty);
     w.u8(d.daylight_cycle as u8);
     w.u32(d.xp);
+    w.u32(d.players.len() as u32);
+    w.0.extend_from_slice(&d.players);
+    w.u8(d.weather);
+    w.f32(d.weather_timer);
+    w.u8(d.weather_cycle as u8);
+    w.u32(d.enchant_count);
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -263,7 +278,7 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "bad wear list"));
         }
         for _ in 0..n {
-            wear.push(r.u16()?);
+            wear.push(if version >= 11 { r.u32()? } else { r.u16()? as u32 });
         }
         food = r.f32()?;
         saturation = r.f32()?;
@@ -275,9 +290,20 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
         daylight_cycle = r.u8()? != 0;
         xp = r.u32()?.min(1 << 24);
     }
+    let players = if version >= 11 { r.bytes(16 << 20)? } else { Vec::new() };
+    let (mut weather, mut weather_timer, mut weather_cycle, mut enchant_count) = (0, 600.0, true, 0);
+    if version >= 11 {
+        weather = r.u8()?;
+        weather_timer = r.f32()?;
+        weather_cycle = r.u8()? != 0;
+        enchant_count = r.u32()?;
+        if !weather_timer.is_finite() {
+            weather_timer = 600.0;
+        }
+    }
     let ok = |v: f32, d: f32| if v.is_finite() { v.clamp(0.0, 20.0) } else { d };
     let (food, saturation) = (ok(food, 20.0), ok(saturation, 5.0));
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, version })
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, version })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -491,6 +517,11 @@ mod tests {
             difficulty: 2,
             daylight_cycle: true,
             xp: 0,
+            players: Vec::new(),
+            weather: 0,
+            weather_timer: 600.0,
+            weather_cycle: true,
+            enchant_count: 3,
             version: VERSION,
         }
     }

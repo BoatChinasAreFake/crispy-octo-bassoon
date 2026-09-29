@@ -6,6 +6,27 @@ use std::collections::BTreeMap;
 
 pub type Stack = Option<(Id, u8)>;
 
+/// What we know about one particular tool, weapon or piece of armour: uses
+/// so far in the low 16 bits (see `durability`), enchantments in the high 16
+/// (see enchant.rs). Zero for everything else. It travels with the item
+/// wherever it goes: slots, the cursor, chests, the ground, saves.
+pub type Wear = u32;
+
+/// Uses so far.
+pub fn uses(w: Wear) -> u16 {
+    w as u16
+}
+
+/// The same item with a different number of uses (enchantments kept).
+pub fn with_uses(w: Wear, uses: u16) -> Wear {
+    (w & 0xFFFF_0000) | uses as u32
+}
+
+/// Uses before `item` (with these enchantments) breaks.
+pub fn max_uses(item: Id, w: Wear) -> Option<u32> {
+    durability(item).map(|d| d as u32 * (1 + crate::enchant::level(w, crate::enchant::Enchant::Unbreaking) as u32))
+}
+
 pub struct Inventory {
     pub slots: [Stack; 36],
     pub selected: usize,
@@ -15,9 +36,9 @@ pub struct Inventory {
     pub armor: [Stack; 4],
     /// Uses so far of whatever durable thing is in each slot (see `durability`).
     /// Only meaningful while the slot holds a tool, weapon or armour.
-    pub wear: [u16; 36],
-    pub armor_wear: [u16; 4],
-    pub cursor_wear: u16,
+    pub wear: [Wear; 36],
+    pub armor_wear: [Wear; 4],
+    pub cursor_wear: Wear,
 }
 
 impl Inventory {
@@ -59,7 +80,7 @@ impl Inventory {
     }
 
     /// Add one used tool (or anything else, `wear` is ignored for things that don't wear).
-    pub fn add_worn(&mut self, item: Id, n: u8, wear: u16) -> u8 {
+    pub fn add_worn(&mut self, item: Id, n: u8, wear: Wear) -> u8 {
         if wear == 0 || durability(item).is_none() {
             return self.add(item, n);
         }
@@ -72,14 +93,15 @@ impl Inventory {
     /// Use the held tool `amount` times. Returns the item if that broke it.
     pub fn wear_held(&mut self, amount: u16) -> Option<Id> {
         let held = self.held();
-        let max = durability(held)?;
         let w = &mut self.wear[self.selected];
-        *w = w.saturating_add(amount);
-        if *w >= max {
+        let max = max_uses(held, *w)?;
+        let used = uses(*w) as u32 + amount as u32;
+        if used >= max {
             *w = 0;
             self.slots[self.selected] = None;
             return Some(held);
         }
+        *w = with_uses(*w, used as u16);
         None
     }
 
@@ -88,12 +110,14 @@ impl Inventory {
         let mut broke = Vec::new();
         for (s, w) in self.armor.iter_mut().zip(self.armor_wear.iter_mut()) {
             let Some((id, _)) = *s else { continue };
-            let Some(max) = durability(id) else { continue };
-            *w = w.saturating_add(amount);
-            if *w >= max {
+            let Some(max) = max_uses(id, *w) else { continue };
+            let used = uses(*w) as u32 + amount as u32;
+            if used >= max {
                 *w = 0;
                 *s = None;
                 broke.push(id);
+            } else {
+                *w = with_uses(*w, used as u16);
             }
         }
         broke
@@ -257,10 +281,10 @@ impl Inventory {
 /// After a click moved stacks between a slot and the cursor, move their wear
 /// with them: each side keeps its own if it holds the same thing as before,
 /// takes the other's if it now holds what the other had, and is fresh otherwise.
-pub fn wear_follow(before: (Stack, Stack), after: (Stack, Stack), slot_wear: &mut u16, cursor_wear: &mut u16) {
+pub fn wear_follow(before: (Stack, Stack), after: (Stack, Stack), slot_wear: &mut Wear, cursor_wear: &mut Wear) {
     let id = |s: Stack| s.map(|s| s.0);
     let (sw, cw) = (*slot_wear, *cursor_wear);
-    let pick = |now: Stack, own: Stack, other: Stack, own_w: u16, other_w: u16| match id(now) {
+    let pick = |now: Stack, own: Stack, other: Stack, own_w: Wear, other_w: Wear| match id(now) {
         None => 0,
         n if n == id(own) => own_w,
         n if n == id(other) => other_w,

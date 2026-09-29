@@ -30,12 +30,12 @@ impl Game {
     /// slab goes on top when you aim at the upper half of something.
     /// `hit_y` is how far up the aimed-at face was hit (0..1).
     pub fn oriented(&self, held: Id, normal: IVec3, hit_y: f32) -> Id {
-        if let Some((m, _)) = stairs_of(held) {
-            return stairs(m, self.facing());
+        if let Some((family, _)) = stairs_of(held) {
+            return family + self.facing() as Id;
         }
-        if let Some((m, _)) = slab_of(held) {
+        if let Some((family, _)) = slab_of(held) {
             let top = normal == IVec3::NEG_Y || (normal.y == 0 && hit_y > 0.5);
-            return slab(m, top);
+            return family + top as Id;
         }
         held
     }
@@ -43,14 +43,14 @@ impl Game {
     /// A slab placed onto a matching slab's open side makes the full block.
     /// Returns whether that's what happened.
     pub fn try_merge_slab(&mut self, held: Id, hit: IVec3, hit_id: Id, normal: IVec3) -> bool {
-        let (Some((m, false)), Some((hm, top))) = (slab_of(held), slab_of(hit_id)) else { return false };
-        if m != hm || !((normal == IVec3::Y && !top) || (normal == IVec3::NEG_Y && top)) {
+        let (Some((family, false)), Some((hit_family, top))) = (slab_of(held), slab_of(hit_id)) else { return false };
+        let full = made_of(held);
+        if family != hit_family || full == AIR || !((normal == IVec3::Y && !top) || (normal == IVec3::NEG_Y && top)) {
             return false;
         }
         if self.cell_occupied(hit) {
             return true; // someone's in the way: don't place it beside instead either
         }
-        let full = MATERIALS[m].0;
         self.world.set_v(hit, full);
         self.sfx(Sfx::Place(crate::sound::material(full)), Some(hit.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;

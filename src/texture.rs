@@ -180,6 +180,11 @@ pub const T_ANVIL_SIDE: u16 = 203;
 pub const T_ANVIL_TOP: u16 = 204;
 pub const T_ANVIL_TOP_CHIPPED: u16 = 205;
 pub const T_ANVIL_TOP_DAMAGED: u16 = 206;
+pub const T_GLOWSHROOM: u16 = 207;
+pub const T_POINTY_ROCK: u16 = 208;
+pub const T_ENCH_TOP: u16 = 209;
+pub const T_ENCH_SIDE: u16 = 210;
+pub const T_ENCH_BOTTOM: u16 = 211;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -267,6 +272,8 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("door_top", T_DOOR_TOP),
     ("anvil_side", T_ANVIL_SIDE),
     ("anvil_top", T_ANVIL_TOP),
+    ("glowshroom", T_GLOWSHROOM),
+    ("pointy_rock", T_POINTY_ROCK),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -1836,6 +1843,44 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             }
         });
     }
+    // ---- Caves and enchanting
+    a.each(T_GLOWSHROOM, |x, y, _, _| {
+        let cap = (4..9).contains(&y) && (2..14).contains(&x) && !(y == 4 && (x < 4 || x > 11));
+        let stalk = (9..16).contains(&y) && (7..9).contains(&x);
+        if cap {
+            if (x * 3 + y) % 4 == 0 { rgb(220, 255, 250) } else { rgb(70, 220, 200) }
+        } else if stalk {
+            rgb(150, 210, 190)
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_POINTY_ROCK, |x, y, r, _| {
+        // A narrow cone, point at the top (flipped by nothing: good enough both ways up).
+        let half = (y as f32 + 1.0) * 0.28;
+        if (x as f32 - 7.5).abs() <= half { shade(rgb(125, 115, 105), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_ENCH_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        let book = (4..12).contains(&x) && (5..11).contains(&y);
+        if book {
+            if x == 7 || x == 8 { rgb(120, 30, 30) } else { rgb(235, 225, 200) }
+        } else if edge {
+            rgb(20, 15, 30)
+        } else {
+            shade(rgb(170, 30, 40), r.range(0.9, 1.05))
+        }
+    });
+    a.each(T_ENCH_SIDE, |x, y, r, _| {
+        if y < 4 {
+            shade(rgb(170, 30, 40), r.range(0.9, 1.05))
+        } else if (x + y) % 7 == 0 {
+            rgb(90, 220, 230)
+        } else {
+            shade(rgb(30, 20, 45), r.range(0.8, 1.1))
+        }
+    });
+    a.each(T_ENCH_BOTTOM, |_, _, r, _| shade(rgb(30, 20, 45), r.range(0.8, 1.1)));
     a.sprite(T_HUNGER_ICON, &DRUMSTICK, &[('#', rgb(60, 30, 10)), ('p', rgb(170, 95, 40)), ('P', rgb(205, 130, 60)), ('w', rgb(235, 190, 120)), ('b', rgb(235, 230, 210))]);
     a.sprite(T_ARMOR_ICON, &CHESTPLATE, &[('#', rgb(30, 30, 30)), ('b', rgb(210, 210, 215)), ('d', rgb(150, 150, 155)), ('h', rgb(245, 245, 250))]);
 

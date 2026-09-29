@@ -432,6 +432,11 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         b.drop = reg.blocks.len() as Id;
                         reg.blocks.push(b);
                         info.added.0 += 1;
+                        // Slabs and stairs get their other variants right after (filled in by `fill_block`).
+                        for suffix in shape_variants(s.str("shape")) {
+                            let v = def(leak(&format!("{key}{suffix}")), leak(&s.name), Model::Cube, true, true, [crate::texture::T_WHITE; 3], 1.0, 0, false, AIR, 0.0, 0);
+                            reg.blocks.push(v);
+                        }
                     }
                 }
                 "item" => {
@@ -616,6 +621,15 @@ fn base_tile_pixels(tile: u16) -> Vec<u8> {
     crate::texture::tile_pixels(atlas, tile)
 }
 
+/// The extra blocks a `shape` needs, by key suffix (declared in pass 1, filled in by `fill_block`).
+fn shape_variants(shape: Option<&str>) -> &'static [&'static str] {
+    match shape.map(str::to_ascii_lowercase).as_deref() {
+        Some("slab") => &["_top"],
+        Some("stairs") => &["_east", "_south", "_west"],
+        _ => &[],
+    }
+}
+
 fn fill_block(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     let Some(id) = ctx.reg.lookup(&format!("{}:{}", m.id, s.name.to_ascii_lowercase())) else { return };
     if id >= FIRST_ITEM {
@@ -681,6 +695,59 @@ fn fill_block(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>)
     b.speed = num(s, "speed", 1.0f32, errs).clamp(0.2, 3.0);
     b.on_break = on_break;
     b.creative = flag(s, "creative", true, errs);
+    fill_shape(ctx, m, s, id, errs);
+    fill_furnace(ctx, m, s, id, errs);
+}
+
+/// `shape = slab` or `shape = stairs`: turn the block (and its variants) into that shape.
+fn fill_shape(ctx: &mut Ctx, m: &ModSource, s: &Section, id: Id, errs: &mut Vec<String>) {
+    let shape = s.str("shape").map(str::to_ascii_lowercase);
+    let shapes: Vec<Shape> = match shape.as_deref() {
+        None | Some("cube") => return,
+        Some("slab") => vec![Shape::Slab { top: false }, Shape::Slab { top: true }],
+        Some("stairs") => (0..4).map(|facing| Shape::Stairs { facing }).collect(),
+        Some(other) => {
+            errs.push(format!("line {}: shape should be slab or stairs, not {other}", s.line));
+            return;
+        }
+    };
+    let full = match s.str("full") {
+        Some(v) => ctx.resolve(&m.id, v).filter(|&b| b < FIRST_ITEM).unwrap_or_else(|| {
+            errs.push(format!("line {}: full: unknown block \"{v}\"", s.line));
+            AIR
+        }),
+        None => AIR,
+    };
+    let base = ctx.reg.blocks[id as usize].clone();
+    for (k, shape) in shapes.into_iter().enumerate() {
+        let i = id as usize + k;
+        let key = ctx.reg.blocks[i].key;
+        let mut b = base.clone();
+        b.key = key;
+        b.model = Model::Shaped;
+        b.shape = shape;
+        b.solid = true;
+        b.opaque = false;
+        b.see_through = false;
+        b.family = id;
+        b.full = full;
+        b.creative = k == 0 && base.creative;
+        ctx.reg.blocks[i] = b;
+    }
+}
+
+/// `smelts_into = <item>` and `burns_for = <seconds>` (blocks and items alike).
+fn fill_furnace(ctx: &mut Ctx, m: &ModSource, s: &Section, id: Id, errs: &mut Vec<String>) {
+    if let Some(v) = s.str("smelts_into") {
+        match ctx.resolve(&m.id, v).filter(|&o| o != AIR) {
+            Some(out) => ctx.reg.smelting.push((id, out)),
+            None => errs.push(format!("line {}: smelts_into: unknown item \"{v}\"", s.line)),
+        }
+    }
+    if s.get("burns_for").is_some() {
+        let secs = num(s, "burns_for", 10.0f32, errs).clamp(0.5, 600.0);
+        ctx.reg.fuels.push((id, secs));
+    }
 }
 
 fn fill_item(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
@@ -691,12 +758,47 @@ fn fill_item(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) 
     let tile = s.get("texture").map(|(_, v, l)| ctx.texture(m, v, errs, *l)).unwrap_or(crate::texture::T_WHITE);
     let on_use = s.get("on_use").map(|(_, v, l)| ctx.actions(&m.id, v, errs, *l)).unwrap_or_default();
     let food = s.get("food").map(|_| num(s, "food", 1.0f32, errs).clamp(0.0, 20.0));
+    let armor = match s.str("armor").map(str::to_ascii_lowercase).as_deref() {
+        None => None,
+        Some(slot) => match ["helmet", "chestplate", "leggings", "boots"].iter().position(|x| *x == slot) {
+            Some(slot) => {
+                let looks = s.str("looks_like").unwrap_or("iron").to_ascii_lowercase();
+                let looks_like = ["wool", "iron", "gold", "diamond"].iter().position(|x| *x == looks).unwrap_or_else(|| {
+                    errs.push(format!("line {}: looks_like should be wool, iron, gold or diamond, not {looks}", s.line));
+                    1
+                }) as u8;
+                Some(ModArmor { slot: slot as u8, points: num(s, "armor_points", 2u8, errs).clamp(1, 10), looks_like })
+            }
+            None => {
+                errs.push(format!("line {}: armor should be helmet, chestplate, leggings or boots, not {slot}", s.line));
+                None
+            }
+        },
+    };
+    let durability = match (s.get("durability"), armor) {
+        // At most 16000, so Unbreaking III (four times as many uses) still fits.
+        (Some(_), _) => Some(num(s, "durability", 100u16, errs).clamp(1, 16000)),
+        (None, Some(_)) => Some(200),
+        _ => None,
+    };
+    let repair = match s.str("repair") {
+        Some(v) => ctx.resolve(&m.id, v).unwrap_or_else(|| {
+            errs.push(format!("line {}: repair: unknown item \"{v}\"", s.line));
+            AIR
+        }),
+        None => AIR,
+    };
+    fill_furnace(ctx, m, s, id, errs);
     let it = &mut ctx.reg.items[(id - FIRST_ITEM) as usize];
+    it.durability = durability;
+    it.armor = armor;
+    it.repair = repair;
     if let Some(n) = s.str("name") {
         it.name = leak(n);
     }
     it.tile = tile;
-    it.stack = num(s, "stack", 64u8, errs).clamp(1, 64);
+    // Things that wear out don't stack.
+    it.stack = if durability.is_some() { 1 } else { num(s, "stack", 64u8, errs).clamp(1, 64) };
     it.pick_tier = num(s, "pickaxe", 0u8, errs).min(4);
     it.damage = num(s, "damage", 1.0f32, errs).clamp(0.0, 40.0);
     it.food = food;
@@ -853,6 +955,66 @@ Now with cheese!
         let (_, px) = reg.textures.iter().find(|(t, _)| *t == w.tex[0]).unwrap();
         assert_eq!(&px[..4], &[240, 200, 60, 255]);
         assert_eq!(&px[(16 + 1) * 4..(16 + 1) * 4 + 4], &[200, 160, 40, 255]);
+    }
+
+    #[test]
+    fn mods_add_gear_shapes_and_cooking() {
+        let text = r#"
+[block marble]
+texture = stone
+
+[block marble_slab]
+texture = stone
+shape = slab
+full = marble
+
+[block marble_stairs]
+texture = stone
+shape = stairs
+burns_for = 3
+
+[item ruby]
+smelts_into = gold
+
+[item ruby_sword]
+damage = 7
+durability = 900
+repair = ruby
+
+[item ruby_helmet]
+armor = helmet
+armor_points = 4
+looks_like = gold
+
+[item bad]
+armor = hat
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "gems".into(), files }], &[]);
+        let errs = &reg.mods[0].errors;
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].contains("hat"));
+        // Slabs and stairs get their variants, in order, with their shapes.
+        let marble = reg.lookup("gems:marble").unwrap();
+        let slab = reg.lookup("gems:marble_slab").unwrap();
+        assert_eq!(reg.lookup("gems:marble_slab_top"), Some(slab + 1));
+        let top = &reg.blocks[slab as usize + 1];
+        assert_eq!((top.shape, top.family, top.full, top.creative), (Shape::Slab { top: true }, slab, marble, false));
+        let stairs = reg.lookup("gems:marble_stairs").unwrap();
+        assert_eq!(reg.lookup("gems:marble_stairs_west"), Some(stairs + 3));
+        assert_eq!(reg.blocks[stairs as usize + 2].shape, Shape::Stairs { facing: 2 });
+        assert_eq!(reg.blocks[stairs as usize].model, Model::Shaped);
+        // Furnace recipes and fuels.
+        let ruby = reg.lookup("gems:ruby").unwrap();
+        assert!(reg.smelting.contains(&(ruby, GOLD_INGOT)));
+        assert!(reg.fuels.contains(&(stairs, 3.0)));
+        // Durability, repair and armour.
+        let sword = &reg.items[(reg.lookup("gems:ruby_sword").unwrap() - FIRST_ITEM) as usize];
+        assert_eq!((sword.durability, sword.stack, sword.repair), (Some(900), 1, ruby));
+        let helmet = &reg.items[(reg.lookup("gems:ruby_helmet").unwrap() - FIRST_ITEM) as usize];
+        assert_eq!(helmet.armor, Some(ModArmor { slot: 0, points: 4, looks_like: 2 }));
+        assert_eq!(helmet.durability, Some(200));
     }
 
     #[test]

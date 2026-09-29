@@ -64,6 +64,16 @@ impl Bag {
         let have = self.count(id);
         self.take(id, have.min(n));
     }
+    pub fn from_items(items: &[(Id, u32)]) -> Bag {
+        let mut b = Bag::default();
+        for &(id, n) in items {
+            if valid_item(id) {
+                b.add(id, n);
+            }
+        }
+        b
+    }
+
     pub fn items(&self) -> Vec<(Id, u32)> {
         let mut v: Vec<(Id, u32)> = self.0.iter().map(|(&k, &n)| (k, n)).collect();
         v.sort_unstable();
@@ -78,15 +88,46 @@ impl Bag {
 #[derive(Default)]
 pub struct Ledger {
     pub bag: Bag,
-    /// What they say they're holding.
+    /// What they say they're holding, and its enchantments.
     pub held: Id,
+    pub held_ench: u16,
     /// Game clock of their last block break, and spare mining time carried over.
     last_break: f32,
-    /// Uses of each kind of tool since one last wore out (see `host_wear`).
-    uses: HashMap<Id, u32>,
+    /// Uses of each kind of tool (and enchantments) since one last wore out (see `host_wear`).
+    uses: HashMap<(Id, u16), u32>,
     carry: f32,
     /// Their experience points (the host's word; see xp.rs).
     pub xp: u32,
+    /// Enchanted things they own: (item, enchantments) -> how many (see enchant.rs).
+    pub enchanted: HashMap<(Id, u16), u32>,
+    /// How many times they've enchanted something (seeds the table's offers).
+    pub enchant_count: u32,
+}
+
+impl Ledger {
+    pub fn owns_enchanted(&self, item: Id, ench: u16) -> bool {
+        ench == 0 || self.enchanted.get(&(item, ench)).is_some_and(|n| *n > 0)
+    }
+
+    pub fn add_enchanted(&mut self, item: Id, ench: u16, n: u32) {
+        if ench != 0 {
+            *self.enchanted.entry((item, ench)).or_insert(0) += n;
+        }
+    }
+
+    /// One of these left them. False if they never had it.
+    pub fn remove_enchanted(&mut self, item: Id, ench: u16) -> bool {
+        match self.enchanted.get_mut(&(item, ench)) {
+            Some(n) if *n > 0 => {
+                *n -= 1;
+                if *n == 0 {
+                    self.enchanted.remove(&(item, ench));
+                }
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Client side: bookkeeping for reconciling with the host's counts.
@@ -100,6 +141,13 @@ pub struct InvSync {
 }
 
 impl InvSync {
+    /// Start counting afresh from these counts (after the host restored us).
+    pub fn restart(&mut self, counts: BTreeMap<Id, u32>) {
+        self.timer = 0.0;
+        self.at_check = counts;
+        self.host_delta.clear();
+    }
+
     /// The host just gave or took items (they're already in its counts).
     pub fn note_host(&mut self, id: Id, delta: i64) {
         *self.host_delta.entry(id).or_insert(0) += delta;
@@ -133,6 +181,30 @@ impl Game {
         }
     }
 
+    /// The enchantments on what a player is holding, if the host knows they really have them.
+    pub fn verified_ench(&self, from: u32) -> u16 {
+        match self.peers.get(&from) {
+            Some(p) if self.creative || p.ledger.owns_enchanted(self.verified_held(from), p.ledger.held_ench) => p.ledger.held_ench,
+            _ => 0,
+        }
+    }
+
+    /// An item is leaving a joined player (thrown, dropped, put in a chest): its
+    /// enchantments go with it only if the host knew about them.
+    pub fn launder(&mut self, from: u32, item: Id, wear: crate::inventory::Wear) -> crate::inventory::Wear {
+        let ench = (wear >> 16) as u16;
+        if ench == 0 || self.creative {
+            return wear;
+        }
+        match self.ledger(from) {
+            Some(l) if l.owns_enchanted(item, ench) => {
+                l.remove_enchanted(item, ench);
+                wear
+            }
+            _ => wear & 0xFFFF,
+        }
+    }
+
     /// Does this player own at least one? (Always yes in creative.)
     pub fn peer_has(&self, from: u32, id: Id) -> bool {
         self.creative || self.peers.get(&from).map(|p| p.ledger.bag.has(id)).unwrap_or(false)
@@ -152,12 +224,13 @@ impl Game {
     }
 
     /// The same, for a used tool or piece of armour.
-    pub fn give_peer_worn(&mut self, from: u32, item: Id, n: u8, wear: u16) {
+    pub fn give_peer_worn(&mut self, from: u32, item: Id, n: u8, wear: crate::inventory::Wear) {
         if n == 0 || !valid_item(item) {
             return;
         }
         if let Some(l) = self.ledger(from) {
             l.bag.add(item, n as u32);
+            l.add_enchanted(item, (wear >> 16) as u16, n as u32);
         }
         self.net_send_to(from, Msg::Give { item, n, wear });
     }
@@ -170,9 +243,10 @@ impl Game {
         self.net_send_to(from, Msg::Effect { heal: 0.0, teleport: None, launch: None, take: Some((item, n)) });
     }
 
-    pub fn set_peer_held(&mut self, from: u32, held: Id) {
+    pub fn set_peer_held(&mut self, from: u32, held: Id, held_ench: u16) {
         if let Some(l) = self.ledger(from) {
             l.held = held;
+            l.held_ench = held_ench;
         }
     }
 
@@ -184,8 +258,10 @@ impl Game {
             return true;
         }
         let held = self.verified_held(from);
+        let ench = self.verified_ench(from);
         if is_break(old, new) {
-            let (t, drops) = break_time(old, held);
+            use crate::enchant::{level, Enchant};
+            let (t, drops) = break_time_with(old, held, level((ench as u32) << 16, Enchant::Efficiency));
             if !t.is_finite() {
                 return false;
             }
@@ -202,7 +278,9 @@ impl Game {
             // The drops land on the ground here; they get them by walking into them.
             if drops {
                 let center = at.as_vec3() + macroquad::math::Vec3::splat(0.5);
-                self.pop_drop(center, block(old).drop, 1);
+                let roll = self.rng.f32();
+                let n = fortune_count(old, level((ench as u32) << 16, Enchant::Fortune), roll);
+                self.pop_drop(center, block(old).drop, n);
                 let points = crate::xp::ore_xp(old, &mut self.rng);
                 self.spawn_orbs(center, points);
                 for (item, n) in crate::farming::random_drops(old, &mut self.rng) {
@@ -221,10 +299,11 @@ impl Game {
         if is_door(old) && is_door(new) {
             return true;
         }
-        if let Some((m, _)) = slab_of(old)
-            && new == MATERIALS[m].0
+        if let Some((family, _)) = slab_of(old)
+            && new == made_of(old)
+            && new != AIR
         {
-            return self.peer_take(from, slab(m, false), 1);
+            return self.peer_take(from, family, 1);
         }
         if is_farmland(new) && !is_farmland(old) {
             let ok = self.peer_has(from, HOE);
@@ -247,21 +326,24 @@ impl Game {
         true
     }
 
-    /// A joined player used a tool `amount` times. The host can't see which of
-    /// their pickaxes they held, so it counts uses per kind of tool: every
-    /// `durability` uses, one of that kind is worn out and leaves the ledger.
-    /// Their own game breaks the same tool at the same moment; if a modified
-    /// one doesn't, the next inventory check takes it anyway.
     /// A repair at an anvil gave back `restored` uses of this kind of tool.
     pub fn host_unwear(&mut self, from: u32, item: Id, restored: u32) {
+        let ench = if self.verified_held(from) == item { self.verified_ench(from) } else { 0 };
         if let Some(l) = self.ledger(from) {
-            let u = l.uses.entry(item).or_insert(0);
+            let u = l.uses.entry((item, ench)).or_insert(0);
             *u = u.saturating_sub(restored);
         }
     }
 
+    /// A joined player used a tool `amount` times. The host can't see which of
+    /// their pickaxes they held, so it counts uses per kind of tool (and its
+    /// enchantments): every time they add up to one tool's durability (more
+    /// with Unbreaking), one of that kind is worn out and leaves the ledger.
+    /// Their own game breaks the same tool at the same moment; if a modified
+    /// one doesn't, the next inventory check takes it anyway.
     pub fn host_wear(&mut self, from: u32, item: Id, amount: u16) {
-        let Some(max) = durability(item) else { return };
+        let ench = if self.verified_held(from) == item { self.verified_ench(from) } else { 0 };
+        let Some(max) = crate::inventory::max_uses(item, (ench as u32) << 16) else { return };
         if amount == 0 || self.creative {
             return;
         }
@@ -269,11 +351,12 @@ impl Game {
         if !l.bag.has(item) {
             return;
         }
-        let u = l.uses.entry(item).or_insert(0);
+        let u = l.uses.entry((item, ench)).or_insert(0);
         *u += amount as u32;
-        if *u >= max as u32 {
-            *u -= max as u32;
+        if *u >= max {
+            *u -= max;
             l.bag.take(item, 1);
+            l.remove_enchanted(item, ench);
         }
     }
 

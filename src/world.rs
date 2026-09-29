@@ -161,7 +161,7 @@ impl Generator {
         self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
     }
 
-    fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32)> {
+    pub fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32)> {
         let (h, biome) = self.column(x, z);
         let density = match biome {
             Biome::Forest => 0.035,
@@ -174,6 +174,41 @@ impl Generator {
         }
         let trunk = 4 + (hash2(self.seed ^ 0x7E1, x, z) * 3.0) as i32;
         Some((h, trunk))
+    }
+
+    /// Ravines: long, narrow cracks down from the surface. Returns the bottom
+    /// of the crack at this column, if one runs through it.
+    pub fn ravine_floor(&self, x: i32, z: i32) -> Option<i32> {
+        const REGION: i32 = 96;
+        let (rx, rz) = (x.div_euclid(REGION), z.div_euclid(REGION));
+        let s = self.seed ^ 0x2A_71E;
+        let mut best: Option<i32> = None;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let (gx, gz) = (rx + dx, rz + dz);
+                if hash2(s, gx, gz) > 0.35 {
+                    continue;
+                }
+                let start = Vec3::new((gx * REGION) as f32 + hash2(s ^ 1, gx, gz) * REGION as f32, 0.0, (gz * REGION) as f32 + hash2(s ^ 2, gx, gz) * REGION as f32);
+                let a = hash2(s ^ 3, gx, gz) * std::f32::consts::TAU;
+                let len = 50.0 + hash2(s ^ 4, gx, gz) * 40.0;
+                let dir = Vec3::new(a.cos(), 0.0, a.sin());
+                let rel = Vec3::new(x as f32 + 0.5, 0.0, z as f32 + 0.5) - start;
+                let t = rel.dot(dir) / len;
+                if !(0.0..=1.0).contains(&t) {
+                    continue;
+                }
+                let dist = (rel - dir * (t * len)).length();
+                let bulge = (t * std::f32::consts::PI).sin();
+                let width = 0.6 + 3.0 * bulge;
+                if dist >= width {
+                    continue;
+                }
+                let floor = 10 + (8.0 * (1.0 - bulge) + (dist / width).powi(2) * 10.0) as i32;
+                best = Some(best.map_or(floor, |b| b.min(floor)));
+            }
+        }
+        best
     }
 
     fn is_cave(&self, x: i32, y: i32, z: i32, surface: i32) -> bool {
@@ -226,14 +261,16 @@ impl Generator {
                     };
                     b[idx(lx, y, lz)] = id;
                 }
-                // Caves and ores
+                // Caves, ravines and ores
+                let ravine = if h > SEA + 2 && biome != Biome::Ocean { self.ravine_floor(x, z) } else { None };
                 for y in 1..h + 1 {
                     let i = idx(lx, y, lz);
                     if b[i] == BEDROCK {
                         continue;
                     }
-                    if self.is_cave(x, y, z, h) {
-                        b[i] = AIR;
+                    if self.is_cave(x, y, z, h) || ravine.is_some_and(|f| y >= f) {
+                        // Deep caverns are flooded.
+                        b[i] = if y <= 11 && self.cavern.noise3(x as f32 / 55.0, y as f32 / 28.0, z as f32 / 55.0) > 0.42 { WATER } else { AIR };
                         continue;
                     }
                     if b[i] == STONE {
@@ -258,6 +295,21 @@ impl Generator {
                                 break;
                             }
                         }
+                    }
+                }
+                // Cave decorations: glowing mushrooms and pointy rocks on floors, pointy rocks on ceilings.
+                for y in 3..(h - 4).max(3) {
+                    if b[idx(lx, y, lz)] != AIR {
+                        continue;
+                    }
+                    let (below, above) = (b[idx(lx, y - 1, lz)], b[idx(lx, y + 1, lz)]);
+                    let r = hash3(s ^ 0xCA7E, x, y, z);
+                    if below == STONE && r < 0.012 {
+                        b[idx(lx, y, lz)] = GLOWSHROOM;
+                    } else if below == STONE && r < 0.03 {
+                        b[idx(lx, y, lz)] = POINTY_ROCK;
+                    } else if above == STONE && r > 0.975 {
+                        b[idx(lx, y, lz)] = POINTY_ROCK;
                     }
                 }
                 // Plants on grass
@@ -329,6 +381,7 @@ impl Generator {
                 put(tx, h, tz, DIRT, true);
             }
         }
+        self.place_structures(cx, cz, &mut b);
         b
     }
 }
@@ -351,6 +404,9 @@ pub struct World {
     pub farm: HashMap<IVec3, Soil>,
     /// What's inside every chest and furnace (see containers.rs); kept in step with the blocks.
     pub containers: HashMap<IVec3, Container>,
+    /// Fill structure chests when their chunks first arrive (off for joined
+    /// players: the host has the real contents).
+    pub structure_loot: bool,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -385,6 +441,7 @@ impl World {
             dirty: HashSet::new(),
             farm: HashMap::new(),
             containers: HashMap::new(),
+            structure_loot: true,
             pending: HashSet::new(),
             edit_log: Vec::new(),
             log_edits: false,
@@ -415,6 +472,9 @@ impl World {
             }
             chunk.recompute_heights();
             self.chunks.insert((cx, cz), chunk);
+            if self.structure_loot {
+                self.fill_structure_chests(cx, cz);
+            }
             for dz in -1..=1 {
                 for dx in -1..=1 {
                     if self.chunks.contains_key(&(cx + dx, cz + dz)) {

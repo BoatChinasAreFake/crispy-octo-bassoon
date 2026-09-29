@@ -20,7 +20,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v10: tool and armour wear (Give, DropItem, ContainerMove, Container), death
 /// drops (DropItem.scatter) and the keep-inventory rule (Welcome).
 /// v11: experience (Xp, Orbs), anvils (Repair) and world rules (Rules).
-pub const PROTOCOL: u32 = 11;
+/// v12: wear carries enchantments (u32), remembered players (PlayerData,
+/// Restore), weather (Weather, Lightning) and enchanting (Enchant).
+pub const PROTOCOL: u32 = 12;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -70,7 +72,8 @@ pub enum Msg {
     PlayerLeave { id: u32 },
     /// Both directions; the host fills in `id` when relaying.
     /// `held` is the item in hand (the host only believes it if the player owns one).
-    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, armor: u16 },
+    /// `held_ench`: its enchantments (believed only if the host knows they have them).
+    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16 },
     /// Mobs, primed TNT (position, fuse) and arrows in flight (position, velocity).
     Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)> },
     /// client -> host
@@ -81,7 +84,7 @@ pub enum Msg {
     HurtYou { dmg: f32, cause: String, knock: Vec3 },
     /// host -> client: loot from a mob you killed.
     /// `wear`: how used it is, for tools and armour.
-    Give { item: Id, n: u8, wear: u16 },
+    Give { item: Id, n: u8, wear: u32 },
     Explosion { at: Vec3, r: f32 },
     Sound { sfx: u8, at: Vec3 },
     Time(f32),
@@ -112,25 +115,39 @@ pub enum Msg {
     OpenContainer { x: i32, y: i32, z: i32 },
     CloseContainer { x: i32, y: i32, z: i32 },
     /// client -> host: I moved `n` of `item` into (`put`) or out of a container slot.
-    ContainerMove { x: i32, y: i32, z: i32, slot: u8, item: Id, n: u8, put: bool, wear: u16 },
+    ContainerMove { x: i32, y: i32, z: i32, slot: u8, item: Id, n: u8, put: bool, wear: u32 },
     /// host -> client: what's in the container you have open, and its furnace gauges (0..1).
-    Container { x: i32, y: i32, z: i32, slots: Vec<(Id, u8, u16)>, burn: f32, cook: f32 },
+    Container { x: i32, y: i32, z: i32, slots: Vec<(Id, u8, u32)>, burn: f32, cook: f32 },
     /// host -> client: every item on the ground: (id, position, item, count).
     Drops(Vec<(u32, Vec3, Id, u8)>),
     /// client -> host: I walked into drop `id` and have room for this many.
     Pickup { id: u32, room: u8 },
     /// client -> host: I threw these (Q), or they didn't fit in my inventory, or
     /// (`scatter`) I died and they fell out of my pockets.
-    DropItem { item: Id, n: u8, wear: u16, scatter: bool },
+    DropItem { item: Id, n: u8, wear: u32, scatter: bool },
     /// host -> client: your experience points (the host keeps count).
     Xp { points: u32 },
     /// host -> client: experience orbs floating around: (id, position, value).
     Orbs(Vec<(u32, Vec3, u16)>),
     /// host -> client: the world's rules (on joining, and whenever they change).
-    Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool },
+    Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool, weather_cycle: bool },
     /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
     /// `material` (or, `combine`, by merging two of them).
     Repair { x: i32, y: i32, z: i32, item: Id, material: Id, used: u8, combine: bool },
+    /// client -> host: my inventory (then armour) with wear, health and hunger, so
+    /// the host can remember me when I leave.
+    PlayerData { slots: Vec<(Id, u8, u32)>, health: f32, food: f32, saturation: f32 },
+    /// host -> client: welcome back; this is how you left.
+    Restore { pos: Vec3, xp: u32, slots: Vec<(Id, u8, u32)>, health: f32, food: f32, saturation: f32 },
+    /// host -> client: the weather changed (`weather::Weather` index).
+    Weather { kind: u8 },
+    /// host -> client: lightning struck here.
+    Lightning { at: Vec3 },
+    /// client -> host: I enchanted `item` with offer `choice` (0..3) at the table at x,y,z.
+    Enchant { x: i32, y: i32, z: i32, item: Id, choice: u8 },
+    /// host -> client: what that enchanting gave (`ench` 0: refused), and how
+    /// many times you've enchanted (it seeds the table's next offers).
+    Enchanted { item: Id, ench: u16, count: u32 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -163,6 +180,15 @@ impl W {
         self.f32(v.x);
         self.f32(v.y);
         self.f32(v.z);
+    }
+    /// Item slots with their wear (and enchantments).
+    fn slots(&mut self, slots: &[(Id, u8, u32)]) {
+        self.u8(slots.len().min(255) as u8);
+        for &(id, n, w) in slots.iter().take(255) {
+            self.u16(id);
+            self.u8(n);
+            self.u32(w);
+        }
     }
     fn bytes(&mut self, b: &[u8]) {
         self.0.extend_from_slice(b);
@@ -202,6 +228,14 @@ impl R<'_> {
     }
     fn v3(&mut self) -> io::Result<Vec3> {
         Ok(Vec3::new(self.f32()?, self.f32()?, self.f32()?))
+    }
+    fn slots(&mut self) -> io::Result<Vec<(Id, u8, u32)>> {
+        let n = self.u8()? as usize;
+        let mut v = Vec::with_capacity(n);
+        for _ in 0..n {
+            v.push((self.u16()?, self.u8()?, self.u32()?));
+        }
+        Ok(v)
     }
     fn arr<const N: usize>(&mut self) -> io::Result<[u8; N]> {
         Ok(self.take(N)?.try_into().unwrap())
@@ -274,7 +308,7 @@ impl Msg {
                 w.u8(6);
                 w.u32(*id);
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, held, armor } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held, held_ench, armor } => {
                 w.u8(7);
                 w.u32(*id);
                 w.v3(*pos);
@@ -282,6 +316,7 @@ impl Msg {
                 w.f32(*pitch);
                 w.u8(*flags);
                 w.u16(*held);
+                w.u16(*held_ench);
                 w.u16(*armor);
             }
             Msg::Mobs { mobs, tnts, arrows } => {
@@ -330,7 +365,7 @@ impl Msg {
                 w.u8(12);
                 w.u16(*item);
                 w.u8(*n);
-                w.u16(*wear);
+                w.u32(*wear);
             }
             Msg::Explosion { at, r } => {
                 w.u8(13);
@@ -431,7 +466,7 @@ impl Msg {
                 w.u16(*item);
                 w.u8(*n);
                 w.u8(*put as u8);
-                w.u16(*wear);
+                w.u32(*wear);
             }
             Msg::Container { x, y, z, slots, burn, cook } => {
                 w.u8(32);
@@ -442,7 +477,7 @@ impl Msg {
                 for &(id, n, wear) in slots {
                     w.u16(id);
                     w.u8(n);
-                    w.u16(wear);
+                    w.u32(wear);
                 }
                 w.f32(*burn);
                 w.f32(*cook);
@@ -466,12 +501,28 @@ impl Msg {
                 w.u8(35);
                 w.u16(*item);
                 w.u8(*n);
-                w.u16(*wear);
+                w.u32(*wear);
                 w.u8(*scatter as u8);
             }
             Msg::Xp { points } => {
                 w.u8(36);
                 w.u32(*points);
+            }
+            Msg::PlayerData { slots, health, food, saturation } => {
+                w.u8(40);
+                w.slots(slots);
+                w.f32(*health);
+                w.f32(*food);
+                w.f32(*saturation);
+            }
+            Msg::Restore { pos, xp, slots, health, food, saturation } => {
+                w.u8(41);
+                w.v3(*pos);
+                w.u32(*xp);
+                w.slots(slots);
+                w.f32(*health);
+                w.f32(*food);
+                w.f32(*saturation);
             }
             Msg::Orbs(list) => {
                 w.u8(37);
@@ -482,11 +533,34 @@ impl Msg {
                     w.u16(value);
                 }
             }
-            Msg::Rules { keep_inventory, difficulty, daylight_cycle } => {
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle } => {
                 w.u8(38);
                 w.u8(*keep_inventory as u8);
                 w.u8(*difficulty);
                 w.u8(*daylight_cycle as u8);
+                w.u8(*weather_cycle as u8);
+            }
+            Msg::Weather { kind } => {
+                w.u8(42);
+                w.u8(*kind);
+            }
+            Msg::Lightning { at } => {
+                w.u8(43);
+                w.v3(*at);
+            }
+            Msg::Enchant { x, y, z, item, choice } => {
+                w.u8(44);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+                w.u8(*choice);
+            }
+            Msg::Enchanted { item, ench, count } => {
+                w.u8(45);
+                w.u16(*item);
+                w.u16(*ench);
+                w.u32(*count);
             }
             Msg::Repair { x, y, z, item, material, used, combine } => {
                 w.u8(39);
@@ -527,7 +601,7 @@ impl Msg {
             }
             5 => Msg::PlayerJoin { id: r.u32()?, name: r.str()? },
             6 => Msg::PlayerLeave { id: r.u32()? },
-            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, armor: r.u16()? },
+            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()? },
             8 => {
                 let n = r.count(31)?;
                 let mut mobs = Vec::with_capacity(n);
@@ -549,7 +623,7 @@ impl Msg {
             9 => Msg::Attack { mob: r.u32()?, dmg: r.f32()?, from: r.v3()? },
             10 => Msg::Ignite { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             11 => Msg::HurtYou { dmg: r.f32()?, cause: r.str()?, knock: r.v3()? },
-            12 => Msg::Give { item: r.u16()?, n: r.u8()?, wear: r.u16()? },
+            12 => Msg::Give { item: r.u16()?, n: r.u8()?, wear: r.u32()? },
             13 => Msg::Explosion { at: r.v3()?, r: r.f32()? },
             14 => Msg::Sound { sfx: r.u8()?, at: r.v3()? },
             15 => Msg::Time(r.f32()?),
@@ -586,13 +660,13 @@ impl Msg {
             }
             29 => Msg::OpenContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             30 => Msg::CloseContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
-            31 => Msg::ContainerMove { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0, wear: r.u16()? },
+            31 => Msg::ContainerMove { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0, wear: r.u32()? },
             32 => {
                 let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
                 let n = r.u8()? as usize;
                 let mut slots = Vec::with_capacity(n);
                 for _ in 0..n {
-                    slots.push((r.u16()?, r.u8()?, r.u16()?));
+                    slots.push((r.u16()?, r.u8()?, r.u32()?));
                 }
                 Msg::Container { x, y, z, slots, burn: r.f32()?, cook: r.f32()? }
             }
@@ -605,8 +679,10 @@ impl Msg {
                 Msg::Drops(list)
             }
             34 => Msg::Pickup { id: r.u32()?, room: r.u8()? },
-            35 => Msg::DropItem { item: r.u16()?, n: r.u8()?, wear: r.u16()?, scatter: r.u8()? != 0 },
+            35 => Msg::DropItem { item: r.u16()?, n: r.u8()?, wear: r.u32()?, scatter: r.u8()? != 0 },
             36 => Msg::Xp { points: r.u32()? },
+            40 => Msg::PlayerData { slots: r.slots()?, health: r.f32()?, food: r.f32()?, saturation: r.f32()? },
+            41 => Msg::Restore { pos: r.v3()?, xp: r.u32()?, slots: r.slots()?, health: r.f32()?, food: r.f32()?, saturation: r.f32()? },
             37 => {
                 let n = r.count(18)?;
                 let mut list = Vec::with_capacity(n);
@@ -615,7 +691,11 @@ impl Msg {
                 }
                 Msg::Orbs(list)
             }
-            38 => Msg::Rules { keep_inventory: r.u8()? != 0, difficulty: r.u8()?, daylight_cycle: r.u8()? != 0 },
+            38 => Msg::Rules { keep_inventory: r.u8()? != 0, difficulty: r.u8()?, daylight_cycle: r.u8()? != 0, weather_cycle: r.u8()? != 0 },
+            42 => Msg::Weather { kind: r.u8()? },
+            43 => Msg::Lightning { at: r.v3()? },
+            44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
+            45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0 },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
@@ -1042,7 +1122,7 @@ mod tests {
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0), keep_inventory: true },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
-            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, armor: 0x4102 },
+            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102 },
             Msg::Craft { recipe: 12, times: 64 },
             Msg::Consume { item: 0x8005, n: 1 },
             Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },
@@ -1052,8 +1132,14 @@ mod tests {
             Msg::Pickup { id: 7, room: 64 },
             Msg::DropItem { item: 0x8010, n: 3, wear: 40, scatter: true },
             Msg::Xp { points: 1507 },
+            Msg::PlayerData { slots: vec![(3, 64, 0), (0x800c, 1, 0x0001_0005)], health: 12.5, food: 7.0, saturation: 0.5 },
+            Msg::Restore { pos: Vec3::new(1.0, 64.0, 2.0), xp: 30, slots: vec![(0, 0, 0)], health: 20.0, food: 20.0, saturation: 5.0 },
             Msg::Orbs(vec![(3, Vec3::new(1.0, 2.0, 3.0), 17)]),
-            Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false },
+            Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false, weather_cycle: true },
+            Msg::Weather { kind: 2 },
+            Msg::Lightning { at: Vec3::new(4.0, 70.0, -9.5) },
+            Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },
+            Msg::Enchanted { item: 0x8003, ench: 0x0249, count: 7 },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },

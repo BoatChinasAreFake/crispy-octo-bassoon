@@ -168,13 +168,20 @@ impl Ui {
     }
 
     /// A stack with its durability bar, if it's a used tool or piece of armour.
-    pub fn stack_worn(&self, stack: Option<(Id, u8)>, wear: u16, x: f32, y: f32, size: f32, show_count: bool) {
+    pub fn stack_worn(&self, stack: Option<(Id, u8)>, wear: crate::inventory::Wear, x: f32, y: f32, size: f32, show_count: bool) {
         self.stack(stack, x, y, size, show_count);
-        let Some(max) = stack.and_then(|(id, _)| durability(id)) else { return };
-        if wear == 0 {
+        let Some((id, _)) = stack else { return };
+        if crate::enchant::is_enchanted(wear) {
+            // A shimmer on enchanted things.
+            let t = (get_time() as f32 * 3.0 + x * 0.05).sin() * 0.5 + 0.5;
+            draw_rectangle(x + size * 0.1, y + size * 0.1, size * 0.8, size * 0.8, Color::new(0.7, 0.3, 1.0, 0.12 + 0.12 * t));
+        }
+        let Some(max) = crate::inventory::max_uses(id, wear) else { return };
+        let used = crate::inventory::uses(wear);
+        if used == 0 {
             return;
         }
-        let left = 1.0 - wear as f32 / max as f32;
+        let left = 1.0 - used as f32 / max as f32;
         let (bx, by, bw, bh) = (x + size * 0.15, y + size * 0.8, size * 0.7, (size * 0.08).max(self.s));
         draw_rectangle(bx, by, bw, bh, Color::new(0.0, 0.0, 0.0, 0.85));
         let c = Color::new((2.0 * (1.0 - left)).min(1.0), (2.0 * left).min(1.0), 0.1, 1.0);
@@ -187,7 +194,7 @@ impl Ui {
     }
 
     /// `slot`, showing how worn a tool is.
-    pub fn slot_worn(&self, stack: Option<(Id, u8)>, wear: u16, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
+    pub fn slot_worn(&self, stack: Option<(Id, u8)>, wear: crate::inventory::Wear, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
         let r = Rect::new(x, y, size, size);
         let hov = self.hovered(r);
         draw_rectangle(x, y, size, size, if hov { Color::new(0.45, 0.45, 0.5, 0.95) } else { SLOT_BG });
