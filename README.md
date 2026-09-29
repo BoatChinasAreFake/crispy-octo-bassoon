@@ -4,7 +4,7 @@ A native, compiled block-building parody written in Rust, with no browser, no we
 
 The game ships with **no image or audio files**. At startup it builds the whole texture atlas (grass, ores, mobs, tools, hearts, the logo) from noise and tiny ASCII sprites, and synthesises every sound effect and the music.
 
-Its only dependencies are macroquad (window, input, audio) and [Rhai](https://rhai.rs), the sandboxed scripting language used for code mods.
+Its only dependencies are macroquad (window, input, audio), [Rhai](https://rhai.rs), the sandboxed scripting language used for code mods, and [gilrs](https://gitlab.com/gilrs-project/gilrs) for game controllers.
 
 ## Build and run
 
@@ -14,22 +14,22 @@ You need a Rust toolchain ([rustup.rs](https://rustup.rs)).
 cargo run --release
 ```
 
-Linux also needs the X11/GL and ALSA development libraries, for example on Debian/Ubuntu:
-`sudo apt install libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev`.
-If you can't install ALSA, `cargo run --release --no-default-features` builds a silent version.
+Linux also needs the X11/GL, ALSA and udev development libraries, for example on Debian/Ubuntu:
+`sudo apt install libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev libudev-dev`.
+If you can't install ALSA or udev, `cargo run --release --no-default-features` builds a version without sound or controller support (add `--features sound` or `--features gamepad` to get one back).
 Windows builds with no extra setup. macOS should work but hasn't been tested.
 
-Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy and a silent (`--no-default-features`) build on every push and pull request (`.github/workflows/ci.yml`).
+Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy and a minimal (`--no-default-features`) build on every push and pull request (`.github/workflows/ci.yml`).
 
 ## Features
 
 - **Infinite procedural terrain.** Seeded Perlin noise produces oceans, beaches, plains, forests, deserts, snowy biomes, ridged mountains, spaghetti caves, big caverns (the deepest ones flooded), ravines that split the surface open, Glowshrooms and Pointy Rocks lighting and littering the caves, ore veins (gold included, for all the good it'll do you), trees, flowers, tall grass, pumpkins, desert Pokey Plants and frozen seas. Chunks generate on background threads.
-- **Custom voxel renderer.** It culls hidden faces, adds per-vertex ambient occlusion and smoothed sky lighting, and uses frustum culling, translucent sorted water, cutout leaves and glass, fog, and mipmaps.
+- **Custom voxel renderer.** It culls hidden faces, adds per-vertex ambient occlusion and smoothed sky lighting, and uses frustum culling, translucent sorted water, cutout leaves and glass, fog, and mipmaps. **Greedy meshing** joins neighbouring faces with the same texture and light into one big rectangle (the shader repeats the texture across it). Faces only join along a direction their shading doesn't change in, so it looks the same as before at a fraction of the triangles, and the render distance goes up to 32 chunks.
 - **Compact world storage.** Like Minecraft, each 16-block-tall section of a chunk stores a small palette of the blocks it contains plus packed indices (0 bits per block for all-air or all-stone sections, 4–8 bits for mixed ones, direct ids past 256 kinds). Typical terrain averages under 2 bits per block. F3 shows the live figure.
 - **Dynamic lighting.** Torches and Glowrock light the area around them, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
-- **Survival mode.** Health, hunger, experience, mining times that depend on your tool, pickaxe tiers that gate ore drops, tools that wear out (and an anvil to fix them), 75 crafting recipes, food, cooking, chests, armour, beds, a bow, farming, fishing, death (which drops your things) and respawn.
+- **Survival mode.** Health, hunger, experience, mining times that depend on your tool, pickaxe tiers that gate ore drops, tools that wear out (and an anvil to fix them), 93 crafting recipes, food, cooking, chests, armour, beds, a bow, farming, fishing, death (which drops your things) and respawn.
 - **Hunger.** A food bar of ten drumsticks, with Minecraft's rules. Sprinting, jumping, swimming, fighting, digging and getting hurt use up hidden saturation first, then food. With a full bar you heal quickly; at 18 points or more you heal slowly. At 6 points or less you're too hungry to sprint, and on an empty bar you starve down to half a heart (dramatic, but not fatal). Food fills the bar: raw food barely helps, cooked food keeps you full much longer. You can't eat when you're full, except legendary snacks (Suspiciously Golden Oinkchop, Big Bob), which also heal you outright. Cake is 7 drumsticks in one bite.
 - **Durability.** Pickaxes, swords, the hoe, the bow, the Fishing Stick and armour wear out, with Minecraft's numbers: 59 uses for wood, 131 for stone, 250 for iron and 1561 for Dimond. A bar under the item shows how worn it is, and the tooltip counts the uses left. Breaking a block uses a tool once (swords twice, and blocks that break instantly not at all). Hitting a mob uses a sword once and anything else twice. Every bow shot, catch and tilled block counts too. Each piece of armour takes a quarter of every hit it softens. Wear stays with the item in chests, on the ground and in saves.
 - **Experience.** Green orbs from defeated mobs (5 for monsters, 1 to 3 for farm animals), coal, iron, gold and Dimond ore, float toward the nearest player. Taking things out of a furnace and catching fish pay experience too. Levels follow Minecraft's curve, and the bar and your level sit above the hotbar. Dying drops 7 points per level (at most 100) as orbs and loses the rest, unless the world keeps inventories.
@@ -53,6 +53,15 @@ Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy
     - Hard: monsters hit 50% harder, and starving can kill.
   - **Daylight Cycle**: turn it off and the sun stays where it is.
   - **Weather Cycle**: turn it off to keep the current weather, and a button next to it changes the weather now.
+- **Flowing water and lava.** Water spreads 7 blocks from a source and lava 3, falling first and spreading sideways from whatever it can't fall through. Two water sources side by side make a third, and taking a source away drains the rest. Nothing moves until something changes nearby, so the sea sits still until you dig next to it. Water meeting a lava source makes **Obsidian (Very Committed)**, meeting flowing lava makes cobblestone, and lava poured on water turns it to stone. Water washes away plants and torches; lava burns them, glows in the dark, and sets you on fire (jump in water to put it out). Lava lakes lie deep underground. A **Bucket (Empty, Optimistic)** (3 iron) scoops up a source and pours it somewhere else; water boils away in the Scorchlands.
+- **Breeding, taming and shears.** Feed an animal its favourite food (Oinkers carrots or potatoes, Fluffers and Mooers wheat, Clucksters seeds) and it falls in love for half a minute. Two in love make a baby, which grows up in four minutes. Animals follow anyone holding their food. **Shears (For Fluffers, Not Haircuts)** (2 iron) take 1–3 wool off a Fluffer; it grows back once the Fluffer has eaten grass. **Woofers** live in forests and snowy places: feed one bones and there's a one-in-three chance it becomes yours. A tamed Woofer wears a collar, follows you (teleporting when left behind), goes after whatever you hit or whatever hits you, and sits or stands when you right-click it. Feed it meat to breed more.
+- **Zappy Dust (legally distinct redstone, simplified).** **Zappy Ore (Tingly)** deep underground drops Zappy Dust. Power comes from a **Lever (Pull It)**, a **Button (Press It)** (on for a second), a **Pressure Plate (Step On It)** (on while anything stands on it) and a **Block of Zappy Dust (Always On)**. Dust laid on the floor carries power up to 15 blocks, along the floor and up or down a step. Anything next to a switch or powered dust is powered: **Zappy Lamps** light up, doors open (and close again), and TNT goes off.
+- **Hmmers and trading.** Every hut gets a **Hmmer** (a legally distinct villager) with a job: Farmer, Librarian, Smith or Fisher. Right-click one to see its five trades. Gold ingots are the money (finally, a use for them): sell wheat, carrots, feathers, coal, iron, cod or string, and buy bread, cake, books, bookshelves, enchanted books, iron tools and armour (the tools come enchanted), fishing gear and bait. Each trade can be made six times before the Hmmer runs out; they restock every day.
+- **Enchanted books.** A **Book (Mostly Wheat)** is 3 wheat and a string. Enchant it at the table like a tool (any enchantment fits a book) to get an **Enchanted Book (Spoilers Inside)**, or buy one from a Librarian. At the anvil, put a tool on the left and a book on the right to add its enchantments, or two books together to merge them. Combining two enchanted tools at the anvil merges their enchantments too.
+- **Combat.** Weapons take a moment to be ready after a swing (swords 0.6 seconds, pickaxes 0.8, hands 0.3), shown by a bar under the crosshair. Hitting early does less damage, and only a fully charged blow can be a critical hit or a sprinting knockback. A fully charged sword blow also sweeps the mobs right next to the target. Hold right-click with a **Shield (Door You Can Carry)** (6 planks and an iron) to block hits from in front (mobs, arrows, half an explosion) while you walk slowly; the shield wears instead. Every armour point takes 2.5% off knockback.
+- **The Scorchlands.** A second, hotter world under a bedrock sky, with Scorchrock, Embersand, gold ore, a lava sea, a dim red glow and no weather. Build an obsidian frame (at least 4 wide and 5 tall, corners optional), light it with a **Sparker (Hot Hands in a Can)** (iron and coal), and stand in the portal for two seconds. Every block there is eight here, and a portal appears at the other end if there isn't one nearby already (the two stay linked). **Grumblers** live there: leave them be, because hitting one brings the whole crowd (they drop Groaner Goo and sometimes gold). Compasses spin in the Scorchlands.
+- **Boats, minecarts and rails.** A **Boat (Mostly Waterproof)** (5 planks) floats: right-click to get in, W and S row, A and D steer, sneak to get out. A **Minecart (Wheeled Bucket)** (5 iron) runs on **Rails (Choo Choo)** (6 iron and a stick make 16), which join up and curve round corners by themselves; W pushes the cart the way you're looking. **Powered Rails (Zoom)** (gold, a stick and Zappy Dust) speed carts up when powered and brake them when not. Hit a vehicle three times to pick it up. Joined players ride them too.
+- **Signs, item frames, compass and map.** A **Sign (Words Go Here)** holds four lines of text that float above it, readable from a distance. An **Item Frame (Look What I Have)** (8 sticks and wool) hangs on a wall and shows off whatever you put in it; hit it to take the item out. The **Compass (Points Home, Mostly)** (4 iron and Zappy Dust) points to your spawn and shows the distance. Hold a **Map (You Are Here)** (8 wheat and a compass) to see the land around you from above, with you on it.
 - **Death drops.** Dying drops your whole inventory, armour included, where you fell. The death screen tells you where, and it all waits five minutes. Worlds created with **Keep Inventory** on (a toggle on the Create World screen, or `--keep-inventory` for servers) let you keep everything instead.
 - **Creative mode.** Flight, instant breaking, infinite blocks, pick-block and a full item palette.
 - **Mobs** (legally distinct):
@@ -88,17 +97,33 @@ Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy
 - **Slabs, stairs and doors.** Slabs and stairs come in Planks, Cobblestun and Stone Brick. Three blocks make 6 slabs and six make 4 stairs. Slabs go on top when you aim at the upper half of something, and a slab placed on a matching slab makes the full block. Stairs face away from you. You walk up slabs and stairs without jumping, and only their real shape gets in your way or gets hit. **Doors** (6 planks make 3) are two blocks tall: right-click to open or close them (sneak to place against one), and breaking either half takes the whole door. Wooden ones burn in furnaces.
 - **Chests and furnaces.** A **Chest (Latches on Every Side)** (8 planks) holds 27 stacks. A **Furnace** (8 cobblestone) has an input, a fuel slot and a take-only output. It cooks one item every 8 seconds while it has fuel, and it glows while lit. It turns raw meat and fish into cooked versions, potatoes into Baked Potatoes, sand into glass, cobblestone into stone, and logs into (legally distinct) coal. Coal, wood, sticks, hay and wooden tools all burn. Cooking a Pufferfish only halves the damage, and a Cooked Boot is still a boot. Right-click to open either one (sneak to place blocks against it), and shift-click to move whole stacks. Furnaces keep cooking while you're away, as long as their chunk is loaded. Breaking either one spills what was inside onto the ground. Everything is saved with the world.
 - **More blocks:** Sandstone (under deserts), Stone Bricks, Mossy Cobblestun, Hay Bale, Bookshelf, Lantern, Mushroom (in forests; two make a Suspicious Stew), Scarecrow and Weeds.
-- **Advancements.** 48 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
+- **Advancements.** 56 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
 - **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, baas, clucks, moos, rattles, skittering, bloops, bow twangs, groans, Hisser hisses, Starer warps, boings, an advancement fanfare, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
-- **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day, weather and chat, and remembers every player's things between visits. Servers can require a password, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
+- **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day, weather and chat, and remembers every player's things between visits. Servers can require a password, keep an allow-list, and give operators commands in chat, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
 - **Mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants and simple effects (bouncy or fast blocks, items that heal, launch, explode, give things or spawn mobs). Servers send their mods to players automatically. See **[MODDING.md](MODDING.md)** and `example-mods/cheese`.
 - **Code mods (scripting).** Mods can also include sandboxed [Rhai](https://rhai.rs) scripts, which react to events (chat commands, breaking and placing blocks, item use, joins, mob deaths, ticks) and call a game API (blocks, items, health, teleport, explosions, mobs, time, messages). Scripts run on the machine that owns the world, including dedicated servers. See **[SCRIPTING.md](SCRIPTING.md)** and `example-mods/commands`.
 - **Multiple worlds.** **Singleplayer** on the title screen opens a world list with each world's name, mode, seed, when it was last played, and size. You can play, create (with a name, game mode and optional seed; any text works as a seed), rename or delete worlds. Each world is its own folder, `saves/<world>/`. Only your edits are stored, and the terrain regenerates from the seed. A save from before world slots (`saves/world.mncr`) is moved in automatically as "My World".
 - First-person hand and held item, third-person view, block-breaking cracks, particles, screen shake, a panoramic title screen with splash texts, and options for render distance, FOV, sensitivity and fullscreen.
-- **Saved settings.** Render distance, FOV, sensitivity, fullscreen, volume, music, and your multiplayer name and last server are kept in `settings.txt` next to the game. It's plain `key=value` text: edit it by hand if you like, and anything it can't make sense of falls back to the default.
+- **Rebindable controls.** **Options > Controls** lists every action with two slots: click one and press the key or mouse button you want (Esc leaves it empty). **Reset to Defaults** puts them back, and How to Play shows your keys.
+- **Game controllers.** Plug in a controller any time (Xbox, PlayStation and most others work):
+
+  | Controller | Action |
+  | --- | --- |
+  | Left stick (press: sprint) | Walk |
+  | Right stick | Look |
+  | A / Cross | Jump |
+  | B / Circle | Sneak; close screens |
+  | X / Square | Throw item |
+  | Y / Triangle | Inventory |
+  | Right trigger / left trigger | Mine or attack / place or use |
+  | Bumpers, D-pad left and right | Hotbar |
+  | Start / Select | Pause / third person |
+- **Saved settings.** Render distance, FOV, sensitivity, fullscreen, volume, music, key bindings, and your multiplayer name and last server are kept in `settings.txt` next to the game. It's plain `key=value` text: edit it by hand if you like, and anything it can't make sense of falls back to the default.
 
 ## Controls
+
+These are the defaults; change them in **Options > Controls**. Game controllers work too (see Features).
 
 | Key | Action |
 | --- | --- |
@@ -108,11 +133,11 @@ Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy
 | Shift | Sneak / fly down |
 | Ctrl or R | Sprint |
 | Left mouse | Mine / attack |
-| Right mouse | Place block / eat (when hungry) / light TNT / fire a bow / open a chest, furnace, anvil, enchanting table or door / put on armour |
+| Right mouse | Place block / eat (when hungry) / light TNT / fire a bow / open a chest, furnace, anvil, enchanting table or door / put on armour / block with a shield / trade with a Hmmer / feed, shear or tame animals / get in a boat or minecart / write on a sign / fill a bucket |
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |
-| T or Enter | Chat, and `/commands` from script mods |
+| T or Enter | Chat (`/` starts a command: server commands, or ones from script mods) |
 | Q / Ctrl+Q | Throw one of the held item / the whole stack |
 | F5 | Toggle third person |
 | F3 | Debug info |
@@ -154,9 +179,22 @@ The server has no window and needs no GPU or sound card. Options:
 - `--keep-inventory`: players keep their things when they die.
 - `--difficulty peaceful|easy|normal|hard`: overrides the world's difficulty.
 - `--max-players N`: player limit (default 16).
+- `--allow-list`: only let in the players on the allow-list (and operators).
 - `--upnp`: ask the router to forward the port, for servers at home.
 
-Console commands: `list`, `say <text>`, `kick <name>`, `ban <name|ip>`, `unban <ip>`, `bans`, `time <day|night>`, `password <pw|off>`, `save`, `stop`. Bans are by IP address and are kept in `banned-ips.txt`.
+Console commands:
+
+- `list`: who's online.
+- `players`: everyone the server remembers, with where they are, their health and experience.
+- `info <name>`: one player's position, health, food, experience, enchanting count, everything they carry and what they wear, whether they're online or not.
+- `forget <name>`: drop a player's saved things, so they start afresh next time.
+- `say <text>`, `kick <name>`, `time <day|noon|night|midnight|0.0-1.0>`, `password <pw|off>`.
+- `ban <name|ip>`, `unban <ip>`, `bans`: bans are by IP address.
+- `op <name>`, `deop <name>`, `ops`: operators can use all of these commands in chat, with a slash (`/kick Bob`). Everyone else can use `/list` and `/help`.
+- `allowlist on|off|list|add <name>|remove <name>`: turning it on adds whoever is online, so nobody is kicked out by surprise. Operators always get in.
+- `save`, `stop`, `help`.
+
+The lists live next to the server in plain text: `allow-list.txt`, `ops.txt` and `banned-ips.txt`. Names aren't accounts, so combine the allow-list with a password. Whoever hosts a world from the pause menu is always an operator there and can use the same commands in chat (their lists last until the world is closed).
 
 The world autosaves every 5 minutes and when you type `stop`. Stopping with Ctrl+C loses anything since the last autosave.
 
@@ -205,7 +243,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/main.rs` | Window, screens/menus, input, main loop |
 | `src/game.rs` | Gameplay rules, spawning, explosions, scene assembly |
 | `src/world.rs` | Chunks, threaded terrain generator, raycasts |
-| `src/mesher.rs` | Chunk meshing with AO and smooth lighting |
+| `src/mesher.rs` | Chunk meshing with AO, smooth lighting and greedy merging |
 | `src/render.rs` | Raw OpenGL pipelines and shaders |
 | `src/entity.rs` | Physics, mobs, models, particles |
 | `src/player.rs` | Player controller |
@@ -226,6 +264,18 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/players.rs` | Remembering joined players between visits |
 | `src/rules.rs` | World rules: keep inventory, difficulty, daylight and weather cycles |
 | `src/settings.rs` | `settings.txt` |
+| `src/keybinds.rs` | Rebindable keys and mouse buttons |
+| `src/pad.rs` | Game controllers |
+| `src/liquids.rs` | Flowing water and lava, buckets |
+| `src/animals.rs` | Breeding, taming and shearing |
+| `src/wiring.rs` | Zappy Dust, switches, lamps and powered doors |
+| `src/villagers.rs` | Hmmers and trading |
+| `src/combat.rs` | Attack charge, sweeps, shields and knockback |
+| `src/scorch.rs` | The Scorchlands and portals |
+| `src/vehicles.rs` | Boats, minecarts and rails |
+| `src/decor.rs` | Signs and item frames |
+| `src/navigation.rs` | Compass and map |
+| `src/admin.rs` | Server commands, allow-list and operators |
 | `src/save.rs` | Binary save format |
 | `src/net.rs` | Network protocol and non-blocking TCP |
 | `src/multiplayer.rs` | Host and client sync logic |
@@ -235,6 +285,6 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|controls|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow|liquids|animals|zappy|trade|scorch|portal|vehicles|decor [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z] [--distance chunks]` renders a scene and saves a PNG.
 
 Not affiliated with any block-game company.
