@@ -173,6 +173,12 @@ pub enum Msg {
     Ride { id: u32, pos: Vec3, yaw: f32 },
     /// client -> host: I put a boat (0) or minecart (1) down here.
     PlaceVehicle { kind: u8, pos: Vec3, yaw: f32 },
+    /// Both ways: what's written on the sign at x,y,z.
+    SignText { x: i32, y: i32, z: i32, lines: Vec<String> },
+    /// host -> client: what hangs in the frame at x,y,z (AIR: nothing).
+    FrameItem { x: i32, y: i32, z: i32, item: Id, wear: u32 },
+    /// client -> host: I put this in the frame (`put`), or knocked out what was there.
+    FrameUse { x: i32, y: i32, z: i32, item: Id, wear: u32, put: bool },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -626,6 +632,33 @@ impl Msg {
                 w.v3(*pos);
                 w.f32(*yaw);
             }
+            Msg::SignText { x, y, z, lines } => {
+                w.u8(53);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(lines.len().min(4) as u8);
+                for l in lines.iter().take(4) {
+                    w.str(l);
+                }
+            }
+            Msg::FrameItem { x, y, z, item, wear } => {
+                w.u8(54);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+                w.u32(*wear);
+            }
+            Msg::FrameUse { x, y, z, item, wear, put } => {
+                w.u8(55);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+                w.u32(*wear);
+                w.u8(*put as u8);
+            }
             Msg::Enchanted { item, ench, count } => {
                 w.u8(45);
                 w.u16(*item);
@@ -781,6 +814,17 @@ impl Msg {
             50 => Msg::VehicleUse { id: r.u32()?, action: r.u8()? },
             51 => Msg::Ride { id: r.u32()?, pos: r.v3()?, yaw: r.f32()? },
             52 => Msg::PlaceVehicle { kind: r.u8()?, pos: r.v3()?, yaw: r.f32()? },
+            53 => {
+                let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
+                let n = r.u8()?.min(4);
+                let mut lines = Vec::new();
+                for _ in 0..n {
+                    lines.push(r.str()?);
+                }
+                Msg::SignText { x, y, z, lines }
+            }
+            54 => Msg::FrameItem { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()? },
+            55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
@@ -1233,6 +1277,9 @@ mod tests {
             Msg::VehicleUse { id: 3, action: 2 },
             Msg::Ride { id: 3, pos: Vec3::ONE, yaw: 1.0 },
             Msg::PlaceVehicle { kind: 0, pos: Vec3::X, yaw: -1.0 },
+            Msg::SignText { x: 1, y: 2, z: 3, lines: vec!["Hello".into(), "".into(), "world".into(), "!".into()] },
+            Msg::FrameItem { x: 1, y: 2, z: 3, item: 0x8003, wear: 7 },
+            Msg::FrameUse { x: 1, y: 2, z: 3, item: 0x8003, wear: 7, put: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },

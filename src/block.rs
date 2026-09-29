@@ -111,8 +111,11 @@ pub const PORTAL_Z: Id = 128;
 pub const RAIL_FIRST: Id = 129;
 /// Powered rails: `POWERED_RAIL + axis * 2 + on` (axis 0 north-south, 1 east-west).
 pub const POWERED_RAIL: Id = 135;
+/// Signs and item frames: `+ facing` (see decor.rs).
+pub const SIGN_FIRST: Id = 139;
+pub const FRAME_FIRST: Id = 143;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 139;
+pub const NUM_BLOCKS: Id = 147;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -188,8 +191,10 @@ pub const SHIELD: Id = FIRST_ITEM + 83;
 pub const SPARKER: Id = FIRST_ITEM + 84;
 pub const BOAT: Id = FIRST_ITEM + 85;
 pub const MINECART: Id = FIRST_ITEM + 86;
+pub const COMPASS: Id = FIRST_ITEM + 87;
+pub const MAP: Id = FIRST_ITEM + 88;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 87;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 89;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -328,6 +333,10 @@ pub enum Shape {
     Button { down: bool },
     /// A portal's shimmering sheet, across x (or z).
     Portal { x_axis: bool },
+    /// A signpost: its board faces north-south (or east-west).
+    Sign { facing: u8 },
+    /// A frame hung on one side of its cell.
+    Frame { facing: u8 },
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -373,6 +382,21 @@ impl Shape {
             Shape::Button { down } => ([([5.0 / 16.0, 0.0, 6.0 / 16.0], [11.0 / 16.0, if down { 1.0 / 16.0 } else { 2.0 / 16.0 }, 10.0 / 16.0]), full, full], 1),
             Shape::Portal { x_axis: true } => ([([0.0, 0.0, 0.375], [1.0, 1.0, 0.625]), full, full], 1),
             Shape::Portal { x_axis: false } => ([([0.375, 0.0, 0.0], [0.625, 1.0, 1.0]), full, full], 1),
+            Shape::Sign { facing } => {
+                let post = ([0.44, 0.0, 0.44], [0.56, 0.55, 0.56]);
+                let board = if facing % 2 == 0 { ([0.05, 0.55, 0.44], [0.95, 1.0, 0.56]) } else { ([0.44, 0.55, 0.05], [0.56, 1.0, 0.95]) };
+                ([post, board, full], 2)
+            }
+            Shape::Frame { facing } => {
+                let t = 1.0 / 16.0;
+                let b = match facing % 4 {
+                    0 => ([0.125, 0.125, 0.0], [0.875, 0.875, t]),
+                    1 => ([1.0 - t, 0.125, 0.125], [1.0, 0.875, 0.875]),
+                    2 => ([0.125, 0.125, 1.0 - t], [0.875, 0.875, 1.0]),
+                    _ => ([0.0, 0.125, 0.125], [t, 0.875, 0.875]),
+                };
+                ([b, full, full], 1)
+            }
         }
     }
 }
@@ -427,6 +451,13 @@ pub fn placing_item(id: Id) -> Option<Id> {
     // Any rail is placed as a straight one, then bends to fit (see vehicles.rs).
     if id == RAIL_FIRST || id == POWERED_RAIL {
         return Some(id);
+    }
+    // Signs and frames come in four facings; the item is the first.
+    if (SIGN_FIRST..SIGN_FIRST + 4).contains(&id) {
+        return Some(SIGN_FIRST);
+    }
+    if (FRAME_FIRST..FRAME_FIRST + 4).contains(&id) {
+        return Some(FRAME_FIRST);
     }
     if let Some((family, _)) = slab_of(id) {
         return Some(family);
@@ -855,7 +886,22 @@ impl Registry {
             d.creative = k == 0;
             blocks.push(d);
         }
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("sign{}", ["", "_east", "_south", "_west"][facing as usize])), "Sign (Words Go Here)", Shaped, false, false, [T_PLANKS; 3], 1.0, 0, false, SIGN_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Sign { facing };
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("item_frame{}", ["", "_east", "_south", "_west"][facing as usize])), "Item Frame (Look What I Have)", Shaped, false, false, [T_FRAME; 3], 0.4, 0, false, FRAME_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Frame { facing };
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
+        debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
+        debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
+        debug_assert_eq!(blocks[FRAME_FIRST as usize].key, "item_frame");
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
         blocks[BOUNCY as usize].bounce = 0.85;
@@ -956,6 +1002,8 @@ impl Registry {
             ItemDef { stack: 1, ..item("sparker", "Sparker (Hot Hands in a Can)", T_SPARKER) },
             ItemDef { stack: 1, ..item("boat", "Boat (Mostly Waterproof)", T_BOAT_ITEM) },
             ItemDef { stack: 1, ..item("minecart", "Minecart (Wheeled Bucket)", T_CART_ITEM) },
+            item("compass", "Compass (Points Home, Mostly)", T_COMPASS),
+            item("map", "Map (You Are Here)", T_MAP),
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -1026,6 +1074,10 @@ impl Registry {
             r(&[(PLANKS, 6), (IRON, 1)], (SHIELD, 1)),
             r(&[(IRON, 1), (COAL, 1)], (SPARKER, 1)),
             r(&[(PLANKS, 5)], (BOAT, 1)),
+            r(&[(IRON, 4), (ZAP_DUST, 1)], (COMPASS, 1)),
+            r(&[(WHEAT, 8), (COMPASS, 1)], (MAP, 1)),
+            r(&[(PLANKS, 6), (STICK, 1)], (SIGN_FIRST, 3)),
+            r(&[(STICK, 8), (WOOL, 1)], (FRAME_FIRST, 1)),
             r(&[(IRON, 5)], (MINECART, 1)),
             r(&[(IRON, 6), (STICK, 1)], (RAIL_FIRST, 16)),
             r(&[(GOLD_INGOT, 6), (STICK, 1), (ZAP_DUST, 1)], (POWERED_RAIL, 6)),
@@ -1229,4 +1281,25 @@ pub fn creative_items() -> Vec<Id> {
 /// Constructors the mod loader uses while building a new registry.
 pub(crate) mod build {
     pub(crate) use super::{def, item, leak};
+}
+
+#[cfg(test)]
+mod id_order_tests {
+    use super::*;
+
+    #[test]
+    fn named_ids_match_their_registrations() {
+        for (id, key) in [
+            (OBSIDIAN, "obsidian"),
+            (ZAP_ORE, "zap_ore"),
+            (LAMP_ON, "zap_lamp_on"),
+            (PORTAL_X, "portal"),
+            (RAIL_FIRST, "rail"),
+            (POWERED_RAIL, "powered_rail"),
+            (SIGN_FIRST, "sign"),
+            (FRAME_FIRST, "item_frame"),
+        ] {
+            assert_eq!(block(id).key, key, "id {id}");
+        }
+    }
 }

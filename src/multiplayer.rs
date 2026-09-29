@@ -403,6 +403,9 @@ impl Game {
             roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
             roster.push(self.rules_msg());
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
+            // Words on signs and things in frames.
+            roster.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
+            roster.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -480,9 +483,12 @@ impl Game {
                         corrections.push((x, y, z, old));
                         continue;
                     }
-                    // A broken chest or furnace spills what was inside.
+                    // A broken chest or furnace spills what was inside (and a frame what it held).
                     if crate::containers::is_container(old) && !crate::containers::is_container(id) {
                         self.spill_container(IVec3::new(x, y, z));
+                    }
+                    if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
+                        self.spill_frame(IVec3::new(x, y, z));
                     }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
@@ -672,6 +678,16 @@ impl Game {
                 }
             }
             Msg::Ride { id, pos, yaw } => self.host_ride(from, id, pos, yaw),
+            Msg::SignText { x, y, z, lines } => {
+                if self.peer_rate_ok(from, "sign", 0.2) {
+                    self.host_sign(from, IVec3::new(x, y, z), lines);
+                }
+            }
+            Msg::FrameUse { x, y, z, item, wear, put } => {
+                if self.peer_rate_ok(from, "frame", 0.05) {
+                    self.host_frame_use(from, IVec3::new(x, y, z), item, wear, put);
+                }
+            }
             Msg::PlaceVehicle { kind, pos, yaw } => {
                 if self.peer_rate_ok(from, "place_vehicle", 0.3) {
                     self.host_place_vehicle(from, kind, pos, yaw);
@@ -846,6 +862,10 @@ impl Game {
             }
             Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
             Msg::Vehicles(list) => self.apply_vehicles(list),
+            Msg::SignText { x, y, z, lines } => {
+                self.world.signs.insert(IVec3::new(x, y, z), crate::decor::clean_lines(&lines));
+            }
+            Msg::FrameItem { x, y, z, item, wear } => self.apply_frame(IVec3::new(x, y, z), item, wear),
             Msg::Weather { kind } => self.weather.kind = crate::weather::Weather::from_index(kind),
             Msg::Lightning { at } => {
                 if at.is_finite() {
@@ -885,7 +905,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } => {}
         }
     }
 
@@ -1916,6 +1936,49 @@ mod tests {
         }
         assert!(pump(&mut host, &mut client, |h, c| h.vehicles.is_empty() && c.vehicles.is_empty()));
         assert!(host.drops.iter().any(|d| d.item == BOAT));
+    }
+
+    #[test]
+    fn signs_and_frames_are_shared() {
+        let mut host = Game::new(794, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let (x, y, z) = (spawn.x.floor() as i32 + 2, spawn.y.floor() as i32 + 1, spawn.z.floor() as i32);
+        let (sign, frame) = (IVec3::new(x, y, z), IVec3::new(x + 1, y, z));
+        host.world.set_v(sign - IVec3::Y, STONE);
+        host.world.set_v(sign, SIGN_FIRST);
+        host.world.set_v(frame + IVec3::X, STONE);
+        host.world.set_v(frame, FRAME_FIRST + 1);
+        host.set_sign(sign, &["Old".into(), "news".into()]);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Signy", "").unwrap();
+        let id = client.my_id;
+        // Joining brings the words along.
+        assert!(pump(&mut host, &mut client, |_, c| c.world.signs.get(&sign).is_some_and(|l| l[0] == "Old")));
+        // The client rewrites it; everyone sees.
+        client.set_sign(sign, &["New".into(), "news".into()]);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.signs[&sign][0] == "New"));
+        // A frame: only things they have go in.
+        client.net_send_msg(Msg::FrameUse { x: frame.x, y: frame.y, z: frame.z, item: DIAMOND, wear: 0, put: true });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(host.world.frames.is_empty());
+        host.give_peer(id, DIAMOND, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DIAMOND) == 1));
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == DIAMOND)).unwrap();
+        client.inv.selected = slot;
+        assert!(client.use_frame(frame));
+        assert!(pump(&mut host, &mut client, |h, _| h.world.frames.get(&frame) == Some(&(DIAMOND, 0))));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 0);
+        // Knock it out: it lands on the host's ground.
+        for _ in 0..10 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(client.hit_frame(frame));
+        assert!(pump(&mut host, &mut client, |h, c| h.world.frames.is_empty() && c.world.frames.is_empty() && h.drops.iter().any(|d| d.item == DIAMOND)));
     }
 
     #[test]

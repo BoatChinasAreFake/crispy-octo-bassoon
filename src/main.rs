@@ -9,6 +9,7 @@ mod block;
 mod building;
 mod combat;
 mod containers;
+mod decor;
 mod drops;
 mod enchant;
 mod entity;
@@ -22,6 +23,7 @@ mod liquids;
 mod mesher;
 mod mods;
 mod multiplayer;
+mod navigation;
 mod net;
 mod noise;
 mod palette;
@@ -98,6 +100,8 @@ enum Screen {
     Enchant,
     /// Trading with a Hmmer (see villagers.rs).
     Trade,
+    /// Writing on a sign (see decor.rs).
+    Sign,
     /// Keep inventory, difficulty, daylight cycle (the world's owner can change them).
     WorldSettings,
     Dead,
@@ -152,6 +156,13 @@ struct App {
     base_atlas: Vec<u8>,
     /// Registry generation the GPU atlas was built from.
     atlas_gen: u32,
+    /// Map colours per block, the map picture, and seconds until it's redrawn (see navigation.rs).
+    map_colors: Vec<[u8; 3]>,
+    map_tex: Option<Texture2D>,
+    map_timer: f32,
+    /// Lines being written on a sign, and which line.
+    sign_lines: [String; 4],
+    sign_line: usize,
     mods_scroll: usize,
     adv_scroll: usize,
     /// Joined a server, so its mods (not ours) are active.
@@ -240,6 +251,18 @@ impl App {
         if self.screen == Screen::Trade && s != Screen::Trade {
             self.game.trading = None;
             self.game.inv.return_cursor();
+        }
+        if self.screen == Screen::Sign && s != Screen::Sign {
+            // Done writing: put it on the sign.
+            if let Some(pos) = self.game.editing_sign.take() {
+                let lines = self.sign_lines.clone();
+                self.game.set_sign(pos, &lines);
+            }
+        }
+        if s == Screen::Sign {
+            self.sign_lines = Default::default();
+            self.sign_line = 0;
+            drain_chars();
         }
         // Leaving a screen where settings change: keep them for next time.
         if matches!(self.screen, Screen::Options { .. } | Screen::Multiplayer) && self.screen != s {
@@ -550,6 +573,17 @@ impl App {
                     self.set_screen(Screen::Playing);
                 }
             }
+            Screen::Sign => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Playing);
+                } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) || is_key_pressed(KeyCode::Down) {
+                    self.sign_line = (self.sign_line + 1) % 4;
+                } else if is_key_pressed(KeyCode::Up) {
+                    self.sign_line = (self.sign_line + 3) % 4;
+                } else {
+                    type_into(&mut self.sign_lines[self.sign_line], decor::LINE_LEN);
+                }
+            }
             Screen::Advancements | Screen::FishLog | Screen::WorldSettings => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
@@ -605,6 +639,9 @@ impl App {
         } else if self.screen == Screen::Enchant && !self.game.enchanting_still_there() {
             self.set_screen(Screen::Playing);
         }
+        if self.game.editing_sign.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Sign);
+        }
         if self.game.trading.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Trade);
         } else if self.screen == Screen::Trade && self.game.trade_list().is_none() {
@@ -631,6 +668,7 @@ impl App {
             self.atlas_gen = block::generation();
             let mut atlas = self.base_atlas.clone();
             texture::apply_mod_textures(&mut atlas);
+            self.map_colors = navigation::block_colors(&atlas);
             let gl = unsafe { get_internal_gl() };
             self.renderer.update_atlas(gl.quad_context, &atlas);
             self.ui.tex.update_from_bytes(texture::ATLAS as u32, texture::ATLAS as u32, &atlas);
@@ -1118,6 +1156,104 @@ impl App {
     }
 
     /// Names floating above other players' heads.
+    /// Words on signs nearby, floating where the sign is.
+    fn sign_text(&self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let eye = self.game.player.eye();
+        for (pos, lines) in &self.game.world.signs {
+            let at = pos.as_vec3() + Vec3::new(0.5, 0.78, 0.5);
+            let d = at.distance(eye);
+            if d > 16.0 || lines.iter().all(|l| l.is_empty()) {
+                continue;
+            }
+            let clip = self.last_view_proj * at.extend(1.0);
+            if clip.w < 0.1 {
+                continue;
+            }
+            let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
+            // Smaller further away.
+            let size = (9.0 * 6.0 / d.max(2.0)).clamp(5.0, 11.0);
+            let line_h = size * 1.25 * s;
+            let wmax = lines.iter().map(|l| self.ui.text_width(l, size)).fold(0.0, f32::max);
+            let top = sy - line_h * 2.0;
+            draw_rectangle(sx - wmax / 2.0 - 3.0 * s, top - line_h * 0.8, wmax + 6.0 * s, line_h * 4.0 + 2.0 * s, Color::new(0.35, 0.25, 0.12, 0.55));
+            for (i, l) in lines.iter().enumerate() {
+                self.ui.text_centered(l, sx, top + i as f32 * line_h, size, WHITE);
+            }
+        }
+    }
+
+    fn sign_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        let (bw, bh) = (220.0 * s, 110.0 * s);
+        let (x0, y0) = ((w - bw) / 2.0, (h - bh) / 2.0 - 20.0 * s);
+        draw_rectangle(x0, y0, bw, bh, Color::new(0.62, 0.47, 0.28, 1.0));
+        draw_rectangle_lines(x0, y0, bw, bh, 2.0 * s, Color::new(0.35, 0.24, 0.12, 1.0));
+        self.ui.text_centered("Write on the sign (Enter: next line, Esc: done)", w / 2.0, y0 - 8.0 * s, 9.0, WHITE);
+        for (i, l) in self.sign_lines.iter().enumerate() {
+            let y = y0 + 24.0 * s + i as f32 * 22.0 * s;
+            let cursor = if i == self.sign_line && (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+            self.ui.text_centered(&format!("{l}{cursor}"), w / 2.0, y, 11.0, Color::new(0.1, 0.07, 0.03, 1.0));
+        }
+        if self.ui.button(Rect::new(w / 2.0 - 50.0 * s, y0 + bh + 10.0 * s, 100.0 * s, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Playing);
+        }
+    }
+
+    /// A compass and a map, while you hold them.
+    fn navigation_hud(&mut self, dt: f32) {
+        let (w, _) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let held = self.game.inv.held();
+        if held == block::COMPASS {
+            let r = 22.0 * s;
+            let (cx, cy) = (w / 2.0, 34.0 * s);
+            draw_circle(cx, cy, r + 2.0 * s, Color::new(0.2, 0.2, 0.22, 0.9));
+            draw_circle(cx, cy, r, Color::new(0.92, 0.9, 0.84, 0.95));
+            let g = &self.game;
+            let a = navigation::compass_needle(g.player.body.pos, g.player.yaw, g.spawn, g.clock);
+            let (dx, dy) = (a.sin(), -a.cos());
+            draw_line(cx, cy, cx + dx * r * 0.85, cy + dy * r * 0.85, 3.0 * s, Color::new(0.85, 0.1, 0.1, 1.0));
+            draw_line(cx, cy, cx - dx * r * 0.5, cy - dy * r * 0.5, 3.0 * s, Color::new(0.3, 0.3, 0.35, 1.0));
+            if !scorch::in_scorch(g.player.body.pos.x) {
+                let dist = Vec2::new(g.spawn.x - g.player.body.pos.x, g.spawn.z - g.player.body.pos.z).length();
+                self.ui.text_centered(&format!("Home: {} blocks", dist as i32), cx, cy + r + 12.0 * s, 8.0, WHITE);
+            }
+        }
+        if held == block::MAP {
+            self.map_timer -= dt;
+            if self.map_timer <= 0.0 || self.map_tex.is_none() {
+                self.map_timer = 0.5;
+                let px = navigation::map_pixels(&self.game.world, self.game.player.body.pos, &self.map_colors);
+                let n = navigation::MAP_SIZE as u16;
+                match &self.map_tex {
+                    Some(t) => t.update_from_bytes(n as u32, n as u32, &px),
+                    None => {
+                        let t = Texture2D::from_rgba8(n, n, &px);
+                        t.set_filter(FilterMode::Nearest);
+                        self.map_tex = Some(t);
+                    }
+                }
+            }
+            if let Some(t) = &self.map_tex {
+                let size = 150.0 * s;
+                let (x, y) = (w - size - 10.0 * s, 10.0 * s);
+                draw_rectangle(x - 4.0 * s, y - 4.0 * s, size + 8.0 * s, size + 8.0 * s, Color::new(0.55, 0.43, 0.26, 1.0));
+                draw_texture_ex(t, x, y, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+                // You are here (pointing the way you face).
+                let (cx, cy) = (x + size / 2.0, y + size / 2.0);
+                let yaw = self.game.player.yaw;
+                let (fx, fy) = (yaw.sin(), -yaw.cos());
+                let (rx, ry) = (-fy, fx);
+                let k = 6.0 * s;
+                draw_triangle(vec2(cx + fx * k, cy + fy * k), vec2(cx - fx * k * 0.6 + rx * k * 0.6, cy - fy * k * 0.6 + ry * k * 0.6), vec2(cx - fx * k * 0.6 - rx * k * 0.6, cy - fy * k * 0.6 - ry * k * 0.6), Color::new(0.9, 0.1, 0.1, 1.0));
+            }
+        }
+    }
+
     fn name_tags(&self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
@@ -1186,6 +1322,9 @@ impl App {
             }
             _ => {
                 self.hud();
+                if !self.game.menu && self.game.ready {
+                    self.navigation_hud(get_frame_time().min(0.05));
+                }
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
                     Screen::Advancements => self.advancements_screen(),
@@ -1195,6 +1334,7 @@ impl App {
                     Screen::Anvil => self.anvil_screen(),
                     Screen::Enchant => self.enchant_screen(),
                     Screen::Trade => self.trade_screen(),
+                    Screen::Sign => self.sign_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
@@ -1233,6 +1373,7 @@ impl App {
             self.ui.text_centered(&format!("{} chunks ready", self.renderer.chunks.len()), w / 2.0, h / 2.0 + 18.0 * s, 9.0, GRAY);
             return;
         }
+        self.sign_text();
         if self.screen == Screen::Playing {
             self.ui.crosshair();
             // The weapon charging back up after a swing (see combat.rs).
@@ -2455,8 +2596,13 @@ async fn game_main() {
         upnp_job: None,
         upnp_mapping: None,
         internet_status: None,
+        map_colors: navigation::block_colors(&base_atlas),
         base_atlas,
         atlas_gen: block::generation(),
+        map_tex: None,
+        map_timer: 0.0,
+        sign_lines: Default::default(),
+        sign_line: 0,
         mods_scroll: 0,
         adv_scroll: 0,
         using_server_mods: false,
@@ -2534,7 +2680,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2696,7 +2842,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2880,6 +3026,32 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "decor" && frames == 125 {
+                // A signpost, a framed sword on a wall, and a map in hand.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let facing = if f.z < 0 { 0u16 } else if f.x > 0 { 1 } else if f.z > 0 { 2 } else { 3 };
+                let sign = base + f * 3 - r;
+                app.game.world.set_v(sign, block::SIGN_FIRST + facing);
+                app.game.world.signs.insert(sign, ["Welcome to".into(), "STOVEVILLE".into(), "pop. 1".into(), "(it's you)".into()]);
+                for k in -1..=2 {
+                    for up in 0..3 {
+                        app.game.world.set_v(base + f * 6 + r * k + IVec3::Y * up, block::STONE_BRICKS);
+                    }
+                }
+                // Frames hang on the wall's near face: their facing is the far side of their cell.
+                let frame_facing = (facing + 0) as block::Id;
+                for (k, item) in [(0, block::SWORD_DIAMOND), (1, block::DIAMOND)] {
+                    let at = base + f * 5 + r * k + IVec3::Y;
+                    app.game.world.set_v(at, block::FRAME_FIRST + frame_facing);
+                    app.game.world.frames.insert(at, (item, 0));
+                }
+                app.game.inv.slots[app.game.inv.selected] = Some((block::MAP, 1));
+                app.game.inv.add(block::COMPASS, 1);
             }
             if s.mode == "vehicles" && frames == 125 {
                 // A loop of rails with a cart, and a boat on a pond.

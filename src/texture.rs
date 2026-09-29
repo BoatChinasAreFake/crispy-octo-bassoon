@@ -221,6 +221,9 @@ pub const T_POWERED_RAIL: u16 = 248;
 pub const T_CART: u16 = 252;
 pub const T_BOAT_ITEM: u16 = 253;
 pub const T_CART_ITEM: u16 = 254;
+pub const T_FRAME: u16 = 255;
+pub const T_COMPASS: u16 = 256;
+pub const T_MAP: u16 = 257;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1148,6 +1151,44 @@ const WORM: [&str; 16] = [
     "................",
     "................",
     "................",
+    "................",
+    "................",
+];
+
+const COMPASS_SPRITE: [&str; 16] = [
+    "................",
+    ".....######.....",
+    "...##iiiiii##...",
+    "..#iwwwwwwwwi#..",
+    "..#iwwwrwwwwi#..",
+    ".#iwwwwrwwwwwi#.",
+    ".#iwwwwrrwwwwi#.",
+    ".#iwwwwkkwwwwi#.",
+    ".#iwwwwkkwwwwi#.",
+    ".#iwwwwwkwwwwi#.",
+    "..#iwwwwkwwwi#..",
+    "..#iwwwwwwwwi#..",
+    "...##iiiiii##...",
+    ".....######.....",
+    "................",
+    "................",
+];
+
+const MAP_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "..############..",
+    "..#pppppppggp#..",
+    "..#ppgggpppgp#..",
+    "..#pggggppppp#..",
+    "..#ppgppbbbpp#..",
+    "..#pppbbbbbpp#..",
+    "..#ppbbbbrppp#..",
+    "..#pppbbppppp#..",
+    "..#ppppppgggp#..",
+    "..#pggppggggp#..",
+    "..#pppppppppp#..",
+    "..############..",
     "................",
     "................",
 ];
@@ -2225,6 +2266,12 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let rim = x == 0 || y == 0 || x == 15 || y == 15;
         if rivet { rgb(210, 210, 215) } else { shade(rgb(95, 95, 102), r.range(0.85, 1.1) * if rim { 0.75 } else { 1.0 }) }
     });
+    a.each(T_FRAME, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        if rim { shade(rgb(140, 100, 60), r.range(0.85, 1.1)) } else { shade(rgb(150, 115, 80), r.range(0.9, 1.05) * 0.8) }
+    });
+    a.sprite(T_COMPASS, &COMPASS_SPRITE, &[('#', rgb(40, 40, 45)), ('i', rgb(190, 190, 198)), ('w', rgb(235, 235, 225)), ('r', rgb(220, 30, 30)), ('k', rgb(60, 60, 70))]);
+    a.sprite(T_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(225, 210, 170)), ('g', rgb(110, 160, 80)), ('b', rgb(80, 120, 210)), ('r', rgb(200, 40, 40))]);
     a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
     a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);
     // ---- Hmmers

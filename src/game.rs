@@ -168,6 +168,8 @@ pub struct Game {
     pub left_portal: bool,
     /// Which portal leads to which (by `scorch::portal_key`), both ways.
     pub portal_links: HashMap<IVec3, IVec3>,
+    /// The sign we've just put up and are writing on (see decor.rs).
+    pub editing_sign: Option<IVec3>,
     /// Boats and minecarts (see vehicles.rs), the one we're in, and time to the next sync.
     pub vehicles: Vec<crate::vehicles::Vehicle>,
     pub next_vehicle_id: u32,
@@ -275,6 +277,7 @@ impl Game {
             portal_cooldown: 0.0,
             left_portal: true,
             portal_links: HashMap::new(),
+            editing_sign: None,
             vehicles: Vec::new(),
             next_vehicle_id: 0,
             riding: None,
@@ -366,6 +369,14 @@ impl Game {
         g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle };
         g.enchant_count = d.enchant_count;
         g.portal_links = crate::scorch::decode_links(&d.portals);
+        let (signs, frames) = crate::decor::decode(&d.decor);
+        g.world.signs = signs;
+        for (p, (item, wear)) in frames {
+            let item = remap.as_ref().map(|r| r[item as usize]).unwrap_or(item);
+            if item != AIR {
+                g.world.frames.insert(p, (item, wear));
+            }
+        }
         for (kind, pos, yaw) in crate::vehicles::decode(&d.vehicles) {
             g.spawn_vehicle(kind, pos, yaw);
         }
@@ -414,6 +425,7 @@ impl Game {
             mobs: crate::animals::encode_mobs(&self.mobs),
             portals: crate::scorch::encode_links(&self.portal_links),
             vehicles: crate::vehicles::encode(&self.vehicles),
+            decor: crate::decor::encode(&self.world.signs, &self.world.frames),
             version: crate::save::VERSION,
         }
     }
@@ -1205,6 +1217,12 @@ impl Game {
             }
             Some(Target::Block(h)) => {
                 let pos = h.pos;
+                // A frame with something in it gives that up before breaking.
+                if c.attack_pressed && self.attack_cd <= 0.0 && self.hit_frame(pos) {
+                    self.attack_cd = 0.25;
+                    self.breaking = None;
+                    return;
+                }
                 if c.attack_held {
                     let id = self.world.get_v(pos);
                     if self.creative {
@@ -1439,6 +1457,10 @@ impl Game {
         if !self.player.sneaking && self.use_switch(hit_pos, hit_id) {
             return;
         }
+        // Item frames take what you're holding.
+        if !self.player.sneaking && crate::decor::is_frame(hit_id) && self.use_frame(hit_pos) {
+            return;
+        }
         // Doors open and close (sneak to place against one instead).
         if is_door(hit_id) && !self.player.sneaking {
             self.toggle_door(hit_pos);
@@ -1503,7 +1525,9 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL if !is_solid(below) => return,
+            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            // Frames go on walls.
+            FRAME_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -1517,6 +1541,10 @@ impl Game {
         }
         let oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
         self.world.set_v(place, oriented);
+        if held == SIGN_FIRST {
+            // Something to write on it.
+            self.editing_sign = Some(place);
+        }
         self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
         if !self.creative {
@@ -1551,6 +1579,7 @@ impl Game {
         // Chests and furnaces hand over what was inside (joined players get it from the host).
         if !self.is_client() {
             self.spill_container(pos);
+            self.spill_frame(pos);
         }
         self.world.set_v(pos, AIR);
         self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
@@ -2362,6 +2391,7 @@ impl Game {
             self.draw_weather(&mut g, eye);
         }
         self.draw_vehicles(&mut g);
+        self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
         self.draw_orbs(&mut g, eye, 48.0);
@@ -3978,6 +4008,62 @@ mod tests {
         let back = Game::from_save(g.to_save());
         assert_eq!(back.vehicles.len(), 1);
         assert_eq!(back.vehicles[0].rider, 0);
+    }
+
+        #[test]
+    fn signs_frames_and_maps() {
+        let mut g = arena(75);
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((SIGN_FIRST, 3));
+        g.inv.selected = 0;
+        g.player.yaw = 0.0;
+        g.player.pitch = -0.3;
+        // Put a sign up: it faces us and asks for words.
+        let floor = IVec3::new(0, 49, -3);
+        aim(&mut g, floor, IVec3::Y);
+        g.use_item();
+        let sign = floor + IVec3::Y;
+        assert!(crate::decor::is_sign(g.world.get_v(sign)));
+        assert_eq!(g.editing_sign, Some(sign));
+        g.editing_sign = None;
+        g.set_sign(sign, &["Welcome".into(), "to".into(), "Stoveville".into()]);
+        assert_eq!(g.world.signs[&sign][2], "Stoveville");
+        // Hang a frame on a wall and put a pickaxe in it.
+        let wall = IVec3::new(3, 50, 0);
+        g.world.set_v(wall, STONE);
+        g.inv.slots[1] = Some((FRAME_FIRST, 1));
+        g.inv.slots[2] = Some((PICK_IRON, 1));
+        g.inv.wear[2] = 17;
+        g.inv.selected = 1;
+        aim(&mut g, wall, IVec3::NEG_X);
+        g.use_item();
+        let frame = wall - IVec3::X;
+        assert_eq!(g.world.get_v(frame), FRAME_FIRST + 1, "hung on the east wall");
+        g.inv.selected = 2;
+        aim(&mut g, frame, IVec3::NEG_X);
+        g.use_item();
+        assert_eq!(g.world.frames.get(&frame), Some(&(PICK_IRON, 17)));
+        assert_eq!(g.inv.count(PICK_IRON), 0);
+        // Kept with the world.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.world.signs.get(&sign), g.world.signs.get(&sign));
+        assert_eq!(back.world.frames.get(&frame), Some(&(PICK_IRON, 17)));
+        // Hit it: the pickaxe pops out (the frame stays); breaking the frame drops nothing more.
+        assert!(g.hit_frame(frame));
+        assert!(g.world.frames.is_empty());
+        assert!(g.drops.iter().any(|d| d.item == PICK_IRON && d.wear == 17));
+        assert!(!g.hit_frame(frame));
+        // Breaking the sign takes its words.
+        g.break_block(sign, false);
+        assert!(g.world.signs.is_empty());
+
+        // The map shows the floor we're standing on; the compass points home.
+        let colors = vec![[10, 20, 30]; reg().blocks.len()];
+        let px = crate::navigation::map_pixels(&g.world, g.player.body.pos, &colors);
+        assert_eq!(px.len(), crate::navigation::MAP_SIZE * crate::navigation::MAP_SIZE * 4);
+        let mid = (crate::navigation::MAP_SIZE / 2 * crate::navigation::MAP_SIZE + crate::navigation::MAP_SIZE / 2) * 4;
+        // Our colour, maybe shaded by the lie of the land.
+        assert!([8, 10, 11].contains(&px[mid]) && px[mid + 3] == 255, "{:?}", &px[mid..mid + 4]);
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

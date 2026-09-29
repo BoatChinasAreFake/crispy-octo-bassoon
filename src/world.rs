@@ -422,6 +422,9 @@ pub struct World {
     pub simulate_liquids: bool,
     /// Cells where Zappy Dust contraptions may need updating (see wiring.rs); same rules.
     pub zap_dirty: HashSet<IVec3>,
+    /// What's written on every sign, and what hangs in every item frame (see decor.rs).
+    pub signs: HashMap<IVec3, [String; 4]>,
+    pub frames: HashMap<IVec3, (Id, crate::inventory::Wear)>,
     /// Huts whose chests were just filled for the first time: a Hmmer should
     /// move in (where to stand, and its seed; see villagers.rs).
     pub new_huts: Vec<(Vec3, u32)>,
@@ -463,6 +466,8 @@ impl World {
             liquid_dirty: HashSet::new(),
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
+            signs: HashMap::new(),
+            frames: HashMap::new(),
             simulate_liquids: true,
             pending: HashSet::new(),
             edit_log: Vec::new(),
@@ -659,6 +664,13 @@ impl World {
             self.containers.entry(p).or_insert_with(|| Container::for_block(id));
         } else if is_container(old) {
             self.containers.remove(&p);
+        }
+        // Signs lose their words and frames their contents with the block (spill first).
+        if crate::decor::is_sign(old) && !crate::decor::is_sign(id) {
+            self.signs.remove(&p);
+        }
+        if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
+            self.frames.remove(&p);
         }
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
