@@ -233,6 +233,14 @@ pub const T_DYED_WOOL: u16 = 262;
 pub const T_STAINED_GLASS: u16 = 269;
 pub const T_DYE_FIRST: u16 = 277;
 pub const T_FIRE: u16 = 285;
+pub const T_GLASS_BOTTLE: u16 = 286;
+pub const T_WATER_BOTTLE: u16 = 287;
+pub const T_POTION_FIRST: u16 = 288;
+pub const T_SPLASH_FIRST: u16 = 293;
+pub const T_TUSK: u16 = 298;
+pub const T_EMBER_SHROOM: u16 = 299;
+pub const T_BREWING_TOP: u16 = 300;
+pub const T_BREWING_SIDE: u16 = 301;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2317,6 +2325,62 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let core = h < height * 0.55 && (fx - 0.5).abs() < 0.3;
         if core { rgb(255, 225, 90) } else { shade(rgb(240, 110, 30), r.range(0.8, 1.1)) }
     });
+    // Bottles: glass, filled with water or a potion's colour (splash ones have a band).
+    let bottle = |a: &mut Atlas, tile: u16, fill: Option<[u8; 3]>, band: bool| {
+        a.each(tile, |x, y, r, _| {
+            let (x, y) = (x as i32, y as i32);
+            let neck = (6..10).contains(&x) && (2..6).contains(&y);
+            let body = (x - 8).pow(2) * 3 / 2 + (y - 10).pow(2) < 26 && y >= 5;
+            let cork = (6..10).contains(&x) && y == 1;
+            if cork {
+                return rgb(150, 110, 70);
+            }
+            if !(neck || body) {
+                return [0, 0, 0, 0];
+            }
+            let rim = !((x - 8).pow(2) * 3 / 2 + (y - 10).pow(2) < 16) && body || (neck && (x == 6 || x == 9));
+            if rim {
+                return [210, 230, 240, 255];
+            }
+            match fill {
+                Some(c) if y >= 8 => {
+                    if band && y == 11 {
+                        return rgb(80, 80, 85);
+                    }
+                    let k = if x < 7 && y < 11 { 1.3 } else { r.range(0.85, 1.0) };
+                    [(c[0] as f32 * k).min(255.0) as u8, (c[1] as f32 * k).min(255.0) as u8, (c[2] as f32 * k).min(255.0) as u8, 255]
+                }
+                _ => [220, 235, 245, 90],
+            }
+        });
+    };
+    bottle(&mut a, T_GLASS_BOTTLE, None, false);
+    bottle(&mut a, T_WATER_BOTTLE, Some([60, 100, 220]), false);
+    for (i, p) in crate::potions::ALL.iter().enumerate() {
+        bottle(&mut a, T_POTION_FIRST + i as u16, Some(p.colour()), false);
+        bottle(&mut a, T_SPLASH_FIRST + i as u16, Some(p.colour()), true);
+    }
+    a.each(T_TUSK, |x, y, r, _| {
+        let (fx, fy) = (x as f32, y as f32);
+        let curve = (fy - 3.0 - (fx - 3.0).powi(2) * 0.12).abs();
+        if (3..14).contains(&x) && curve < 2.2 - fx * 0.12 { shade(rgb(235, 225, 195), r.range(0.85, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_EMBER_SHROOM, |x, y, r, _| {
+        let cap = (4..12).contains(&x) && (4..8).contains(&y) && !((x == 4 || x == 11) && y == 4);
+        let stem = (7..9).contains(&x) && y >= 8;
+        if cap {
+            if (x + y) % 3 == 0 { rgb(255, 210, 90) } else { shade(rgb(230, 90, 30), r.range(0.85, 1.1)) }
+        } else if stem {
+            shade(rgb(200, 150, 110), r.range(0.9, 1.05))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_BREWING_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(rgb(110, 105, 100), r.range(0.8, 1.05) * if edge { 0.7 } else { 1.0 })
+    });
+    a.each(T_BREWING_SIDE, |x, _, r, _| shade(rgb(200, 170, 60), r.range(0.8, 1.1) * if x % 4 == 0 { 0.8 } else { 1.0 }));
     a.each(T_LADDER, |x, y, r, _| {
         let rail = x < 2 || x > 13;
         let rung = y % 4 == 1 && (2..14).contains(&x);

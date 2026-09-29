@@ -133,7 +133,10 @@ pub const DYED_WOOL: Id = 196;
 pub const STAINED_GLASS: Id = 203;
 /// Burning (see fire.rs).
 pub const FIRE: Id = 211;
-pub const NUM_BLOCKS: Id = 212;
+/// Potions (see potions.rs): a Scorchlands ingredient, and the stand.
+pub const EMBER_SHROOM: Id = 212;
+pub const BREWING_STAND: Id = 213;
+pub const NUM_BLOCKS: Id = 214;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -214,8 +217,15 @@ pub const MAP: Id = FIRST_ITEM + 88;
 pub const APPLE: Id = FIRST_ITEM + 89;
 /// Dyes, one per colour (see carpentry::COLOURS).
 pub const DYE_FIRST: Id = FIRST_ITEM + 90;
+pub const GLASS_BOTTLE: Id = FIRST_ITEM + 98;
+pub const WATER_BOTTLE: Id = FIRST_ITEM + 99;
+/// Potions, then their splash versions, in `potions::ALL` order.
+pub const POTION_FIRST: Id = FIRST_ITEM + 100;
+pub const SPLASH_FIRST: Id = FIRST_ITEM + 105;
+/// Dropped by Grumblers; makes a Brewing Stand.
+pub const GRUMBLER_TUSK: Id = FIRST_ITEM + 110;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 98;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 111;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -368,6 +378,8 @@ pub enum Shape {
     Ladder { facing: u8 },
     /// A trapdoor: shut, a thin floor; open, flipped up against its `facing` side.
     Trapdoor { facing: u8, open: bool },
+    /// A brewing stand: a base and a rod.
+    Brewer,
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -468,6 +480,7 @@ impl Shape {
                 };
                 ([b, full, full], 1)
             }
+            Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
             Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
             Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
             Shape::Frame { facing } => {
@@ -1044,6 +1057,10 @@ impl Registry {
             blocks.push(d);
         }
         blocks.extend(fire_def);
+        blocks.push(def("ember_shroom", "Ember Shroom (Warm to the Touch)", Cross, false, false, [T_EMBER_SHROOM; 3], 0.0, 0, false, EMBER_SHROOM, 5.0, S_GRASS));
+        let mut stand = def("brewing_stand", "Brewing Stand (Chemistry, Loosely)", Shaped, true, false, [T_BREWING_TOP, T_BREWING_SIDE, T_BREWING_TOP], 1.0, 0, false, BREWING_STAND, 2.0, S_STONE);
+        stand.shape = Shape::Brewer;
+        blocks.push(stand);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1156,6 +1173,17 @@ impl Registry {
             let (key, name) = crate::carpentry::COLOURS[c as usize];
             items.push(item(leak(&format!("{key}_dye")), leak(&format!("{name} Dye")), T_DYE_FIRST + c));
         }
+        items.push(ItemDef { stack: 16, ..item("glass_bottle", "Glass Bottle (Empty, Hopeful)", T_GLASS_BOTTLE) });
+        items.push(ItemDef { stack: 16, ..item("water_bottle", "Water Bottle (Just Water)", T_WATER_BOTTLE) });
+        for splash in [false, true] {
+            for (i, p) in crate::potions::ALL.iter().enumerate() {
+                let key = format!("{}potion_of_{}", if splash { "splash_" } else { "" }, p.key());
+                let name = format!("{}Potion of {}", if splash { "Splash " } else { "" }, p.name());
+                let tile = if splash { T_SPLASH_FIRST } else { T_POTION_FIRST } + i as u16;
+                items.push(ItemDef { stack: 1, ..item(leak(&key), leak(&name), tile) });
+            }
+        }
+        items.push(item("grumbler_tusk", "Grumbler Tusk (Rude to Ask)", T_TUSK));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1233,6 +1261,8 @@ impl Registry {
             r(&[(STICK, 7)], (LADDER_FIRST, 3)),
             r(&[(PLANKS, 6)], (TRAPDOOR_FIRST, 2)),
             r(&[(GLASS, 6)], (PANE_FIRST, 16)),
+            r(&[(GLASS, 3)], (GLASS_BOTTLE, 3)),
+            r(&[(COBBLE, 3), (GRUMBLER_TUSK, 1)], (BREWING_STAND, 1)),
             r(&[(BONE_DUST, 1)], (DYE_FIRST, 2)),
             r(&[(COAL, 1)], (DYE_FIRST + 1, 2)),
             r(&[(FLOWER, 1)], (DYE_FIRST + 2, 2)),

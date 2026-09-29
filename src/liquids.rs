@@ -246,7 +246,7 @@ impl Game {
 
     /// Lava burns, fire lingers, water puts it out (the local player).
     pub fn lava_tick(&mut self, dt: f32) {
-        if self.creative || self.dead.is_some() {
+        if self.creative || self.dead.is_some() || self.has_effect(crate::potions::Potion::FireResistance) {
             self.on_fire = 0.0;
             return;
         }

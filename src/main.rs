@@ -34,6 +34,7 @@ mod noise;
 mod pad;
 mod palette;
 mod player;
+mod potions;
 mod players;
 mod render;
 mod rules;
@@ -1227,6 +1228,19 @@ impl App {
     }
 
     /// A compass and a map, while you hold them.
+    /// Potion effects and their time left, down the left side.
+    fn effects_hud(&self) {
+        let s = self.ui.s;
+        let h = screen_height();
+        for (i, (p, left)) in self.game.effects.iter().enumerate() {
+            let y = h * 0.35 + i as f32 * 12.0 * s;
+            let c = p.colour();
+            let secs = left.max(0.0) as i32;
+            draw_rectangle(4.0 * s, y - 7.0 * s, 6.0 * s, 6.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
+            self.ui.text(&format!("{} {}:{:02}", p.name(), secs / 60, secs % 60), 13.0 * s, y, 8.0, WHITE);
+        }
+    }
+
     fn navigation_hud(&mut self, dt: f32) {
         let (w, _) = (screen_width(), screen_height());
         let s = self.ui.s;
@@ -1351,6 +1365,7 @@ impl App {
                 self.hud();
                 if !self.game.menu && self.game.ready {
                     self.navigation_hud(get_frame_time().min(0.05));
+                    self.effects_hud();
                 }
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
@@ -1966,7 +1981,7 @@ impl App {
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let slot = 20.0 * s;
-        let top_h = if containers::is_furnace(kind) { slot * 3.2 } else { slot * 3.0 };
+        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * 3.0 };
         let panel_w = slot * 9.0 + 12.0 * s;
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
@@ -1979,7 +1994,7 @@ impl App {
         self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
         let top = y0 + 18.0 * s;
         // (slot index, x, y) for the container's own slots.
-        let spots: Vec<(usize, f32, f32)> = if containers::is_furnace(kind) {
+        let spots: Vec<(usize, f32, f32)> = if containers::is_three_slot(kind) {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
         } else {
@@ -1993,6 +2008,21 @@ impl App {
             if l || r {
                 self.game.container_click(i, r, shift && l);
             }
+        }
+        if kind == BREWING_STAND {
+            let progress = (c.cook / potions::BREW_SECS).clamp(0.0, 1.0);
+            let ax = sx + slot * 3.9;
+            let fy = top + slot * 1.1;
+            self.ui.tile(texture::T_ARROW_UI, ax, fy, slot * 1.2, Color::new(0.3, 0.3, 0.3, 1.0));
+            self.ui.tile_part(texture::T_ARROW_UI, ax, fy, slot * 1.2, progress, false, WHITE);
+            let hint = match (c.slots[INPUT], c.slots[FUEL]) {
+                (None, _) => "Ingredient on top: Glowshroom, Zappy Dust, Ember Shroom, Carrot, Feather (or Hisspowder)".to_string(),
+                (_, None) => "A Water Bottle (or a potion) below".to_string(),
+                (Some((i, _)), Some((b, _))) if potions::brew(b, i).is_none() => format!("{} does nothing to {}.", item_name(i), item_name(b)),
+                _ if c.slots[OUTPUT].is_some() => "Take the potion out first.".to_string(),
+                _ => "Bubbling...".to_string(),
+            };
+            self.ui.text(&hint, sx + slot * 0.2, top + slot * 3.1, 7.0, GRAY);
         }
         if containers::is_furnace(kind) {
             let (burn, cook) = c.gauges();
@@ -2803,7 +2833,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2972,7 +3002,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3156,6 +3186,26 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "brewing" && frames == 125 {
+                // A brewing stand mid-brew, potions in hand, and a couple of effects on.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let at = (p + fwd * 2.5).floor().as_ivec3();
+                app.game.world.set_v(at, block::BREWING_STAND);
+                if let Some(c) = app.game.world.containers.get_mut(&at) {
+                    c.slots[containers::INPUT] = Some((block::EMBER_SHROOM, 3));
+                    c.slots[containers::FUEL] = Some((block::WATER_BOTTLE, 1));
+                }
+                app.game.world.set_v(at + IVec3::X, block::EMBER_SHROOM);
+                for (i, p) in potions::ALL.iter().enumerate() {
+                    app.game.inv.slots[i] = Some((potions::potion_item(*p, i % 2 == 1), 1));
+                }
+                app.game.inv.slots[5] = Some((block::GLASS_BOTTLE, 3));
+                app.game.inv.slots[6] = Some((block::WATER_BOTTLE, 2));
+                app.game.inv.slots[7] = Some((block::GRUMBLER_TUSK, 1));
+                app.game.apply_potion(potions::Potion::Speed);
+                app.game.apply_potion(potions::Potion::NightVision);
             }
             if s.mode == "carpentry" && frames == 125 {
                 // A fenced pen with a gate, a wall with a ladder, panes and colours.

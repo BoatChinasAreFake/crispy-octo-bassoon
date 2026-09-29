@@ -37,7 +37,13 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | FURNACE | FURNACE_LIT)
+    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND)
+}
+
+/// Furnaces and brewing stands: an input on top, a second slot below
+/// (fuel, or the bottle being brewed), and a take-only output.
+pub fn is_three_slot(id: Id) -> bool {
+    is_furnace(id) || id == BREWING_STAND
 }
 
 pub fn is_furnace(id: Id) -> bool {
@@ -82,6 +88,13 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
 
 /// Can `item` go into slot `slot` of a container of block `kind`?
 pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
+    if kind == BREWING_STAND {
+        return match slot {
+            INPUT => item == GUNPOWDER || crate::potions::ALL.iter().any(|p| p.ingredient() == item),
+            FUEL => crate::potions::is_bottle(item),
+            _ => false,
+        };
+    }
     if !is_furnace(kind) {
         return slot < CHEST_SLOTS;
     }
@@ -94,7 +107,7 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
 
 impl Container {
     pub fn for_block(id: Id) -> Container {
-        let n = if is_furnace(id) { 3 } else { CHEST_SLOTS };
+        let n = if is_three_slot(id) { 3 } else { CHEST_SLOTS };
         Container { slots: vec![None; n], wear: vec![0; n], burn: 0.0, burn_total: 0.0, cook: 0.0 }
     }
 
@@ -144,6 +157,31 @@ impl Container {
             self.cook = (self.cook - dt * 2.0).max(0.0);
         }
         before != (self.slots.clone(), self.burn > 0.0, (self.cook * 4.0) as i32, (self.burn * 2.0) as i32)
+    }
+
+    /// Brew for `dt` seconds (a brewing stand: bottle and ingredient into a
+    /// potion; `cook` is the progress). Returns true if anything visible changed.
+    pub fn brew_tick(&mut self, dt: f32) -> bool {
+        let before = (self.slots.clone(), (self.cook * 4.0) as i32);
+        let result = match (self.slots[FUEL], self.slots[INPUT]) {
+            (Some((bottle, 1)), Some((ingredient, _))) => crate::potions::brew(bottle, ingredient),
+            _ => None,
+        };
+        match result {
+            Some(potion) if self.slots[OUTPUT].is_none() => {
+                self.cook += dt;
+                if self.cook >= crate::potions::BREW_SECS {
+                    self.cook = 0.0;
+                    if let Some((ingredient, n)) = self.slots[INPUT] {
+                        self.slots[INPUT] = if n > 1 { Some((ingredient, n - 1)) } else { None };
+                    }
+                    self.slots[FUEL] = None;
+                    self.slots[OUTPUT] = Some((potion, 1));
+                }
+            }
+            _ => self.cook = 0.0,
+        }
+        before != (self.slots.clone(), (self.cook * 4.0) as i32)
     }
 
     /// 0..1 fuel left and cooking progress, for the UI.
@@ -288,10 +326,10 @@ impl Game {
             // Only what the slot accepts may go in (the output is take-only).
             let put_ok = cursor.map(|(id, _)| accepts(kind, slot, id)).unwrap_or(true);
             let same = matches!((cursor, s), (Some((a, _)), Some((b, _))) if a == b);
-            if !(put_ok || cursor.is_none() || (slot == OUTPUT && is_furnace(kind))) {
+            if !(put_ok || cursor.is_none() || (slot == OUTPUT && is_three_slot(kind))) {
                 return;
             }
-            if is_furnace(kind) && slot == OUTPUT {
+            if is_three_slot(kind) && slot == OUTPUT {
                 // Take-only: grab it all (or top up a matching stack in the cursor).
                 match (s, cursor) {
                     (Some(st), None) => {
@@ -341,7 +379,9 @@ impl Game {
         let mut left = n;
         let mut changed: Vec<(usize, Stack)> = Vec::new();
         // Furnaces: fuel to the fuel slot (unless it's also cookable), the rest to the input.
-        let order: Vec<usize> = if is_furnace(kind) {
+        let order: Vec<usize> = if kind == BREWING_STAND {
+            if crate::potions::is_bottle(id) { vec![FUEL] } else { vec![INPUT] }
+        } else if is_furnace(kind) {
             if fuel_secs(id).is_some() && smelt(id).is_none() { vec![FUEL] } else { vec![INPUT] }
         } else {
             // Chests: top up matching stacks first, then empty slots.
@@ -400,6 +440,14 @@ impl Game {
 
     /// Furnaces cook, glow, and tell whoever's watching.
     pub fn container_tick(&mut self, dt: f32) {
+        let stands: Vec<IVec3> = self.world.containers.keys().copied().filter(|p| self.world.is_loaded(p.x, p.z) && self.world.get_v(*p) == BREWING_STAND).collect();
+        for p in stands {
+            if let Some(c) = self.world.containers.get_mut(&p)
+                && c.brew_tick(dt)
+            {
+                self.dirty_containers.insert(p);
+            }
+        }
         let furnaces: Vec<IVec3> = self.world.containers.keys().copied().filter(|p| self.world.is_loaded(p.x, p.z) && is_furnace(self.world.get_v(*p))).collect();
         for p in furnaces {
             let Some(c) = self.world.containers.get_mut(&p) else { continue };

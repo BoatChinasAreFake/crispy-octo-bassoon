@@ -24,7 +24,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// Restore), weather (Weather, Lightning) and enchanting (Enchant).
 /// v13: liquids, animals (MobInteract, mob flags), Zappy Dust, trading
 /// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
-pub const PROTOCOL: u32 = 13;
+pub const PROTOCOL: u32 = 14;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -179,6 +179,10 @@ pub enum Msg {
     FrameItem { x: i32, y: i32, z: i32, item: Id, wear: u32 },
     /// client -> host: I put this in the frame (`put`), or knocked out what was there.
     FrameUse { x: i32, y: i32, z: i32, item: Id, wear: u32, put: bool },
+    /// client -> host: I threw this splash potion; it burst at `at`.
+    Splash { item: Id, at: Vec3 },
+    /// host -> client: a splash potion caught you (`item` is the drinkable kind).
+    PotionEffect { item: Id },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -650,6 +654,15 @@ impl Msg {
                 w.u16(*item);
                 w.u32(*wear);
             }
+            Msg::Splash { item, at } => {
+                w.u8(56);
+                w.u16(*item);
+                w.v3(*at);
+            }
+            Msg::PotionEffect { item } => {
+                w.u8(57);
+                w.u16(*item);
+            }
             Msg::FrameUse { x, y, z, item, wear, put } => {
                 w.u8(55);
                 w.i32(*x);
@@ -824,6 +837,8 @@ impl Msg {
                 Msg::SignText { x, y, z, lines }
             }
             54 => Msg::FrameItem { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()? },
+            56 => Msg::Splash { item: r.u16()?, at: r.v3()? },
+            57 => Msg::PotionEffect { item: r.u16()? },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
@@ -1280,6 +1295,8 @@ mod tests {
             Msg::SignText { x: 1, y: 2, z: 3, lines: vec!["Hello".into(), "".into(), "world".into(), "!".into()] },
             Msg::FrameItem { x: 1, y: 2, z: 3, item: 0x8003, wear: 7 },
             Msg::FrameUse { x: 1, y: 2, z: 3, item: 0x8003, wear: 7, put: true },
+            Msg::Splash { item: 0x8070, at: Vec3::new(1.0, 2.0, 3.0) },
+            Msg::PotionEffect { item: 0x8065 },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },

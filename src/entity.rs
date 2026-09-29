@@ -259,7 +259,7 @@ impl MobKind {
             MobKind::Grumbler => (0.3, 1.95),
         }
     }
-    fn max_health(self) -> f32 {
+    pub fn max_health(self) -> f32 {
         match self {
             MobKind::Oinker => 10.0,
             MobKind::Hisser => 20.0,
@@ -802,6 +802,7 @@ impl Mob {
             MobKind::Cluckster => Some((CLUCKETS, 1)),
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             MobKind::Grumbler if rng.chance(0.4) => Some((GOLD_INGOT, 1)),
+            MobKind::Grumbler if rng.chance(0.5) => Some((GRUMBLER_TUSK, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)

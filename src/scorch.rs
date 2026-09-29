@@ -100,6 +100,10 @@ impl Generator {
                     if b[i] == AIR && above == SCORCHROCK && hash3(s ^ 3, x >> 2, y >> 1, z >> 2) < 0.06 && hash3(s ^ 4, x, y, z) < 0.6 {
                         b[i] = GLOWROCK;
                     }
+                    // Ember Shrooms grow in clumps on the rock (a brewing ingredient).
+                    if b[i] == AIR && matches!(below, SCORCHROCK | EMBERSAND) && hash3(s ^ 5, x >> 3, 0, z >> 3) < 0.3 && hash3(s ^ 6, x, y, z) < 0.08 {
+                        b[i] = EMBER_SHROOM;
+                    }
                 }
             }
         }

@@ -69,6 +69,7 @@ pub const ALL: &[Advancement] = &[
     adv("good_as_new", "Good as New(ish)", "Repair something at an anvil. Hit it until it's fixed."),
     adv("ominous", "Drops Ominously", "Use an anvil until it crumbles. It warned you."),
     adv("level_30", "Experienced", "Reach level 30. Nothing to spend it on but anvils. For now."),
+    adv("brewmaster", "Local Brewery", "Drink a potion you brewed. Or found. We don't judge."),
     adv("lumberjack_reforms", "Reformed Lumberjack", "Grow a tree from a sapling with Bone Dust. Balance restored."),
 ];
 

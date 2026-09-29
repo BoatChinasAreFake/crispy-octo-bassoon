@@ -150,6 +150,8 @@ pub struct Game {
     pub sapling_timer: f32,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
+    /// Potion effects on the local player, with seconds left (see potions.rs).
+    pub effects: Vec<(crate::potions::Potion, f32)>,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -273,6 +275,7 @@ impl Game {
             decaying: Vec::new(),
             sapling_timer: 0.0,
             fire_timer: 0.0,
+            effects: Vec::new(),
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],
@@ -641,6 +644,7 @@ impl Game {
         self.liquid_tick(dt);
         self.zap_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
+        self.effects_tick(dt);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
@@ -1352,6 +1356,9 @@ impl Game {
             return;
         }
         if matches!(held, BUCKET | WATER_BUCKET | LAVA_BUCKET) && self.use_bucket(held) {
+            return;
+        }
+        if self.use_potion(held) {
             return;
         }
         // Planting, tilling and soil science come before eating (carrots are both).
@@ -2524,7 +2531,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.in_scorch() { 0.32 } else { 0.0 }, lights }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else { 0.0 }, lights }
     }
 }
 
