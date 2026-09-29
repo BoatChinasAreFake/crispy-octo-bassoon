@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 
 pub const FILE: &str = "settings.txt";
+/// The farthest the world can be drawn, in chunks (greedy meshing keeps it affordable).
+pub const MAX_RENDER_DISTANCE: i32 = 32;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -88,7 +90,7 @@ impl Settings {
                 _ => {}
             }
         }
-        s.render_distance = s.render_distance.clamp(3, 16);
+        s.render_distance = s.render_distance.clamp(3, MAX_RENDER_DISTANCE);
         s.fov = s.fov.clamp(50.0, 110.0);
         s.sensitivity = s.sensitivity.clamp(0.1, 3.0);
         s.volume = s.volume.clamp(0.0, 1.0);
@@ -139,7 +141,7 @@ mod tests {
     #[test]
     fn nonsense_is_tamed() {
         let s = Settings::from_text("render_distance=9000\nfov=NaN\nvolume=-3\nmusic=perhaps\nname=a\u{7}b\nserver=\n= \ngarbage\nsensitivity=2");
-        assert_eq!(s.render_distance, 16);
+        assert_eq!(s.render_distance, MAX_RENDER_DISTANCE);
         assert_eq!(s.fov, 72.0);
         assert_eq!(s.volume, 0.0);
         assert!(s.music_on);

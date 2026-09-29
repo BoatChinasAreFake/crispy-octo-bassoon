@@ -1757,7 +1757,7 @@ impl App {
             d
         };
         let st = &mut self.settings;
-        st.render_distance = (st.render_distance + row(&self.ui, format!("Render Distance: {} chunks", st.render_distance), y)).clamp(3, 16);
+        st.render_distance = (st.render_distance + row(&self.ui, format!("Render Distance: {} chunks", st.render_distance), y)).clamp(3, settings::MAX_RENDER_DISTANCE);
         y += bh + 5.0 * s;
         st.fov = (st.fov + 5.0 * row(&self.ui, format!("FOV: {:.0}", st.fov), y) as f32).clamp(50.0, 110.0);
         y += bh + 5.0 * s;
@@ -2482,6 +2482,8 @@ struct ShotArgs {
     yaw: f32,
     pitch: f32,
     pos: Option<Vec3>,
+    /// Render distance in chunks (the default setting when absent).
+    distance: Option<i32>,
     addr: String,
     password: String,
     chat: Vec<String>,
@@ -2495,6 +2497,7 @@ fn parse_args() -> Option<ShotArgs> {
         mode: get("--mode").unwrap_or_else(|| "title".into()),
         frames: get("--frames").and_then(|f| f.parse().ok()).unwrap_or(240),
         time: get("--time").and_then(|f| f.parse().ok()),
+        distance: get("--distance").and_then(|f| f.parse().ok()),
         addr: get("--addr").unwrap_or_else(|| "127.0.0.1".into()),
         password: get("--password").unwrap_or_default(),
         chat: args.windows(2).filter(|w| w[0] == "--chat").map(|w| w[1].clone()).collect(),
@@ -2630,6 +2633,9 @@ async fn game_main() {
             set_fullscreen(true);
         }
         app.settings = saved;
+    }
+    if let Some(d) = shot.as_ref().and_then(|s| s.distance) {
+        app.settings.render_distance = d.clamp(3, settings::MAX_RENDER_DISTANCE);
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {

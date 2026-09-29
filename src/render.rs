@@ -12,22 +12,27 @@ const VERTEX_SHADER: &str = r#"#version 100
 attribute vec3 in_pos;
 attribute vec2 in_uv;
 attribute vec2 in_light;
+attribute vec2 in_tile;
 
 uniform mat4 mvp;
 
 varying vec2 v_uv;
 varying vec2 v_light;
 varying vec3 v_wpos;
+varying vec2 v_tile;
 
 void main() {
     gl_Position = mvp * vec4(in_pos, 1.0);
     v_uv = in_uv;
     v_light = in_light;
     v_wpos = in_pos;
+    v_tile = in_tile;
 }
 "#;
 
 const FRAGMENT_SHADER: &str = r#"#version 100
+#extension GL_OES_standard_derivatives : enable
+#extension GL_EXT_shader_texture_lod : enable
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
 #else
@@ -37,6 +42,7 @@ precision mediump float;
 varying vec2 v_uv;
 varying vec2 v_light;
 varying vec3 v_wpos;
+varying vec2 v_tile;
 
 uniform sampler2D tex;
 uniform vec4 cam_pos;
@@ -46,8 +52,26 @@ uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchland
 uniform vec4 tint;
 uniform vec4 lights[16];
 
+// One tile's width in the atlas, and a hair to stay inside it.
+const float TILE = TILE_SIZE;
+const float EDGE = 1.0 / 4096.0;
+
+vec4 sample_tile() {
+    if (v_tile.x < 0.0) {
+        return texture2D(tex, v_uv);
+    }
+    // A merged face repeats its tile. Mipmap choice follows the unwrapped
+    // coordinates where the driver lets us, so the tile edges don't sparkle.
+    vec2 uv = v_tile + EDGE + fract(v_uv) * (TILE - 2.0 * EDGE);
+#if defined(GL_OES_standard_derivatives) && defined(GL_EXT_shader_texture_lod)
+    return texture2DGradEXT(tex, uv, dFdx(v_uv) * TILE, dFdy(v_uv) * TILE);
+#else
+    return texture2D(tex, uv);
+#endif
+}
+
 void main() {
-    vec4 c = texture2D(tex, v_uv) * tint;
+    vec4 c = sample_tile() * tint;
     if (c.a < 0.08) discard;
     vec3 col;
     if (params2.x > 0.5) {
@@ -163,7 +187,7 @@ impl DynGeo {
         let uvs = [[a, d], [cc, d], [cc, b], [a, b]];
         let mut v = [Vertex::default(); 4];
         for i in 0..4 {
-            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light };
+            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light, tile: [-1.0; 2] };
         }
         self.mesh.quad(v, false);
         self.end_batch();
@@ -239,14 +263,17 @@ impl Renderer {
         );
         ctx.texture_generate_mipmaps(texture);
 
+        let (_, _, tile) = tile_uv(0);
+        let fragment = FRAGMENT_SHADER.replace("TILE_SIZE", &format!("{tile:.8}"));
         let shader = ctx
-            .new_shader(ShaderSource::Glsl { vertex: VERTEX_SHADER, fragment: FRAGMENT_SHADER }, shader_meta())
+            .new_shader(ShaderSource::Glsl { vertex: VERTEX_SHADER, fragment: &fragment }, shader_meta())
             .unwrap_or_else(|e| panic!("shader failed to compile: {e:?}"));
         let layout = [BufferLayout::default()];
         let attrs = [
             VertexAttribute::new("in_pos", VertexFormat::Float3),
             VertexAttribute::new("in_uv", VertexFormat::Float2),
             VertexAttribute::new("in_light", VertexFormat::Float2),
+            VertexAttribute::new("in_tile", VertexFormat::Float2),
         ];
         let alpha = Some(BlendState::new(
             Equation::Add,

@@ -2608,6 +2608,33 @@ mod tests {
     }
 
     #[test]
+    fn greedy_meshing_shrinks_real_terrain() {
+        let w = loaded_world(7);
+        let mesh = crate::mesher::mesh_chunk(&w, 0, 0);
+        let merged = mesh.opaque.verts.iter().filter(|v| v.tile[0] >= 0.0).count() / 4;
+        let quads = mesh.opaque.verts.len() / 4;
+        // Count what one quad per visible cube face would have cost.
+        let mut faces = 0;
+        for y in 0..crate::world::CH {
+            for z in 0..16 {
+                for x in 0..16 {
+                    let id = w.get(x, y, z);
+                    if block(id).model != crate::block::Model::Cube {
+                        continue;
+                    }
+                    for (n, _, _) in crate::mesher::FACES {
+                        if !is_opaque(w.get(x + n[0], y + n[1], z + n[2])) && !(w.get(x + n[0], y + n[1], z + n[2]) == id && block(id).see_through) {
+                            faces += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // This chunk is a stepped hill (little to merge), yet it still comes out smaller.
+        assert!(merged > 0 && quads < faces, "{quads} quads ({merged} cube) for {faces} faces");
+    }
+
+    #[test]
     fn generation_is_deterministic() {
         let g = crate::world::Generator::new(99);
         assert_eq!(g.generate(3, -2), g.generate(3, -2));
