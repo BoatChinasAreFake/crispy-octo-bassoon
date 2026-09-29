@@ -1076,14 +1076,22 @@ impl Game {
         for chunk in edits.chunks(4096) {
             self.net_send_msg(Msg::Blocks(chunk.to_vec()));
         }
-        // Edits just read from a region file go to everyone (they may be near it).
+        // What was just read from a region file goes to everyone (they may be near it).
         let news = self.world.regions.as_mut().map(|r| std::mem::take(&mut r.news)).unwrap_or_default();
-        if matches!(self.net, Some(Net::Host(_))) {
-            for (cx, cz) in news {
+        if matches!(self.net, Some(Net::Host(_))) && !news.is_empty() {
+            for &(cx, cz) in &news {
                 if let Some(m) = self.world.mods.get(&(cx, cz)) {
                     let entries = m.iter().map(|(&i, &b)| (i, b)).collect();
                     self.net_send_msg(Msg::Mods { cx, cz, entries });
                 }
+            }
+            // And the signs and frames in them.
+            let chunks: std::collections::HashSet<(i32, i32)> = news.into_iter().collect();
+            let inside = |p: &IVec3| chunks.contains(&(p.x.div_euclid(16), p.z.div_euclid(16)));
+            let mut out: Vec<Msg> = self.world.signs.iter().filter(|(p, _)| inside(p)).map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }).collect();
+            out.extend(self.world.frames.iter().filter(|(p, _)| inside(p)).map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+            for m in out {
+                self.net_send_msg(m);
             }
         }
 

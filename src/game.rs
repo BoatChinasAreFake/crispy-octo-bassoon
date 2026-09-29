@@ -446,14 +446,14 @@ impl Game {
             spawn: self.spawn.to_array(),
             // The four worn armour slots go after the 36 inventory slots.
             slots: self.inv.slots.iter().chain(self.inv.armor.iter()).copied().collect(),
-            // With region files the edits are written there instead (`flush_regions`).
+            // With region files, edits, soil, containers and decor are written there instead (`flush_regions`).
             mods: if self.world.regions.is_some() { HashMap::new() } else { self.world.mods.clone() },
             palette: mod_palette(reg()),
             script_vars: self.export_script_vars(),
             advancements: self.advancements.earned.clone(),
-            farm: crate::farming::encode(&self.world.farm),
+            farm: if self.world.regions.is_some() { Vec::new() } else { crate::farming::encode(&self.world.farm) },
             fish_log: self.fish_log.encode(),
-            containers: crate::containers::encode(&self.world.containers),
+            containers: if self.world.regions.is_some() { Vec::new() } else { crate::containers::encode(&self.world.containers) },
             drops: crate::drops::encode(&self.drops),
             wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).copied().collect(),
             food: self.player.hunger.food,
@@ -470,7 +470,7 @@ impl Game {
             mobs: crate::animals::encode_mobs(&self.mobs, &self.mob_names),
             portals: crate::scorch::encode_links(&self.portal_links),
             vehicles: crate::vehicles::encode(&self.vehicles),
-            decor: crate::decor::encode(&self.world.signs, &self.world.frames),
+            decor: if self.world.regions.is_some() { Vec::new() } else { crate::decor::encode(&self.world.signs, &self.world.frames) },
             version: crate::save::VERSION,
         }
     }

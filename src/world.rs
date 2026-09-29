@@ -403,6 +403,8 @@ pub struct World {
     /// Chunks whose mesh is stale.
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
+    /// Generated chunks waiting for their region file to be read.
+    waiting: Vec<(i32, i32, PalettedBlocks)>,
     /// Soil records for every tilled block (see farming.rs); kept in step with the blocks.
     pub farm: HashMap<IVec3, Soil>,
     /// What's inside every chest and furnace (see containers.rs); kept in step with the blocks.
@@ -474,6 +476,7 @@ impl World {
             frames: HashMap::new(),
             simulate_liquids: true,
             pending: HashSet::new(),
+            waiting: Vec::new(),
             edit_log: Vec::new(),
             log_edits: false,
             req_tx: Some(req_tx),
@@ -492,8 +495,28 @@ impl World {
     pub fn stream(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
         // Lighting a new chunk takes a few milliseconds; spread arrivals over frames.
         let start = std::time::Instant::now();
-        while start.elapsed().as_secs_f32() < 0.008 {
+        let in_time = || start.elapsed().as_secs_f32() < 0.008;
+        // Chunks whose region file is being read wait for it (see regions.rs).
+        self.absorb_region_reads();
+        let mut i = 0;
+        while i < self.waiting.len() && in_time() {
+            let (cx, cz) = (self.waiting[i].0, self.waiting[i].1);
+            if self.region_pending(cx, cz) {
+                i += 1;
+                continue;
+            }
+            let (_, _, blocks) = self.waiting.swap_remove(i);
+            self.pending.remove(&(cx, cz));
+            if !self.chunks.contains_key(&(cx, cz)) {
+                self.insert_chunk(cx, cz, blocks);
+            }
+        }
+        while in_time() {
             let Ok((cx, cz, blocks)) = self.res_rx.try_recv() else { break };
+            if self.region_pending(cx, cz) {
+                self.waiting.push((cx, cz, blocks));
+                continue;
+            }
             self.pending.remove(&(cx, cz));
             if self.chunks.contains_key(&(cx, cz)) {
                 continue; // made on the spot meanwhile (see `load_now`)
@@ -569,6 +592,10 @@ impl World {
         wanted.sort_unstable();
         wanted.dedup_by_key(|w| (w.1, w.2));
         let budget = 24usize.saturating_sub(self.pending.len());
+        // Their region files start loading now, so they're usually ready first.
+        for &(_, cx, cz) in wanted.iter().take(budget) {
+            self.prefetch_region(cx, cz);
+        }
         if let Some(tx) = &self.req_tx {
             for &(_, cx, cz) in wanted.iter().take(budget) {
                 if tx.send((cx, cz)).is_ok() {

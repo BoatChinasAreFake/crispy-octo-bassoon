@@ -16,9 +16,10 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// rule and experience points; v11 widens tool wear to carry enchantments and
 /// adds joined players' records and the weather; v12 adds animals worth
 /// keeping (tamed, bred, fed), Hmmers, and which portal leads to which; v13
-/// moves block edits out into region files beside the save (see regions.rs).
+/// moves block edits out into region files beside the save (see regions.rs);
+/// v14 moves soil, containers, signs and frames there too.
 /// Older saves still load.
-pub const VERSION: u32 = 13;
+pub const VERSION: u32 = 14;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
