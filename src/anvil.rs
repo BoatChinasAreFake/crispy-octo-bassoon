@@ -9,7 +9,7 @@
 
 use crate::block::*;
 use crate::game::Game;
-use crate::inventory::{click_stack, right_click_stack, wear_follow, Stack};
+use crate::inventory::{click_stack, right_click_stack, uses, wear_follow, with_uses, Stack, Wear};
 use crate::net::Msg;
 use crate::sound::{Mat, Sfx};
 use crate::xp::{level_of, spend_levels};
@@ -26,6 +26,9 @@ pub fn is_anvil(id: Id) -> bool {
 
 /// What repairs `id` at an anvil.
 pub fn repair_material(id: Id) -> Option<Id> {
+    if id >= FIRST_MOD_ITEM {
+        return Some(reg().items.get((id - FIRST_ITEM) as usize)?.repair).filter(|&m| m != AIR);
+    }
     if let Some((_, tier)) = armor_of(id) {
         return Some([WOOL, IRON, GOLD_INGOT, DIAMOND][tier]);
     }
@@ -42,8 +45,8 @@ pub fn repair_material(id: Id) -> Option<Id> {
 /// What an anvil would do with `item` (worn `wear`) and `other` in the second slot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Repair {
-    /// Wear of the result.
-    pub wear: u16,
+    /// Wear of the result (the left item's enchantments are kept).
+    pub wear: Wear,
     /// Experience levels it costs.
     pub cost: u32,
     /// How many of the second slot it uses up.
@@ -52,28 +55,29 @@ pub struct Repair {
     pub combine: bool,
 }
 
-pub fn plan(item: Id, wear: u16, other: Stack, other_wear: u16) -> Option<Repair> {
+pub fn plan(item: Id, full_wear: Wear, other: Stack, other_wear: Wear) -> Option<Repair> {
     let max = durability(item)?;
+    let (wear, other_uses) = (uses(full_wear), uses(other_wear));
     let (oid, on) = other?;
     if oid == item {
         // Both uses left, plus a 12% bonus, as one.
-        let left = (max - wear.min(max)) as u32 + (max - other_wear.min(max)) as u32 + max as u32 * 12 / 100;
-        let wear = max.saturating_sub(left.min(max as u32) as u16);
-        return Some(Repair { wear, cost: COMBINE_COST, used: 1, combine: true });
+        let left = (max - wear.min(max)) as u32 + (max - other_uses.min(max)) as u32 + max as u32 * 12 / 100;
+        let new = max.saturating_sub(left.min(max as u32) as u16);
+        return Some(Repair { wear: with_uses(full_wear, new), cost: COMBINE_COST, used: 1, combine: true });
     }
     if repair_material(item) != Some(oid) || wear == 0 {
         return None;
     }
     let unit = max.div_ceil(4);
     let used = (wear.div_ceil(unit)).min(on as u16).min(4) as u8;
-    Some(Repair { wear: wear.saturating_sub(unit * used as u16), cost: used as u32, used, combine: false })
+    Some(Repair { wear: with_uses(full_wear, wear.saturating_sub(unit * used as u16)), cost: used as u32, used, combine: false })
 }
 
 /// What's on an open anvil (only on the player's own screen).
 pub struct AnvilUi {
     pub pos: IVec3,
     pub slots: [Stack; 2],
-    pub wear: [u16; 2],
+    pub wear: [Wear; 2],
 }
 
 impl Game {

@@ -458,7 +458,8 @@ impl Game {
             let above = p + IVec3::Y;
             let top_id = self.world.get_v(above);
             let top = Crop::of_block(top_id);
-            let wet = water_offsets().any(|o| self.world.get_v(p + o) == WATER);
+            // Water nearby, or rain falling on it.
+            let wet = water_offsets().any(|o| self.world.get_v(p + o) == WATER) || self.rained_on(above.x, above.y, above.z);
             let sky = self.world.sky_light(above.x, above.y, above.z) * daylight;
             let light = if sky < 0.5 && self.light_near(above, 5) { 0.8 } else { sky };
             let watched = players.iter().any(|q| q.distance(above.as_vec3()) < 10.0);

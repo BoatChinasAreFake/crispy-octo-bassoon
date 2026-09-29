@@ -75,8 +75,12 @@ pub const DOOR_FIRST: Id = 78;
 pub const ANVIL: Id = 94;
 pub const ANVIL_CHIPPED: Id = 95;
 pub const ANVIL_DAMAGED: Id = 96;
+/// Cave decorations: a mushroom that glows, and pointy rocks (up from floors, down from ceilings).
+pub const GLOWSHROOM: Id = 97;
+pub const POINTY_ROCK: Id = 98;
+pub const ENCHANTING_TABLE: Id = 99;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 97;
+pub const NUM_BLOCKS: Id = 100;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -165,8 +169,12 @@ pub const BOOTS: usize = 3;
 pub const ARMOR_POINTS: [[u8; 4]; 4] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3]];
 
 /// (slot, tier) of an armour item.
+/// For mod armour, the tier is the one it looks like when worn.
 pub fn armor_of(id: Id) -> Option<(usize, usize)> {
-    (ARMOR_FIRST..ARMOR_FIRST + 16).contains(&id).then(|| (((id - ARMOR_FIRST) % 4) as usize, ((id - ARMOR_FIRST) / 4) as usize))
+    if (ARMOR_FIRST..ARMOR_FIRST + 16).contains(&id) {
+        return Some((((id - ARMOR_FIRST) % 4) as usize, ((id - ARMOR_FIRST) / 4) as usize));
+    }
+    item_def(id).and_then(|i| i.armor).map(|a| (a.slot as usize, a.looks_like as usize))
 }
 
 /// How many uses a tool, weapon or piece of armour survives (Minecraft's numbers;
@@ -183,12 +191,14 @@ pub fn durability(id: Id) -> Option<u16> {
         PICK_DIAMOND | SWORD_DIAMOND => 1561,
         BOW => 384,
         ROD => 64,
-        _ => return None,
+        _ => return item_def(id).and_then(|i| i.durability),
     })
 }
 
+/// Swords (and mod weapons: things that wear out, hit hard and aren't pickaxes).
 pub fn is_sword(id: Id) -> bool {
     matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND)
+        || (id >= FIRST_MOD_ITEM && item_def(id).is_some_and(|i| i.durability.is_some() && i.pick_tier == 0 && i.armor.is_none() && i.damage > 1.0))
 }
 
 /// Wear from breaking a block with `held` (swords aren't meant for digging).
@@ -208,6 +218,9 @@ pub fn hit_wear(held: Id) -> u16 {
 }
 
 pub fn armor_points(id: Id) -> u8 {
+    if let Some(a) = item_def(id).and_then(|i| i.armor) {
+        return a.points;
+    }
     armor_of(id).map(|(slot, tier)| ARMOR_POINTS[tier][slot]).unwrap_or(0)
 }
 
@@ -221,6 +234,8 @@ pub enum Shape {
     /// Closed, the panel sits on the `facing` side of its cell.
     Door { facing: u8, open: bool, top: bool },
     Anvil,
+    /// Three quarters of a block tall (the enchanting table).
+    Table,
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -260,6 +275,7 @@ impl Shape {
             Shape::Door { facing, open, .. } => ([side_box(if open { facing + 3 } else { facing }), full, full], 1),
             // A foot, a waist and a long top, lengthways along x.
             Shape::Anvil => ([([0.125, 0.0, 0.125], [0.875, 0.25, 0.875]), ([0.25, 0.25, 0.3125], [0.75, 0.625, 0.6875]), ([0.0, 0.625, 0.1875], [1.0, 1.0, 0.8125])], 3),
+            Shape::Table => ([([0.0; 3], [1.0, 0.75, 1.0]), full, full], 1),
         }
     }
 }
@@ -282,24 +298,37 @@ pub fn door_state(id: Id) -> Option<(u8, bool, bool)> {
     })
 }
 
-/// A slab's (material, top).
-pub fn slab_of(id: Id) -> Option<(usize, bool)> {
-    (SLAB_FIRST..STAIRS_FIRST).contains(&id).then(|| (((id - SLAB_FIRST) / 2) as usize, (id - SLAB_FIRST) % 2 == 1))
+/// A slab's (bottom slab, which is the item; top). A slab's variants are
+/// consecutive ids: bottom, then top.
+pub fn slab_of(id: Id) -> Option<(Id, bool)> {
+    match block(id).shape {
+        Shape::Slab { top } => Some((block(id).family, top)),
+        _ => None,
+    }
 }
 
-/// A stair's (material, facing).
-pub fn stairs_of(id: Id) -> Option<(usize, u8)> {
-    (STAIRS_FIRST..DOOR_FIRST).contains(&id).then(|| (((id - STAIRS_FIRST) / 4) as usize, ((id - STAIRS_FIRST) % 4) as u8))
+/// A stair's (north-facing stairs, which is the item; facing). Its four
+/// facings are consecutive ids.
+pub fn stairs_of(id: Id) -> Option<(Id, u8)> {
+    match block(id).shape {
+        Shape::Stairs { facing } => Some((block(id).family, facing)),
+        _ => None,
+    }
+}
+
+/// The full block a slab or stair is made of (two slabs merge into it), if any.
+pub fn made_of(id: Id) -> Id {
+    block(id).full
 }
 
 /// The item a player spends to place block `id` (None: not something players
 /// place directly; door tops come free with their bottom half).
 pub fn placing_item(id: Id) -> Option<Id> {
-    if let Some((m, _)) = slab_of(id) {
-        return Some(slab(m, false));
+    if let Some((family, _)) = slab_of(id) {
+        return Some(family);
     }
-    if let Some((m, _)) = stairs_of(id) {
-        return Some(stairs(m, 0));
+    if let Some((family, _)) = stairs_of(id) {
+        return Some(family);
     }
     if let Some((_, _, top)) = door_state(id) {
         return (!top).then_some(DOOR);
@@ -330,6 +359,7 @@ pub enum Action {
     Spawn(u8),
 }
 
+#[derive(Clone)]
 pub struct BlockDef {
     /// Stable identifier, e.g. "stone" or "cheese:cheese_block" (used by saves).
     pub key: &'static str,
@@ -363,6 +393,10 @@ pub struct BlockDef {
     pub creative: bool,
     /// Its boxes, for `Model::Shaped` blocks (everything else is a full cube).
     pub shape: Shape,
+    /// Slabs and stairs: the variant that is the item (bottom slab, north-facing stairs).
+    pub family: Id,
+    /// Slabs and stairs: the full block they're made of (AIR: none).
+    pub full: Id,
 }
 
 pub struct ItemDef {
@@ -379,6 +413,22 @@ pub struct ItemDef {
     pub consume: bool,
     /// Exists (the base item id range has gaps).
     pub real: bool,
+    /// Mod tools, weapons and armour: uses before it breaks.
+    pub durability: Option<u16>,
+    /// Mod armour.
+    pub armor: Option<ModArmor>,
+    /// Mod tools and armour: what repairs it at an anvil (AIR: nothing).
+    pub repair: Id,
+}
+
+/// A mod item worn as armour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModArmor {
+    /// 0 helmet .. 3 boots.
+    pub slot: u8,
+    pub points: u8,
+    /// Which base tier it looks like when worn (0 wool .. 3 dimond).
+    pub looks_like: u8,
 }
 
 #[derive(Clone)]
@@ -431,6 +481,9 @@ pub struct Registry {
     pub mods: Vec<ModInfo>,
     /// Extra texture tiles painted over the atlas: (tile, 16x16 RGBA).
     pub textures: Vec<(u16, Vec<u8>)>,
+    /// Mod furnace recipes (input, output) and fuels (item, seconds).
+    pub smelting: Vec<(Id, Id)>,
+    pub fuels: Vec<(Id, f32)>,
 }
 
 static REGISTRY: AtomicPtr<Registry> = AtomicPtr::new(std::ptr::null_mut());
@@ -490,11 +543,13 @@ pub(crate) fn def(key: &'static str, name: &'static str, model: Model, solid: bo
         on_break: Vec::new(),
         creative: true,
         shape: Shape::Full,
+        family: AIR,
+        full: AIR,
     }
 }
 
 pub(crate) fn item(key: &'static str, name: &'static str, tile: u16) -> ItemDef {
-    ItemDef { key, name, tile, stack: 64, pick_tier: 0, damage: 1.0, food: None, on_use: Vec::new(), consume: true, real: true }
+    ItemDef { key, name, tile, stack: 64, pick_tier: 0, damage: 1.0, food: None, on_use: Vec::new(), consume: true, real: true, durability: None, armor: None, repair: AIR }
 }
 
 const S_STONE: u8 = 0;
@@ -589,6 +644,8 @@ impl Registry {
                 let label = format!("{name} Slab{}", if top { " (Upside Down)" } else { " (Half the Commitment)" });
                 let mut d = variant(m, key, label, Shape::Slab { top }, !top);
                 d.drop = slab(m, false);
+                d.family = slab(m, false);
+                d.full = MATERIALS[m].0;
                 blocks.push(d);
             }
         }
@@ -597,6 +654,8 @@ impl Registry {
                 let key = format!("{}_stairs{}", base_key[m], ["", "_east", "_south", "_west"][facing as usize]);
                 let mut d = variant(m, key, format!("{name} Stairs (Up, Mostly)"), Shape::Stairs { facing }, facing == 0);
                 d.drop = stairs(m, 0);
+                d.family = stairs(m, 0);
+                d.full = MATERIALS[m].0;
                 blocks.push(d);
             }
         }
@@ -620,6 +679,11 @@ impl Registry {
             d.creative = i == 0;
             blocks.push(d);
         }
+        blocks.push(def("glowshroom", "Glowshroom (Cave Nightlight)", Cross, false, false, [T_GLOWSHROOM; 3], 0.0, 0, false, GLOWSHROOM, 7.0, S_GRASS));
+        blocks.push(def("pointy_rock", "Pointy Rock (Mind Your Head)", Cross, false, false, [T_POINTY_ROCK; 3], 0.6, 1, true, POINTY_ROCK, 0.0, S_STONE));
+        let mut table = def("enchanting_table", "Enchanting Table (Bookshelf-Powered Guesswork)", Shaped, true, false, [T_ENCH_TOP, T_ENCH_SIDE, T_ENCH_BOTTOM], 5.0, 1, true, ENCHANTING_TABLE, 7.0, S_STONE);
+        table.shape = Shape::Table;
+        blocks.push(table);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
@@ -765,6 +829,7 @@ impl Registry {
             r(&[(PLANKS, 6)], (DOOR, 3)),
             // A real anvil takes 31 iron. This one is a bargain.
             r(&[(IRON, 10)], (ANVIL, 1)),
+            r(&[(BOOKSHELF, 1), (DIAMOND, 2), (COBBLE, 4)], (ENCHANTING_TABLE, 1)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {
@@ -777,7 +842,7 @@ impl Registry {
                 recipes.push(r(&[(material, n)], (ARMOR_FIRST + (t * 4 + slot) as Id, 1)));
             }
         }
-        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new() }
+        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new() }
     }
 
     /// Look up a block or item id by key ("stone", "cheese:wheel", ...).
@@ -908,7 +973,13 @@ pub fn use_actions(id: Id) -> Option<(&'static [Action], bool)> {
 }
 
 /// Seconds to break `id` while holding `held`, and whether it drops anything.
+#[cfg(test)]
 pub fn break_time(id: Id, held: Id) -> (f32, bool) {
+    break_time_with(id, held, 0)
+}
+
+/// `break_time` for a pickaxe with Efficiency `efficiency` (Minecraft's bonus: level² + 1).
+pub fn break_time_with(id: Id, held: Id, efficiency: u8) -> (f32, bool) {
     let b = block(id);
     if b.hardness < 0.0 {
         return (f32::INFINITY, false);
@@ -920,8 +991,24 @@ pub fn break_time(id: Id, held: Id) -> (f32, bool) {
     if tier == 0 {
         return (b.hardness * 5.0, b.pick_tier == 0);
     }
-    let speed = [1.0, 2.0, 4.0, 6.0, 8.0][tier as usize];
+    let bonus = if efficiency > 0 { (efficiency as f32).powi(2) + 1.0 } else { 0.0 };
+    let speed = [1.0, 2.0, 4.0, 6.0, 8.0][tier as usize] + bonus;
     (b.hardness * 1.5 / speed, tier >= b.pick_tier)
+}
+
+/// Damage with Sharpness `sharpness`.
+pub fn attack_damage_with(id: Id, sharpness: u8) -> f32 {
+    attack_damage(id) + sharpness as f32 * 1.25
+}
+
+/// How many of an ore's drop come out with Fortune `fortune` (ores that drop
+/// something other than themselves; everything else is always one).
+pub fn fortune_count(id: Id, fortune: u8, roll: f32) -> u8 {
+    let b = block(id);
+    if fortune == 0 || !matches!(id, COAL_ORE | IRON_ORE | GOLD_ORE | DIAMOND_ORE) || b.drop == id {
+        return 1;
+    }
+    1 + (roll * (fortune as f32 + 1.0)).floor().min(fortune as f32) as u8
 }
 
 pub fn recipes() -> &'static [Recipe] {

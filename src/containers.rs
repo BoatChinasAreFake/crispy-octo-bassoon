@@ -11,7 +11,7 @@
 
 use crate::block::*;
 use crate::game::Game;
-use crate::inventory::{click_stack, right_click_stack, Stack};
+use crate::inventory::{click_stack, right_click_stack, uses, with_uses, Stack, Wear};
 use crate::net::Msg;
 use crate::sound::{Mat, Sfx};
 use macroquad::math::{IVec3, Vec3};
@@ -28,7 +28,7 @@ pub const COOK_SECS: f32 = 8.0;
 pub struct Container {
     pub slots: Vec<Stack>,
     /// Wear of any tools or armour stored here (see `durability`).
-    pub wear: Vec<u16>,
+    pub wear: Vec<Wear>,
     /// Furnace: seconds of fuel left, how long the current fuel lasts, and
     /// progress on the current item (seconds).
     pub burn: f32,
@@ -59,7 +59,8 @@ pub fn smelt(id: Id) -> Option<Id> {
         SAND => GLASS,
         COBBLE => STONE,
         LOG => COAL, // charcoal, legally distinct
-        _ => return None,
+        // Mod recipes.
+        _ => return reg().smelting.iter().find(|r| r.0 == id).map(|r| r.1),
     })
 }
 
@@ -71,10 +72,11 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
         HAY => 45.0,
         STICK | WHEAT => 5.0,
         DOOR => 10.0,
-        id if slab_of(id).is_some_and(|(m, _)| MATERIALS[m].0 == PLANKS) => 7.5,
-        id if stairs_of(id).is_some_and(|(m, _)| MATERIALS[m].0 == PLANKS) => 15.0,
+        id if slab_of(id).is_some() && made_of(id) == PLANKS => 7.5,
+        id if stairs_of(id).is_some() && made_of(id) == PLANKS => 15.0,
         BOW | ROD | HOE | PICK_WOOD | SWORD_WOOD => 10.0,
-        _ => return None,
+        // Mod fuels.
+        _ => return reg().fuels.iter().find(|f| f.0 == id).map(|f| f.1),
     })
 }
 
@@ -97,7 +99,7 @@ impl Container {
     }
 
     /// Everything inside, with its wear (for spilling when it's broken).
-    pub fn contents(&self) -> Vec<(Id, u8, u16)> {
+    pub fn contents(&self) -> Vec<(Id, u8, Wear)> {
         self.slots.iter().zip(&self.wear).filter_map(|(s, w)| s.map(|(id, n)| (id, n, *w))).collect()
     }
 
@@ -178,7 +180,8 @@ pub fn moves(before: Stack, after: Stack) -> Vec<(Id, u8, bool)> {
 
 // ------------------------------------------------------------------ saving
 
-/// Save format: v7 saves had no wear, v9 adds two bytes of it per slot.
+/// Save format: v7 saves had no wear, v9 two bytes of it per slot, v11 four
+/// (uses and enchantments).
 pub fn encode(containers: &std::collections::HashMap<IVec3, Container>) -> Vec<u8> {
     let mut out = Vec::new();
     let mut entries: Vec<_> = containers.iter().collect();
@@ -201,9 +204,10 @@ pub fn encode(containers: &std::collections::HashMap<IVec3, Container>) -> Vec<u
     out
 }
 
-/// Unpack `encode`'s output (`with_wear`: from a v9+ save); stops at anything malformed.
-pub fn decode(b: &[u8], with_wear: bool) -> std::collections::HashMap<IVec3, Container> {
-    let per = if with_wear { 5 } else { 3 };
+/// Unpack `encode`'s output (`wear_bytes` per slot: 0 before save v9, 2
+/// before v11, then 4); stops at anything malformed.
+pub fn decode(b: &[u8], wear_bytes: usize) -> std::collections::HashMap<IVec3, Container> {
+    let per = 3 + wear_bytes;
     let mut map = std::collections::HashMap::new();
     let mut i = 0;
     let rd = |o: usize, b: &[u8]| -> Option<[u8; 4]> { b.get(o..o + 4)?.try_into().ok() };
@@ -224,7 +228,16 @@ pub fn decode(b: &[u8], with_wear: bool) -> std::collections::HashMap<IVec3, Con
                 (c > 0 && valid_item(id)).then_some((id, c.min(64)))
             })
             .collect();
-        let wear = (0..n).map(|k| if with_wear { u16::from_le_bytes([b[i + k * per + 3], b[i + k * per + 4]]) } else { 0 }).collect();
+        let wear = (0..n)
+            .map(|k| {
+                let o = i + k * per + 3;
+                match wear_bytes {
+                    2 => u16::from_le_bytes([b[o], b[o + 1]]) as Wear,
+                    4 => u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]),
+                    _ => 0,
+                }
+            })
+            .collect();
         i += n * per;
         map.insert(IVec3::new(i32::from_le_bytes(x), i32::from_le_bytes(y), i32::from_le_bytes(z)), Container { slots, wear, burn, burn_total, cook });
     }
@@ -355,7 +368,7 @@ impl Game {
                 changed.push((i, before));
             }
         }
-        let after: Vec<(usize, Stack, Stack, u16)> = changed.iter().map(|&(i, b)| (i, b, c.slots[i], c.wear[i])).collect();
+        let after: Vec<(usize, Stack, Stack, Wear)> = changed.iter().map(|&(i, b)| (i, b, c.slots[i], c.wear[i])).collect();
         self.inv.slots[inv_slot] = if left > 0 { Some((id, left)) } else { None };
         self.dirty_containers.insert(pos);
         if self.is_client() {
@@ -457,7 +470,7 @@ impl Game {
     /// against the container and the player's ledger; on any refusal they get
     /// the true contents back (and the next inventory check fixes their side).
     #[allow(clippy::too_many_arguments)]
-    pub fn host_container_move(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8, put: bool, wear: u16) {
+    pub fn host_container_move(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8, put: bool, wear: Wear) {
         let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
         let kind = self.world.get_v(p);
         let ok = open && self.peer_near(from, p) && n > 0 && valid_item(item) && self.world.containers.get(&p).map(|c| slot < c.slots.len()).unwrap_or(false);
@@ -471,7 +484,7 @@ impl Game {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn container_put(&mut self, from: u32, p: IVec3, kind: Id, slot: usize, item: Id, n: u8, wear: u16) -> bool {
+    fn container_put(&mut self, from: u32, p: IVec3, kind: Id, slot: usize, item: Id, n: u8, wear: Wear) -> bool {
         if !accepts(kind, slot, item) {
             return false;
         }
@@ -482,12 +495,13 @@ impl Game {
         if !fits || !self.peer_take(from, item, n as u32) {
             return false;
         }
+        let wear = self.launder(from, item, wear);
         let c = self.world.containers.get_mut(&p).expect("checked");
         let have = c.slots[slot].map(|s| s.1).unwrap_or(0);
         c.slots[slot] = Some((item, have + n));
         if have == 0 {
             // Their word for how worn it is (wear is only cosmetic to the host: see `host_wear`).
-            c.wear[slot] = durability(item).map(|d| wear.min(d - 1)).unwrap_or(0);
+            c.wear[slot] = crate::inventory::max_uses(item, wear).map(|m| with_uses(wear, uses(wear).min((m - 1).min(u16::MAX as u32) as u16))).unwrap_or(0);
         }
         true
     }
@@ -495,6 +509,7 @@ impl Game {
     fn container_take(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8) -> bool {
         let furnace = is_furnace(self.world.get_v(p));
         let Some(c) = self.world.containers.get_mut(&p) else { return false };
+        let ench = (c.wear.get(slot).copied().unwrap_or(0) >> 16) as u16;
         match c.slots[slot] {
             Some((id, have)) if id == item && have >= n => {
                 c.slots[slot] = if have > n { Some((id, have - n)) } else { None };
@@ -505,6 +520,7 @@ impl Game {
             && let Some(peer) = self.peers.get_mut(&from)
         {
             peer.ledger.bag.add(item, n as u32);
+            peer.ledger.add_enchanted(item, ench, n as u32);
         }
         // Cooking pays a little experience when the results are taken.
         if furnace && slot == OUTPUT {
@@ -515,7 +531,7 @@ impl Game {
     }
 
     /// Joined players: the host's copy of what's in a container.
-    pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, u16)>, burn: f32, cook: f32) {
+    pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, Wear)>, burn: f32, cook: f32) {
         let kind = self.world.get_v(p);
         let c = self.world.containers.entry(p).or_insert_with(|| Container::for_block(kind));
         c.wear = slots.iter().map(|s| s.2).collect();
@@ -591,7 +607,7 @@ mod tests {
         map.insert(IVec3::new(0, 1, 2), f);
         map.get_mut(&IVec3::new(-3, 60, 1_000_000)).unwrap().slots[5] = Some((PICK_IRON, 1));
         map.get_mut(&IVec3::new(-3, 60, 1_000_000)).unwrap().wear[5] = 123;
-        assert_eq!(decode(&encode(&map), true), map);
-        assert!(decode(&[1, 2, 3], true).is_empty());
+        assert_eq!(decode(&encode(&map), 4), map);
+        assert!(decode(&[1, 2, 3], 4).is_empty());
     }
 }

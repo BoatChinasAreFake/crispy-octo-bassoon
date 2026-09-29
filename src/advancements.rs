@@ -57,6 +57,7 @@ pub const ALL: &[Advancement] = &[
     adv("cover_me", "Cover Me in Dimonds", "Wear a full set of Dimond armour. Subtle."),
     adv("open_door_policy", "Open Door Policy", "Open a door. Then close it. Then open it again."),
     adv("butterfingers", "Butterfingers", "Throw something on the floor with Q. On purpose, surely."),
+    adv("enchanter", "Enchanter", "Enchant something. The table knows words you don't."),
     adv("good_as_new", "Good as New(ish)", "Repair something at an anvil. Hit it until it's fixed."),
     adv("ominous", "Drops Ominously", "Use an anvil until it crumbles. It warned you."),
     adv("level_30", "Experienced", "Reach level 30. Nothing to spend it on but anvils. For now."),

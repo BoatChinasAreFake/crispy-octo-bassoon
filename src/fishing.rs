@@ -77,7 +77,7 @@ impl Bobber {
 
     /// Advance the bobber. `reeling` is whether the use button is held (for fights).
     #[allow(clippy::too_many_arguments)]
-    pub fn update(&mut self, dt: f32, world: &World, angler: &FishLog, time: f32, rod_at: Vec3, reeling: bool, rng: &mut Rng) -> Vec<FishEvent> {
+    pub fn update(&mut self, dt: f32, world: &World, angler: &FishLog, time: f32, raining: bool, rod_at: Vec3, reeling: bool, rng: &mut Rng) -> Vec<FishEvent> {
         let mut ev = Vec::new();
         self.since_nibble += dt;
         if self.pos.distance(rod_at) > 40.0 {
@@ -116,7 +116,7 @@ impl Bobber {
                 if cell == WATER {
                     self.pos = next;
                     self.vel = Vec3::ZERO;
-                    self.state = BobberState::Floating { wait: bite_wait(world, self.pos, time, self.bait, angler, rng), nibble: rng.range(1.0, 3.0) };
+                    self.state = BobberState::Floating { wait: bite_wait(world, self.pos, time, self.bait, angler, raining, rng), nibble: rng.range(1.0, 3.0) };
                     ev.push(FishEvent::Splashdown);
                 } else if is_solid(cell) {
                     self.vel = Vec3::ZERO;
@@ -147,7 +147,7 @@ impl Bobber {
             BobberState::Biting { window } => {
                 let window = window - dt;
                 if window <= 0.0 {
-                    self.state = BobberState::Floating { wait: bite_wait(world, self.pos, time, self.bait, angler, rng), nibble: rng.range(1.0, 3.0) };
+                    self.state = BobberState::Floating { wait: bite_wait(world, self.pos, time, self.bait, angler, raining, rng), nibble: rng.range(1.0, 3.0) };
                     ev.push(FishEvent::GotAway);
                 } else {
                     self.state = BobberState::Biting { window };
@@ -220,12 +220,14 @@ pub fn time_factor(time: f32) -> f32 {
 }
 
 /// Seconds until a real bite.
-fn bite_wait(world: &World, p: Vec3, time: f32, bait: bool, angler: &FishLog, rng: &mut Rng) -> f32 {
+fn bite_wait(world: &World, p: Vec3, time: f32, bait: bool, angler: &FishLog, raining: bool, rng: &mut Rng) -> f32 {
     let (depth, area) = water_info(world, p);
     let water = if area < 6 || depth < 2 { 3.0 } else if area >= 20 && depth >= 4 { 0.8 } else { 1.0 };
     let bait = if bait { 0.6 } else { 1.0 };
     let skill = 1.0 - angler.level() as f32 * 0.03;
-    rng.range(5.0, 14.0) * water * bait * skill * time_factor(time)
+    // Fish bite sooner in the rain (everyone knows this).
+    let rain = if raining { 0.75 } else { 1.0 };
+    rng.range(5.0, 14.0) * water * bait * skill * rain * time_factor(time)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -431,7 +433,8 @@ impl Game {
         }
         let rod_at = self.player.eye();
         let Some(b) = &mut self.bobber else { return };
-        let events = b.update(dt, &self.world, &self.fish_log, self.time, rod_at, reeling, &mut self.rng);
+        let raining = self.weather.kind.wet();
+        let events = b.update(dt, &self.world, &self.fish_log, self.time, raining, rod_at, reeling, &mut self.rng);
         let at = b.pos;
         for e in events {
             match e {
@@ -462,6 +465,15 @@ impl Game {
     }
 
     /// Reeled something in at `p`: the world's owner decides what it is.
+    /// A catch leaves the water on an arc toward whoever caught it: an item
+    /// on the ground like any other, picked up when it arrives.
+    fn fling_catch(&mut self, from: Vec3, to: Vec3, item: Id, n: u8) {
+        const FLIGHT: f32 = 0.8;
+        let start = from + Vec3::Y * 0.6;
+        let vel = (to - start) / FLIGHT + Vec3::Y * (0.5 * crate::entity::GRAVITY * FLIGHT);
+        self.spawn_drop(start, item, n, 0, vel, 0.0);
+    }
+
     fn land_catch(&mut self, p: Vec3) {
         if self.inv.held() == ROD {
             self.use_tool(1);
@@ -480,7 +492,9 @@ impl Game {
         let best = self.fish_log.record(c.item, c.cm, c.category);
         let line = catch_line(&c, best);
         self.msg(line);
-        self.give(c.item, c.n);
+        // The catch flies out of the water toward you, like it should.
+        let me = self.player.body.pos + Vec3::Y * 0.9;
+        self.fling_catch(p, me, c.item, c.n);
         let points = self.rng.int(1, 6) as u32;
         self.add_xp(points);
         self.catch_advancements(c.item, c.category);
@@ -503,6 +517,7 @@ impl Game {
     /// A joined player landed a fish at `pos`: check it's plausible, then roll it here.
     pub fn host_catch(&mut self, from: u32, pos: Vec3, bait: bool) {
         let Some(peer) = self.peers.get(&from) else { return };
+        let them = peer.target + Vec3::Y * 0.9;
         let near = peer.target.distance(pos) < 42.0;
         let wet = (0..2).any(|dy| self.world.get(pos.x.floor() as i32, pos.y.floor() as i32 - dy, pos.z.floor() as i32) == WATER);
         if !near || !wet || !pos.is_finite() || !self.peer_has(from, ROD) {
@@ -516,7 +531,7 @@ impl Game {
         let bait = bait && self.peer_take(from, BAIT, 1);
         let c = roll_catch(&self.world, pos, self.time, 0, bait, &mut self.rng);
         self.system_message(Some(from), &catch_line(&c, false));
-        self.give_peer(from, c.item, c.n);
+        self.fling_catch(pos, them, c.item, c.n);
         self.host_wear(from, ROD, 1);
         let points = self.rng.int(1, 6) as u32;
         self.give_peer_xp(from, points);
@@ -573,7 +588,7 @@ mod tests {
         let world = World::new(1);
         let mut out = Vec::new();
         for _ in 0..600 {
-            out = b.update(0.02, &world, &log, 0.25, Vec3::ZERO, true, &mut rng);
+            out = b.update(0.02, &world, &log, 0.25, false, Vec3::ZERO, true, &mut rng);
             if !out.is_empty() {
                 break;
             }
@@ -585,7 +600,7 @@ mod tests {
         let mut out = Vec::new();
         for _ in 0..3000 {
             let tension = b.fight.map(|f| f.tension).unwrap_or(0.0);
-            out = b.update(0.02, &world, &log, 0.25, Vec3::ZERO, tension < 0.5, &mut rng);
+            out = b.update(0.02, &world, &log, 0.25, false, Vec3::ZERO, tension < 0.5, &mut rng);
             t += 0.02;
             if !out.is_empty() {
                 break;

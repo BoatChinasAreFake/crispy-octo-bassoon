@@ -105,6 +105,10 @@ pub enum Sfx {
     Twang,
     /// An arrow hitting something.
     Thunk,
+    /// Lightning: a crack, then a long rumble.
+    Thunder,
+    /// An enchanting table doing its thing.
+    Chime,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -315,6 +319,35 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             voice(&mut v, 0.0, 1.25, 95.0 * p, 70.0 * p, 520.0, 0.06, 1.0, rng);
             voice(&mut v, 0.0, 1.25, 142.0 * p, 104.0 * p, 700.0, 0.05, 0.4, rng);
             finish(v, 1.1)
+        }
+        Sfx::Thunder => {
+            let n = samples(4.0);
+            let mut v = vec![0.0; n];
+            let (mut lp, mut lp2, mut crack) = (Lp::new(), Lp::new(), Lp::new());
+            let wobble = rng.range(1.5, 3.0);
+            for (i, x) in v.iter_mut().enumerate() {
+                let t = t_of(i);
+                let snap = crack.run(rng.range(-1.0, 1.0), 6000.0) * (-t * 18.0).exp() * 1.4;
+                let fc = 120.0 + 500.0 * (-t * 1.5).exp();
+                let rumble = lp2.run(lp.run(rng.range(-1.0, 1.0), fc), fc) * 4.0;
+                let swell = (0.6 + 0.4 * (t * wobble * TAU).sin()) * (-t * 0.9).exp();
+                *x = (snap + rumble * swell) * (t / 0.003).min(1.0);
+            }
+            finish(v, 2.0)
+        }
+        Sfx::Chime => {
+            let n = samples(1.6);
+            let mut v = vec![0.0; n];
+            for (k, f) in [880.0f32, 1318.5, 1760.0, 2637.0].into_iter().enumerate() {
+                let start = k as f32 * 0.07;
+                for (i, x) in v.iter_mut().enumerate() {
+                    let t = t_of(i) - start;
+                    if t > 0.0 {
+                        *x += (t * f * TAU).sin() * (-t * 3.0).exp() * 0.3;
+                    }
+                }
+            }
+            finish(v, 1.0)
         }
         Sfx::Explode => {
             let n = samples(2.0);
@@ -563,6 +596,8 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Bloop,
         Sfx::Twang,
         Sfx::Thunk,
+        Sfx::Thunder,
+        Sfx::Chime,
     ]);
     v
 }
@@ -580,7 +615,7 @@ impl Audio {
         if !AUDIO_DEAD.load(Ordering::Relaxed) {
             for s in all_sfx() {
                 // Several variants per effect: quad-snd has no pitch control, so variety is baked in.
-                let n = if matches!(s, Sfx::Explode | Sfx::Hiss | Sfx::Click | Sfx::Craft | Sfx::Fanfare) { 1 } else { VARIANTS };
+                let n = if matches!(s, Sfx::Explode | Sfx::Hiss | Sfx::Click | Sfx::Craft | Sfx::Fanfare | Sfx::Thunder | Sfx::Chime) { 1 } else { VARIANTS };
                 let mut sounds = Vec::new();
                 for _ in 0..n {
                     if let Ok(snd) = load_sound_from_bytes(&wav(&synth(s, &mut rng))).await {
@@ -604,7 +639,7 @@ impl Audio {
             Sfx::Hit(_) => 0.45,
             Sfx::Click => 0.5,
             Sfx::Pop => 0.45,
-            Sfx::Explode => 1.0,
+            Sfx::Explode | Sfx::Thunder => 1.0,
             // Voices are dense; keep them level with the percussive sounds.
             Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck => 0.4,
             Sfx::Fanfare => 0.5,

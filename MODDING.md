@@ -65,6 +65,10 @@ description = One line shown on the Mods screen.
 | `speed` | Walking speed multiplier on top of it (0.2–3) | `1` |
 | `on_break` | Actions when a player breaks it (see below) | |
 | `creative` | Show it in the creative palette | `true` |
+| `shape` | `slab` or `stairs` (they behave like the base game's: slabs stack into `full`, stairs face away from you) | `cube` |
+| `full` | For slabs: the block two of them make | none (two slabs stay two slabs) |
+| `smelts_into` | What a furnace turns it into | doesn't cook |
+| `burns_for` | Seconds it burns as furnace fuel (0.5–600) | not fuel |
 
 ### `[item <name>]`
 
@@ -78,6 +82,31 @@ description = One line shown on the Mods screen.
 | `damage` | Attack damage (hand = 1, dimond sword = 7) | `1` |
 | `on_use` | Actions on right-click (see below) | |
 | `consume` | Using it uses one up | `true` |
+| `durability` | Uses before it breaks (1–16000); makes it a tool that wears out, stacks to 1, and can be enchanted with Unbreaking | lasts forever (armour: `200`) |
+| `repair` | What mends it at an anvil (each one restores a quarter) | can't be repaired |
+| `armor` | `helmet`, `chestplate`, `leggings` or `boots`: it's worn in that slot | not armour |
+| `armor_points` | For armour: points of protection (1–10; each takes 4% off damage) | `2` |
+| `looks_like` | For armour: which base-game set it looks like when worn: `wool`, `iron`, `gold` or `diamond` | `iron` |
+| `smelts_into`, `burns_for` | As for blocks | |
+
+A pickaxe (`pickaxe` above 0) can be enchanted with Efficiency and Fortune, a `damage` above 1 with `durability` counts as a sword (Sharpness), and armour takes Protection.
+
+For example, a slab of a mod block and a cheese sword:
+
+```
+[block cheese_slab]
+name = Cheese Slab
+texture = cheese
+shape = slab
+full = cheese_block
+
+[item cheese_sword]
+name = Cheese Sword (Mature)
+texture = cheese_sword
+damage = 5
+durability = 300
+repair = cheese
+```
 
 ### Actions (`on_use`, `on_break`)
 

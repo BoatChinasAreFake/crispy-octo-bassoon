@@ -36,11 +36,13 @@ pub struct Peer {
     strikes: u32,
     /// What the host knows they own (see ledger.rs).
     pub ledger: crate::ledger::Ledger,
+    /// Their last report of their inventory, health and hunger (see players.rs).
+    pub report: Option<crate::players::Report>,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default() }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None }
     }
     pub fn alive(&self) -> bool {
         self.flags & FLAG_DEAD == 0
@@ -126,6 +128,7 @@ impl Game {
         g.my_id = id;
         g.player_name = sanitize_name(name);
         g.world.log_edits = true;
+        g.world.structure_loot = false;
         g.net = Some(Net::Client(conn));
         g.pending_msgs = leftover;
         g.msg("Connected! Say hi with T.");
@@ -234,6 +237,11 @@ impl Game {
     }
 
     pub fn disconnect(&mut self) {
+        // One last report, so the host remembers exactly how we left.
+        if self.is_client() {
+            let m = self.report_msg();
+            self.net_send_msg(m);
+        }
         if let Some(Net::Client(c)) = &mut self.net {
             c.flush();
         }
@@ -285,15 +293,26 @@ impl Game {
                         }
                     }
                 }
-                for c in s.clients.iter().filter(|c| c.conn.closed.is_some()) {
-                    if c.joined {
-                        left.push((c.id, c.name.clone(), c.conn.closed.clone().unwrap_or_default()));
-                    }
-                }
-                s.clients.retain(|c| c.conn.closed.is_none());
             }
         }
+        // Everything that arrived first (a leaving player's last words included),
+        // then the goodbyes.
+        for (from, m) in inbox {
+            if self.is_host() {
+                self.host_handle(from, m);
+            } else {
+                self.client_handle(m);
+            }
+        }
+        // (Including anyone kicked just now.)
+        if let Some(Net::Host(s)) = &mut self.net {
+            for c in s.clients.iter().filter(|c| c.conn.closed.is_some() && c.joined) {
+                left.push((c.id, c.name.clone(), c.conn.closed.clone().unwrap_or_default()));
+            }
+            s.clients.retain(|c| c.conn.closed.is_none());
+        }
         for (id, name, why) in left {
+            self.remember_peer(id);
             self.peers.remove(&id);
             self.forget_viewer(id);
             self.net_broadcast(Msg::PlayerLeave { id });
@@ -304,13 +323,6 @@ impl Game {
                 self.msg(format!("{name} left the game ({why})"));
             }
             self.fire("on_player_leave", vec![name.into()]);
-        }
-        for (from, m) in inbox {
-            if self.is_host() {
-                self.host_handle(from, m);
-            } else {
-                self.client_handle(m);
-            }
         }
     }
 
@@ -389,6 +401,7 @@ impl Game {
             }
             roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
             roster.push(self.rules_msg());
+            roster.push(Msg::Weather { kind: self.weather.kind.index() });
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -403,13 +416,14 @@ impl Game {
             server.broadcast(&Msg::PlayerJoin { id: from, name: name.clone() }, Some(from));
             self.peers.insert(from, Peer::new(name.clone(), self.spawn));
             self.msg(format!("{name} joined the game"));
+            self.welcome_back(from, &name);
             self.fire("on_player_join", vec![name.clone().into()]);
         }
     }
 
     fn rules_msg(&self) -> Msg {
         let r = self.rules;
-        Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle }
+        Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle, weather_cycle: r.weather_cycle }
     }
 
     /// Change the world's rules (the owner's World Settings) and tell everyone.
@@ -488,8 +502,8 @@ impl Game {
                     }
                 }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, held, armor, .. } => {
-                self.set_peer_held(from, held);
+            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, .. } => {
+                self.set_peer_held(from, held, held_ench);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // Just died: their experience spills (items come separately, see `drop_everything`).
                 if p.alive() && flags & FLAG_DEAD != 0 {
@@ -511,7 +525,7 @@ impl Game {
                 p.pitch = pitch.clamp(-1.6, 1.6);
                 p.flags = flags;
                 p.armor = armor;
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, armor });
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor });
             }
             Msg::Attack { mob, dmg, .. } => {
                 // Hits come from where the player actually is, within reach, at a human pace.
@@ -520,7 +534,8 @@ impl Game {
                     return;
                 }
                 // No harder than the weapon they really own (x1.5 for a falling crit).
-                let dmg = dmg.clamp(0.0, attack_damage(self.verified_held(from)) * 1.5);
+                let sharpness = crate::enchant::level((self.verified_ench(from) as u32) << 16, crate::enchant::Enchant::Sharpness);
+                let dmg = dmg.clamp(0.0, attack_damage_with(self.verified_held(from), sharpness) * 1.5);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
                     m.damage(dmg, eye);
                     m.last_attacker = from;
@@ -622,9 +637,19 @@ impl Game {
             }
             Msg::CloseContainer { x, y, z } => self.host_close(from, IVec3::new(x, y, z)),
             Msg::Pickup { id, room } => self.host_pickup(from, id, room),
+            Msg::PlayerData { slots, health, food, saturation } => {
+                if self.peer_rate_ok(from, "report", 1.0) {
+                    self.host_report(from, slots, health, food, saturation);
+                }
+            }
             Msg::Repair { x, y, z, item, material, used, combine } => {
                 if self.peer_rate_ok(from, "repair", 0.2) {
                     self.host_repair(from, IVec3::new(x, y, z), item, material, used, combine);
+                }
+            }
+            Msg::Enchant { x, y, z, item, choice } => {
+                if self.peer_rate_ok(from, "enchant", 0.2) {
+                    self.host_enchant(from, IVec3::new(x, y, z), item, choice);
                 }
             }
             Msg::DropItem { item, n, wear, scatter } => {
@@ -691,8 +716,8 @@ impl Game {
             return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
         }
         // Two slabs make a block.
-        if let Some((m, _)) = slab_of(old) {
-            return new == AIR || new == MATERIALS[m].0;
+        if slab_of(old).is_some() {
+            return new == AIR || (new == made_of(old) && new != AIR);
         }
         match new {
             AIR => true,
@@ -773,8 +798,16 @@ impl Game {
             Msg::Drops(list) => self.apply_drops(list),
             Msg::Orbs(list) => self.apply_orbs(list),
             Msg::Xp { points } => self.xp = points.min(1 << 24),
-            Msg::Rules { keep_inventory, difficulty, daylight_cycle } => {
-                self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle };
+            Msg::Restore { pos, xp, slots, health, food, saturation } => self.apply_restore(pos, xp, slots, health, food, saturation),
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle } => {
+                self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle };
+            }
+            Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
+            Msg::Weather { kind } => self.weather.kind = crate::weather::Weather::from_index(kind),
+            Msg::Lightning { at } => {
+                if at.is_finite() {
+                    self.lightning_effects(at);
+                }
             }
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
@@ -809,7 +842,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } => {}
         }
     }
 
@@ -900,7 +933,7 @@ impl Game {
             if p.hurt > 0.2 {
                 flags |= FLAG_HURT;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), armor: self.inv.armor_look() };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look() };
             self.net_send_msg(m);
         }
         if self.is_host() {
@@ -1177,7 +1210,7 @@ mod tests {
 
         // Teleporting across the map is refused and the client is put back.
         // (NaN positions never get this far: the decoder drops the connection.)
-        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, armor: 0 });
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0 });
         for _ in 0..20 {
             host.update(0.016, &idle());
             std::thread::sleep(Duration::from_millis(4));
@@ -1523,6 +1556,122 @@ mod tests {
     }
 
     #[test]
+    fn players_are_remembered() {
+        let mut host = Game::new(785, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Returny", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn + Vec3::new(3.0, 0.0, 1.0);
+        host.give_peer(id, DIAMOND, 7);
+        host.give_peer_worn(id, PICK_IRON, 1, 42);
+        host.give_peer_xp(id, 55);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DIAMOND) == 7 && c.inv.count(PICK_IRON) == 1 && c.xp == 55));
+        let slot = client.inv.slots.iter().position(|s| *s == Some((PICK_IRON, 1))).unwrap();
+        assert_eq!(client.inv.wear[slot], 42);
+        client.player.hunger.food = 9.0;
+        let at = client.player.body.pos;
+        // Leaving sends one last report; the host remembers it.
+        client.disconnect();
+        drop(client);
+        let start = Instant::now();
+        while !host.peers.is_empty() && start.elapsed() < Duration::from_secs(10) {
+            host.update(0.016, &idle());
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        let rec = host.saved_players.get("returny").expect("remembered").clone();
+        assert_eq!(rec.xp, 55);
+        assert!(rec.bag.contains(&(DIAMOND, 7)));
+        assert_eq!(rec.report.food, 9.0);
+        // It survives the host saving and loading the world.
+        let back = Game::from_save(host.to_save());
+        assert_eq!(back.saved_players.get("returny"), Some(&rec));
+
+        // Coming back (any capitals) puts it all back, and the ledger with it.
+        let mut client = join(&mut host, port, "RETURNY", "").unwrap();
+        let id = client.my_id;
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DIAMOND) == 7 && c.xp == 55));
+        let slot = client.inv.slots.iter().position(|s| *s == Some((PICK_IRON, 1))).unwrap();
+        assert_eq!(client.inv.wear[slot], 42);
+        assert_eq!(client.player.hunger.food, 9.0);
+        assert!(client.player.body.pos.distance(at) < 1.0);
+        assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 7);
+        assert!(!host.saved_players.contains_key("returny"), "taken while they're here");
+        // And the inventory check agrees with the host.
+        for _ in 0..250 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(client.inv.count(DIAMOND), 7);
+    }
+
+    #[test]
+    fn enchanting_is_checked_by_the_host() {
+        use crate::enchant::{enchants, with_level, Enchant};
+        use crate::xp::points_for_level;
+        let mut host = Game::new(786, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Glowy", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 1, spawn.z.floor() as i32);
+        let table = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        host.world.set_v(table, ENCHANTING_TABLE);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(table) == ENCHANTING_TABLE));
+        host.give_peer(id, PICK_IRON, 1);
+        host.give_peer(id, GOLD_INGOT, 3);
+        host.give_peer_xp(id, points_for_level(10));
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(PICK_IRON) == 1 && c.inv.count(GOLD_INGOT) == 3 && c.xp == points_for_level(10)));
+
+        client.open_enchanting(table);
+        for item in [PICK_IRON, GOLD_INGOT] {
+            let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)).unwrap();
+            client.enchant_quick_put(slot);
+        }
+        let offer = client.enchant_offers().expect("offers")[0];
+        client.enchant_pick(0);
+        let bits = enchants(offer.1);
+        assert!(bits != 0);
+        // The host charges a level and a gold ingot, and knows about the enchantments.
+        assert!(pump(&mut host, &mut client, |h, c| h.peers[&id].ledger.enchanted.get(&(PICK_IRON, bits)) == Some(&1) && c.enchant_count == 1));
+        let l = &host.peers[&id].ledger;
+        assert_eq!((l.bag.count(GOLD_INGOT), l.enchant_count, crate::xp::level_of(l.xp).0), (2, 1, 9));
+        client.close_enchanting();
+
+        // Held, the host believes it; a made-up enchantment it doesn't.
+        let slot = client.inv.slots.iter().position(|s| *s == Some((PICK_IRON, 1))).unwrap();
+        client.inv.selected = slot;
+        assert!(slot < 9, "the pickaxe comes back to the hotbar");
+        assert!(pump(&mut host, &mut client, |h, _| h.verified_ench(id) == bits));
+        let real = client.inv.wear[slot];
+        client.inv.wear[slot] = with_level(real, Enchant::Sharpness, 5);
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.held_ench != bits));
+        assert_eq!(host.verified_ench(id), 0);
+
+        // A forged enchantment thrown on the ground arrives plain.
+        client.throw_held(false);
+        assert!(pump(&mut host, &mut client, |h, _| h.drops.iter().any(|d| d.item == PICK_IRON)));
+        let d = host.drops.iter().find(|d| d.item == PICK_IRON).unwrap();
+        assert_eq!(d.wear >> 16, 0);
+        assert_eq!(host.peers[&id].ledger.enchanted.get(&(PICK_IRON, bits)), Some(&1), "the real one is still theirs");
+
+        // Enchanting without the gold (the host's count) is refused.
+        host.peers.get_mut(&id).unwrap().ledger.bag.take(GOLD_INGOT, 2);
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.net_send_msg(Msg::Enchant { x: table.x, y: table.y, z: table.z, item: PICK_IRON, choice: 0 });
+        for _ in 0..60 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.peers[&id].ledger.enchant_count, 1);
+    }
+
+        #[test]
     fn chests_are_shared_through_the_host() {
         let mut host = Game::new(781, false, false);
         let spawn = host.spawn;

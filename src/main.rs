@@ -8,6 +8,7 @@ mod block;
 mod building;
 mod containers;
 mod drops;
+mod enchant;
 mod entity;
 mod farming;
 mod fishing;
@@ -22,16 +23,19 @@ mod net;
 mod noise;
 mod palette;
 mod player;
+mod players;
 mod render;
 mod rules;
 mod save;
 mod scripting;
 mod server;
+mod structures;
 mod settings;
 mod upnp;
 mod sound;
 mod texture;
 mod ui;
+mod weather;
 mod world;
 mod xp;
 
@@ -83,6 +87,8 @@ enum Screen {
     Container,
     /// An anvil is open (see anvil.rs).
     Anvil,
+    /// An enchanting table is open (see enchant.rs).
+    Enchant,
     /// Keep inventory, difficulty, daylight cycle (the world's owner can change them).
     WorldSettings,
     Dead,
@@ -218,6 +224,9 @@ impl App {
         }
         if self.screen == Screen::Anvil && s != Screen::Anvil {
             self.game.close_anvil();
+        }
+        if self.screen == Screen::Enchant && s != Screen::Enchant {
+            self.game.close_enchanting();
         }
         // Leaving a screen where settings change: keep them for next time.
         if matches!(self.screen, Screen::Options { .. } | Screen::Multiplayer) && self.screen != s {
@@ -518,7 +527,7 @@ impl App {
                     self.game.third_person = !self.game.third_person;
                 }
             }
-            Screen::Inventory | Screen::Container | Screen::Anvil => {
+            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant => {
                 if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
                     self.set_screen(Screen::Playing);
                 }
@@ -563,7 +572,7 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Title | Screen::Dead) || self.game.net.is_some();
         if simulate {
             self.game.update(dt, &controls);
         }
@@ -576,6 +585,11 @@ impl App {
         if self.game.anvil.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Anvil);
         } else if self.screen == Screen::Anvil && !self.game.anvil_still_there() {
+            self.set_screen(Screen::Playing);
+        }
+        if self.game.enchanting.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Enchant);
+        } else if self.screen == Screen::Enchant && !self.game.enchanting_still_there() {
             self.set_screen(Screen::Playing);
         }
         if let Some(e) = self.game.net_error.take() {
@@ -1161,6 +1175,7 @@ impl App {
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Container => self.container_screen(),
                     Screen::Anvil => self.anvil_screen(),
+                    Screen::Enchant => self.enchant_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
@@ -1258,6 +1273,18 @@ impl App {
                 format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
                 format!("Facing: {facing}"),
                 format!("Biome: {} (surface {hgt})", biome.name()),
+                {
+                    // The closest thing the generator built, within a few chunks.
+                    let (pcx, pcz) = ((p.x / 16.0).floor() as i32, (p.z / 16.0).floor() as i32);
+                    let near = (-6..=6)
+                        .flat_map(|dz| (-6..=6).map(move |dx| (pcx + dx, pcz + dz)))
+                        .filter_map(|(cx, cz)| g.world.generator.site(cx, cz))
+                        .min_by_key(|s| (s.origin.x as f32 - p.x).hypot(s.origin.z as f32 - p.z) as i32);
+                    match near {
+                        Some(s) => format!("Nearest structure: {} at {}, {}, {}", s.kind.name(), s.origin.x, s.origin.y, s.origin.z),
+                        None => "Nearest structure: none nearby".to_string(),
+                    }
+                },
                 format!("Chunks: {} meshed, {} loaded", self.renderer.chunks.len(), g.world.chunks.len()),
                 {
                     // Palette-packed block storage vs. two bytes per block.
@@ -1741,6 +1768,22 @@ impl App {
         if self.ui.button(Rect::new(x, y, bw, bh), day, owner) {
             rules.daylight_cycle = !rules.daylight_cycle;
         }
+        y += bh + 5.0 * s;
+        let half = (bw - 5.0 * s) / 2.0;
+        let cycle = if rules.weather_cycle { "Weather Cycle: ON" } else { "Weather Cycle: OFF" };
+        if self.ui.button(Rect::new(x, y, half, bh), cycle, owner) {
+            rules.weather_cycle = !rules.weather_cycle;
+        }
+        use weather::Weather;
+        let now = match self.game.weather.kind {
+            Weather::Clear => "Weather: Clear",
+            Weather::Rain => "Weather: Rain",
+            Weather::Thunder => "Weather: Thunderstorm",
+        };
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), now, owner) {
+            let next = Weather::from_index((self.game.weather.kind.index() + 1) % 3);
+            self.game.set_weather(next);
+        }
         if rules != self.game.rules {
             self.game.set_rules(rules);
         }
@@ -1831,9 +1874,103 @@ impl App {
         }
     }
 
+    fn enchant_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let slot = 20.0 * s;
+        let panel_w = slot * 9.0 + 12.0 * s;
+        let top_h = slot * 3.4;
+        let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
+        let x0 = (w - panel_w) / 2.0;
+        let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
+        let sx = x0 + 6.0 * s;
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        let mut tooltip: Option<String> = None;
+        let Some((pos, item, wear, gold)) = self.game.enchanting.as_ref().map(|e| (e.pos, e.item, e.wear, e.gold)) else { return };
+        let shelves = self.game.bookshelves(pos);
+        self.ui.text(&format!("Enchanting Table ({shelves} bookshel{})", if shelves == 1 { "f" } else { "ves" }), sx, y0 + 12.0 * s, 10.0, WHITE);
+        let top = y0 + 20.0 * s;
+        for (i, x, stack, wr, hint) in [(0, sx, item, wear, "Something to enchant"), (1, sx + slot * 1.2, gold, 0, "Gold ingots (1 to 3)")] {
+            let (l, r, hov) = self.ui.slot_worn(stack, wr, x, top + slot * 0.6, slot, false);
+            if hov {
+                tooltip = label(stack, wr).or(Some(hint.to_string()));
+            }
+            if l || r {
+                self.game.enchant_click(i, r);
+            }
+        }
+        // The three offers, cheapest first; hovering hints at what's in store.
+        let offers = self.game.enchant_offers();
+        let bx = sx + slot * 2.7;
+        let bw = panel_w - (bx - x0) - 6.0 * s;
+        let bh = slot * 0.95;
+        let level = self.game.level().0;
+        for choice in 0..3 {
+            let y = top + choice as f32 * (bh + 2.0 * s);
+            let r = Rect::new(bx, y, bw, bh);
+            let Some((need, bits)) = offers.map(|o| o[choice]) else {
+                draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.15, 0.12, 0.1, 1.0));
+                continue;
+            };
+            let blocked = self.game.enchant_blocked(choice);
+            let hover = r.contains(mouse_position().into());
+            let bg = if blocked.is_some() { Color::new(0.2, 0.16, 0.14, 1.0) } else if hover { Color::new(0.45, 0.3, 0.6, 1.0) } else { Color::new(0.32, 0.22, 0.42, 1.0) };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, s, Color::new(0.6, 0.5, 0.7, 1.0));
+            // Only the first enchantment is revealed (Minecraft keeps some mystery too).
+            let first = enchant::Enchant::ALL.iter().find(|e| enchant::level(bits, **e) > 0).map(|e| enchant::describe(enchant::with_level(0, *e, enchant::level(bits, *e)))).unwrap_or_default();
+            let color = if blocked.is_some() { GRAY } else { Color::new(0.85, 1.0, 0.6, 1.0) };
+            self.ui.text(&format!("{first} . . . ?"), r.x + 4.0 * s, r.y + bh * 0.45, 8.0, color);
+            let cost = choice + 1;
+            let req = format!("Level {need}+   costs {cost} level{} and {cost} gold", if cost == 1 { "" } else { "s" });
+            self.ui.text(&req, r.x + 4.0 * s, r.y + bh * 0.85, 7.0, if level >= need || self.game.creative { GRAY } else { Color::new(1.0, 0.4, 0.4, 1.0) });
+            if hover {
+                let what = enchant::Enchant::ALL.iter().find(|e| enchant::level(bits, **e) > 0).map(|e| e.name()).unwrap_or("Something");
+                tooltip = Some(blocked.clone().unwrap_or_else(|| format!("{what}, and maybe more")));
+                if is_mouse_button_pressed(MouseButton::Left) && self.game.inv.cursor.is_none() {
+                    self.game.enchant_pick(choice);
+                }
+            }
+        }
+        if offers.is_none() {
+            let hint = if item.is_some() { "That can't be enchanted (or already is)." } else { "Put in a tool, weapon or armour, and some gold." };
+            self.ui.text(hint, bx + 4.0 * s, top + bh * 1.6, 8.0, GRAY);
+        }
+        let inv_y = top + top_h + 12.0 * s;
+        self.ui.text(&format!("Inventory (level {level})"), sx, inv_y - 4.0 * s, 8.0, GRAY);
+        for i in 9..36 {
+            let j = i - 9;
+            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        let hot_y = inv_y + slot * 3.0 + 6.0 * s;
+        for i in 0..9 {
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        if let Some(cur) = self.game.inv.cursor {
+            let (mx, my) = mouse_position();
+            self.ui.stack_worn(Some(cur), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
+        } else if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
     fn inventory_slot_click(&mut self, i: usize, l: bool, r: bool, shift: bool) {
         if l && shift && self.game.anvil.is_some() {
             self.game.anvil_quick_put(i);
+        } else if l && shift && self.game.enchanting.is_some() {
+            self.game.enchant_quick_put(i);
         } else if l && shift {
             self.game.container_quick_put(i);
         } else if l {
@@ -1878,7 +2015,7 @@ impl App {
             }
             if hov {
                 tooltip = Some(match worn {
-                    Some((id, _)) => format!("{} (+{} armour){}", item_name(id), armor_points(id), durability(id).map(|d| format!(", {}/{d} left", d - self.game.inv.armor_wear[i])).unwrap_or_default()),
+                    Some((id, _)) => format!("{} (+{} armour)", label(worn, self.game.inv.armor_wear[i]).unwrap_or_default(), armor_points(id)),
                     None => ["Helmet", "Chestplate", "Leggings", "Boots"][i].to_string(),
                 });
             }
@@ -2030,6 +2167,59 @@ impl App {
     }
 }
 
+/// Where to stand to show off a structure, a ravine or snow near spawn: (eye, yaw, pitch).
+fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
+    use structures::Kind;
+    let generator = &g.world.generator;
+    let (cx0, cz0) = ((g.spawn.x / 16.0).floor() as i32, (g.spawn.z / 16.0).floor() as i32);
+    let ring = |r: i32| (-r..=r).flat_map(move |dz| (-r..=r).map(move |dx| (dx, dz))).filter(move |(dx, dz)| dx.abs().max(dz.abs()) == r);
+    let look = |from: Vec3, to: Vec3| {
+        let d = to - from;
+        (from, d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()))
+    };
+    let kind = match mode {
+        "hut" => Kind::Hut,
+        "tower" => Kind::Tower,
+        "well" => Kind::Well,
+        "dungeon" => Kind::Dungeon,
+        "ravine" | "snow" | "rain" | "thunder" => {
+            for r in 0..60 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let (h, biome) = generator.column(x, z);
+                    let open = generator.site(cx0 + dx, cz0 + dz).is_none() && h > world::SEA + 2;
+                    if mode == "snow" {
+                        if biome == world::Biome::Snowy && open {
+                            return Some((Vec3::new(x as f32 + 0.5, h as f32 + 8.0, z as f32 + 0.5), 2.4, -0.35));
+                        }
+                    } else if mode != "ravine" {
+                        let clear = (-3..=3).all(|i| (-3..=3).all(|j| generator.tree_at(x + i, z + j).is_none()));
+                        if biome == world::Biome::Plains && open && clear {
+                            return Some((Vec3::new(x as f32 + 0.5, h as f32 + 3.0, z as f32 + 0.5), 2.4, -0.1));
+                        }
+                    } else if generator.ravine_floor(x, z).is_some() && h > world::SEA + 4 {
+                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + 14.0, z as f32 + 0.5), 2.4, -1.1));
+                    }
+                }
+            }
+            return None;
+        }
+        _ => return None,
+    };
+    for r in 0..60 {
+        for (dx, dz) in ring(r) {
+            let Some(site) = generator.site(cx0 + dx, cz0 + dz).filter(|s| s.kind == kind) else { continue };
+            let o = site.origin.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+            return Some(match kind {
+                Kind::Dungeon => look(o + Vec3::new(2.6, 2.4, 2.6), o + Vec3::new(-3.0, 0.5, -1.0)),
+                Kind::Tower => look(o + Vec3::new(-11.0, 9.0, -11.0), o + Vec3::Y * 4.0),
+                _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
+            });
+        }
+    }
+    None
+}
+
 /// Headless-ish verification helper: `--screenshot out.png [--mode title|survival|creative|inventory|night|options] [--frames N]`.
 struct ShotArgs {
     path: String,
@@ -2080,13 +2270,17 @@ fn install_audio_panic_hook() {
     }));
 }
 
-/// Tooltip text for a slot: its name, and how many uses are left for tools.
-fn label(stack: Option<(Id, u8)>, wear: u16) -> Option<String> {
+/// Tooltip text for a slot: its name, enchantments, and uses left for tools.
+fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     let (id, _) = stack?;
-    Some(match durability(id) {
-        Some(max) => format!("{} ({}/{max} uses left)", item_name(id), max.saturating_sub(wear)),
-        None => item_name(id).to_string(),
-    })
+    let mut s = item_name(id).to_string();
+    if enchant::is_enchanted(wear) {
+        s += &format!(" [{}]", enchant::describe(wear));
+    }
+    if let Some(max) = inventory::max_uses(id, wear) {
+        s += &format!(" ({}/{max} uses left)", max.saturating_sub(inventory::uses(wear) as u32));
+    }
+    Some(s)
 }
 
 fn main() {
@@ -2121,7 +2315,7 @@ async fn game_main() {
     install_audio_panic_hook();
     let audio = Audio::load().await;
 
-    let shot = parse_args();
+    let mut shot = parse_args();
     let mut app = App {
         screen: Screen::Title,
         game: Game::new(random_seed(), true, true),
@@ -2184,7 +2378,7 @@ async fn game_main() {
         app.status = Some((format!("Mod \"{}\" has {} problem(s): see the Mods screen.", m.name, m.errors.len()), 8.0));
     }
 
-    if let Some(s) = &shot {
+    if let Some(s) = &mut shot {
         match s.mode.as_str() {
             "survival" | "creative" | "inventory" | "night" | "death" => {
                 let mut g = Game::new(424242, s.mode == "creative", false);
@@ -2228,11 +2422,31 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
                     g.inv.slots[0] = Some((block::ROD, 1));
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "hut" | "tower" | "well" | "dungeon" | "ravine" | "rain" | "thunder" | "snow" => {
+                // Somewhere the generator built something (or the sky is doing something).
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.3);
+                let kind = match s.mode.as_str() {
+                    "rain" | "snow" => Some(weather::Weather::Rain),
+                    "thunder" => Some(weather::Weather::Thunder),
+                    _ => None,
+                };
+                if let Some(k) = kind {
+                    g.weather.kind = k;
+                    g.weather.strength = 1.0;
+                    g.rules.weather_cycle = false;
+                }
+                if let Some((pos, yaw, pitch)) = scenic_view(&g, &s.mode) {
+                    (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
                 }
                 app.start_game(g);
                 app.show_debug = false;
@@ -2337,7 +2551,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2522,6 +2736,42 @@ async fn game_main() {
                     app.game.player.health = 15.0;
                 }
             }
+            if matches!(s.mode.as_str(), "enchant" | "table") && frames == 125 {
+                // An enchanting table in a ring of bookshelves, and something to enchant.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let v = p + fwd * 4.5;
+                let t = IVec3::new(v.x.floor() as i32, p.y.floor() as i32, v.z.floor() as i32);
+                app.game.world.set_v(t, block::ENCHANTING_TABLE);
+                for dx in -2..=2i32 {
+                    for dz in -2..=2i32 {
+                        // Leave a gap on the near side to walk in.
+                        let near = IVec3::new(dx, 0, dz).as_vec3().dot(fwd) < -1.0;
+                        if dx.abs().max(dz.abs()) == 2 && !near {
+                            app.game.world.set_v(t + IVec3::new(dx, 0, dz), block::BOOKSHELF);
+                            app.game.world.set_v(t + IVec3::new(dx, 1, dz), block::BOOKSHELF);
+                        }
+                    }
+                }
+                app.game.xp = xp::points_for_level(30) + 40;
+                for (item, n, wear) in [(block::PICK_DIAMOND, 1, 12), (block::GOLD_INGOT, 9, 0), (block::SWORD_IRON, 1, enchant::with_level(enchant::with_level(40, enchant::Enchant::Sharpness, 3), enchant::Enchant::Unbreaking, 1)), (block::BREAD, 6, 0)] {
+                    app.game.inv.add(item, n);
+                    let i = app.game.inv.slots.iter().position(|s| *s == Some((item, n))).unwrap();
+                    app.game.inv.wear[i] = wear;
+                }
+                if s.mode == "enchant" {
+                    app.game.open_enchanting(t);
+                    if let Some(ui) = &mut app.game.enchanting {
+                        ui.item = Some((block::PICK_DIAMOND, 1));
+                        ui.wear = 12;
+                        ui.gold = Some((block::GOLD_INGOT, 3));
+                    }
+                    app.game.inv.remove(block::PICK_DIAMOND, 1);
+                    app.game.inv.remove(block::GOLD_INGOT, 3);
+                } else {
+                    app.game.inv.selected = app.game.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == block::SWORD_IRON)).unwrap_or(0);
+                }
+            }
             if matches!(s.mode.as_str(), "anvil" | "rules" | "xp") && frames == 125 {
                 // An anvil (and a chipped one) ahead, a worn pickaxe and some iron, and a few levels.
                 let p = app.game.player.body.pos;
@@ -2568,6 +2818,13 @@ async fn game_main() {
                     o.body.vel = Vec3::ZERO;
                     o.age = 0.0;
                 }
+            }
+            if s.mode == "thunder" && frames + 2 == s.frames {
+                // A bolt in the distance for the photo.
+                let p = app.game.player.body.pos;
+                let (x, z) = ((p.x + s.yaw.sin() * 14.0).floor() as i32, (p.z - s.yaw.cos() * 14.0).floor() as i32);
+                let y = app.game.world.surface_y(x, z) + 1;
+                app.game.lightning_effects(Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5));
             }
             if s.mode == "death" && frames == 150 {
                 app.game.inv.add(block::DIAMOND, 3);
