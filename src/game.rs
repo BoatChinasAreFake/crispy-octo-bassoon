@@ -148,6 +148,12 @@ pub struct Game {
     pub lava_waiting: HashSet<IVec3>,
     /// Seconds the local player stays on fire (lava).
     pub on_fire: f32,
+    /// Zappy Dust (see wiring.rs): time since the last update, pressed
+    /// buttons and plates with their time left, doors held open by power.
+    pub zap_timer: f32,
+    pub buttons: HashMap<IVec3, f32>,
+    pub plates: HashMap<IVec3, f32>,
+    pub powered_doors: HashSet<IVec3>,
 }
 
 impl Game {
@@ -239,6 +245,10 @@ impl Game {
             liquid_timers: [0.0; 2],
             lava_waiting: HashSet::new(),
             on_fire: 0.0,
+            zap_timer: 0.0,
+            buttons: HashMap::new(),
+            plates: HashMap::new(),
+            powered_doors: HashSet::new(),
         }
     }
 
@@ -561,6 +571,7 @@ impl Game {
         }
         self.weather_tick(dt);
         self.liquid_tick(dt);
+        self.zap_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
@@ -1314,6 +1325,10 @@ impl Game {
         let (hit_pos, normal) = (h.pos, h.normal);
         let hit_y = self.player.eye().y + self.player.look_dir().y * h.dist - hit_pos.y as f32;
         let hit_id = self.world.get_v(hit_pos);
+        // Levers and buttons (sneak to place against one instead).
+        if !self.player.sneaking && self.use_switch(hit_pos, hit_id) {
+            return;
+        }
         // Doors open and close (sneak to place against one instead).
         if is_door(hit_id) && !self.player.sneaking {
             self.toggle_door(hit_pos);
@@ -1358,6 +1373,10 @@ impl Game {
             self.place_door(hit_pos, normal, hit_id);
             return;
         }
+        if held == ZAP_DUST {
+            self.place_dust(hit_pos, normal, hit_id);
+            return;
+        }
         if !is_block_item(held) {
             return;
         }
@@ -1371,7 +1390,7 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH if !is_solid(below) => return,
+            TORCH | LEVER | BUTTON | PLATE if !is_solid(below) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -1461,7 +1480,7 @@ impl Game {
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
-        if block(a).model == Model::Cross || door_state(a).is_some_and(|(_, _, top)| !top) {
+        if block(a).model == Model::Cross || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
             self.world.set_v(above, AIR);
             if is_door(a) {
                 self.world.set_v(above + IVec3::Y, AIR);
@@ -1742,6 +1761,7 @@ impl Game {
         }
         self.weather_tick(dt);
         self.liquid_tick(dt);
+        self.zap_tick(dt);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
         }
@@ -3407,7 +3427,94 @@ mod tests {
         assert!(back.mobs.len() < g.mobs.len(), "not the wild Oinker {wild}");
     }
 
-    /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
+    #[test]
+    fn zappy_dust_carries_power() {
+        let mut g = arena(69);
+        let run = |g: &mut Game, secs: f32| {
+            let mut t = 0.0;
+            while t < secs {
+                g.zap_tick(0.05);
+                t += 0.05;
+            }
+        };
+        // Lever, 15 blocks of dust with a step up in the middle, a lamp at the end.
+        let lever = IVec3::new(-8, 50, 0);
+        g.world.set_v(lever, LEVER);
+        g.world.set_v(IVec3::new(0, 50, 0), STONE);
+        for x in -7..=7 {
+            let y = if x == 0 { 51 } else { 50 };
+            g.world.set_v(IVec3::new(x, y, 0), WIRE);
+        }
+        let lamp = IVec3::new(8, 50, 0);
+        g.world.set_v(lamp, LAMP);
+        run(&mut g, 0.5);
+        assert_eq!(g.world.get_v(lamp), LAMP);
+        // Flip it (as the player would).
+        g.inv.slots = [None; 36];
+        aim(&mut g, lever, IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get_v(lever), LEVER_ON);
+        run(&mut g, 0.5);
+        assert!((-7..=7).all(|x| g.world.get_v(IVec3::new(x, if x == 0 { 51 } else { 50 }, 0)) == WIRE_ON), "the whole line lights up");
+        assert_eq!(g.world.get_v(lamp), LAMP_ON);
+        assert!(g.advancements.has("its_alive"));
+        // Dust only carries so far: a 16th block stays dark.
+        g.world.set_v(lamp, WIRE);
+        g.world.set_v(lamp + IVec3::X, LAMP);
+        run(&mut g, 0.5);
+        assert_eq!(g.world.get_v(lamp), WIRE);
+        assert_eq!(g.world.get_v(lamp + IVec3::X), LAMP);
+        // Flip it back and it all goes dark.
+        g.world.set_v(lamp, AIR);
+        g.world.set_v(lamp + IVec3::X, AIR);
+        g.world.set_v(lamp, LAMP);
+        aim(&mut g, lever, IVec3::Y);
+        g.use_item();
+        run(&mut g, 0.5);
+        assert_eq!(g.world.get_v(IVec3::new(3, 50, 0)), WIRE);
+        assert_eq!(g.world.get_v(lamp), LAMP);
+
+        // A button: a second of power, then it pops out.
+        let button = IVec3::new(4, 50, 4);
+        let door_at = IVec3::new(5, 50, 4);
+        g.world.set_v(button, BUTTON);
+        g.world.set_v(door_at, door(0, false, false));
+        g.world.set_v(door_at + IVec3::Y, door(0, false, true));
+        aim(&mut g, button, IVec3::Y);
+        g.use_item();
+        run(&mut g, 0.3);
+        assert_eq!(door_state(g.world.get_v(door_at)), Some((0, true, false)), "the door opens");
+        run(&mut g, 1.5);
+        assert_eq!(g.world.get_v(button), BUTTON);
+        assert_eq!(door_state(g.world.get_v(door_at)), Some((0, false, false)), "and closes again");
+
+        // A pressure plate under a mob, next to TNT.
+        let plate = IVec3::new(-4, 50, 6);
+        g.world.set_v(plate, PLATE);
+        g.world.set_v(plate + IVec3::X, TNT);
+        g.mobs.clear();
+        g.alloc_mob(MobKind::Oinker, plate.as_vec3() + Vec3::new(0.5, 0.0, 0.5));
+        run(&mut g, 0.3);
+        assert_eq!(g.world.get_v(plate), PLATE_ON);
+        assert_eq!(g.world.get_v(plate + IVec3::X), AIR);
+        assert_eq!(g.tnts.len(), 1, "primed");
+        g.mobs.clear();
+        run(&mut g, 1.0);
+        assert_eq!(g.world.get_v(plate), PLATE);
+
+        // Dust is laid from the item, on a floor; it falls off with it.
+        g.inv.slots[0] = Some((ZAP_DUST, 3));
+        g.inv.selected = 0;
+        let floor = IVec3::new(-6, 49, -6);
+        aim(&mut g, floor, IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get_v(floor + IVec3::Y), WIRE);
+        assert_eq!(g.inv.count(ZAP_DUST), 2);
+        g.break_block(floor, false);
+        assert_eq!(g.world.get_v(floor + IVec3::Y), AIR);
+    }
+
+        /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
     fn arena(seed: u32) -> Game {
         let mut g = Game::new(seed, false, false);
         g.world = loaded_world(seed);

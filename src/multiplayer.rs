@@ -723,6 +723,10 @@ impl Game {
         if let Some((f, o, true)) = door_state(new) {
             return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
         }
+        // Levers flip both ways, buttons only go in (the host lets them out).
+        if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
+            return true;
+        }
         // Two slabs make a block.
         if slab_of(old).is_some() {
             return new == AIR || (new == made_of(old) && new != AIR);
@@ -1704,6 +1708,36 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(host.mobs[0].love, 0.0);
+    }
+
+    #[test]
+    fn joined_players_flip_switches() {
+        let mut host = Game::new(789, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Sparky", "").unwrap();
+        let (x, z) = (spawn.x.floor() as i32 + 2, spawn.z.floor() as i32);
+        let y = host.world.surface_y(x, z) + 1;
+        let (lever, lamp, button) = (IVec3::new(x, y, z), IVec3::new(x + 1, y, z), IVec3::new(x, y, z + 2));
+        host.world.set_v(lever, LEVER);
+        host.world.set_v(lamp, LAMP);
+        host.world.set_v(button, BUTTON);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(lamp) == LAMP && c.world.get_v(button) == BUTTON));
+        // A flipped lever lights the lamp, on the host and back on the client.
+        client.world.set_v(lever, LEVER_ON);
+        assert!(pump(&mut host, &mut client, |h, c| h.world.get_v(lamp) == LAMP_ON && c.world.get_v(lamp) == LAMP_ON));
+        // A pressed button pops back out by itself.
+        client.world.set_v(button, BUTTON_ON);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(button) == BUTTON_ON));
+        assert!(pump(&mut host, &mut client, |h, c| h.world.get_v(button) == BUTTON && c.world.get_v(button) == BUTTON));
+        // Clients can't power dust or plates themselves.
+        client.world.set_v(lamp + IVec3::X, WIRE_ON);
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.world.get_v(lamp + IVec3::X), AIR);
     }
 
     #[test]

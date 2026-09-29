@@ -284,6 +284,8 @@ impl Generator {
                             b[i] = DIAMOND_ORE;
                         } else if y < 32 && (0.0215..0.0245).contains(&r) && r2 < 0.55 {
                             b[i] = GOLD_ORE;
+                        } else if y < 16 && (0.0245..0.029).contains(&r) && r2 < 0.55 {
+                            b[i] = ZAP_ORE;
                         }
                     }
                     for (oi, ore) in self.ores.iter().enumerate() {
@@ -411,6 +413,8 @@ pub struct World {
     /// collected where the world lives (`simulate_liquids`).
     pub liquid_dirty: HashSet<IVec3>,
     pub simulate_liquids: bool,
+    /// Cells where Zappy Dust contraptions may need updating (see wiring.rs); same rules.
+    pub zap_dirty: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -447,6 +451,7 @@ impl World {
             containers: HashMap::new(),
             structure_loot: true,
             liquid_dirty: HashSet::new(),
+            zap_dirty: HashSet::new(),
             simulate_liquids: true,
             pending: HashSet::new(),
             edit_log: Vec::new(),
@@ -474,10 +479,15 @@ impl World {
                     if (i as usize) < CHUNK_VOL && valid_block(id) {
                         chunk.blocks.set(i as usize, id);
                         // Liquids placed or moved by players pick up where they left off.
-                        if self.simulate_liquids && is_liquid(id) {
+                        if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
                             let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                             let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
-                            self.liquid_dirty.insert(ivec3(cx * CW + lx, y, cz * CW + lz));
+                            let p = ivec3(cx * CW + lx, y, cz * CW + lz);
+                            if is_liquid(id) {
+                                self.liquid_dirty.insert(p);
+                            } else {
+                                self.zap_dirty.insert(p);
+                            }
                         }
                     }
                 }
@@ -631,6 +641,7 @@ impl World {
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
         if self.simulate_liquids {
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
+            self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT);
         }
         let xs: &[i32] = if lx == 0 { &[-1, 0] } else if lx == CW - 1 { &[0, 1] } else { &[0] };
         let zs: &[i32] = if lz == 0 { &[-1, 0] } else if lz == CW - 1 { &[0, 1] } else { &[0] };
@@ -650,6 +661,17 @@ impl World {
             self.liquid_dirty.insert(p);
             for d in SIDES {
                 self.liquid_dirty.insert(p + d);
+            }
+        }
+    }
+
+    /// The same for Zappy Dust: a switch flipped or a wire laid wakes its neighbours.
+    fn wake_zappy(&mut self, p: IVec3, involved: bool) {
+        const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
+        if involved || SIDES.iter().any(|d| is_zappy(self.get_v(p + *d))) {
+            self.zap_dirty.insert(p);
+            for d in SIDES {
+                self.zap_dirty.insert(p + d);
             }
         }
     }

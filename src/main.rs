@@ -38,6 +38,7 @@ mod sound;
 mod texture;
 mod ui;
 mod weather;
+mod wiring;
 mod world;
 mod xp;
 
@@ -2435,7 +2436,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2564,7 +2565,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2748,6 +2749,38 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "zappy" && frames == 125 {
+                // A lever wired to a row of lamps and a door; a button and a plate beside.
+                // Laid out on the grid (dust only links to its neighbours).
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: f32, ro: f32, up: i32| base + f * fo.round() as i32 + r * ro.round() as i32 + IVec3::Y * up;
+                let w = &mut app.game.world;
+                w.set_v(at(4.0, -4.0, 0), block::LEVER_ON);
+                for k in 0..9 {
+                    w.set_v(at(4.0, -3.0 + k as f32, 0), block::WIRE);
+                }
+                for k in 0..4 {
+                    w.set_v(at(5.0 + k as f32, 5.0, 0), block::WIRE);
+                }
+                for k in 0..3 {
+                    w.set_v(at(5.0, -2.0 + k as f32 * 3.0, 0), block::LAMP);
+                    w.set_v(at(5.0, -2.0 + k as f32 * 3.0, 1), block::LAMP);
+                }
+                let d = at(9.0, 5.0, 0);
+                w.set_v(d, block::door(0, false, false));
+                w.set_v(d + IVec3::Y, block::door(0, false, true));
+                w.set_v(at(3.0, -1.5, 0), block::BUTTON);
+                w.set_v(at(2.5, 1.0, 0), block::PLATE);
+                w.set_v(at(8.0, -4.0, 0), block::ZAP_BLOCK);
+                w.set_v(at(8.0, -3.0, 0), block::LAMP);
+                app.game.inv.add(block::ZAP_DUST, 32);
+                app.game.inv.add(block::LEVER, 2);
+                app.game.inv.add(block::LAMP, 4);
             }
             if s.mode == "liquids" && frames == 125 {
                 // A waterfall off a pillar, a lava pool, and where they met.

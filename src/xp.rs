@@ -67,6 +67,7 @@ pub fn ore_xp(id: Id, rng: &mut Rng) -> u32 {
         COAL_ORE => rng.int(0, 2) as u32,
         IRON_ORE | GOLD_ORE => 1,
         DIAMOND_ORE => rng.int(3, 7) as u32,
+        ZAP_ORE => rng.int(1, 5) as u32,
         _ => 0,
     }
 }

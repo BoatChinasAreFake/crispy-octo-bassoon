@@ -194,6 +194,15 @@ pub const T_WOOF_SKIN: u16 = 217;
 pub const T_WOOF_FACE: u16 = 218;
 pub const T_COLLAR: u16 = 219;
 pub const T_SHEARS: u16 = 220;
+pub const T_ZAP_ORE: u16 = 221;
+pub const T_WIRE: u16 = 222;
+pub const T_WIRE_ON: u16 = 223;
+pub const T_LEVER: u16 = 224;
+pub const T_LEVER_ON: u16 = 225;
+pub const T_ZAP_BLOCK: u16 = 226;
+pub const T_LAMP: u16 = 227;
+pub const T_LAMP_ON: u16 = 228;
+pub const T_ZAP_DUST: u16 = 229;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1125,6 +1134,25 @@ const WORM: [&str; 16] = [
     "................",
 ];
 
+const DUST_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "........#.......",
+    ".......#r#......",
+    "....#.#rhr#.....",
+    "...#r##rrr#.#...",
+    "..#rhr#rr#.#r#..",
+    "..#rrr#r#.#rhr#.",
+    "...#r#.#..#rrr#.",
+    "....#..#r##r#...",
+    "......#rhr##....",
+    ".....#rrrrr#....",
+    "......#####.....",
+    "................",
+    "................",
+];
+
 const SHEARS_SPRITE: [&str; 16] = [
     "................",
     "...........##...",
@@ -1946,6 +1974,58 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let glint = (x * 7 + y * 3) % 23 == 0;
         if glint { rgb(120, 90, 170) } else { shade(rgb(28, 20, 40), 1.0 + n * 0.5 + r.range(-0.1, 0.1)) }
     });
+    // ---- Zappy Dust
+    a.ore(T_ZAP_ORE, rgb(230, 40, 40), rgb(150, 10, 10));
+    for (tile, lit) in [(T_WIRE, false), (T_WIRE_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            // A cross of dust with a blob in the middle.
+            let (dx, dy) = ((x as i32 - 7).abs(), (y as i32 - 7).abs());
+            let on = dx <= 1 || dy <= 1 || (dx <= 3 && dy <= 3);
+            if !on {
+                [0, 0, 0, 0]
+            } else if lit {
+                shade(rgb(255, 40, 30), r.range(0.85, 1.15))
+            } else {
+                shade(rgb(110, 10, 10), r.range(0.85, 1.15))
+            }
+        });
+    }
+    for (tile, on) in [(T_LEVER, false), (T_LEVER_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            let base = y >= 12 && (4..12).contains(&x);
+            // The handle leans left when off, right when on.
+            let t = (12 - y as i32).max(0) as f32 / 10.0;
+            let hx = 7.5 + if on { t * 4.0 } else { -t * 4.0 };
+            let handle = y < 12 && y >= 2 && (x as f32 - hx).abs() < 1.0;
+            let knob = y < 4 && (x as f32 - hx).abs() < 1.5;
+            if base {
+                shade(rgb(120, 120, 120), r.range(0.85, 1.1))
+            } else if knob && on {
+                rgb(255, 50, 40)
+            } else if knob || handle {
+                shade(rgb(140, 105, 60), r.range(0.9, 1.1))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    a.each(T_ZAP_BLOCK, |x, y, r, _| {
+        let sparkle = (x * 5 + y * 3) % 13 == 0;
+        if sparkle { rgb(255, 180, 170) } else { shade(rgb(200, 25, 20), r.range(0.8, 1.1)) }
+    });
+    for (tile, on) in [(T_LAMP, false), (T_LAMP_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            let frame = x == 0 || y == 0 || x == 15 || y == 15 || x == 7 || y == 7;
+            if frame {
+                rgb(70, 45, 30)
+            } else if on {
+                shade(rgb(255, 225, 150), r.range(0.9, 1.08))
+            } else {
+                shade(rgb(120, 80, 55), r.range(0.85, 1.1))
+            }
+        });
+    }
+    a.sprite(T_ZAP_DUST, &DUST_SPRITE, &[('#', rgb(90, 5, 5)), ('r', rgb(220, 30, 25)), ('h', rgb(255, 120, 100))]);
     // ---- Animals
     a.speckle(T_WOOF_SKIN, rgb(200, 196, 190), 0.07);
     a.copy(T_WOOF_SKIN, T_WOOF_FACE);
