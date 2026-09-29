@@ -24,6 +24,7 @@ use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 600.0;
 
+#[derive(Default)]
 pub struct Controls {
     pub input: Input,
     pub attack_held: bool,
@@ -1469,6 +1470,10 @@ impl Game {
         if !self.player.sneaking && crate::decor::is_frame(hit_id) && self.use_frame(hit_pos) {
             return;
         }
+        // Gates and trapdoors swing (sneak to place against them instead).
+        if !self.player.sneaking && self.toggle_hinged(hit_pos) {
+            return;
+        }
         // Doors open and close (sneak to place against one instead).
         if is_door(hit_id) && !self.player.sneaking {
             self.toggle_door(hit_pos);
@@ -1534,8 +1539,8 @@ impl Game {
         match held {
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
             TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | SIGN_FIRST if !is_solid(below) => return,
-            // Frames go on walls.
-            FRAME_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
+            // Frames and ladders go on walls.
+            FRAME_FIRST | LADDER_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {

@@ -117,7 +117,21 @@ pub const FRAME_FIRST: Id = 143;
 /// Number of base-game blocks; mod blocks start here.
 /// Grows into a tree (see trees.rs).
 pub const SAPLING: Id = 147;
-pub const NUM_BLOCKS: Id = 148;
+/// Building bits (see carpentry.rs). Fences and panes: `FIRST + mask` of the
+/// sides they join (1 east, 2 west, 4 south, 8 north).
+pub const FENCE_FIRST: Id = 148;
+pub const PANE_FIRST: Id = 164;
+/// Gates: `GATE_FIRST + x_axis * 2 + open` (x_axis: it spans east-west).
+pub const GATE_FIRST: Id = 180;
+/// Ladders: `LADDER_FIRST + facing` (the wall they're on, like item frames).
+pub const LADDER_FIRST: Id = 184;
+/// Trapdoors: `TRAPDOOR_FIRST + facing * 2 + open` (the hinge side).
+pub const TRAPDOOR_FIRST: Id = 188;
+/// Coloured wool (`DYED_WOOL + colour - 1`; colour 0, white, is plain Wool) and
+/// stained glass (`STAINED_GLASS + colour`). Colours: see carpentry::COLOURS.
+pub const DYED_WOOL: Id = 196;
+pub const STAINED_GLASS: Id = 203;
+pub const NUM_BLOCKS: Id = 211;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -196,8 +210,10 @@ pub const MINECART: Id = FIRST_ITEM + 86;
 pub const COMPASS: Id = FIRST_ITEM + 87;
 pub const MAP: Id = FIRST_ITEM + 88;
 pub const APPLE: Id = FIRST_ITEM + 89;
+/// Dyes, one per colour (see carpentry::COLOURS).
+pub const DYE_FIRST: Id = FIRST_ITEM + 90;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 90;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 98;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -340,6 +356,16 @@ pub enum Shape {
     Sign { facing: u8 },
     /// A frame hung on one side of its cell.
     Frame { facing: u8 },
+    /// A fence post with rails to the sides in `mask` (1 east, 2 west, 4 south, 8 north).
+    Fence { mask: u8 },
+    /// A glass pane, joined to the sides in `mask`.
+    Pane { mask: u8 },
+    /// A fence gate across x (or z), open or shut.
+    Gate { x_axis: bool, open: bool },
+    /// A ladder on the `facing` side of its cell.
+    Ladder { facing: u8 },
+    /// A trapdoor: shut, a thin floor; open, flipped up against its `facing` side.
+    Trapdoor { facing: u8, open: bool },
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -390,6 +416,58 @@ impl Shape {
                 let board = if facing % 2 == 0 { ([0.05, 0.55, 0.44], [0.95, 1.0, 0.56]) } else { ([0.44, 0.55, 0.05], [0.56, 1.0, 0.95]) };
                 ([post, board, full], 2)
             }
+            Shape::Fence { mask } => {
+                let post = ([0.375, 0.0, 0.375], [0.625, 1.0, 0.625]);
+                let (mut v, mut n) = ([post, post, post], 1);
+                let (y0, y1) = (0.375, 0.9375);
+                if mask & 3 != 0 {
+                    v[n] = ([if mask & 2 != 0 { 0.0 } else { 0.5 }, y0, 0.4375], [if mask & 1 != 0 { 1.0 } else { 0.5 }, y1, 0.5625]);
+                    n += 1;
+                }
+                if mask & 12 != 0 {
+                    v[n] = ([0.4375, y0, if mask & 8 != 0 { 0.0 } else { 0.5 }], [0.5625, y1, if mask & 4 != 0 { 1.0 } else { 0.5 }]);
+                    n += 1;
+                }
+                (v, n)
+            }
+            Shape::Pane { mask } => {
+                let post = ([0.4375, 0.0, 0.4375], [0.5625, 1.0, 0.5625]);
+                let (mut v, mut n) = ([post, post, post], 1);
+                if mask & 3 != 0 {
+                    v[n] = ([if mask & 2 != 0 { 0.0 } else { 0.5 }, 0.0, 0.4375], [if mask & 1 != 0 { 1.0 } else { 0.5 }, 1.0, 0.5625]);
+                    n += 1;
+                }
+                if mask & 12 != 0 {
+                    v[n] = ([0.4375, 0.0, if mask & 8 != 0 { 0.0 } else { 0.5 }], [0.5625, 1.0, if mask & 4 != 0 { 1.0 } else { 0.5 }]);
+                    n += 1;
+                }
+                (v, n)
+            }
+            Shape::Gate { x_axis, open: false } => {
+                let b = if x_axis { ([0.0, 0.375, 0.4375], [1.0, 1.0, 0.5625]) } else { ([0.4375, 0.375, 0.0], [0.5625, 1.0, 1.0]) };
+                ([b, full, full], 1)
+            }
+            Shape::Gate { x_axis, open: true } => {
+                // Two halves swung back against the posts' sides.
+                let (a, b) = if x_axis {
+                    (([0.0, 0.375, 0.4375], [0.125, 1.0, 1.0]), ([0.875, 0.375, 0.4375], [1.0, 1.0, 1.0]))
+                } else {
+                    (([0.4375, 0.375, 0.0], [1.0, 1.0, 0.125]), ([0.4375, 0.375, 0.875], [1.0, 1.0, 1.0]))
+                };
+                ([a, b, full], 2)
+            }
+            Shape::Ladder { facing } => {
+                let t = 0.125;
+                let b = match facing % 4 {
+                    0 => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                    1 => ([1.0 - t, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                    2 => ([0.0, 0.0, 1.0 - t], [1.0, 1.0, 1.0]),
+                    _ => ([0.0, 0.0, 0.0], [t, 1.0, 1.0]),
+                };
+                ([b, full, full], 1)
+            }
+            Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
+            Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
             Shape::Frame { facing } => {
                 let t = 1.0 / 16.0;
                 let b = match facing % 4 {
@@ -461,6 +539,9 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if (FRAME_FIRST..FRAME_FIRST + 4).contains(&id) {
         return Some(FRAME_FIRST);
+    }
+    if let Some(f) = crate::carpentry::family(id) {
+        return Some(f);
     }
     if let Some((family, _)) = slab_of(id) {
         return Some(family);
@@ -904,6 +985,56 @@ impl Registry {
         let mut sapling = def("sapling", "Sapling (Tree, Eventually)", Cross, false, false, [T_SAPLING; 3], 0.0, 0, false, SAPLING, 0.0, S_GRASS);
         sapling.creative = true;
         blocks.push(sapling);
+        // Fences and panes: every combination of joined sides.
+        for mask in 0..16u8 {
+            let mut d = def(leak(&format!("fence{}", if mask == 0 { String::new() } else { format!("_{mask}") })), "Fence (Keeps Honest Animals In)", Shaped, true, false, [T_PLANKS; 3], 2.0, 0, false, FENCE_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Fence { mask };
+            d.creative = mask == 0;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for mask in 0..16u8 {
+            let mut d = def(leak(&format!("glass_pane{}", if mask == 0 { String::new() } else { format!("_{mask}") })), "Glass Pane (Window, Budget)", Shaped, true, false, [T_GLASS; 3], 0.3, 0, false, AIR, 0.0, S_GLASS);
+            d.shape = Shape::Pane { mask };
+            d.creative = mask == 0;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for (x_axis, open) in [(false, false), (false, true), (true, false), (true, true)] {
+            let key = format!("fence_gate{}{}", if x_axis { "_x" } else { "" }, if open { "_open" } else { "" });
+            let mut d = def(leak(&key), "Fence Gate (Swings Both Ways)", Shaped, !open, false, [T_PLANKS; 3], 2.0, 0, false, GATE_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Gate { x_axis, open };
+            d.creative = !x_axis && !open;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("ladder{}", ["", "_east", "_south", "_west"][facing as usize])), "Ladder (Up, Mostly)", Shaped, false, false, [T_LADDER; 3], 0.4, 0, false, LADDER_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Ladder { facing };
+            d.creative = facing == 0;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            for open in [false, true] {
+                let key = format!("trapdoor{}{}", ["", "_east", "_south", "_west"][facing as usize], if open { "_open" } else { "" });
+                let mut d = def(leak(&key), "Trapdoor (Floor Door)", Shaped, true, false, [T_TRAPDOOR; 3], 3.0, 0, false, TRAPDOOR_FIRST, 0.0, S_WOOD);
+                d.shape = Shape::Trapdoor { facing, open };
+                d.creative = facing == 0 && !open;
+                d.see_through = true;
+                blocks.push(d);
+            }
+        }
+        for c in 1..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            blocks.push(def(leak(&format!("{key}_wool")), leak(&format!("{name} Wool")), Cube, true, true, [T_DYED_WOOL + c - 1; 3], 0.8, 0, false, DYED_WOOL + c - 1, 0.0, S_GRASS));
+        }
+        for c in 0..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            let mut d = def(leak(&format!("{key}_stained_glass")), leak(&format!("{name} Stained Glass")), Cube, true, false, [T_STAINED_GLASS + c; 3], 0.3, 0, false, AIR, 0.0, S_GLASS);
+            d.see_through = true;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1012,6 +1143,10 @@ impl Registry {
             item("map", "Map (You Are Here)", T_MAP),
             ItemDef { food: Some(4.0), ..item("apple", "Apple (Keeps the Doctor Confused)", T_APPLE) },
         ]);
+        for c in 0..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            items.push(item(leak(&format!("{key}_dye")), leak(&format!("{name} Dye")), T_DYE_FIRST + c));
+        }
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1084,12 +1219,33 @@ impl Registry {
             r(&[(IRON, 4), (ZAP_DUST, 1)], (COMPASS, 1)),
             r(&[(WHEAT, 8), (COMPASS, 1)], (MAP, 1)),
             r(&[(PLANKS, 6), (STICK, 1)], (SIGN_FIRST, 3)),
+            r(&[(PLANKS, 4), (STICK, 2)], (FENCE_FIRST, 3)),
+            r(&[(STICK, 4), (PLANKS, 2)], (GATE_FIRST, 1)),
+            r(&[(STICK, 7)], (LADDER_FIRST, 3)),
+            r(&[(PLANKS, 6)], (TRAPDOOR_FIRST, 2)),
+            r(&[(GLASS, 6)], (PANE_FIRST, 16)),
+            r(&[(BONE_DUST, 1)], (DYE_FIRST, 2)),
+            r(&[(COAL, 1)], (DYE_FIRST + 1, 2)),
+            r(&[(FLOWER, 1)], (DYE_FIRST + 2, 2)),
+            r(&[(PUMPKIN, 1)], (DYE_FIRST + 3, 3)),
+            r(&[(GOLD_INGOT, 1)], (DYE_FIRST + 4, 4)),
+            r(&[(CACTUS, 1)], (DYE_FIRST + 5, 2)),
+            r(&[(TROPICAL, 1)], (DYE_FIRST + 6, 2)),
+            r(&[(DYE_FIRST + 2, 1), (DYE_FIRST + 6, 1)], (DYE_FIRST + 7, 2)),
             r(&[(STICK, 8), (WOOL, 1)], (FRAME_FIRST, 1)),
             r(&[(IRON, 5)], (MINECART, 1)),
             r(&[(IRON, 6), (STICK, 1)], (RAIL_FIRST, 16)),
             r(&[(GOLD_INGOT, 6), (STICK, 1), (ZAP_DUST, 1)], (POWERED_RAIL, 6)),
         ];
         let mut recipes = recipes;
+        // Dye wool one block at a time, glass eight at a time.
+        for c in 0..8u16 {
+            let wool = if c == 0 { WOOL } else { DYED_WOOL + c - 1 };
+            if c > 0 {
+                recipes.push(r(&[(WOOL, 1), (DYE_FIRST + c, 1)], (wool, 1)));
+            }
+            recipes.push(r(&[(GLASS, 8), (DYE_FIRST + c, 1)], (STAINED_GLASS + c, 8)));
+        }
         for (m, (full, _)) in MATERIALS.iter().enumerate() {
             recipes.push(r(&[(*full, 3)], (slab(m, false), 6)));
             recipes.push(r(&[(*full, 6)], (stairs(m, 0), 4)));

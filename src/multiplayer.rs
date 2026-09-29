@@ -787,6 +787,10 @@ impl Game {
             let p = IVec3::new(x, y, z);
             return old == AIR && crate::scorch::portal_frame(&self.world, p, new == PORTAL_X).is_some();
         }
+        // Gates and trapdoors swing; fences and panes may be placed at any join (the host reshapes them).
+        if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new)) {
+            return a == b && matches!(a, GATE_FIRST | TRAPDOOR_FIRST);
+        }
         // Levers flip both ways, buttons only go in (the host lets them out).
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
             return true;

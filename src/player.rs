@@ -146,6 +146,19 @@ impl Player {
             if input.jump {
                 b.vel.y = (b.vel.y + 22.0 * dt).min(3.5);
             }
+        } else if crate::carpentry::on_ladder(world, b.min(), b.max()) {
+            // Ladders: walk into them (or jump) to climb, sneak to hold on, slide down otherwise.
+            let climbing = input.forward.abs() > 0.1 || input.strafe.abs() > 0.1 || input.jump;
+            b.vel.y = if climbing && !self.sneaking {
+                3.0
+            } else if self.sneaking {
+                0.0
+            } else {
+                (b.vel.y - GRAVITY * dt).max(-2.5)
+            };
+            b.vel.x = b.vel.x.clamp(-2.5, 2.5);
+            b.vel.z = b.vel.z.clamp(-2.5, 2.5);
+            self.fall_start = b.pos.y;
         } else {
             b.vel.y = (b.vel.y - GRAVITY * dt).max(-60.0);
             if input.jump && b.on_ground {

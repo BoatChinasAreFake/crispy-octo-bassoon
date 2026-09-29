@@ -41,15 +41,26 @@ impl Body {
 /// The first block box overlapping the box `min..max`, in world coordinates.
 fn collides(world: &World, min: Vec3, max: Vec3) -> Option<(Vec3, Vec3)> {
     const E: f32 = 1e-4;
-    for y in (min.y + E).floor() as i32..=(max.y - E).floor() as i32 {
+    let low = (min.y + E).floor() as i32;
+    // One row lower too: fences and shut gates reach above their cell.
+    for y in low - 1..=(max.y - E).floor() as i32 {
         for z in (min.z + E).floor() as i32..=(max.z - E).floor() as i32 {
             for x in (min.x + E).floor() as i32..=(max.x - E).floor() as i32 {
                 let id = world.get(x, y, z);
                 if !is_solid(id) {
                     continue;
                 }
+                let tall = crate::carpentry::is_tall(id);
+                if y < low && !tall {
+                    continue;
+                }
                 let cell = Vec3::new(x as f32, y as f32, z as f32);
-                let (boxes, n) = block_boxes(id);
+                let (mut boxes, n) = block_boxes(id);
+                if tall {
+                    for b in boxes.iter_mut() {
+                        b.1[1] = crate::carpentry::TALL;
+                    }
+                }
                 for &(a, b) in &boxes[..n] {
                     let (bmin, bmax) = (cell + Vec3::from_array(a), cell + Vec3::from_array(b));
                     if min.x < bmax.x - E && max.x > bmin.x + E && min.y < bmax.y - E && max.y > bmin.y + E && min.z < bmax.z - E && max.z > bmin.z + E {

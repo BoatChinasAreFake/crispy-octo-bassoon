@@ -41,6 +41,9 @@ impl Game {
         if held == SIGN_FIRST {
             return SIGN_FIRST + self.facing() as Id;
         }
+        if let Some(id) = self.hinged_facing(held, normal) {
+            return id;
+        }
         if held == FRAME_FIRST {
             return FRAME_FIRST + crate::decor::frame_facing(normal).unwrap_or(0) as Id;
         }

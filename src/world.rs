@@ -678,6 +678,11 @@ impl World {
         if self.simulate_liquids && matches!(old, LOG | LEAVES) && !matches!(id, LOG | LEAVES) {
             self.wake_leaves(p);
         }
+        // Fences and panes join whatever is beside them (where the world lives; see carpentry.rs).
+        let glassy = |b: Id| b == GLASS || crate::carpentry::is_stained_glass(b);
+        if self.simulate_liquids && (is_opaque(old) != is_opaque(id) || crate::carpentry::family(old) != crate::carpentry::family(id) || glassy(old) != glassy(id)) {
+            self.reshape_joins(p);
+        }
         if self.simulate_liquids {
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
             self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));

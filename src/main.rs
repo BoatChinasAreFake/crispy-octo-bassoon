@@ -8,6 +8,7 @@ mod animals;
 mod anvil;
 mod block;
 mod building;
+mod carpentry;
 mod combat;
 mod containers;
 mod decor;
@@ -2801,7 +2802,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2970,7 +2971,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3154,6 +3155,37 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "carpentry" && frames == 125 {
+                // A fenced pen with a gate, a wall with a ladder, panes and colours.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                for k in -3..=3 {
+                    app.game.world.set_v(at(3, k, 0), if k == 0 { carpentry::gate(f.x != 0, false) } else { block::FENCE_FIRST });
+                    app.game.world.set_v(at(7, k, 0), block::FENCE_FIRST);
+                }
+                for fo in 4..7 {
+                    app.game.world.set_v(at(fo, -3, 0), block::FENCE_FIRST);
+                    app.game.world.set_v(at(fo, 3, 0), block::FENCE_FIRST);
+                }
+                app.game.alloc_mob(entity::MobKind::Oinker, at(5, 0, 0).as_vec3() + Vec3::new(0.5, 0.0, 0.5));
+                // A wall of coloured wool and stained glass panes, with a ladder.
+                for k in 4..12 {
+                    for up in 0..4 {
+                        let c = (k + up) as u16 % 8;
+                        let id = if up == 2 && k % 2 == 0 { block::PANE_FIRST } else if up == 3 { block::STAINED_GLASS + c } else if c == 0 { block::WOOL } else { block::DYED_WOOL + c - 1 };
+                        app.game.world.set_v(at(9, k - 8, up), id);
+                    }
+                }
+                for up in 0..4 {
+                    app.game.world.set_v(at(8, -4, up), block::LADDER_FIRST + building_facing(-f));
+                }
+                app.game.world.set_v(at(2, 3, 0), carpentry::trapdoor(0, true));
+                app.game.world.set_v(at(2, 4, 0), carpentry::trapdoor(0, false));
             }
             if s.mode == "decor" && frames == 125 {
                 // A signpost, a framed sword on a wall, and a map in hand.
@@ -3459,4 +3491,9 @@ async fn game_main() {
         }
         next_frame().await;
     }
+}
+
+/// The ladder/frame facing for a wall on side `d` of the cell.
+fn building_facing(d: IVec3) -> block::Id {
+    crate::decor::frame_facing(-d).unwrap_or(0) as block::Id
 }

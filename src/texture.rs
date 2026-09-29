@@ -226,6 +226,12 @@ pub const T_COMPASS: u16 = 256;
 pub const T_MAP: u16 = 257;
 pub const T_SAPLING: u16 = 258;
 pub const T_APPLE: u16 = 259;
+pub const T_LADDER: u16 = 260;
+pub const T_TRAPDOOR: u16 = 261;
+/// Seven dyed wools (colours 1..8), eight stained glasses and eight dyes.
+pub const T_DYED_WOOL: u16 = 262;
+pub const T_STAINED_GLASS: u16 = 269;
+pub const T_DYE_FIRST: u16 = 277;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2298,6 +2304,51 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             [0, 0, 0, 0]
         }
     });
+    a.each(T_LADDER, |x, y, r, _| {
+        let rail = x < 2 || x > 13;
+        let rung = y % 4 == 1 && (2..14).contains(&x);
+        if rail || rung { shade(rgb(125, 90, 50), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_TRAPDOOR, |x, y, r, _| {
+        let frame = x < 2 || y < 2 || x > 13 || y > 13 || x == 7 || x == 8;
+        let hole = !frame && (y % 5 == 3) && (3..13).contains(&x);
+        if hole { [0, 0, 0, 0] } else { shade(rgb(150, 110, 65), r.range(0.8, 1.1) * if frame { 0.85 } else { 1.0 }) }
+    });
+    for c in 0..8u16 {
+        let tint = crate::carpentry::colour_rgb(c as usize);
+        if c > 0 {
+            let to = T_DYED_WOOL + c - 1;
+            a.copy(T_WOOL, to);
+            for y in 0..16 {
+                for x in 0..16 {
+                    let p = a.get(to, x, y);
+                    let k = (p[0] as f32 + p[1] as f32 + p[2] as f32) / (3.0 * 235.0);
+                    a.set(to, x, y, rgb((tint[0] as f32 * k).min(255.0) as u8, (tint[1] as f32 * k).min(255.0) as u8, (tint[2] as f32 * k).min(255.0) as u8));
+                }
+            }
+        }
+        let to = T_STAINED_GLASS + c;
+        a.each(to, |x, y, r, _| {
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            let glint = (x + y == 9 || x + y == 11) && (3..9).contains(&x);
+            let pane = (x + y) % 3 == 0;
+            let m = |k: f32| [(tint[0] as f32 * k) as u8, (tint[1] as f32 * k) as u8, (tint[2] as f32 * k) as u8, 255];
+            if edge { m(r.range(0.6, 0.75)) } else if glint { [255, 255, 255, 200] } else if pane { m(r.range(0.9, 1.0)) } else { [0, 0, 0, 0] }
+        });
+        a.each(T_DYE_FIRST + c, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 9.0);
+            let blob = dx * dx + dy * dy * 1.4 < 22.0 && y > 4;
+            let nozzle = (6..10).contains(&x) && (3..6).contains(&y);
+            if nozzle {
+                rgb(200, 200, 205)
+            } else if blob {
+                let k = if dx < -1.0 && dy < -1.0 { 1.25 } else { r.range(0.85, 1.05) };
+                [(tint[0] as f32 * k).min(255.0) as u8, (tint[1] as f32 * k).min(255.0) as u8, (tint[2] as f32 * k).min(255.0) as u8, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
     a.sprite(T_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(225, 210, 170)), ('g', rgb(110, 160, 80)), ('b', rgb(80, 120, 210)), ('r', rgb(200, 40, 40))]);
     a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
     a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);
