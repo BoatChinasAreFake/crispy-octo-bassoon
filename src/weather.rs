@@ -147,6 +147,11 @@ impl Game {
             self.world.set_v(under, AIR);
             self.tnts.push(crate::entity::PrimedTnt { pos: under.as_vec3(), fuse: 1.0 });
         }
+        // Lightning starts fires.
+        let at_cell = under + macroquad::math::IVec3::Y;
+        if !self.is_client() {
+            self.ignite(at_cell);
+        }
         let cause = "was struck by lightning. Statistically impressive";
         if !self.dedicated && self.player.body.pos.distance(at) < LIGHTNING_RADIUS {
             self.player.hurt = 0.0;

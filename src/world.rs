@@ -417,6 +417,8 @@ pub struct World {
     /// Every sapling in loaded or edited chunks, and leaves that should check
     /// whether they still hang on to a tree (see trees.rs).
     pub saplings: HashSet<IVec3>,
+    /// Every fire burning (see fire.rs).
+    pub fires: HashSet<IVec3>,
     pub leaf_checks: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
@@ -457,6 +459,7 @@ impl World {
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
             saplings: HashSet::new(),
+            fires: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
             frames: HashMap::new(),
@@ -499,10 +502,11 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING {
+                    if id == SAPLING || id == FIRE {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
-                        self.saplings.insert(ivec3(cx * CW + lx, y, cz * CW + lz));
+                        let p = ivec3(cx * CW + lx, y, cz * CW + lz);
+                        if id == SAPLING { self.saplings.insert(p); } else { self.fires.insert(p); }
                     }
                     // Liquids and contraptions pick up where they left off.
                     if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
@@ -674,6 +678,11 @@ impl World {
             self.saplings.insert(p);
         } else if old == SAPLING {
             self.saplings.remove(&p);
+        }
+        if id == FIRE {
+            self.fires.insert(p);
+        } else if old == FIRE {
+            self.fires.remove(&p);
         }
         if self.simulate_liquids && matches!(old, LOG | LEAVES) && !matches!(id, LOG | LEAVES) {
             self.wake_leaves(p);

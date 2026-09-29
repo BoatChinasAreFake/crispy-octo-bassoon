@@ -232,6 +232,7 @@ pub const T_TRAPDOOR: u16 = 261;
 pub const T_DYED_WOOL: u16 = 262;
 pub const T_STAINED_GLASS: u16 = 269;
 pub const T_DYE_FIRST: u16 = 277;
+pub const T_FIRE: u16 = 285;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2303,6 +2304,18 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         } else {
             [0, 0, 0, 0]
         }
+    });
+    a.each(T_FIRE, |x, y, r, p| {
+        // Flickering tongues: taller in the middle, yellow at the heart.
+        let fx = x as f32 / 15.0;
+        let wave = p.noise2(fx * 5.0, 0.3) * 0.25;
+        let height = 0.9 - (fx - 0.5).abs() * 0.9 + wave;
+        let h = 1.0 - y as f32 / 15.0;
+        if h > height || r.chance(0.08) {
+            return [0, 0, 0, 0];
+        }
+        let core = h < height * 0.55 && (fx - 0.5).abs() < 0.3;
+        if core { rgb(255, 225, 90) } else { shade(rgb(240, 110, 30), r.range(0.8, 1.1)) }
     });
     a.each(T_LADDER, |x, y, r, _| {
         let rail = x < 2 || x > 13;

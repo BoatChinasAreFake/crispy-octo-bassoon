@@ -148,6 +148,8 @@ pub struct Game {
     /// Leaves withering away (seconds left), and the sapling growth clock (see trees.rs).
     pub decaying: Vec<(IVec3, f32)>,
     pub sapling_timer: f32,
+    /// Fire update clock (see fire.rs).
+    pub fire_timer: f32,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -270,6 +272,7 @@ impl Game {
             admin: Default::default(),
             decaying: Vec::new(),
             sapling_timer: 0.0,
+            fire_timer: 0.0,
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],
@@ -2142,6 +2145,7 @@ impl Game {
         }
         self.farm_tick(dt);
         self.trees_tick(dt);
+        self.fire_tick(dt);
         self.container_tick(dt);
         self.drops_tick(dt);
         self.orbs_tick(dt);

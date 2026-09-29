@@ -131,7 +131,9 @@ pub const TRAPDOOR_FIRST: Id = 188;
 /// stained glass (`STAINED_GLASS + colour`). Colours: see carpentry::COLOURS.
 pub const DYED_WOOL: Id = 196;
 pub const STAINED_GLASS: Id = 203;
-pub const NUM_BLOCKS: Id = 211;
+/// Burning (see fire.rs).
+pub const FIRE: Id = 211;
+pub const NUM_BLOCKS: Id = 212;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -985,6 +987,7 @@ impl Registry {
         let mut sapling = def("sapling", "Sapling (Tree, Eventually)", Cross, false, false, [T_SAPLING; 3], 0.0, 0, false, SAPLING, 0.0, S_GRASS);
         sapling.creative = true;
         blocks.push(sapling);
+        let fire_def;
         // Fences and panes: every combination of joined sides.
         for mask in 0..16u8 {
             let mut d = def(leak(&format!("fence{}", if mask == 0 { String::new() } else { format!("_{mask}") })), "Fence (Keeps Honest Animals In)", Shaped, true, false, [T_PLANKS; 3], 2.0, 0, false, FENCE_FIRST, 0.0, S_WOOD);
@@ -1029,12 +1032,18 @@ impl Registry {
             let (key, name) = crate::carpentry::COLOURS[c as usize];
             blocks.push(def(leak(&format!("{key}_wool")), leak(&format!("{name} Wool")), Cube, true, true, [T_DYED_WOOL + c - 1; 3], 0.8, 0, false, DYED_WOOL + c - 1, 0.0, S_GRASS));
         }
+        {
+            let mut d = def("fire", "Fire (Hot)", Cross, false, false, [T_FIRE; 3], 0.0, 0, false, AIR, 9.0, S_GRASS);
+            d.creative = false;
+            fire_def = Some(d);
+        }
         for c in 0..8u16 {
             let (key, name) = crate::carpentry::COLOURS[c as usize];
             let mut d = def(leak(&format!("{key}_stained_glass")), leak(&format!("{name} Stained Glass")), Cube, true, false, [T_STAINED_GLASS + c; 3], 0.3, 0, false, AIR, 0.0, S_GLASS);
             d.see_through = true;
             blocks.push(d);
         }
+        blocks.extend(fire_def);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");

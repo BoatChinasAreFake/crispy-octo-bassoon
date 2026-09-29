@@ -782,6 +782,10 @@ impl Game {
         if let Some((f, o, true)) = door_state(new) {
             return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
         }
+        // Fire only where it can burn.
+        if new == FIRE {
+            return crate::fire::can_burn_at(&self.world, IVec3::new(x, y, z));
+        }
         // Portals light only inside a real obsidian frame.
         if matches!(new, PORTAL_X | PORTAL_Z) {
             let p = IVec3::new(x, y, z);

@@ -139,7 +139,8 @@ impl Game {
                 return true;
             }
         }
-        false
+        // Not a portal: set it alight.
+        self.spark(hit, normal)
     }
 
     /// Standing in a portal long enough takes you through (the local player).

@@ -179,6 +179,9 @@ impl Game {
                 self.smoke(p.as_vec3() + Vec3::new(0.5, 1.0, 0.5), 6, 0.3);
             }
             self.world.set_v(p, new);
+            if is_lava(new) {
+                self.lava_ignites(p);
+            }
         }
     }
 
@@ -256,6 +259,9 @@ impl Game {
                     lava |= is_lava(self.world.get(x, y, z));
                 }
             }
+        }
+        if !lava && crate::fire::touches_fire(&self.world, min, max) {
+            self.on_fire = self.on_fire.max(4.0);
         }
         if lava {
             self.on_fire = 8.0;

@@ -16,6 +16,7 @@ mod drops;
 mod enchant;
 mod entity;
 mod farming;
+mod fire;
 mod fishing;
 mod game;
 mod hunger;
@@ -3186,6 +3187,10 @@ async fn game_main() {
                 }
                 app.game.world.set_v(at(2, 3, 0), carpentry::trapdoor(0, true));
                 app.game.world.set_v(at(2, 4, 0), carpentry::trapdoor(0, false));
+                // A campfire of sorts: logs, alight.
+                app.game.world.set_v(at(2, -3, 0), block::LOG);
+                app.game.world.set_v(at(2, -3, 1), block::FIRE);
+                app.game.world.set_v(at(2, -2, 0), block::FIRE);
             }
             if s.mode == "decor" && frames == 125 {
                 // A signpost, a framed sword on a wall, and a map in hand.

@@ -714,6 +714,8 @@ impl Mob {
             self.hurt = self.hurt.max(0.2);
         } else if self.body.in_water {
             self.on_fire = 0.0;
+        } else if crate::fire::touches_fire(world, self.body.min(), self.body.max()) {
+            self.on_fire = self.on_fire.max(4.0);
         }
         if self.on_fire > 0.0 {
             self.on_fire -= dt;

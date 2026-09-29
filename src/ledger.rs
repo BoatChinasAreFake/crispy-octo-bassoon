@@ -295,9 +295,22 @@ impl Game {
             }
             return true;
         }
-        // Doors swing for free; a slab onto a slab costs the second slab.
+        // Doors, gates and trapdoors swing for free; a slab onto a slab costs the second slab.
         if is_door(old) && is_door(new) {
             return true;
+        }
+        if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new))
+            && a == b
+        {
+            return true;
+        }
+        // Fire comes from a Sparker (which wears a little).
+        if new == FIRE {
+            let ok = self.peer_has(from, SPARKER);
+            if ok {
+                self.host_wear(from, SPARKER, 1);
+            }
+            return ok;
         }
         if let Some((family, _)) = slab_of(old)
             && new == made_of(old)
