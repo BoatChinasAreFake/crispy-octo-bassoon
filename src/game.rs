@@ -303,7 +303,7 @@ impl Game {
                 (s, _) => s,
             };
             let wear = d.wear.get(i).copied().unwrap_or(0);
-            let wear = s.and_then(|(id, _)| crate::inventory::max_uses(id, wear)).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min((max - 1).min(u16::MAX as u32) as u16))).unwrap_or(0);
+            let wear = s.map(|(id, _)| crate::inventory::sanitize_wear(id, wear)).unwrap_or(0);
             if i < 36 {
                 g.inv.slots[i] = s;
                 g.inv.wear[i] = wear;
@@ -3512,6 +3512,56 @@ mod tests {
         assert_eq!(g.inv.count(ZAP_DUST), 2);
         g.break_block(floor, false);
         assert_eq!(g.world.get_v(floor + IVec3::Y), AIR);
+    }
+
+        #[test]
+    fn enchanted_books() {
+        use crate::anvil::plan;
+        use crate::enchant::{level, merge, offers, offer_seed, with_level, Enchant};
+        // Books take any enchantment at the table, and come out enchanted.
+        let o = offers(BOOK, 0, 15, offer_seed(BOOK, 0)).expect("books are enchantable");
+        assert!(o.iter().all(|x| x.1 != 0));
+        let mut g = arena(70);
+        let pos = IVec3::new(2, 50, 0);
+        g.world.set_v(pos, ENCHANTING_TABLE);
+        g.open_enchanting(pos);
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((BOOK, 5));
+        g.inv.slots[1] = Some((GOLD_INGOT, 5));
+        g.enchant_quick_put(0);
+        g.enchant_quick_put(1);
+        assert_eq!(g.inv.slots[0], Some((BOOK, 4)), "one book at a time");
+        g.xp = crate::xp::points_for_level(30);
+        g.enchant_pick(2);
+        let ui = g.enchanting.as_ref().unwrap();
+        assert_eq!(ui.item, Some((ENCHANTED_BOOK, 1)));
+        let book = ui.wear;
+        assert!(book >> 16 != 0);
+        g.close_enchanting();
+        let slot = g.inv.slots.iter().position(|s| *s == Some((ENCHANTED_BOOK, 1))).unwrap();
+        assert_eq!(g.inv.wear[slot], book, "the book keeps its enchantments");
+
+        // At the anvil, a book's enchantments go onto anything they fit.
+        let sharp3 = with_level(0, Enchant::Sharpness, 3) | with_level(0, Enchant::Efficiency, 2);
+        let r = plan(SWORD_IRON, 40, Some((ENCHANTED_BOOK, 1)), sharp3).unwrap();
+        assert!(r.book && r.used == 1);
+        assert_eq!(level(r.wear, Enchant::Sharpness), 3);
+        assert_eq!(level(r.wear, Enchant::Efficiency), 0, "Efficiency doesn't fit a sword");
+        assert_eq!(r.wear & 0xFFFF, 40, "wear kept");
+        assert_eq!(r.cost, 3);
+        // Two of the same level make one higher; different levels keep the best.
+        let sharp3_sword = with_level(0, Enchant::Sharpness, 3);
+        assert_eq!(level(merge(SWORD_IRON, sharp3_sword, sharp3_sword), Enchant::Sharpness), 4);
+        assert_eq!(level(merge(SWORD_IRON, with_level(0, Enchant::Sharpness, 5), sharp3_sword), Enchant::Sharpness), 5);
+        // Nothing new to add: nothing to do.
+        assert!(plan(SWORD_IRON, with_level(0, Enchant::Sharpness, 5), Some((ENCHANTED_BOOK, 1)), with_level(0, Enchant::Sharpness, 5)).is_none(), "already as good as it gets");
+        assert!(plan(SWORD_IRON, 0, Some((ENCHANTED_BOOK, 1)), with_level(0, Enchant::Protection, 2)).is_none(), "nothing fits");
+        // Merging two enchanted tools merges their enchantments too.
+        let r = plan(PICK_IRON, with_level(100, Enchant::Efficiency, 2), Some((PICK_IRON, 1)), with_level(50, Enchant::Efficiency, 2) | with_level(0, Enchant::Fortune, 1)).unwrap();
+        assert_eq!((level(r.wear, Enchant::Efficiency), level(r.wear, Enchant::Fortune)), (3, 1));
+        // Books merge with books.
+        let r = plan(ENCHANTED_BOOK, with_level(0, Enchant::Protection, 2), Some((ENCHANTED_BOOK, 1)), with_level(0, Enchant::Protection, 2)).unwrap();
+        assert_eq!(level(r.wear, Enchant::Protection), 3);
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

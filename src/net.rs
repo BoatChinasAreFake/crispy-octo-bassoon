@@ -141,7 +141,8 @@ pub enum Msg {
     Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool, weather_cycle: bool },
     /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
     /// `material` (or, `combine`, by merging two of them).
-    Repair { x: i32, y: i32, z: i32, item: Id, material: Id, used: u8, combine: bool },
+    /// `ench`, `other_ench`: the enchantments on the item and on what it was combined with.
+    Repair { x: i32, y: i32, z: i32, item: Id, material: Id, used: u8, combine: bool, ench: u16, other_ench: u16 },
     /// client -> host: my inventory (then armour) with wear, health and hunger, so
     /// the host can remember me when I leave.
     PlayerData { slots: Vec<(Id, u8, u32)>, health: f32, food: f32, saturation: f32 },
@@ -578,7 +579,7 @@ impl Msg {
                 w.u16(*ench);
                 w.u32(*count);
             }
-            Msg::Repair { x, y, z, item, material, used, combine } => {
+            Msg::Repair { x, y, z, item, material, used, combine, ench, other_ench } => {
                 w.u8(39);
                 w.i32(*x);
                 w.i32(*y);
@@ -587,6 +588,8 @@ impl Msg {
                 w.u16(*material);
                 w.u8(*used);
                 w.u8(*combine as u8);
+                w.u16(*ench);
+                w.u16(*other_ench);
             }
         }
         w.0
@@ -713,7 +716,7 @@ impl Msg {
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
-            39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0 },
+            39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -1158,7 +1161,7 @@ mod tests {
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },
             Msg::Enchanted { item: 0x8003, ench: 0x0249, count: 7 },
             Msg::MobInteract { mob: 77, item: 0x8019 },
-            Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false },
+            Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },
             Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1, 0), (0, 0, 0), (0x800c, 1, 99)], burn: 0.5, cook: 0.25 },

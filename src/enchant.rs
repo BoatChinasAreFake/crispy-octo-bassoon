@@ -58,8 +58,11 @@ impl Enchant {
         }
     }
 
-    /// Can `item` carry this enchantment?
+    /// Can `item` carry this enchantment? (Books carry anything.)
     pub fn fits(self, item: Id) -> bool {
+        if item == BOOK || item == ENCHANTED_BOOK {
+            return true;
+        }
         let pick = pick_tier(item) > 0;
         match self {
             Enchant::Efficiency | Enchant::Fortune => pick,
@@ -99,6 +102,32 @@ pub fn with_level(w: Wear, e: Enchant, lvl: u8) -> Wear {
 
 pub fn is_enchanted(w: Wear) -> bool {
     w >> 16 != 0
+}
+
+/// Total levels of all its enchantments.
+pub fn total_levels(w: Wear) -> u32 {
+    Enchant::ALL.iter().map(|e| level(w, *e) as u32).sum()
+}
+
+/// `a`'s enchantments with `b`'s added, as far as they fit `item`: a level
+/// both have goes up by one (to its maximum), otherwise the higher wins.
+/// Only the enchantment bits are returned.
+pub fn merge(item: Id, a: Wear, b: Wear) -> Wear {
+    let mut w = a & 0xFFFF_0000;
+    for e in Enchant::ALL {
+        let (la, lb) = (level(a, e), level(b, e));
+        if lb == 0 || !e.fits(item) {
+            continue;
+        }
+        let new = if la == lb { (la + 1).min(e.max_level()) } else { la.max(lb) };
+        w = with_level(w, e, new);
+    }
+    w
+}
+
+/// What the table turns an item into (a book becomes an enchanted book).
+pub fn enchanted_form(item: Id) -> Id {
+    if item == BOOK { ENCHANTED_BOOK } else { item }
 }
 
 /// "Efficiency III, Unbreaking I".
@@ -244,6 +273,11 @@ impl Game {
         } else if ui.item.is_none() && n == 1 {
             ui.item = self.inv.slots[inv_slot].take();
             ui.wear = std::mem::take(&mut self.inv.wear[inv_slot]);
+        } else if ui.item.is_none() && id == BOOK {
+            // One book off the stack.
+            ui.item = Some((BOOK, 1));
+            ui.wear = 0;
+            self.inv.slots[inv_slot] = Some((BOOK, n - 1));
         }
     }
 
@@ -285,7 +319,8 @@ impl Game {
         let Some(ui) = &mut self.enchanting else { return };
         let Some((item, _)) = ui.item else { return };
         ui.wear = (ui.wear & 0xFFFF) | bits;
-        ui.predicted = Some((item, enchants(bits)));
+        ui.item = Some((enchanted_form(item), 1));
+        ui.predicted = Some((enchanted_form(item), enchants(bits)));
         if !creative {
             ui.gold = match ui.gold {
                 Some((g, n)) if n as u32 > cost => Some((g, n - cost as u8)),
@@ -329,11 +364,17 @@ impl Game {
             l.bag.take(GOLD_INGOT, cost);
             l.xp = spend_levels(l.xp, cost);
         }
+        // A book goes in, an enchanted book comes out.
+        let result = enchanted_form(item);
+        if result != item {
+            l.bag.take(item, 1);
+            l.bag.add(result, 1);
+        }
         l.enchant_count += 1;
-        l.add_enchanted(item, enchants(bits), 1);
+        l.add_enchanted(result, enchants(bits), 1);
         let (points, count) = (l.xp, l.enchant_count);
         self.net_send_to(from, Msg::Xp { points });
-        self.net_send_to(from, Msg::Enchanted { item, ench: enchants(bits), count });
+        self.net_send_to(from, Msg::Enchanted { item: result, ench: enchants(bits), count });
         self.sfx(Sfx::Chime, Some(pos.as_vec3() + Vec3::splat(0.5)));
     }
 

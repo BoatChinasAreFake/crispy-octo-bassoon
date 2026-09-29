@@ -165,7 +165,7 @@ impl Game {
         }
         self.next_drop_id = self.next_drop_id.wrapping_add(1).max(1);
         let mut d = ItemDrop::new(self.next_drop_id, item, n, at, vel, delay);
-        d.wear = durability(item).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min(max - 1))).unwrap_or(0);
+        d.wear = crate::inventory::sanitize_wear(item, wear);
         self.drops.push(d);
         if self.drops.len() > MAX_DROPS {
             self.drops.remove(0);

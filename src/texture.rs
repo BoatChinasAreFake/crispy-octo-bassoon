@@ -203,6 +203,8 @@ pub const T_ZAP_BLOCK: u16 = 226;
 pub const T_LAMP: u16 = 227;
 pub const T_LAMP_ON: u16 = 228;
 pub const T_ZAP_DUST: u16 = 229;
+pub const T_BOOK: u16 = 230;
+pub const T_ENCHANTED_BOOK: u16 = 231;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1134,6 +1136,25 @@ const WORM: [&str; 16] = [
     "................",
 ];
 
+const BOOK_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "..###########...",
+    "..#ccccccccp#...",
+    "..#ccccccccp#...",
+    "..#ccgggcccp#...",
+    "..#cccgccccp#...",
+    "..#ccccccccp#...",
+    "..#cccccgccp#...",
+    "..#ccccgggcp#...",
+    "..#ccccccccp#...",
+    "..#ddddddddp#...",
+    "..#dddddddpp#...",
+    "..###########...",
+    "................",
+    "................",
+];
+
 const DUST_SPRITE: [&str; 16] = [
     "................",
     "................",
@@ -2024,6 +2045,9 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
                 shade(rgb(120, 80, 55), r.range(0.85, 1.1))
             }
         });
+    }
+    for (tile, cover) in [(T_BOOK, rgb(120, 70, 40)), (T_ENCHANTED_BOOK, rgb(110, 40, 150))] {
+        a.sprite(tile, &BOOK_SPRITE, &[('#', rgb(30, 15, 10)), ('c', cover), ('d', shade(cover, 0.7)), ('p', rgb(240, 232, 210)), ('g', rgb(250, 210, 60))]);
     }
     a.sprite(T_ZAP_DUST, &DUST_SPRITE, &[('#', rgb(90, 5, 5)), ('r', rgb(220, 30, 25)), ('h', rgb(255, 120, 100))]);
     // ---- Animals

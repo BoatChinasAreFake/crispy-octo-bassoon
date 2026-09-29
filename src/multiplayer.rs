@@ -646,9 +646,9 @@ impl Game {
                     self.host_report(from, slots, health, food, saturation);
                 }
             }
-            Msg::Repair { x, y, z, item, material, used, combine } => {
+            Msg::Repair { x, y, z, item, material, used, combine, ench, other_ench } => {
                 if self.peer_rate_ok(from, "repair", 0.2) {
-                    self.host_repair(from, IVec3::new(x, y, z), item, material, used, combine);
+                    self.host_repair(from, IVec3::new(x, y, z), item, material, used, combine, ench, other_ench);
                 }
             }
             Msg::MobInteract { mob, item } => {
@@ -1565,7 +1565,7 @@ mod tests {
             host.update(0.016, &idle()); // past the repair rate limit
             client.update(0.016, &idle());
         }
-        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: PICK_IRON, material: IRON, used: 4, combine: false });
+        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: PICK_IRON, material: IRON, used: 4, combine: false, ench: 0, other_ench: 0 });
         assert!(pump(&mut host, &mut client, |_, c| c.xp == points_for_level(1)));
         assert_eq!(host.peers[&id].ledger.bag.count(IRON), 1);
 
@@ -1738,6 +1738,39 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(host.world.get_v(lamp + IVec3::X), AIR);
+    }
+
+    #[test]
+    fn books_at_the_anvil_are_checked() {
+        use crate::enchant::{with_level, Enchant};
+        let mut host = Game::new(790, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Booky", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 1, spawn.z.floor() as i32);
+        let anvil = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        host.world.set_v(anvil, ANVIL);
+        let sharp = with_level(0, Enchant::Sharpness, 2);
+        host.give_peer(id, SWORD_IRON, 1);
+        host.give_peer_worn(id, ENCHANTED_BOOK, 1, sharp);
+        host.give_peer_xp(id, crate::xp::points_for_level(5));
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(ENCHANTED_BOOK) == 1 && c.world.get_v(anvil) == ANVIL));
+        // A forged book (Sharpness V they never had) does nothing.
+        let forged = (with_level(0, Enchant::Sharpness, 5) >> 16) as u16;
+        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: SWORD_IRON, material: ENCHANTED_BOOK, used: 1, combine: false, ench: 0, other_ench: forged });
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.peers[&id].ledger.bag.count(ENCHANTED_BOOK), 1);
+        // The real one goes on: the book's gone, the sword is enchanted, levels spent.
+        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: SWORD_IRON, material: ENCHANTED_BOOK, used: 1, combine: false, ench: 0, other_ench: (sharp >> 16) as u16 });
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.bag.count(ENCHANTED_BOOK) == 0));
+        let l = &host.peers[&id].ledger;
+        assert_eq!(l.enchanted.get(&(SWORD_IRON, (sharp >> 16) as u16)), Some(&1));
+        assert_eq!(crate::xp::level_of(l.xp).0, 3);
     }
 
     #[test]

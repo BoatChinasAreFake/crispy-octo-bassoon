@@ -1855,11 +1855,11 @@ impl App {
         if let Some((_, r)) = plan {
             let level = self.game.level().0;
             let ok = self.game.creative || level >= r.cost;
-            let what = if r.combine { "Merge" } else { "Repair" };
+            let what = if r.book { "Enchant" } else if r.combine { "Merge" } else { "Repair" };
             let text = format!("{what} cost: {} level{}{}", r.cost, if r.cost == 1 { "" } else { "s" }, if ok { "" } else { "  (Too Expensive!)" });
             self.ui.text(&text, sx, top + slot * 1.75, 8.0, if ok { Color::new(0.5, 1.0, 0.4, 1.0) } else { Color::new(1.0, 0.4, 0.4, 1.0) });
         } else {
-            self.ui.text("Worn tool on the left, what it's made of (or a twin) on the right.", sx, top + slot * 1.75, 7.0, GRAY);
+            self.ui.text("Worn tool on the left, what it's made of (a twin, or an enchanted book) on the right.", sx, top + slot * 1.75, 7.0, GRAY);
         }
         let inv_y = top + top_h + 12.0 * s;
         self.ui.text(&format!("Inventory (level {})", self.game.level().0), sx, inv_y - 4.0 * s, 8.0, GRAY);

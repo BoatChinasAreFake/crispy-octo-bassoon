@@ -8,6 +8,7 @@
 //! host against their ledger and their experience (see ledger.rs, xp.rs).
 
 use crate::block::*;
+use crate::enchant::{enchants, merge, total_levels};
 use crate::game::Game;
 use crate::inventory::{click_stack, right_click_stack, uses, wear_follow, with_uses, Stack, Wear};
 use crate::net::Msg;
@@ -54,24 +55,37 @@ pub struct Repair {
     pub used: u8,
     /// Merging two of the same thing (rather than repairing with materials).
     pub combine: bool,
+    /// Putting an enchanted book's enchantments on it.
+    pub book: bool,
 }
 
 pub fn plan(item: Id, full_wear: Wear, other: Stack, other_wear: Wear) -> Option<Repair> {
+    let (oid, on) = other?;
+    // An enchanted book's enchantments go onto the item (or another book), as far as they fit.
+    if oid == ENCHANTED_BOOK && item != BOOK {
+        let merged = merge(item, full_wear, other_wear);
+        let added = total_levels(merged).saturating_sub(total_levels(full_wear));
+        if added == 0 {
+            return None;
+        }
+        return Some(Repair { wear: (full_wear & 0xFFFF) | merged, cost: added.max(1), used: 1, combine: false, book: true });
+    }
     let max = durability(item)?;
     let (wear, other_uses) = (uses(full_wear), uses(other_wear));
-    let (oid, on) = other?;
     if oid == item {
-        // Both uses left, plus a 12% bonus, as one.
+        // Both uses left, plus a 12% bonus, as one; and both lots of enchantments.
         let left = (max - wear.min(max)) as u32 + (max - other_uses.min(max)) as u32 + max as u32 * 12 / 100;
         let new = max.saturating_sub(left.min(max as u32) as u16);
-        return Some(Repair { wear: with_uses(full_wear, new), cost: COMBINE_COST, used: 1, combine: true });
+        let merged = merge(item, full_wear, other_wear);
+        let added = total_levels(merged).saturating_sub(total_levels(full_wear));
+        return Some(Repair { wear: with_uses(merged, new), cost: COMBINE_COST + added, used: 1, combine: true, book: false });
     }
     if repair_material(item) != Some(oid) || wear == 0 {
         return None;
     }
     let unit = max.div_ceil(4);
     let used = (wear.div_ceil(unit)).min(on as u16).min(4) as u8;
-    Some(Repair { wear: with_uses(full_wear, wear.saturating_sub(unit * used as u16)), cost: used as u32, used, combine: false })
+    Some(Repair { wear: with_uses(full_wear, wear.saturating_sub(unit * used as u16)), cost: used as u32, used, combine: false, book: false })
 }
 
 /// What's on an open anvil (only on the player's own screen).
@@ -144,6 +158,7 @@ impl Game {
         let Some(ui) = &mut self.anvil else { return };
         let pos = ui.pos;
         let material = ui.slots[1].map(|s| s.0).unwrap_or(AIR);
+        let (ench, other_ench) = (enchants(ui.wear[0]), enchants(ui.wear[1]));
         ui.slots[0] = None;
         ui.wear[0] = 0;
         ui.slots[1] = match ui.slots[1] {
@@ -162,7 +177,7 @@ impl Game {
         self.advance("good_as_new");
         if self.is_client() {
             // The host checks it's all real, charges the levels, and may chip the anvil.
-            self.net_send_msg(Msg::Repair { x: pos.x, y: pos.y, z: pos.z, item, material, used: r.used, combine: r.combine });
+            self.net_send_msg(Msg::Repair { x: pos.x, y: pos.y, z: pos.z, item, material, used: r.used, combine: r.combine, ench, other_ench });
         } else {
             self.anvil_wear_down(pos);
         }
@@ -187,9 +202,19 @@ impl Game {
     }
 
     /// A joined player repaired something: check it all, then charge them.
+    /// `ench` and `other_ench` are the enchantments on the two things they used.
     #[allow(clippy::too_many_arguments)]
-    pub fn host_repair(&mut self, from: u32, pos: IVec3, item: Id, material: Id, used: u8, combine: bool) {
+    pub fn host_repair(&mut self, from: u32, pos: IVec3, item: Id, material: Id, used: u8, combine: bool, ench: u16, other_ench: u16) {
         if !is_anvil(self.world.get_v(pos)) || !self.peer_near(from, pos) {
+            return;
+        }
+        // Enchantments only move if the host knows they have them.
+        let (ench, other_ench) = match self.peers.get(&from).map(|p| &p.ledger) {
+            Some(l) if self.creative || (l.owns_enchanted(item, ench) && l.owns_enchanted(material, other_ench)) => (ench, other_ench),
+            _ => (0, 0),
+        };
+        if material == ENCHANTED_BOOK && item != BOOK {
+            self.host_book_onto(from, pos, item, ench, other_ench);
             return;
         }
         let Some(max) = durability(item) else { return };
@@ -216,9 +241,38 @@ impl Game {
             self.peer_take(from, take.0, take.1);
             let p = self.peers.get_mut(&from).expect("checked");
             p.ledger.xp = spend_levels(p.ledger.xp, cost);
+            // Merging two: the second one's enchantments join the first's.
+            if combine && (ench != 0 || other_ench != 0) {
+                let merged = enchants(merge(item, (ench as u32) << 16, (other_ench as u32) << 16));
+                p.ledger.remove_enchanted(item, ench);
+                p.ledger.remove_enchanted(item, other_ench);
+                p.ledger.add_enchanted(item, merged, 1);
+            }
             let points = p.ledger.xp;
             self.net_send_to(from, Msg::Xp { points });
             self.host_unwear(from, item, restored);
+        }
+        self.anvil_wear_down(pos);
+    }
+
+    /// A joined player put an enchanted book's enchantments on something.
+    fn host_book_onto(&mut self, from: u32, pos: IVec3, item: Id, ench: u16, book: u16) {
+        let Some(r) = plan(item, (ench as u32) << 16, Some((ENCHANTED_BOOK, 1)), (book as u32) << 16) else { return };
+        if !self.creative {
+            let Some(l) = self.peers.get_mut(&from).map(|p| &mut p.ledger) else { return };
+            let books = if item == ENCHANTED_BOOK { 2 } else { 1 };
+            if level_of(l.xp).0 < r.cost || !l.bag.has(item) || l.bag.count(ENCHANTED_BOOK) < books {
+                let points = l.xp;
+                self.net_send_to(from, Msg::Xp { points });
+                return;
+            }
+            l.bag.take(ENCHANTED_BOOK, 1);
+            l.remove_enchanted(ENCHANTED_BOOK, book);
+            l.remove_enchanted(item, ench);
+            l.add_enchanted(item, enchants(r.wear), 1);
+            l.xp = spend_levels(l.xp, r.cost);
+            let points = l.xp;
+            self.net_send_to(from, Msg::Xp { points });
         }
         self.anvil_wear_down(pos);
     }
@@ -232,7 +286,7 @@ mod tests {
     fn anvil_rules() {
         // Iron pickaxe (250 uses), 200 worn: each iron chunk gives back 63.
         let r = plan(PICK_IRON, 200, Some((IRON, 10)), 0).unwrap();
-        assert_eq!((r.used, r.cost, r.wear, r.combine), (4, 4, 0, false));
+        assert_eq!((r.used, r.cost, r.wear, r.combine, r.book), (4, 4, 0, false, false));
         let r = plan(PICK_IRON, 100, Some((IRON, 1)), 0).unwrap();
         assert_eq!((r.used, r.wear), (1, 37));
         // The wrong stuff, or nothing to fix, does nothing.

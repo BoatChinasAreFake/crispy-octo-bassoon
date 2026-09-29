@@ -11,7 +11,7 @@
 
 use crate::block::*;
 use crate::game::Game;
-use crate::inventory::{click_stack, right_click_stack, uses, with_uses, Stack, Wear};
+use crate::inventory::{click_stack, right_click_stack, Stack, Wear};
 use crate::net::Msg;
 use crate::sound::{Mat, Sfx};
 use macroquad::math::{IVec3, Vec3};
@@ -501,7 +501,7 @@ impl Game {
         c.slots[slot] = Some((item, have + n));
         if have == 0 {
             // Their word for how worn it is (wear is only cosmetic to the host: see `host_wear`).
-            c.wear[slot] = crate::inventory::max_uses(item, wear).map(|m| with_uses(wear, uses(wear).min((m - 1).min(u16::MAX as u32) as u16))).unwrap_or(0);
+            c.wear[slot] = crate::inventory::sanitize_wear(item, wear);
         }
         true
     }
