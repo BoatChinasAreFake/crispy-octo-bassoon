@@ -40,6 +40,7 @@ mod scorch;
 mod scripting;
 mod server;
 mod structures;
+mod trees;
 mod settings;
 mod upnp;
 mod vehicles;

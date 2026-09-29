@@ -224,6 +224,8 @@ pub const T_CART_ITEM: u16 = 254;
 pub const T_FRAME: u16 = 255;
 pub const T_COMPASS: u16 = 256;
 pub const T_MAP: u16 = 257;
+pub const T_SAPLING: u16 = 258;
+pub const T_APPLE: u16 = 259;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2271,6 +2273,31 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         if rim { shade(rgb(140, 100, 60), r.range(0.85, 1.1)) } else { shade(rgb(150, 115, 80), r.range(0.9, 1.05) * 0.8) }
     });
     a.sprite(T_COMPASS, &COMPASS_SPRITE, &[('#', rgb(40, 40, 45)), ('i', rgb(190, 190, 198)), ('w', rgb(235, 235, 225)), ('r', rgb(220, 30, 30)), ('k', rgb(60, 60, 70))]);
+    a.each(T_SAPLING, |x, y, r, _| {
+        // A thin stem with a few leafy tufts.
+        let stem = x == 7 && y >= 8;
+        let d = |cx: i32, cy: i32, rad: i32| (x as i32 - cx).pow(2) + (y as i32 - cy).pow(2) <= rad * rad;
+        if stem {
+            shade(rgb(100, 70, 40), r.range(0.85, 1.1))
+        } else if d(7, 5, 3) || d(4, 8, 2) || d(10, 8, 2) {
+            shade(rgb(60, 140, 45), r.range(0.75, 1.15))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_APPLE, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        if x == 8 && (2..5).contains(&y) {
+            rgb(90, 60, 30)
+        } else if (9..12).contains(&x) && y == 3 {
+            rgb(70, 150, 50)
+        } else if dx * dx * 1.1 + dy * dy < 26.0 {
+            let hi = dx < -1.5 && dy < -1.5;
+            if hi { rgb(255, 140, 130) } else { shade(rgb(210, 35, 35), r.range(0.85, 1.05)) }
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
     a.sprite(T_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(225, 210, 170)), ('g', rgb(110, 160, 80)), ('b', rgb(80, 120, 210)), ('r', rgb(200, 40, 40))]);
     a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
     a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);

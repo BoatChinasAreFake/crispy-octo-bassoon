@@ -144,6 +144,9 @@ pub struct Game {
     pub saved_players: std::collections::BTreeMap<String, crate::players::PlayerRecord>,
     /// Allow-list and operators (see admin.rs).
     pub admin: crate::admin::Admin,
+    /// Leaves withering away (seconds left), and the sapling growth clock (see trees.rs).
+    pub decaying: Vec<(IVec3, f32)>,
+    pub sapling_timer: f32,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -264,6 +267,8 @@ impl Game {
             enchant_count: 0,
             saved_players: Default::default(),
             admin: Default::default(),
+            decaying: Vec::new(),
+            sapling_timer: 0.0,
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],
@@ -1527,7 +1532,7 @@ impl Game {
         }
         let below = self.world.get_v(place - IVec3::Y);
         match held {
-            FLOWER | TALL_GRASS if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
+            FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
             TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames go on walls.
             FRAME_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
@@ -1699,7 +1704,7 @@ impl Game {
         self.item_advancements(item);
     }
 
-    fn block_particles(&mut self, pos: IVec3, n: usize) {
+    pub fn block_particles(&mut self, pos: IVec3, n: usize) {
         let id = self.world.get_v(pos);
         self.block_particles_tile(pos, block(id).tex[1], n);
     }
@@ -2131,6 +2136,7 @@ impl Game {
             self.try_spawn();
         }
         self.farm_tick(dt);
+        self.trees_tick(dt);
         self.container_tick(dt);
         self.drops_tick(dt);
         self.orbs_tick(dt);
@@ -2595,7 +2601,7 @@ fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::inventory::Inventory;
 
@@ -4099,7 +4105,7 @@ mod tests {
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
-    fn arena(seed: u32) -> Game {
+    pub(crate) fn arena(seed: u32) -> Game {
         let mut g = Game::new(seed, false, false);
         g.world = loaded_world(seed);
         g.ready = true;

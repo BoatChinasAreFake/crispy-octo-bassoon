@@ -329,7 +329,9 @@ pub fn random_drops(id: Id, rng: &mut Rng) -> Vec<(Id, u8)> {
     }
     let r = rng.f32();
     match id {
-        LEAVES if r < 0.08 => vec![(STICK, 1)],
+        LEAVES if r < 0.05 => vec![(SAPLING, 1)],
+        LEAVES if r < 0.12 => vec![(STICK, 1)],
+        LEAVES if r < 0.13 => vec![(APPLE, 1)],
         GRAVEL if r < 0.1 => vec![(COAL, 1)],
         TALL_GRASS if r < 0.12 => vec![(WHEAT_SEEDS, 1)],
         TALL_GRASS if r < 0.15 => vec![(CARROT, 1)],
@@ -541,6 +543,9 @@ impl Game {
     /// Fertiliser or Soil Probe used on farmland (or a crop on it) at `pos`.
     /// Returns what to tell the player; None if there's no soil there.
     pub fn farm_interact(&mut self, pos: IVec3, item: Id) -> Option<String> {
+        if item == BONE_DUST && self.world.get_v(pos) == SAPLING {
+            return Some(self.bone_sapling(pos));
+        }
         let soil_pos = if is_farmland(self.world.get_v(pos)) { pos } else { pos - IVec3::Y };
         let above = soil_pos + IVec3::Y;
         let sky = self.world.sky_light(above.x, above.y, above.z) * self.daylight();
@@ -583,7 +588,7 @@ impl Game {
             }
             return true;
         }
-        let soily = is_farmland(id) || (Crop::of_block(id).is_some() && is_farmland(self.world.get_v(pos - IVec3::Y)));
+        let soily = is_farmland(id) || (Crop::of_block(id).is_some() && is_farmland(self.world.get_v(pos - IVec3::Y))) || (id == SAPLING && held == BONE_DUST);
         if matches!(held, BONE_DUST | COMPOST | WOOD_ASH | SOIL_PROBE) && soily {
             self.player.swing = 1.0;
             if held == SOIL_PROBE {

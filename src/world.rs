@@ -414,6 +414,10 @@ pub struct World {
     /// Huts whose chests were just filled for the first time: a Hmmer should
     /// move in (where to stand, and its seed; see villagers.rs).
     pub new_huts: Vec<(Vec3, u32)>,
+    /// Every sapling in loaded or edited chunks, and leaves that should check
+    /// whether they still hang on to a tree (see trees.rs).
+    pub saplings: HashSet<IVec3>,
+    pub leaf_checks: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -452,6 +456,8 @@ impl World {
             liquid_dirty: HashSet::new(),
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
+            saplings: HashSet::new(),
+            leaf_checks: HashSet::new(),
             signs: HashMap::new(),
             frames: HashMap::new(),
             simulate_liquids: true,
@@ -493,6 +499,11 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
+                    if id == SAPLING {
+                        let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
+                        let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
+                        self.saplings.insert(ivec3(cx * CW + lx, y, cz * CW + lz));
+                    }
                     // Liquids and contraptions pick up where they left off.
                     if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
@@ -659,6 +670,14 @@ impl World {
         }
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
+        if id == SAPLING {
+            self.saplings.insert(p);
+        } else if old == SAPLING {
+            self.saplings.remove(&p);
+        }
+        if self.simulate_liquids && matches!(old, LOG | LEAVES) && !matches!(id, LOG | LEAVES) {
+            self.wake_leaves(p);
+        }
         if self.simulate_liquids {
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
             self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));

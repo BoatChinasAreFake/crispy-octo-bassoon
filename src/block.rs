@@ -115,7 +115,9 @@ pub const POWERED_RAIL: Id = 135;
 pub const SIGN_FIRST: Id = 139;
 pub const FRAME_FIRST: Id = 143;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 147;
+/// Grows into a tree (see trees.rs).
+pub const SAPLING: Id = 147;
+pub const NUM_BLOCKS: Id = 148;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -193,8 +195,9 @@ pub const BOAT: Id = FIRST_ITEM + 85;
 pub const MINECART: Id = FIRST_ITEM + 86;
 pub const COMPASS: Id = FIRST_ITEM + 87;
 pub const MAP: Id = FIRST_ITEM + 88;
+pub const APPLE: Id = FIRST_ITEM + 89;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 89;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 90;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -898,6 +901,9 @@ impl Registry {
             d.creative = facing == 0;
             blocks.push(d);
         }
+        let mut sapling = def("sapling", "Sapling (Tree, Eventually)", Cross, false, false, [T_SAPLING; 3], 0.0, 0, false, SAPLING, 0.0, S_GRASS);
+        sapling.creative = true;
+        blocks.push(sapling);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1004,6 +1010,7 @@ impl Registry {
             ItemDef { stack: 1, ..item("minecart", "Minecart (Wheeled Bucket)", T_CART_ITEM) },
             item("compass", "Compass (Points Home, Mostly)", T_COMPASS),
             item("map", "Map (You Are Here)", T_MAP),
+            ItemDef { food: Some(4.0), ..item("apple", "Apple (Keeps the Doctor Confused)", T_APPLE) },
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -1212,7 +1219,7 @@ pub fn food_quality(id: Id) -> f32 {
     match id {
         PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COD | SALMON | TROPICAL | POTATO => 0.3,
         GOO | COOKED_BOOT => 0.1,
-        CARROT | BREAD => 0.6,
+        CARROT | BREAD | APPLE => 0.6,
         GOLDEN_CHOP | BIG_BOB => 1.2,
         _ => 0.8,
     }
