@@ -42,6 +42,7 @@ mod noise;
 mod pad;
 mod palette;
 mod player;
+mod playtest;
 mod potions;
 mod players;
 mod regions;
@@ -2895,6 +2896,9 @@ fn main() {
     // Headless modes run before any window (or GPU) is touched.
     if args.iter().any(|a| a == "--server") {
         std::process::exit(server::run(&args));
+    }
+    if args.iter().any(|a| a == "--playtest") {
+        std::process::exit(playtest::run(&args));
     }
     if let Some(i) = args.iter().position(|a| a == "--export-sounds") {
         let dir = args.get(i + 1).map(String::as_str).unwrap_or("sounds");
