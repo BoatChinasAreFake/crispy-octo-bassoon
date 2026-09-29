@@ -29,9 +29,19 @@ Run the tests with `cargo test --release`.
 - **Dynamic lighting.** Torches and Glowrock light the area around them, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
-- **Survival mode.** Health, hunger, mining times that depend on your tool, pickaxe tiers that gate ore drops, tools that wear out, 73 crafting recipes, food, cooking, chests, armour, beds, a bow, farming, fishing, death (which drops your things) and respawn.
+- **Survival mode.** Health, hunger, experience, mining times that depend on your tool, pickaxe tiers that gate ore drops, tools that wear out (and an anvil to fix them), 74 crafting recipes, food, cooking, chests, armour, beds, a bow, farming, fishing, death (which drops your things) and respawn.
 - **Hunger.** A food bar of ten drumsticks, with Minecraft's rules. Sprinting, jumping, swimming, fighting, digging and getting hurt use up hidden saturation first, then food. With a full bar you heal quickly; at 18 points or more you heal slowly. At 6 points or less you're too hungry to sprint, and on an empty bar you starve down to half a heart (dramatic, but not fatal). Food fills the bar: raw food barely helps, cooked food keeps you full much longer. You can't eat when you're full, except legendary snacks (Suspiciously Golden Oinkchop, Big Bob), which also heal you outright. Cake is 7 drumsticks in one bite.
 - **Durability.** Pickaxes, swords, the hoe, the bow, the Fishing Stick and armour wear out, with Minecraft's numbers: 59 uses for wood, 131 for stone, 250 for iron and 1561 for Dimond. A bar under the item shows how worn it is, and the tooltip counts the uses left. Breaking a block uses a tool once (swords twice, and blocks that break instantly not at all). Hitting a mob uses a sword once and anything else twice. Every bow shot, catch and tilled block counts too. Each piece of armour takes a quarter of every hit it softens. Wear stays with the item in chests, on the ground and in saves.
+- **Experience.** Green orbs from defeated mobs (5 for monsters, 1 to 3 for farm animals), coal, iron, gold and Dimond ore, float toward the nearest player. Taking things out of a furnace and catching fish pay experience too. Levels follow Minecraft's curve, and the bar and your level sit above the hotbar. Dying drops 7 points per level (at most 100) as orbs and loses the rest, unless the world keeps inventories.
+- **Anvils.** An **Anvil (Drops Ominously)** costs 10 iron (a real one is 31; this one's a bargain). Right-click it, put a worn tool or piece of armour on the left and what it's made of on the right: planks, cobblestone, iron, Dimond, gold, wool, or string for bows and Fishing Sticks. Each unit mends a quarter of its durability and costs a level. Or put two of the same thing together to merge them, which costs 3 levels and adds a 12% bonus. Every use has a 12% chance of knocking the anvil down a stage (Chipped, then Damaged, then gone).
+- **World settings.** **World Settings** in the pause menu changes a world's rules at any time (for the world's owner; joined players can look but not touch):
+  - **Keep Inventory**: keep your things (and experience) when you die.
+  - **Difficulty**:
+    - Peaceful: no monsters and no hunger.
+    - Easy: monsters hit about half as hard, and starving stops at five hearts.
+    - Normal: as described above.
+    - Hard: monsters hit 50% harder, and starving can kill.
+  - **Daylight Cycle**: turn it off and the sun stays where it is.
 - **Death drops.** Dying drops your whole inventory, armour included, where you fell. The death screen tells you where, and it all waits five minutes. Worlds created with **Keep Inventory** on (a toggle on the Create World screen, or `--keep-inventory` for servers) let you keep everything instead.
 - **Creative mode.** Flight, instant breaking, infinite blocks, pick-block and a full item palette.
 - **Mobs** (legally distinct):
@@ -67,7 +77,7 @@ Run the tests with `cargo test --release`.
 - **Slabs, stairs and doors.** Slabs and stairs come in Planks, Cobblestun and Stone Brick. Three blocks make 6 slabs and six make 4 stairs. Slabs go on top when you aim at the upper half of something, and a slab placed on a matching slab makes the full block. Stairs face away from you. You walk up slabs and stairs without jumping, and only their real shape gets in your way or gets hit. **Doors** (6 planks make 3) are two blocks tall: right-click to open or close them (sneak to place against one), and breaking either half takes the whole door. Wooden ones burn in furnaces.
 - **Chests and furnaces.** A **Chest (Latches on Every Side)** (8 planks) holds 27 stacks. A **Furnace** (8 cobblestone) has an input, a fuel slot and a take-only output. It cooks one item every 8 seconds while it has fuel, and it glows while lit. It turns raw meat and fish into cooked versions, potatoes into Baked Potatoes, sand into glass, cobblestone into stone, and logs into (legally distinct) coal. Coal, wood, sticks, hay and wooden tools all burn. Cooking a Pufferfish only halves the damage, and a Cooked Boot is still a boot. Right-click to open either one (sneak to place blocks against it), and shift-click to move whole stacks. Furnaces keep cooking while you're away, as long as their chunk is loaded. Breaking either one spills what was inside onto the ground. Everything is saved with the world.
 - **More blocks:** Sandstone (under deserts), Stone Bricks, Mossy Cobblestun, Hay Bale, Bookshelf, Lantern, Mushroom (in forests; two make a Suspicious Stew), Scarecrow and Weeds.
-- **Advancements.** 44 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
+- **Advancements.** 47 of them, each with a toast and a fanfare ("Getting Wood", "DIMONDS!", "Don't Blink", "The Cake Is Not a Lie"...). They're saved per world, and the pause menu lists them.
 - **TNT.** Light it with a torch (or bare hands), and it chain-reacts.
 - **Sound.** Synthesised effects for mining, placing and footsteps (different for stone, wood, grass, sand and glass), plus hurt sounds, oinks, baas, clucks, moos, rattles, skittering, bloops, bow twangs, groans, Hisser hisses, Starer warps, boings, an advancement fanfare, explosions, eating, splashes, item pickups, crafting and menu clicks. Sounds get quieter with distance. A calm procedural tune drifts in now and then. Volume and music are in Options. Run `minceraft --export-sounds <dir>` to write every sound out as a WAV.
 - **Multiplayer over LAN or the internet.** Open any world from the pause menu (the game can ask your router to forward the port by itself), or run a headless dedicated server. It syncs blocks, player movement, mobs, TNT, explosions, damage, loot, sounds, time of day and chat. Servers can require a password, and a public server checks that players' block edits are within reach and at a human rate. Everything uses the Rust standard library, with no accounts and no central server.
@@ -87,7 +97,7 @@ Run the tests with `cargo test --release`.
 | Shift | Sneak / fly down |
 | Ctrl or R | Sprint |
 | Left mouse | Mine / attack |
-| Right mouse | Place block / eat (when hungry) / light TNT / fire a bow / open a chest, furnace or door / put on armour |
+| Right mouse | Place block / eat (when hungry) / light TNT / fire a bow / open a chest, furnace, anvil or door / put on armour |
 | Middle mouse | Pick block (creative) |
 | 1–9, mouse wheel | Select hotbar slot |
 | E or Tab | Inventory and crafting (shift-click a recipe to craft many) |
@@ -131,6 +141,7 @@ The server has no window and needs no GPU or sound card. Options:
 - `--world FILE`: the world save (default `saves/server.mncr`, created if missing).
 - `--seed N` and `--creative`: settings for a new world.
 - `--keep-inventory`: players keep their things when they die.
+- `--difficulty peaceful|easy|normal|hard`: overrides the world's difficulty.
 - `--max-players N`: player limit (default 16).
 - `--upnp`: ask the router to forward the port, for servers at home.
 
@@ -163,6 +174,7 @@ On a cloud server, allow TCP port 25565 in its firewall or security group.
   - Every few seconds each player's game compares counts with the host. If a modified client has conjured items, the host's numbers win.
   - Items on the ground live on the host too. Breaking a block puts its drops on the host's ground, and players pick things up by asking the host, which checks they're close enough and have room, then hands them over through the ledger. Throwing (Q) takes the items from the ledger before they land, so you can't throw what you don't have.
   - Tools wear out on the host too. It can't see which of your pickaxes you're holding, so it counts uses per kind of tool; every time those add up to one tool's durability, one leaves the ledger. Your own game breaks the same tool at the same moment, and a modified one that doesn't loses it at the next check anyway.
+  - Experience is counted by the host: orbs are its, it decides who collected them, and it tells each player their total. Anvil repairs are checked against that total and the ledger (the iron has to be real, and so do the levels), so modified clients can't repair for free.
   - Dying drops everything through the host, like throwing: it takes the items from the ledger and puts them on its ground.
   - Doors and slabs follow the same rules: a door's top half only goes on its own bottom half, opening one is free, and placing stairs, slabs or doors costs the item.
   - Chests and furnaces live on the host. Players see a copy of whatever they have open, and every move in or out is checked against both the container and the ledger. You can't put in what you don't own, take what isn't there, or reach into a chest from across the map. A broken container spills its contents on the host's ground.
@@ -193,6 +205,10 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/containers.rs` | Chests and furnaces: contents, cooking, host-checked moves |
 | `src/drops.rs` | Items on the ground: physics, merging, pickups, network sync |
 | `src/building.rs` | Slabs, stairs and doors: facing, merging, opening |
+| `src/hunger.rs` | Food, saturation and exhaustion |
+| `src/xp.rs` | Experience levels and orbs |
+| `src/anvil.rs` | Anvil repairs and merging |
+| `src/rules.rs` | World rules: keep inventory, difficulty, daylight cycle |
 | `src/settings.rs` | `settings.txt` |
 | `src/save.rs` | Binary save format |
 | `src/net.rs` | Network protocol and non-blocking TCP |
@@ -203,6 +219,6 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z]` renders a scene and saves a PNG.
 
 Not affiliated with any block-game company.

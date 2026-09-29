@@ -12,8 +12,9 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// variables; v4 adds earned advancements; v5 widens block/item ids to two
 /// bytes; v6 adds farm soil and the fishing log; v7 adds what's in chests and
 /// furnaces; v8 adds items lying on the ground; v9 adds tool and armour wear,
-/// hunger and the keep-inventory rule. Older saves still load.
-pub const VERSION: u32 = 9;
+/// hunger and the keep-inventory rule; v10 adds difficulty, the daylight cycle
+/// rule and experience points. Older saves still load.
+pub const VERSION: u32 = 10;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -52,6 +53,11 @@ pub struct SaveData {
     pub saturation: f32,
     /// World rule: keep your things when you die (save v9+).
     pub keep_inventory: bool,
+    /// World rules: difficulty (`rules::Difficulty` index) and whether the sun moves (save v10+).
+    pub difficulty: u8,
+    pub daylight_cycle: bool,
+    /// Experience points (save v10+).
+    pub xp: u32,
     /// The format version it was read from (the container and drop blobs changed in v9).
     pub version: u32,
 }
@@ -171,6 +177,9 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     w.f32(d.food);
     w.f32(d.saturation);
     w.u8(d.keep_inventory as u8);
+    w.u8(d.difficulty);
+    w.u8(d.daylight_cycle as u8);
+    w.u32(d.xp);
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -260,9 +269,15 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
         saturation = r.f32()?;
         keep_inventory = r.u8()? != 0;
     }
+    let (mut difficulty, mut daylight_cycle, mut xp) = (2, true, 0);
+    if version >= 10 {
+        difficulty = r.u8()?;
+        daylight_cycle = r.u8()? != 0;
+        xp = r.u32()?.min(1 << 24);
+    }
     let ok = |v: f32, d: f32| if v.is_finite() { v.clamp(0.0, 20.0) } else { d };
     let (food, saturation) = (ok(food, 20.0), ok(saturation, 5.0));
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, version })
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, version })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -473,6 +488,9 @@ mod tests {
             food: 20.0,
             saturation: 5.0,
             keep_inventory: false,
+            difficulty: 2,
+            daylight_cycle: true,
+            xp: 0,
             version: VERSION,
         }
     }

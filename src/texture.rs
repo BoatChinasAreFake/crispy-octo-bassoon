@@ -175,6 +175,11 @@ pub const T_ARMOR_WORN: u16 = 196;
 pub const T_ARMOR_ICON: u16 = 200;
 /// HUD: two hunger points.
 pub const T_HUNGER_ICON: u16 = 201;
+pub const T_XP_ORB: u16 = 202;
+pub const T_ANVIL_SIDE: u16 = 203;
+pub const T_ANVIL_TOP: u16 = 204;
+pub const T_ANVIL_TOP_CHIPPED: u16 = 205;
+pub const T_ANVIL_TOP_DAMAGED: u16 = 206;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -260,6 +265,8 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("furnace_lit", T_FURNACE_LIT),
     ("door_bottom", T_DOOR_BOTTOM),
     ("door_top", T_DOOR_TOP),
+    ("anvil_side", T_ANVIL_SIDE),
+    ("anvil_top", T_ANVIL_TOP),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -1798,6 +1805,35 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             let rim = x == 0 || y == 0 || x == 15 || y == 15;
             let knit = wool && (x + y) % 4 == 0;
             shade(base, r.range(0.9, 1.05) * if rim { 0.7 } else if knit { 0.85 } else { 1.0 })
+        });
+    }
+    // ---- Experience and anvils
+    a.each(T_XP_ORB, |x, y, _, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d > 7.0 {
+            [0, 0, 0, 0]
+        } else if d > 5.5 {
+            rgb(60, 140, 20)
+        } else if d < 2.5 {
+            rgb(250, 255, 170)
+        } else {
+            rgb(150, 230, 50)
+        }
+    });
+    a.each(T_ANVIL_SIDE, |x, y, r, _| {
+        let edge = y == 0 || y == 15;
+        shade(rgb(68, 68, 72), r.range(0.85, 1.1) * if edge { 0.75 } else if (x + y * 3) % 11 == 0 { 1.15 } else { 1.0 })
+    });
+    for (i, tile) in [T_ANVIL_TOP, T_ANVIL_TOP_CHIPPED, T_ANVIL_TOP_DAMAGED].into_iter().enumerate() {
+        a.each(tile, |x, y, r, _| {
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            // Cracks get worse with each stage.
+            let crack = (i >= 1 && (x as i32 - y as i32 - 2).abs() <= 0 && (3..12).contains(&x)) || (i >= 2 && (x + y == 17 && (4..13).contains(&x) || (y == 9 && (2..8).contains(&x))));
+            if crack {
+                rgb(25, 25, 28)
+            } else {
+                shade(rgb(88, 88, 94), r.range(0.9, 1.08) * if edge { 0.75 } else { 1.0 })
+            }
         });
     }
     a.sprite(T_HUNGER_ICON, &DRUMSTICK, &[('#', rgb(60, 30, 10)), ('p', rgb(170, 95, 40)), ('P', rgb(205, 130, 60)), ('w', rgb(235, 190, 120)), ('b', rgb(235, 230, 210))]);

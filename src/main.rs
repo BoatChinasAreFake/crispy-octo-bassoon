@@ -3,6 +3,7 @@
 //! generated at startup.
 
 mod advancements;
+mod anvil;
 mod block;
 mod building;
 mod containers;
@@ -22,6 +23,7 @@ mod noise;
 mod palette;
 mod player;
 mod render;
+mod rules;
 mod save;
 mod scripting;
 mod server;
@@ -31,6 +33,7 @@ mod sound;
 mod texture;
 mod ui;
 mod world;
+mod xp;
 
 use block::*;
 use game::{Controls, Game};
@@ -78,6 +81,10 @@ enum Screen {
     Inventory,
     /// A chest or furnace is open (see containers.rs).
     Container,
+    /// An anvil is open (see anvil.rs).
+    Anvil,
+    /// Keep inventory, difficulty, daylight cycle (the world's owner can change them).
+    WorldSettings,
     Dead,
     Options { from_title: bool },
     Help { from_title: bool },
@@ -209,6 +216,9 @@ impl App {
         if self.screen == Screen::Container && s != Screen::Container {
             self.game.close_container();
         }
+        if self.screen == Screen::Anvil && s != Screen::Anvil {
+            self.game.close_anvil();
+        }
         // Leaving a screen where settings change: keep them for next time.
         if matches!(self.screen, Screen::Options { .. } | Screen::Multiplayer) && self.screen != s {
             self.save_settings();
@@ -282,7 +292,7 @@ impl App {
 
     fn new_world(&mut self, creative: bool, keep_inventory: bool, seed: u32) {
         let mut g = Game::new(seed, creative, false);
-        g.keep_inventory = keep_inventory;
+        g.rules.keep_inventory = keep_inventory;
         g.msg(if creative {
             "Creative mode: infinite blocks, zero consequences. Double-tap Space to fly."
         } else {
@@ -508,7 +518,7 @@ impl App {
                     self.game.third_person = !self.game.third_person;
                 }
             }
-            Screen::Inventory | Screen::Container => {
+            Screen::Inventory | Screen::Container | Screen::Anvil => {
                 if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
                     self.set_screen(Screen::Playing);
                 }
@@ -518,7 +528,7 @@ impl App {
                     self.set_screen(Screen::Playing);
                 }
             }
-            Screen::Advancements | Screen::FishLog => {
+            Screen::Advancements | Screen::FishLog | Screen::WorldSettings => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
                 }
@@ -553,7 +563,7 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Title | Screen::Dead) || self.game.net.is_some();
         if simulate {
             self.game.update(dt, &controls);
         }
@@ -561,6 +571,11 @@ impl App {
         if self.game.open.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Container);
         } else if self.screen == Screen::Container && !self.game.container_still_there() {
+            self.set_screen(Screen::Playing);
+        }
+        if self.game.anvil.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Anvil);
+        } else if self.screen == Screen::Anvil && !self.game.anvil_still_there() {
             self.set_screen(Screen::Playing);
         }
         if let Some(e) = self.game.net_error.take() {
@@ -655,7 +670,7 @@ impl App {
             let Some(net::Msg::Welcome { id, seed, time, creative, spawn, keep_inventory }) = msgs.pop() else { return };
             let (conn, _) = self.joining.take().unwrap();
             let mut g = Game::new_client(id, seed, time, creative, spawn, conn, &self.mp_name, leftover);
-            g.keep_inventory = keep_inventory;
+            g.rules.keep_inventory = keep_inventory;
             self.start_game(g);
             return;
         }
@@ -1145,6 +1160,8 @@ impl App {
                     Screen::FishLog => self.fish_log_screen(),
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Container => self.container_screen(),
+                    Screen::Anvil => self.anvil_screen(),
+                    Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
                 }
@@ -1189,12 +1206,22 @@ impl App {
         let sel = x0 + g.inv.selected as f32 * slot;
         draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
         if !g.creative {
-            self.ui.hearts(g.player.health, x0, y0 - 12.0 * s);
+            // Experience bar just above the hotbar, with the level in the middle.
+            let (level, progress) = g.level();
+            let (bw, by) = (slot * 9.0, y0 - 6.0 * s);
+            draw_rectangle(x0, by, bw, 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+            draw_rectangle(x0, by + s, bw * progress, 2.0 * s, Color::new(0.5, 0.95, 0.2, 1.0));
+            if level > 0 {
+                let t = level.to_string();
+                self.ui.text_centered(&t, x0 + bw / 2.0 + s, by + 2.0 * s, 10.0, BLACK);
+                self.ui.text_centered(&t, x0 + bw / 2.0, by + s, 10.0, Color::new(0.55, 1.0, 0.3, 1.0));
+            }
+            self.ui.hearts(g.player.health, x0, y0 - 18.0 * s);
             let points = g.inv.armor_points();
             if points > 0 {
-                self.ui.armor_bar(points, x0, y0 - 23.0 * s);
+                self.ui.armor_bar(points, x0, y0 - 29.0 * s);
             }
-            self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 12.0 * s);
+            self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 18.0 * s);
         }
         if g.held_name > 0.0 {
             let held = g.inv.held();
@@ -1347,8 +1374,12 @@ impl App {
             }
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Save World", !client) {
+        let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y, half, bh), "Save World", !client) {
             self.save();
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "World Settings", true) {
+            self.set_screen(Screen::WorldSettings);
         }
         y += bh + 5.0 * s;
         let half = (bw - 5.0 * s) / 2.0;
@@ -1584,7 +1615,7 @@ impl App {
             self.ui.text_centered(d, w / 2.0, h * 0.3 + 20.0 * s, 10.0, Color::new(1.0, 0.85, 0.85, 1.0));
         }
         if let Some(p) = self.game.death_spot() {
-            let line = if self.game.keep_inventory || self.game.creative {
+            let line = if self.game.rules.keep_inventory || self.game.creative {
                 "Your inventory is safe. This world is kind.".to_string()
             } else {
                 format!("Your things are on the ground at {}, {}, {} for five minutes.", p.x, p.y, p.z)
@@ -1684,8 +1715,126 @@ impl App {
         }
     }
 
+    fn world_settings_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+        self.ui.text_centered("World Settings", w / 2.0, h * 0.2, 16.0, WHITE);
+        let owner = !self.game.is_client();
+        let bw = (240.0 * s).min(w * 0.85);
+        let bh = 20.0 * s;
+        let x = w / 2.0 - bw / 2.0;
+        let mut y = h * 0.3;
+        let mut rules = self.game.rules;
+        let keep = if rules.keep_inventory { "Keep Inventory: ON (dying costs nothing)" } else { "Keep Inventory: OFF (you drop everything)" };
+        if self.ui.button(Rect::new(x, y, bw, bh), keep, owner) {
+            rules.keep_inventory = !rules.keep_inventory;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), &format!("Difficulty: {}", rules.difficulty.name()), owner) {
+            rules.difficulty = rules::Difficulty::from_index((rules.difficulty.index() + 1) % 4);
+        }
+        y += bh + 2.0 * s;
+        self.ui.text_centered(rules.difficulty.blurb(), w / 2.0, y + 9.0 * s, 8.0, GRAY);
+        y += 16.0 * s;
+        let day = if rules.daylight_cycle { "Daylight Cycle: ON" } else { "Daylight Cycle: OFF (the sun is taking a break)" };
+        if self.ui.button(Rect::new(x, y, bw, bh), day, owner) {
+            rules.daylight_cycle = !rules.daylight_cycle;
+        }
+        if rules != self.game.rules {
+            self.game.set_rules(rules);
+        }
+        y += bh + 8.0 * s;
+        if !owner {
+            self.ui.text_centered("The host decides these. You just live here.", w / 2.0, y + 6.0 * s, 9.0, GRAY);
+            y += 14.0 * s;
+        }
+        if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
+            self.set_screen(Screen::Paused);
+        }
+    }
+
+    fn anvil_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let slot = 20.0 * s;
+        let panel_w = slot * 9.0 + 12.0 * s;
+        let top_h = slot * 2.2;
+        let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
+        let x0 = (w - panel_w) / 2.0;
+        let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
+        let sx = x0 + 6.0 * s;
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        let mut tooltip: Option<String> = None;
+        let Some(pos) = self.game.anvil.as_ref().map(|a| a.pos) else { return };
+        self.ui.text(block(self.game.world.get_v(pos)).name, sx, y0 + 12.0 * s, 10.0, WHITE);
+        let top = y0 + 20.0 * s;
+        let (slots, wear) = self.game.anvil.as_ref().map(|a| (a.slots, a.wear)).unwrap_or_default();
+        for (i, x) in [(0, sx + slot * 0.5), (1, sx + slot * 2.5)] {
+            let (l, r, hov) = self.ui.slot_worn(slots[i], wear[i], x, top, slot, false);
+            if hov {
+                tooltip = label(slots[i], wear[i]).or(Some(["The worn thing", "Its material, or another one like it"][i].to_string()));
+            }
+            if l || r {
+                self.game.anvil_click(i, r);
+            }
+        }
+        self.ui.text("+", sx + slot * 1.75, top + slot * 0.7, 12.0, WHITE);
+        let plan = self.game.anvil_plan();
+        let ax = sx + slot * 4.0;
+        self.ui.tile(texture::T_ARROW_UI, ax, top, slot * 1.2, if plan.is_some() { WHITE } else { Color::new(0.3, 0.3, 0.3, 1.0) });
+        let out_x = sx + slot * 6.0;
+        let result = plan.map(|(item, _)| Some((item, 1))).unwrap_or(None);
+        let (l, _, hov) = self.ui.slot_worn(result, plan.map(|(_, r)| r.wear).unwrap_or(0), out_x, top, slot, false);
+        if hov {
+            tooltip = plan.and_then(|(item, r)| label(Some((item, 1)), r.wear));
+        }
+        if l {
+            self.game.anvil_take();
+        }
+        if let Some((_, r)) = plan {
+            let level = self.game.level().0;
+            let ok = self.game.creative || level >= r.cost;
+            let what = if r.combine { "Merge" } else { "Repair" };
+            let text = format!("{what} cost: {} level{}{}", r.cost, if r.cost == 1 { "" } else { "s" }, if ok { "" } else { "  (Too Expensive!)" });
+            self.ui.text(&text, sx, top + slot * 1.75, 8.0, if ok { Color::new(0.5, 1.0, 0.4, 1.0) } else { Color::new(1.0, 0.4, 0.4, 1.0) });
+        } else {
+            self.ui.text("Worn tool on the left, what it's made of (or a twin) on the right.", sx, top + slot * 1.75, 7.0, GRAY);
+        }
+        let inv_y = top + top_h + 12.0 * s;
+        self.ui.text(&format!("Inventory (level {})", self.game.level().0), sx, inv_y - 4.0 * s, 8.0, GRAY);
+        for i in 9..36 {
+            let j = i - 9;
+            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        let hot_y = inv_y + slot * 3.0 + 6.0 * s;
+        for i in 0..9 {
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        if let Some(cur) = self.game.inv.cursor {
+            let (mx, my) = mouse_position();
+            self.ui.stack_worn(Some(cur), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
+        } else if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
     fn inventory_slot_click(&mut self, i: usize, l: bool, r: bool, shift: bool) {
-        if l && shift {
+        if l && shift && self.game.anvil.is_some() {
+            self.game.anvil_quick_put(i);
+        } else if l && shift {
             self.game.container_quick_put(i);
         } else if l {
             self.game.inv.click(i);
@@ -2079,7 +2228,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2188,7 +2337,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2371,6 +2520,53 @@ async fn game_main() {
                     }
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
+                }
+            }
+            if matches!(s.mode.as_str(), "anvil" | "rules" | "xp") && frames == 125 {
+                // An anvil (and a chipped one) ahead, a worn pickaxe and some iron, and a few levels.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, p.y.floor() as i32, v.z.floor() as i32)
+                };
+                let (a, b) = (at(3.5, -0.8), at(3.5, 1.2));
+                app.game.world.set_v(a, block::ANVIL);
+                app.game.world.set_v(b, block::ANVIL_DAMAGED);
+                app.game.xp = xp::points_for_level(7) + 20;
+                for (item, n, wear) in [(block::PICK_IRON, 1, 190), (block::IRON, 5, 0), (block::SWORD_DIAMOND, 1, 800), (block::BREAD, 6, 0)] {
+                    app.game.inv.add(item, n);
+                    let i = app.game.inv.slots.iter().position(|s| *s == Some((item, n))).unwrap();
+                    app.game.inv.wear[i] = wear;
+                }
+                match s.mode.as_str() {
+                    "anvil" => {
+                        app.game.open_anvil(a);
+                        if let Some(ui) = &mut app.game.anvil {
+                            ui.slots = [Some((block::PICK_IRON, 1)), Some((block::IRON, 3))];
+                            ui.wear = [190, 0];
+                        }
+                        app.game.inv.remove(block::PICK_IRON, 1);
+                        app.game.inv.remove(block::IRON, 3);
+                    }
+                    "rules" => app.set_screen(Screen::WorldSettings),
+                    _ => {
+                        for i in 0..6 {
+                            let v = p + fwd * (2.0 + i as f32 * 0.6) + right * ((i as f32 - 2.5) * 0.7) + Vec3::Y * 0.8;
+                            app.game.spawn_orbs(v, [3, 7, 17, 1, 37, 7][i]);
+                        }
+                        for o in app.game.orbs.iter_mut() {
+                            o.body.vel = Vec3::ZERO;
+                        }
+                    }
+                }
+            }
+            if s.mode == "xp" && frames > 125 {
+                // Hold the orbs still for the photo.
+                for o in app.game.orbs.iter_mut() {
+                    o.body.vel = Vec3::ZERO;
+                    o.age = 0.0;
                 }
             }
             if s.mode == "death" && frames == 150 {

@@ -61,8 +61,9 @@ impl Hunger {
     }
 
     /// Advance by `dt` seconds. Returns the change in health: healing when well
-    /// fed, a point of starvation damage every few seconds when empty.
-    pub fn tick(&mut self, dt: f32, health: f32) -> f32 {
+    /// fed, a point of starvation damage every few seconds when empty (but
+    /// never below `floor`, which depends on the difficulty).
+    pub fn tick(&mut self, dt: f32, health: f32, floor: f32) -> f32 {
         while self.exhaustion >= EXHAUSTION_PER_POINT {
             self.exhaustion -= EXHAUSTION_PER_POINT;
             if self.saturation > 0.0 {
@@ -90,7 +91,7 @@ impl Hunger {
         } else if self.food <= 0.0 {
             if self.timer >= 4.0 {
                 self.timer = 0.0;
-                if health > 1.0 {
+                if health > floor {
                     return -1.0;
                 }
             }
@@ -109,27 +110,27 @@ mod tests {
     fn hunger_heals_drains_and_starves() {
         let mut h = Hunger::default();
         // Full and hurt: quick healing, which costs saturation.
-        let healed: f32 = (0..20).map(|_| h.tick(0.5, 10.0)).sum();
+        let healed: f32 = (0..20).map(|_| h.tick(0.5, 10.0, 1.0)).sum();
         assert!(healed > 1.0, "healed {healed}");
         assert!(h.saturation < 5.0);
         // Running around empties the bar: saturation goes first, then food.
         let mut h = Hunger::default();
         h.exhaust(4.0 * 5.0);
-        h.tick(0.1, MAX_HEALTH);
+        h.tick(0.1, MAX_HEALTH, 1.0);
         assert_eq!((h.food, h.saturation), (MAX_FOOD, 0.0));
         for _ in 0..10 {
             h.exhaust(4.0);
-            h.tick(0.1, MAX_HEALTH);
+            h.tick(0.1, MAX_HEALTH, 1.0);
         }
         assert_eq!(h.food, 10.0);
         // No sprinting on an empty stomach, and no healing below 18.
         h.food = 6.0;
         assert!(!h.can_sprint());
-        assert_eq!((0..10).map(|_| h.tick(1.0, 10.0)).sum::<f32>(), 0.0);
+        assert_eq!((0..10).map(|_| h.tick(1.0, 10.0, 1.0)).sum::<f32>(), 0.0);
         // Starving hurts every four seconds, but never below half a heart.
         h.food = 0.0;
-        assert_eq!((0..8).map(|_| h.tick(1.0, 10.0)).sum::<f32>(), -2.0);
-        assert_eq!((0..8).map(|_| h.tick(1.0, 1.0)).sum::<f32>(), 0.0);
+        assert_eq!((0..8).map(|_| h.tick(1.0, 10.0, 1.0)).sum::<f32>(), -2.0);
+        assert_eq!((0..8).map(|_| h.tick(1.0, 1.0, 1.0)).sum::<f32>(), 0.0);
         // Eating: points and saturation, capped.
         h.eat(8.0, 0.8);
         assert_eq!(h.food, 8.0);

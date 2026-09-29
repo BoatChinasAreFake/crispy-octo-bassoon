@@ -123,8 +123,16 @@ pub struct Game {
     pub drop_timer: f32,
     pub drop_sync: f32,
     pub drops_sent_empty: bool,
-    /// World rule: keep everything when you die (off: it falls on the ground).
-    pub keep_inventory: bool,
+    /// Keep inventory, difficulty, daylight cycle (see rules.rs).
+    pub rules: crate::rules::WorldRules,
+    /// Experience points (see xp.rs), and the orbs floating around.
+    pub xp: u32,
+    pub orbs: Vec<crate::xp::XpOrb>,
+    pub next_orb_id: u32,
+    pub orb_sync: f32,
+    pub orbs_sent_empty: bool,
+    /// The anvil screen's inputs while it's open (see anvil.rs).
+    pub anvil: Option<crate::anvil::AnvilUi>,
 }
 
 impl Game {
@@ -201,7 +209,13 @@ impl Game {
             drop_timer: 0.0,
             drop_sync: 0.0,
             drops_sent_empty: true,
-            keep_inventory: false,
+            rules: Default::default(),
+            xp: 0,
+            orbs: Vec::new(),
+            next_orb_id: 0,
+            orb_sync: 0.0,
+            orbs_sent_empty: true,
+            anvil: None,
         }
     }
 
@@ -262,7 +276,8 @@ impl Game {
             }
         }
         g.player.hunger = crate::hunger::Hunger::new(d.food, d.saturation);
-        g.keep_inventory = d.keep_inventory;
+        g.xp = d.xp;
+        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle };
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -291,7 +306,10 @@ impl Game {
             wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).copied().collect(),
             food: self.player.hunger.food,
             saturation: self.player.hunger.saturation,
-            keep_inventory: self.keep_inventory,
+            keep_inventory: self.rules.keep_inventory,
+            difficulty: self.rules.difficulty.index(),
+            daylight_cycle: self.rules.daylight_cycle,
+            xp: self.xp,
             version: crate::save::VERSION,
         }
     }
@@ -473,7 +491,9 @@ impl Game {
 
     fn update_local(&mut self, dt: f32, c: &Controls) {
         self.clock += dt;
-        self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+        if self.rules.daylight_cycle {
+            self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+        }
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
@@ -887,13 +907,15 @@ impl Game {
                     let me = self.player.body.clone();
                     if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         self.player.hurt = 0.0;
-                        self.hurt_player_armored(a.damage, "was shot by a Rattler (with a Pointy Stick)");
+                        let d = self.rules.difficulty.mob_damage(a.damage);
+                        self.hurt_player_armored(d, "was shot by a Rattler (with a Pointy Stick)");
                         self.player.body.vel += a.vel.normalize_or_zero() * 4.0;
                         return false;
                     }
                     let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
                     if let Some(id) = hit {
-                        self.hurt_peer(id, a.damage, "was shot by a Rattler (with a Pointy Stick)", a.vel.normalize_or_zero() * 4.0);
+                        let d = self.rules.difficulty.mob_damage(a.damage);
+                        self.hurt_peer(id, d, "was shot by a Rattler (with a Pointy Stick)", a.vel.normalize_or_zero() * 4.0);
                         return false;
                     }
                     true
@@ -1052,14 +1074,19 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
-        // Chests and furnaces open (sneak to place against them instead).
+        // Chests, furnaces and anvils open (sneak to place against them instead).
         if let Some(Target::Block(h)) = &self.target
-            && crate::containers::is_container(self.world.get_v(h.pos))
             && !self.player.sneaking
         {
-            let pos = h.pos;
-            self.open_container(pos);
-            return;
+            let (pos, id) = (h.pos, self.world.get_v(h.pos));
+            if crate::containers::is_container(id) {
+                self.open_container(pos);
+                return;
+            }
+            if crate::anvil::is_anvil(id) {
+                self.open_anvil(pos);
+                return;
+            }
         }
         if held != AIR {
             if self.is_client() {
@@ -1327,6 +1354,8 @@ impl Game {
                     }
                     self.pop_drop(center, item, n);
                 }
+                let points = crate::xp::ore_xp(id, &mut self.rng);
+                self.spawn_orbs(center, points);
             }
             self.farm_break_effects(pos, id);
         }
@@ -1461,7 +1490,13 @@ impl Game {
         if self.creative || self.dead.is_some() {
             return;
         }
-        let change = self.player.hunger.tick(dt, self.player.health);
+        let difficulty = self.rules.difficulty;
+        if !difficulty.monsters() {
+            // Peaceful: never hungry, so always healing.
+            self.player.hunger.food = crate::hunger::MAX_FOOD;
+            self.player.hunger.saturation = self.player.hunger.saturation.max(5.0);
+        }
+        let change = self.player.hunger.tick(dt, self.player.health, difficulty.starve_floor());
         if change > 0.0 {
             self.player.health = (self.player.health + change).min(MAX_HEALTH);
         } else if change < 0.0 {
@@ -1508,8 +1543,12 @@ impl Game {
             self.player.health = 0.0;
             self.dead = Some(format!("Stove {cause}"));
             // Everything falls out of your pockets, unless the world says otherwise.
-            if !self.keep_inventory {
+            // (Joined players' experience is spilled by the host when it sees them die.)
+            if !self.rules.keep_inventory {
                 self.drop_everything();
+                let at = self.player.body.pos + Vec3::Y * 0.5;
+                let points = crate::xp::death_drop(std::mem::take(&mut self.xp));
+                self.spawn_orbs(at, points);
             }
         }
     }
@@ -1599,7 +1638,9 @@ impl Game {
     pub fn server_tick(&mut self, dt: f32) {
         self.net_receive(dt);
         self.clock += dt;
-        self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+        if self.rules.daylight_cycle {
+            self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+        }
         for m in self.messages.iter_mut() {
             m.1 -= dt;
         }
@@ -1706,10 +1747,12 @@ impl Game {
         for (target_id, target, e) in events {
             match e {
                 MobEvent::HurtPlayer(d, cause) if target_id != self.my_id => {
+                    let d = self.rules.difficulty.mob_damage(d);
                     self.hurt_peer(target_id, d, cause, Vec3::Y * 3.0);
                     let _ = target;
                 }
                 MobEvent::HurtPlayer(d, cause) => {
+                    let d = self.rules.difficulty.mob_damage(d);
                     self.hurt_player_armored(d, cause);
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
                     self.player.body.vel += knock * 3.0 + Vec3::Y * 3.0;
@@ -1760,6 +1803,8 @@ impl Game {
                         }
                         self.sfx(Sfx::Bloop, Some(at));
                     }
+                    let points = m.kind.xp_value(m.size, &mut self.rng);
+                    self.spawn_orbs(m.body.pos + Vec3::Y * 0.5, points);
                     let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
                     for (item, n) in drops.into_iter().flatten() {
                         if !self.creative {
@@ -1801,6 +1846,10 @@ impl Game {
         self.farm_tick(dt);
         self.container_tick(dt);
         self.drops_tick(dt);
+        self.orbs_tick(dt);
+        if !self.rules.difficulty.monsters() {
+            self.mobs.retain(|m| !m.kind.hostile());
+        }
     }
 
     fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
@@ -1841,7 +1890,7 @@ impl Game {
             }
             return;
         }
-        if hostile >= 12 + 4 * self.peers.len() {
+        if hostile >= 12 + 4 * self.peers.len() || !self.rules.difficulty.monsters() {
             return;
         }
         let roll = self.rng.f32();
@@ -1877,7 +1926,7 @@ impl Game {
             self.mobs.retain(|m| !m.kind.hostile());
         }
         self.ready = false;
-        self.msg(if self.keep_inventory {
+        self.msg(if self.rules.keep_inventory {
             "Respawned. Inventory kept, because this world is nice."
         } else {
             "Respawned. Your stuff is where you fell. It'll wait five minutes. Probably."
@@ -2002,8 +2051,9 @@ impl Game {
             let sky = self.world.sky_light(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
-        // Items on the ground
+        // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
+        self.draw_orbs(&mut g, eye, 48.0);
         // Particles
         g.begin(Pass::Opaque, [1.0; 4], false);
         for p in &self.particles {
@@ -2788,12 +2838,137 @@ mod tests {
         assert_eq!(g.player.hunger.food, crate::hunger::MAX_FOOD, "respawn with a full stomach");
         // Keep-inventory worlds are kinder.
         let mut g = arena(59);
-        g.keep_inventory = true;
+        g.rules.keep_inventory = true;
         g.inv.slots[0] = Some((DIAMOND, 5));
         g.hurt_player(100.0, "was tested gently");
         assert_eq!(g.inv.count(DIAMOND), 5);
         assert!(g.drops.is_empty());
-        assert!(Game::from_save(g.to_save()).keep_inventory);
+        assert!(Game::from_save(g.to_save()).rules.keep_inventory);
+    }
+
+    #[test]
+    fn experience_from_everything() {
+        use crate::xp::{death_drop, level_of, points_for_level};
+        let mut g = arena(61);
+        // Orbs drift to you and count up.
+        let at = g.player.body.pos + Vec3::new(3.0, 1.0, 0.0);
+        g.spawn_orbs(at, 30);
+        for _ in 0..100 {
+            g.orbs_tick(0.05);
+        }
+        assert!(g.orbs.is_empty());
+        assert_eq!(g.xp, 30);
+        assert_eq!(g.level().0, 3);
+        // Dimond ore pays 3 to 7; the furnace pays for what you take out.
+        g.world.set(2, 50, 0, DIAMOND_ORE);
+        g.break_block(IVec3::new(2, 50, 0), true);
+        let ore: u32 = g.orbs.iter().map(|o| o.value as u32).sum();
+        assert!((3..=7).contains(&ore), "{ore}");
+        g.orbs.clear();
+        let furnace = IVec3::new(-2, 50, 0);
+        g.world.set_v(furnace, FURNACE);
+        g.world.containers.get_mut(&furnace).unwrap().slots[crate::containers::OUTPUT] = Some((COOKED_CHOP, 10));
+        g.open = Some(furnace);
+        g.container_click(crate::containers::OUTPUT, false, false);
+        assert!((33..=34).contains(&g.xp), "3.5 points for ten chops: {}", g.xp);
+        g.close_container();
+        // Saved with the world.
+        assert_eq!(Game::from_save(g.to_save()).xp, g.xp);
+        // Dying spills some of it (7 a level) and loses the rest.
+        g.xp = points_for_level(10);
+        g.hurt_player(100.0, "was tested");
+        assert_eq!(g.xp, 0);
+        assert_eq!(g.orbs.iter().map(|o| o.value as u32).sum::<u32>(), death_drop(points_for_level(10)));
+        // ...unless the world keeps inventories.
+        let mut g = arena(63);
+        g.rules.keep_inventory = true;
+        g.xp = points_for_level(10);
+        g.hurt_player(100.0, "was tested");
+        assert_eq!(level_of(g.xp).0, 10);
+    }
+
+    #[test]
+    fn anvils_repair_for_levels() {
+        use crate::xp::{level_of, points_for_level};
+        let mut g = arena(65);
+        let pos = IVec3::new(2, 50, 0);
+        g.world.set_v(pos, ANVIL);
+        aim(&mut g, pos, IVec3::NEG_X);
+        g.use_item();
+        assert!(g.anvil.is_some(), "right-click opens it");
+        // A badly worn iron pickaxe and some iron.
+        g.inv.cursor = Some((PICK_IRON, 1));
+        g.inv.cursor_wear = 200;
+        g.anvil_click(0, false);
+        g.inv.cursor = Some((IRON, 10));
+        g.anvil_click(1, false);
+        let (item, r) = g.anvil_plan().unwrap();
+        assert_eq!((item, r.used, r.cost, r.wear), (PICK_IRON, 4, 4, 0));
+        // Not enough levels: nothing happens.
+        g.xp = points_for_level(3);
+        g.anvil_take();
+        assert!(g.inv.cursor.is_none());
+        // Enough: good as new, iron and levels spent.
+        g.xp = points_for_level(5);
+        g.rng = crate::noise::Rng::new(3);
+        g.anvil_take();
+        assert_eq!((g.inv.cursor, g.inv.cursor_wear), (Some((PICK_IRON, 1)), 0));
+        assert_eq!(g.anvil.as_ref().unwrap().slots[1], Some((IRON, 6)));
+        assert_eq!(level_of(g.xp).0, 1);
+        assert!(g.advancements.has("good_as_new"));
+        // Walking away returns what's left on it.
+        g.inv.cursor = None;
+        g.close_anvil();
+        assert_eq!(g.inv.count(IRON), 6);
+        // Every use might chip it; eventually it crumbles.
+        let mut stages = vec![g.world.get_v(pos)];
+        for _ in 0..500 {
+            g.anvil_wear_down(pos);
+            let now = g.world.get_v(pos);
+            if *stages.last().unwrap() != now {
+                stages.push(now);
+            }
+            if now == AIR {
+                break;
+            }
+        }
+        assert!(stages.starts_with(&[ANVIL]) && stages.ends_with(&[ANVIL_CHIPPED, ANVIL_DAMAGED, AIR]), "{stages:?}");
+        assert!(g.advancements.has("ominous"));
+    }
+
+    #[test]
+    fn world_rules_change_the_world() {
+        use crate::rules::{Difficulty, WorldRules};
+        let mut g = arena(67);
+        // Peaceful: no monsters, never hungry.
+        g.alloc_mob(MobKind::Groaner, Vec3::new(3.5, 50.0, 3.5));
+        g.alloc_mob(MobKind::Oinker, Vec3::new(-3.5, 50.0, 3.5));
+        g.rules.difficulty = Difficulty::Peaceful;
+        g.update_entities(0.05);
+        assert_eq!(g.mobs.len(), 1);
+        assert!(!g.mobs[0].kind.hostile());
+        g.player.hunger.food = 3.0;
+        g.hunger_tick(0.1);
+        assert_eq!(g.player.hunger.food, crate::hunger::MAX_FOOD);
+        // Hard: starving can finish you off.
+        g.rules.difficulty = Difficulty::Hard;
+        g.player.hunger = crate::hunger::Hunger::new(0.0, 0.0);
+        g.player.health = 2.0;
+        for _ in 0..200 {
+            g.hunger_tick(0.1);
+            g.player.hurt = 0.0;
+        }
+        assert!(g.dead.is_some());
+        // A frozen sun, and all of it saved.
+        let mut g = arena(69);
+        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false };
+        let t = g.time;
+        let idle = Controls { input: Input { forward: 0.0, strafe: 0.0, jump: false, jump_pressed: false, sneak: false, sprint: false }, attack_held: false, attack_pressed: false, use_held: false, use_pressed: false, pick: false, drop: false, drop_all: false };
+        for _ in 0..20 {
+            g.update(0.5, &idle);
+        }
+        assert_eq!(g.time, t);
+        assert_eq!(Game::from_save(g.to_save()).rules, g.rules);
     }
 
     /// Walk over every item on the ground (then back).
