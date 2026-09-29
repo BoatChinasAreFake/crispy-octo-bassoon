@@ -392,6 +392,9 @@ pub struct Hit {
     pub dist: f32,
 }
 
+/// A chunk from a generator thread: where, its blocks, and its light on its own.
+type Generated = (i32, i32, PalettedBlocks, crate::light::LightStore);
+
 pub struct World {
     pub generator: Arc<Generator>,
     pub chunks: HashMap<(i32, i32), Chunk>,
@@ -404,7 +407,7 @@ pub struct World {
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
     /// Generated chunks waiting for their region file to be read.
-    waiting: Vec<(i32, i32, PalettedBlocks)>,
+    waiting: Vec<Generated>,
     /// Soil records for every tilled block (see farming.rs); kept in step with the blocks.
     pub farm: HashMap<IVec3, Soil>,
     /// What's inside every chest and furnace (see containers.rs); kept in step with the blocks.
@@ -434,7 +437,7 @@ pub struct World {
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
     req_tx: Option<Sender<(i32, i32)>>,
-    res_rx: Receiver<(i32, i32, PalettedBlocks)>,
+    res_rx: Receiver<Generated>,
 }
 
 impl World {
@@ -451,8 +454,11 @@ impl World {
             let _ = builder.spawn(move || loop {
                 let job = rx.lock().ok().and_then(|r| r.recv().ok());
                 let Some((cx, cz)) = job else { return };
-                // Packed here, on the worker, so the main thread never holds a flat copy.
-                if tx.send((cx, cz, PalettedBlocks::from_ids(&g.generate(cx, cz)))).is_err() {
+                // Packed and lit here, on the worker, so the main thread never holds
+                // a flat copy and only has to join the light up at the borders.
+                let blocks = PalettedBlocks::from_ids(&g.generate(cx, cz));
+                let light = crate::light::light_alone(&blocks);
+                if tx.send((cx, cz, blocks, light)).is_err() {
                     return;
                 }
             });
@@ -505,31 +511,38 @@ impl World {
                 i += 1;
                 continue;
             }
-            let (_, _, blocks) = self.waiting.swap_remove(i);
+            let (_, _, blocks, light) = self.waiting.swap_remove(i);
             self.pending.remove(&(cx, cz));
             if !self.chunks.contains_key(&(cx, cz)) {
-                self.insert_chunk(cx, cz, blocks);
+                self.insert_chunk_lit(cx, cz, blocks, Some(light));
             }
         }
         while in_time() {
-            let Ok((cx, cz, blocks)) = self.res_rx.try_recv() else { break };
+            let Ok((cx, cz, blocks, light)) = self.res_rx.try_recv() else { break };
             if self.region_pending(cx, cz) {
-                self.waiting.push((cx, cz, blocks));
+                self.waiting.push((cx, cz, blocks, light));
                 continue;
             }
             self.pending.remove(&(cx, cz));
             if self.chunks.contains_key(&(cx, cz)) {
                 continue; // made on the spot meanwhile (see `load_now`)
             }
-            self.insert_chunk(cx, cz, blocks);
+            self.insert_chunk_lit(cx, cz, blocks, Some(light));
         }
         self.request_chunks(centers)
     }
 
     /// A freshly generated chunk: replay edits, fill chests, wake liquids, mark for meshing.
     pub(crate) fn insert_chunk(&mut self, cx: i32, cz: i32, blocks: PalettedBlocks) {
+        self.insert_chunk_lit(cx, cz, blocks, None);
+    }
+
+    /// The same, with the light a generator thread worked out for the chunk
+    /// on its own (used unless edits changed its blocks since).
+    pub(crate) fn insert_chunk_lit(&mut self, cx: i32, cz: i32, blocks: PalettedBlocks, light: Option<crate::light::LightStore>) {
         self.ensure_region(cx, cz);
         let mut chunk = Chunk::new(blocks);
+        let edited = self.mods.get(&(cx, cz)).is_some_and(|m| !m.is_empty());
         if let Some(m) = self.mods.get(&(cx, cz)) {
             for (&i, &id) in m {
                 // Saves and hosts can't be trusted to stay in bounds.
@@ -556,8 +569,17 @@ impl World {
             }
         }
         chunk.recompute_heights();
-        self.chunks.insert((cx, cz), chunk);
-        self.light_new_chunk(cx, cz);
+        match light.filter(|_| !edited) {
+            Some(light) => {
+                chunk.light = light;
+                self.chunks.insert((cx, cz), chunk);
+                self.light_prelit_chunk(cx, cz);
+            }
+            None => {
+                self.chunks.insert((cx, cz), chunk);
+                self.light_new_chunk(cx, cz);
+            }
+        }
         if self.structure_loot {
             self.fill_structure_chests(cx, cz);
         }
