@@ -7,6 +7,7 @@ mod animals;
 mod anvil;
 mod block;
 mod building;
+mod combat;
 mod containers;
 mod drops;
 mod enchant;
@@ -1232,6 +1233,17 @@ impl App {
         }
         if self.screen == Screen::Playing {
             self.ui.crosshair();
+            // The weapon charging back up after a swing (see combat.rs).
+            let charge = self.game.attack_charge();
+            if charge < 1.0 && !self.game.creative {
+                let (bw, bh) = (18.0 * s, 2.0 * s);
+                let (bx, by) = (w / 2.0 - bw / 2.0, h / 2.0 + 10.0 * s);
+                draw_rectangle(bx - 1.0, by - 1.0, bw + 2.0, bh + 2.0, Color::new(0.0, 0.0, 0.0, 0.6));
+                draw_rectangle(bx, by, bw * charge, bh, Color::new(0.9, 0.9, 0.9, 0.9));
+            }
+            if self.game.blocking {
+                self.ui.tile(texture::T_SHIELD, w / 2.0 + 10.0 * s, h / 2.0 - 8.0 * s, 16.0 * s, Color::new(1.0, 1.0, 1.0, 0.8));
+            }
         }
         self.name_tags();
 

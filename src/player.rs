@@ -8,6 +8,7 @@ use macroquad::math::Vec3;
 pub const EYE: f32 = 1.62;
 pub const MAX_HEALTH: f32 = 20.0;
 
+#[derive(Default)]
 pub struct Input {
     pub forward: f32,
     pub strafe: f32,
@@ -27,6 +28,8 @@ pub struct Player {
     pub fall_start: f32,
     pub sprinting: bool,
     pub sneaking: bool,
+    /// Holding up a shield (walks like sneaking; see combat.rs).
+    pub blocking: bool,
     pub bob: f32,
     pub last_jump_press: f64,
     /// Food, saturation and exhaustion (see hunger.rs).
@@ -52,6 +55,7 @@ impl Player {
             fall_start: pos.y,
             sprinting: false,
             sneaking: false,
+            blocking: false,
             bob: 0.0,
             last_jump_press: -10.0,
             hunger: Default::default(),
@@ -123,7 +127,7 @@ impl Player {
             1.2
         } else if in_water {
             2.6
-        } else if self.sneaking {
+        } else if self.sneaking || self.blocking {
             1.4
         } else if self.sprinting {
             5.8

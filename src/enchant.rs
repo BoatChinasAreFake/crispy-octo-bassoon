@@ -67,7 +67,7 @@ impl Enchant {
         match self {
             Enchant::Efficiency | Enchant::Fortune => pick,
             Enchant::Sharpness => is_sword(item),
-            Enchant::Protection => armor_of(item).is_some(),
+            Enchant::Protection => armor_of(item).is_some() || item == SHIELD,
             Enchant::Unbreaking => durability(item).is_some(),
         }
     }

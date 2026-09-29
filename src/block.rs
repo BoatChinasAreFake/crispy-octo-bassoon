@@ -171,8 +171,9 @@ pub const ZAP_DUST: Id = FIRST_ITEM + 80;
 pub const BOOK: Id = FIRST_ITEM + 81;
 /// Carries its enchantments in its wear, like a tool (see enchant.rs).
 pub const ENCHANTED_BOOK: Id = FIRST_ITEM + 82;
+pub const SHIELD: Id = FIRST_ITEM + 83;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 83;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 84;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -256,6 +257,7 @@ pub fn durability(id: Id) -> Option<u16> {
         BOW => 384,
         ROD => 64,
         SHEARS => 238,
+        SHIELD => 336,
         _ => return item_def(id).and_then(|i| i.durability),
     })
 }
@@ -268,7 +270,7 @@ pub fn is_sword(id: Id) -> bool {
 
 /// Wear from breaking a block with `held` (swords aren't meant for digging).
 pub fn dig_wear(held: Id, broken: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || block(broken).hardness <= 0.0 {
+    if durability(held).is_none() || armor_of(held).is_some() || held == SHIELD || block(broken).hardness <= 0.0 {
         return 0;
     }
     if is_sword(held) { 2 } else { 1 }
@@ -276,7 +278,7 @@ pub fn dig_wear(held: Id, broken: Id) -> u16 {
 
 /// Wear from hitting a mob with `held` (anything but a sword is a clumsy weapon).
 pub fn hit_wear(held: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS) {
+    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS | SHIELD) {
         return 0;
     }
     if is_sword(held) { 1 } else { 2 }
@@ -900,6 +902,7 @@ impl Registry {
             item("zap_dust", "Zappy Dust (Do Not Lick)", T_ZAP_DUST),
             item("book", "Book (Mostly Wheat)", T_BOOK),
             ItemDef { stack: 1, ..item("enchanted_book", "Enchanted Book (Spoilers Inside)", T_ENCHANTED_BOOK) },
+            ItemDef { stack: 1, ..item("shield", "Shield (Door You Can Carry)", T_SHIELD) },
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -967,6 +970,7 @@ impl Registry {
             r(&[(STONE, 2)], (PLATE, 1)),
             r(&[(GLOWROCK, 1), (ZAP_DUST, 4)], (LAMP, 1)),
             r(&[(WHEAT, 3), (STRING, 1)], (BOOK, 1)),
+            r(&[(PLANKS, 6), (IRON, 1)], (SHIELD, 1)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {

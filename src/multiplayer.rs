@@ -802,8 +802,11 @@ impl Game {
             Msg::Mobs { mobs, tnts, arrows } => self.sync_mobs(mobs, tnts, arrows),
             Msg::HurtYou { dmg, cause, knock } => {
                 self.player.hurt = 0.0;
-                self.hurt_player_armored(dmg, &cause);
-                self.player.body.vel += knock;
+                // Whatever hit us came from the opposite way to the knock.
+                let flat = Vec3::new(knock.x, 0.0, knock.z);
+                let from = (flat.length() > 0.01).then(|| self.player.body.pos + Vec3::Y * 0.9 - flat.normalize() * 2.0);
+                self.hurt_player_from(dmg, &cause, from, false);
+                self.player.body.vel += self.steadied(knock);
             }
             Msg::Give { item, n, wear } => {
                 if valid_item(item) && n > 0 {

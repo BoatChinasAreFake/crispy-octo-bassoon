@@ -156,6 +156,9 @@ pub struct Game {
     pub powered_doors: HashSet<IVec3>,
     /// The Hmmer whose trades are on screen (see villagers.rs).
     pub trading: Option<u32>,
+    /// Seconds since the last swing (weapons charge back up; see combat.rs), and a raised shield.
+    pub since_attack: f32,
+    pub blocking: bool,
 }
 
 impl Game {
@@ -252,6 +255,8 @@ impl Game {
             plates: HashMap::new(),
             powered_doors: HashSet::new(),
             trading: None,
+            since_attack: 10.0,
+            blocking: false,
         }
     }
 
@@ -633,6 +638,10 @@ impl Game {
 
         self.update_target();
         self.attack_cd = (self.attack_cd - dt).max(0.0);
+        self.since_attack += dt;
+        // Shields go up while right-click is held.
+        self.blocking = c.use_held && self.inv.held() == SHIELD;
+        self.player.blocking = self.blocking;
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
         self.update_fishing(dt, c.use_held);
@@ -1000,8 +1009,9 @@ impl Game {
                     if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         self.player.hurt = 0.0;
                         let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_player_armored(d, "was shot by a Rattler (with a Pointy Stick)");
-                        self.player.body.vel += a.vel.normalize_or_zero() * 4.0;
+                        self.hurt_player_from(d, "was shot by a Rattler (with a Pointy Stick)", Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
+                        let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
+                        self.player.body.vel += knock;
                         return false;
                     }
                     let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
@@ -1079,7 +1089,11 @@ impl Game {
                 self.breaking = None;
                 if c.attack_pressed && self.attack_cd <= 0.0 {
                     let i = *i;
-                    let dmg = attack_damage_with(held, self.held_level(Enchant::Sharpness)) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
+                    // Early swings are weak; only a full one can crit (see combat.rs).
+                    let charge = self.attack_charge();
+                    let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
+                    let dmg = attack_damage_with(held, self.held_level(Enchant::Sharpness)) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
                     if !self.creative {
                         self.player.hunger.exhaust(crate::hunger::ATTACK);
@@ -1100,8 +1114,17 @@ impl Game {
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
                         self.sfx(Sfx::hurt_of(kind), Some(at));
+                        if charge > 0.9 {
+                            if self.player.sprinting {
+                                // A running start sends them flying.
+                                let push = (at - from).normalize_or_zero() * 5.0;
+                                self.mobs[i].body.vel += push;
+                            } else if is_sword(held) && self.player.body.on_ground {
+                                self.sweep(i, from);
+                            }
+                        }
                     }
-                    self.attack_cd = 0.35;
+                    self.attack_cd = 0.1;
                 }
             }
             Some(Target::Block(h)) => {
@@ -1711,9 +1734,9 @@ impl Game {
         if pd < r * 2.0 && !self.dedicated {
             let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
             self.player.hurt = 0.0;
-            self.hurt_player_armored(dmg, cause);
+            self.hurt_player_from(dmg, cause, Some(at), true);
             let push = (self.player.body.pos - at).normalize_or_zero() * (1.0 - pd / (r * 2.0)) * 14.0;
-            self.player.body.vel += push + Vec3::Y * 4.0;
+            self.player.body.vel += self.steadied(push + Vec3::Y * 4.0);
         }
         for m in self.mobs.iter_mut() {
             let d = (m.body.pos + Vec3::Y * 0.5).distance(at);
@@ -1888,9 +1911,10 @@ impl Game {
                     let me = crate::players::record_key(&self.player_name);
                     self.sic_pets(&me, mob_id);
                     let d = self.rules.difficulty.mob_damage(d);
-                    self.hurt_player_armored(d, cause);
+                    let from = self.mobs.iter().find(|m| m.id == mob_id).map(|m| m.body.pos + Vec3::Y * 0.9);
+                    self.hurt_player_from(d, cause, from, false);
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
-                    self.player.body.vel += knock * 3.0 + Vec3::Y * 3.0;
+                    self.player.body.vel += self.steadied(knock * 3.0 + Vec3::Y * 3.0);
                 }
                 MobEvent::Explode(at, r, cause) => self.explode(at, r, cause),
                 MobEvent::Smoke(at) => self.smoke(at, 1, 0.2),
@@ -3619,6 +3643,61 @@ mod tests {
         let back = Game::from_save(g.to_save());
         let h = back.mobs.iter().find(|m| m.kind == MobKind::Hmmer).unwrap();
         assert_eq!((h.seed, h.home), (seed, g.mobs[0].home));
+    }
+
+        #[test]
+    fn charged_blows_sweeps_and_shields() {
+        let mut g = arena(72);
+        g.mobs.clear();
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((SWORD_IRON, 1));
+        g.inv.selected = 0;
+        let spawn = |g: &mut Game, x: f32| {
+            g.alloc_mob(MobKind::Mooer, Vec3::new(x, 50.0, -1.5));
+            g.mobs.len() - 1
+        };
+        let (a, b) = (spawn(&mut g, 0.5), spawn(&mut g, 1.4));
+        let full = g.mobs[a].health;
+        let swing = |g: &mut Game, i: usize| {
+            g.target = Some(Target::Mob(i));
+            let c = Controls { input: Default::default(), attack_held: true, attack_pressed: true, use_held: false, use_pressed: false, pick: false, drop: false, drop_all: false };
+            g.attack_cd = 0.0;
+            g.handle_actions(0.0, &c);
+        };
+        // A fully charged sword blow does full damage and sweeps the one beside it.
+        g.player.body.on_ground = true;
+        swing(&mut g, a);
+        assert!((full - g.mobs[a].health - attack_damage(SWORD_IRON)).abs() < 1e-3);
+        assert!(g.mobs[b].health < full, "swept");
+        // Straight away again: much weaker.
+        for m in g.mobs.iter_mut() {
+            m.hurt = 0.0;
+        }
+        let before = g.mobs[a].health;
+        swing(&mut g, a);
+        assert!(before - g.mobs[a].health < attack_damage(SWORD_IRON) * 0.3);
+
+        // A shield up stops hits from in front, and wears instead.
+        g.inv.slots[1] = Some((SHIELD, 1));
+        g.inv.selected = 1;
+        g.player.yaw = 0.0;
+        g.player.pitch = 0.0;
+        g.blocking = true;
+        g.player.hurt = 0.0;
+        let hp = g.player.health;
+        let front = g.player.body.pos + Vec3::new(0.0, 0.9, -3.0);
+        g.hurt_player_from(5.0, "tested", Some(front), false);
+        assert_eq!(g.player.health, hp);
+        assert_eq!(g.inv.wear[1], 5);
+        assert!(g.advancements.has("not_today"));
+        // Not from behind, though.
+        g.hurt_player_from(5.0, "tested", Some(g.player.body.pos + Vec3::new(0.0, 0.9, 3.0)), false);
+        assert!(g.player.health < hp);
+        // Armour steadies you.
+        let push = Vec3::new(10.0, 0.0, 0.0);
+        assert_eq!(g.steadied(push), push);
+        g.inv.armor = [Some((ARMOR_FIRST + 12, 1)), Some((ARMOR_FIRST + 13, 1)), Some((ARMOR_FIRST + 14, 1)), Some((ARMOR_FIRST + 15, 1))];
+        assert!(g.steadied(push).x < 6.0);
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
