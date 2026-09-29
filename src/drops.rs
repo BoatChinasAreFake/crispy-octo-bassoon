@@ -56,11 +56,12 @@ impl ItemDrop {
             return;
         }
         if self.body.in_water && self.body.vel.y < 1.5 {
-            // Bob to the surface (unless it's flying out, like a catch).
+            // Bob to the surface (unless it's flying out, like a catch), and drift with the current.
             self.body.vel.y = (self.body.vel.y + 6.0 * dt).min(1.5);
             let k = (1.0 - 3.0 * dt).max(0.0);
             self.body.vel.x *= k;
             self.body.vel.z *= k;
+            self.body.vel += crate::liquids::current(world, p + Vec3::Y * 0.1) * 6.0 * dt;
         } else {
             self.body.vel.y -= GRAVITY * dt;
         }
@@ -164,7 +165,7 @@ impl Game {
         }
         self.next_drop_id = self.next_drop_id.wrapping_add(1).max(1);
         let mut d = ItemDrop::new(self.next_drop_id, item, n, at, vel, delay);
-        d.wear = durability(item).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min(max - 1))).unwrap_or(0);
+        d.wear = crate::inventory::sanitize_wear(item, wear);
         self.drops.push(d);
         if self.drops.len() > MAX_DROPS {
             self.drops.remove(0);
@@ -252,7 +253,13 @@ impl Game {
         for d in self.drops.iter_mut() {
             d.update(dt, &self.world);
         }
-        self.drops.retain(|d| d.age < DESPAWN_SECS && d.body.pos.y > -16.0);
+        // Lava eats things.
+        let burnt: Vec<Vec3> = self.drops.iter().filter(|d| d.body.in_lava).map(|d| d.body.pos).collect();
+        for p in burnt {
+            self.sfx(Sfx::Hiss, Some(p));
+            self.smoke(p + Vec3::Y * 0.3, 4, 0.2);
+        }
+        self.drops.retain(|d| d.age < DESPAWN_SECS && d.body.pos.y > -16.0 && !d.body.in_lava);
         self.drop_timer += dt;
         if self.drop_timer >= 0.5 {
             self.drop_timer = 0.0;

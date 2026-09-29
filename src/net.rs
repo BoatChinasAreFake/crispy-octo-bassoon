@@ -22,7 +22,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v11: experience (Xp, Orbs), anvils (Repair) and world rules (Rules).
 /// v12: wear carries enchantments (u32), remembered players (PlayerData,
 /// Restore), weather (Weather, Lightning) and enchanting (Enchant).
-pub const PROTOCOL: u32 = 12;
+/// v13: liquids, animals (MobInteract, mob flags), Zappy Dust, trading
+/// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
+pub const PROTOCOL: u32 = 13;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -55,7 +57,15 @@ pub struct MobSnap {
     pub burning: bool,
     /// Bloops come in sizes 1, 2 and 4; everything else is 1.
     pub size: u8,
+    /// `MOB_*` bits: baby, sheared, tamed, sitting, in love.
+    pub flags: u8,
 }
+
+pub const MOB_BABY: u8 = 1;
+pub const MOB_SHEARED: u8 = 2;
+pub const MOB_TAMED: u8 = 4;
+pub const MOB_SITTING: u8 = 8;
+pub const MOB_LOVE: u8 = 16;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
@@ -133,7 +143,8 @@ pub enum Msg {
     Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool, weather_cycle: bool },
     /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
     /// `material` (or, `combine`, by merging two of them).
-    Repair { x: i32, y: i32, z: i32, item: Id, material: Id, used: u8, combine: bool },
+    /// `ench`, `other_ench`: the enchantments on the item and on what it was combined with.
+    Repair { x: i32, y: i32, z: i32, item: Id, material: Id, used: u8, combine: bool, ench: u16, other_ench: u16 },
     /// client -> host: my inventory (then armour) with wear, health and hunger, so
     /// the host can remember me when I leave.
     PlayerData { slots: Vec<(Id, u8, u32)>, health: f32, food: f32, saturation: f32 },
@@ -148,6 +159,26 @@ pub enum Msg {
     /// host -> client: what that enchanting gave (`ench` 0: refused), and how
     /// many times you've enchanted (it seeds the table's next offers).
     Enchanted { item: Id, ench: u16, count: u32 },
+    /// client -> host: I right-clicked this mob holding this (feeding, shearing, taming).
+    MobInteract { mob: u32, item: Id },
+    /// client -> host: I made trade number `index` with this Hmmer.
+    Trade { mob: u32, index: u8 },
+    /// client -> host: I've stood in the portal at x,y,z long enough: take me through.
+    UsePortal { x: i32, y: i32, z: i32 },
+    /// host -> client: every boat and minecart: (id, kind, position, yaw, rider id + 1 or 0).
+    Vehicles(Vec<(u32, u8, Vec3, f32, u32)>),
+    /// client -> host: get in (0), get out (1) or hit (2) this vehicle.
+    VehicleUse { id: u32, action: u8 },
+    /// client -> host: where I've driven the vehicle I'm in.
+    Ride { id: u32, pos: Vec3, yaw: f32 },
+    /// client -> host: I put a boat (0) or minecart (1) down here.
+    PlaceVehicle { kind: u8, pos: Vec3, yaw: f32 },
+    /// Both ways: what's written on the sign at x,y,z.
+    SignText { x: i32, y: i32, z: i32, lines: Vec<String> },
+    /// host -> client: what hangs in the frame at x,y,z (AIR: nothing).
+    FrameItem { x: i32, y: i32, z: i32, item: Id, wear: u32 },
+    /// client -> host: I put this in the frame (`put`), or knocked out what was there.
+    FrameUse { x: i32, y: i32, z: i32, item: Id, wear: u32, put: bool },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -331,6 +362,7 @@ impl Msg {
                     w.f32(m.hurt);
                     w.u8(m.burning as u8);
                     w.u8(m.size);
+                    w.u8(m.flags);
                 }
                 w.u32(tnts.len() as u32);
                 for &(p, f) in tnts {
@@ -556,13 +588,84 @@ impl Msg {
                 w.u16(*item);
                 w.u8(*choice);
             }
+            Msg::MobInteract { mob, item } => {
+                w.u8(46);
+                w.u32(*mob);
+                w.u16(*item);
+            }
+            Msg::Trade { mob, index } => {
+                w.u8(47);
+                w.u32(*mob);
+                w.u8(*index);
+            }
+            Msg::UsePortal { x, y, z } => {
+                w.u8(48);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::Vehicles(list) => {
+                w.u8(49);
+                w.u32(list.len() as u32);
+                for &(id, kind, pos, yaw, rider) in list {
+                    w.u32(id);
+                    w.u8(kind);
+                    w.v3(pos);
+                    w.f32(yaw);
+                    w.u32(rider);
+                }
+            }
+            Msg::VehicleUse { id, action } => {
+                w.u8(50);
+                w.u32(*id);
+                w.u8(*action);
+            }
+            Msg::Ride { id, pos, yaw } => {
+                w.u8(51);
+                w.u32(*id);
+                w.v3(*pos);
+                w.f32(*yaw);
+            }
+            Msg::PlaceVehicle { kind, pos, yaw } => {
+                w.u8(52);
+                w.u8(*kind);
+                w.v3(*pos);
+                w.f32(*yaw);
+            }
+            Msg::SignText { x, y, z, lines } => {
+                w.u8(53);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(lines.len().min(4) as u8);
+                for l in lines.iter().take(4) {
+                    w.str(l);
+                }
+            }
+            Msg::FrameItem { x, y, z, item, wear } => {
+                w.u8(54);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+                w.u32(*wear);
+            }
+            Msg::FrameUse { x, y, z, item, wear, put } => {
+                w.u8(55);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+                w.u32(*wear);
+                w.u8(*put as u8);
+            }
             Msg::Enchanted { item, ench, count } => {
                 w.u8(45);
                 w.u16(*item);
                 w.u16(*ench);
                 w.u32(*count);
             }
-            Msg::Repair { x, y, z, item, material, used, combine } => {
+            Msg::Repair { x, y, z, item, material, used, combine, ench, other_ench } => {
                 w.u8(39);
                 w.i32(*x);
                 w.i32(*y);
@@ -571,6 +674,8 @@ impl Msg {
                 w.u16(*material);
                 w.u8(*used);
                 w.u8(*combine as u8);
+                w.u16(*ench);
+                w.u16(*other_ench);
             }
         }
         w.0
@@ -603,10 +708,10 @@ impl Msg {
             6 => Msg::PlayerLeave { id: r.u32()? },
             7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()? },
             8 => {
-                let n = r.count(31)?;
+                let n = r.count(32)?;
                 let mut mobs = Vec::with_capacity(n);
                 for _ in 0..n {
-                    mobs.push(MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0, size: r.u8()? });
+                    mobs.push(MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0, size: r.u8()?, flags: r.u8()? });
                 }
                 let n = r.count(16)?;
                 let mut tnts = Vec::with_capacity(n);
@@ -695,8 +800,33 @@ impl Msg {
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
+            46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
+            47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
+            48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            49 => {
+                let n = r.count(25)?;
+                let mut list = Vec::with_capacity(n);
+                for _ in 0..n {
+                    list.push((r.u32()?, r.u8()?, r.v3()?, r.f32()?, r.u32()?));
+                }
+                Msg::Vehicles(list)
+            }
+            50 => Msg::VehicleUse { id: r.u32()?, action: r.u8()? },
+            51 => Msg::Ride { id: r.u32()?, pos: r.v3()?, yaw: r.f32()? },
+            52 => Msg::PlaceVehicle { kind: r.u8()?, pos: r.v3()?, yaw: r.f32()? },
+            53 => {
+                let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
+                let n = r.u8()?.min(4);
+                let mut lines = Vec::new();
+                for _ in 0..n {
+                    lines.push(r.str()?);
+                }
+                Msg::SignText { x, y, z, lines }
+            }
+            54 => Msg::FrameItem { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()? },
+            55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
-            39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0 },
+            39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
         };
         Ok(m)
@@ -1140,12 +1270,22 @@ mod tests {
             Msg::Lightning { at: Vec3::new(4.0, 70.0, -9.5) },
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },
             Msg::Enchanted { item: 0x8003, ench: 0x0249, count: 7 },
-            Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false },
+            Msg::MobInteract { mob: 77, item: 0x8019 },
+            Msg::Trade { mob: 12, index: 3 },
+            Msg::UsePortal { x: 32800, y: 40, z: -3 },
+            Msg::Vehicles(vec![(3, 1, Vec3::new(1.0, 2.0, 3.0), 0.5, 2)]),
+            Msg::VehicleUse { id: 3, action: 2 },
+            Msg::Ride { id: 3, pos: Vec3::ONE, yaw: 1.0 },
+            Msg::PlaceVehicle { kind: 0, pos: Vec3::X, yaw: -1.0 },
+            Msg::SignText { x: 1, y: 2, z: 3, lines: vec!["Hello".into(), "".into(), "world".into(), "!".into()] },
+            Msg::FrameItem { x: 1, y: 2, z: 3, item: 0x8003, wear: 7 },
+            Msg::FrameUse { x: 1, y: 2, z: 3, item: 0x8003, wear: 7, put: true },
+            Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },
             Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1, 0), (0, 0, 0), (0x800c, 1, 99)], burn: 0.5, cook: 0.25 },
             Msg::Mobs {
-                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4 }],
+                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4, flags: MOB_BABY | MOB_TAMED }],
                 tnts: vec![(Vec3::Z, 2.0)],
                 arrows: vec![(Vec3::Y, Vec3::new(20.0, 3.0, -1.0))],
             },

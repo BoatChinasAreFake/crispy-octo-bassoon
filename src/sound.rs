@@ -63,6 +63,9 @@ impl Sfx {
             crate::entity::MobKind::Mooer => Sfx::Moo,
             crate::entity::MobKind::Rattler => Sfx::Rattle,
             crate::entity::MobKind::Bloop => Sfx::Bloop,
+            crate::entity::MobKind::Woofer => Sfx::Woof,
+            crate::entity::MobKind::Hmmer => Sfx::Hmm,
+            crate::entity::MobKind::Grumbler => Sfx::Oink,
             _ => Sfx::MobHurt,
         }
     }
@@ -109,6 +112,12 @@ pub enum Sfx {
     Thunder,
     /// An enchanting table doing its thing.
     Chime,
+    /// A Woofer.
+    Woof,
+    /// Shears.
+    Snip,
+    /// A Hmmer, hmming.
+    Hmm,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -451,6 +460,30 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             }
             finish(v, 1.1)
         }
+        Sfx::Woof => {
+            // Two short barks.
+            let mut v = vec![0.0; samples(0.5)];
+            let p = rng.range(0.9, 1.15);
+            for k in 0..2 {
+                voice(&mut v, k as f32 * 0.2, 0.12, 330.0 * p, 220.0 * p, 1600.0, 0.01, 1.0, rng);
+            }
+            finish(v, 1.1)
+        }
+        Sfx::Snip => {
+            let mut v = vec![0.0; samples(0.3)];
+            for k in 0..2 {
+                burst(&mut v, k as f32 * 0.12, 0.04, 60.0, 3000.0, 9000.0, 0.8, rng);
+                tone(&mut v, k as f32 * 0.12, 0.03, 2400.0, 2000.0, 80.0, 0.3, &[1.0]);
+            }
+            finish(v, 1.0)
+        }
+        Sfx::Hmm => {
+            // A thoughtful, nasal "hmm".
+            let mut v = vec![0.0; samples(0.6)];
+            let p = rng.range(0.85, 1.15);
+            voice(&mut v, 0.0, 0.5, 180.0 * p, 150.0 * p, 900.0, 0.04, 1.0, rng);
+            finish(v, 1.0)
+        }
         Sfx::Moo => {
             let mut v = vec![0.0; samples(1.2)];
             let p = rng.range(0.9, 1.1);
@@ -598,6 +631,9 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Thunk,
         Sfx::Thunder,
         Sfx::Chime,
+        Sfx::Woof,
+        Sfx::Snip,
+        Sfx::Hmm,
     ]);
     v
 }

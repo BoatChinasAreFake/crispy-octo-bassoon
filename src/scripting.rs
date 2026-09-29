@@ -267,6 +267,9 @@ fn register_api(e: &mut Engine) {
             "bloop" => Sfx::Bloop,
             "twang" => Sfx::Twang,
             "thunk" => Sfx::Thunk,
+            "woof" => Sfx::Woof,
+            "snip" => Sfx::Snip,
+            "hmm" => Sfx::Hmm,
             other => return err(format!("unknown sound \"{other}\"")),
         };
         push(Cmd::Sound(s, Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))

@@ -108,6 +108,8 @@ pub struct Generator {
     cave_a: Perlin,
     cave_b: Perlin,
     cavern: Perlin,
+    /// The Scorchlands' caverns (see scorch.rs).
+    pub(crate) scorch: Perlin,
     /// Mod world generation, copied from the registry when the world is created.
     ores: Vec<OreGen>,
     plants: Vec<PlantGen>,
@@ -126,6 +128,7 @@ impl Generator {
             cave_a: Perlin::new(s + 5),
             cave_b: Perlin::new(s + 6),
             cavern: Perlin::new(s + 7),
+            scorch: Perlin::new(s + 8),
             ores: reg().ores.clone(),
             plants: reg().plants.clone(),
         }
@@ -229,6 +232,10 @@ impl Generator {
     }
 
     pub fn generate(&self, cx: i32, cz: i32) -> Vec<Id> {
+        // Far east: the wall, then the Scorchlands (see scorch.rs).
+        if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL {
+            return self.generate_scorch(cx, cz);
+        }
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -269,8 +276,8 @@ impl Generator {
                         continue;
                     }
                     if self.is_cave(x, y, z, h) || ravine.is_some_and(|f| y >= f) {
-                        // Deep caverns are flooded.
-                        b[i] = if y <= 11 && self.cavern.noise3(x as f32 / 55.0, y as f32 / 28.0, z as f32 / 55.0) > 0.42 { WATER } else { AIR };
+                        // The deepest caverns are lakes of lava.
+                        b[i] = if y <= 10 && self.cavern.noise3(x as f32 / 55.0, y as f32 / 28.0, z as f32 / 55.0) > 0.42 { LAVA } else { AIR };
                         continue;
                     }
                     if b[i] == STONE {
@@ -284,6 +291,8 @@ impl Generator {
                             b[i] = DIAMOND_ORE;
                         } else if y < 32 && (0.0215..0.0245).contains(&r) && r2 < 0.55 {
                             b[i] = GOLD_ORE;
+                        } else if y < 16 && (0.0245..0.029).contains(&r) && r2 < 0.55 {
+                            b[i] = ZAP_ORE;
                         }
                     }
                     for (oi, ore) in self.ores.iter().enumerate() {
@@ -407,6 +416,18 @@ pub struct World {
     /// Fill structure chests when their chunks first arrive (off for joined
     /// players: the host has the real contents).
     pub structure_loot: bool,
+    /// Cells where water or lava may need to move (see liquids.rs). Only
+    /// collected where the world lives (`simulate_liquids`).
+    pub liquid_dirty: HashSet<IVec3>,
+    pub simulate_liquids: bool,
+    /// Cells where Zappy Dust contraptions may need updating (see wiring.rs); same rules.
+    pub zap_dirty: HashSet<IVec3>,
+    /// What's written on every sign, and what hangs in every item frame (see decor.rs).
+    pub signs: HashMap<IVec3, [String; 4]>,
+    pub frames: HashMap<IVec3, (Id, crate::inventory::Wear)>,
+    /// Huts whose chests were just filled for the first time: a Hmmer should
+    /// move in (where to stand, and its seed; see villagers.rs).
+    pub new_huts: Vec<(Vec3, u32)>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -442,6 +463,12 @@ impl World {
             farm: HashMap::new(),
             containers: HashMap::new(),
             structure_loot: true,
+            liquid_dirty: HashSet::new(),
+            zap_dirty: HashSet::new(),
+            new_huts: Vec::new(),
+            signs: HashMap::new(),
+            frames: HashMap::new(),
+            simulate_liquids: true,
             pending: HashSet::new(),
             edit_log: Vec::new(),
             log_edits: false,
@@ -461,29 +488,52 @@ impl World {
     pub fn stream(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
         while let Ok((cx, cz, blocks)) = self.res_rx.try_recv() {
             self.pending.remove(&(cx, cz));
-            let mut chunk = Chunk::new(blocks);
-            if let Some(m) = self.mods.get(&(cx, cz)) {
-                for (&i, &id) in m {
-                    // Saves and hosts can't be trusted to stay in bounds.
-                    if (i as usize) < CHUNK_VOL && valid_block(id) {
-                        chunk.blocks.set(i as usize, id);
-                    }
-                }
+            if self.chunks.contains_key(&(cx, cz)) {
+                continue; // made on the spot meanwhile (see `load_now`)
             }
-            chunk.recompute_heights();
-            self.chunks.insert((cx, cz), chunk);
-            if self.structure_loot {
-                self.fill_structure_chests(cx, cz);
-            }
-            for dz in -1..=1 {
-                for dx in -1..=1 {
-                    if self.chunks.contains_key(&(cx + dx, cz + dz)) {
-                        self.dirty.insert((cx + dx, cz + dz));
+            self.insert_chunk(cx, cz, blocks);
+        }
+        self.request_chunks(centers)
+    }
+
+    /// A freshly generated chunk: replay edits, fill chests, wake liquids, mark for meshing.
+    pub(crate) fn insert_chunk(&mut self, cx: i32, cz: i32, blocks: PalettedBlocks) {
+        let mut chunk = Chunk::new(blocks);
+        if let Some(m) = self.mods.get(&(cx, cz)) {
+            for (&i, &id) in m {
+                // Saves and hosts can't be trusted to stay in bounds.
+                if (i as usize) < CHUNK_VOL && valid_block(id) {
+                    chunk.blocks.set(i as usize, id);
+                    // Liquids and contraptions pick up where they left off.
+                    if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
+                        let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
+                        let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
+                        let p = ivec3(cx * CW + lx, y, cz * CW + lz);
+                        if is_liquid(id) {
+                            self.liquid_dirty.insert(p);
+                        } else {
+                            self.zap_dirty.insert(p);
+                        }
                     }
                 }
             }
         }
+        chunk.recompute_heights();
+        self.chunks.insert((cx, cz), chunk);
+        if self.structure_loot {
+            self.fill_structure_chests(cx, cz);
+        }
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if self.chunks.contains_key(&(cx + dx, cz + dz)) {
+                    self.dirty.insert((cx + dx, cz + dz));
+                }
+            }
+        }
+    }
 
+    /// Ask the workers for chunks near `centers`, and drop ones nobody is near.
+    fn request_chunks(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
         let chunk_of = |p: Vec3| ((p.x / CW as f32).floor() as i32, (p.z / CW as f32).floor() as i32);
         let mut wanted: Vec<(i32, i32, i32)> = Vec::new();
         for (ci, &(center, radius)) in centers.iter().enumerate() {
@@ -615,8 +665,19 @@ impl World {
         } else if is_container(old) {
             self.containers.remove(&p);
         }
+        // Signs lose their words and frames their contents with the block (spill first).
+        if crate::decor::is_sign(old) && !crate::decor::is_sign(id) {
+            self.signs.remove(&p);
+        }
+        if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
+            self.frames.remove(&p);
+        }
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
+        if self.simulate_liquids {
+            self.wake_liquids(p, is_liquid(id) || is_liquid(old));
+            self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));
+        }
         let xs: &[i32] = if lx == 0 { &[-1, 0] } else if lx == CW - 1 { &[0, 1] } else { &[0] };
         let zs: &[i32] = if lz == 0 { &[-1, 0] } else if lz == CW - 1 { &[0, 1] } else { &[0] };
         for &dx in xs {
@@ -625,6 +686,30 @@ impl World {
             }
         }
         Some(old)
+    }
+
+    /// A cell changed: it and its neighbours may need to flow (only if a
+    /// liquid is involved, which is rare, so this stays cheap).
+    fn wake_liquids(&mut self, p: IVec3, involved: bool) {
+        const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
+        if involved || SIDES.iter().any(|d| is_liquid(self.get_v(p + *d))) {
+            self.liquid_dirty.insert(p);
+            for d in SIDES {
+                self.liquid_dirty.insert(p + d);
+            }
+        }
+    }
+
+    /// The same for Zappy Dust: a switch flipped or a wire laid wakes its neighbours.
+    fn wake_zappy(&mut self, p: IVec3, involved: bool) {
+        const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
+        let watched = |id: Id| is_zappy(id) || crate::scorch::is_portal(id);
+        if involved || SIDES.iter().any(|d| watched(self.get_v(p + *d))) {
+            self.zap_dirty.insert(p);
+            for d in SIDES {
+                self.zap_dirty.insert(p + d);
+            }
+        }
     }
 
     /// Set a block even if its chunk isn't loaded here (it's applied when the
@@ -645,8 +730,17 @@ impl World {
         self.set(p.x, p.y, p.z, id)
     }
 
-    /// Voxel DDA (Amanatides & Woo).
+    /// Voxel DDA (Amanatides & Woo), stopping at anything a player can point at.
     pub fn raycast(&self, origin: Vec3, dir: Vec3, max: f32) -> Option<Hit> {
+        self.raycast_where(origin, dir, max, targetable)
+    }
+
+    /// The same, also stopping at water and lava sources (buckets reach through flows to them).
+    pub fn raycast_liquid(&self, origin: Vec3, dir: Vec3, max: f32) -> Option<Hit> {
+        self.raycast_where(origin, dir, max, |id| targetable(id) || id == WATER || id == LAVA)
+    }
+
+    fn raycast_where(&self, origin: Vec3, dir: Vec3, max: f32, stop: impl Fn(Id) -> bool) -> Option<Hit> {
         let mut p = ivec3(origin.x.floor() as i32, origin.y.floor() as i32, origin.z.floor() as i32);
         let step = ivec3(dir.x.signum() as i32, dir.y.signum() as i32, dir.z.signum() as i32);
         let inv = |d: f32| if d.abs() < 1e-9 { f32::INFINITY } else { 1.0 / d.abs() };
@@ -657,7 +751,7 @@ impl World {
         let mut t = 0.0;
         while t <= max {
             let id = self.get_v(p);
-            if targetable(id) {
+            if stop(id) {
                 if block(id).model != Model::Shaped {
                     return Some(Hit { pos: p, normal, dist: t });
                 }
@@ -717,7 +811,7 @@ impl World {
     pub fn surface_y(&self, x: i32, z: i32) -> i32 {
         for y in (0..CH).rev() {
             let b = self.get(x, y, z);
-            if is_solid(b) || b == WATER {
+            if is_solid(b) || is_liquid(b) {
                 return y;
             }
         }

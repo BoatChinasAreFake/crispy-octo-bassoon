@@ -120,7 +120,7 @@ Separate several actions with `;`, for example `on_use = launch 18; message Whee
 | `message Some text` | Show a chat message |
 | `give slice 2` | Give items |
 | `time day` / `night` / `noon` / `midnight` / `0.0`–`1.0` | Set the time (host only) |
-| `spawn oinker` / `hisser` / `groaner` / `fluffer` / `starer` / `cluckster` / `mooer` / `rattler` / `webber` / `bloop` | Spawn a mob (host only). The names they parody (`pig`, `creeper`, `zombie`, `sheep`, `enderman`, `chicken`, `cow`, `skeleton`, `spider`, `slime`) work too |
+| `spawn oinker` / `hisser` / `groaner` / `fluffer` / `starer` / `cluckster` / `mooer` / `rattler` / `webber` / `bloop` / `woofer` / `hmmer` / `grumbler` | Spawn a mob (host only). The names they parody (`pig`, `creeper`, `zombie`, `sheep`, `enderman`, `chicken`, `cow`, `skeleton`, `spider`, `slime`, `wolf`, `villager`, `zombified_piglin`) work too |
 
 ### `[texture <name>]`
 

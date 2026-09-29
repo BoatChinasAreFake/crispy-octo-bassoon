@@ -185,11 +185,50 @@ pub const T_POINTY_ROCK: u16 = 208;
 pub const T_ENCH_TOP: u16 = 209;
 pub const T_ENCH_SIDE: u16 = 210;
 pub const T_ENCH_BOTTOM: u16 = 211;
+pub const T_LAVA: u16 = 212;
+pub const T_OBSIDIAN: u16 = 213;
+pub const T_BUCKET: u16 = 214;
+pub const T_WATER_BUCKET: u16 = 215;
+pub const T_LAVA_BUCKET: u16 = 216;
+pub const T_WOOF_SKIN: u16 = 217;
+pub const T_WOOF_FACE: u16 = 218;
+pub const T_COLLAR: u16 = 219;
+pub const T_SHEARS: u16 = 220;
+pub const T_ZAP_ORE: u16 = 221;
+pub const T_WIRE: u16 = 222;
+pub const T_WIRE_ON: u16 = 223;
+pub const T_LEVER: u16 = 224;
+pub const T_LEVER_ON: u16 = 225;
+pub const T_ZAP_BLOCK: u16 = 226;
+pub const T_LAMP: u16 = 227;
+pub const T_LAMP_ON: u16 = 228;
+pub const T_ZAP_DUST: u16 = 229;
+pub const T_BOOK: u16 = 230;
+pub const T_ENCHANTED_BOOK: u16 = 231;
+pub const T_HMM_FACE: u16 = 232;
+pub const T_HMM_ROBE: u16 = 233;
+pub const T_SHIELD: u16 = 234;
+pub const T_SCORCHROCK: u16 = 235;
+pub const T_EMBERSAND: u16 = 236;
+pub const T_SCORCH_GOLD: u16 = 237;
+pub const T_PORTAL: u16 = 238;
+pub const T_SPARKER: u16 = 239;
+pub const T_GRUMBLE_SKIN: u16 = 240;
+pub const T_GRUMBLE_FACE: u16 = 241;
+/// Six rail shapes in a row (see `RAIL_FIRST`), then four powered rails.
+pub const T_RAIL: u16 = 242;
+pub const T_POWERED_RAIL: u16 = 248;
+pub const T_CART: u16 = 252;
+pub const T_BOAT_ITEM: u16 = 253;
+pub const T_CART_ITEM: u16 = 254;
+pub const T_FRAME: u16 = 255;
+pub const T_COMPASS: u16 = 256;
+pub const T_MAP: u16 = 257;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
-/// keeps the first 256 tiles; mods look textures up by name, so this can move).
-pub const FIRST_MOD_TILE: u16 = 256;
+/// keeps the first 512 tiles; mods look textures up by name, so this can move).
+pub const FIRST_MOD_TILE: u16 = 512;
 
 /// Names mods can use to refer to built-in textures.
 pub const BASE_TEXTURES: &[(&str, u16)] = &[
@@ -274,6 +313,8 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("anvil_top", T_ANVIL_TOP),
     ("glowshroom", T_GLOWSHROOM),
     ("pointy_rock", T_POINTY_ROCK),
+    ("lava", T_LAVA),
+    ("obsidian", T_OBSIDIAN),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -1114,6 +1155,196 @@ const WORM: [&str; 16] = [
     "................",
 ];
 
+const COMPASS_SPRITE: [&str; 16] = [
+    "................",
+    ".....######.....",
+    "...##iiiiii##...",
+    "..#iwwwwwwwwi#..",
+    "..#iwwwrwwwwi#..",
+    ".#iwwwwrwwwwwi#.",
+    ".#iwwwwrrwwwwi#.",
+    ".#iwwwwkkwwwwi#.",
+    ".#iwwwwkkwwwwi#.",
+    ".#iwwwwwkwwwwi#.",
+    "..#iwwwwkwwwi#..",
+    "..#iwwwwwwwwi#..",
+    "...##iiiiii##...",
+    ".....######.....",
+    "................",
+    "................",
+];
+
+const MAP_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "..############..",
+    "..#pppppppggp#..",
+    "..#ppgggpppgp#..",
+    "..#pggggppppp#..",
+    "..#ppgppbbbpp#..",
+    "..#pppbbbbbpp#..",
+    "..#ppbbbbrppp#..",
+    "..#pppbbppppp#..",
+    "..#ppppppgggp#..",
+    "..#pggppggggp#..",
+    "..#pppppppppp#..",
+    "..############..",
+    "................",
+    "................",
+];
+
+const BOAT_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "#..............#",
+    "##............##",
+    "#w#..........#w#",
+    "#ww##########ww#",
+    ".#wwwwwwwwwwww#.",
+    ".#dddddddddddd#.",
+    "..#dddddddddd#..",
+    "...##########...",
+    "................",
+    "................",
+    "................",
+];
+
+const CART_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "..############..",
+    "..#hbbbbbbbbh#..",
+    "..#bbbbbbbbbb#..",
+    "..#bbbbbbbbbb#..",
+    "..#bbbbbbbbbb#..",
+    "..#hbbbbbbbbh#..",
+    "..############..",
+    "...##......##...",
+    "..#kk#....#kk#..",
+    "...##......##...",
+    "................",
+    "................",
+];
+
+const SPARKER_SPRITE: [&str; 16] = [
+    "................",
+    "..........y.....",
+    ".........yfy....",
+    "..........f.....",
+    "........#.......",
+    ".......#i#......",
+    "......#ii#......",
+    ".....#ii#.......",
+    "....#cc#........",
+    "...#ccc#........",
+    "..#ccc#.........",
+    "..#cc#..........",
+    "...##...........",
+    "................",
+    "................",
+    "................",
+];
+
+const SHIELD_SPRITE: [&str; 16] = [
+    "................",
+    "...##########...",
+    "..#iwwwwwwwwi#..",
+    "..#wwwdwwdwww#..",
+    "..#wwwdwwdwww#..",
+    "..#iiiiiiiiii#..",
+    "..#wwwdwwdwww#..",
+    "..#wwwdwwdwww#..",
+    "..#wwwdwwdwww#..",
+    "...#wwdwwdww#...",
+    "...#wwdwwdww#...",
+    "....#wwwwww#....",
+    ".....#iwwi#.....",
+    "......####......",
+    "................",
+    "................",
+];
+
+const BOOK_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "..###########...",
+    "..#ccccccccp#...",
+    "..#ccccccccp#...",
+    "..#ccgggcccp#...",
+    "..#cccgccccp#...",
+    "..#ccccccccp#...",
+    "..#cccccgccp#...",
+    "..#ccccgggcp#...",
+    "..#ccccccccp#...",
+    "..#ddddddddp#...",
+    "..#dddddddpp#...",
+    "..###########...",
+    "................",
+    "................",
+];
+
+const DUST_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "........#.......",
+    ".......#r#......",
+    "....#.#rhr#.....",
+    "...#r##rrr#.#...",
+    "..#rhr#rr#.#r#..",
+    "..#rrr#r#.#rhr#.",
+    "...#r#.#..#rrr#.",
+    "....#..#r##r#...",
+    "......#rhr##....",
+    ".....#rrrrr#....",
+    "......#####.....",
+    "................",
+    "................",
+];
+
+const SHEARS_SPRITE: [&str; 16] = [
+    "................",
+    "...........##...",
+    "..........#hb#..",
+    ".........#hb#...",
+    "..##....#hb#....",
+    ".#hb#..#hb#.....",
+    "..#hb##hb#......",
+    "...#hbhb#.......",
+    "....#bb#........",
+    "...#r##r#.......",
+    "..#r#..#r#......",
+    ".#r#....#r#.....",
+    ".#r#....#r#.....",
+    "..##.....##.....",
+    "................",
+    "................",
+];
+
+const BUCKET_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "....########....",
+    "...#........#...",
+    "..#..........#..",
+    "..##########.#..",
+    "..#ffffffffff#..",
+    "..#bhbbbbbbdb#..",
+    "...#hbbbbbbd#...",
+    "...#hbbbbbbd#...",
+    "...#bbbbbbdd#...",
+    "....#bbbbbd#....",
+    "....#bbbbdd#....",
+    "....########....",
+    "................",
+    "................",
+];
+
 pub fn build_atlas(seed: u64) -> Vec<u8> {
     let mut a = Atlas { px: vec![0u8; ATLAS * ATLAS * 4], rng: Rng::new(seed), perlin: Perlin::new(seed) };
 
@@ -1881,6 +2112,194 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         }
     });
     a.each(T_ENCH_BOTTOM, |_, _, r, _| shade(rgb(30, 20, 45), r.range(0.8, 1.1)));
+    // ---- Liquids
+    a.each(T_LAVA, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.3 + 20.0, y as f32 * 0.3) + r.range(-0.08, 0.08);
+        if n > 0.35 {
+            rgb(255, 230, 120)
+        } else if n > 0.0 {
+            rgb(250, 150, 30)
+        } else {
+            shade(rgb(215, 80, 15), 1.0 + n * 0.4)
+        }
+    });
+    a.each(T_OBSIDIAN, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.5 + 90.0, y as f32 * 0.5);
+        let glint = (x * 7 + y * 3) % 23 == 0;
+        if glint { rgb(120, 90, 170) } else { shade(rgb(28, 20, 40), 1.0 + n * 0.5 + r.range(-0.1, 0.1)) }
+    });
+    // ---- Zappy Dust
+    a.ore(T_ZAP_ORE, rgb(230, 40, 40), rgb(150, 10, 10));
+    for (tile, lit) in [(T_WIRE, false), (T_WIRE_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            // A cross of dust with a blob in the middle.
+            let (dx, dy) = ((x as i32 - 7).abs(), (y as i32 - 7).abs());
+            let on = dx <= 1 || dy <= 1 || (dx <= 3 && dy <= 3);
+            if !on {
+                [0, 0, 0, 0]
+            } else if lit {
+                shade(rgb(255, 40, 30), r.range(0.85, 1.15))
+            } else {
+                shade(rgb(110, 10, 10), r.range(0.85, 1.15))
+            }
+        });
+    }
+    for (tile, on) in [(T_LEVER, false), (T_LEVER_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            let base = y >= 12 && (4..12).contains(&x);
+            // The handle leans left when off, right when on.
+            let t = (12 - y as i32).max(0) as f32 / 10.0;
+            let hx = 7.5 + if on { t * 4.0 } else { -t * 4.0 };
+            let handle = y < 12 && y >= 2 && (x as f32 - hx).abs() < 1.0;
+            let knob = y < 4 && (x as f32 - hx).abs() < 1.5;
+            if base {
+                shade(rgb(120, 120, 120), r.range(0.85, 1.1))
+            } else if knob && on {
+                rgb(255, 50, 40)
+            } else if knob || handle {
+                shade(rgb(140, 105, 60), r.range(0.9, 1.1))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    a.each(T_ZAP_BLOCK, |x, y, r, _| {
+        let sparkle = (x * 5 + y * 3) % 13 == 0;
+        if sparkle { rgb(255, 180, 170) } else { shade(rgb(200, 25, 20), r.range(0.8, 1.1)) }
+    });
+    for (tile, on) in [(T_LAMP, false), (T_LAMP_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            let frame = x == 0 || y == 0 || x == 15 || y == 15 || x == 7 || y == 7;
+            if frame {
+                rgb(70, 45, 30)
+            } else if on {
+                shade(rgb(255, 225, 150), r.range(0.9, 1.08))
+            } else {
+                shade(rgb(120, 80, 55), r.range(0.85, 1.1))
+            }
+        });
+    }
+    for (tile, cover) in [(T_BOOK, rgb(120, 70, 40)), (T_ENCHANTED_BOOK, rgb(110, 40, 150))] {
+        a.sprite(tile, &BOOK_SPRITE, &[('#', rgb(30, 15, 10)), ('c', cover), ('d', shade(cover, 0.7)), ('p', rgb(240, 232, 210)), ('g', rgb(250, 210, 60))]);
+    }
+    a.sprite(T_ZAP_DUST, &DUST_SPRITE, &[('#', rgb(90, 5, 5)), ('r', rgb(220, 30, 25)), ('h', rgb(255, 120, 100))]);
+    a.sprite(T_SHIELD, &SHIELD_SPRITE, &[('#', rgb(40, 30, 20)), ('w', rgb(150, 110, 65)), ('d', rgb(115, 80, 45)), ('i', rgb(190, 190, 198))]);
+    // ---- The Scorchlands
+    a.each(T_SCORCHROCK, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.45 + 70.0, y as f32 * 0.45);
+        shade(rgb(125, 45, 42), 1.0 + n * 0.3 + r.range(-0.12, 0.12))
+    });
+    a.each(T_EMBERSAND, |x, y, r, p| {
+        let face = p.noise2(x as f32 * 0.6 + 11.0, y as f32 * 0.6) > 0.35;
+        if face { rgb(60, 40, 30) } else { shade(rgb(95, 70, 55), r.range(0.8, 1.1)) }
+    });
+    a.copy(T_SCORCHROCK, T_SCORCH_GOLD);
+    for _ in 0..9 {
+        let (x, y) = (a.rng.int(1, 14) as usize, a.rng.int(1, 14) as usize);
+        a.set(T_SCORCH_GOLD, x, y, rgb(250, 210, 60));
+        a.set(T_SCORCH_GOLD, x + 1, y, rgb(200, 160, 40));
+    }
+    a.each(T_PORTAL, |x, y, r, p| {
+        let swirl = (p.noise2(x as f32 * 0.35, y as f32 * 0.35 + 40.0) * 7.0).sin();
+        if swirl > 0.75 {
+            [0, 0, 0, 0]
+        } else {
+            shade(rgb(140, 60, 220), 0.8 + swirl.abs() * 0.4 + r.range(-0.05, 0.05))
+        }
+    });
+    a.sprite(T_SPARKER, &SPARKER_SPRITE, &[('#', rgb(40, 40, 45)), ('i', rgb(190, 190, 198)), ('c', rgb(50, 50, 55)), ('f', rgb(255, 180, 40)), ('y', rgb(255, 240, 150))]);
+    a.speckle(T_GRUMBLE_SKIN, rgb(210, 140, 130), 0.1);
+    for _ in 0..30 {
+        let (x, y) = (a.rng.int(0, 15) as usize, a.rng.int(0, 15) as usize);
+        a.set(T_GRUMBLE_SKIN, x, y, rgb(110, 150, 90));
+    }
+    a.copy(T_GRUMBLE_SKIN, T_GRUMBLE_FACE);
+    for (x, y, c) in [(3, 5, rgb(250, 250, 250)), (4, 5, rgb(200, 30, 30)), (11, 5, rgb(200, 30, 30)), (12, 5, rgb(250, 250, 250))] {
+        a.set(T_GRUMBLE_FACE, x, y, c);
+    }
+    for y in 8..12 {
+        for x in 5..11 {
+            a.set(T_GRUMBLE_FACE, x, y, if y > 8 && (x == 6 || x == 9) { rgb(90, 40, 40) } else { rgb(230, 160, 150) });
+        }
+    }
+    // ---- Rails and vehicles
+    for k in 0..10u16 {
+        let tile = T_RAIL + k;
+        let powered = k >= 6;
+        let (shape, on) = if powered { ((k - 6) / 2, (k - 6) % 2 == 1) } else { (k, false) };
+        let rail = if powered { rgb(235, 190, 60) } else { rgb(170, 170, 178) };
+        a.each(tile, |x, y, r, _| {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            // Distance across the track (0 at one rail's middle) and along it.
+            let (across, along) = match shape {
+                0 => (fx, fy),
+                1 => (fy, fx),
+                _ => {
+                    // Corners: arcs round the corner between the two ends.
+                    let (cx, cy) = match shape {
+                        2 => (16.0, 0.0),
+                        3 => (0.0, 0.0),
+                        4 => (16.0, 16.0),
+                        _ => (0.0, 16.0),
+                    };
+                    let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+                    let ang = (fy - cy).atan2(fx - cx);
+                    (d, ang * 16.0 / std::f32::consts::FRAC_PI_2)
+                }
+            };
+            let on_rail = (3.0..5.0).contains(&across) || (11.0..13.0).contains(&across);
+            let sleeper = (2.0..14.0).contains(&across) && along.rem_euclid(4.0) < 2.0;
+            let dust = powered && (7.0..9.0).contains(&across);
+            if on_rail {
+                shade(rail, r.range(0.9, 1.1))
+            } else if dust {
+                if on { rgb(255, 50, 40) } else { rgb(110, 15, 15) }
+            } else if sleeper {
+                shade(rgb(115, 85, 50), r.range(0.85, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    a.each(T_CART, |x, y, r, _| {
+        let rivet = (x % 5 == 2) && (y % 5 == 2);
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        if rivet { rgb(210, 210, 215) } else { shade(rgb(95, 95, 102), r.range(0.85, 1.1) * if rim { 0.75 } else { 1.0 }) }
+    });
+    a.each(T_FRAME, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        if rim { shade(rgb(140, 100, 60), r.range(0.85, 1.1)) } else { shade(rgb(150, 115, 80), r.range(0.9, 1.05) * 0.8) }
+    });
+    a.sprite(T_COMPASS, &COMPASS_SPRITE, &[('#', rgb(40, 40, 45)), ('i', rgb(190, 190, 198)), ('w', rgb(235, 235, 225)), ('r', rgb(220, 30, 30)), ('k', rgb(60, 60, 70))]);
+    a.sprite(T_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(225, 210, 170)), ('g', rgb(110, 160, 80)), ('b', rgb(80, 120, 210)), ('r', rgb(200, 40, 40))]);
+    a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
+    a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);
+    // ---- Hmmers
+    a.copy(T_SKIN, T_HMM_FACE);
+    for (x, y, c) in [(3, 6, rgb(255, 255, 255)), (4, 6, rgb(40, 110, 40)), (11, 6, rgb(40, 110, 40)), (12, 6, rgb(255, 255, 255))] {
+        a.set(T_HMM_FACE, x, y, c);
+    }
+    for x in 2..14 {
+        a.set(T_HMM_FACE, x, 4, rgb(60, 40, 25));
+    }
+    a.each(T_HMM_ROBE, |x, _, r, _| shade(rgb(115, 75, 45), r.range(0.85, 1.08) * if x % 7 == 0 { 0.85 } else { 1.0 }));
+    // ---- Animals
+    a.speckle(T_WOOF_SKIN, rgb(200, 196, 190), 0.07);
+    a.copy(T_WOOF_SKIN, T_WOOF_FACE);
+    for (x, y, c) in [(3, 5, rgb(20, 20, 20)), (4, 5, rgb(255, 255, 255)), (11, 5, rgb(255, 255, 255)), (12, 5, rgb(20, 20, 20))] {
+        a.set(T_WOOF_FACE, x, y, c);
+    }
+    for y in 9..12 {
+        for x in 6..10 {
+            a.set(T_WOOF_FACE, x, y, if y == 9 { rgb(40, 30, 30) } else { rgb(170, 165, 160) });
+        }
+    }
+    a.each(T_COLLAR, |x, _, r, _| if x % 5 == 2 { rgb(240, 210, 60) } else { shade(rgb(200, 30, 35), r.range(0.9, 1.05)) });
+    a.sprite(T_SHEARS, &SHEARS_SPRITE, &[('#', rgb(40, 40, 45)), ('b', rgb(200, 200, 208)), ('h', rgb(240, 240, 245)), ('r', rgb(190, 40, 40))]);
+    for (tile, fill) in [(T_BUCKET, None), (T_WATER_BUCKET, Some(rgb(50, 95, 220))), (T_LAVA_BUCKET, Some(rgb(245, 120, 25)))] {
+        let pal = [('#', rgb(50, 50, 55)), ('b', rgb(190, 190, 198)), ('d', rgb(130, 130, 138)), ('h', rgb(235, 235, 240)), ('f', fill.unwrap_or(rgb(70, 70, 76)))];
+        a.sprite(tile, &BUCKET_SPRITE, &pal);
+    }
     a.sprite(T_HUNGER_ICON, &DRUMSTICK, &[('#', rgb(60, 30, 10)), ('p', rgb(170, 95, 40)), ('P', rgb(205, 130, 60)), ('w', rgb(235, 190, 120)), ('b', rgb(235, 230, 210))]);
     a.sprite(T_ARMOR_ICON, &CHESTPLATE, &[('#', rgb(30, 30, 30)), ('b', rgb(210, 210, 215)), ('d', rgb(150, 150, 155)), ('h', rgb(245, 245, 250))]);
 

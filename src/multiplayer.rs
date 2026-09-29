@@ -129,6 +129,7 @@ impl Game {
         g.player_name = sanitize_name(name);
         g.world.log_edits = true;
         g.world.structure_loot = false;
+        g.world.simulate_liquids = false;
         g.net = Some(Net::Client(conn));
         g.pending_msgs = leftover;
         g.msg("Connected! Say hi with T.");
@@ -215,7 +216,14 @@ impl Game {
             return; // a script handled it
         }
         if text.starts_with('/') {
-            self.msg(format!("Unknown command {}. Commands come from script mods.", text.split_whitespace().next().unwrap_or("")));
+            match self.admin_command(crate::admin::Caller::Host, &text) {
+                Some(lines) => {
+                    for l in lines {
+                        self.msg(l);
+                    }
+                }
+                None => self.msg(format!("Unknown command {}. Try /help, or commands from script mods.", text.split_whitespace().next().unwrap_or(""))),
+            }
             return;
         }
         self.msg(format!("<{me}> {text}"));
@@ -341,6 +349,12 @@ impl Game {
                         server.kick(from, &format!("The server is full ({} players).", server.max_players));
                         return;
                     }
+                    if !self.admin.admits(&sanitize_name(&name)) {
+                        let who = server.get(from).map(|c| c.conn.peer_addr()).unwrap_or_default();
+                        server.kick(from, "You're not on this server's allow-list.");
+                        self.msg(format!("Turned away {} from {who} (not on the allow-list)", sanitize_name(&name)));
+                        return;
+                    }
                     let password = server.password.is_some();
                     if let Some(c) = server.get(from) {
                         if c.nonce.is_some() {
@@ -402,6 +416,9 @@ impl Game {
             roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
             roster.push(self.rules_msg());
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
+            // Words on signs and things in frames.
+            roster.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
+            roster.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -466,7 +483,7 @@ impl Game {
                     // Scripts may veto what remote players do, just like the host's own actions.
                     if old != id && self.scripts.is_some() {
                         let who = self.peer_name(from);
-                        let (hook, key) = if id == AIR || id == WATER { ("on_block_break", old) } else { ("on_block_place", id) };
+                        let (hook, key) = if id == AIR || is_liquid(id) { ("on_block_break", old) } else { ("on_block_place", id) };
                         let args = vec![who.into(), (x as rhai::INT).into(), (y as rhai::INT).into(), (z as rhai::INT).into(), reg().key_of(key).into()];
                         if !self.fire(hook, args) {
                             corrections.push((x, y, z, old));
@@ -479,9 +496,12 @@ impl Game {
                         corrections.push((x, y, z, old));
                         continue;
                     }
-                    // A broken chest or furnace spills what was inside.
+                    // A broken chest or furnace spills what was inside (and a frame what it held).
                     if crate::containers::is_container(old) && !crate::containers::is_container(id) {
                         self.spill_container(IVec3::new(x, y, z));
+                    }
+                    if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
+                        self.spill_frame(IVec3::new(x, y, z));
                     }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
@@ -543,6 +563,9 @@ impl Game {
                     self.sfx(Sfx::hurt_of(kind), Some(pos));
                     let held = self.verified_held(from);
                     self.host_wear(from, held, hit_wear(held));
+                    if let Some(name) = self.peers.get(&from).map(|p| crate::players::record_key(&p.name)) {
+                        self.sic_pets(&name, mob);
+                    }
                 }
             }
             Msg::Ignite { x, y, z } => {
@@ -581,8 +604,17 @@ impl Game {
                     return;
                 }
                 if text.starts_with('/') {
-                    let cmd = text.split_whitespace().next().unwrap_or("").to_string();
-                    self.system_message(Some(from), &format!("Unknown command {cmd}. Commands come from script mods."));
+                    match self.admin_command(crate::admin::Caller::Player(from), &text) {
+                        Some(lines) => {
+                            for l in lines {
+                                self.system_message(Some(from), &l);
+                            }
+                        }
+                        None => {
+                            let cmd = text.split_whitespace().next().unwrap_or("").to_string();
+                            self.system_message(Some(from), &format!("Unknown command {cmd}. Try /help, or commands from script mods."));
+                        }
+                    }
                     return;
                 }
                 self.msg(format!("<{who}> {text}"));
@@ -642,9 +674,45 @@ impl Game {
                     self.host_report(from, slots, health, food, saturation);
                 }
             }
-            Msg::Repair { x, y, z, item, material, used, combine } => {
+            Msg::Repair { x, y, z, item, material, used, combine, ench, other_ench } => {
                 if self.peer_rate_ok(from, "repair", 0.2) {
-                    self.host_repair(from, IVec3::new(x, y, z), item, material, used, combine);
+                    self.host_repair(from, IVec3::new(x, y, z), item, material, used, combine, ench, other_ench);
+                }
+            }
+            Msg::MobInteract { mob, item } => {
+                if self.peer_rate_ok(from, "mob", 0.15) {
+                    self.host_mob_interact(from, mob, item);
+                }
+            }
+            Msg::Trade { mob, index } => {
+                if self.peer_rate_ok(from, "trade", 0.1) {
+                    self.host_trade(from, mob, index);
+                }
+            }
+            Msg::UsePortal { x, y, z } => {
+                if self.peer_rate_ok(from, "portal", 2.0) {
+                    self.host_use_portal(from, IVec3::new(x, y, z));
+                }
+            }
+            Msg::VehicleUse { id, action } => {
+                if self.peer_rate_ok(from, "vehicle", 0.05) {
+                    self.host_vehicle_use(from, id, action);
+                }
+            }
+            Msg::Ride { id, pos, yaw } => self.host_ride(from, id, pos, yaw),
+            Msg::SignText { x, y, z, lines } => {
+                if self.peer_rate_ok(from, "sign", 0.2) {
+                    self.host_sign(from, IVec3::new(x, y, z), lines);
+                }
+            }
+            Msg::FrameUse { x, y, z, item, wear, put } => {
+                if self.peer_rate_ok(from, "frame", 0.05) {
+                    self.host_frame_use(from, IVec3::new(x, y, z), item, wear, put);
+                }
+            }
+            Msg::PlaceVehicle { kind, pos, yaw } => {
+                if self.peer_rate_ok(from, "place_vehicle", 0.3) {
+                    self.host_place_vehicle(from, kind, pos, yaw);
                 }
             }
             Msg::Enchant { x, y, z, item, choice } => {
@@ -702,7 +770,6 @@ impl Game {
         if block(old).hardness < 0.0 && !replaceable(old) {
             return false;
         }
-        let p = IVec3::new(x, y, z);
         // Crops only appear on farmland, and only as seedlings: the host grows them.
         if let Some((_, stage)) = Crop::of_block(new) {
             let on_farmland = is_farmland(self.world.get(x, y - 1, z));
@@ -715,14 +782,24 @@ impl Game {
         if let Some((f, o, true)) = door_state(new) {
             return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
         }
+        // Portals light only inside a real obsidian frame.
+        if matches!(new, PORTAL_X | PORTAL_Z) {
+            let p = IVec3::new(x, y, z);
+            return old == AIR && crate::scorch::portal_frame(&self.world, p, new == PORTAL_X).is_some();
+        }
+        // Levers flip both ways, buttons only go in (the host lets them out).
+        if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
+            return true;
+        }
         // Two slabs make a block.
         if slab_of(old).is_some() {
             return new == AIR || (new == made_of(old) && new != AIR);
         }
         match new {
             AIR => true,
-            // Melting ice, or water running into a hole next to water.
-            WATER => old == ICE || [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z, IVec3::Y].iter().any(|d| self.world.get_v(p + *d) == WATER),
+            // Melting ice, or pouring out a bucket (the ledger checks they have one).
+            WATER => old == ICE || replaceable(old) || crate::liquids::open(old),
+            LAVA => replaceable(old) || crate::liquids::open(old),
             // Tilling, and trampling.
             n if is_farmland(n) => matches!(old, GRASS | DIRT | SNOW_GRASS),
             DIRT if is_farmland(old) => true,
@@ -784,8 +861,11 @@ impl Game {
             Msg::Mobs { mobs, tnts, arrows } => self.sync_mobs(mobs, tnts, arrows),
             Msg::HurtYou { dmg, cause, knock } => {
                 self.player.hurt = 0.0;
-                self.hurt_player_armored(dmg, &cause);
-                self.player.body.vel += knock;
+                // Whatever hit us came from the opposite way to the knock.
+                let flat = Vec3::new(knock.x, 0.0, knock.z);
+                let from = (flat.length() > 0.01).then(|| self.player.body.pos + Vec3::Y * 0.9 - flat.normalize() * 2.0);
+                self.hurt_player_from(dmg, &cause, from, false);
+                self.player.body.vel += self.steadied(knock);
             }
             Msg::Give { item, n, wear } => {
                 if valid_item(item) && n > 0 {
@@ -803,6 +883,11 @@ impl Game {
                 self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle };
             }
             Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
+            Msg::Vehicles(list) => self.apply_vehicles(list),
+            Msg::SignText { x, y, z, lines } => {
+                self.world.signs.insert(IVec3::new(x, y, z), crate::decor::clean_lines(&lines));
+            }
+            Msg::FrameItem { x, y, z, item, wear } => self.apply_frame(IVec3::new(x, y, z), item, wear),
             Msg::Weather { kind } => self.weather.kind = crate::weather::Weather::from_index(kind),
             Msg::Lightning { at } => {
                 if at.is_finite() {
@@ -842,7 +927,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } => {}
         }
     }
 
@@ -865,8 +950,20 @@ impl Game {
             // Starers reuse the fuse field for "angry".
             m.angry = kind == MobKind::Starer && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
+            if kind == MobKind::Hmmer {
+                m.seed = s.fuse as u32;
+                m.fuse = 0.0;
+            }
             m.hurt = m.hurt.max(s.hurt);
             m.burning = s.burning;
+            // Animals: just what's needed to draw them (and guess at shearing).
+            if (s.flags & MOB_BABY != 0) != (m.baby > 0.0) {
+                m.set_baby(if s.flags & MOB_BABY != 0 { 1.0 } else { 0.0 });
+            }
+            m.sheared = s.flags & MOB_SHEARED != 0;
+            m.owner = (s.flags & MOB_TAMED != 0).then(String::new);
+            m.sitting = s.flags & MOB_SITTING != 0;
+            m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
             next.push(m);
         }
         self.mobs = next;
@@ -885,6 +982,16 @@ impl Game {
             }
             m.anim += Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length() * 5.0;
             m.hurt = (m.hurt - dt).max(0.0);
+            // Babies stay babies until the host says otherwise.
+            if m.baby > 0.0 {
+                m.baby = 1.0;
+            }
+        }
+        let love: Vec<Vec3> = self.mobs.iter().filter(|m| m.love > 0.0).map(|m| m.body.pos + Vec3::Y * m.body.height).collect();
+        for p in love {
+            if self.rng.chance(dt * 2.0) {
+                self.hearts(p, 1);
+            }
         }
         // Arrows in flight keep moving between snapshots.
         for a in self.arrows.iter_mut().filter(|a| !a.stuck) {
@@ -947,10 +1054,12 @@ impl Game {
                         kind: m.kind.index(),
                         pos: m.body.pos,
                         yaw: m.yaw,
-                        fuse: if m.angry { 1.0 } else { m.fuse },
+                        // Starers send "angry" and Hmmers their seed (it decides their trades) here.
+                        fuse: if m.kind == MobKind::Hmmer { m.seed as f32 } else if m.angry { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
+                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE,
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
@@ -1174,6 +1283,34 @@ mod tests {
         let mut client = Game::new_client(id, seed, time, creative, spawn, conn, name, leftover);
         load_around(&mut client, spawn);
         Ok(client)
+    }
+
+    #[test]
+    fn allow_list_and_operators() {
+        let mut host = Game::new(779, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        host.admin_command(crate::admin::Caller::Host, "allowlist add Friendly");
+        host.admin_command(crate::admin::Caller::Host, "allowlist on");
+        let err = join(&mut host, port, "Stranger", "").err().expect("strangers are turned away");
+        assert!(err.contains("allow-list"), "{err}");
+        let mut client = join(&mut host, port, "Friendly", "").unwrap();
+        let id = client.my_id;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.contains_key(&id)));
+
+        // Not an operator yet: commands are refused, but /list works for anyone.
+        client.send_chat("/time night");
+        client.send_chat("/list");
+        assert!(pump(&mut host, &mut client, |_, c| c.messages.iter().any(|m| m.0.contains("Only operators")) && c.messages.iter().any(|m| m.0.contains("2 online"))));
+        assert!((host.time - 0.55).abs() > 0.01);
+
+        host.admin_command(crate::admin::Caller::Host, "op friendly");
+        assert!(pump(&mut host, &mut client, |_, c| c.messages.iter().any(|m| m.0.contains("made you an operator"))));
+        // Now the same player can use the commands.
+        client.send_chat("/time noon");
+        client.send_chat("/info friendly");
+        assert!(pump(&mut host, &mut client, |h, c| (h.time - 0.25).abs() < 0.01 && c.messages.iter().any(|m| m.0.contains("health"))));
     }
 
     #[test]
@@ -1533,7 +1670,7 @@ mod tests {
             host.update(0.016, &idle()); // past the repair rate limit
             client.update(0.016, &idle());
         }
-        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: PICK_IRON, material: IRON, used: 4, combine: false });
+        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: PICK_IRON, material: IRON, used: 4, combine: false, ench: 0, other_ench: 0 });
         assert!(pump(&mut host, &mut client, |_, c| c.xp == points_for_level(1)));
         assert_eq!(host.peers[&id].ledger.bag.count(IRON), 1);
 
@@ -1604,6 +1741,294 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(client.inv.count(DIAMOND), 7);
+    }
+
+    #[test]
+    fn buckets_go_through_the_ledger() {
+        let mut host = Game::new(787, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Sloshy", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 2, spawn.z.floor() as i32);
+        let y = host.world.surface_y(x, z) + 1;
+        let pond = IVec3::new(x, y, z);
+        // A source walled in, so it doesn't run anywhere.
+        for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+            host.world.set_v(pond + d, COBBLE);
+        }
+        host.world.set_v(pond, WATER);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(pond) == WATER));
+        host.give_peer(id, BUCKET, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BUCKET) == 1));
+        // Scooping it up: the host swaps the bucket for a full one.
+        client.world.set_v(pond, AIR);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(pond) == AIR));
+        let l = &host.peers[&id].ledger;
+        assert_eq!((l.bag.count(BUCKET), l.bag.count(WATER_BUCKET)), (0, 1));
+        // Pouring it back is fine; pouring lava they don't have is not.
+        client.world.set_v(pond, WATER);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(pond) == WATER));
+        assert_eq!(host.peers[&id].ledger.bag.count(BUCKET), 1);
+        let dry = pond + IVec3::Y * 2;
+        client.world.set_v(dry, LAVA);
+        for _ in 0..60 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.world.get_v(dry), AIR);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(dry) == AIR), "the client is put right");
+    }
+
+    #[test]
+    fn feeding_goes_through_the_host() {
+        let mut host = Game::new(788, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Farmy", "").unwrap();
+        let id = client.my_id;
+        host.give_peer(id, WHEAT, 3);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(WHEAT) == 3));
+        host.mobs.clear();
+        host.alloc_mob(MobKind::Mooer, spawn + Vec3::new(2.0, 0.5, 0.0));
+        let cow = host.mobs[0].id;
+        assert!(pump(&mut host, &mut client, |_, c| c.mobs.iter().any(|m| m.id == cow)));
+        // Feeding it: the host takes the wheat and the Mooer falls in love (and says so).
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == WHEAT)).unwrap();
+        client.inv.selected = slot;
+        client.net_send_msg(Msg::MobInteract { mob: cow, item: WHEAT });
+        assert!(pump(&mut host, &mut client, |h, c| h.mobs[0].love > 0.0 && c.inv.count(WHEAT) == 2 && c.mobs.iter().any(|m| m.id == cow && m.love > 0.0)));
+        assert_eq!(host.peers[&id].ledger.bag.count(WHEAT), 2);
+        // Food they don't have does nothing.
+        host.mobs[0].love = 0.0;
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.net_send_msg(Msg::MobInteract { mob: cow, item: CARROT });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.mobs[0].love, 0.0);
+    }
+
+    #[test]
+    fn joined_players_flip_switches() {
+        let mut host = Game::new(789, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Sparky", "").unwrap();
+        let (x, z) = (spawn.x.floor() as i32 + 2, spawn.z.floor() as i32);
+        let y = host.world.surface_y(x, z) + 1;
+        let (lever, lamp, button) = (IVec3::new(x, y, z), IVec3::new(x + 1, y, z), IVec3::new(x, y, z + 2));
+        host.world.set_v(lever, LEVER);
+        host.world.set_v(lamp, LAMP);
+        host.world.set_v(button, BUTTON);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(lamp) == LAMP && c.world.get_v(button) == BUTTON));
+        // A flipped lever lights the lamp, on the host and back on the client.
+        client.world.set_v(lever, LEVER_ON);
+        assert!(pump(&mut host, &mut client, |h, c| h.world.get_v(lamp) == LAMP_ON && c.world.get_v(lamp) == LAMP_ON));
+        // A pressed button pops back out by itself.
+        client.world.set_v(button, BUTTON_ON);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(button) == BUTTON_ON));
+        assert!(pump(&mut host, &mut client, |h, c| h.world.get_v(button) == BUTTON && c.world.get_v(button) == BUTTON));
+        // Clients can't power dust or plates themselves.
+        client.world.set_v(lamp + IVec3::X, WIRE_ON);
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.world.get_v(lamp + IVec3::X), AIR);
+    }
+
+    #[test]
+    fn books_at_the_anvil_are_checked() {
+        use crate::enchant::{with_level, Enchant};
+        let mut host = Game::new(790, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Booky", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 1, spawn.z.floor() as i32);
+        let anvil = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        host.world.set_v(anvil, ANVIL);
+        let sharp = with_level(0, Enchant::Sharpness, 2);
+        host.give_peer(id, SWORD_IRON, 1);
+        host.give_peer_worn(id, ENCHANTED_BOOK, 1, sharp);
+        host.give_peer_xp(id, crate::xp::points_for_level(5));
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(ENCHANTED_BOOK) == 1 && c.world.get_v(anvil) == ANVIL));
+        // A forged book (Sharpness V they never had) does nothing.
+        let forged = (with_level(0, Enchant::Sharpness, 5) >> 16) as u16;
+        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: SWORD_IRON, material: ENCHANTED_BOOK, used: 1, combine: false, ench: 0, other_ench: forged });
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.peers[&id].ledger.bag.count(ENCHANTED_BOOK), 1);
+        // The real one goes on: the book's gone, the sword is enchanted, levels spent.
+        client.net_send_msg(Msg::Repair { x: anvil.x, y: anvil.y, z: anvil.z, item: SWORD_IRON, material: ENCHANTED_BOOK, used: 1, combine: false, ench: 0, other_ench: (sharp >> 16) as u16 });
+        assert!(pump(&mut host, &mut client, |h, _| h.peers[&id].ledger.bag.count(ENCHANTED_BOOK) == 0));
+        let l = &host.peers[&id].ledger;
+        assert_eq!(l.enchanted.get(&(SWORD_IRON, (sharp >> 16) as u16)), Some(&1));
+        assert_eq!(crate::xp::level_of(l.xp).0, 3);
+    }
+
+    #[test]
+    fn trading_goes_through_the_host() {
+        use crate::villagers::{trades, Job};
+        let mut host = Game::new(791, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Tradey", "").unwrap();
+        let id = client.my_id;
+        host.mobs.clear();
+        let seed = (0..64u32).find(|&s| Job::of(s) == Job::Farmer).unwrap();
+        host.world.new_huts.push((spawn + Vec3::new(2.0, 0.5, 0.0), seed));
+        host.house_hmmers();
+        let hmmer = host.mobs[0].id;
+        host.give_peer(id, WHEAT, 40);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(WHEAT) == 40 && c.mobs.iter().any(|m| m.id == hmmer && m.seed == seed)));
+        // The client sees the same trades, and makes one.
+        client.open_trade(hmmer);
+        let list = client.trade_list().expect("talking").1;
+        assert_eq!(list, trades(seed));
+        let wheat = list.iter().position(|t| t.give[0].0 == WHEAT).unwrap();
+        client.make_trade(wheat);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(GOLD_INGOT) == 1 && c.inv.count(WHEAT) == 20));
+        let l = &host.peers[&id].ledger;
+        assert_eq!((l.bag.count(WHEAT), l.bag.count(GOLD_INGOT)), (20, 1));
+        // Trading wheat they don't have (as far as the host knows) gets nothing.
+        host.peers.get_mut(&id).unwrap().ledger.bag.take(WHEAT, 20);
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.net_send_msg(Msg::Trade { mob: hmmer, index: wheat as u8 });
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.peers[&id].ledger.bag.count(GOLD_INGOT), 1);
+    }
+
+    #[test]
+    fn portals_take_joined_players_through() {
+        let mut host = Game::new(792, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Travelly", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 3, spawn.z.floor() as i32);
+        let base = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        crate::scorch::build_portal(&mut host.world, base);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(base) == PORTAL_X));
+        // Walk in and wait: the host builds the other end and moves us there.
+        client.player.body.pos = base.as_vec3() + Vec3::new(1.0, 0.0, 0.5);
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        for _ in 0..50 {
+            client.portal_tick(0.05);
+        }
+        assert!(pump(&mut host, &mut client, |_, c| crate::scorch::in_scorch(c.player.body.pos.x)));
+        assert!(crate::scorch::in_scorch(host.peers[&id].target.x));
+        // A portal they aren't standing in does nothing.
+        client.net_send_msg(Msg::UsePortal { x: base.x, y: base.y, z: base.z });
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(crate::scorch::in_scorch(client.player.body.pos.x));
+    }
+
+    #[test]
+    fn vehicles_through_the_host() {
+        let mut host = Game::new(793, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Rowy", "").unwrap();
+        let id = client.my_id;
+        host.give_peer(id, BOAT, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BOAT) == 1));
+        // Put a boat down: the host takes the boat from the ledger and everyone sees it.
+        let at = spawn + Vec3::new(2.0, 0.0, 0.0);
+        client.net_send_msg(Msg::PlaceVehicle { kind: crate::vehicles::BOAT_KIND, pos: at, yaw: 0.0 });
+        assert!(pump(&mut host, &mut client, |h, c| h.vehicles.len() == 1 && c.vehicles.len() == 1));
+        assert_eq!(host.peers[&id].ledger.bag.count(BOAT), 0);
+        // Get in and drive it: the host follows along.
+        client.mount(0);
+        assert!(pump(&mut host, &mut client, |h, _| h.vehicles[0].rider == id + 1));
+        let moved = at + Vec3::new(0.0, 0.0, -3.0);
+        client.vehicles[0].pos = moved;
+        assert!(pump(&mut host, &mut client, |h, _| h.vehicles[0].pos.distance(moved) < 0.5));
+        // Out, then hit it into an item.
+        for _ in 0..10 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.dismount();
+        assert!(pump(&mut host, &mut client, |h, _| h.vehicles[0].rider == 0));
+        for _ in 0..3 {
+            for _ in 0..12 {
+                host.update(0.016, &idle());
+                client.update(0.016, &idle());
+            }
+            client.net_send_msg(Msg::VehicleUse { id: host.vehicles.first().map(|v| v.id).unwrap_or(0), action: 2 });
+        }
+        assert!(pump(&mut host, &mut client, |h, c| h.vehicles.is_empty() && c.vehicles.is_empty()));
+        assert!(host.drops.iter().any(|d| d.item == BOAT));
+    }
+
+    #[test]
+    fn signs_and_frames_are_shared() {
+        let mut host = Game::new(794, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let (x, y, z) = (spawn.x.floor() as i32 + 2, spawn.y.floor() as i32 + 1, spawn.z.floor() as i32);
+        let (sign, frame) = (IVec3::new(x, y, z), IVec3::new(x + 1, y, z));
+        host.world.set_v(sign - IVec3::Y, STONE);
+        host.world.set_v(sign, SIGN_FIRST);
+        host.world.set_v(frame + IVec3::X, STONE);
+        host.world.set_v(frame, FRAME_FIRST + 1);
+        host.set_sign(sign, &["Old".into(), "news".into()]);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Signy", "").unwrap();
+        let id = client.my_id;
+        // Joining brings the words along.
+        assert!(pump(&mut host, &mut client, |_, c| c.world.signs.get(&sign).is_some_and(|l| l[0] == "Old")));
+        // The client rewrites it; everyone sees.
+        client.set_sign(sign, &["New".into(), "news".into()]);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.signs[&sign][0] == "New"));
+        // A frame: only things they have go in.
+        client.net_send_msg(Msg::FrameUse { x: frame.x, y: frame.y, z: frame.z, item: DIAMOND, wear: 0, put: true });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(host.world.frames.is_empty());
+        host.give_peer(id, DIAMOND, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(DIAMOND) == 1));
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == DIAMOND)).unwrap();
+        client.inv.selected = slot;
+        assert!(client.use_frame(frame));
+        assert!(pump(&mut host, &mut client, |h, _| h.world.frames.get(&frame) == Some(&(DIAMOND, 0))));
+        assert_eq!(host.peers[&id].ledger.bag.count(DIAMOND), 0);
+        // Knock it out: it lands on the host's ground.
+        for _ in 0..10 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(client.hit_frame(frame));
+        assert!(pump(&mut host, &mut client, |h, c| h.world.frames.is_empty() && c.world.frames.is_empty() && h.drops.iter().any(|d| d.item == DIAMOND)));
     }
 
     #[test]

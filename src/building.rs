@@ -37,6 +37,13 @@ impl Game {
             let top = normal == IVec3::NEG_Y || (normal.y == 0 && hit_y > 0.5);
             return family + top as Id;
         }
+        // Signs face whoever put them up; frames hang on the wall they were put on.
+        if held == SIGN_FIRST {
+            return SIGN_FIRST + self.facing() as Id;
+        }
+        if held == FRAME_FIRST {
+            return FRAME_FIRST + crate::decor::frame_facing(normal).unwrap_or(0) as Id;
+        }
         held
     }
 

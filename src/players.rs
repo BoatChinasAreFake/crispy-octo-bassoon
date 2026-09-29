@@ -10,7 +10,7 @@
 
 use crate::block::*;
 use crate::game::Game;
-use crate::inventory::{max_uses, uses, with_uses, Wear};
+use crate::inventory::Wear;
 use crate::net::Msg;
 use macroquad::math::Vec3;
 use std::collections::BTreeMap;
@@ -70,7 +70,7 @@ fn clean(slots: Vec<(Id, u8, Wear)>) -> Vec<(Id, u8, Wear)> {
             if n == 0 || !valid_item(id) {
                 return (AIR, 0, 0);
             }
-            let w = max_uses(id, w).map(|m| with_uses(w, uses(w).min((m - 1).min(u16::MAX as u32) as u16))).unwrap_or(0);
+            let w = crate::inventory::sanitize_wear(id, w);
             (id, n.min(max_stack(id)), w)
         })
         .collect();

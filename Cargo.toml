@@ -4,14 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+gilrs = { version = "0.11.2", optional = true }
 macroquad = { version = "0.4", default-features = false }
 rhai = "1.26.1"
 
 [features]
-default = ["sound"]
+default = ["sound", "gamepad"]
 # Real audio output (ALSA on Linux, WASAPI on Windows, CoreAudio on macOS).
 # Build with --no-default-features to get a silent game without the ALSA dev package.
 sound = ["macroquad/audio", "dep:quad-alsa-sys"]
+# Game controllers (needs libudev on Linux). Without it, keyboard and mouse only.
+gamepad = ["dep:gilrs"]
 
 # Already pulled in by macroquad's audio; used directly only to check for a sound card.
 [target.'cfg(target_os = "linux")'.dependencies]

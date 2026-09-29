@@ -79,8 +79,43 @@ pub const ANVIL_DAMAGED: Id = 96;
 pub const GLOWSHROOM: Id = 97;
 pub const POINTY_ROCK: Id = 98;
 pub const ENCHANTING_TABLE: Id = 99;
+/// Flowing water: `WATER_FLOW + level - 1`, levels 1 (next to the source) to 7 (see liquids.rs).
+pub const WATER_FLOW: Id = 100;
+pub const LAVA: Id = 107;
+/// Flowing lava: `LAVA_FLOW + level - 1`, levels 1 to 3.
+pub const LAVA_FLOW: Id = 108;
+pub const OBSIDIAN: Id = 111;
+/// Zappy Dust (legally distinct redstone; see wiring.rs): the ore, the wire
+/// (off, on), switches (off, on), the block that's always on, and a lamp.
+pub const ZAP_ORE: Id = 112;
+pub const WIRE: Id = 113;
+pub const WIRE_ON: Id = 114;
+pub const LEVER: Id = 115;
+pub const LEVER_ON: Id = 116;
+pub const BUTTON: Id = 117;
+pub const BUTTON_ON: Id = 118;
+pub const PLATE: Id = 119;
+pub const PLATE_ON: Id = 120;
+pub const ZAP_BLOCK: Id = 121;
+pub const LAMP: Id = 122;
+pub const LAMP_ON: Id = 123;
+/// The Scorchlands (see scorch.rs): its rock, slow sand, gold ore, and portals
+/// (spanning x or z).
+pub const SCORCHROCK: Id = 124;
+pub const EMBERSAND: Id = 125;
+pub const SCORCH_GOLD_ORE: Id = 126;
+pub const PORTAL_X: Id = 127;
+pub const PORTAL_Z: Id = 128;
+/// Rails (see vehicles.rs): `RAIL_FIRST + shape`, shapes north-south,
+/// east-west, then corners NE, NW, SE, SW. The north-south one is the item.
+pub const RAIL_FIRST: Id = 129;
+/// Powered rails: `POWERED_RAIL + axis * 2 + on` (axis 0 north-south, 1 east-west).
+pub const POWERED_RAIL: Id = 135;
+/// Signs and item frames: `+ facing` (see decor.rs).
+pub const SIGN_FIRST: Id = 139;
+pub const FRAME_FIRST: Id = 143;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 100;
+pub const NUM_BLOCKS: Id = 147;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -143,8 +178,59 @@ pub const COOKED_BOOT: Id = FIRST_ITEM + 58;
 pub const DOOR: Id = FIRST_ITEM + 59;
 /// Armour: `ARMOR_FIRST + tier * 4 + slot` (see `armor_of`).
 pub const ARMOR_FIRST: Id = FIRST_ITEM + 60;
+pub const BUCKET: Id = FIRST_ITEM + 76;
+pub const WATER_BUCKET: Id = FIRST_ITEM + 77;
+pub const LAVA_BUCKET: Id = FIRST_ITEM + 78;
+pub const SHEARS: Id = FIRST_ITEM + 79;
+pub const ZAP_DUST: Id = FIRST_ITEM + 80;
+pub const BOOK: Id = FIRST_ITEM + 81;
+/// Carries its enchantments in its wear, like a tool (see enchant.rs).
+pub const ENCHANTED_BOOK: Id = FIRST_ITEM + 82;
+pub const SHIELD: Id = FIRST_ITEM + 83;
+/// Lights portals (and TNT).
+pub const SPARKER: Id = FIRST_ITEM + 84;
+pub const BOAT: Id = FIRST_ITEM + 85;
+pub const MINECART: Id = FIRST_ITEM + 86;
+pub const COMPASS: Id = FIRST_ITEM + 87;
+pub const MAP: Id = FIRST_ITEM + 88;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 76;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 89;
+
+/// Longest a liquid runs from its source: water 7 blocks, lava 3.
+pub const WATER_REACH: u8 = 7;
+pub const LAVA_REACH: u8 = 3;
+
+pub fn is_water(id: Id) -> bool {
+    id == WATER || (WATER_FLOW..WATER_FLOW + WATER_REACH as Id).contains(&id)
+}
+pub fn is_lava(id: Id) -> bool {
+    id == LAVA || (LAVA_FLOW..LAVA_FLOW + LAVA_REACH as Id).contains(&id)
+}
+/// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
+pub fn is_zappy(id: Id) -> bool {
+    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id)
+}
+pub fn is_liquid(id: Id) -> bool {
+    is_water(id) || is_lava(id)
+}
+/// How far a liquid block is from its source (0: it is the source).
+pub fn liquid_level(id: Id) -> u8 {
+    match id {
+        WATER | LAVA => 0,
+        _ if is_water(id) => (id - WATER_FLOW) as u8 + 1,
+        _ if is_lava(id) => (id - LAVA_FLOW) as u8 + 1,
+        _ => 0,
+    }
+}
+/// Water or lava at `level` (0: a source).
+pub fn liquid_at(lava: bool, level: u8) -> Id {
+    match (lava, level) {
+        (false, 0) => WATER,
+        (true, 0) => LAVA,
+        (false, l) => WATER_FLOW + l.min(WATER_REACH) as Id - 1,
+        (true, l) => LAVA_FLOW + l.min(LAVA_REACH) as Id - 1,
+    }
+}
 
 /// What slabs and stairs are made of: the full block, and its name.
 pub const MATERIALS: [(Id, &str); 3] = [(PLANKS, "Planks"), (COBBLE, "Cobblestun"), (STONE_BRICKS, "Stone Brick")];
@@ -191,6 +277,9 @@ pub fn durability(id: Id) -> Option<u16> {
         PICK_DIAMOND | SWORD_DIAMOND => 1561,
         BOW => 384,
         ROD => 64,
+        SHEARS => 238,
+        SHIELD => 336,
+        SPARKER => 64,
         _ => return item_def(id).and_then(|i| i.durability),
     })
 }
@@ -203,7 +292,7 @@ pub fn is_sword(id: Id) -> bool {
 
 /// Wear from breaking a block with `held` (swords aren't meant for digging).
 pub fn dig_wear(held: Id, broken: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || block(broken).hardness <= 0.0 {
+    if durability(held).is_none() || armor_of(held).is_some() || held == SHIELD || block(broken).hardness <= 0.0 {
         return 0;
     }
     if is_sword(held) { 2 } else { 1 }
@@ -211,7 +300,7 @@ pub fn dig_wear(held: Id, broken: Id) -> u16 {
 
 /// Wear from hitting a mob with `held` (anything but a sword is a clumsy weapon).
 pub fn hit_wear(held: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD) {
+    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS | SHIELD | SPARKER) {
         return 0;
     }
     if is_sword(held) { 1 } else { 2 }
@@ -236,6 +325,18 @@ pub enum Shape {
     Anvil,
     /// Three quarters of a block tall (the enchanting table).
     Table,
+    /// A thin layer on the floor (Zappy Dust).
+    Dust,
+    /// A pressure plate, a little lower when stood on.
+    Plate { down: bool },
+    /// A button on the floor, pressed in or not.
+    Button { down: bool },
+    /// A portal's shimmering sheet, across x (or z).
+    Portal { x_axis: bool },
+    /// A signpost: its board faces north-south (or east-west).
+    Sign { facing: u8 },
+    /// A frame hung on one side of its cell.
+    Frame { facing: u8 },
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -276,6 +377,26 @@ impl Shape {
             // A foot, a waist and a long top, lengthways along x.
             Shape::Anvil => ([([0.125, 0.0, 0.125], [0.875, 0.25, 0.875]), ([0.25, 0.25, 0.3125], [0.75, 0.625, 0.6875]), ([0.0, 0.625, 0.1875], [1.0, 1.0, 0.8125])], 3),
             Shape::Table => ([([0.0; 3], [1.0, 0.75, 1.0]), full, full], 1),
+            Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
+            Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
+            Shape::Button { down } => ([([5.0 / 16.0, 0.0, 6.0 / 16.0], [11.0 / 16.0, if down { 1.0 / 16.0 } else { 2.0 / 16.0 }, 10.0 / 16.0]), full, full], 1),
+            Shape::Portal { x_axis: true } => ([([0.0, 0.0, 0.375], [1.0, 1.0, 0.625]), full, full], 1),
+            Shape::Portal { x_axis: false } => ([([0.375, 0.0, 0.0], [0.625, 1.0, 1.0]), full, full], 1),
+            Shape::Sign { facing } => {
+                let post = ([0.44, 0.0, 0.44], [0.56, 0.55, 0.56]);
+                let board = if facing % 2 == 0 { ([0.05, 0.55, 0.44], [0.95, 1.0, 0.56]) } else { ([0.44, 0.55, 0.05], [0.56, 1.0, 0.95]) };
+                ([post, board, full], 2)
+            }
+            Shape::Frame { facing } => {
+                let t = 1.0 / 16.0;
+                let b = match facing % 4 {
+                    0 => ([0.125, 0.125, 0.0], [0.875, 0.875, t]),
+                    1 => ([1.0 - t, 0.125, 0.125], [1.0, 0.875, 0.875]),
+                    2 => ([0.125, 0.125, 1.0 - t], [0.875, 0.875, 1.0]),
+                    _ => ([0.0, 0.125, 0.125], [t, 0.875, 0.875]),
+                };
+                ([b, full, full], 1)
+            }
         }
     }
 }
@@ -324,6 +445,20 @@ pub fn made_of(id: Id) -> Id {
 /// The item a player spends to place block `id` (None: not something players
 /// place directly; door tops come free with their bottom half).
 pub fn placing_item(id: Id) -> Option<Id> {
+    if id == WIRE {
+        return Some(ZAP_DUST);
+    }
+    // Any rail is placed as a straight one, then bends to fit (see vehicles.rs).
+    if id == RAIL_FIRST || id == POWERED_RAIL {
+        return Some(id);
+    }
+    // Signs and frames come in four facings; the item is the first.
+    if (SIGN_FIRST..SIGN_FIRST + 4).contains(&id) {
+        return Some(SIGN_FIRST);
+    }
+    if (FRAME_FIRST..FRAME_FIRST + 4).contains(&id) {
+        return Some(FRAME_FIRST);
+    }
     if let Some((family, _)) = slab_of(id) {
         return Some(family);
     }
@@ -684,12 +819,94 @@ impl Registry {
         let mut table = def("enchanting_table", "Enchanting Table (Bookshelf-Powered Guesswork)", Shaped, true, false, [T_ENCH_TOP, T_ENCH_SIDE, T_ENCH_BOTTOM], 5.0, 1, true, ENCHANTING_TABLE, 7.0, S_STONE);
         table.shape = Shape::Table;
         blocks.push(table);
+        for level in 1..=WATER_REACH {
+            let mut d = def(leak(&format!("water_flowing_{level}")), "Water (In a Hurry)", Liquid, false, false, [T_WATER; 3], -1.0, 0, false, AIR, 0.0, S_GRASS);
+            d.creative = false;
+            blocks.push(d);
+        }
+        blocks.push(def("lava", "Lava (Spicy Water)", Liquid, false, false, [T_LAVA; 3], -1.0, 0, false, AIR, 0.0, S_STONE));
+        for level in 1..=LAVA_REACH {
+            let mut d = def(leak(&format!("lava_flowing_{level}")), "Lava (On the Move)", Liquid, false, false, [T_LAVA; 3], -1.0, 0, false, AIR, 0.0, S_STONE);
+            d.creative = false;
+            blocks.push(d);
+        }
+        blocks.push(def("obsidian", "Obsidian (Very Committed)", Cube, true, true, [T_OBSIDIAN; 3], 50.0, 4, true, OBSIDIAN, 0.0, S_STONE));
+        blocks.push(def("zap_ore", "Zappy Ore (Tingly)", Cube, true, true, [T_ZAP_ORE; 3], 3.0, 3, true, ZAP_DUST, 0.0, S_STONE));
+        for (on, key, tile) in [(false, "zap_wire", T_WIRE), (true, "zap_wire_on", T_WIRE_ON)] {
+            let mut d = def(key, "Zappy Dust (Laid Out)", Shaped, false, false, [tile, tile, tile], 0.0, 0, false, ZAP_DUST, 0.0, S_STONE);
+            let _ = on;
+            d.shape = Shape::Dust;
+            d.creative = false;
+            blocks.push(d);
+        }
+        for (on, key, tile) in [(false, "lever", T_LEVER), (true, "lever_on", T_LEVER_ON)] {
+            let mut d = def(key, "Lever (Pull It)", Cross, false, false, [tile; 3], 0.3, 0, false, LEVER, 0.0, S_WOOD);
+            d.creative = !on;
+            blocks.push(d);
+        }
+        for down in [false, true] {
+            let mut d = def(if down { "button_on" } else { "button" }, "Button (Press It)", Shaped, false, false, [T_STONE; 3], 0.3, 0, false, BUTTON, 0.0, S_STONE);
+            d.shape = Shape::Button { down };
+            d.creative = !down;
+            blocks.push(d);
+        }
+        for down in [false, true] {
+            let mut d = def(if down { "pressure_plate_on" } else { "pressure_plate" }, "Pressure Plate (Step On It)", Shaped, false, false, [T_STONE; 3], 0.4, 0, false, PLATE, 0.0, S_STONE);
+            d.shape = Shape::Plate { down };
+            d.creative = !down;
+            blocks.push(d);
+        }
+        blocks.push(def("zap_block", "Block of Zappy Dust (Always On)", Cube, true, true, [T_ZAP_BLOCK; 3], 3.0, 1, true, ZAP_BLOCK, 0.0, S_STONE));
+        blocks.push(def("zap_lamp", "Zappy Lamp (Off)", Cube, true, true, [T_LAMP; 3], 0.4, 0, false, LAMP, 0.0, S_GLASS));
+        let mut lit = def("zap_lamp_on", "Zappy Lamp (On)", Cube, true, true, [T_LAMP_ON; 3], 0.4, 0, false, LAMP, 14.0, S_GLASS);
+        lit.creative = false;
+        blocks.push(lit);
+        blocks.push(def("scorchrock", "Scorchrock (Grumbly)", Cube, true, true, [T_SCORCHROCK; 3], 0.4, 1, true, SCORCHROCK, 0.0, S_STONE));
+        let mut sand = def("embersand", "Embersand (Clingy)", Cube, true, true, [T_EMBERSAND; 3], 0.5, 0, false, EMBERSAND, 0.0, S_SAND);
+        sand.speed = 0.5;
+        blocks.push(sand);
+        blocks.push(def("scorch_gold_ore", "Scorched Gold Ore (Still Useless, Now Warm)", Cube, true, true, [T_SCORCH_GOLD; 3], 3.0, 1, true, GOLD_INGOT, 0.0, S_STONE));
+        for x_axis in [true, false] {
+            let mut d = def(if x_axis { "portal" } else { "portal_z" }, "Portal (Shimmery)", Shaped, false, false, [T_PORTAL; 3], -1.0, 0, false, AIR, 11.0, S_GLASS);
+            d.shape = Shape::Portal { x_axis };
+            d.creative = false;
+            blocks.push(d);
+        }
+        for (k, key) in ["rail", "rail_ew", "rail_ne", "rail_nw", "rail_se", "rail_sw"].into_iter().enumerate() {
+            let tile = T_RAIL + k as u16;
+            let mut d = def(key, "Rail (Choo Choo)", Shaped, false, false, [tile; 3], 0.7, 0, false, RAIL_FIRST, 0.0, S_STONE);
+            d.shape = Shape::Dust;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
+        for (k, key) in ["powered_rail", "powered_rail_on", "powered_rail_ew", "powered_rail_ew_on"].into_iter().enumerate() {
+            let tile = T_POWERED_RAIL + k as u16;
+            let mut d = def(key, "Powered Rail (Zoom)", Shaped, false, false, [tile; 3], 0.7, 0, false, POWERED_RAIL, 0.0, S_STONE);
+            d.shape = Shape::Dust;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("sign{}", ["", "_east", "_south", "_west"][facing as usize])), "Sign (Words Go Here)", Shaped, false, false, [T_PLANKS; 3], 1.0, 0, false, SIGN_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Sign { facing };
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("item_frame{}", ["", "_east", "_south", "_west"][facing as usize])), "Item Frame (Look What I Have)", Shaped, false, false, [T_FRAME; 3], 0.4, 0, false, FRAME_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Frame { facing };
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
+        debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
+        debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
+        debug_assert_eq!(blocks[FRAME_FIRST as usize].key, "item_frame");
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
         blocks[BOUNCY as usize].bounce = 0.85;
         blocks[LANTERN as usize].see_through = true;
-        for id in [AIR, WATER, BEDROCK] {
+        for id in [AIR, WATER, LAVA, BEDROCK] {
             blocks[id as usize].creative = false;
         }
 
@@ -773,6 +990,21 @@ impl Registry {
                 items.push(ItemDef { stack: 1, ..item(leak(&format!("{tier}_{part}")), armor_names[t][slot], T_ARMOR_ITEMS + (t * 4 + slot) as u16) });
             }
         }
+        items.extend([
+            ItemDef { stack: 16, ..item("bucket", "Bucket (Empty, Optimistic)", T_BUCKET) },
+            ItemDef { stack: 1, ..item("water_bucket", "Bucket of Water (Sloshy)", T_WATER_BUCKET) },
+            ItemDef { stack: 1, ..item("lava_bucket", "Bucket of Lava (Hold Level)", T_LAVA_BUCKET) },
+            ItemDef { stack: 1, ..item("shears", "Shears (For Fluffers, Not Haircuts)", T_SHEARS) },
+            item("zap_dust", "Zappy Dust (Do Not Lick)", T_ZAP_DUST),
+            item("book", "Book (Mostly Wheat)", T_BOOK),
+            ItemDef { stack: 1, ..item("enchanted_book", "Enchanted Book (Spoilers Inside)", T_ENCHANTED_BOOK) },
+            ItemDef { stack: 1, ..item("shield", "Shield (Door You Can Carry)", T_SHIELD) },
+            ItemDef { stack: 1, ..item("sparker", "Sparker (Hot Hands in a Can)", T_SPARKER) },
+            ItemDef { stack: 1, ..item("boat", "Boat (Mostly Waterproof)", T_BOAT_ITEM) },
+            ItemDef { stack: 1, ..item("minecart", "Minecart (Wheeled Bucket)", T_CART_ITEM) },
+            item("compass", "Compass (Points Home, Mostly)", T_COMPASS),
+            item("map", "Map (You Are Here)", T_MAP),
+        ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -830,6 +1062,25 @@ impl Registry {
             // A real anvil takes 31 iron. This one is a bargain.
             r(&[(IRON, 10)], (ANVIL, 1)),
             r(&[(BOOKSHELF, 1), (DIAMOND, 2), (COBBLE, 4)], (ENCHANTING_TABLE, 1)),
+            r(&[(IRON, 3)], (BUCKET, 1)),
+            r(&[(IRON, 2)], (SHEARS, 1)),
+            r(&[(ZAP_DUST, 9)], (ZAP_BLOCK, 1)),
+            r(&[(ZAP_BLOCK, 1)], (ZAP_DUST, 9)),
+            r(&[(STICK, 1), (COBBLE, 1)], (LEVER, 1)),
+            r(&[(STONE, 1)], (BUTTON, 2)),
+            r(&[(STONE, 2)], (PLATE, 1)),
+            r(&[(GLOWROCK, 1), (ZAP_DUST, 4)], (LAMP, 1)),
+            r(&[(WHEAT, 3), (STRING, 1)], (BOOK, 1)),
+            r(&[(PLANKS, 6), (IRON, 1)], (SHIELD, 1)),
+            r(&[(IRON, 1), (COAL, 1)], (SPARKER, 1)),
+            r(&[(PLANKS, 5)], (BOAT, 1)),
+            r(&[(IRON, 4), (ZAP_DUST, 1)], (COMPASS, 1)),
+            r(&[(WHEAT, 8), (COMPASS, 1)], (MAP, 1)),
+            r(&[(PLANKS, 6), (STICK, 1)], (SIGN_FIRST, 3)),
+            r(&[(STICK, 8), (WOOL, 1)], (FRAME_FIRST, 1)),
+            r(&[(IRON, 5)], (MINECART, 1)),
+            r(&[(IRON, 6), (STICK, 1)], (RAIL_FIRST, 16)),
+            r(&[(GOLD_INGOT, 6), (STICK, 1), (ZAP_DUST, 1)], (POWERED_RAIL, 6)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {
@@ -911,12 +1162,12 @@ pub fn dapples_sky(id: Id) -> bool {
 /// Can the player point at it (and break it)?
 #[inline]
 pub fn targetable(id: Id) -> bool {
-    id != AIR && id != WATER
+    id != AIR && !is_liquid(id)
 }
 /// Placing into this cell simply replaces it.
 #[inline]
 pub fn replaceable(id: Id) -> bool {
-    matches!(id, AIR | WATER | TALL_GRASS | WEEDS)
+    matches!(id, AIR | TALL_GRASS | WEEDS) || is_liquid(id)
 }
 
 pub fn is_block_item(id: Id) -> bool {
@@ -1004,6 +1255,10 @@ pub fn attack_damage_with(id: Id, sharpness: u8) -> f32 {
 /// How many of an ore's drop come out with Fortune `fortune` (ores that drop
 /// something other than themselves; everything else is always one).
 pub fn fortune_count(id: Id, fortune: u8, roll: f32) -> u8 {
+    // Zappy ore always gives a handful (and Fortune adds to it).
+    if id == ZAP_ORE {
+        return 4 + (roll * 2.0) as u8 + fortune;
+    }
     let b = block(id);
     if fortune == 0 || !matches!(id, COAL_ORE | IRON_ORE | GOLD_ORE | DIAMOND_ORE) || b.drop == id {
         return 1;
@@ -1026,4 +1281,25 @@ pub fn creative_items() -> Vec<Id> {
 /// Constructors the mod loader uses while building a new registry.
 pub(crate) mod build {
     pub(crate) use super::{def, item, leak};
+}
+
+#[cfg(test)]
+mod id_order_tests {
+    use super::*;
+
+    #[test]
+    fn named_ids_match_their_registrations() {
+        for (id, key) in [
+            (OBSIDIAN, "obsidian"),
+            (ZAP_ORE, "zap_ore"),
+            (LAMP_ON, "zap_lamp_on"),
+            (PORTAL_X, "portal"),
+            (RAIL_FIRST, "rail"),
+            (POWERED_RAIL, "powered_rail"),
+            (SIGN_FIRST, "sign"),
+            (FRAME_FIRST, "item_frame"),
+        ] {
+            assert_eq!(block(id).key, key, "id {id}");
+        }
+    }
 }

@@ -16,7 +16,7 @@ use crate::scripting::{Cmd, ScriptHost};
 use rhai::{Dynamic, INT};
 use crate::sound::{material, Sfx};
 use crate::texture::*;
-use crate::world::{Hit, World, CH, SEA};
+use crate::world::{Hit, World, CH};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
 use macroquad::miniquad::RenderingBackend;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -39,6 +39,8 @@ pub struct Controls {
 pub enum Target {
     Block(Hit),
     Mob(usize),
+    /// A boat or minecart (see vehicles.rs).
+    Vehicle(usize),
 }
 
 pub struct Camera {
@@ -140,9 +142,41 @@ pub struct Game {
     pub enchant_count: u32,
     /// Joined players we remember, by name (see players.rs).
     pub saved_players: std::collections::BTreeMap<String, crate::players::PlayerRecord>,
+    /// Allow-list and operators (see admin.rs).
+    pub admin: crate::admin::Admin,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
+    /// Seconds since the last water and lava steps, and lava cells waiting for theirs (see liquids.rs).
+    pub liquid_timers: [f32; 2],
+    pub lava_waiting: HashSet<IVec3>,
+    /// Seconds the local player stays on fire (lava).
+    pub on_fire: f32,
+    /// Zappy Dust (see wiring.rs): time since the last update, pressed
+    /// buttons and plates with their time left, doors held open by power.
+    pub zap_timer: f32,
+    pub buttons: HashMap<IVec3, f32>,
+    pub plates: HashMap<IVec3, f32>,
+    pub powered_doors: HashSet<IVec3>,
+    /// The Hmmer whose trades are on screen (see villagers.rs).
+    pub trading: Option<u32>,
+    /// Seconds since the last swing (weapons charge back up; see combat.rs), and a raised shield.
+    pub since_attack: f32,
+    pub blocking: bool,
+    /// Portals (see scorch.rs): seconds spent standing in one, seconds before
+    /// another trip, and whether we've stepped out since the last.
+    pub portal_time: f32,
+    pub portal_cooldown: f32,
+    pub left_portal: bool,
+    /// Which portal leads to which (by `scorch::portal_key`), both ways.
+    pub portal_links: HashMap<IVec3, IVec3>,
+    /// The sign we've just put up and are writing on (see decor.rs).
+    pub editing_sign: Option<IVec3>,
+    /// Boats and minecarts (see vehicles.rs), the one we're in, and time to the next sync.
+    pub vehicles: Vec<crate::vehicles::Vehicle>,
+    pub next_vehicle_id: u32,
+    pub riding: Option<u32>,
+    pub vehicle_sync: f32,
 }
 
 impl Game {
@@ -229,8 +263,28 @@ impl Game {
             enchanting: None,
             enchant_count: 0,
             saved_players: Default::default(),
+            admin: Default::default(),
             report_timer: 0.0,
             weather: Default::default(),
+            liquid_timers: [0.0; 2],
+            lava_waiting: HashSet::new(),
+            on_fire: 0.0,
+            zap_timer: 0.0,
+            buttons: HashMap::new(),
+            plates: HashMap::new(),
+            powered_doors: HashSet::new(),
+            trading: None,
+            since_attack: 10.0,
+            blocking: false,
+            portal_time: 0.0,
+            portal_cooldown: 0.0,
+            left_portal: true,
+            portal_links: HashMap::new(),
+            editing_sign: None,
+            vehicles: Vec::new(),
+            next_vehicle_id: 0,
+            riding: None,
+            vehicle_sync: 0.0,
         }
     }
 
@@ -285,7 +339,7 @@ impl Game {
                 (s, _) => s,
             };
             let wear = d.wear.get(i).copied().unwrap_or(0);
-            let wear = s.and_then(|(id, _)| durability(id)).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min(max - 1))).unwrap_or(0);
+            let wear = s.map(|(id, _)| crate::inventory::sanitize_wear(id, wear)).unwrap_or(0);
             if i < 36 {
                 g.inv.slots[i] = s;
                 g.inv.wear[i] = wear;
@@ -317,6 +371,23 @@ impl Game {
         }
         g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle };
         g.enchant_count = d.enchant_count;
+        g.portal_links = crate::scorch::decode_links(&d.portals);
+        let (signs, frames) = crate::decor::decode(&d.decor);
+        g.world.signs = signs;
+        for (p, (item, wear)) in frames {
+            let item = remap.as_ref().map(|r| r[item as usize]).unwrap_or(item);
+            if item != AIR {
+                g.world.frames.insert(p, (item, wear));
+            }
+        }
+        for (kind, pos, yaw) in crate::vehicles::decode(&d.vehicles) {
+            g.spawn_vehicle(kind, pos, yaw);
+        }
+        for mut m in crate::animals::decode_mobs(&d.mobs, &mut g.rng) {
+            m.id = g.next_mob_id;
+            g.next_mob_id += 1;
+            g.mobs.push(m);
+        }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -354,6 +425,10 @@ impl Game {
             weather: self.weather.kind.index(),
             weather_timer: self.weather.timer,
             enchant_count: self.enchant_count,
+            mobs: crate::animals::encode_mobs(&self.mobs),
+            portals: crate::scorch::encode_links(&self.portal_links),
+            vehicles: crate::vehicles::encode(&self.vehicles),
+            decor: crate::decor::encode(&self.world.signs, &self.world.frames),
             version: crate::save::VERSION,
         }
     }
@@ -429,7 +504,15 @@ impl Game {
         self.sun_angle().sin() < -0.05
     }
 
+    /// Is the camera (or the local player) down in the Scorchlands?
+    pub fn in_scorch(&self) -> bool {
+        !self.menu && crate::scorch::in_scorch(self.player.body.pos.x)
+    }
+
     pub fn sky_color(&self) -> [f32; 3] {
+        if self.in_scorch() {
+            return [0.24, 0.06, 0.03];
+        }
         let d = ((self.daylight() - 0.18) / 0.82).clamp(0.0, 1.0);
         let day = [0.55, 0.75, 1.0];
         let night = [0.02, 0.03, 0.08];
@@ -546,6 +629,8 @@ impl Game {
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         }
         self.weather_tick(dt);
+        self.liquid_tick(dt);
+        self.zap_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
@@ -571,7 +656,14 @@ impl Game {
                 self.advance("cover_me");
             }
         }
-        let mut fall = self.player.update(dt, &c.input, &self.world, self.creative);
+        // In a boat or cart, the vehicle moves us (see vehicles.rs).
+        let mut fall = if self.riding.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
+        self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
+        // Flowing water carries you along.
+        if self.player.body.in_water && !self.player.flying {
+            let push = crate::liquids::current(&self.world, self.player.body.pos + Vec3::Y * 0.3);
+            self.player.body.vel += push * dt * if self.player.body.in_lava { 2.0 } else { 9.0 };
+        }
         self.hunger_tick(dt);
         let landed = self.player.landed.take();
         let feet = self.player.body.pos - Vec3::Y * 0.05;
@@ -592,12 +684,18 @@ impl Game {
         }
         self.footsteps(dt);
         self.block_effects();
+        self.lava_tick(dt);
+        self.portal_tick(dt);
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
 
         self.update_target();
         self.attack_cd = (self.attack_cd - dt).max(0.0);
+        self.since_attack += dt;
+        // Shields go up while right-click is held.
+        self.blocking = c.use_held && self.inv.held() == SHIELD;
+        self.player.blocking = self.blocking;
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
         self.update_fishing(dt, c.use_held);
@@ -835,6 +933,15 @@ impl Game {
 
     /// Right-clicking a bed.
     fn sleep(&mut self, bed: IVec3) {
+        if self.in_scorch() {
+            // Beds don't like it down here.
+            self.world.set_v(bed, AIR);
+            self.msg("The bed exploded. Beds are not rated for the Scorchlands.");
+            if !self.is_client() {
+                self.explode(bed.as_vec3() + Vec3::splat(0.5), 3.0, "tried to sleep in the Scorchlands");
+            }
+            return;
+        }
         self.spawn = bed.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
         if !self.is_night() {
             self.msg("You can only sleep at night. Naps are a premium feature. (Spawn point set, though.)");
@@ -965,8 +1072,9 @@ impl Game {
                     if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         self.player.hurt = 0.0;
                         let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_player_armored(d, "was shot by a Rattler (with a Pointy Stick)");
-                        self.player.body.vel += a.vel.normalize_or_zero() * 4.0;
+                        self.hurt_player_from(d, "was shot by a Rattler (with a Pointy Stick)", Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
+                        let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
+                        self.player.body.vel += knock;
                         return false;
                     }
                     let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
@@ -991,7 +1099,7 @@ impl Game {
             for dz in -3..=3 {
                 for dx in -3..=3 {
                     let p = at + ivec3(dx, dy, dz);
-                    if self.world.get_v(p) == WATER {
+                    if is_water(self.world.get_v(p)) {
                         self.world.set_v(p, AIR);
                         n += 1;
                     }
@@ -1023,9 +1131,22 @@ impl Game {
                 }
             }
         }
-        self.target = match (best, hit) {
-            (Some((i, _)), _) => Some(Target::Mob(i)),
-            (None, Some(h)) => Some(Target::Block(h)),
+        let mut ride: Option<(usize, f32)> = None;
+        for (i, v) in self.vehicles.iter().enumerate() {
+            let (min, max) = v.bounds();
+            if let Some(t) = ray_aabb(eye, dir, min, max)
+                && t < reach.min(block_dist)
+                && best.is_none_or(|b| t < b.1)
+                && ride.is_none_or(|r| t < r.1)
+                && Some(v.id) != self.riding
+            {
+                ride = Some((i, t));
+            }
+        }
+        self.target = match (ride, best, hit) {
+            (Some((i, _)), _, _) => Some(Target::Vehicle(i)),
+            (None, Some((i, _)), _) => Some(Target::Mob(i)),
+            (None, None, Some(h)) => Some(Target::Block(h)),
             _ => None,
         };
     }
@@ -1040,16 +1161,40 @@ impl Game {
         }
 
         match &self.target {
+            Some(Target::Vehicle(i)) => {
+                let i = *i;
+                self.breaking = None;
+                if c.attack_pressed && self.attack_cd <= 0.0 {
+                    let id = self.vehicles[i].id;
+                    self.attack_cd = 0.3;
+                    if self.is_client() {
+                        self.net_send_msg(Msg::VehicleUse { id, action: 2 });
+                        self.vehicles[i].hurt = 0.4;
+                    } else {
+                        let me = self.my_id + 1;
+                        self.hit_vehicle(id, me);
+                    }
+                }
+            }
             Some(Target::Mob(i)) => {
                 self.breaking = None;
                 if c.attack_pressed && self.attack_cd <= 0.0 {
                     let i = *i;
-                    let dmg = attack_damage_with(held, self.held_level(Enchant::Sharpness)) * if self.player.body.vel.y < -1.0 { 1.5 } else { 1.0 };
+                    // Early swings are weak; only a full one can crit (see combat.rs).
+                    let charge = self.attack_charge();
+                    let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
+                    let dmg = attack_damage_with(held, self.held_level(Enchant::Sharpness)) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
                     if !self.creative {
                         self.player.hunger.exhaust(crate::hunger::ATTACK);
                     }
                     let from = self.player.body.pos;
+                    if !self.is_client() {
+                        // Pets join in.
+                        let (me, id) = (crate::players::record_key(&self.player_name), self.mobs[i].id);
+                        self.sic_pets(&me, id);
+                    }
                     if self.is_client() {
                         // The host owns mobs: ask it to apply the hit (it echoes the sound back).
                         let mob = self.mobs[i].id;
@@ -1060,12 +1205,27 @@ impl Game {
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
                         self.sfx(Sfx::hurt_of(kind), Some(at));
+                        if charge > 0.9 {
+                            if self.player.sprinting {
+                                // A running start sends them flying.
+                                let push = (at - from).normalize_or_zero() * 5.0;
+                                self.mobs[i].body.vel += push;
+                            } else if is_sword(held) && self.player.body.on_ground {
+                                self.sweep(i, from);
+                            }
+                        }
                     }
-                    self.attack_cd = 0.35;
+                    self.attack_cd = 0.1;
                 }
             }
             Some(Target::Block(h)) => {
                 let pos = h.pos;
+                // A frame with something in it gives that up before breaking.
+                if c.attack_pressed && self.attack_cd <= 0.0 && self.hit_frame(pos) {
+                    self.attack_cd = 0.25;
+                    self.breaking = None;
+                    return;
+                }
                 if c.attack_held {
                     let id = self.world.get_v(pos);
                     if self.creative {
@@ -1132,6 +1292,20 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        // Feeding, shearing and taming animals.
+        if let Some(Target::Mob(i)) = self.target
+            && self.use_on_mob(i)
+        {
+            return;
+        }
+        // Getting into a boat or cart; putting one down.
+        if let Some(Target::Vehicle(i)) = self.target {
+            self.mount(i);
+            return;
+        }
+        if matches!(held, BOAT | MINECART) && self.place_vehicle(held) {
+            return;
+        }
         // Chests, furnaces and anvils open (sneak to place against them instead).
         if let Some(Target::Block(h)) = &self.target
             && !self.player.sneaking
@@ -1166,6 +1340,9 @@ impl Game {
             self.inv.equip(slot);
             self.sfx(Sfx::Place(crate::sound::Mat::Glass), None);
             self.msg(format!("You put on the {}. Dashing.", item_name(held)));
+            return;
+        }
+        if matches!(held, BUCKET | WATER_BUCKET | LAVA_BUCKET) && self.use_bucket(held) {
             return;
         }
         // Planting, tilling and soil science come before eating (carrots are both).
@@ -1279,6 +1456,14 @@ impl Game {
         let (hit_pos, normal) = (h.pos, h.normal);
         let hit_y = self.player.eye().y + self.player.look_dir().y * h.dist - hit_pos.y as f32;
         let hit_id = self.world.get_v(hit_pos);
+        // Levers and buttons (sneak to place against one instead).
+        if !self.player.sneaking && self.use_switch(hit_pos, hit_id) {
+            return;
+        }
+        // Item frames take what you're holding.
+        if !self.player.sneaking && crate::decor::is_frame(hit_id) && self.use_frame(hit_pos) {
+            return;
+        }
         // Doors open and close (sneak to place against one instead).
         if is_door(hit_id) && !self.player.sneaking {
             self.toggle_door(hit_pos);
@@ -1302,7 +1487,10 @@ impl Game {
             self.advance("cake");
             return;
         }
-        if hit_id == TNT && (held == TORCH || held == AIR) {
+        if held == SPARKER && self.use_sparker(hit_pos, normal) {
+            return;
+        }
+        if hit_id == TNT && (held == TORCH || held == AIR || held == SPARKER) {
             if self.is_client() {
                 self.world.set_remote(hit_pos.x, hit_pos.y, hit_pos.z, AIR);
                 self.net_send_msg(Msg::Ignite { x: hit_pos.x, y: hit_pos.y, z: hit_pos.z });
@@ -1323,6 +1511,10 @@ impl Game {
             self.place_door(hit_pos, normal, hit_id);
             return;
         }
+        if held == ZAP_DUST {
+            self.place_dust(hit_pos, normal, hit_id);
+            return;
+        }
         if !is_block_item(held) {
             return;
         }
@@ -1336,7 +1528,9 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH if !is_solid(below) => return,
+            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            // Frames go on walls.
+            FRAME_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -1350,6 +1544,10 @@ impl Game {
         }
         let oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
         self.world.set_v(place, oriented);
+        if held == SIGN_FIRST {
+            // Something to write on it.
+            self.editing_sign = Some(place);
+        }
         self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
         if !self.creative {
@@ -1384,6 +1582,7 @@ impl Game {
         // Chests and furnaces hand over what was inside (joined players get it from the host).
         if !self.is_client() {
             self.spill_container(pos);
+            self.spill_frame(pos);
         }
         self.world.set_v(pos, AIR);
         self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
@@ -1426,20 +1625,13 @@ impl Game {
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
-        if block(a).model == Model::Cross || door_state(a).is_some_and(|(_, _, top)| !top) {
+        if block(a).model == Model::Cross || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
             self.world.set_v(above, AIR);
             if is_door(a) {
                 self.world.set_v(above + IVec3::Y, AIR);
             }
             if !self.creative && !self.is_client() && block(a).drop != AIR {
                 self.pop_drop(above.as_vec3() + Vec3::splat(0.5), block(a).drop, 1);
-            }
-        }
-        // Water flows (lazily) into the hole.
-        for n in [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z, IVec3::Y] {
-            if self.world.get_v(pos + n) == WATER && pos.y <= SEA {
-                self.world.set_v(pos, WATER);
-                break;
             }
         }
     }
@@ -1531,7 +1723,7 @@ impl Game {
         }
     }
 
-    fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
+    pub(crate) fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
         if self.dedicated {
             return;
         }
@@ -1635,7 +1827,8 @@ impl Game {
                     }
                     let id = self.world.get_v(p);
                     match id {
-                        AIR | WATER | BEDROCK => {}
+                        AIR | BEDROCK => {}
+                        _ if is_liquid(id) => {}
                         TNT => {
                             self.world.set_v(p, AIR);
                             let fuse = self.rng.range(0.3, 0.9);
@@ -1660,9 +1853,9 @@ impl Game {
         if pd < r * 2.0 && !self.dedicated {
             let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
             self.player.hurt = 0.0;
-            self.hurt_player_armored(dmg, cause);
+            self.hurt_player_from(dmg, cause, Some(at), true);
             let push = (self.player.body.pos - at).normalize_or_zero() * (1.0 - pd / (r * 2.0)) * 14.0;
-            self.player.body.vel += push + Vec3::Y * 4.0;
+            self.player.body.vel += self.steadied(push + Vec3::Y * 4.0);
         }
         for m in self.mobs.iter_mut() {
             let d = (m.body.pos + Vec3::Y * 0.5).distance(at);
@@ -1693,7 +1886,7 @@ impl Game {
     /// Particles and sound for a block someone else changed.
     pub fn block_change_feedback(&mut self, pos: IVec3, old: Id, new: Id) {
         let center = pos.as_vec3() + Vec3::splat(0.5);
-        if new == AIR || new == WATER {
+        if new == AIR || is_liquid(new) {
             if targetable(old) {
                 let tile = block(old).tex[1];
                 self.block_particles_tile(pos, tile, 10);
@@ -1712,6 +1905,9 @@ impl Game {
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         }
         self.weather_tick(dt);
+        self.liquid_tick(dt);
+        self.zap_tick(dt);
+        self.vehicles_tick(dt, 0.0, 0.0, false);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
         }
@@ -1766,6 +1962,9 @@ impl Game {
             self.msg("You made eye contact with a Starer. Bold. Also a mistake.");
             self.advance("dont_blink");
         }
+        self.house_hmmers();
+        self.animals_tick(dt);
+        self.hmmers_tick(dt);
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
@@ -1779,7 +1978,8 @@ impl Game {
                 .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
                 .unwrap_or((u32::MAX, ppos));
             let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
-            events.extend(evs.into_iter().map(|e| (target_id, target, e)));
+            let id = m.id;
+            events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
             if fuse_before == 0.0 && m.fuse > 0.0 {
                 noises.push((Sfx::Hiss, m.body.pos));
             }
@@ -1794,12 +1994,22 @@ impl Game {
                     MobKind::Rattler => noises.push((Sfx::Rattle, m.body.pos)),
                     MobKind::Webber => noises.push((Sfx::Skitter, m.body.pos)),
                     MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
+                    MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
+                    MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
+                    MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer => {}
                 }
             }
         }
         for (s, at) in noises {
             self.sfx(s, Some(at));
+        }
+        // Hit one Grumbler and the rest nearby join in.
+        let riled: Vec<Vec3> = self.mobs.iter().filter(|m| m.kind == MobKind::Grumbler && m.angry && m.hurt > 0.3).map(|m| m.body.pos).collect();
+        for at in riled {
+            for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Grumbler && m.body.pos.distance(at) < 16.0) {
+                m.angry = true;
+            }
         }
         // Keep mobs from stacking inside each other.
         for i in 0..self.mobs.len() {
@@ -1815,18 +2025,24 @@ impl Game {
                 }
             }
         }
-        for (target_id, target, e) in events {
+        for (target_id, target, mob_id, e) in events {
             match e {
                 MobEvent::HurtPlayer(d, cause) if target_id != self.my_id => {
                     let d = self.rules.difficulty.mob_damage(d);
                     self.hurt_peer(target_id, d, cause, Vec3::Y * 3.0);
                     let _ = target;
+                    if let Some(name) = self.peers.get(&target_id).map(|p| crate::players::record_key(&p.name)) {
+                        self.sic_pets(&name, mob_id);
+                    }
                 }
                 MobEvent::HurtPlayer(d, cause) => {
+                    let me = crate::players::record_key(&self.player_name);
+                    self.sic_pets(&me, mob_id);
                     let d = self.rules.difficulty.mob_damage(d);
-                    self.hurt_player_armored(d, cause);
+                    let from = self.mobs.iter().find(|m| m.id == mob_id).map(|m| m.body.pos + Vec3::Y * 0.9);
+                    self.hurt_player_from(d, cause, from, false);
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
-                    self.player.body.vel += knock * 3.0 + Vec3::Y * 3.0;
+                    self.player.body.vel += self.steadied(knock * 3.0 + Vec3::Y * 3.0);
                 }
                 MobEvent::Explode(at, r, cause) => self.explode(at, r, cause),
                 MobEvent::Smoke(at) => self.smoke(at, 1, 0.2),
@@ -1843,7 +2059,7 @@ impl Game {
         let mut i = 0;
         while i < self.mobs.len() {
             let m = &self.mobs[i];
-            let far = (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
+            let far = !m.persistent && (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
                 if m.health <= 0.0 && m.health > -50.0 {
@@ -1862,7 +2078,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -1923,7 +2139,7 @@ impl Game {
         }
     }
 
-    fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
+    pub(crate) fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
         self.alloc_mob_sized(kind, pos, 1);
     }
 
@@ -1942,7 +2158,12 @@ impl Game {
             return;
         }
         let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
-        let passive = self.mobs.iter().filter(|m| !m.kind.hostile()).count();
+        if crate::scorch::in_scorch(p.x) {
+            self.scorch_spawn(p);
+            return;
+        }
+        // Kept animals (bred, tamed) don't count against new ones turning up.
+        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent).count();
         let hostile = self.mobs.len() - passive;
         let a = self.rng.range(0.0, TAU);
         let d = self.rng.range(24.0, 56.0);
@@ -1952,9 +2173,17 @@ impl Game {
         }
         let y = self.world.surface_y(x, z);
         let top = self.world.get(x, y, z);
-        let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && w.get(x, y, z) != WATER;
-        if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
-            let kind = [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize];
+        let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && !is_liquid(w.get(x, y, z));
+        let (_, biome) = self.world.generator.column(x, z);
+        let woofy = matches!(biome, crate::world::Biome::Forest | crate::world::Biome::Snowy);
+        if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS) && clear(&self.world, y + 1) {
+            let kind = if woofy && self.rng.chance(0.25) {
+                MobKind::Woofer
+            } else if top == SNOW_GRASS {
+                return;
+            } else {
+                [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize]
+            };
             for i in 0..self.rng.int(1, 3) {
                 let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.7, y as f32 + 1.0, z as f32 + 0.5);
                 self.alloc_mob(kind, pos);
@@ -1992,6 +2221,39 @@ impl Game {
         }
     }
 
+    /// The Scorchlands have their own residents, light or dark.
+    fn scorch_spawn(&mut self, p: Vec3) {
+        let here = self.mobs.iter().filter(|m| crate::scorch::in_scorch(m.body.pos.x)).count();
+        if here >= 10 + 3 * self.peers.len() || !self.rules.difficulty.monsters() {
+            return;
+        }
+        let a = self.rng.range(0.0, TAU);
+        let d = self.rng.range(16.0, 40.0);
+        let (x, z) = ((p.x + a.cos() * d).floor() as i32, (p.z + a.sin() * d).floor() as i32);
+        if !self.world.is_loaded(x, z) || crate::scorch::in_wall(x) || x < crate::scorch::SCORCH_X + 16 {
+            return;
+        }
+        let y0 = self.rng.int(crate::scorch::LAVA_SEA + 1, CH - 10);
+        for y in y0..y0 + 12 {
+            let floor = self.world.get(x, y - 1, z);
+            let clear = (0..3).all(|h| self.world.get(x, y + h, z) == AIR);
+            if matches!(floor, SCORCHROCK | EMBERSAND) && clear {
+                let at = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
+                let roll = self.rng.f32();
+                if roll < 0.6 {
+                    for i in 0..self.rng.int(1, 3) {
+                        self.alloc_mob(MobKind::Grumbler, at + Vec3::new(i as f32 * 0.7, 0.0, 0.0));
+                    }
+                } else if roll < 0.8 {
+                    self.alloc_mob_sized(MobKind::Bloop, at, 2);
+                } else {
+                    self.alloc_mob(MobKind::Rattler, at);
+                }
+                return;
+            }
+        }
+    }
+
     pub fn respawn(&mut self) {
         self.dead = None;
         self.player = Player::new(self.spawn);
@@ -2018,9 +2280,10 @@ impl Game {
         let a = self.sun_angle();
         let sun_dir = Vec3::new(a.cos(), a.sin(), 0.25).normalize();
 
-        // Stars fade in at night.
+        // Stars fade in at night (no sky at all under the Scorchlands' bedrock).
+        let scorch = self.in_scorch();
         let night = 1.0 - ((self.daylight() - 0.18) / 0.5).clamp(0.0, 1.0);
-        if night > 0.01 {
+        if night > 0.01 && !scorch {
             g.begin(Pass::Sky, [1.0, 1.0, 1.0, night], true);
             let rot = Mat4::from_rotation_z(a);
             for (i, s) in self.stars.iter().enumerate() {
@@ -2030,15 +2293,17 @@ impl Game {
             }
         }
         g.begin(Pass::Sky, [1.0; 4], true);
-        sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
-        sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
+        if !scorch {
+            sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
+            sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
+        }
 
         // Clouds: a scrolling blocky layer.
         let cloud_y = 112.0;
         let cell = 12.0;
         let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
-        let reach = ((render_distance * 16) as f32 / cell) as i32 + 4;
+        let reach = if scorch { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
         g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
         for j in -reach..=reach {
             for i in -reach..=reach {
@@ -2125,7 +2390,11 @@ impl Game {
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
         // Rain, snow and lightning
-        self.draw_weather(&mut g, eye);
+        if !scorch {
+            self.draw_weather(&mut g, eye);
+        }
+        self.draw_vehicles(&mut g);
+        self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
         self.draw_orbs(&mut g, eye, 48.0);
@@ -2224,6 +2493,9 @@ impl Game {
         let far = (render_distance * 16) as f32;
         let (fog_color, fog_start, fog_end) = if underwater {
             ([0.05, 0.12, 0.35], 0.0, 22.0)
+        } else if self.in_scorch() {
+            // Hazy, hot air.
+            (sky, far * 0.2, far * 0.8)
         } else {
             (sky, far * 0.55, far - 4.0)
         };
@@ -2235,7 +2507,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), lights }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.in_scorch() { 0.32 } else { 0.0 }, lights }
     }
 }
 
@@ -2336,6 +2608,33 @@ mod tests {
         }
         assert!(ready(&w), "chunks never generated");
         w
+    }
+
+    #[test]
+    fn greedy_meshing_shrinks_real_terrain() {
+        let w = loaded_world(7);
+        let mesh = crate::mesher::mesh_chunk(&w, 0, 0);
+        let merged = mesh.opaque.verts.iter().filter(|v| v.tile[0] >= 0.0).count() / 4;
+        let quads = mesh.opaque.verts.len() / 4;
+        // Count what one quad per visible cube face would have cost.
+        let mut faces = 0;
+        for y in 0..crate::world::CH {
+            for z in 0..16 {
+                for x in 0..16 {
+                    let id = w.get(x, y, z);
+                    if block(id).model != crate::block::Model::Cube {
+                        continue;
+                    }
+                    for (n, _, _) in crate::mesher::FACES {
+                        if !is_opaque(w.get(x + n[0], y + n[1], z + n[2])) && !(w.get(x + n[0], y + n[1], z + n[2]) == id && block(id).see_through) {
+                            faces += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // This chunk is a stepped hill (little to merge), yet it still comes out smaller.
+        assert!(merged > 0 && quads < faces, "{quads} quads ({merged} cube) for {faces} faces");
     }
 
     #[test]
@@ -2614,6 +2913,13 @@ mod tests {
     fn aim(g: &mut Game, pos: IVec3, normal: IVec3) {
         let dist = (pos.as_vec3() + Vec3::splat(0.5)).distance(g.player.eye());
         g.target = Some(Target::Block(crate::world::Hit { pos, normal, dist }));
+    }
+
+    /// Turn the player to look at a point (for things that raycast themselves).
+    fn look_at(g: &mut Game, at: Vec3) {
+        let d = at - g.player.eye();
+        g.player.yaw = d.x.atan2(-d.z);
+        g.player.pitch = d.y.atan2(Vec3::new(d.x, 0.0, d.z).length());
     }
 
     #[test]
@@ -3179,7 +3485,618 @@ mod tests {
         assert!(hit(4) < hit(0) - 1.0, "{} vs {}", hit(4), hit(0));
     }
 
-    /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
+    #[test]
+    fn buckets_and_flowing_liquids() {
+        let mut g = arena(68);
+        let step = |g: &mut Game, secs: f32| {
+            let mut t = 0.0;
+            while t < secs {
+                g.liquid_tick(0.05);
+                t += 0.05;
+            }
+        };
+        // A pool of water two blocks deep to scoop from.
+        let pool = IVec3::new(3, 49, 0);
+        g.world.set_v(pool, WATER);
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((BUCKET, 2));
+        g.inv.selected = 0;
+        look_at(&mut g, pool.as_vec3() + Vec3::new(0.5, 0.9, 0.5));
+        g.use_item();
+        assert_eq!(g.world.get_v(pool), AIR, "scooped up");
+        assert_eq!((g.inv.count(BUCKET), g.inv.count(WATER_BUCKET)), (1, 1));
+        // Pour it out on the floor: it spreads seven blocks and no further.
+        let slot = g.inv.slots.iter().position(|s| *s == Some((WATER_BUCKET, 1))).unwrap();
+        g.inv.selected = slot;
+        let spot = IVec3::new(0, 50, 3);
+        look_at(&mut g, spot.as_vec3() + Vec3::new(0.5, 0.02, 0.5));
+        g.use_item();
+        assert_eq!(g.world.get_v(spot), WATER);
+        assert_eq!(g.inv.slots[slot], Some((BUCKET, 1)));
+        step(&mut g, 4.0);
+        assert_eq!(g.world.get_v(spot + IVec3::new(0, 0, 1)), liquid_at(false, 1));
+        assert_eq!(g.world.get_v(spot + IVec3::new(0, 0, 7)), liquid_at(false, 7));
+        assert_eq!(g.world.get_v(pool), liquid_at(false, 1), "it pours into the hole left behind");
+        assert_eq!(g.world.get_v(spot + IVec3::new(-7, 0, 0)), liquid_at(false, 7));
+        assert_eq!(g.world.get_v(spot + IVec3::new(-8, 0, 0)), AIR);
+        // It carries things downstream.
+        assert!(crate::liquids::current(&g.world, (spot + IVec3::new(-3, 0, 0)).as_vec3() + Vec3::splat(0.5)).x < 0.0);
+        // Scoop the source back up and it all drains away.
+        g.inv.selected = slot;
+        look_at(&mut g, spot.as_vec3() + Vec3::new(0.5, 0.5, 0.5));
+        g.use_item();
+        assert_eq!(g.inv.slots[slot], Some((WATER_BUCKET, 1)));
+        step(&mut g, 5.0);
+        assert!((-8..=8).all(|d| g.world.get_v(spot + IVec3::new(d, 0, 0)) == AIR));
+
+        // Lava next to water turns to obsidian; standing in lava hurts and sets you alight.
+        let lava = IVec3::new(-4, 50, -4);
+        g.world.set_v(lava, LAVA);
+        g.world.set_v(lava + IVec3::X, WATER);
+        step(&mut g, 2.0);
+        assert_eq!(g.world.get_v(lava), OBSIDIAN);
+        g.world.set_v(IVec3::new(5, 50, 5), LAVA);
+        g.player.body.pos = Vec3::new(5.5, 50.0, 5.5);
+        g.player.hurt = 0.0;
+        let before = g.player.health;
+        g.lava_tick(0.05);
+        assert!(g.player.health < before && g.on_fire > 0.0);
+        assert!(g.advancements.has("hot_stuff"));
+        // Out of the lava it keeps burning until water (or rain) puts it out.
+        g.world.set_v(IVec3::new(5, 50, 5), AIR);
+        g.player.hurt = 0.0;
+        let before = g.player.health;
+        g.lava_tick(1.0);
+        assert!(g.player.health < before);
+        g.player.body.in_water = true;
+        g.lava_tick(0.05);
+        assert_eq!(g.on_fire, 0.0);
+    }
+
+    #[test]
+    fn feeding_breeding_shearing_and_taming() {
+        use crate::animals::{Interaction, GROW_SECS};
+        use crate::players::record_key;
+        let mut g = arena(5150);
+        for x in -12..12 {
+            for z in -12..12 {
+                g.world.set(x, 49, z, GRASS);
+            }
+        }
+        g.mobs.clear();
+        let me = record_key(&g.player_name);
+        let at = g.player.body.pos;
+        let spawn = |g: &mut Game, kind: MobKind, x: f32| {
+            let mut m = Mob::new(kind, Vec3::new(x, 50.0, 2.5), &mut g.rng);
+            m.id = g.next_mob_id;
+            g.next_mob_id += 1;
+            g.mobs.push(m);
+            m_id(g)
+        };
+        fn m_id(g: &Game) -> u32 {
+            g.mobs.last().unwrap().id
+        }
+        // Wheat for Mooers; not carrots.
+        let a = spawn(&mut g, MobKind::Mooer, 1.5);
+        let b = spawn(&mut g, MobKind::Mooer, 3.0);
+        assert_eq!(g.interact_mob(&me, at, a, CARROT), Interaction::Nothing);
+        assert_eq!(g.interact_mob(&me, at, a, WHEAT), Interaction::Ate);
+        assert_eq!(g.interact_mob(&me, at, a, WHEAT), Interaction::Nothing, "already in love");
+        assert_eq!(g.interact_mob(&me, at, b, WHEAT), Interaction::Ate);
+        // They find each other and a calf appears.
+        for _ in 0..400 {
+            g.animals_tick(0.05);
+            let (daylight, world) = (1.0, &g.world);
+            for m in g.mobs.iter_mut() {
+                m.update(0.05, world, Vec3::new(0.0, 50.0, -20.0), false, daylight, &mut g.rng);
+            }
+            if g.mobs.len() == 3 {
+                break;
+            }
+        }
+        assert_eq!(g.mobs.len(), 3, "a baby");
+        let calf = g.mobs.last().unwrap();
+        assert!(calf.baby > 0.0 && calf.persistent && calf.body.height < 1.0);
+        assert!(g.mobs.iter().take(2).all(|m| m.breed_cd > 0.0 && m.love == 0.0));
+        assert_eq!(g.interact_mob(&me, at, a, WHEAT), Interaction::Nothing, "resting");
+        assert!(g.advancements.has("the_birds_and_the_bees"));
+        // Babies grow up.
+        let mut calf = g.mobs.pop().unwrap();
+        calf.update(GROW_SECS + 1.0, &g.world, Vec3::ZERO, false, 1.0, &mut g.rng);
+        assert!(calf.baby <= 0.0 && calf.body.height > 1.0);
+
+        // Shearing.
+        let f = spawn(&mut g, MobKind::Fluffer, -2.0);
+        let drops = g.drops.len();
+        assert_eq!(g.interact_mob(&me, at, f, SHEARS), Interaction::Sheared);
+        assert!(g.drops.len() > drops && g.drops.last().unwrap().item == WOOL);
+        assert_eq!(g.interact_mob(&me, at, f, SHEARS), Interaction::Nothing, "nothing left to shear");
+        // It grows back after some grass.
+        let fi = g.mobs.len() - 1;
+        g.mobs[fi].body.on_ground = true;
+        for _ in 0..2000 {
+            g.animals_tick(0.1);
+            if !g.mobs[fi].sheared {
+                break;
+            }
+        }
+        assert!(!g.mobs[fi].sheared);
+
+        // Taming takes a few bones; then it follows, sits and fights.
+        let w = spawn(&mut g, MobKind::Woofer, -4.0);
+        g.rng = crate::noise::Rng::new(2);
+        let mut bones = 0;
+        while g.mobs.iter().find(|m| m.id == w).unwrap().owner.is_none() {
+            assert_eq!(g.interact_mob(&me, at, w, BONE), Interaction::Ate);
+            bones += 1;
+            assert!(bones < 50);
+        }
+        let wi = g.mobs.iter().position(|m| m.id == w).unwrap();
+        assert!(g.mobs[wi].sitting && g.mobs[wi].persistent && g.advancements.has("good_boy"));
+        assert_eq!(g.interact_mob(&me, at, w, AIR), Interaction::Toggled);
+        assert!(!g.mobs[wi].sitting);
+        g.animals_tick(0.05);
+        assert!(g.mobs[wi].goal.is_some(), "heads for its owner");
+        // Someone else's Woofer ignores you.
+        assert_eq!(g.interact_mob("somebody_else", at, w, AIR), Interaction::Nothing);
+        // Hit a mob and the Woofer goes for it.
+        let target = spawn(&mut g, MobKind::Oinker, -4.5);
+        g.sic_pets(&me, target);
+        assert_eq!(g.mobs[wi].prey, Some(target));
+        let hp = g.mobs.last().unwrap().health;
+        for _ in 0..10 {
+            g.mobs[wi].attack_cd = 0.0;
+            g.animals_tick(0.05);
+        }
+        assert!(g.mobs.last().unwrap().health < hp);
+        // Tamed, bred and fed animals are saved with the world (wild ones aren't).
+        let wild = spawn(&mut g, MobKind::Oinker, 5.0);
+        let back = Game::from_save(g.to_save());
+        let pet = back.mobs.iter().find(|m| m.kind == MobKind::Woofer).expect("the Woofer came back");
+        assert_eq!(pet.owner.as_deref(), Some(me.as_str()));
+        assert!(back.mobs.iter().any(|m| m.kind == MobKind::Fluffer));
+        assert_eq!(back.mobs.iter().filter(|m| m.kind == MobKind::Mooer).count(), 2);
+        assert!(back.mobs.len() < g.mobs.len(), "not the wild Oinker {wild}");
+    }
+
+    #[test]
+    fn zappy_dust_carries_power() {
+        let mut g = arena(69);
+        let run = |g: &mut Game, secs: f32| {
+            let mut t = 0.0;
+            while t < secs {
+                g.zap_tick(0.05);
+                t += 0.05;
+            }
+        };
+        // Lever, 15 blocks of dust with a step up in the middle, a lamp at the end.
+        let lever = IVec3::new(-8, 50, 0);
+        g.world.set_v(lever, LEVER);
+        g.world.set_v(IVec3::new(0, 50, 0), STONE);
+        for x in -7..=7 {
+            let y = if x == 0 { 51 } else { 50 };
+            g.world.set_v(IVec3::new(x, y, 0), WIRE);
+        }
+        let lamp = IVec3::new(8, 50, 0);
+        g.world.set_v(lamp, LAMP);
+        run(&mut g, 0.5);
+        assert_eq!(g.world.get_v(lamp), LAMP);
+        // Flip it (as the player would).
+        g.inv.slots = [None; 36];
+        aim(&mut g, lever, IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get_v(lever), LEVER_ON);
+        run(&mut g, 0.5);
+        assert!((-7..=7).all(|x| g.world.get_v(IVec3::new(x, if x == 0 { 51 } else { 50 }, 0)) == WIRE_ON), "the whole line lights up");
+        assert_eq!(g.world.get_v(lamp), LAMP_ON);
+        assert!(g.advancements.has("its_alive"));
+        // Dust only carries so far: a 16th block stays dark.
+        g.world.set_v(lamp, WIRE);
+        g.world.set_v(lamp + IVec3::X, LAMP);
+        run(&mut g, 0.5);
+        assert_eq!(g.world.get_v(lamp), WIRE);
+        assert_eq!(g.world.get_v(lamp + IVec3::X), LAMP);
+        // Flip it back and it all goes dark.
+        g.world.set_v(lamp, AIR);
+        g.world.set_v(lamp + IVec3::X, AIR);
+        g.world.set_v(lamp, LAMP);
+        aim(&mut g, lever, IVec3::Y);
+        g.use_item();
+        run(&mut g, 0.5);
+        assert_eq!(g.world.get_v(IVec3::new(3, 50, 0)), WIRE);
+        assert_eq!(g.world.get_v(lamp), LAMP);
+
+        // A button: a second of power, then it pops out.
+        let button = IVec3::new(4, 50, 4);
+        let door_at = IVec3::new(5, 50, 4);
+        g.world.set_v(button, BUTTON);
+        g.world.set_v(door_at, door(0, false, false));
+        g.world.set_v(door_at + IVec3::Y, door(0, false, true));
+        aim(&mut g, button, IVec3::Y);
+        g.use_item();
+        run(&mut g, 0.3);
+        assert_eq!(door_state(g.world.get_v(door_at)), Some((0, true, false)), "the door opens");
+        run(&mut g, 1.5);
+        assert_eq!(g.world.get_v(button), BUTTON);
+        assert_eq!(door_state(g.world.get_v(door_at)), Some((0, false, false)), "and closes again");
+
+        // A pressure plate under a mob, next to TNT.
+        let plate = IVec3::new(-4, 50, 6);
+        g.world.set_v(plate, PLATE);
+        g.world.set_v(plate + IVec3::X, TNT);
+        g.mobs.clear();
+        g.alloc_mob(MobKind::Oinker, plate.as_vec3() + Vec3::new(0.5, 0.0, 0.5));
+        run(&mut g, 0.3);
+        assert_eq!(g.world.get_v(plate), PLATE_ON);
+        assert_eq!(g.world.get_v(plate + IVec3::X), AIR);
+        assert_eq!(g.tnts.len(), 1, "primed");
+        g.mobs.clear();
+        run(&mut g, 1.0);
+        assert_eq!(g.world.get_v(plate), PLATE);
+
+        // Dust is laid from the item, on a floor; it falls off with it.
+        g.inv.slots[0] = Some((ZAP_DUST, 3));
+        g.inv.selected = 0;
+        let floor = IVec3::new(-6, 49, -6);
+        aim(&mut g, floor, IVec3::Y);
+        g.use_item();
+        assert_eq!(g.world.get_v(floor + IVec3::Y), WIRE);
+        assert_eq!(g.inv.count(ZAP_DUST), 2);
+        g.break_block(floor, false);
+        assert_eq!(g.world.get_v(floor + IVec3::Y), AIR);
+    }
+
+        #[test]
+    fn enchanted_books() {
+        use crate::anvil::plan;
+        use crate::enchant::{level, merge, offers, offer_seed, with_level, Enchant};
+        // Books take any enchantment at the table, and come out enchanted.
+        let o = offers(BOOK, 0, 15, offer_seed(BOOK, 0)).expect("books are enchantable");
+        assert!(o.iter().all(|x| x.1 != 0));
+        let mut g = arena(70);
+        let pos = IVec3::new(2, 50, 0);
+        g.world.set_v(pos, ENCHANTING_TABLE);
+        g.open_enchanting(pos);
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((BOOK, 5));
+        g.inv.slots[1] = Some((GOLD_INGOT, 5));
+        g.enchant_quick_put(0);
+        g.enchant_quick_put(1);
+        assert_eq!(g.inv.slots[0], Some((BOOK, 4)), "one book at a time");
+        g.xp = crate::xp::points_for_level(30);
+        g.enchant_pick(2);
+        let ui = g.enchanting.as_ref().unwrap();
+        assert_eq!(ui.item, Some((ENCHANTED_BOOK, 1)));
+        let book = ui.wear;
+        assert!(book >> 16 != 0);
+        g.close_enchanting();
+        let slot = g.inv.slots.iter().position(|s| *s == Some((ENCHANTED_BOOK, 1))).unwrap();
+        assert_eq!(g.inv.wear[slot], book, "the book keeps its enchantments");
+
+        // At the anvil, a book's enchantments go onto anything they fit.
+        let sharp3 = with_level(0, Enchant::Sharpness, 3) | with_level(0, Enchant::Efficiency, 2);
+        let r = plan(SWORD_IRON, 40, Some((ENCHANTED_BOOK, 1)), sharp3).unwrap();
+        assert!(r.book && r.used == 1);
+        assert_eq!(level(r.wear, Enchant::Sharpness), 3);
+        assert_eq!(level(r.wear, Enchant::Efficiency), 0, "Efficiency doesn't fit a sword");
+        assert_eq!(r.wear & 0xFFFF, 40, "wear kept");
+        assert_eq!(r.cost, 3);
+        // Two of the same level make one higher; different levels keep the best.
+        let sharp3_sword = with_level(0, Enchant::Sharpness, 3);
+        assert_eq!(level(merge(SWORD_IRON, sharp3_sword, sharp3_sword), Enchant::Sharpness), 4);
+        assert_eq!(level(merge(SWORD_IRON, with_level(0, Enchant::Sharpness, 5), sharp3_sword), Enchant::Sharpness), 5);
+        // Nothing new to add: nothing to do.
+        assert!(plan(SWORD_IRON, with_level(0, Enchant::Sharpness, 5), Some((ENCHANTED_BOOK, 1)), with_level(0, Enchant::Sharpness, 5)).is_none(), "already as good as it gets");
+        assert!(plan(SWORD_IRON, 0, Some((ENCHANTED_BOOK, 1)), with_level(0, Enchant::Protection, 2)).is_none(), "nothing fits");
+        // Merging two enchanted tools merges their enchantments too.
+        let r = plan(PICK_IRON, with_level(100, Enchant::Efficiency, 2), Some((PICK_IRON, 1)), with_level(50, Enchant::Efficiency, 2) | with_level(0, Enchant::Fortune, 1)).unwrap();
+        assert_eq!((level(r.wear, Enchant::Efficiency), level(r.wear, Enchant::Fortune)), (3, 1));
+        // Books merge with books.
+        let r = plan(ENCHANTED_BOOK, with_level(0, Enchant::Protection, 2), Some((ENCHANTED_BOOK, 1)), with_level(0, Enchant::Protection, 2)).unwrap();
+        assert_eq!(level(r.wear, Enchant::Protection), 3);
+    }
+
+        #[test]
+    fn hmmers_move_in_and_trade() {
+        use crate::villagers::{trades, Job, STOCK};
+        let mut g = arena(71);
+        g.mobs.clear();
+        // A hut chest filled for the first time brings a Hmmer (a Smith, for this seed).
+        let seed = (0..64u32).find(|&s| Job::of(s) == Job::Smith).unwrap();
+        g.world.new_huts.push((Vec3::new(2.5, 50.0, 0.5), seed));
+        g.house_hmmers();
+        assert_eq!(g.mobs.len(), 1);
+        let (id, kind) = (g.mobs[0].id, g.mobs[0].kind);
+        assert_eq!(kind, MobKind::Hmmer);
+        assert!(g.mobs[0].persistent && g.mobs[0].home.is_some());
+        // Right-click to talk.
+        g.target = Some(Target::Mob(0));
+        g.use_item();
+        assert_eq!(g.trading, Some(id));
+        let (job, list) = g.trade_list().unwrap();
+        assert_eq!((job, list.clone()), (Job::Smith, trades(seed)));
+        // Coal for gold.
+        let coal = list.iter().position(|t| t.give[0].0 == COAL).unwrap();
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((COAL, 64));
+        g.inv.slots[1] = Some((COAL, 64));
+        g.make_trade(coal);
+        assert_eq!((g.inv.count(COAL), g.inv.count(GOLD_INGOT)), (116, 1));
+        assert!(g.advancements.has("what_a_deal"));
+        // Can't afford: nothing happens.
+        let chest = list.iter().position(|t| t.give[0] == (GOLD_INGOT, 10)).unwrap();
+        g.make_trade(chest);
+        assert_eq!(g.inv.count(GOLD_INGOT), 1);
+        // They run out, and restock the next day.
+        for _ in 0..STOCK {
+            g.make_trade(coal);
+        }
+        assert_eq!(g.inv.count(GOLD_INGOT), STOCK as u32);
+        g.mobs[0].restock = 0.01;
+        g.hmmers_tick(0.1);
+        g.make_trade(coal);
+        assert_eq!(g.inv.count(GOLD_INGOT), STOCK as u32 + 1);
+        // Hmmers stay near home.
+        g.mobs[0].body.pos = Vec3::new(-10.0, 50.0, 10.0);
+        g.mobs[0].goal = None;
+        g.hmmers_tick(0.1);
+        assert!(g.mobs[0].goal.is_some());
+        // And they're kept with the world.
+        let back = Game::from_save(g.to_save());
+        let h = back.mobs.iter().find(|m| m.kind == MobKind::Hmmer).unwrap();
+        assert_eq!((h.seed, h.home), (seed, g.mobs[0].home));
+    }
+
+        #[test]
+    fn charged_blows_sweeps_and_shields() {
+        let mut g = arena(72);
+        g.mobs.clear();
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((SWORD_IRON, 1));
+        g.inv.selected = 0;
+        let spawn = |g: &mut Game, x: f32| {
+            g.alloc_mob(MobKind::Mooer, Vec3::new(x, 50.0, -1.5));
+            g.mobs.len() - 1
+        };
+        let (a, b) = (spawn(&mut g, 0.5), spawn(&mut g, 1.4));
+        let full = g.mobs[a].health;
+        let swing = |g: &mut Game, i: usize| {
+            g.target = Some(Target::Mob(i));
+            let c = Controls { input: Default::default(), attack_held: true, attack_pressed: true, use_held: false, use_pressed: false, pick: false, drop: false, drop_all: false };
+            g.attack_cd = 0.0;
+            g.handle_actions(0.0, &c);
+        };
+        // A fully charged sword blow does full damage and sweeps the one beside it.
+        g.player.body.on_ground = true;
+        swing(&mut g, a);
+        assert!((full - g.mobs[a].health - attack_damage(SWORD_IRON)).abs() < 1e-3);
+        assert!(g.mobs[b].health < full, "swept");
+        // Straight away again: much weaker.
+        for m in g.mobs.iter_mut() {
+            m.hurt = 0.0;
+        }
+        let before = g.mobs[a].health;
+        swing(&mut g, a);
+        assert!(before - g.mobs[a].health < attack_damage(SWORD_IRON) * 0.3);
+
+        // A shield up stops hits from in front, and wears instead.
+        g.inv.slots[1] = Some((SHIELD, 1));
+        g.inv.selected = 1;
+        g.player.yaw = 0.0;
+        g.player.pitch = 0.0;
+        g.blocking = true;
+        g.player.hurt = 0.0;
+        let hp = g.player.health;
+        let front = g.player.body.pos + Vec3::new(0.0, 0.9, -3.0);
+        g.hurt_player_from(5.0, "tested", Some(front), false);
+        assert_eq!(g.player.health, hp);
+        assert_eq!(g.inv.wear[1], 5);
+        assert!(g.advancements.has("not_today"));
+        // Not from behind, though.
+        g.hurt_player_from(5.0, "tested", Some(g.player.body.pos + Vec3::new(0.0, 0.9, 3.0)), false);
+        assert!(g.player.health < hp);
+        // Armour steadies you.
+        let push = Vec3::new(10.0, 0.0, 0.0);
+        assert_eq!(g.steadied(push), push);
+        g.inv.armor = [Some((ARMOR_FIRST + 12, 1)), Some((ARMOR_FIRST + 13, 1)), Some((ARMOR_FIRST + 14, 1)), Some((ARMOR_FIRST + 15, 1))];
+        assert!(g.steadied(push).x < 6.0);
+    }
+
+        #[test]
+    fn portals_to_the_scorchlands_and_back() {
+        use crate::scorch::{in_scorch, is_portal};
+        let mut g = arena(73);
+        // A 4x5 obsidian frame (corners too), lit with a Sparker.
+        let base = IVec3::new(3, 50, -3);
+        for dx in -1..=2 {
+            for dy in -1..=3 {
+                if dx == -1 || dx == 2 || dy == -1 || dy == 3 {
+                    g.world.set_v(base + IVec3::new(dx, dy, 0), OBSIDIAN);
+                }
+            }
+        }
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((SPARKER, 1));
+        g.inv.selected = 0;
+        aim(&mut g, base - IVec3::Y, IVec3::Y);
+        g.use_item();
+        assert!((0..2).all(|dx| (0..3).all(|dy| g.world.get_v(base + IVec3::new(dx, dy, 0)) == PORTAL_X)), "lit");
+        assert!(g.advancements.has("portal_open"));
+        assert_eq!(g.inv.wear[0], 1, "the Sparker wears");
+        // A frame with a gap won't light.
+        let open = IVec3::new(-6, 50, 3);
+        for dy in -1..=3 {
+            g.world.set_v(open + IVec3::new(-1, dy, 0), OBSIDIAN);
+        }
+        assert!(crate::scorch::portal_frame(&g.world, open, true).is_none());
+
+        // Standing in it for a couple of seconds takes you to the Scorchlands, into a new portal.
+        g.player.body.pos = base.as_vec3() + Vec3::new(1.0, 0.0, 0.5);
+        for _ in 0..50 {
+            g.portal_tick(0.05);
+        }
+        let there = g.player.body.pos;
+        assert!(in_scorch(there.x), "at {there}");
+        let feet = IVec3::new(there.x.floor() as i32, there.y.floor() as i32, there.z.floor() as i32);
+        assert!(is_portal(g.world.get_v(feet)), "arrived in a portal");
+        assert!(g.advancements.has("hotter"));
+        assert_eq!(g.sky_color(), [0.24, 0.06, 0.03]);
+        // Straight back through isn't possible without stepping out first.
+        for _ in 0..60 {
+            g.portal_tick(0.05);
+        }
+        assert!(in_scorch(g.player.body.pos.x));
+        // Step out, step back in: home again, to the portal we came from.
+        g.player.body.pos += Vec3::new(0.0, 0.0, 2.0);
+        g.portal_tick(0.05);
+        g.player.body.pos = there;
+        for _ in 0..90 {
+            g.portal_tick(0.05);
+        }
+        let home = g.player.body.pos;
+        assert!(!in_scorch(home.x));
+        assert!(home.distance(base.as_vec3()) < 6.0, "back at the first portal: {home}");
+        // The links are kept with the world.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.portal_links, g.portal_links);
+        assert_eq!(g.portal_links.len(), 2);
+        // Break the frame and the portal falls apart.
+        g.world.set_v(base + IVec3::new(-1, 1, 0), AIR);
+        for _ in 0..30 {
+            g.zap_tick(0.05);
+        }
+        assert!((0..2).all(|dx| (0..3).all(|dy| g.world.get_v(base + IVec3::new(dx, dy, 0)) == AIR)));
+    }
+
+        #[test]
+    fn carts_ride_rails_and_boats_float() {
+        use crate::vehicles::{is_rail, rail_dirs};
+        let mut g = arena(74);
+        let run = |g: &mut Game, secs: f32, forward: f32| {
+            let mut t = 0.0;
+            while t < secs {
+                g.zap_tick(0.05);
+                g.vehicles_tick(0.05, forward, 0.0, false);
+                t += 0.05;
+            }
+        };
+        // An L of rails: they bend round the corner by themselves.
+        for z in 0..6 {
+            g.world.set_v(IVec3::new(0, 50, -z), RAIL_FIRST);
+        }
+        for x in 1..6 {
+            g.world.set_v(IVec3::new(x, 50, -5), RAIL_FIRST);
+        }
+        // A powered rail at the start, with a lever to power it.
+        g.world.set_v(IVec3::new(0, 50, 0), POWERED_RAIL);
+        g.world.set_v(IVec3::new(-1, 50, 0), LEVER_ON);
+        run(&mut g, 0.3, 0.0);
+        let corner = g.world.get_v(IVec3::new(0, 50, -5));
+        assert_eq!(rail_dirs(corner), Some([IVec3::Z, IVec3::X]), "the corner bent: {corner}");
+        assert_eq!(rail_dirs(g.world.get_v(IVec3::new(3, 50, -5))), Some([IVec3::X, IVec3::NEG_X]));
+        assert_eq!(g.world.get_v(IVec3::new(0, 50, 0)), POWERED_RAIL + 1, "powered and lit");
+        // A cart on the powered rail sets off round the corner and to the end.
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((MINECART, 1));
+        g.inv.selected = 0;
+        g.player.yaw = 0.0;
+        g.player.pitch = -0.6;
+        g.player.body.pos = Vec3::new(0.5, 50.0, 2.5);
+        assert!(g.place_vehicle(MINECART));
+        assert_eq!(g.vehicles.len(), 1);
+        g.mount(0);
+        assert!(g.riding.is_some());
+        run(&mut g, 4.0, 0.0);
+        let v = &g.vehicles[0];
+        assert!(v.pos.x > 4.5 && (v.pos.z + 4.5).abs() < 0.2, "at the end of the line: {}", v.pos);
+        assert!(g.player.body.pos.distance(v.seat()) < 0.01, "carrying us");
+        // Sneak to get out; hit it three times to pick it up.
+        g.vehicles_tick(0.05, 0.0, 0.0, true);
+        assert!(g.riding.is_none());
+        let id = g.vehicles[0].id;
+        for _ in 0..3 {
+            g.hit_vehicle(id, 1);
+        }
+        assert!(g.vehicles.is_empty());
+        assert!(g.drops.iter().any(|d| d.item == MINECART));
+        assert!(is_rail(RAIL_FIRST + 5));
+
+        // A boat on a pond floats, and rows forward.
+        for x in -8..=-2 {
+            for z in 2..=8 {
+                g.world.set(x, 49, z, WATER);
+            }
+        }
+        let id = g.spawn_vehicle(crate::vehicles::BOAT_KIND, Vec3::new(-5.0, 49.6, 5.0), 0.0);
+        let i = g.vehicles.iter().position(|v| v.id == id).unwrap();
+        g.mount(i);
+        run(&mut g, 1.0, 1.0);
+        let b = g.vehicles.iter().find(|v| v.id == id).unwrap();
+        assert!(b.pos.z < 4.5, "rowed north: {}", b.pos);
+        assert!((b.pos.y - 49.85).abs() < 0.3, "afloat: {}", b.pos.y);
+        // Vehicles are kept with the world.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.vehicles.len(), 1);
+        assert_eq!(back.vehicles[0].rider, 0);
+    }
+
+        #[test]
+    fn signs_frames_and_maps() {
+        let mut g = arena(75);
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((SIGN_FIRST, 3));
+        g.inv.selected = 0;
+        g.player.yaw = 0.0;
+        g.player.pitch = -0.3;
+        // Put a sign up: it faces us and asks for words.
+        let floor = IVec3::new(0, 49, -3);
+        aim(&mut g, floor, IVec3::Y);
+        g.use_item();
+        let sign = floor + IVec3::Y;
+        assert!(crate::decor::is_sign(g.world.get_v(sign)));
+        assert_eq!(g.editing_sign, Some(sign));
+        g.editing_sign = None;
+        g.set_sign(sign, &["Welcome".into(), "to".into(), "Stoveville".into()]);
+        assert_eq!(g.world.signs[&sign][2], "Stoveville");
+        // Hang a frame on a wall and put a pickaxe in it.
+        let wall = IVec3::new(3, 50, 0);
+        g.world.set_v(wall, STONE);
+        g.inv.slots[1] = Some((FRAME_FIRST, 1));
+        g.inv.slots[2] = Some((PICK_IRON, 1));
+        g.inv.wear[2] = 17;
+        g.inv.selected = 1;
+        aim(&mut g, wall, IVec3::NEG_X);
+        g.use_item();
+        let frame = wall - IVec3::X;
+        assert_eq!(g.world.get_v(frame), FRAME_FIRST + 1, "hung on the east wall");
+        g.inv.selected = 2;
+        aim(&mut g, frame, IVec3::NEG_X);
+        g.use_item();
+        assert_eq!(g.world.frames.get(&frame), Some(&(PICK_IRON, 17)));
+        assert_eq!(g.inv.count(PICK_IRON), 0);
+        // Kept with the world.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.world.signs.get(&sign), g.world.signs.get(&sign));
+        assert_eq!(back.world.frames.get(&frame), Some(&(PICK_IRON, 17)));
+        // Hit it: the pickaxe pops out (the frame stays); breaking the frame drops nothing more.
+        assert!(g.hit_frame(frame));
+        assert!(g.world.frames.is_empty());
+        assert!(g.drops.iter().any(|d| d.item == PICK_IRON && d.wear == 17));
+        assert!(!g.hit_frame(frame));
+        // Breaking the sign takes its words.
+        g.break_block(sign, false);
+        assert!(g.world.signs.is_empty());
+
+        // The map shows the floor we're standing on; the compass points home.
+        let colors = vec![[10, 20, 30]; reg().blocks.len()];
+        let px = crate::navigation::map_pixels(&g.world, g.player.body.pos, &colors);
+        assert_eq!(px.len(), crate::navigation::MAP_SIZE * crate::navigation::MAP_SIZE * 4);
+        let mid = (crate::navigation::MAP_SIZE / 2 * crate::navigation::MAP_SIZE + crate::navigation::MAP_SIZE / 2) * 4;
+        // Our colour, maybe shaded by the lie of the land.
+        assert!([8, 10, 11].contains(&px[mid]) && px[mid + 3] == 255, "{:?}", &px[mid..mid + 4]);
+    }
+
+        /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
     fn arena(seed: u32) -> Game {
         let mut g = Game::new(seed, false, false);
         g.world = loaded_world(seed);

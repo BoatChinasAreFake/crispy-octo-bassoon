@@ -27,6 +27,22 @@ pub fn max_uses(item: Id, w: Wear) -> Option<u32> {
     durability(item).map(|d| d as u32 * (1 + crate::enchant::level(w, crate::enchant::Enchant::Unbreaking) as u32))
 }
 
+/// Items that remember their wear: tools, weapons, armour, and enchanted books.
+pub fn keeps_wear(item: Id) -> bool {
+    durability(item).is_some() || item == ENCHANTED_BOOK
+}
+
+/// Keep only what makes sense for `item` (saves and other players can't be trusted).
+pub fn sanitize_wear(item: Id, w: Wear) -> Wear {
+    if item == ENCHANTED_BOOK {
+        return w & 0xFFFF_0000;
+    }
+    match max_uses(item, w) {
+        Some(m) => with_uses(w, uses(w).min((m - 1).min(u16::MAX as u32) as u16)),
+        None => 0,
+    }
+}
+
 pub struct Inventory {
     pub slots: [Stack; 36],
     pub selected: usize,
@@ -81,7 +97,7 @@ impl Inventory {
 
     /// Add one used tool (or anything else, `wear` is ignored for things that don't wear).
     pub fn add_worn(&mut self, item: Id, n: u8, wear: Wear) -> u8 {
-        if wear == 0 || durability(item).is_none() {
+        if wear == 0 || !keeps_wear(item) {
             return self.add(item, n);
         }
         let Some(i) = self.slots.iter().position(|s| s.is_none()) else { return n };

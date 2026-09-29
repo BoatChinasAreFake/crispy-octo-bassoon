@@ -6,12 +6,21 @@ use crate::texture::tile_uv;
 use crate::world::{exposure, idx, Chunk, World, CH, CW};
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct Vertex {
     pub pos: [f32; 3],
+    /// Atlas coordinates, or (when `tile` is set) tile repeats from 0 up.
     pub uv: [f32; 2],
     /// x: ambient occlusion * face shade, y: sky exposure.
     pub light: [f32; 2],
+    /// Where a repeating tile starts in the atlas (x below zero: `uv` is plain).
+    pub tile: [f32; 2],
+}
+
+impl Default for Vertex {
+    fn default() -> Self {
+        Vertex { pos: [0.0; 3], uv: [0.0; 2], light: [0.0; 2], tile: [-1.0; 2] }
+    }
 }
 
 #[derive(Default)]
@@ -113,7 +122,97 @@ fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 2]) -> Vertex {
     let (u0, v0, s) = tile_uv(tile);
     let u = u0 + UV_EPS + uv[0] * (s - 2.0 * UV_EPS);
     let v = v0 + UV_EPS + uv[1] * (s - 2.0 * UV_EPS);
-    Vertex { pos, uv: [u, v], light }
+    Vertex { pos, uv: [u, v], light, tile: [-1.0; 2] }
+}
+
+/// A face of a plain cube waiting to be merged with its like: its tile and the
+/// light at its four corners. `tile == u16::MAX` marks an empty cell.
+#[derive(Clone, Copy, PartialEq)]
+struct Flat {
+    tile: u16,
+    light: [[f32; 2]; 4],
+}
+
+const NO_FLAT: Flat = Flat { tile: u16::MAX, light: [[0.0; 2]; 4] };
+
+/// Greedy meshing: cube faces with the same tile and light join into big
+/// rectangles (the shader repeats the tile across them). Faces only join
+/// along a direction their light doesn't change in, so shading gradients
+/// (ambient occlusion, sky light) come out as they would face by face.
+fn merge_flats(flats: &[Flat], dims: [i32; 3], origin: [f32; 3], out: &mut MeshData) {
+    let cell = |f: usize, p: [i32; 3]| ((f as i32 * dims[1] + p[1]) * dims[2] + p[2]) as usize * dims[0] as usize + p[0] as usize;
+    let mut used = vec![false; flats.len()];
+    for (f, (nrm, corners, _)) in FACES.iter().enumerate() {
+        let a = if nrm[0] != 0 { 0 } else if nrm[1] != 0 { 1 } else { 2 };
+        let (t1, t2) = match a {
+            0 => (2, 1),
+            1 => (0, 2),
+            _ => (0, 1),
+        };
+        // Which axes the tile's u and v run along (see FACES and CORNER_UV).
+        let differs = |i: usize, j: usize| (0..3).find(|&k| corners[i][k] != corners[j][k]).unwrap_or(0);
+        let (u_axis, v_axis) = (differs(0, 1), differs(1, 2));
+        // Light that doesn't change along an axis: each corner matches the one across from it.
+        let across = |axis: usize, i: usize| (0..4).find(|&j| (0..3).all(|k| (corners[i][k] != corners[j][k]) == (k == axis))).unwrap_or(i);
+        let steady = |key: &Flat, axis: usize| (0..4).all(|i| key.light[i] == key.light[across(axis, i)]);
+        for layer in 0..dims[a] {
+            for q in 0..dims[t2] {
+                for pp in 0..dims[t1] {
+                    let mut p = [0; 3];
+                    p[a] = layer;
+                    p[t1] = pp;
+                    p[t2] = q;
+                    let i0 = cell(f, p);
+                    let key = flats[i0];
+                    if key.tile == u16::MAX || used[i0] {
+                        continue;
+                    }
+                    let fits = |p: [i32; 3]| {
+                        let i = cell(f, p);
+                        !used[i] && flats[i] == key
+                    };
+                    let mut w = 1;
+                    while steady(&key, t1) && pp + w < dims[t1] && fits({ let mut r = p; r[t1] += w; r }) {
+                        w += 1;
+                    }
+                    let mut h = 1;
+                    'grow: while steady(&key, t2) && q + h < dims[t2] {
+                        for k in 0..w {
+                            let mut r = p;
+                            r[t1] += k;
+                            r[t2] += h;
+                            if !fits(r) {
+                                break 'grow;
+                            }
+                        }
+                        h += 1;
+                    }
+                    for dh in 0..h {
+                        for k in 0..w {
+                            let mut r = p;
+                            r[t1] += k;
+                            r[t2] += dh;
+                            used[cell(f, r)] = true;
+                        }
+                    }
+                    let mut ext = [1.0f32; 3];
+                    ext[t1] = w as f32;
+                    ext[t2] = h as f32;
+                    let (u0, v0, _) = tile_uv(key.tile);
+                    let mut v = [Vertex::default(); 4];
+                    for i in 0..4 {
+                        let c = corners[i];
+                        let pos = [0, 1, 2].map(|k| origin[k] + p[k] as f32 + c[k] * ext[k]);
+                        let uv = [CORNER_UV[i][0] * ext[u_axis], CORNER_UV[i][1] * ext[v_axis]];
+                        v[i] = Vertex { pos, uv, light: key.light[i], tile: [u0, v0] };
+                    }
+                    // Flip the diagonal so shading gradients don't crease.
+                    let l = key.light.map(|l| l[0]);
+                    out.quad(v, l[0] + l[2] < l[1] + l[3]);
+                }
+            }
+        }
+    }
 }
 
 pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
@@ -135,6 +234,9 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
         max_y = max_y.max(*h as i32);
     }
     let max_y = (max_y + 2).min(CH);
+    let dims = [CW, max_y, CW];
+    let mut flats = vec![NO_FLAT; (6 * CW * CW * max_y) as usize];
+    let flat_at = |f: usize, lx: i32, y: i32, lz: i32| ((f as i32 * max_y + y) * CW + lz) as usize * CW as usize + lx as usize;
 
     for y in 0..max_y {
         // All-air sections have nothing to draw (their neighbours draw the faces).
@@ -171,24 +273,63 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         }
                     }
                     Model::Liquid => {
-                        let above = hood.get(lx, y + 1, lz);
-                        let top_h = if above == WATER { 1.0 } else { 0.875 };
+                        // Water is translucent; lava glows and hides what's behind it.
+                        let lava = is_lava(id);
+                        let same = |b: Id| if lava { is_lava(b) } else { is_water(b) };
+                        // Surface height of a same-kind cell (1.0 if more of it sits on top).
+                        let height = |x: i32, z: i32| -> Option<f32> {
+                            let b = hood.get(x, y, z);
+                            if !same(b) {
+                                return None;
+                            }
+                            if same(hood.get(x, y + 1, z)) {
+                                return Some(1.0);
+                            }
+                            let reach = if lava { LAVA_REACH } else { WATER_REACH } as f32;
+                            Some(0.875 * (1.0 - liquid_level(b) as f32 / (reach + 1.0)))
+                        };
+                        // Each top corner averages the cells around it, so flows slope.
+                        let corner = |cx: i32, cz: i32| -> f32 {
+                            let mut sum = 0.0;
+                            let mut n = 0.0;
+                            for dz in cz - 1..=cz {
+                                for dx in cx - 1..=cx {
+                                    match height(lx + dx, lz + dz) {
+                                        Some(1.0) => return 1.0,
+                                        Some(h) => {
+                                            sum += h;
+                                            n += 1.0;
+                                        }
+                                        None => {}
+                                    }
+                                }
+                            }
+                            if n > 0.0 { sum / n } else { 0.1 }
+                        };
+                        let tops = [[corner(0, 0), corner(1, 0)], [corner(0, 1), corner(1, 1)]];
+                        let tile = def.tex[1];
+                        if lava && (wx as i32).rem_euclid(3) == 0 && (wz as i32).rem_euclid(3) == 0 && !same(hood.get(lx, y + 1, lz)) {
+                            out.lights.push([wx + 0.5, wy + 1.0, wz + 0.5, 9.0]);
+                        }
                         for (f, (n, corners, shade)) in FACES.iter().enumerate() {
                             let nb = hood.get(lx + n[0], y + n[1], lz + n[2]);
-                            if nb == WATER || is_opaque(nb) && f != 2 {
-                                continue;
-                            }
-                            if f == 2 && is_opaque(nb) {
+                            if same(nb) || (is_opaque(nb) && f != 2) || (f == 2 && is_opaque(nb)) {
                                 continue;
                             }
                             let sky = hood.sky(lx + n[0], y + n[1].max(0), lz + n[2]);
+                            // Lava lights itself (the shader reads x above 1.5 as "glowing").
+                            let light = if lava { [2.45, sky] } else { [*shade, sky] };
                             let mut v = [Vertex::default(); 4];
                             for i in 0..4 {
                                 let c = corners[i];
-                                let cy = if c[1] > 0.5 { top_h } else { 0.0 };
-                                v[i] = vert([wx + c[0], wy + cy, wz + c[2]], T_WATER_TILE, CORNER_UV[i], [*shade, sky]);
+                                let cy = if c[1] > 0.5 { tops[c[2] as usize][c[0] as usize] } else { 0.0 };
+                                v[i] = vert([wx + c[0], wy + cy, wz + c[2]], tile, CORNER_UV[i], light);
                             }
-                            out.water.quad(v, false);
+                            if lava {
+                                out.opaque.quad(v, false);
+                            } else {
+                                out.water.quad(v, false);
+                            }
                         }
                     }
                     Model::Shaped => {
@@ -217,7 +358,9 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                         4 => [p[0], 1.0 - p[1]],
                                         _ => [1.0 - p[0], 1.0 - p[1]],
                                     };
-                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [shade * 0.95, sky]);
+                                    // Portals glow (see the shader's "above 1.5" rule).
+                                    let lx = if crate::scorch::is_portal(id) { 2.3 } else { shade * 0.95 };
+                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [lx, sky]);
                                 }
                                 out.opaque.quad(v, false);
                             }
@@ -271,16 +414,57 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 }
                                 v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade, sky / n_s]);
                             }
-                            // Flip the diagonal so AO gradients don't crease.
-                            let flip = ao[0] + ao[2] < ao[1] + ao[3];
-                            out.opaque.quad(v, flip);
+                            // Faces wait to be merged with their like (see `merge_flats`).
+                            flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light) };
                         }
                     }
                 }
             }
         }
     }
+    merge_flats(&flats, dims, [bx, 0.0, bz], &mut out.opaque);
     out
 }
 
-const T_WATER_TILE: u16 = crate::texture::T_WATER;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tops(dims: [i32; 3], fill: impl Fn(i32, i32) -> Option<u16>) -> Vec<Flat> {
+        let mut flats = vec![NO_FLAT; (6 * dims[0] * dims[1] * dims[2]) as usize];
+        for z in 0..dims[2] {
+            for x in 0..dims[0] {
+                if let Some(tile) = fill(x, z) {
+                    // Face 2 is the top, at y 0.
+                    flats[((2 * dims[1]) * dims[2] + z) as usize * dims[0] as usize + x as usize] = Flat { tile, light: [[1.0, 1.0]; 4] };
+                }
+            }
+        }
+        flats
+    }
+
+    #[test]
+    fn a_flat_field_is_one_quad() {
+        let dims = [16, 1, 16];
+        let mut out = MeshData::default();
+        merge_flats(&tops(dims, |_, _| Some(3)), dims, [0.0; 3], &mut out);
+        assert_eq!(out.verts.len(), 4);
+        // The tile repeats sixteen times each way.
+        let (lo, hi) = out.verts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v.uv[0]), hi.max(v.uv[0])));
+        assert_eq!((lo, hi), (0.0, 16.0));
+        assert!(out.verts.iter().all(|v| v.tile[0] >= 0.0 && v.pos[1] == 1.0));
+    }
+
+    #[test]
+    fn different_tiles_and_holes_split_the_field() {
+        let dims = [16, 1, 16];
+        let mut out = MeshData::default();
+        merge_flats(&tops(dims, |x, z| if (x, z) == (5, 5) { Some(4) } else if x == 9 { None } else { Some(3) }), dims, [0.0; 3], &mut out);
+        let quads = out.verts.len() / 4;
+        assert!(quads > 2 && quads < 12, "{quads} quads");
+        // Every face is still covered exactly once: 255 - 16 of tile 3, one of tile 4.
+        let area: f32 = out.verts.chunks(4).map(|q| (q[1].pos[0] - q[0].pos[0]).abs().max((q[2].pos[0] - q[1].pos[0]).abs()) * (q[1].pos[2] - q[0].pos[2]).abs().max((q[2].pos[2] - q[1].pos[2]).abs())).sum();
+        assert_eq!(area, 256.0 - 16.0);
+    }
+}

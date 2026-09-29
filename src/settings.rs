@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 
 pub const FILE: &str = "settings.txt";
+/// The farthest the world can be drawn, in chunks (greedy meshing keeps it affordable).
+pub const MAX_RENDER_DISTANCE: i32 = 32;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -19,6 +21,8 @@ pub struct Settings {
     /// Last name and server used on the Multiplayer screen (empty: pick a fresh name).
     pub mp_name: String,
     pub mp_addr: String,
+    /// Keys and mouse buttons (see keybinds.rs).
+    pub binds: crate::keybinds::Bindings,
 }
 
 impl Default for Settings {
@@ -32,6 +36,7 @@ impl Default for Settings {
             music_on: true,
             mp_name: String::new(),
             mp_addr: "127.0.0.1".into(),
+            binds: Default::default(),
         }
     }
 }
@@ -58,7 +63,7 @@ impl Settings {
             self.music_on,
             clean(&self.mp_name, 16),
             clean(&self.mp_addr, 128),
-        )
+        ) + self.binds.to_text().as_str()
     }
 
     pub fn from_text(text: &str) -> Settings {
@@ -85,10 +90,12 @@ impl Settings {
                 "music" => s.music_on = flag(s.music_on),
                 "name" => s.mp_name = clean(v, 16),
                 "server" => s.mp_addr = clean(v, 128),
-                _ => {}
+                k => {
+                    s.binds.read(k, v);
+                }
             }
         }
-        s.render_distance = s.render_distance.clamp(3, 16);
+        s.render_distance = s.render_distance.clamp(3, MAX_RENDER_DISTANCE);
         s.fov = s.fov.clamp(50.0, 110.0);
         s.sensitivity = s.sensitivity.clamp(0.1, 3.0);
         s.volume = s.volume.clamp(0.0, 1.0);
@@ -125,6 +132,11 @@ mod tests {
             music_on: false,
             mp_name: "Stove42".into(),
             mp_addr: "[::1]:25565".into(),
+            binds: {
+                let mut b = crate::keybinds::Bindings::default();
+                b.set(crate::keybinds::Action::Sprint, false, crate::keybinds::Bind::parse("F"));
+                b
+            },
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));
@@ -139,7 +151,7 @@ mod tests {
     #[test]
     fn nonsense_is_tamed() {
         let s = Settings::from_text("render_distance=9000\nfov=NaN\nvolume=-3\nmusic=perhaps\nname=a\u{7}b\nserver=\n= \ngarbage\nsensitivity=2");
-        assert_eq!(s.render_distance, 16);
+        assert_eq!(s.render_distance, MAX_RENDER_DISTANCE);
         assert_eq!(s.fov, 72.0);
         assert_eq!(s.volume, 0.0);
         assert!(s.music_on);

@@ -113,7 +113,7 @@ impl Bobber {
                 self.vel.y -= 20.0 * dt;
                 let next = self.pos + self.vel * dt;
                 let cell = world.get(next.x.floor() as i32, next.y.floor() as i32, next.z.floor() as i32);
-                if cell == WATER {
+                if is_water(cell) {
                     self.pos = next;
                     self.vel = Vec3::ZERO;
                     self.state = BobberState::Floating { wait: bite_wait(world, self.pos, time, self.bait, angler, raining, rng), nibble: rng.range(1.0, 3.0) };
@@ -190,7 +190,7 @@ impl Bobber {
 fn water_surface(world: &World, p: Vec3) -> f32 {
     let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
     let mut y = p.y.floor() as i32;
-    while y < 127 && world.get(x, y + 1, z) == WATER {
+    while y < 127 && is_water(world.get(x, y + 1, z)) {
         y += 1;
     }
     y as f32 + 1.0
@@ -200,10 +200,10 @@ fn water_surface(world: &World, p: Vec3) -> f32 {
 pub fn water_info(world: &World, p: Vec3) -> (i32, i32) {
     let (x, y, z) = (p.x.floor() as i32, water_surface(world, p) as i32 - 1, p.z.floor() as i32);
     let mut depth = 0;
-    while depth < 12 && world.get(x, y - depth, z) == WATER {
+    while depth < 12 && is_water(world.get(x, y - depth, z)) {
         depth += 1;
     }
-    let area = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| (dx, dz))).filter(|&(dx, dz)| world.get(x + dx, y, z + dz) == WATER).count() as i32;
+    let area = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| (dx, dz))).filter(|&(dx, dz)| is_water(world.get(x + dx, y, z + dz))).count() as i32;
     (depth, area)
 }
 
@@ -519,7 +519,7 @@ impl Game {
         let Some(peer) = self.peers.get(&from) else { return };
         let them = peer.target + Vec3::Y * 0.9;
         let near = peer.target.distance(pos) < 42.0;
-        let wet = (0..2).any(|dy| self.world.get(pos.x.floor() as i32, pos.y.floor() as i32 - dy, pos.z.floor() as i32) == WATER);
+        let wet = (0..2).any(|dy| is_water(self.world.get(pos.x.floor() as i32, pos.y.floor() as i32 - dy, pos.z.floor() as i32)));
         if !near || !wet || !pos.is_finite() || !self.peer_has(from, ROD) {
             return;
         }
