@@ -208,6 +208,13 @@ pub const T_ENCHANTED_BOOK: u16 = 231;
 pub const T_HMM_FACE: u16 = 232;
 pub const T_HMM_ROBE: u16 = 233;
 pub const T_SHIELD: u16 = 234;
+pub const T_SCORCHROCK: u16 = 235;
+pub const T_EMBERSAND: u16 = 236;
+pub const T_SCORCH_GOLD: u16 = 237;
+pub const T_PORTAL: u16 = 238;
+pub const T_SPARKER: u16 = 239;
+pub const T_GRUMBLE_SKIN: u16 = 240;
+pub const T_GRUMBLE_FACE: u16 = 241;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1134,6 +1141,25 @@ const WORM: [&str; 16] = [
     "................",
     "................",
     "................",
+    "................",
+    "................",
+    "................",
+];
+
+const SPARKER_SPRITE: [&str; 16] = [
+    "................",
+    "..........y.....",
+    ".........yfy....",
+    "..........f.....",
+    "........#.......",
+    ".......#i#......",
+    "......#ii#......",
+    ".....#ii#.......",
+    "....#cc#........",
+    "...#ccc#........",
+    "..#ccc#.........",
+    "..#cc#..........",
+    "...##...........",
     "................",
     "................",
     "................",
@@ -2073,6 +2099,44 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     a.sprite(T_ZAP_DUST, &DUST_SPRITE, &[('#', rgb(90, 5, 5)), ('r', rgb(220, 30, 25)), ('h', rgb(255, 120, 100))]);
     a.sprite(T_SHIELD, &SHIELD_SPRITE, &[('#', rgb(40, 30, 20)), ('w', rgb(150, 110, 65)), ('d', rgb(115, 80, 45)), ('i', rgb(190, 190, 198))]);
+    // ---- The Scorchlands
+    a.each(T_SCORCHROCK, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.45 + 70.0, y as f32 * 0.45);
+        shade(rgb(125, 45, 42), 1.0 + n * 0.3 + r.range(-0.12, 0.12))
+    });
+    a.each(T_EMBERSAND, |x, y, r, p| {
+        let face = p.noise2(x as f32 * 0.6 + 11.0, y as f32 * 0.6) > 0.35;
+        if face { rgb(60, 40, 30) } else { shade(rgb(95, 70, 55), r.range(0.8, 1.1)) }
+    });
+    a.copy(T_SCORCHROCK, T_SCORCH_GOLD);
+    for _ in 0..9 {
+        let (x, y) = (a.rng.int(1, 14) as usize, a.rng.int(1, 14) as usize);
+        a.set(T_SCORCH_GOLD, x, y, rgb(250, 210, 60));
+        a.set(T_SCORCH_GOLD, x + 1, y, rgb(200, 160, 40));
+    }
+    a.each(T_PORTAL, |x, y, r, p| {
+        let swirl = (p.noise2(x as f32 * 0.35, y as f32 * 0.35 + 40.0) * 7.0).sin();
+        if swirl > 0.75 {
+            [0, 0, 0, 0]
+        } else {
+            shade(rgb(140, 60, 220), 0.8 + swirl.abs() * 0.4 + r.range(-0.05, 0.05))
+        }
+    });
+    a.sprite(T_SPARKER, &SPARKER_SPRITE, &[('#', rgb(40, 40, 45)), ('i', rgb(190, 190, 198)), ('c', rgb(50, 50, 55)), ('f', rgb(255, 180, 40)), ('y', rgb(255, 240, 150))]);
+    a.speckle(T_GRUMBLE_SKIN, rgb(210, 140, 130), 0.1);
+    for _ in 0..30 {
+        let (x, y) = (a.rng.int(0, 15) as usize, a.rng.int(0, 15) as usize);
+        a.set(T_GRUMBLE_SKIN, x, y, rgb(110, 150, 90));
+    }
+    a.copy(T_GRUMBLE_SKIN, T_GRUMBLE_FACE);
+    for (x, y, c) in [(3, 5, rgb(250, 250, 250)), (4, 5, rgb(200, 30, 30)), (11, 5, rgb(200, 30, 30)), (12, 5, rgb(250, 250, 250))] {
+        a.set(T_GRUMBLE_FACE, x, y, c);
+    }
+    for y in 8..12 {
+        for x in 5..11 {
+            a.set(T_GRUMBLE_FACE, x, y, if y > 8 && (x == 6 || x == 9) { rgb(90, 40, 40) } else { rgb(230, 160, 150) });
+        }
+    }
     // ---- Hmmers
     a.copy(T_SKIN, T_HMM_FACE);
     for (x, y, c) in [(3, 6, rgb(255, 255, 255)), (4, 6, rgb(40, 110, 40)), (11, 6, rgb(40, 110, 40)), (12, 6, rgb(255, 255, 255))] {

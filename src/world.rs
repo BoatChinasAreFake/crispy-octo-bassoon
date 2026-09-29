@@ -108,6 +108,8 @@ pub struct Generator {
     cave_a: Perlin,
     cave_b: Perlin,
     cavern: Perlin,
+    /// The Scorchlands' caverns (see scorch.rs).
+    pub(crate) scorch: Perlin,
     /// Mod world generation, copied from the registry when the world is created.
     ores: Vec<OreGen>,
     plants: Vec<PlantGen>,
@@ -126,6 +128,7 @@ impl Generator {
             cave_a: Perlin::new(s + 5),
             cave_b: Perlin::new(s + 6),
             cavern: Perlin::new(s + 7),
+            scorch: Perlin::new(s + 8),
             ores: reg().ores.clone(),
             plants: reg().plants.clone(),
         }
@@ -229,6 +232,10 @@ impl Generator {
     }
 
     pub fn generate(&self, cx: i32, cz: i32) -> Vec<Id> {
+        // Far east: the wall, then the Scorchlands (see scorch.rs).
+        if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL {
+            return self.generate_scorch(cx, cz);
+        }
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -476,40 +483,52 @@ impl World {
     pub fn stream(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
         while let Ok((cx, cz, blocks)) = self.res_rx.try_recv() {
             self.pending.remove(&(cx, cz));
-            let mut chunk = Chunk::new(blocks);
-            if let Some(m) = self.mods.get(&(cx, cz)) {
-                for (&i, &id) in m {
-                    // Saves and hosts can't be trusted to stay in bounds.
-                    if (i as usize) < CHUNK_VOL && valid_block(id) {
-                        chunk.blocks.set(i as usize, id);
-                        // Liquids placed or moved by players pick up where they left off.
-                        if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
-                            let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
-                            let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
-                            let p = ivec3(cx * CW + lx, y, cz * CW + lz);
-                            if is_liquid(id) {
-                                self.liquid_dirty.insert(p);
-                            } else {
-                                self.zap_dirty.insert(p);
-                            }
+            if self.chunks.contains_key(&(cx, cz)) {
+                continue; // made on the spot meanwhile (see `load_now`)
+            }
+            self.insert_chunk(cx, cz, blocks);
+        }
+        self.request_chunks(centers)
+    }
+
+    /// A freshly generated chunk: replay edits, fill chests, wake liquids, mark for meshing.
+    pub(crate) fn insert_chunk(&mut self, cx: i32, cz: i32, blocks: PalettedBlocks) {
+        let mut chunk = Chunk::new(blocks);
+        if let Some(m) = self.mods.get(&(cx, cz)) {
+            for (&i, &id) in m {
+                // Saves and hosts can't be trusted to stay in bounds.
+                if (i as usize) < CHUNK_VOL && valid_block(id) {
+                    chunk.blocks.set(i as usize, id);
+                    // Liquids and contraptions pick up where they left off.
+                    if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
+                        let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
+                        let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
+                        let p = ivec3(cx * CW + lx, y, cz * CW + lz);
+                        if is_liquid(id) {
+                            self.liquid_dirty.insert(p);
+                        } else {
+                            self.zap_dirty.insert(p);
                         }
                     }
                 }
             }
-            chunk.recompute_heights();
-            self.chunks.insert((cx, cz), chunk);
-            if self.structure_loot {
-                self.fill_structure_chests(cx, cz);
-            }
-            for dz in -1..=1 {
-                for dx in -1..=1 {
-                    if self.chunks.contains_key(&(cx + dx, cz + dz)) {
-                        self.dirty.insert((cx + dx, cz + dz));
-                    }
+        }
+        chunk.recompute_heights();
+        self.chunks.insert((cx, cz), chunk);
+        if self.structure_loot {
+            self.fill_structure_chests(cx, cz);
+        }
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                if self.chunks.contains_key(&(cx + dx, cz + dz)) {
+                    self.dirty.insert((cx + dx, cz + dz));
                 }
             }
         }
+    }
 
+    /// Ask the workers for chunks near `centers`, and drop ones nobody is near.
+    fn request_chunks(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
         let chunk_of = |p: Vec3| ((p.x / CW as f32).floor() as i32, (p.z / CW as f32).floor() as i32);
         let mut wanted: Vec<(i32, i32, i32)> = Vec::new();
         for (ci, &(center, radius)) in centers.iter().enumerate() {
@@ -645,7 +664,7 @@ impl World {
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
         if self.simulate_liquids {
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
-            self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT);
+            self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));
         }
         let xs: &[i32] = if lx == 0 { &[-1, 0] } else if lx == CW - 1 { &[0, 1] } else { &[0] };
         let zs: &[i32] = if lz == 0 { &[-1, 0] } else if lz == CW - 1 { &[0, 1] } else { &[0] };
@@ -672,7 +691,8 @@ impl World {
     /// The same for Zappy Dust: a switch flipped or a wire laid wakes its neighbours.
     fn wake_zappy(&mut self, p: IVec3, involved: bool) {
         const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
-        if involved || SIDES.iter().any(|d| is_zappy(self.get_v(p + *d))) {
+        let watched = |id: Id| is_zappy(id) || crate::scorch::is_portal(id);
+        if involved || SIDES.iter().any(|d| watched(self.get_v(p + *d))) {
             self.zap_dirty.insert(p);
             for d in SIDES {
                 self.zap_dirty.insert(p + d);

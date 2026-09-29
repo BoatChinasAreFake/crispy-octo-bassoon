@@ -43,6 +43,9 @@ pub struct Site {
 impl Generator {
     /// The structure (if any) that starts in chunk (cx, cz).
     pub fn site(&self, cx: i32, cz: i32) -> Option<Site> {
+        if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL - 2 * CW {
+            return None;
+        }
         let s = self.seed ^ 0x57_C0DE;
         let r = hash2(s, cx, cz);
         if r >= 0.10 {

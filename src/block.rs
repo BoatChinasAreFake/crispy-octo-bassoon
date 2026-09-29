@@ -99,8 +99,15 @@ pub const PLATE_ON: Id = 120;
 pub const ZAP_BLOCK: Id = 121;
 pub const LAMP: Id = 122;
 pub const LAMP_ON: Id = 123;
+/// The Scorchlands (see scorch.rs): its rock, slow sand, gold ore, and portals
+/// (spanning x or z).
+pub const SCORCHROCK: Id = 124;
+pub const EMBERSAND: Id = 125;
+pub const SCORCH_GOLD_ORE: Id = 126;
+pub const PORTAL_X: Id = 127;
+pub const PORTAL_Z: Id = 128;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 124;
+pub const NUM_BLOCKS: Id = 129;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -172,8 +179,10 @@ pub const BOOK: Id = FIRST_ITEM + 81;
 /// Carries its enchantments in its wear, like a tool (see enchant.rs).
 pub const ENCHANTED_BOOK: Id = FIRST_ITEM + 82;
 pub const SHIELD: Id = FIRST_ITEM + 83;
+/// Lights portals (and TNT).
+pub const SPARKER: Id = FIRST_ITEM + 84;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 84;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 85;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -258,6 +267,7 @@ pub fn durability(id: Id) -> Option<u16> {
         ROD => 64,
         SHEARS => 238,
         SHIELD => 336,
+        SPARKER => 64,
         _ => return item_def(id).and_then(|i| i.durability),
     })
 }
@@ -278,7 +288,7 @@ pub fn dig_wear(held: Id, broken: Id) -> u16 {
 
 /// Wear from hitting a mob with `held` (anything but a sword is a clumsy weapon).
 pub fn hit_wear(held: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS | SHIELD) {
+    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS | SHIELD | SPARKER) {
         return 0;
     }
     if is_sword(held) { 1 } else { 2 }
@@ -309,6 +319,8 @@ pub enum Shape {
     Plate { down: bool },
     /// A button on the floor, pressed in or not.
     Button { down: bool },
+    /// A portal's shimmering sheet, across x (or z).
+    Portal { x_axis: bool },
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -352,6 +364,8 @@ impl Shape {
             Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
             Shape::Button { down } => ([([5.0 / 16.0, 0.0, 6.0 / 16.0], [11.0 / 16.0, if down { 1.0 / 16.0 } else { 2.0 / 16.0 }, 10.0 / 16.0]), full, full], 1),
+            Shape::Portal { x_axis: true } => ([([0.0, 0.0, 0.375], [1.0, 1.0, 0.625]), full, full], 1),
+            Shape::Portal { x_axis: false } => ([([0.375, 0.0, 0.0], [0.625, 1.0, 1.0]), full, full], 1),
         }
     }
 }
@@ -805,6 +819,17 @@ impl Registry {
         let mut lit = def("zap_lamp_on", "Zappy Lamp (On)", Cube, true, true, [T_LAMP_ON; 3], 0.4, 0, false, LAMP, 14.0, S_GLASS);
         lit.creative = false;
         blocks.push(lit);
+        blocks.push(def("scorchrock", "Scorchrock (Grumbly)", Cube, true, true, [T_SCORCHROCK; 3], 0.4, 1, true, SCORCHROCK, 0.0, S_STONE));
+        let mut sand = def("embersand", "Embersand (Clingy)", Cube, true, true, [T_EMBERSAND; 3], 0.5, 0, false, EMBERSAND, 0.0, S_SAND);
+        sand.speed = 0.5;
+        blocks.push(sand);
+        blocks.push(def("scorch_gold_ore", "Scorched Gold Ore (Still Useless, Now Warm)", Cube, true, true, [T_SCORCH_GOLD; 3], 3.0, 1, true, GOLD_INGOT, 0.0, S_STONE));
+        for x_axis in [true, false] {
+            let mut d = def(if x_axis { "portal" } else { "portal_z" }, "Portal (Shimmery)", Shaped, false, false, [T_PORTAL; 3], -1.0, 0, false, AIR, 11.0, S_GLASS);
+            d.shape = Shape::Portal { x_axis };
+            d.creative = false;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
@@ -903,6 +928,7 @@ impl Registry {
             item("book", "Book (Mostly Wheat)", T_BOOK),
             ItemDef { stack: 1, ..item("enchanted_book", "Enchanted Book (Spoilers Inside)", T_ENCHANTED_BOOK) },
             ItemDef { stack: 1, ..item("shield", "Shield (Door You Can Carry)", T_SHIELD) },
+            ItemDef { stack: 1, ..item("sparker", "Sparker (Hot Hands in a Can)", T_SPARKER) },
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -971,6 +997,7 @@ impl Registry {
             r(&[(GLOWROCK, 1), (ZAP_DUST, 4)], (LAMP, 1)),
             r(&[(WHEAT, 3), (STRING, 1)], (BOOK, 1)),
             r(&[(PLANKS, 6), (IRON, 1)], (SHIELD, 1)),
+            r(&[(IRON, 1), (COAL, 1)], (SPARKER, 1)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {

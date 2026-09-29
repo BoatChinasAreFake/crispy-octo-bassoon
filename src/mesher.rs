@@ -256,7 +256,9 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                         4 => [p[0], 1.0 - p[1]],
                                         _ => [1.0 - p[0], 1.0 - p[1]],
                                     };
-                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [shade * 0.95, sky]);
+                                    // Portals glow (see the shader's "above 1.5" rule).
+                                    let lx = if crate::scorch::is_portal(id) { 2.3 } else { shade * 0.95 };
+                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [lx, sky]);
                                 }
                                 out.opaque.quad(v, false);
                             }

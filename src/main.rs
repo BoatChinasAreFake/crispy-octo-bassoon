@@ -30,6 +30,7 @@ mod players;
 mod render;
 mod rules;
 mod save;
+mod scorch;
 mod scripting;
 mod server;
 mod structures;
@@ -2557,6 +2558,39 @@ async fn game_main() {
                 }
                 if let Some((pos, yaw, pitch)) = scenic_view(&g, &s.mode) {
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "scorch" | "portal" => {
+                // Through a portal (built on the spot), or looking at one.
+                let mut g = Game::new(424242, s.mode == "scorch", false);
+                g.time = s.time.unwrap_or(0.3);
+                let spawn = g.spawn;
+                let here = IVec3::new(spawn.x.floor() as i32, spawn.y.floor() as i32, spawn.z.floor() as i32);
+                if s.mode == "scorch" {
+                    let to = g.travel(here);
+                    g.player.body.pos = to;
+                    if s.pos.is_none() {
+                        s.pos = Some(to + Vec3::new(0.0, 0.0, 1.0));
+                        s.yaw = std::f32::consts::PI;
+                        s.pitch = -0.15;
+                    }
+                } else {
+                    let (cx, cz) = (here.x.div_euclid(16), here.z.div_euclid(16));
+                    for dz in -1..=1 {
+                        for dx in -1..=1 {
+                            g.world.load_now(cx + dx, cz + dz);
+                        }
+                    }
+                    let base = here + IVec3::new(0, 0, -6);
+                    let base = IVec3::new(base.x, g.world.surface_y(base.x, base.z) + 1, base.z);
+                    scorch::build_portal(&mut g.world, base);
+                    if s.pos.is_none() {
+                        s.pos = Some(base.as_vec3() + Vec3::new(1.0, 1.2, 6.0));
+                        s.yaw = 0.0;
+                        s.pitch = -0.05;
+                    }
                 }
                 app.start_game(g);
                 app.show_debug = false;

@@ -22,7 +22,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v11: experience (Xp, Orbs), anvils (Repair) and world rules (Rules).
 /// v12: wear carries enchantments (u32), remembered players (PlayerData,
 /// Restore), weather (Weather, Lightning) and enchanting (Enchant).
-pub const PROTOCOL: u32 = 12;
+/// v13: liquids, animals (MobInteract, mob flags), Zappy Dust, trading
+/// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
+pub const PROTOCOL: u32 = 13;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -161,6 +163,8 @@ pub enum Msg {
     MobInteract { mob: u32, item: Id },
     /// client -> host: I made trade number `index` with this Hmmer.
     Trade { mob: u32, index: u8 },
+    /// client -> host: I've stood in the portal at x,y,z long enough: take me through.
+    UsePortal { x: i32, y: i32, z: i32 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -580,6 +584,12 @@ impl Msg {
                 w.u32(*mob);
                 w.u8(*index);
             }
+            Msg::UsePortal { x, y, z } => {
+                w.u8(48);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
             Msg::Enchanted { item, ench, count } => {
                 w.u8(45);
                 w.u16(*item);
@@ -723,6 +733,7 @@ impl Msg {
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
+            48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
@@ -1170,6 +1181,7 @@ mod tests {
             Msg::Enchanted { item: 0x8003, ench: 0x0249, count: 7 },
             Msg::MobInteract { mob: 77, item: 0x8019 },
             Msg::Trade { mob: 12, index: 3 },
+            Msg::UsePortal { x: 32800, y: 40, z: -3 },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },

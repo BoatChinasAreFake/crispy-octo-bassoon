@@ -159,6 +159,13 @@ pub struct Game {
     /// Seconds since the last swing (weapons charge back up; see combat.rs), and a raised shield.
     pub since_attack: f32,
     pub blocking: bool,
+    /// Portals (see scorch.rs): seconds spent standing in one, seconds before
+    /// another trip, and whether we've stepped out since the last.
+    pub portal_time: f32,
+    pub portal_cooldown: f32,
+    pub left_portal: bool,
+    /// Which portal leads to which (by `scorch::portal_key`), both ways.
+    pub portal_links: HashMap<IVec3, IVec3>,
 }
 
 impl Game {
@@ -257,6 +264,10 @@ impl Game {
             trading: None,
             since_attack: 10.0,
             blocking: false,
+            portal_time: 0.0,
+            portal_cooldown: 0.0,
+            left_portal: true,
+            portal_links: HashMap::new(),
         }
     }
 
@@ -343,6 +354,7 @@ impl Game {
         }
         g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle };
         g.enchant_count = d.enchant_count;
+        g.portal_links = crate::scorch::decode_links(&d.portals);
         for mut m in crate::animals::decode_mobs(&d.mobs, &mut g.rng) {
             m.id = g.next_mob_id;
             g.next_mob_id += 1;
@@ -386,6 +398,7 @@ impl Game {
             weather_timer: self.weather.timer,
             enchant_count: self.enchant_count,
             mobs: crate::animals::encode_mobs(&self.mobs),
+            portals: crate::scorch::encode_links(&self.portal_links),
             version: crate::save::VERSION,
         }
     }
@@ -461,7 +474,15 @@ impl Game {
         self.sun_angle().sin() < -0.05
     }
 
+    /// Is the camera (or the local player) down in the Scorchlands?
+    pub fn in_scorch(&self) -> bool {
+        !self.menu && crate::scorch::in_scorch(self.player.body.pos.x)
+    }
+
     pub fn sky_color(&self) -> [f32; 3] {
+        if self.in_scorch() {
+            return [0.24, 0.06, 0.03];
+        }
         let d = ((self.daylight() - 0.18) / 0.82).clamp(0.0, 1.0);
         let day = [0.55, 0.75, 1.0];
         let night = [0.02, 0.03, 0.08];
@@ -632,6 +653,7 @@ impl Game {
         self.footsteps(dt);
         self.block_effects();
         self.lava_tick(dt);
+        self.portal_tick(dt);
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
@@ -879,6 +901,15 @@ impl Game {
 
     /// Right-clicking a bed.
     fn sleep(&mut self, bed: IVec3) {
+        if self.in_scorch() {
+            // Beds don't like it down here.
+            self.world.set_v(bed, AIR);
+            self.msg("The bed exploded. Beds are not rated for the Scorchlands.");
+            if !self.is_client() {
+                self.explode(bed.as_vec3() + Vec3::splat(0.5), 3.0, "tried to sleep in the Scorchlands");
+            }
+            return;
+        }
         self.spawn = bed.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
         if !self.is_night() {
             self.msg("You can only sleep at night. Naps are a premium feature. (Spawn point set, though.)");
@@ -1378,7 +1409,10 @@ impl Game {
             self.advance("cake");
             return;
         }
-        if hit_id == TNT && (held == TORCH || held == AIR) {
+        if held == SPARKER && self.use_sparker(hit_pos, normal) {
+            return;
+        }
+        if hit_id == TNT && (held == TORCH || held == AIR || held == SPARKER) {
             if self.is_client() {
                 self.world.set_remote(hit_pos.x, hit_pos.y, hit_pos.z, AIR);
                 self.net_send_msg(Msg::Ignite { x: hit_pos.x, y: hit_pos.y, z: hit_pos.z });
@@ -1876,12 +1910,20 @@ impl Game {
                     MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
+                    MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer => {}
                 }
             }
         }
         for (s, at) in noises {
             self.sfx(s, Some(at));
+        }
+        // Hit one Grumbler and the rest nearby join in.
+        let riled: Vec<Vec3> = self.mobs.iter().filter(|m| m.kind == MobKind::Grumbler && m.angry && m.hurt > 0.3).map(|m| m.body.pos).collect();
+        for at in riled {
+            for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Grumbler && m.body.pos.distance(at) < 16.0) {
+                m.angry = true;
+            }
         }
         // Keep mobs from stacking inside each other.
         for i in 0..self.mobs.len() {
@@ -1950,7 +1992,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2030,6 +2072,10 @@ impl Game {
             return;
         }
         let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
+        if crate::scorch::in_scorch(p.x) {
+            self.scorch_spawn(p);
+            return;
+        }
         // Kept animals (bred, tamed) don't count against new ones turning up.
         let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent).count();
         let hostile = self.mobs.len() - passive;
@@ -2089,6 +2135,39 @@ impl Game {
         }
     }
 
+    /// The Scorchlands have their own residents, light or dark.
+    fn scorch_spawn(&mut self, p: Vec3) {
+        let here = self.mobs.iter().filter(|m| crate::scorch::in_scorch(m.body.pos.x)).count();
+        if here >= 10 + 3 * self.peers.len() || !self.rules.difficulty.monsters() {
+            return;
+        }
+        let a = self.rng.range(0.0, TAU);
+        let d = self.rng.range(16.0, 40.0);
+        let (x, z) = ((p.x + a.cos() * d).floor() as i32, (p.z + a.sin() * d).floor() as i32);
+        if !self.world.is_loaded(x, z) || crate::scorch::in_wall(x) || x < crate::scorch::SCORCH_X + 16 {
+            return;
+        }
+        let y0 = self.rng.int(crate::scorch::LAVA_SEA + 1, CH - 10);
+        for y in y0..y0 + 12 {
+            let floor = self.world.get(x, y - 1, z);
+            let clear = (0..3).all(|h| self.world.get(x, y + h, z) == AIR);
+            if matches!(floor, SCORCHROCK | EMBERSAND) && clear {
+                let at = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
+                let roll = self.rng.f32();
+                if roll < 0.6 {
+                    for i in 0..self.rng.int(1, 3) {
+                        self.alloc_mob(MobKind::Grumbler, at + Vec3::new(i as f32 * 0.7, 0.0, 0.0));
+                    }
+                } else if roll < 0.8 {
+                    self.alloc_mob_sized(MobKind::Bloop, at, 2);
+                } else {
+                    self.alloc_mob(MobKind::Rattler, at);
+                }
+                return;
+            }
+        }
+    }
+
     pub fn respawn(&mut self) {
         self.dead = None;
         self.player = Player::new(self.spawn);
@@ -2115,9 +2194,10 @@ impl Game {
         let a = self.sun_angle();
         let sun_dir = Vec3::new(a.cos(), a.sin(), 0.25).normalize();
 
-        // Stars fade in at night.
+        // Stars fade in at night (no sky at all under the Scorchlands' bedrock).
+        let scorch = self.in_scorch();
         let night = 1.0 - ((self.daylight() - 0.18) / 0.5).clamp(0.0, 1.0);
-        if night > 0.01 {
+        if night > 0.01 && !scorch {
             g.begin(Pass::Sky, [1.0, 1.0, 1.0, night], true);
             let rot = Mat4::from_rotation_z(a);
             for (i, s) in self.stars.iter().enumerate() {
@@ -2127,15 +2207,17 @@ impl Game {
             }
         }
         g.begin(Pass::Sky, [1.0; 4], true);
-        sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
-        sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
+        if !scorch {
+            sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
+            sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
+        }
 
         // Clouds: a scrolling blocky layer.
         let cloud_y = 112.0;
         let cell = 12.0;
         let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
-        let reach = ((render_distance * 16) as f32 / cell) as i32 + 4;
+        let reach = if scorch { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
         g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
         for j in -reach..=reach {
             for i in -reach..=reach {
@@ -2222,7 +2304,9 @@ impl Game {
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
         // Rain, snow and lightning
-        self.draw_weather(&mut g, eye);
+        if !scorch {
+            self.draw_weather(&mut g, eye);
+        }
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
         self.draw_orbs(&mut g, eye, 48.0);
@@ -2321,6 +2405,9 @@ impl Game {
         let far = (render_distance * 16) as f32;
         let (fog_color, fog_start, fog_end) = if underwater {
             ([0.05, 0.12, 0.35], 0.0, 22.0)
+        } else if self.in_scorch() {
+            // Hazy, hot air.
+            (sky, far * 0.2, far * 0.8)
         } else {
             (sky, far * 0.55, far - 4.0)
         };
@@ -2332,7 +2419,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), lights }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.in_scorch() { 0.32 } else { 0.0 }, lights }
     }
 }
 
@@ -3698,6 +3785,72 @@ mod tests {
         assert_eq!(g.steadied(push), push);
         g.inv.armor = [Some((ARMOR_FIRST + 12, 1)), Some((ARMOR_FIRST + 13, 1)), Some((ARMOR_FIRST + 14, 1)), Some((ARMOR_FIRST + 15, 1))];
         assert!(g.steadied(push).x < 6.0);
+    }
+
+        #[test]
+    fn portals_to_the_scorchlands_and_back() {
+        use crate::scorch::{in_scorch, is_portal};
+        let mut g = arena(73);
+        // A 4x5 obsidian frame (corners too), lit with a Sparker.
+        let base = IVec3::new(3, 50, -3);
+        for dx in -1..=2 {
+            for dy in -1..=3 {
+                if dx == -1 || dx == 2 || dy == -1 || dy == 3 {
+                    g.world.set_v(base + IVec3::new(dx, dy, 0), OBSIDIAN);
+                }
+            }
+        }
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((SPARKER, 1));
+        g.inv.selected = 0;
+        aim(&mut g, base - IVec3::Y, IVec3::Y);
+        g.use_item();
+        assert!((0..2).all(|dx| (0..3).all(|dy| g.world.get_v(base + IVec3::new(dx, dy, 0)) == PORTAL_X)), "lit");
+        assert!(g.advancements.has("portal_open"));
+        assert_eq!(g.inv.wear[0], 1, "the Sparker wears");
+        // A frame with a gap won't light.
+        let open = IVec3::new(-6, 50, 3);
+        for dy in -1..=3 {
+            g.world.set_v(open + IVec3::new(-1, dy, 0), OBSIDIAN);
+        }
+        assert!(crate::scorch::portal_frame(&g.world, open, true).is_none());
+
+        // Standing in it for a couple of seconds takes you to the Scorchlands, into a new portal.
+        g.player.body.pos = base.as_vec3() + Vec3::new(1.0, 0.0, 0.5);
+        for _ in 0..50 {
+            g.portal_tick(0.05);
+        }
+        let there = g.player.body.pos;
+        assert!(in_scorch(there.x), "at {there}");
+        let feet = IVec3::new(there.x.floor() as i32, there.y.floor() as i32, there.z.floor() as i32);
+        assert!(is_portal(g.world.get_v(feet)), "arrived in a portal");
+        assert!(g.advancements.has("hotter"));
+        assert_eq!(g.sky_color(), [0.24, 0.06, 0.03]);
+        // Straight back through isn't possible without stepping out first.
+        for _ in 0..60 {
+            g.portal_tick(0.05);
+        }
+        assert!(in_scorch(g.player.body.pos.x));
+        // Step out, step back in: home again, to the portal we came from.
+        g.player.body.pos += Vec3::new(0.0, 0.0, 2.0);
+        g.portal_tick(0.05);
+        g.player.body.pos = there;
+        for _ in 0..90 {
+            g.portal_tick(0.05);
+        }
+        let home = g.player.body.pos;
+        assert!(!in_scorch(home.x));
+        assert!(home.distance(base.as_vec3()) < 6.0, "back at the first portal: {home}");
+        // The links are kept with the world.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.portal_links, g.portal_links);
+        assert_eq!(g.portal_links.len(), 2);
+        // Break the frame and the portal falls apart.
+        g.world.set_v(base + IVec3::new(-1, 1, 0), AIR);
+        for _ in 0..30 {
+            g.zap_tick(0.05);
+        }
+        assert!((0..2).all(|dx| (0..3).all(|dy| g.world.get_v(base + IVec3::new(dx, dy, 0)) == AIR)));
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

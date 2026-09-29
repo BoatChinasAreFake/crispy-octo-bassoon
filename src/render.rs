@@ -42,7 +42,7 @@ uniform sampler2D tex;
 uniform vec4 cam_pos;
 uniform vec4 fog_color;
 uniform vec4 params;   // x: daylight, y: fog start, z: fog end, w: alpha multiplier
-uniform vec4 params2;  // x: fullbright
+uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow)
 uniform vec4 tint;
 uniform vec4 lights[16];
 
@@ -65,7 +65,7 @@ void main() {
                 bl = max(bl, clamp(1.0 - d / L.w, 0.0, 1.0));
             }
         }
-        float lvl = max(max(sky, bl), 0.05);
+        float lvl = max(max(sky, bl), max(0.05, params2.y));
         // Torchlight is warm, daylight is neutral.
         vec3 warm = mix(vec3(1.0), vec3(1.0, 0.85, 0.6), clamp(bl - sky, 0.0, 1.0));
         col = c.rgb * v_light.x * lvl * warm;
@@ -185,6 +185,8 @@ pub struct FrameParams {
     pub fog_start: f32,
     pub fog_end: f32,
     pub daylight: f32,
+    /// Least light anywhere (0 for the ordinary world).
+    pub ambient: f32,
     pub lights: [Vec4; 16],
 }
 
@@ -351,7 +353,7 @@ impl Renderer {
             cam_pos: fp.cam_pos.extend(1.0),
             fog_color: Vec4::new(fp.fog_color[0], fp.fog_color[1], fp.fog_color[2], 1.0),
             params: Vec4::new(fp.daylight, fp.fog_start, fp.fog_end, 1.0),
-            params2: Vec4::ZERO,
+            params2: Vec4::new(0.0, fp.ambient, 0.0, 0.0),
             tint: Vec4::ONE,
             lights: fp.lights,
         };

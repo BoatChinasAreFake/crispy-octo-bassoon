@@ -144,6 +144,19 @@ impl Game {
                 self.buttons.insert(p, BUTTON_SECS);
             }
             check.insert(p);
+            // A portal whose frame is broken falls apart.
+            if crate::scorch::is_portal(id) {
+                let side = if id == PORTAL_X { IVec3::X } else { IVec3::Z };
+                let intact = [side, -side, IVec3::Y, IVec3::NEG_Y].iter().all(|d| {
+                    let n = self.world.get_v(p + *d);
+                    n == id || n == OBSIDIAN
+                });
+                if !intact {
+                    self.world.set_v(p, AIR);
+                    self.sfx(Sfx::Warp, Some(p.as_vec3() + Vec3::splat(0.5)));
+                }
+                continue;
+            }
             if is_wire(id) && !done.contains(&p) {
                 for (q, lit) in settle_network(&self.world, p) {
                     done.insert(q);

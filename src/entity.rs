@@ -166,11 +166,13 @@ pub enum MobKind {
     Woofer,
     /// Villager-ish: lives in a hut and trades (see villagers.rs).
     Hmmer,
+    /// Pig-person-ish: roams the Scorchlands, minds its own business until you hit one of them.
+    Grumbler,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 12] = [
+    pub const ALL: [MobKind; 13] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -183,6 +185,7 @@ impl MobKind {
         MobKind::Bloop,
         MobKind::Woofer,
         MobKind::Hmmer,
+        MobKind::Grumbler,
     ];
 
     pub fn index(self) -> u8 {
@@ -206,6 +209,7 @@ impl MobKind {
             "bloop" | "slime" => Some(MobKind::Bloop),
             "woofer" | "wolf" | "dog" => Some(MobKind::Woofer),
             "hmmer" | "villager" => Some(MobKind::Hmmer),
+            "grumbler" | "zombified_piglin" | "zombie_pigman" => Some(MobKind::Grumbler),
             _ => None,
         }
     }
@@ -223,6 +227,7 @@ impl MobKind {
             MobKind::Bloop => "Bloop",
             MobKind::Woofer => "Woofer",
             MobKind::Hmmer => "Hmmer",
+            MobKind::Grumbler => "Grumbler",
         }
     }
     /// Half-width and height at size 1.
@@ -240,6 +245,7 @@ impl MobKind {
             MobKind::Bloop => (0.26, 0.52),
             MobKind::Woofer => (0.3, 0.85),
             MobKind::Hmmer => (0.3, 1.95),
+            MobKind::Grumbler => (0.3, 1.95),
         }
     }
     fn max_health(self) -> f32 {
@@ -256,6 +262,7 @@ impl MobKind {
             MobKind::Bloop => 1.0, // times size squared
             MobKind::Woofer => 8.0,
             MobKind::Hmmer => 20.0,
+            MobKind::Grumbler => 20.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -269,7 +276,7 @@ impl MobKind {
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
@@ -464,6 +471,7 @@ impl Mob {
             MobKind::Webber => self.angry = true,
             MobKind::Woofer if self.owner.is_none() => self.angry = true,
             MobKind::Hmmer => self.flee = 4.0,
+            MobKind::Grumbler => self.angry = true,
             MobKind::Starer => {
                 self.angry = true;
                 // Takes the hit, then blinks away to think about it (flee = "wants to warp").
@@ -507,6 +515,18 @@ impl Mob {
                     } else {
                         self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
                         may_wander = false;
+                    }
+                }
+            }
+            MobKind::Grumbler => {
+                if !player_visible || dist > 40.0 {
+                    self.angry = false;
+                }
+                if self.angry && player_visible {
+                    want = Some((face, 3.2));
+                    if flat.length() < 1.3 && to_player.y.abs() < 1.6 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(5.0, "annoyed a Grumbler (and all its friends)"));
+                        self.attack_cd = 1.1;
                     }
                 }
             }
@@ -756,6 +776,7 @@ impl Mob {
             MobKind::Webber if n > 0 => Some((STRING, n)),
             // Only the smallest Bloops leave anything; bigger ones split instead.
             MobKind::Bloop if n > 0 && self.size <= 1.0 => Some((GOO, n)),
+            MobKind::Grumbler if n > 0 => Some((GOO, n)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -767,6 +788,7 @@ impl Mob {
             MobKind::Fluffer if rng.chance(0.7) => Some((MUTTON, 1)),
             MobKind::Cluckster => Some((CLUCKETS, 1)),
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
+            MobKind::Grumbler if rng.chance(0.4) => Some((GOLD_INGOT, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -942,6 +964,8 @@ static MOOER: [Part; 8] = [
 
 static RATTLER: [Part; 6] = humanoid(T_BONE, T_RATTLER_FACE, T_BONE, T_BONE, Limb::Forward, Limb::Forward);
 
+static GRUMBLER: [Part; 6] = humanoid(T_GRUMBLE_SKIN, T_GRUMBLE_FACE, T_GRUMBLE_SKIN, T_GOLD, Limb::Swing(-0.8), Limb::Swing(0.8));
+
 /// A robe, arms folded, and a nose that means business.
 static HMMER: [Part; 7] = {
     let h = humanoid(T_SKIN, T_HMM_FACE, T_HMM_ROBE, T_HMM_ROBE, Limb::Fixed, Limb::Fixed);
@@ -1012,6 +1036,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Bloop => &BLOOP,
         MobKind::Woofer => &WOOFER,
         MobKind::Hmmer => &HMMER,
+        MobKind::Grumbler => &GRUMBLER,
     }
 }
 

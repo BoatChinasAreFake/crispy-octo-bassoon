@@ -661,6 +661,11 @@ impl Game {
                     self.host_trade(from, mob, index);
                 }
             }
+            Msg::UsePortal { x, y, z } => {
+                if self.peer_rate_ok(from, "portal", 2.0) {
+                    self.host_use_portal(from, IVec3::new(x, y, z));
+                }
+            }
             Msg::Enchant { x, y, z, item, choice } => {
                 if self.peer_rate_ok(from, "enchant", 0.2) {
                     self.host_enchant(from, IVec3::new(x, y, z), item, choice);
@@ -727,6 +732,11 @@ impl Game {
         }
         if let Some((f, o, true)) = door_state(new) {
             return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
+        }
+        // Portals light only inside a real obsidian frame.
+        if matches!(new, PORTAL_X | PORTAL_Z) {
+            let p = IVec3::new(x, y, z);
+            return old == AIR && crate::scorch::portal_frame(&self.world, p, new == PORTAL_X).is_some();
         }
         // Levers flip both ways, buttons only go in (the host lets them out).
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
@@ -863,7 +873,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } => {}
         }
     }
 
@@ -1823,6 +1833,38 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(host.peers[&id].ledger.bag.count(GOLD_INGOT), 1);
+    }
+
+    #[test]
+    fn portals_take_joined_players_through() {
+        let mut host = Game::new(792, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Travelly", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 3, spawn.z.floor() as i32);
+        let base = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        crate::scorch::build_portal(&mut host.world, base);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(base) == PORTAL_X));
+        // Walk in and wait: the host builds the other end and moves us there.
+        client.player.body.pos = base.as_vec3() + Vec3::new(1.0, 0.0, 0.5);
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        for _ in 0..50 {
+            client.portal_tick(0.05);
+        }
+        assert!(pump(&mut host, &mut client, |_, c| crate::scorch::in_scorch(c.player.body.pos.x)));
+        assert!(crate::scorch::in_scorch(host.peers[&id].target.x));
+        // A portal they aren't standing in does nothing.
+        client.net_send_msg(Msg::UsePortal { x: base.x, y: base.y, z: base.z });
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert!(crate::scorch::in_scorch(client.player.body.pos.x));
     }
 
     #[test]

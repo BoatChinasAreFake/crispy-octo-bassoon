@@ -219,6 +219,17 @@ impl Game {
         if !(0..CH).contains(&place.y) || !(replaceable(there) || open(there)) || there == liquid {
             return false;
         }
+        // Water boils away in the Scorchlands.
+        if liquid == WATER && crate::scorch::in_scorch(place.x as f32) {
+            if !self.creative {
+                let slot = self.inv.selected;
+                self.inv.slots[slot] = Some((BUCKET, 1));
+            }
+            self.sfx(Sfx::Hiss, Some(place.as_vec3() + Vec3::splat(0.5)));
+            self.smoke(place.as_vec3() + Vec3::splat(0.5), 10, 0.4);
+            self.msg("The water boiled away. It's the Scorchlands, what did you expect?");
+            return true;
+        }
         self.world.set_v(place, liquid);
         if !self.creative {
             let slot = self.inv.selected;

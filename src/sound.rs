@@ -65,6 +65,7 @@ impl Sfx {
             crate::entity::MobKind::Bloop => Sfx::Bloop,
             crate::entity::MobKind::Woofer => Sfx::Woof,
             crate::entity::MobKind::Hmmer => Sfx::Hmm,
+            crate::entity::MobKind::Grumbler => Sfx::Oink,
             _ => Sfx::MobHurt,
         }
     }
