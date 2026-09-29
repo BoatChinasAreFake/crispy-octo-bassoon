@@ -159,6 +159,8 @@ pub enum Msg {
     Enchanted { item: Id, ench: u16, count: u32 },
     /// client -> host: I right-clicked this mob holding this (feeding, shearing, taming).
     MobInteract { mob: u32, item: Id },
+    /// client -> host: I made trade number `index` with this Hmmer.
+    Trade { mob: u32, index: u8 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -573,6 +575,11 @@ impl Msg {
                 w.u32(*mob);
                 w.u16(*item);
             }
+            Msg::Trade { mob, index } => {
+                w.u8(47);
+                w.u32(*mob);
+                w.u8(*index);
+            }
             Msg::Enchanted { item, ench, count } => {
                 w.u8(45);
                 w.u16(*item);
@@ -715,6 +722,7 @@ impl Msg {
             43 => Msg::Lightning { at: r.v3()? },
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
+            47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
@@ -1161,6 +1169,7 @@ mod tests {
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },
             Msg::Enchanted { item: 0x8003, ench: 0x0249, count: 7 },
             Msg::MobInteract { mob: 77, item: 0x8019 },
+            Msg::Trade { mob: 12, index: 3 },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },

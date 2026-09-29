@@ -154,6 +154,8 @@ pub struct Game {
     pub buttons: HashMap<IVec3, f32>,
     pub plates: HashMap<IVec3, f32>,
     pub powered_doors: HashSet<IVec3>,
+    /// The Hmmer whose trades are on screen (see villagers.rs).
+    pub trading: Option<u32>,
 }
 
 impl Game {
@@ -249,6 +251,7 @@ impl Game {
             buttons: HashMap::new(),
             plates: HashMap::new(),
             powered_doors: HashSet::new(),
+            trading: None,
         }
     }
 
@@ -1816,7 +1819,9 @@ impl Game {
             self.msg("You made eye contact with a Starer. Bold. Also a mistake.");
             self.advance("dont_blink");
         }
+        self.house_hmmers();
         self.animals_tick(dt);
+        self.hmmers_tick(dt);
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
@@ -1847,6 +1852,7 @@ impl Game {
                     MobKind::Webber => noises.push((Sfx::Skitter, m.body.pos)),
                     MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
+                    MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer => {}
                 }
             }
@@ -1920,7 +1926,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -3562,6 +3568,57 @@ mod tests {
         // Books merge with books.
         let r = plan(ENCHANTED_BOOK, with_level(0, Enchant::Protection, 2), Some((ENCHANTED_BOOK, 1)), with_level(0, Enchant::Protection, 2)).unwrap();
         assert_eq!(level(r.wear, Enchant::Protection), 3);
+    }
+
+        #[test]
+    fn hmmers_move_in_and_trade() {
+        use crate::villagers::{trades, Job, STOCK};
+        let mut g = arena(71);
+        g.mobs.clear();
+        // A hut chest filled for the first time brings a Hmmer (a Smith, for this seed).
+        let seed = (0..64u32).find(|&s| Job::of(s) == Job::Smith).unwrap();
+        g.world.new_huts.push((Vec3::new(2.5, 50.0, 0.5), seed));
+        g.house_hmmers();
+        assert_eq!(g.mobs.len(), 1);
+        let (id, kind) = (g.mobs[0].id, g.mobs[0].kind);
+        assert_eq!(kind, MobKind::Hmmer);
+        assert!(g.mobs[0].persistent && g.mobs[0].home.is_some());
+        // Right-click to talk.
+        g.target = Some(Target::Mob(0));
+        g.use_item();
+        assert_eq!(g.trading, Some(id));
+        let (job, list) = g.trade_list().unwrap();
+        assert_eq!((job, list.clone()), (Job::Smith, trades(seed)));
+        // Coal for gold.
+        let coal = list.iter().position(|t| t.give[0].0 == COAL).unwrap();
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((COAL, 64));
+        g.inv.slots[1] = Some((COAL, 64));
+        g.make_trade(coal);
+        assert_eq!((g.inv.count(COAL), g.inv.count(GOLD_INGOT)), (116, 1));
+        assert!(g.advancements.has("what_a_deal"));
+        // Can't afford: nothing happens.
+        let chest = list.iter().position(|t| t.give[0] == (GOLD_INGOT, 10)).unwrap();
+        g.make_trade(chest);
+        assert_eq!(g.inv.count(GOLD_INGOT), 1);
+        // They run out, and restock the next day.
+        for _ in 0..STOCK {
+            g.make_trade(coal);
+        }
+        assert_eq!(g.inv.count(GOLD_INGOT), STOCK as u32);
+        g.mobs[0].restock = 0.01;
+        g.hmmers_tick(0.1);
+        g.make_trade(coal);
+        assert_eq!(g.inv.count(GOLD_INGOT), STOCK as u32 + 1);
+        // Hmmers stay near home.
+        g.mobs[0].body.pos = Vec3::new(-10.0, 50.0, 10.0);
+        g.mobs[0].goal = None;
+        g.hmmers_tick(0.1);
+        assert!(g.mobs[0].goal.is_some());
+        // And they're kept with the world.
+        let back = Game::from_save(g.to_save());
+        let h = back.mobs.iter().find(|m| m.kind == MobKind::Hmmer).unwrap();
+        assert_eq!((h.seed, h.home), (seed, g.mobs[0].home));
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

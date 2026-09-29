@@ -164,11 +164,13 @@ pub enum MobKind {
     Bloop,
     /// Wolf-ish: neutral in the wild, tameable with bones (see animals.rs).
     Woofer,
+    /// Villager-ish: lives in a hut and trades (see villagers.rs).
+    Hmmer,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 11] = [
+    pub const ALL: [MobKind; 12] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -180,6 +182,7 @@ impl MobKind {
         MobKind::Webber,
         MobKind::Bloop,
         MobKind::Woofer,
+        MobKind::Hmmer,
     ];
 
     pub fn index(self) -> u8 {
@@ -202,6 +205,7 @@ impl MobKind {
             "webber" | "spider" => Some(MobKind::Webber),
             "bloop" | "slime" => Some(MobKind::Bloop),
             "woofer" | "wolf" | "dog" => Some(MobKind::Woofer),
+            "hmmer" | "villager" => Some(MobKind::Hmmer),
             _ => None,
         }
     }
@@ -218,6 +222,7 @@ impl MobKind {
             MobKind::Webber => "Webber",
             MobKind::Bloop => "Bloop",
             MobKind::Woofer => "Woofer",
+            MobKind::Hmmer => "Hmmer",
         }
     }
     /// Half-width and height at size 1.
@@ -234,6 +239,7 @@ impl MobKind {
             MobKind::Webber => (0.7, 0.9),
             MobKind::Bloop => (0.26, 0.52),
             MobKind::Woofer => (0.3, 0.85),
+            MobKind::Hmmer => (0.3, 1.95),
         }
     }
     fn max_health(self) -> f32 {
@@ -249,6 +255,7 @@ impl MobKind {
             MobKind::Webber => 16.0,
             MobKind::Bloop => 1.0, // times size squared
             MobKind::Woofer => 8.0,
+            MobKind::Hmmer => 20.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -262,7 +269,7 @@ impl MobKind {
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !self.passive() && self != MobKind::Woofer
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
@@ -332,6 +339,14 @@ pub struct Mob {
     pub goal: Option<Vec3>,
     /// Kept when players are far away (tamed, bred or fed; saved with the world).
     pub persistent: bool,
+    // ---- Hmmers (see villagers.rs)
+    /// Decides its job and trades.
+    pub seed: u32,
+    /// Its hut.
+    pub home: Option<Vec3>,
+    /// Times each trade was made since the last restock, and seconds to the next.
+    pub trades_used: [u8; 8],
+    pub restock: f32,
 }
 
 pub enum MobEvent {
@@ -397,6 +412,10 @@ impl Mob {
             prey: None,
             goal: None,
             persistent: false,
+            seed: 0,
+            home: None,
+            trades_used: [0; 8],
+            restock: crate::villagers::RESTOCK_SECS,
         }
     }
 
@@ -444,6 +463,7 @@ impl Mob {
             k if k.passive() => self.flee = 4.0,
             MobKind::Webber => self.angry = true,
             MobKind::Woofer if self.owner.is_none() => self.angry = true,
+            MobKind::Hmmer => self.flee = 4.0,
             MobKind::Starer => {
                 self.angry = true;
                 // Takes the hit, then blinks away to think about it (flee = "wants to warp").
@@ -475,7 +495,7 @@ impl Mob {
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
         match self.kind {
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -824,6 +844,7 @@ pub enum Limb {
     SwingY(f32),
 }
 
+#[derive(Clone, Copy)]
 pub struct Part {
     pub min: [f32; 3],
     pub size: [f32; 3],
@@ -921,6 +942,20 @@ static MOOER: [Part; 8] = [
 
 static RATTLER: [Part; 6] = humanoid(T_BONE, T_RATTLER_FACE, T_BONE, T_BONE, Limb::Forward, Limb::Forward);
 
+/// A robe, arms folded, and a nose that means business.
+static HMMER: [Part; 7] = {
+    let h = humanoid(T_SKIN, T_HMM_FACE, T_HMM_ROBE, T_HMM_ROBE, Limb::Fixed, Limb::Fixed);
+    [
+        h[0],
+        h[1],
+        h[2],
+        part([-0.3, 1.0, -0.3], [0.6, 0.22, 0.25], [0.0; 3], Limb::Fixed, [T_HMM_ROBE; 6]),
+        part([-0.25, 0.3, -0.13], [0.5, 0.5, 0.26], [0.0; 3], Limb::Fixed, [T_HMM_ROBE; 6]),
+        h[5],
+        part([-0.06, 1.55, -0.38], [0.12, 0.22, 0.14], [0.0; 3], Limb::Fixed, [T_SKIN; 6]),
+    ]
+};
+
 const WS: u16 = T_WEB_SKIN;
 const fn web_leg(side: f32, z: f32, phase: f32) -> Part {
     let x = if side < 0.0 { -1.05 } else { 0.35 };
@@ -976,6 +1011,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Webber => &WEBBER,
         MobKind::Bloop => &BLOOP,
         MobKind::Woofer => &WOOFER,
+        MobKind::Hmmer => &HMMER,
     }
 }
 

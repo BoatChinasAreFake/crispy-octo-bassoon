@@ -64,6 +64,7 @@ impl Sfx {
             crate::entity::MobKind::Rattler => Sfx::Rattle,
             crate::entity::MobKind::Bloop => Sfx::Bloop,
             crate::entity::MobKind::Woofer => Sfx::Woof,
+            crate::entity::MobKind::Hmmer => Sfx::Hmm,
             _ => Sfx::MobHurt,
         }
     }
@@ -114,6 +115,8 @@ pub enum Sfx {
     Woof,
     /// Shears.
     Snip,
+    /// A Hmmer, hmming.
+    Hmm,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -473,6 +476,13 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             }
             finish(v, 1.0)
         }
+        Sfx::Hmm => {
+            // A thoughtful, nasal "hmm".
+            let mut v = vec![0.0; samples(0.6)];
+            let p = rng.range(0.85, 1.15);
+            voice(&mut v, 0.0, 0.5, 180.0 * p, 150.0 * p, 900.0, 0.04, 1.0, rng);
+            finish(v, 1.0)
+        }
         Sfx::Moo => {
             let mut v = vec![0.0; samples(1.2)];
             let p = rng.range(0.9, 1.1);
@@ -622,6 +632,7 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Chime,
         Sfx::Woof,
         Sfx::Snip,
+        Sfx::Hmm,
     ]);
     v
 }

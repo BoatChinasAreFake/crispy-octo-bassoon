@@ -656,6 +656,11 @@ impl Game {
                     self.host_mob_interact(from, mob, item);
                 }
             }
+            Msg::Trade { mob, index } => {
+                if self.peer_rate_ok(from, "trade", 0.1) {
+                    self.host_trade(from, mob, index);
+                }
+            }
             Msg::Enchant { x, y, z, item, choice } => {
                 if self.peer_rate_ok(from, "enchant", 0.2) {
                     self.host_enchant(from, IVec3::new(x, y, z), item, choice);
@@ -855,7 +860,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } => {}
         }
     }
 
@@ -878,6 +883,10 @@ impl Game {
             // Starers reuse the fuse field for "angry".
             m.angry = kind == MobKind::Starer && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
+            if kind == MobKind::Hmmer {
+                m.seed = s.fuse as u32;
+                m.fuse = 0.0;
+            }
             m.hurt = m.hurt.max(s.hurt);
             m.burning = s.burning;
             // Animals: just what's needed to draw them (and guess at shearing).
@@ -978,7 +987,8 @@ impl Game {
                         kind: m.kind.index(),
                         pos: m.body.pos,
                         yaw: m.yaw,
-                        fuse: if m.angry { 1.0 } else { m.fuse },
+                        // Starers send "angry" and Hmmers their seed (it decides their trades) here.
+                        fuse: if m.kind == MobKind::Hmmer { m.seed as f32 } else if m.angry { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
@@ -1771,6 +1781,45 @@ mod tests {
         let l = &host.peers[&id].ledger;
         assert_eq!(l.enchanted.get(&(SWORD_IRON, (sharp >> 16) as u16)), Some(&1));
         assert_eq!(crate::xp::level_of(l.xp).0, 3);
+    }
+
+    #[test]
+    fn trading_goes_through_the_host() {
+        use crate::villagers::{trades, Job};
+        let mut host = Game::new(791, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Tradey", "").unwrap();
+        let id = client.my_id;
+        host.mobs.clear();
+        let seed = (0..64u32).find(|&s| Job::of(s) == Job::Farmer).unwrap();
+        host.world.new_huts.push((spawn + Vec3::new(2.0, 0.5, 0.0), seed));
+        host.house_hmmers();
+        let hmmer = host.mobs[0].id;
+        host.give_peer(id, WHEAT, 40);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(WHEAT) == 40 && c.mobs.iter().any(|m| m.id == hmmer && m.seed == seed)));
+        // The client sees the same trades, and makes one.
+        client.open_trade(hmmer);
+        let list = client.trade_list().expect("talking").1;
+        assert_eq!(list, trades(seed));
+        let wheat = list.iter().position(|t| t.give[0].0 == WHEAT).unwrap();
+        client.make_trade(wheat);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(GOLD_INGOT) == 1 && c.inv.count(WHEAT) == 20));
+        let l = &host.peers[&id].ledger;
+        assert_eq!((l.bag.count(WHEAT), l.bag.count(GOLD_INGOT)), (20, 1));
+        // Trading wheat they don't have (as far as the host knows) gets nothing.
+        host.peers.get_mut(&id).unwrap().ledger.bag.take(WHEAT, 20);
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.net_send_msg(Msg::Trade { mob: hmmer, index: wheat as u8 });
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.peers[&id].ledger.bag.count(GOLD_INGOT), 1);
     }
 
     #[test]

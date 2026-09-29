@@ -34,6 +34,7 @@ mod server;
 mod structures;
 mod settings;
 mod upnp;
+mod villagers;
 mod sound;
 mod texture;
 mod ui;
@@ -92,6 +93,8 @@ enum Screen {
     Anvil,
     /// An enchanting table is open (see enchant.rs).
     Enchant,
+    /// Trading with a Hmmer (see villagers.rs).
+    Trade,
     /// Keep inventory, difficulty, daylight cycle (the world's owner can change them).
     WorldSettings,
     Dead,
@@ -230,6 +233,10 @@ impl App {
         }
         if self.screen == Screen::Enchant && s != Screen::Enchant {
             self.game.close_enchanting();
+        }
+        if self.screen == Screen::Trade && s != Screen::Trade {
+            self.game.trading = None;
+            self.game.inv.return_cursor();
         }
         // Leaving a screen where settings change: keep them for next time.
         if matches!(self.screen, Screen::Options { .. } | Screen::Multiplayer) && self.screen != s {
@@ -530,7 +537,7 @@ impl App {
                     self.game.third_person = !self.game.third_person;
                 }
             }
-            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant => {
+            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade => {
                 if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
                     self.set_screen(Screen::Playing);
                 }
@@ -575,7 +582,7 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Title | Screen::Dead) || self.game.net.is_some();
         if simulate {
             self.game.update(dt, &controls);
         }
@@ -593,6 +600,11 @@ impl App {
         if self.game.enchanting.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Enchant);
         } else if self.screen == Screen::Enchant && !self.game.enchanting_still_there() {
+            self.set_screen(Screen::Playing);
+        }
+        if self.game.trading.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Trade);
+        } else if self.screen == Screen::Trade && self.game.trade_list().is_none() {
             self.set_screen(Screen::Playing);
         }
         if let Some(e) = self.game.net_error.take() {
@@ -1179,6 +1191,7 @@ impl App {
                     Screen::Container => self.container_screen(),
                     Screen::Anvil => self.anvil_screen(),
                     Screen::Enchant => self.enchant_screen(),
+                    Screen::Trade => self.trade_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
@@ -1980,6 +1993,77 @@ impl App {
         }
     }
 
+    fn trade_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let slot = 20.0 * s;
+        let Some((job, list)) = self.game.trade_list() else { return };
+        let row = slot * 1.1;
+        let panel_w = slot * 9.0 + 12.0 * s;
+        let panel_h = 24.0 * s + row * list.len() as f32 + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
+        let x0 = (w - panel_w) / 2.0;
+        let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
+        let sx = x0 + 6.0 * s;
+        let mut tooltip: Option<String> = None;
+        self.ui.text(&format!("Hmmer: {}", job.name()), sx, y0 + 12.0 * s, 10.0, WHITE);
+        let top = y0 + 20.0 * s;
+        let (mx, my) = mouse_position();
+        for (i, t) in list.iter().enumerate() {
+            let y = top + i as f32 * row;
+            let r = Rect::new(sx, y, panel_w - 12.0 * s, slot);
+            let afford = self.game.creative || villagers::can_afford(|id| self.game.inv.count(id), t);
+            let hover = r.contains(vec2(mx, my));
+            draw_rectangle(r.x, r.y, r.w, r.h, if hover && afford { Color::new(0.35, 0.3, 0.2, 1.0) } else { Color::new(0.18, 0.16, 0.14, 1.0) });
+            let mut x = sx;
+            for (id, n) in t.give {
+                if id != AIR {
+                    self.ui.stack_worn(Some((id, n)), 0, x, y, slot, false);
+                    if hover && mx < x + slot && mx >= x {
+                        tooltip = label(Some((id, n)), 0);
+                    }
+                }
+                x += slot;
+            }
+            self.ui.tile(texture::T_ARROW_UI, sx + slot * 2.3, y, slot, if afford { WHITE } else { Color::new(0.4, 0.4, 0.4, 1.0) });
+            let gx = sx + slot * 3.6;
+            self.ui.stack_worn(Some(t.get), t.wear, gx, y, slot, false);
+            self.ui.text(&label(Some(t.get), t.wear).unwrap_or_default(), gx + slot * 1.2, y + slot * 0.62, 7.0, if afford { WHITE } else { GRAY });
+            if hover && mx >= gx {
+                tooltip = label(Some(t.get), t.wear);
+            }
+            if hover && is_mouse_button_pressed(MouseButton::Left) && self.game.inv.cursor.is_none() {
+                self.game.make_trade(i);
+            }
+        }
+        let inv_y = top + row * list.len() as f32 + 12.0 * s;
+        self.ui.text("Inventory", sx, inv_y - 4.0 * s, 8.0, GRAY);
+        for i in 9..36 {
+            let j = i - 9;
+            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, false);
+        }
+        let hot_y = inv_y + slot * 3.0 + 6.0 * s;
+        for i in 0..9 {
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, false);
+        }
+        if let Some(cur) = self.game.inv.cursor {
+            self.ui.stack_worn(Some(cur), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
+        } else if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
     fn inventory_slot_click(&mut self, i: usize, l: bool, r: bool, shift: bool) {
         if l && shift && self.game.anvil.is_some() {
             self.game.anvil_quick_put(i);
@@ -2436,7 +2520,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2565,7 +2649,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2749,6 +2833,22 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "trade" && frames == 125 {
+                // A Librarian and a purse of gold.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let seed = (0..64u32).find(|&s| villagers::Job::of(s) == villagers::Job::Librarian).unwrap_or(1);
+                app.game.world.new_huts.push((p + fwd * 3.0, seed));
+                app.game.house_hmmers();
+                let id = app.game.mobs.last().map(|m| m.id).unwrap_or(0);
+                if let Some(m) = app.game.mobs.last_mut() {
+                    m.yaw = s.yaw + std::f32::consts::PI;
+                }
+                app.game.inv.add(block::GOLD_INGOT, 23);
+                app.game.inv.add(block::FEATHER, 30);
+                app.game.inv.add(block::BOOK, 3);
+                app.game.open_trade(id);
             }
             if s.mode == "zappy" && frames == 125 {
                 // A lever wired to a row of lamps and a door; a button and a plate beside.

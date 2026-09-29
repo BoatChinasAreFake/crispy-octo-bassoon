@@ -142,6 +142,10 @@ impl Game {
         let held = self.inv.held();
         let mob = &self.mobs[mob_index];
         let id = mob.id;
+        if mob.kind == MobKind::Hmmer {
+            self.open_trade(id);
+            return true;
+        }
         if self.is_client() {
             // The host decides (and takes what was used); shears wear here and there alike.
             if will_shear(mob, held) {
@@ -370,7 +374,12 @@ pub fn encode_mobs(mobs: &[Mob]) -> Vec<u8> {
             out.extend_from_slice(&v.to_le_bytes());
         }
         out.push(m.size as u8);
-        out.push(m.sheared as u8 | (m.sitting as u8) << 1);
+        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2);
+        out.extend_from_slice(&m.seed.to_le_bytes());
+        let home = m.home.unwrap_or(Vec3::ZERO);
+        for v in [home.x, home.y, home.z] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
         let owner = m.owner.as_deref().unwrap_or("");
         let owner = &owner.as_bytes()[..owner.len().min(64)];
         out.push(owner.len() as u8);
@@ -393,6 +402,8 @@ pub fn decode_mobs(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<Mob> {
         let Some(kind) = take(1).and_then(|s| MobKind::from_index(s[0])) else { break };
         let Some(f) = take(28).map(|s| (0..7).map(|k| f32::from_le_bytes([s[k * 4], s[k * 4 + 1], s[k * 4 + 2], s[k * 4 + 3]])).collect::<Vec<f32>>()) else { break };
         let Some(&[size, flags]) = take(2) else { break };
+        let Some(seed) = take(4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])) else { break };
+        let Some(home) = take(12).map(|s| (0..3).map(|k| f32::from_le_bytes([s[k * 4], s[k * 4 + 1], s[k * 4 + 2], s[k * 4 + 3]])).collect::<Vec<f32>>()) else { break };
         let Some(len) = take(1).map(|s| s[0] as usize) else { break };
         let Some(owner) = take(len).map(|s| String::from_utf8_lossy(s).into_owned()) else { break };
         if !f.iter().all(|x| x.is_finite()) {
@@ -406,6 +417,8 @@ pub fn decode_mobs(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<Mob> {
         m.sheared = flags & 1 != 0;
         m.sitting = flags & 2 != 0;
         m.owner = (!owner.is_empty()).then_some(owner);
+        m.seed = seed & 0xFF_FFFF;
+        m.home = (flags & 4 != 0 && home.iter().all(|v| v.is_finite())).then(|| Vec3::new(home[0], home[1], home[2]));
         m.persistent = true;
         v.push(m);
     }

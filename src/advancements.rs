@@ -61,6 +61,7 @@ pub const ALL: &[Advancement] = &[
     adv("good_boy", "Who's a Good Boy?", "Tame a Woofer with a bone. It's you. You're the good boy now."),
     adv("the_birds_and_the_bees", "The Birds and the Bees", "Breed two animals. We won't ask how."),
     adv("its_alive", "It's Alive!", "Light a Zappy Lamp with a switch. Electricity: now legally distinct."),
+    adv("what_a_deal", "What a Deal", "Trade with a Hmmer. Gold is finally good for something."),
     adv("enchanter", "Enchanter", "Enchant something. The table knows words you don't."),
     adv("good_as_new", "Good as New(ish)", "Repair something at an anvil. Hit it until it's fixed."),
     adv("ominous", "Drops Ominously", "Use an anvil until it crumbles. It warned you."),

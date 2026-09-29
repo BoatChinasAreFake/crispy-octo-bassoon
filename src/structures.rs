@@ -300,11 +300,29 @@ fn loot_wear(item: Id, kind: Kind, rng: &mut Rng) -> Wear {
 }
 
 impl World {
+    /// Roughly the middle of the hut a chest is in (the free floor nearest it).
+    fn hut_middle(&self, chest: IVec3) -> macroquad::math::Vec3 {
+        let mut best = chest.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5);
+        for d in [IVec3::new(-2, 0, 2), IVec3::new(2, 0, 2), IVec3::new(-2, 0, -2), IVec3::new(2, 0, -2)] {
+            let q = chest + d;
+            if self.get_v(q) == AIR && self.get_v(q + IVec3::Y) == AIR {
+                best = q.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5);
+                break;
+            }
+        }
+        best
+    }
+
     /// A chunk just arrived: fill any structure chests in it that have never been filled.
     pub fn fill_structure_chests(&mut self, cx: i32, cz: i32) {
         for (p, kind, seed) in self.generator.structure_chests(cx, cz) {
             if self.get_v(p) == CHEST && !self.containers.contains_key(&p) {
                 self.containers.insert(p, loot(kind, seed));
+                if kind == Kind::Hut {
+                    // Someone lives here: they stand a step in from the chest.
+                    let spot = (p.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5)).lerp(self.hut_middle(p), 0.5);
+                    self.new_huts.push((spot, seed));
+                }
             }
         }
     }

@@ -205,6 +205,8 @@ pub const T_LAMP_ON: u16 = 228;
 pub const T_ZAP_DUST: u16 = 229;
 pub const T_BOOK: u16 = 230;
 pub const T_ENCHANTED_BOOK: u16 = 231;
+pub const T_HMM_FACE: u16 = 232;
+pub const T_HMM_ROBE: u16 = 233;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2050,6 +2052,15 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         a.sprite(tile, &BOOK_SPRITE, &[('#', rgb(30, 15, 10)), ('c', cover), ('d', shade(cover, 0.7)), ('p', rgb(240, 232, 210)), ('g', rgb(250, 210, 60))]);
     }
     a.sprite(T_ZAP_DUST, &DUST_SPRITE, &[('#', rgb(90, 5, 5)), ('r', rgb(220, 30, 25)), ('h', rgb(255, 120, 100))]);
+    // ---- Hmmers
+    a.copy(T_SKIN, T_HMM_FACE);
+    for (x, y, c) in [(3, 6, rgb(255, 255, 255)), (4, 6, rgb(40, 110, 40)), (11, 6, rgb(40, 110, 40)), (12, 6, rgb(255, 255, 255))] {
+        a.set(T_HMM_FACE, x, y, c);
+    }
+    for x in 2..14 {
+        a.set(T_HMM_FACE, x, 4, rgb(60, 40, 25));
+    }
+    a.each(T_HMM_ROBE, |x, _, r, _| shade(rgb(115, 75, 45), r.range(0.85, 1.08) * if x % 7 == 0 { 0.85 } else { 1.0 }));
     // ---- Animals
     a.speckle(T_WOOF_SKIN, rgb(200, 196, 190), 0.07);
     a.copy(T_WOOF_SKIN, T_WOOF_FACE);

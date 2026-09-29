@@ -415,6 +415,9 @@ pub struct World {
     pub simulate_liquids: bool,
     /// Cells where Zappy Dust contraptions may need updating (see wiring.rs); same rules.
     pub zap_dirty: HashSet<IVec3>,
+    /// Huts whose chests were just filled for the first time: a Hmmer should
+    /// move in (where to stand, and its seed; see villagers.rs).
+    pub new_huts: Vec<(Vec3, u32)>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -452,6 +455,7 @@ impl World {
             structure_loot: true,
             liquid_dirty: HashSet::new(),
             zap_dirty: HashSet::new(),
+            new_huts: Vec::new(),
             simulate_liquids: true,
             pending: HashSet::new(),
             edit_log: Vec::new(),
