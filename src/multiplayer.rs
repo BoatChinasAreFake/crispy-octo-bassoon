@@ -38,11 +38,13 @@ pub struct Peer {
     pub ledger: crate::ledger::Ledger,
     /// Their last report of their inventory, health and hunger (see players.rs).
     pub report: Option<crate::players::Report>,
+    /// How they look (see nametags.rs).
+    pub skin: u8,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0 }
     }
     pub fn alive(&self) -> bool {
         self.flags & FLAG_DEAD == 0
@@ -414,6 +416,12 @@ impl Game {
                 roster.push(Msg::PlayerJoin { id: self.my_id, name: self.player_name.clone() });
             }
             roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
+            // How everyone looks, and what the mobs are called.
+            if !self.dedicated {
+                roster.push(Msg::PlayerSkin { id: self.my_id, skin: self.skin });
+            }
+            roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerSkin { id, skin: p.skin }));
+            roster.extend(self.mob_names.iter().map(|(&mob, name)| Msg::MobName { mob, name: name.clone() }));
             roster.push(self.rules_msg());
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
             // Words on signs and things in frames.
@@ -620,7 +628,24 @@ impl Game {
                 self.msg(format!("<{who}> {text}"));
                 self.relay(from, Msg::Chat { from, text });
             }
+            Msg::Splash { item, at } => self.host_splash(from, item, at),
+            Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
+            Msg::MobName { mob, name } => {
+                if self.peer_rate_ok(from, "name", 0.5) {
+                    self.host_mob_name(from, mob, name);
+                }
+            }
+            Msg::PlayerSkin { skin, .. } => {
+                let skin = skin % crate::nametags::SKINS.len() as u8;
+                if let Some(p) = self.peers.get_mut(&from) {
+                    p.skin = skin;
+                }
+                self.relay(from, Msg::PlayerSkin { id: from, skin });
+            }
             Msg::UseItem { item } => {
+                if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
+                    self.host_fill_bottle(from);
+                }
                 if valid_item(item) && self.peer_rate_ok(from, "use", 0.1) && self.peer_has(from, item) {
                     let who = self.peer_name(from);
                     self.fire("on_use_item", vec![who.into(), reg().key_of(item).into()]);
@@ -782,10 +807,18 @@ impl Game {
         if let Some((f, o, true)) = door_state(new) {
             return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
         }
+        // Fire only where it can burn.
+        if new == FIRE {
+            return crate::fire::can_burn_at(&self.world, IVec3::new(x, y, z));
+        }
         // Portals light only inside a real obsidian frame.
         if matches!(new, PORTAL_X | PORTAL_Z) {
             let p = IVec3::new(x, y, z);
             return old == AIR && crate::scorch::portal_frame(&self.world, p, new == PORTAL_X).is_some();
+        }
+        // Gates and trapdoors swing; fences and panes may be placed at any join (the host reshapes them).
+        if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new)) {
+            return a == b && matches!(a, GATE_FIRST | TRAPDOOR_FIRST);
         }
         // Levers flip both ways, buttons only go in (the host lets them out).
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
@@ -904,6 +937,23 @@ impl Game {
                 }
             }
             Msg::Time(t) => self.time = t.rem_euclid(1.0),
+            Msg::MountMob { mob } => self.mount_mob(mob),
+            Msg::MobName { mob, name } => {
+                let name = crate::nametags::clean_name(&name);
+                if !name.is_empty() {
+                    self.mob_names.insert(mob, name);
+                }
+            }
+            Msg::PlayerSkin { id, skin } => {
+                if let Some(p) = self.peers.get_mut(&id) {
+                    p.skin = skin % crate::nametags::SKINS.len() as u8;
+                }
+            }
+            Msg::PotionEffect { item } => {
+                if let Some((p, false)) = crate::potions::potion_of(item) {
+                    self.apply_potion(p);
+                }
+            }
             Msg::Chat { from: SYSTEM, text } => self.msg(text),
             Msg::Chat { from, text } => {
                 let name = self.peer_name(from);
@@ -927,7 +977,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } => {}
         }
     }
 
@@ -964,6 +1014,7 @@ impl Game {
             m.owner = (s.flags & MOB_TAMED != 0).then(String::new);
             m.sitting = s.flags & MOB_SITTING != 0;
             m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
+            m.saddled = s.flags & MOB_SADDLED != 0;
             next.push(m);
         }
         self.mobs = next;
@@ -973,7 +1024,12 @@ impl Game {
 
     /// Client-side entity tick: particles plus smoothing the host's mobs.
     pub fn client_entities(&mut self, dt: f32) {
+        let mounted = self.mounted;
         for m in self.mobs.iter_mut() {
+            // The Galloper we're riding goes where we steer it.
+            if Some(m.id) == mounted {
+                continue;
+            }
             let before = m.body.pos;
             let k = (dt * 12.0).min(1.0);
             m.body.pos += (m.net_pos - m.body.pos) * k;
@@ -1020,6 +1076,16 @@ impl Game {
         for chunk in edits.chunks(4096) {
             self.net_send_msg(Msg::Blocks(chunk.to_vec()));
         }
+        // Edits just read from a region file go to everyone (they may be near it).
+        let news = self.world.regions.as_mut().map(|r| std::mem::take(&mut r.news)).unwrap_or_default();
+        if matches!(self.net, Some(Net::Host(_))) {
+            for (cx, cz) in news {
+                if let Some(m) = self.world.mods.get(&(cx, cz)) {
+                    let entries = m.iter().map(|(&i, &b)| (i, b)).collect();
+                    self.net_send_msg(Msg::Mods { cx, cz, entries });
+                }
+            }
+        }
 
         for t in self.net_timers.iter_mut() {
             *t -= dt;
@@ -1059,7 +1125,7 @@ impl Game {
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
-                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE,
+                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE | m.saddled as u8 * MOB_SADDLED,
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();

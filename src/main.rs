@@ -3,35 +3,46 @@
 //! generated at startup.
 
 mod admin;
+mod access;
 mod advancements;
 mod animals;
 mod anvil;
 mod block;
 mod building;
+mod carpentry;
 mod combat;
 mod containers;
+mod contraptions;
 mod decor;
 mod drops;
 mod enchant;
 mod entity;
 mod farming;
+mod fire;
 mod fishing;
 mod game;
+mod hollow;
+mod hoppers;
+mod horses;
 mod hunger;
 mod inventory;
 mod keybinds;
 mod ledger;
+mod light;
 mod liquids;
 mod mesher;
 mod mods;
 mod multiplayer;
+mod nametags;
 mod navigation;
 mod net;
 mod noise;
 mod pad;
 mod palette;
 mod player;
+mod potions;
 mod players;
+mod regions;
 mod render;
 mod rules;
 mod save;
@@ -39,6 +50,7 @@ mod scorch;
 mod scripting;
 mod server;
 mod structures;
+mod trees;
 mod settings;
 mod upnp;
 mod vehicles;
@@ -105,6 +117,8 @@ enum Screen {
     Trade,
     /// Writing on a sign (see decor.rs).
     Sign,
+    /// Writing a Name Tag for a mob (see nametags.rs).
+    NameTag,
     /// Keep inventory, difficulty, daylight cycle (the world's owner can change them).
     WorldSettings,
     Dead,
@@ -148,6 +162,15 @@ struct App {
     joining: Option<(net::Conn, f64)>,
     /// Chat line being typed, if the chat box is open.
     chat: Option<String>,
+    /// Lines already sent (Up/Down bring them back), which one is showing,
+    /// and how far the chat log is scrolled back.
+    chat_sent: Vec<String>,
+    /// The name being written on a Name Tag.
+    name_line: String,
+    /// Sound subtitles on screen (see access.rs).
+    captions: access::Captions,
+    chat_pick: Option<usize>,
+    chat_scroll: usize,
     last_view_proj: Mat4,
     lan_addr: Option<String>,
     /// Password for joining, and for hosting if set.
@@ -302,6 +325,14 @@ impl App {
         gl.flush();
         self.renderer.clear(gl.quad_context);
         self.game = game;
+        // A world of our own keeps its block edits in region files beside its save.
+        if let Some(id) = &self.current_world {
+            let dir = regions::region_dir(&save::world_file(&save::saves_dir(), id));
+            self.game.world.use_regions(dir);
+        }
+        // We look like our settings say (joined players tell the host).
+        let skin = self.settings.skin;
+        self.game.set_skin(skin);
         self.set_screen(Screen::Playing);
     }
 
@@ -407,6 +438,9 @@ impl App {
     /// Write the game into its world slot (None if it has no slot, e.g. a joined server).
     fn write_current_world(&mut self) -> Option<std::io::Result<()>> {
         let id = self.current_world.clone()?;
+        if let Err(e) = self.game.world.flush_regions() {
+            return Some(Err(e));
+        }
         let data = self.game.to_save();
         Some(save::write_to(&save::world_file(&save::saves_dir(), &id), &data))
     }
@@ -465,13 +499,44 @@ impl App {
     fn handle_keys(&mut self) {
         if let Some(line) = &mut self.chat {
             type_into(line, 200);
+            // Up and Down bring back what you said before; Page Up/Down and the wheel scroll the log.
+            let recall = if is_key_pressed(KeyCode::Up) && !self.chat_sent.is_empty() {
+                Some(self.chat_pick.map_or(0, |p| p + 1).min(self.chat_sent.len() - 1))
+            } else if is_key_pressed(KeyCode::Down) {
+                self.chat_pick.and_then(|p| p.checked_sub(1))
+            } else {
+                self.chat_pick
+            };
+            if recall != self.chat_pick {
+                self.chat_pick = recall;
+                match recall {
+                    Some(p) => *line = self.chat_sent[self.chat_sent.len() - 1 - p].clone(),
+                    None => line.clear(),
+                }
+            }
+            let wheel = mouse_wheel().1;
+            if is_key_pressed(KeyCode::PageUp) || wheel > 0.1 {
+                self.chat_scroll = (self.chat_scroll + 3).min(self.game.chat_log.len().saturating_sub(1));
+            } else if is_key_pressed(KeyCode::PageDown) || wheel < -0.1 {
+                self.chat_scroll = self.chat_scroll.saturating_sub(3);
+            }
             if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
                 let text = line.clone();
                 self.chat = None;
+                if !text.trim().is_empty() && self.chat_sent.last() != Some(&text) {
+                    self.chat_sent.push(text.clone());
+                    if self.chat_sent.len() > 50 {
+                        self.chat_sent.remove(0);
+                    }
+                }
+                self.chat_pick = None;
+                self.chat_scroll = 0;
                 self.game.send_chat(&text);
                 self.set_screen(Screen::Playing);
             } else if is_key_pressed(KeyCode::Escape) {
                 self.chat = None;
+                self.chat_pick = None;
+                self.chat_scroll = 0;
                 self.set_screen(Screen::Playing);
             }
             return;
@@ -585,6 +650,15 @@ impl App {
                     self.set_screen(Screen::Playing);
                 }
             }
+            Screen::NameTag => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.finish_name_tag(false);
+                } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                    self.finish_name_tag(true);
+                } else {
+                    type_into(&mut self.name_line, nametags::NAME_LEN);
+                }
+            }
             Screen::Sign => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Playing);
@@ -660,6 +734,10 @@ impl App {
         }
         if self.game.editing_sign.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Sign);
+        }
+        if self.game.naming.is_some() && self.screen == Screen::Playing {
+            drain_chars();
+            self.set_screen(Screen::NameTag);
         }
         if self.game.trading.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Trade);
@@ -1222,6 +1300,78 @@ impl App {
         }
     }
 
+    /// Writing a Name Tag for a mob.
+    fn name_tag_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        let (bw, bh) = (200.0 * s, 34.0 * s);
+        let (x0, y0) = ((w - bw) / 2.0, (h - bh) / 2.0 - 20.0 * s);
+        draw_rectangle(x0, y0, bw, bh, Color::new(0.84, 0.75, 0.55, 1.0));
+        draw_rectangle_lines(x0, y0, bw, bh, 2.0 * s, Color::new(0.45, 0.35, 0.2, 1.0));
+        self.ui.text_centered("Name it (Enter: done, Esc: never mind)", w / 2.0, y0 - 8.0 * s, 9.0, WHITE);
+        let cursor = if (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+        self.ui.text_centered(&format!("{}{cursor}", self.name_line), w / 2.0, y0 + 22.0 * s, 11.0, Color::new(0.1, 0.07, 0.03, 1.0));
+        if self.ui.button(Rect::new(w / 2.0 - 50.0 * s, y0 + bh + 10.0 * s, 100.0 * s, 20.0 * s), "Done", true) {
+            self.finish_name_tag(true);
+        }
+    }
+
+    /// Leave the Name Tag screen, naming the mob or not.
+    fn finish_name_tag(&mut self, confirm: bool) {
+        if let Some(id) = self.game.naming.take()
+            && confirm
+        {
+            let name = self.name_line.clone();
+            self.game.name_mob(id, &name);
+        }
+        self.name_line.clear();
+        self.set_screen(Screen::Playing);
+    }
+
+    /// Sound subtitles, bottom right (see access.rs).
+    fn captions_hud(&self) {
+        let (w, h, s) = (screen_width(), screen_height(), self.ui.s);
+        for (i, (text, side, left)) in self.captions.lines.iter().rev().enumerate() {
+            let line = match side {
+                -1 => format!("< {text}"),
+                1 => format!("{text} >"),
+                _ => text.to_string(),
+            };
+            let a = left.min(1.0);
+            let tw = self.ui.text_width(&line, 8.0);
+            let (x, y) = (w - tw - 10.0 * s, h - 60.0 * s - i as f32 * 10.0 * s);
+            draw_rectangle(x - 3.0 * s, y - 8.0 * s, tw + 6.0 * s, 10.0 * s, Color::new(0.0, 0.0, 0.0, 0.6 * a));
+            self.ui.text(&line, x, y, 8.0, Color::new(1.0, 1.0, 1.0, a));
+        }
+    }
+
+    /// The Hollow Wyrm's health, across the top while it's near.
+    fn boss_bar(&self) {
+        let g = &self.game;
+        let Some(m) = g.mobs.iter().find(|m| m.kind == entity::MobKind::Wyrm && m.body.pos.distance(g.player.body.pos) < 150.0) else { return };
+        let (w, s) = (screen_width(), self.ui.s);
+        let bw = (180.0 * s).min(w * 0.7);
+        let (x, y) = (w / 2.0 - bw / 2.0, 18.0 * s);
+        let frac = (m.health / m.kind.max_health()).clamp(0.0, 1.0);
+        self.ui.text_centered("Hollow Wyrm", w / 2.0, y - 3.0 * s, 9.0, Color::new(0.85, 0.6, 1.0, 1.0));
+        draw_rectangle(x, y, bw, 5.0 * s, Color::new(0.1, 0.05, 0.12, 0.9));
+        draw_rectangle(x, y, bw * frac, 5.0 * s, Color::new(0.75, 0.25, 0.9, 1.0));
+    }
+
+    /// Potion effects and their time left, down the left side.
+    fn effects_hud(&self) {
+        let s = self.ui.s;
+        let h = screen_height();
+        for (i, (p, left)) in self.game.effects.iter().enumerate() {
+            let y = h * 0.35 + i as f32 * 12.0 * s;
+            let c = p.colour();
+            let secs = left.max(0.0) as i32;
+            draw_rectangle(4.0 * s, y - 7.0 * s, 6.0 * s, 6.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
+            self.ui.text(&format!("{} {}:{:02}", p.name(), secs / 60, secs % 60), 13.0 * s, y, 8.0, WHITE);
+        }
+    }
+
     /// A compass and a map, while you hold them.
     fn navigation_hud(&mut self, dt: f32) {
         let (w, _) = (screen_width(), screen_height());
@@ -1291,6 +1441,22 @@ impl App {
             draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 10.0 * s, tw + 6.0 * s, 12.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
             self.ui.text_centered(&p.name, sx, sy, 9.0, WHITE);
         }
+        // Mobs with Name Tags.
+        for m in &self.game.mobs {
+            let Some(name) = self.game.mob_names.get(&m.id) else { continue };
+            let at = m.body.pos + Vec3::Y * (m.body.height + 0.4);
+            if at.distance(eye) > 32.0 {
+                continue;
+            }
+            let clip = self.last_view_proj * at.extend(1.0);
+            if clip.w < 0.1 {
+                continue;
+            }
+            let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
+            let tw = self.ui.text_width(name, 8.0);
+            draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4));
+            self.ui.text_centered(name, sx, sy, 8.0, Color::new(1.0, 0.95, 0.8, 1.0));
+        }
     }
 
     fn play_sounds(&mut self, dt: f32) {
@@ -1300,11 +1466,19 @@ impl App {
         }
         // Keep the game world quiet while paused or in menus layered over it.
         let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Help { .. } | Screen::Advancements | Screen::FishLog);
+        let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
                 self.audio.play(s, at, listener);
+                // Captions for what's heard (only what's close enough to hear).
+                let heard = at.is_none_or(|p| p.distance(listener) < 24.0);
+                if self.settings.subtitles && heard && let Some(text) = access::caption(s) {
+                    self.captions.add(text, access::side(listener, yaw, at));
+                }
             }
         }
+        self.captions.tick(dt);
+        self.game.colour_blind = self.settings.colour_blind;
         let in_game = !self.game.menu && self.screen != Screen::Dead;
         self.audio.update_music(dt, in_game);
     }
@@ -1347,6 +1521,9 @@ impl App {
                 self.hud();
                 if !self.game.menu && self.game.ready {
                     self.navigation_hud(get_frame_time().min(0.05));
+                    self.effects_hud();
+                    self.boss_bar();
+                    self.captions_hud();
                 }
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
@@ -1358,6 +1535,7 @@ impl App {
                     Screen::Enchant => self.enchant_screen(),
                     Screen::Trade => self.trade_screen(),
                     Screen::Sign => self.sign_screen(),
+                    Screen::NameTag => self.name_tag_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
@@ -1451,14 +1629,23 @@ impl App {
             }
         }
 
-        // Chat-ish messages (all recent ones stay visible while typing)
+        // Chat-ish messages. While typing, the whole log (scrollable) instead.
         let typing = self.chat.is_some();
-        for (i, (m, t)) in g.messages.iter().rev().enumerate() {
-            let a = if typing { 1.0 } else { t.min(1.0) };
+        let lines: Vec<(&str, f32)> = if typing {
+            let n = g.chat_log.len();
+            let end = n.saturating_sub(self.chat_scroll);
+            g.chat_log.iter().take(end).rev().take(14).map(|m| (m.as_str(), 1.0)).collect()
+        } else {
+            g.messages.iter().rev().map(|(m, t)| (m.as_str(), t.min(1.0))).collect()
+        };
+        for (i, (m, a)) in lines.into_iter().enumerate() {
             let y = h - 40.0 * s - i as f32 * 11.0 * s;
             let tw = self.ui.text_width(m, 9.0);
             draw_rectangle(4.0 * s, y - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4 * a));
             self.ui.text(m, 7.0 * s, y, 9.0, Color::new(1.0, 1.0, 1.0, a));
+        }
+        if typing && self.chat_scroll > 0 {
+            self.ui.text(&format!("(scrolled back {} lines: Page Down to return)", self.chat_scroll), 7.0 * s, h - 40.0 * s - 14.5 * 11.0 * s, 8.0, GRAY);
         }
 
         if let Some(line) = &self.chat {
@@ -1490,12 +1677,24 @@ impl App {
                         None => "Nearest structure: none nearby".to_string(),
                     }
                 },
-                format!("Chunks: {} meshed, {} loaded", self.renderer.chunks.len(), g.world.chunks.len()),
+                format!("Chunks: {} meshed, {} loaded; {} regions of edits in memory", self.renderer.chunks.len(), g.world.chunks.len(), g.world.regions_loaded()),
                 {
                     // Palette-packed block storage vs. two bytes per block.
                     let (bytes, bits) = g.world.chunks.values().fold((0, 0), |(b, t), c| (b + c.blocks.bytes(), t + c.blocks.total_bits()));
                     let blocks = (g.world.chunks.len() * (world::CW * world::CW * world::CH) as usize).max(1);
                     format!("Block memory: {:.1} MB ({:.1} bits/block, flat would be {:.1} MB)", bytes as f64 / 1e6, bits as f64 / blocks as f64, blocks as f64 * 2.0 / 1e6)
+                },
+                {
+                    // Light where you stand, and how much of it is stored cell by cell.
+                    let e = g.player.eye().floor().as_ivec3();
+                    let detailed: usize = g.world.chunks.values().map(|c| c.light.detailed()).sum();
+                    format!(
+                        "Light: sky {} block {}  ({} of {} sections stored in full)",
+                        g.world.sky_level(e.x, e.y, e.z),
+                        g.world.block_level(e.x, e.y, e.z),
+                        detailed,
+                        g.world.chunks.len() * (world::CH / 16) as usize
+                    )
                 },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
@@ -1790,20 +1989,36 @@ impl App {
         *vol = (*vol + 0.1 * row(&self.ui, format!("Sound Volume: {:.0}%", *vol * 100.0), y) as f32).clamp(0.0, 1.0);
         *vol = (*vol * 10.0).round() / 10.0;
         y += bh + 5.0 * s;
-        let music = if self.audio.music_on { "Music: ON (occasionally, tastefully)" } else { "Music: OFF" };
-        if self.ui.button(Rect::new(x, y, bw, bh), music, true) {
+        // Two to a row from here on.
+        let half = (bw - 4.0 * s) / 2.0;
+        let (left, right) = (x, x + half + 4.0 * s);
+        let music = if self.audio.music_on { "Music: ON" } else { "Music: OFF" };
+        if self.ui.button(Rect::new(left, y, half, bh), music, true) {
             self.audio.music_on = !self.audio.music_on;
         }
-        y += bh + 5.0 * s;
-        let st = &mut self.settings;
-        let fs = if st.fullscreen { "Fullscreen: ON (F11)" } else { "Fullscreen: OFF (F11)" };
-        if self.ui.button(Rect::new(x, y, bw, bh), fs, true) {
+        let fs = if self.settings.fullscreen { "Fullscreen: ON" } else { "Fullscreen: OFF" };
+        if self.ui.button(Rect::new(right, y, half, bh), fs, true) {
             self.settings.fullscreen = !self.settings.fullscreen;
             set_fullscreen(self.settings.fullscreen);
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Controls...", true) {
+        if self.ui.button(Rect::new(left, y, half, bh), "Controls...", true) {
             self.set_screen(Screen::Controls { from_title });
+        }
+        let skin = format!("Skin: {}", nametags::skin_name(self.settings.skin));
+        if self.ui.button(Rect::new(right, y, half, bh), &skin, true) {
+            self.settings.skin = (self.settings.skin + 1) % nametags::SKINS.len() as u8;
+            let k = self.settings.skin;
+            self.game.set_skin(k);
+        }
+        y += bh + 5.0 * s;
+        let subs = if self.settings.subtitles { "Subtitles: ON" } else { "Subtitles: OFF" };
+        if self.ui.button(Rect::new(left, y, half, bh), subs, true) {
+            self.settings.subtitles = !self.settings.subtitles;
+        }
+        let cb = if self.settings.colour_blind { "Colour-blind: ON" } else { "Colour-blind: OFF" };
+        if self.ui.button(Rect::new(right, y, half, bh), cb, true) {
+            self.settings.colour_blind = !self.settings.colour_blind;
         }
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
@@ -1950,7 +2165,7 @@ impl App {
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let slot = 20.0 * s;
-        let top_h = if containers::is_furnace(kind) { slot * 3.2 } else { slot * 3.0 };
+        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * 3.0 };
         let panel_w = slot * 9.0 + 12.0 * s;
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
@@ -1963,11 +2178,11 @@ impl App {
         self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
         let top = y0 + 18.0 * s;
         // (slot index, x, y) for the container's own slots.
-        let spots: Vec<(usize, f32, f32)> = if containers::is_furnace(kind) {
+        let spots: Vec<(usize, f32, f32)> = if containers::is_three_slot(kind) {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
         } else {
-            (0..containers::CHEST_SLOTS).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
+            (0..c.slots.len()).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
         };
         for &(i, x, y) in &spots {
             let (l, r, hov) = self.ui.slot_worn(c.slots[i], c.wear[i], x, y, slot, false);
@@ -1977,6 +2192,21 @@ impl App {
             if l || r {
                 self.game.container_click(i, r, shift && l);
             }
+        }
+        if kind == BREWING_STAND {
+            let progress = (c.cook / potions::BREW_SECS).clamp(0.0, 1.0);
+            let ax = sx + slot * 3.9;
+            let fy = top + slot * 1.1;
+            self.ui.tile(texture::T_ARROW_UI, ax, fy, slot * 1.2, Color::new(0.3, 0.3, 0.3, 1.0));
+            self.ui.tile_part(texture::T_ARROW_UI, ax, fy, slot * 1.2, progress, false, WHITE);
+            let hint = match (c.slots[INPUT], c.slots[FUEL]) {
+                (None, _) => "Ingredient on top: Glowshroom, Zappy Dust, Ember Shroom, Carrot, Feather (or Hisspowder)".to_string(),
+                (_, None) => "A Water Bottle (or a potion) below".to_string(),
+                (Some((i, _)), Some((b, _))) if potions::brew(b, i).is_none() => format!("{} does nothing to {}.", item_name(i), item_name(b)),
+                _ if c.slots[OUTPUT].is_some() => "Take the potion out first.".to_string(),
+                _ => "Bubbling...".to_string(),
+            };
+            self.ui.text(&hint, sx + slot * 0.2, top + slot * 3.1, 7.0, GRAY);
         }
         if containers::is_furnace(kind) {
             let (burn, cook) = c.gauges();
@@ -2690,6 +2920,11 @@ async fn game_main() {
         connect_next: None,
         joining: None,
         chat: None,
+        chat_sent: Vec::new(),
+        name_line: String::new(),
+        captions: Default::default(),
+        chat_pick: None,
+        chat_scroll: 0,
         last_view_proj: Mat4::IDENTITY,
         lan_addr: None,
         mp_password: String::new(),
@@ -2737,6 +2972,11 @@ async fn game_main() {
     }
     if let Some(d) = shot.as_ref().and_then(|s| s.distance) {
         app.settings.render_distance = d.clamp(3, settings::MAX_RENDER_DISTANCE);
+    }
+    let flag = |f: &str| std::env::args().any(|a| a == f);
+    if shot.is_some() {
+        app.settings.colour_blind = flag("--colour-blind");
+        app.settings.subtitles = flag("--subtitles");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {
@@ -2787,7 +3027,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2845,6 +3085,22 @@ async fn game_main() {
                         s.yaw = 0.0;
                         s.pitch = -0.05;
                     }
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "hollow" => {
+                // On the island's edge, looking in at the pillars (and whatever circles them).
+                let mut g = Game::new(424242, true, false);
+                let to = g.hollow_destination(IVec3::ZERO);
+                g.player.body.pos = to;
+                let o = hollow::ORIGIN.as_vec3();
+                g.world.load_now(hollow::ORIGIN.x.div_euclid(16), 0);
+                g.alloc_mob(entity::MobKind::Wyrm, o + Vec3::new(20.0, 24.0, -10.0));
+                if s.pos.is_none() {
+                    s.pos = Some(to + Vec3::Y * 2.0);
+                    s.yaw = -std::f32::consts::FRAC_PI_2;
+                    s.pitch = 0.12;
                 }
                 app.start_game(g);
                 app.show_debug = false;
@@ -2956,7 +3212,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3140,6 +3396,90 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "contraptions" && frames == 125 {
+                // Lever -> dust -> repeater -> lamp; a torch inverter; pistons out; a dispenser.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                app.game.world.set_v(at(3, -3, 0), block::LEVER_ON);
+                for k in -2..0 {
+                    app.game.world.set_v(at(3, k, 0), block::WIRE);
+                }
+                app.game.world.set_v(at(3, 0, 0), contraptions::repeater(contraptions::facing_of(r), false));
+                app.game.world.set_v(at(3, 1, 0), block::LAMP);
+                app.game.world.set_v(at(5, -2, 0), block::STONE);
+                app.game.world.set_v(at(5, -2, 1), block::ZTORCH_ON);
+                app.game.world.set_v(at(5, -1, 1), block::LAMP);
+                for k in 0..3 {
+                    app.game.world.set_v(at(6, k, 0), contraptions::piston(contraptions::facing_of(f), false, k == 1));
+                    app.game.world.set_v(at(7, k, 0), block::PLANKS);
+                    app.game.world.set_v(at(6, k, 1), block::ZAP_BLOCK);
+                }
+                app.game.world.set_v(at(4, 3, 0), block::DISPENSER_FIRST + contraptions::facing_of(-f) as block::Id);
+                // A chest feeding a furnace through a hopper.
+                app.game.world.set_v(at(3, -5, 0), block::FURNACE);
+                app.game.world.set_v(at(3, -5, 1), block::HOPPER_FIRST);
+                app.game.world.set_v(at(3, -5, 2), block::CHEST);
+                app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
+            }
+            if s.mode == "brewing" && frames == 125 {
+                // A brewing stand mid-brew, potions in hand, and a couple of effects on.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let at = (p + fwd * 2.5).floor().as_ivec3();
+                app.game.world.set_v(at, block::BREWING_STAND);
+                if let Some(c) = app.game.world.containers.get_mut(&at) {
+                    c.slots[containers::INPUT] = Some((block::EMBER_SHROOM, 3));
+                    c.slots[containers::FUEL] = Some((block::WATER_BOTTLE, 1));
+                }
+                app.game.world.set_v(at + IVec3::X, block::EMBER_SHROOM);
+                for (i, p) in potions::ALL.iter().enumerate() {
+                    app.game.inv.slots[i] = Some((potions::potion_item(*p, i % 2 == 1), 1));
+                }
+                app.game.inv.slots[5] = Some((block::GLASS_BOTTLE, 3));
+                app.game.inv.slots[6] = Some((block::WATER_BOTTLE, 2));
+                app.game.inv.slots[7] = Some((block::GRUMBLER_TUSK, 1));
+                app.game.apply_potion(potions::Potion::Speed);
+                app.game.apply_potion(potions::Potion::NightVision);
+            }
+            if s.mode == "carpentry" && frames == 125 {
+                // A fenced pen with a gate, a wall with a ladder, panes and colours.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                for k in -3..=3 {
+                    app.game.world.set_v(at(3, k, 0), if k == 0 { carpentry::gate(f.x != 0, false) } else { block::FENCE_FIRST });
+                    app.game.world.set_v(at(7, k, 0), block::FENCE_FIRST);
+                }
+                for fo in 4..7 {
+                    app.game.world.set_v(at(fo, -3, 0), block::FENCE_FIRST);
+                    app.game.world.set_v(at(fo, 3, 0), block::FENCE_FIRST);
+                }
+                app.game.alloc_mob(entity::MobKind::Oinker, at(5, 0, 0).as_vec3() + Vec3::new(0.5, 0.0, 0.5));
+                // A wall of coloured wool and stained glass panes, with a ladder.
+                for k in 4..12 {
+                    for up in 0..4 {
+                        let c = (k + up) as u16 % 8;
+                        let id = if up == 2 && k % 2 == 0 { block::PANE_FIRST } else if up == 3 { block::STAINED_GLASS + c } else if c == 0 { block::WOOL } else { block::DYED_WOOL + c - 1 };
+                        app.game.world.set_v(at(9, k - 8, up), id);
+                    }
+                }
+                for up in 0..4 {
+                    app.game.world.set_v(at(8, -4, up), block::LADDER_FIRST + building_facing(-f));
+                }
+                app.game.world.set_v(at(2, 3, 0), carpentry::trapdoor(0, true));
+                app.game.world.set_v(at(2, 4, 0), carpentry::trapdoor(0, false));
+                // A campfire of sorts: logs, alight.
+                app.game.world.set_v(at(2, -3, 0), block::LOG);
+                app.game.world.set_v(at(2, -3, 1), block::FIRE);
+                app.game.world.set_v(at(2, -2, 0), block::FIRE);
             }
             if s.mode == "decor" && frames == 125 {
                 // A signpost, a framed sword on a wall, and a map in hand.
@@ -3445,4 +3785,9 @@ async fn game_main() {
         }
         next_frame().await;
     }
+}
+
+/// The ladder/frame facing for a wall on side `d` of the cell.
+fn building_facing(d: IVec3) -> block::Id {
+    crate::decor::frame_facing(-d).unwrap_or(0) as block::Id
 }

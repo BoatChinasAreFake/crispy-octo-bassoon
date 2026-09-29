@@ -61,7 +61,7 @@ fn wire_links(world: &World, p: IVec3) -> Vec<IVec3> {
 pub fn powered(world: &World, p: IVec3) -> bool {
     SIDES.iter().any(|d| {
         let id = world.get_v(p + *d);
-        source_on(id) || id == WIRE_ON
+        source_on(id) || id == WIRE_ON || crate::contraptions::powers(world, p + *d, p)
     })
 }
 
@@ -84,7 +84,7 @@ fn settle_network(world: &World, start: IVec3) -> HashMap<IVec3, bool> {
     let mut dist: HashMap<IVec3, u32> = HashMap::new();
     let mut bfs = VecDeque::new();
     for &p in &all {
-        if SIDES.iter().any(|d| source_on(world.get_v(p + *d))) {
+        if SIDES.iter().any(|d| source_on(world.get_v(p + *d)) || crate::contraptions::powers(world, p + *d, p)) {
             dist.insert(p, 0);
             bfs.push_back(p);
         }
@@ -189,7 +189,15 @@ impl Game {
 
     /// A lamp, door or TNT at `p` reacting to power arriving or going.
     fn zap_consumer(&mut self, p: IVec3) {
+        // A Zappy Torch standing on this block watches it.
+        if crate::contraptions::is_ztorch(self.world.get_v(p + IVec3::Y)) {
+            self.contraption_update(p + IVec3::Y);
+        }
         let id = self.world.get_v(p);
+        if crate::contraptions::is_contraption(id) {
+            self.contraption_update(p);
+            return;
+        }
         let center = p.as_vec3() + Vec3::splat(0.5);
         match id {
             LAMP | LAMP_ON => {

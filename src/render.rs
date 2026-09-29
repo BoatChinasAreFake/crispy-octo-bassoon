@@ -11,13 +11,13 @@ use std::collections::HashMap;
 const VERTEX_SHADER: &str = r#"#version 100
 attribute vec3 in_pos;
 attribute vec2 in_uv;
-attribute vec2 in_light;
+attribute vec3 in_light;
 attribute vec2 in_tile;
 
 uniform mat4 mvp;
 
 varying vec2 v_uv;
-varying vec2 v_light;
+varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 
@@ -40,7 +40,7 @@ precision mediump float;
 #endif
 
 varying vec2 v_uv;
-varying vec2 v_light;
+varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 
@@ -48,7 +48,8 @@ uniform sampler2D tex;
 uniform vec4 cam_pos;
 uniform vec4 fog_color;
 uniform vec4 params;   // x: daylight, y: fog start, z: fog end, w: alpha multiplier
-uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow)
+uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow), z: colour-blind view
+DALTONIZE
 uniform vec4 tint;
 uniform vec4 lights[16];
 
@@ -81,12 +82,15 @@ void main() {
         col = c.rgb * (v_light.x - 1.5);
     } else {
         float sky = v_light.y * params.x;
-        float bl = 0.0;
+        // The world carries its own block light (z); things that move use the
+        // nearby point lights. Lights marked moving (negative radius, like a
+        // held torch) shine on everything.
+        float bl = max(v_light.z, 0.0);
         for (int i = 0; i < 16; i++) {
             vec4 L = lights[i];
-            if (L.w > 0.0) {
+            if (L.w != 0.0 && (v_light.z < 0.0 || L.w < 0.0)) {
                 float d = distance(v_wpos, L.xyz);
-                bl = max(bl, clamp(1.0 - d / L.w, 0.0, 1.0));
+                bl = max(bl, clamp(1.0 - d / abs(L.w), 0.0, 1.0));
             }
         }
         float lvl = max(max(sky, bl), max(0.05, params2.y));
@@ -98,6 +102,10 @@ void main() {
         float d = distance(v_wpos, cam_pos.xyz);
         float f = clamp((d - params.y) / (params.z - params.y), 0.0, 1.0);
         col = mix(col, fog_color.rgb, f);
+    }
+    // Colour-blind friendly view (see access.rs).
+    if (params2.z > 0.5) {
+        col = daltonize(col);
     }
     gl_FragColor = vec4(col, c.a * params.w);
 }
@@ -187,7 +195,7 @@ impl DynGeo {
         let uvs = [[a, d], [cc, d], [cc, b], [a, b]];
         let mut v = [Vertex::default(); 4];
         for i in 0..4 {
-            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light, tile: [-1.0; 2] };
+            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light: [light[0], light[1], -1.0], tile: [-1.0; 2] };
         }
         self.mesh.quad(v, false);
         self.end_batch();
@@ -212,6 +220,8 @@ pub struct FrameParams {
     /// Least light anywhere (0 for the ordinary world).
     pub ambient: f32,
     pub lights: [Vec4; 16],
+    /// Show the world through the colour-blind filter (see access.rs).
+    pub colour_blind: bool,
 }
 
 pub struct Renderer {
@@ -264,7 +274,7 @@ impl Renderer {
         ctx.texture_generate_mipmaps(texture);
 
         let (_, _, tile) = tile_uv(0);
-        let fragment = FRAGMENT_SHADER.replace("TILE_SIZE", &format!("{tile:.8}"));
+        let fragment = FRAGMENT_SHADER.replace("TILE_SIZE", &format!("{tile:.8}")).replace("DALTONIZE", crate::access::DALTONIZE_GLSL);
         let shader = ctx
             .new_shader(ShaderSource::Glsl { vertex: VERTEX_SHADER, fragment: &fragment }, shader_meta())
             .unwrap_or_else(|e| panic!("shader failed to compile: {e:?}"));
@@ -272,7 +282,7 @@ impl Renderer {
         let attrs = [
             VertexAttribute::new("in_pos", VertexFormat::Float3),
             VertexAttribute::new("in_uv", VertexFormat::Float2),
-            VertexAttribute::new("in_light", VertexFormat::Float2),
+            VertexAttribute::new("in_light", VertexFormat::Float3),
             VertexAttribute::new("in_tile", VertexFormat::Float2),
         ];
         let alpha = Some(BlendState::new(
@@ -380,7 +390,7 @@ impl Renderer {
             cam_pos: fp.cam_pos.extend(1.0),
             fog_color: Vec4::new(fp.fog_color[0], fp.fog_color[1], fp.fog_color[2], 1.0),
             params: Vec4::new(fp.daylight, fp.fog_start, fp.fog_end, 1.0),
-            params2: Vec4::new(0.0, fp.ambient, 0.0, 0.0),
+            params2: Vec4::new(0.0, fp.ambient, fp.colour_blind as u8 as f32, 0.0),
             tint: Vec4::ONE,
             lights: fp.lights,
         };

@@ -37,6 +37,9 @@ pub struct Player {
     pub swing: f32,
     /// Speed multiplier from the block underfoot (mod blocks can change it).
     pub ground_speed: f32,
+    /// Potion effects on the body: faster walking, higher jumps (see potions.rs).
+    pub speed_boost: f32,
+    pub leaping: bool,
     /// Set when a bouncy block launched us (the game plays a sound and clears it).
     pub bounced: bool,
     /// Set on landing to how far we fell (for trampling and hay bales).
@@ -61,6 +64,8 @@ impl Player {
             hunger: Default::default(),
             swing: 0.0,
             ground_speed: 1.0,
+            speed_boost: 1.0,
+            leaping: false,
             bounced: false,
             landed: None,
         }
@@ -134,7 +139,7 @@ impl Player {
         } else {
             4.3
         };
-        let target = wish * speed * if b.on_ground { self.ground_speed } else { 1.0 };
+        let target = wish * speed * self.speed_boost * if b.on_ground { self.ground_speed } else { 1.0 };
         let accel = if b.on_ground || in_water { 14.0 } else { 3.0 };
         let k = (dt * accel).min(1.0);
         b.vel.x += (target.x - b.vel.x) * k;
@@ -146,10 +151,23 @@ impl Player {
             if input.jump {
                 b.vel.y = (b.vel.y + 22.0 * dt).min(3.5);
             }
+        } else if crate::carpentry::on_ladder(world, b.min(), b.max()) {
+            // Ladders: walk into them (or jump) to climb, sneak to hold on, slide down otherwise.
+            let climbing = input.forward.abs() > 0.1 || input.strafe.abs() > 0.1 || input.jump;
+            b.vel.y = if climbing && !self.sneaking {
+                3.0
+            } else if self.sneaking {
+                0.0
+            } else {
+                (b.vel.y - GRAVITY * dt).max(-2.5)
+            };
+            b.vel.x = b.vel.x.clamp(-2.5, 2.5);
+            b.vel.z = b.vel.z.clamp(-2.5, 2.5);
+            self.fall_start = b.pos.y;
         } else {
             b.vel.y = (b.vel.y - GRAVITY * dt).max(-60.0);
             if input.jump && b.on_ground {
-                b.vel.y = 8.7;
+                b.vel.y = if self.leaping { 11.0 } else { 8.7 };
                 if self.sprinting {
                     b.vel.x += fwd.x * 1.5;
                     b.vel.z += fwd.z * 1.5;

@@ -115,7 +115,49 @@ pub const POWERED_RAIL: Id = 135;
 pub const SIGN_FIRST: Id = 139;
 pub const FRAME_FIRST: Id = 143;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 147;
+/// Grows into a tree (see trees.rs).
+pub const SAPLING: Id = 147;
+/// Building bits (see carpentry.rs). Fences and panes: `FIRST + mask` of the
+/// sides they join (1 east, 2 west, 4 south, 8 north).
+pub const FENCE_FIRST: Id = 148;
+pub const PANE_FIRST: Id = 164;
+/// Gates: `GATE_FIRST + x_axis * 2 + open` (x_axis: it spans east-west).
+pub const GATE_FIRST: Id = 180;
+/// Ladders: `LADDER_FIRST + facing` (the wall they're on, like item frames).
+pub const LADDER_FIRST: Id = 184;
+/// Trapdoors: `TRAPDOOR_FIRST + facing * 2 + open` (the hinge side).
+pub const TRAPDOOR_FIRST: Id = 188;
+/// Coloured wool (`DYED_WOOL + colour - 1`; colour 0, white, is plain Wool) and
+/// stained glass (`STAINED_GLASS + colour`). Colours: see carpentry::COLOURS.
+pub const DYED_WOOL: Id = 196;
+pub const STAINED_GLASS: Id = 203;
+/// Burning (see fire.rs).
+pub const FIRE: Id = 211;
+/// Potions (see potions.rs): a Scorchlands ingredient, and the stand.
+pub const EMBER_SHROOM: Id = 212;
+pub const BREWING_STAND: Id = 213;
+/// Contraptions (see contraptions.rs). Zappy Torches lit and out.
+pub const ZTORCH_ON: Id = 214;
+pub const ZTORCH_OFF: Id = 215;
+/// Repeaters: `REPEATER_FIRST + facing * 2 + on` (facing: the way power goes).
+pub const REPEATER_FIRST: Id = 216;
+/// Pistons and sticky pistons: `+ facing * 2 + extended` (six facings, see contraptions::dir6).
+pub const PISTON_FIRST: Id = 224;
+pub const STICKY_FIRST: Id = 236;
+/// Piston heads: `HEAD_FIRST + facing * 2 + sticky`.
+pub const HEAD_FIRST: Id = 248;
+/// Dispensers: `DISPENSER_FIRST + facing`.
+pub const DISPENSER_FIRST: Id = 260;
+/// Hoppers: `HOPPER_FIRST` spouts down, `+ 1 + facing` to a side (see hoppers.rs).
+pub const HOPPER_FIRST: Id = 266;
+/// The Hollow (see hollow.rs).
+pub const HOLLOW_STONE: Id = 271;
+pub const HOLLOW_PORTAL: Id = 272;
+pub const EYE_FRAME: Id = 273;
+pub const EYE_FRAME_FULL: Id = 274;
+pub const WYRM_CRYSTAL: Id = 275;
+pub const WYRM_EGG: Id = 276;
+pub const NUM_BLOCKS: Id = 277;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -193,8 +235,24 @@ pub const BOAT: Id = FIRST_ITEM + 85;
 pub const MINECART: Id = FIRST_ITEM + 86;
 pub const COMPASS: Id = FIRST_ITEM + 87;
 pub const MAP: Id = FIRST_ITEM + 88;
+pub const APPLE: Id = FIRST_ITEM + 89;
+/// Dyes, one per colour (see carpentry::COLOURS).
+pub const DYE_FIRST: Id = FIRST_ITEM + 90;
+pub const GLASS_BOTTLE: Id = FIRST_ITEM + 98;
+pub const WATER_BOTTLE: Id = FIRST_ITEM + 99;
+/// Potions, then their splash versions, in `potions::ALL` order.
+pub const POTION_FIRST: Id = FIRST_ITEM + 100;
+pub const SPLASH_FIRST: Id = FIRST_ITEM + 105;
+/// Dropped by Grumblers; makes a Brewing Stand.
+pub const GRUMBLER_TUSK: Id = FIRST_ITEM + 110;
+/// Goes on a tamed Galloper (see horses.rs).
+pub const SADDLE: Id = FIRST_ITEM + 111;
+/// Points the way to a Crypt, and opens its portal (see hollow.rs).
+pub const STARING_EYE: Id = FIRST_ITEM + 112;
+/// Names a mob (see nametags.rs).
+pub const NAME_TAG: Id = FIRST_ITEM + 113;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 89;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 114;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -208,7 +266,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id)
+    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -337,6 +395,62 @@ pub enum Shape {
     Sign { facing: u8 },
     /// A frame hung on one side of its cell.
     Frame { facing: u8 },
+    /// A fence post with rails to the sides in `mask` (1 east, 2 west, 4 south, 8 north).
+    Fence { mask: u8 },
+    /// A glass pane, joined to the sides in `mask`.
+    Pane { mask: u8 },
+    /// A fence gate across x (or z), open or shut.
+    Gate { x_axis: bool, open: bool },
+    /// A ladder on the `facing` side of its cell.
+    Ladder { facing: u8 },
+    /// A trapdoor: shut, a thin floor; open, flipped up against its `facing` side.
+    Trapdoor { facing: u8, open: bool },
+    /// A brewing stand: a base and a rod.
+    Brewer,
+    /// A repeater: a thin plate (with a little post showing which way it points).
+    Repeater { facing: u8 },
+    /// A piston's body (shorter when its head is out), facing one of six ways.
+    Piston { facing: u8, extended: bool },
+    /// A piston's head: a plate at the front and a rod back to the body.
+    PistonHead { facing: u8 },
+    /// A hopper: a bowl, a funnel and a spout (0 down, else 1 + a side facing).
+    Hopper { spout: u8 },
+    /// A thin sheet three quarters of the way up (the Hollow's portal).
+    Sheet,
+}
+
+/// A box covering `a..b` of a cell measured along direction `facing` (see
+/// contraptions::dir6), and all of it across.
+fn along(facing: u8, a: f32, b: f32) -> Aabb {
+    let (mut lo, mut hi) = ([0.0f32; 3], [1.0f32; 3]);
+    let (axis, pos) = match facing % 6 {
+        0 => (2, false),
+        1 => (0, true),
+        2 => (2, true),
+        3 => (0, false),
+        4 => (1, true),
+        _ => (1, false),
+    };
+    if pos {
+        lo[axis] = a;
+        hi[axis] = b;
+    } else {
+        lo[axis] = 1.0 - b;
+        hi[axis] = 1.0 - a;
+    }
+    (lo, hi)
+}
+
+/// The rod through the middle of a cell along `facing`, over `a..b`.
+fn rod(facing: u8, a: f32, b: f32) -> Aabb {
+    let (mut lo, mut hi) = along(facing, a, b);
+    for k in 0..3 {
+        if lo[k] == 0.0 && hi[k] == 1.0 {
+            lo[k] = 0.375;
+            hi[k] = 0.625;
+        }
+    }
+    (lo, hi)
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -387,6 +501,80 @@ impl Shape {
                 let board = if facing % 2 == 0 { ([0.05, 0.55, 0.44], [0.95, 1.0, 0.56]) } else { ([0.44, 0.55, 0.05], [0.56, 1.0, 0.95]) };
                 ([post, board, full], 2)
             }
+            Shape::Fence { mask } => {
+                let post = ([0.375, 0.0, 0.375], [0.625, 1.0, 0.625]);
+                let (mut v, mut n) = ([post, post, post], 1);
+                let (y0, y1) = (0.375, 0.9375);
+                if mask & 3 != 0 {
+                    v[n] = ([if mask & 2 != 0 { 0.0 } else { 0.5 }, y0, 0.4375], [if mask & 1 != 0 { 1.0 } else { 0.5 }, y1, 0.5625]);
+                    n += 1;
+                }
+                if mask & 12 != 0 {
+                    v[n] = ([0.4375, y0, if mask & 8 != 0 { 0.0 } else { 0.5 }], [0.5625, y1, if mask & 4 != 0 { 1.0 } else { 0.5 }]);
+                    n += 1;
+                }
+                (v, n)
+            }
+            Shape::Pane { mask } => {
+                let post = ([0.4375, 0.0, 0.4375], [0.5625, 1.0, 0.5625]);
+                let (mut v, mut n) = ([post, post, post], 1);
+                if mask & 3 != 0 {
+                    v[n] = ([if mask & 2 != 0 { 0.0 } else { 0.5 }, 0.0, 0.4375], [if mask & 1 != 0 { 1.0 } else { 0.5 }, 1.0, 0.5625]);
+                    n += 1;
+                }
+                if mask & 12 != 0 {
+                    v[n] = ([0.4375, 0.0, if mask & 8 != 0 { 0.0 } else { 0.5 }], [0.5625, 1.0, if mask & 4 != 0 { 1.0 } else { 0.5 }]);
+                    n += 1;
+                }
+                (v, n)
+            }
+            Shape::Gate { x_axis, open: false } => {
+                let b = if x_axis { ([0.0, 0.375, 0.4375], [1.0, 1.0, 0.5625]) } else { ([0.4375, 0.375, 0.0], [0.5625, 1.0, 1.0]) };
+                ([b, full, full], 1)
+            }
+            Shape::Gate { x_axis, open: true } => {
+                // Two halves swung back against the posts' sides.
+                let (a, b) = if x_axis {
+                    (([0.0, 0.375, 0.4375], [0.125, 1.0, 1.0]), ([0.875, 0.375, 0.4375], [1.0, 1.0, 1.0]))
+                } else {
+                    (([0.4375, 0.375, 0.0], [1.0, 1.0, 0.125]), ([0.4375, 0.375, 0.875], [1.0, 1.0, 1.0]))
+                };
+                ([a, b, full], 2)
+            }
+            Shape::Ladder { facing } => {
+                let t = 0.125;
+                let b = match facing % 4 {
+                    0 => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                    1 => ([1.0 - t, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                    2 => ([0.0, 0.0, 1.0 - t], [1.0, 1.0, 1.0]),
+                    _ => ([0.0, 0.0, 0.0], [t, 1.0, 1.0]),
+                };
+                ([b, full, full], 1)
+            }
+            Shape::Repeater { facing } => {
+                let d = [[0.5, 0.2], [0.8, 0.5], [0.5, 0.8], [0.2, 0.5]][(facing % 4) as usize];
+                let post = ([d[0] - 0.07, 0.125, d[1] - 0.07], [d[0] + 0.07, 0.3125, d[1] + 0.07]);
+                ([([0.0; 3], [1.0, 0.125, 1.0]), post, full], 2)
+            }
+            Shape::Piston { extended: false, .. } => ([full, full, full], 1),
+            Shape::Piston { facing, extended: true } => ([along(facing, 0.0, 0.75), full, full], 1),
+            Shape::PistonHead { facing } => ([along(facing, 0.75, 1.0), rod(facing, -0.25, 0.75), full], 2),
+            Shape::Hopper { spout } => {
+                let bowl = ([0.0, 0.625, 0.0], [1.0, 1.0, 1.0]);
+                let funnel = ([0.25, 0.25, 0.25], [0.75, 0.625, 0.75]);
+                let tip = match spout {
+                    0 => ([0.375, 0.0, 0.375], [0.625, 0.25, 0.625]),
+                    k => {
+                        let (lo, hi) = rod(k - 1, 0.0, 0.25);
+                        ([lo[0], 0.25, lo[2]], [hi[0], 0.5, hi[2]])
+                    }
+                };
+                ([bowl, funnel, tip], 3)
+            }
+            Shape::Sheet => ([([0.0, 0.7, 0.0], [1.0, 0.75, 1.0]), full, full], 1),
+            Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
+            Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
+            Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
             Shape::Frame { facing } => {
                 let t = 1.0 / 16.0;
                 let b = match facing % 4 {
@@ -458,6 +646,12 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if (FRAME_FIRST..FRAME_FIRST + 4).contains(&id) {
         return Some(FRAME_FIRST);
+    }
+    if crate::hoppers::is_hopper(id) {
+        return Some(HOPPER_FIRST);
+    }
+    if let Some(f) = crate::carpentry::family(id).or_else(|| crate::contraptions::family(id)) {
+        return Some(f);
     }
     if let Some((family, _)) = slab_of(id) {
         return Some(family);
@@ -898,6 +1092,138 @@ impl Registry {
             d.creative = facing == 0;
             blocks.push(d);
         }
+        let mut sapling = def("sapling", "Sapling (Tree, Eventually)", Cross, false, false, [T_SAPLING; 3], 0.0, 0, false, SAPLING, 0.0, S_GRASS);
+        sapling.creative = true;
+        blocks.push(sapling);
+        let fire_def;
+        // Fences and panes: every combination of joined sides.
+        for mask in 0..16u8 {
+            let mut d = def(leak(&format!("fence{}", if mask == 0 { String::new() } else { format!("_{mask}") })), "Fence (Keeps Honest Animals In)", Shaped, true, false, [T_PLANKS; 3], 2.0, 0, false, FENCE_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Fence { mask };
+            d.creative = mask == 0;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for mask in 0..16u8 {
+            let mut d = def(leak(&format!("glass_pane{}", if mask == 0 { String::new() } else { format!("_{mask}") })), "Glass Pane (Window, Budget)", Shaped, true, false, [T_GLASS; 3], 0.3, 0, false, AIR, 0.0, S_GLASS);
+            d.shape = Shape::Pane { mask };
+            d.creative = mask == 0;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for (x_axis, open) in [(false, false), (false, true), (true, false), (true, true)] {
+            let key = format!("fence_gate{}{}", if x_axis { "_x" } else { "" }, if open { "_open" } else { "" });
+            let mut d = def(leak(&key), "Fence Gate (Swings Both Ways)", Shaped, !open, false, [T_PLANKS; 3], 2.0, 0, false, GATE_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Gate { x_axis, open };
+            d.creative = !x_axis && !open;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("ladder{}", ["", "_east", "_south", "_west"][facing as usize])), "Ladder (Up, Mostly)", Shaped, false, false, [T_LADDER; 3], 0.4, 0, false, LADDER_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Ladder { facing };
+            d.creative = facing == 0;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            for open in [false, true] {
+                let key = format!("trapdoor{}{}", ["", "_east", "_south", "_west"][facing as usize], if open { "_open" } else { "" });
+                let mut d = def(leak(&key), "Trapdoor (Floor Door)", Shaped, true, false, [T_TRAPDOOR; 3], 3.0, 0, false, TRAPDOOR_FIRST, 0.0, S_WOOD);
+                d.shape = Shape::Trapdoor { facing, open };
+                d.creative = facing == 0 && !open;
+                d.see_through = true;
+                blocks.push(d);
+            }
+        }
+        for c in 1..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            blocks.push(def(leak(&format!("{key}_wool")), leak(&format!("{name} Wool")), Cube, true, true, [T_DYED_WOOL + c - 1; 3], 0.8, 0, false, DYED_WOOL + c - 1, 0.0, S_GRASS));
+        }
+        {
+            let mut d = def("fire", "Fire (Hot)", Cross, false, false, [T_FIRE; 3], 0.0, 0, false, AIR, 9.0, S_GRASS);
+            d.creative = false;
+            fire_def = Some(d);
+        }
+        for c in 0..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            let mut d = def(leak(&format!("{key}_stained_glass")), leak(&format!("{name} Stained Glass")), Cube, true, false, [T_STAINED_GLASS + c; 3], 0.3, 0, false, AIR, 0.0, S_GLASS);
+            d.see_through = true;
+            blocks.push(d);
+        }
+        blocks.extend(fire_def);
+        blocks.push(def("ember_shroom", "Ember Shroom (Warm to the Touch)", Cross, false, false, [T_EMBER_SHROOM; 3], 0.0, 0, false, EMBER_SHROOM, 5.0, S_GRASS));
+        let mut stand = def("brewing_stand", "Brewing Stand (Chemistry, Loosely)", Shaped, true, false, [T_BREWING_TOP, T_BREWING_SIDE, T_BREWING_TOP], 1.0, 0, false, BREWING_STAND, 2.0, S_STONE);
+        stand.shape = Shape::Brewer;
+        blocks.push(stand);
+        // Contraptions (see contraptions.rs).
+        for lit in [true, false] {
+            let mut d = def(if lit { "zappy_torch" } else { "zappy_torch_off" }, "Zappy Torch (Contrarian)", Cross, false, false, [if lit { T_ZTORCH_ON } else { T_ZTORCH_OFF }; 3], 0.0, 0, false, ZTORCH_ON, if lit { 4.0 } else { 0.0 }, S_WOOD);
+            d.creative = lit;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            for on in [false, true] {
+                let key = format!("repeater{}{}", ["", "_east", "_south", "_west"][facing as usize], if on { "_on" } else { "" });
+                let mut d = def(leak(&key), "Repeater (Says It Again)", Shaped, true, false, [if on { T_REPEATER_ON } else { T_REPEATER }, T_STONE, T_STONE], 0.0, 0, false, REPEATER_FIRST, 0.0, S_STONE);
+                d.shape = Shape::Repeater { facing };
+                d.creative = facing == 0 && !on;
+                d.see_through = true;
+                blocks.push(d);
+            }
+        }
+        for sticky in [false, true] {
+            for facing in 0..6u8 {
+                for extended in [false, true] {
+                    let key = format!("{}piston_{}{}", if sticky { "sticky_" } else { "" }, ["north", "east", "south", "west", "up", "down"][facing as usize], if extended { "_out" } else { "" });
+                    let name = if sticky { "Sticky Piston (Clingy)" } else { "Piston (Pushy)" };
+                    let family = if sticky { STICKY_FIRST } else { PISTON_FIRST };
+                    let mut d = def(leak(&key), name, Shaped, true, !extended, [T_PISTON_SIDE; 3], 1.5, 0, false, family, 0.0, S_STONE);
+                    d.shape = Shape::Piston { facing, extended };
+                    d.creative = facing == 0 && !extended;
+                    d.see_through = extended;
+                    blocks.push(d);
+                }
+            }
+        }
+        for facing in 0..6u8 {
+            for sticky in [false, true] {
+                let key = format!("piston_head_{}{}", ["north", "east", "south", "west", "up", "down"][facing as usize], if sticky { "_sticky" } else { "" });
+                let mut d = def(leak(&key), "Piston Head", Shaped, true, false, [T_PISTON_SIDE; 3], 1.5, 0, false, AIR, 0.0, S_STONE);
+                d.shape = Shape::PistonHead { facing };
+                d.creative = false;
+                d.see_through = true;
+                blocks.push(d);
+            }
+        }
+        let mut hoppers = Vec::new();
+        for spout in 0..5u8 {
+            let key = format!("hopper{}", ["", "_north", "_east", "_south", "_west"][spout as usize]);
+            let mut d = def(leak(&key), "Hopper (Funnel With Ambition)", Shaped, true, false, [T_HOPPER_TOP, T_HOPPER_SIDE, T_HOPPER_SIDE], 3.0, 1, true, HOPPER_FIRST, 0.0, S_STONE);
+            d.shape = Shape::Hopper { spout };
+            d.creative = spout == 0;
+            d.see_through = true;
+            hoppers.push(d);
+        }
+        for facing in 0..6u8 {
+            let key = format!("dispenser{}", ["", "_east", "_south", "_west", "_up", "_down"][facing as usize]);
+            let mut d = def(leak(&key), "Dispenser (Spits Things)", Cube, true, true, [T_COBBLE; 3], 3.5, 1, true, DISPENSER_FIRST, 0.0, S_STONE);
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
+        blocks.extend(hoppers);
+        blocks.push(def("hollow_stone", "Hollow Stone (Pale, Suspicious)", Cube, true, true, [T_HOLLOW_STONE; 3], 3.0, 1, true, HOLLOW_STONE, 0.0, S_STONE));
+        let mut sheet = def("hollow_portal", "Hollow Portal (Starry)", Shaped, false, false, [T_HOLLOW_PORTAL; 3], -1.0, 0, false, AIR, 11.0, S_GLASS);
+        sheet.shape = Shape::Sheet;
+        sheet.creative = false;
+        blocks.push(sheet);
+        for (key, name, top) in [("eye_frame", "Eye Frame (Empty)", T_EYE_FRAME_TOP), ("eye_frame_full", "Eye Frame (Staring Back)", T_EYE_FRAME_FULL)] {
+            let mut d = def(key, name, Cube, true, true, [top, T_EYE_FRAME_SIDE, T_HOLLOW_STONE], -1.0, 0, false, AIR, 0.0, S_STONE);
+            d.creative = key == "eye_frame";
+            blocks.push(d);
+        }
+        blocks.push(def("wyrm_crystal", "Wyrm Crystal (Do Not Touch)", Cube, true, false, [T_WYRM_CRYSTAL; 3], 0.3, 0, false, AIR, 12.0, S_GLASS));
+        blocks.push(def("wyrm_egg", "Wyrm Egg (Trophy, Allegedly)", Cube, true, true, [T_WYRM_EGG; 3], 3.0, 0, false, WYRM_EGG, 2.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1004,7 +1330,26 @@ impl Registry {
             ItemDef { stack: 1, ..item("minecart", "Minecart (Wheeled Bucket)", T_CART_ITEM) },
             item("compass", "Compass (Points Home, Mostly)", T_COMPASS),
             item("map", "Map (You Are Here)", T_MAP),
+            ItemDef { food: Some(4.0), ..item("apple", "Apple (Keeps the Doctor Confused)", T_APPLE) },
         ]);
+        for c in 0..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            items.push(item(leak(&format!("{key}_dye")), leak(&format!("{name} Dye")), T_DYE_FIRST + c));
+        }
+        items.push(ItemDef { stack: 16, ..item("glass_bottle", "Glass Bottle (Empty, Hopeful)", T_GLASS_BOTTLE) });
+        items.push(ItemDef { stack: 16, ..item("water_bottle", "Water Bottle (Just Water)", T_WATER_BOTTLE) });
+        for splash in [false, true] {
+            for (i, p) in crate::potions::ALL.iter().enumerate() {
+                let key = format!("{}potion_of_{}", if splash { "splash_" } else { "" }, p.key());
+                let name = format!("{}Potion of {}", if splash { "Splash " } else { "" }, p.name());
+                let tile = if splash { T_SPLASH_FIRST } else { T_POTION_FIRST } + i as u16;
+                items.push(ItemDef { stack: 1, ..item(leak(&key), leak(&name), tile) });
+            }
+        }
+        items.push(item("grumbler_tusk", "Grumbler Tusk (Rude to Ask)", T_TUSK));
+        items.push(ItemDef { stack: 1, ..item("saddle", "Saddle (Some Assembly Required)", T_SADDLE) });
+        items.push(item("staring_eye", "Staring Eye (It Knows)", T_STARING_EYE));
+        items.push(item("name_tag", "Name Tag (Hello, My Name Is)", T_NAME_TAG));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1077,12 +1422,44 @@ impl Registry {
             r(&[(IRON, 4), (ZAP_DUST, 1)], (COMPASS, 1)),
             r(&[(WHEAT, 8), (COMPASS, 1)], (MAP, 1)),
             r(&[(PLANKS, 6), (STICK, 1)], (SIGN_FIRST, 3)),
+            r(&[(PLANKS, 4), (STICK, 2)], (FENCE_FIRST, 3)),
+            r(&[(STICK, 4), (PLANKS, 2)], (GATE_FIRST, 1)),
+            r(&[(STICK, 7)], (LADDER_FIRST, 3)),
+            r(&[(PLANKS, 6)], (TRAPDOOR_FIRST, 2)),
+            r(&[(GLASS, 6)], (PANE_FIRST, 16)),
+            r(&[(GLASS, 3)], (GLASS_BOTTLE, 3)),
+            r(&[(COBBLE, 3), (GRUMBLER_TUSK, 1)], (BREWING_STAND, 1)),
+            r(&[(STICK, 1), (ZAP_DUST, 1)], (ZTORCH_ON, 1)),
+            r(&[(STONE, 3), (ZTORCH_ON, 2), (ZAP_DUST, 1)], (REPEATER_FIRST, 1)),
+            r(&[(PLANKS, 3), (COBBLE, 4), (IRON, 1), (ZAP_DUST, 1)], (PISTON_FIRST, 1)),
+            r(&[(PISTON_FIRST, 1), (GOO, 1)], (STICKY_FIRST, 1)),
+            r(&[(COBBLE, 7), (BOW, 1), (ZAP_DUST, 1)], (DISPENSER_FIRST, 1)),
+            r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
+            r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
+            r(&[(PEARL, 1), (EMBER_SHROOM, 1)], (STARING_EYE, 1)),
+            r(&[(STRING, 1), (BOOK, 1)], (NAME_TAG, 2)),
+            r(&[(BONE_DUST, 1)], (DYE_FIRST, 2)),
+            r(&[(COAL, 1)], (DYE_FIRST + 1, 2)),
+            r(&[(FLOWER, 1)], (DYE_FIRST + 2, 2)),
+            r(&[(PUMPKIN, 1)], (DYE_FIRST + 3, 3)),
+            r(&[(GOLD_INGOT, 1)], (DYE_FIRST + 4, 4)),
+            r(&[(CACTUS, 1)], (DYE_FIRST + 5, 2)),
+            r(&[(TROPICAL, 1)], (DYE_FIRST + 6, 2)),
+            r(&[(DYE_FIRST + 2, 1), (DYE_FIRST + 6, 1)], (DYE_FIRST + 7, 2)),
             r(&[(STICK, 8), (WOOL, 1)], (FRAME_FIRST, 1)),
             r(&[(IRON, 5)], (MINECART, 1)),
             r(&[(IRON, 6), (STICK, 1)], (RAIL_FIRST, 16)),
             r(&[(GOLD_INGOT, 6), (STICK, 1), (ZAP_DUST, 1)], (POWERED_RAIL, 6)),
         ];
         let mut recipes = recipes;
+        // Dye wool one block at a time, glass eight at a time.
+        for c in 0..8u16 {
+            let wool = if c == 0 { WOOL } else { DYED_WOOL + c - 1 };
+            if c > 0 {
+                recipes.push(r(&[(WOOL, 1), (DYE_FIRST + c, 1)], (wool, 1)));
+            }
+            recipes.push(r(&[(GLASS, 8), (DYE_FIRST + c, 1)], (STAINED_GLASS + c, 8)));
+        }
         for (m, (full, _)) in MATERIALS.iter().enumerate() {
             recipes.push(r(&[(*full, 3)], (slab(m, false), 6)));
             recipes.push(r(&[(*full, 6)], (stairs(m, 0), 4)));
@@ -1212,7 +1589,7 @@ pub fn food_quality(id: Id) -> f32 {
     match id {
         PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COD | SALMON | TROPICAL | POTATO => 0.3,
         GOO | COOKED_BOOT => 0.1,
-        CARROT | BREAD => 0.6,
+        CARROT | BREAD | APPLE => 0.6,
         GOLDEN_CHOP | BIG_BOB => 1.2,
         _ => 0.8,
     }

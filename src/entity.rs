@@ -41,15 +41,26 @@ impl Body {
 /// The first block box overlapping the box `min..max`, in world coordinates.
 fn collides(world: &World, min: Vec3, max: Vec3) -> Option<(Vec3, Vec3)> {
     const E: f32 = 1e-4;
-    for y in (min.y + E).floor() as i32..=(max.y - E).floor() as i32 {
+    let low = (min.y + E).floor() as i32;
+    // One row lower too: fences and shut gates reach above their cell.
+    for y in low - 1..=(max.y - E).floor() as i32 {
         for z in (min.z + E).floor() as i32..=(max.z - E).floor() as i32 {
             for x in (min.x + E).floor() as i32..=(max.x - E).floor() as i32 {
                 let id = world.get(x, y, z);
                 if !is_solid(id) {
                     continue;
                 }
+                let tall = crate::carpentry::is_tall(id);
+                if y < low && !tall {
+                    continue;
+                }
                 let cell = Vec3::new(x as f32, y as f32, z as f32);
-                let (boxes, n) = block_boxes(id);
+                let (mut boxes, n) = block_boxes(id);
+                if tall {
+                    for b in boxes.iter_mut() {
+                        b.1[1] = crate::carpentry::TALL;
+                    }
+                }
                 for &(a, b) in &boxes[..n] {
                     let (bmin, bmax) = (cell + Vec3::from_array(a), cell + Vec3::from_array(b));
                     if min.x < bmax.x - E && max.x > bmin.x + E && min.y < bmax.y - E && max.y > bmin.y + E && min.z < bmax.z - E && max.z > bmin.z + E {
@@ -168,11 +179,15 @@ pub enum MobKind {
     Hmmer,
     /// Pig-person-ish: roams the Scorchlands, minds its own business until you hit one of them.
     Grumbler,
+    /// Horse-ish: wanders the plains; tame it, saddle it, ride it (see horses.rs).
+    Galloper,
+    /// Dragon-ish: the Hollow's boss (see hollow.rs).
+    Wyrm,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 13] = [
+    pub const ALL: [MobKind; 15] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -186,6 +201,8 @@ impl MobKind {
         MobKind::Woofer,
         MobKind::Hmmer,
         MobKind::Grumbler,
+        MobKind::Galloper,
+        MobKind::Wyrm,
     ];
 
     pub fn index(self) -> u8 {
@@ -210,6 +227,8 @@ impl MobKind {
             "woofer" | "wolf" | "dog" => Some(MobKind::Woofer),
             "hmmer" | "villager" => Some(MobKind::Hmmer),
             "grumbler" | "zombified_piglin" | "zombie_pigman" => Some(MobKind::Grumbler),
+            "galloper" | "horse" => Some(MobKind::Galloper),
+            "wyrm" | "hollow wyrm" | "hollow_wyrm" | "ender_dragon" | "dragon" => Some(MobKind::Wyrm),
             _ => None,
         }
     }
@@ -228,6 +247,8 @@ impl MobKind {
             MobKind::Woofer => "Woofer",
             MobKind::Hmmer => "Hmmer",
             MobKind::Grumbler => "Grumbler",
+            MobKind::Galloper => "Galloper",
+            MobKind::Wyrm => "Hollow Wyrm",
         }
     }
     /// Half-width and height at size 1.
@@ -246,9 +267,11 @@ impl MobKind {
             MobKind::Woofer => (0.3, 0.85),
             MobKind::Hmmer => (0.3, 1.95),
             MobKind::Grumbler => (0.3, 1.95),
+            MobKind::Galloper => (0.6, 1.6),
+            MobKind::Wyrm => (2.5, 2.0),
         }
     }
-    fn max_health(self) -> f32 {
+    pub fn max_health(self) -> f32 {
         match self {
             MobKind::Oinker => 10.0,
             MobKind::Hisser => 20.0,
@@ -263,6 +286,8 @@ impl MobKind {
             MobKind::Woofer => 8.0,
             MobKind::Hmmer => 20.0,
             MobKind::Grumbler => 20.0,
+            MobKind::Galloper => 22.0,
+            MobKind::Wyrm => 200.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -280,7 +305,7 @@ impl MobKind {
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper)
     }
     /// What it eats to fall in love (see animals.rs); Woofers only once tamed.
     pub fn breed_food(self) -> &'static [Id] {
@@ -288,6 +313,7 @@ impl MobKind {
             MobKind::Oinker => &[CARROT, POTATO],
             MobKind::Fluffer | MobKind::Mooer => &[WHEAT],
             MobKind::Cluckster => &[WHEAT_SEEDS],
+            MobKind::Galloper => &[APPLE],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             _ => &[],
         }
@@ -354,6 +380,12 @@ pub struct Mob {
     /// Times each trade was made since the last restock, and seconds to the next.
     pub trades_used: [u8; 8],
     pub restock: f32,
+    // ---- Gallopers (see horses.rs)
+    pub saddled: bool,
+    /// How used to people it is (tamed at `horses::TAME_AT`).
+    pub temper: u8,
+    /// Who's riding it: 0 nobody, else player id + 1.
+    pub rider: u32,
 }
 
 pub enum MobEvent {
@@ -423,6 +455,9 @@ impl Mob {
             home: None,
             trades_used: [0; 8],
             restock: crate::villagers::RESTOCK_SECS,
+            saddled: false,
+            temper: 0,
+            rider: 0,
         }
     }
 
@@ -494,6 +529,10 @@ impl Mob {
                 self.set_baby(0.0);
             }
         }
+        if self.kind == MobKind::Wyrm {
+            crate::hollow::wyrm_update(self, dt, player, player_visible, &mut ev);
+            return ev;
+        }
         let to_player = player - self.body.pos;
         let dist = to_player.length();
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
@@ -503,7 +542,8 @@ impl Mob {
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
         match self.kind {
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer => {
+            // (The Wyrm flies on its own, see hollow.rs.)
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -703,6 +743,8 @@ impl Mob {
             self.hurt = self.hurt.max(0.2);
         } else if self.body.in_water {
             self.on_fire = 0.0;
+        } else if crate::fire::touches_fire(world, self.body.min(), self.body.max()) {
+            self.on_fire = self.on_fire.max(4.0);
         }
         if self.on_fire > 0.0 {
             self.on_fire -= dt;
@@ -789,6 +831,7 @@ impl Mob {
             MobKind::Cluckster => Some((CLUCKETS, 1)),
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             MobKind::Grumbler if rng.chance(0.4) => Some((GOLD_INGOT, 1)),
+            MobKind::Grumbler if rng.chance(0.5) => Some((GRUMBLER_TUSK, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -839,8 +882,11 @@ impl Mob {
             k => model(k),
         };
         draw_model(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, sky, false);
-        if self.owner.is_some() {
+        if self.owner.is_some() && self.kind == MobKind::Woofer {
             draw_model(geo, &root, &WOOFER_COLLAR, 0.0, sky, false);
+        }
+        if self.saddled {
+            draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
         }
     }
 }
@@ -864,6 +910,8 @@ pub enum Limb {
     Forward,
     /// Sweeps side to side around the vertical axis (Webber legs).
     SwingY(f32),
+    /// Flaps up and down around the body's length (the Wyrm's wings).
+    Wing(f32),
 }
 
 #[derive(Clone, Copy)]
@@ -902,7 +950,7 @@ static HISSER: [Part; 6] = [
     part([0.01, 0.0, 0.16], [0.24, 0.4, 0.26], [0.0, 0.4, 0.3], Limb::Swing(1.0), [HS; 6]),
 ];
 
-const fn humanoid(skin: u16, face: u16, shirt: u16, pants: u16, arms: Limb, arms2: Limb) -> [Part; 6] {
+pub const fn humanoid(skin: u16, face: u16, shirt: u16, pants: u16, arms: Limb, arms2: Limb) -> [Part; 6] {
     [
         part([-0.25, 0.0, -0.125], [0.25, 0.75, 0.25], [0.0, 0.75, 0.0], Limb::Swing(1.0), [pants; 6]),
         part([0.0, 0.0, -0.125], [0.25, 0.75, 0.25], [0.0, 0.75, 0.0], Limb::Swing(-1.0), [pants; 6]),
@@ -935,7 +983,6 @@ static STARER: [Part; 6] = [
     part([0.24, 0.9, -0.08], [0.16, 1.45, 0.16], [0.0, 2.35, 0.0], Limb::Swing(0.4), [SS; 6]),
     part([-0.24, 2.4, -0.24], [0.48, 0.48, 0.48], [0.0; 3], Limb::Fixed, [SS, SS, SS, SS, SS, T_STARER_FACE]),
 ];
-pub static STOVE: [Part; 6] = humanoid(T_SKIN, T_STOVE_FACE, T_STOVE_SHIRT, T_STOVE_PANTS, Limb::Swing(-1.0), Limb::Swing(1.0));
 
 const CB: u16 = T_CLUCK_BODY;
 const CL: u16 = T_CLUCK_LEG;
@@ -1012,6 +1059,33 @@ static WOOFER: [Part; 8] = [
     part([0.06, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(1.0), [WF; 6]),
     part([-0.05, 0.55, 0.38], [0.1, 0.1, 0.4], [0.0, 0.6, 0.38], Limb::SwingY(1.5), [WF; 6]),
 ];
+const WY: u16 = T_WYRM_SKIN;
+static WYRM: [Part; 8] = [
+    // A long body, neck and head, two great wings, and a tail.
+    part([-0.8, 1.0, -2.0], [1.6, 1.0, 4.0], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.35, 1.3, -3.6], [0.7, 0.6, 1.7], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.55, 1.2, -4.8], [1.1, 0.8, 1.3], [0.0; 3], Limb::Fixed, [WY, WY, WY, WY, WY, T_WYRM_FACE]),
+    part([-4.8, 1.8, -1.2], [4.0, 0.15, 2.4], [-0.8, 1.9, 0.0], Limb::Wing(1.0), [T_WYRM_WING; 6]),
+    part([0.8, 1.8, -1.2], [4.0, 0.15, 2.4], [0.8, 1.9, 0.0], Limb::Wing(-1.0), [T_WYRM_WING; 6]),
+    part([-0.3, 1.2, 2.0], [0.6, 0.5, 2.5], [0.0, 1.45, 2.0], Limb::SwingY(0.6), [WY; 6]),
+    part([-0.8, 0.2, -1.2], [0.4, 0.8, 0.4], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([0.4, 0.2, -1.2], [0.4, 0.8, 0.4], [0.0; 3], Limb::Fixed, [WY; 6]),
+];
+const GL: u16 = T_GALLOPER;
+static GALLOPER: [Part; 9] = [
+    // Body, neck, head (with its face), four long legs, a tail.
+    part([-0.3, 0.8, -0.6], [0.6, 0.55, 1.2], [0.0; 3], Limb::Fixed, [GL; 6]),
+    part([-0.16, 1.05, -0.85], [0.32, 0.6, 0.35], [0.0; 3], Limb::Fixed, [GL; 6]),
+    part([-0.15, 1.45, -1.25], [0.3, 0.3, 0.55], [0.0; 3], Limb::Fixed, [GL, GL, GL, GL, GL, T_GALLOP_FACE]),
+    part([-0.28, 0.0, -0.55], [0.16, 0.85, 0.16], [0.0, 0.85, -0.47], Limb::Swing(1.0), [GL; 6]),
+    part([0.12, 0.0, -0.55], [0.16, 0.85, 0.16], [0.0, 0.85, -0.47], Limb::Swing(-1.0), [GL; 6]),
+    part([-0.28, 0.0, 0.4], [0.16, 0.85, 0.16], [0.0, 0.85, 0.48], Limb::Swing(-1.0), [GL; 6]),
+    part([0.12, 0.0, 0.4], [0.16, 0.85, 0.16], [0.0, 0.85, 0.48], Limb::Swing(1.0), [GL; 6]),
+    part([-0.06, 0.6, 0.6], [0.12, 0.6, 0.12], [0.0, 1.2, 0.6], Limb::SwingY(1.0), [T_GALLOP_MANE; 6]),
+    part([-0.05, 1.1, -0.95], [0.1, 0.6, 0.2], [0.0; 3], Limb::Fixed, [T_GALLOP_MANE; 6]),
+];
+/// A saddle on a Galloper's back.
+pub static SADDLE_PART: [Part; 1] = [part([-0.32, 1.3, -0.3], [0.64, 0.1, 0.5], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6])];
 static WOOFER_COLLAR: [Part; 1] = [part([-0.21, 0.52, -0.46], [0.42, 0.1, 0.08], [0.0; 3], Limb::Fixed, [T_COLLAR; 6])];
 static FLUFFER_SHEARED: [Part; 6] = [
     part([-0.3, 0.5, -0.45], [0.6, 0.5, 0.9], [0.0; 3], Limb::Fixed, [FS; 6]),
@@ -1037,6 +1111,8 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Woofer => &WOOFER,
         MobKind::Hmmer => &HMMER,
         MobKind::Grumbler => &GRUMBLER,
+        MobKind::Galloper => &GALLOPER,
+        MobKind::Wyrm => &WYRM,
     }
 }
 
@@ -1048,6 +1124,7 @@ pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky:
             Limb::Swing(s) => Mat4::from_rotation_x(swing * s),
             Limb::Forward => Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2 + swing * 0.1),
             Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
+            Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
         };
         let pivot = Vec3::from_array(p.pivot);
         let m = *root

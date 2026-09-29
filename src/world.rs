@@ -28,29 +28,15 @@ pub struct Chunk {
     /// Per column: one above the highest block that blocks or dapples sunlight
     /// (so at least `heights`; higher where there are leaves).
     pub canopy: [u8; 256],
+    /// Sky and block light levels (see light.rs).
+    pub light: crate::light::LightStore,
 }
 
-/// How much sky a cell sees, from its column's heights: full sky above everything,
-/// dappled shade under foliage, and fading light below solid blocks.
-#[inline]
-pub fn exposure(height: i32, canopy: i32, y: i32) -> f32 {
-    if y < height {
-        (1.0 - (height - y) as f32 * 0.09).max(0.0)
-    } else if y < canopy {
-        CANOPY_SHADE
-    } else {
-        1.0
-    }
-}
-
-/// Light under leaves. Foliage scatters light rather than stopping it, so shade
-/// under a tree is gentle (and the undersides of leaves aren't pitch black at dusk).
-pub const CANOPY_SHADE: f32 = 0.8;
 
 impl Chunk {
     /// A chunk whose heightmaps still need `recompute_heights`.
     pub fn new(blocks: PalettedBlocks) -> Chunk {
-        Chunk { blocks, heights: [0; 256], canopy: [0; 256] }
+        Chunk { blocks, heights: [0; 256], canopy: [0; 256], light: Default::default() }
     }
     fn recompute_height(&mut self, lx: i32, lz: i32) {
         let (mut h, mut canopy) = (0, 0);
@@ -236,6 +222,10 @@ impl Generator {
         if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL {
             return self.generate_scorch(cx, cz);
         }
+        // Far west: the wall, then the Hollow (see hollow.rs).
+        if cx * CW < crate::hollow::HOLLOW_X + crate::hollow::WALL {
+            return self.generate_hollow(cx, cz);
+        }
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -391,6 +381,7 @@ impl Generator {
             }
         }
         self.place_structures(cx, cz, &mut b);
+        self.place_crypts(cx, cz, &mut b);
         b
     }
 }
@@ -404,8 +395,11 @@ pub struct Hit {
 pub struct World {
     pub generator: Arc<Generator>,
     pub chunks: HashMap<(i32, i32), Chunk>,
-    /// Player edits, keyed by chunk then block index. Re-applied when chunks regenerate.
+    /// Player edits, keyed by chunk then block index. Re-applied when chunks
+    /// regenerate. With region files, only the regions near someone are here.
     pub mods: HashMap<(i32, i32), HashMap<u32, Id>>,
+    /// Where edits are kept on disk, if anywhere (see regions.rs).
+    pub regions: Option<crate::regions::Regions>,
     /// Chunks whose mesh is stale.
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
@@ -428,6 +422,12 @@ pub struct World {
     /// Huts whose chests were just filled for the first time: a Hmmer should
     /// move in (where to stand, and its seed; see villagers.rs).
     pub new_huts: Vec<(Vec3, u32)>,
+    /// Every sapling in loaded or edited chunks, and leaves that should check
+    /// whether they still hang on to a tree (see trees.rs).
+    pub saplings: HashSet<IVec3>,
+    /// Every fire burning (see fire.rs).
+    pub fires: HashSet<IVec3>,
+    pub leaf_checks: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -459,6 +459,7 @@ impl World {
             generator,
             chunks: HashMap::new(),
             mods: HashMap::new(),
+            regions: None,
             dirty: HashSet::new(),
             farm: HashMap::new(),
             containers: HashMap::new(),
@@ -466,6 +467,9 @@ impl World {
             liquid_dirty: HashSet::new(),
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
+            saplings: HashSet::new(),
+            fires: HashSet::new(),
+            leaf_checks: HashSet::new(),
             signs: HashMap::new(),
             frames: HashMap::new(),
             simulate_liquids: true,
@@ -486,7 +490,10 @@ impl World {
     /// `centers` are (position, radius) pairs: the local player plus, when hosting,
     /// the remote players, so mobs and physics keep working around them.
     pub fn stream(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
-        while let Ok((cx, cz, blocks)) = self.res_rx.try_recv() {
+        // Lighting a new chunk takes a few milliseconds; spread arrivals over frames.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs_f32() < 0.008 {
+            let Ok((cx, cz, blocks)) = self.res_rx.try_recv() else { break };
             self.pending.remove(&(cx, cz));
             if self.chunks.contains_key(&(cx, cz)) {
                 continue; // made on the spot meanwhile (see `load_now`)
@@ -498,12 +505,19 @@ impl World {
 
     /// A freshly generated chunk: replay edits, fill chests, wake liquids, mark for meshing.
     pub(crate) fn insert_chunk(&mut self, cx: i32, cz: i32, blocks: PalettedBlocks) {
+        self.ensure_region(cx, cz);
         let mut chunk = Chunk::new(blocks);
         if let Some(m) = self.mods.get(&(cx, cz)) {
             for (&i, &id) in m {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
+                    if id == SAPLING || id == FIRE {
+                        let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
+                        let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
+                        let p = ivec3(cx * CW + lx, y, cz * CW + lz);
+                        if id == SAPLING { self.saplings.insert(p); } else { self.fires.insert(p); }
+                    }
                     // Liquids and contraptions pick up where they left off.
                     if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
@@ -520,6 +534,7 @@ impl World {
         }
         chunk.recompute_heights();
         self.chunks.insert((cx, cz), chunk);
+        self.light_new_chunk(cx, cz);
         if self.structure_loot {
             self.fill_structure_chests(cx, cz);
         }
@@ -577,7 +592,15 @@ impl World {
             self.chunks.remove(k);
             self.dirty.remove(k);
         }
+        if !gone.is_empty() {
+            self.drop_idle_regions();
+        }
         gone
+    }
+
+    /// Chunks asked for but not yet generated.
+    pub(crate) fn pending_chunks(&self) -> impl Iterator<Item = &(i32, i32)> {
+        self.pending.iter()
     }
 
     pub fn is_loaded(&self, x: i32, z: i32) -> bool {
@@ -607,15 +630,10 @@ impl World {
         self.get(p.x, p.y, p.z)
     }
 
-    /// 0..1 sky exposure of a cell, used for lighting and mob burning/spawning.
+    /// 0..1 sky light of a cell (1: open sky), used for mob burning and
+    /// spawning, crops, rain and shading things that move (see light.rs).
     pub fn sky_light(&self, x: i32, y: i32, z: i32) -> f32 {
-        match self.chunks.get(&(x.div_euclid(CW), z.div_euclid(CW))) {
-            Some(c) => {
-                let i = (z.rem_euclid(CW) * CW + x.rem_euclid(CW)) as usize;
-                exposure(c.heights[i] as i32, c.canopy[i] as i32, y)
-            }
-            None => 1.0,
-        }
+        crate::light::sky_brightness(self.sky_level(x, y, z))
     }
 
     pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
@@ -633,7 +651,7 @@ impl World {
         if !self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) && (0..CH).contains(&y) {
             // Not loaded here: remember it so the chunk is right when it generates.
             let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
-            self.mods.entry((cx, cz)).or_default().insert(idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
+            self.record_edit(cx, cz, idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
             return None;
         }
         self.set_inner(x, y, z, id)
@@ -673,7 +691,25 @@ impl World {
             self.frames.remove(&p);
         }
         c.recompute_height(lx, lz);
-        self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
+        self.record_edit(cx, cz, i as u32, id);
+        if id == SAPLING {
+            self.saplings.insert(p);
+        } else if old == SAPLING {
+            self.saplings.remove(&p);
+        }
+        if id == FIRE {
+            self.fires.insert(p);
+        } else if old == FIRE {
+            self.fires.remove(&p);
+        }
+        if self.simulate_liquids && matches!(old, LOG | LEAVES) && !matches!(id, LOG | LEAVES) {
+            self.wake_leaves(p);
+        }
+        // Fences and panes join whatever is beside them (where the world lives; see carpentry.rs).
+        let glassy = |b: Id| b == GLASS || crate::carpentry::is_stained_glass(b);
+        if self.simulate_liquids && (is_opaque(old) != is_opaque(id) || crate::carpentry::family(old) != crate::carpentry::family(id) || glassy(old) != glassy(id)) {
+            self.reshape_joins(p);
+        }
         if self.simulate_liquids {
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
             self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));
@@ -685,6 +721,7 @@ impl World {
                 self.dirty.insert((cx + dx, cz + dz));
             }
         }
+        self.relight(p, old, id);
         Some(old)
     }
 
@@ -719,7 +756,7 @@ impl World {
             self.set(x, y, z, id);
         } else if (0..CH).contains(&y) && valid_block(id) {
             let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
-            self.mods.entry((cx, cz)).or_default().insert(idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
+            self.record_edit(cx, cz, idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
             if self.log_edits {
                 self.edit_log.push((x, y, z, id));
             }

@@ -100,6 +100,10 @@ impl Generator {
                     if b[i] == AIR && above == SCORCHROCK && hash3(s ^ 3, x >> 2, y >> 1, z >> 2) < 0.06 && hash3(s ^ 4, x, y, z) < 0.6 {
                         b[i] = GLOWROCK;
                     }
+                    // Ember Shrooms grow in clumps on the rock (a brewing ingredient).
+                    if b[i] == AIR && matches!(below, SCORCHROCK | EMBERSAND) && hash3(s ^ 5, x >> 3, 0, z >> 3) < 0.3 && hash3(s ^ 6, x, y, z) < 0.08 {
+                        b[i] = EMBER_SHROOM;
+                    }
                 }
             }
         }
@@ -139,7 +143,8 @@ impl Game {
                 return true;
             }
         }
-        false
+        // Not a portal: set it alight.
+        self.spark(hit, normal)
     }
 
     /// Standing in a portal long enough takes you through (the local player).
@@ -185,6 +190,16 @@ impl Game {
     pub fn host_use_portal(&mut self, from: u32, at: IVec3) {
         let Some(p) = self.peers.get(&from) else { return };
         let near = p.target.distance(at.as_vec3() + Vec3::splat(0.5)) < 3.0;
+        // The Hollow's portals go straight there (or home).
+        if near && self.world.get_v(at) == HOLLOW_PORTAL {
+            let to = self.hollow_destination(at);
+            if let Some(p) = self.peers.get_mut(&from) {
+                p.target = to;
+                p.pos = to;
+            }
+            self.net_send_to(from, Msg::Effect { heal: 0.0, teleport: Some(to), launch: None, take: None });
+            return;
+        }
         let here = is_portal(self.world.get_v(at)) || is_portal(self.world.get_v(at + IVec3::Y));
         if !near || !here {
             return;

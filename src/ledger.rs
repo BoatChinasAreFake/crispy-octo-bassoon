@@ -169,7 +169,7 @@ fn seed_of(crop: Crop) -> Id {
 }
 
 impl Game {
-    fn ledger(&mut self, from: u32) -> Option<&mut Ledger> {
+    pub fn ledger(&mut self, from: u32) -> Option<&mut Ledger> {
         self.peers.get_mut(&from).map(|p| &mut p.ledger)
     }
 
@@ -295,9 +295,22 @@ impl Game {
             }
             return true;
         }
-        // Doors swing for free; a slab onto a slab costs the second slab.
+        // Doors, gates and trapdoors swing for free; a slab onto a slab costs the second slab.
         if is_door(old) && is_door(new) {
             return true;
+        }
+        if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new))
+            && a == b
+        {
+            return true;
+        }
+        // Fire comes from a Sparker (which wears a little).
+        if new == FIRE {
+            let ok = self.peer_has(from, SPARKER);
+            if ok {
+                self.host_wear(from, SPARKER, 1);
+            }
+            return ok;
         }
         if let Some((family, _)) = slab_of(old)
             && new == made_of(old)
@@ -408,7 +421,12 @@ impl Game {
     /// A joined player used things up (eating, yeeting, ...).
     pub fn host_consume(&mut self, from: u32, item: Id, n: u8) {
         if let Some(l) = self.ledger(from) {
+            let had = l.bag.count(item);
             l.bag.discard(item, n as u32);
+            // Drinking a potion leaves the bottle (thrown splash potions go via `host_splash`).
+            if matches!(crate::potions::potion_of(item), Some((_, false))) {
+                l.bag.add(GLASS_BOTTLE, had.min(n as u32));
+            }
         }
     }
 

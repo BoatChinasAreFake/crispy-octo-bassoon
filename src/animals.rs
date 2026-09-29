@@ -48,8 +48,10 @@ pub enum Interaction {
     Ate,
     /// Wore the shears once.
     Sheared,
-    /// A pet sat down or stood up.
+    /// A pet sat down or stood up (or a Galloper bucked someone off).
     Toggled,
+    /// Got on this Galloper (see horses.rs).
+    Mounted(u32),
 }
 
 /// Would right-clicking this mob with `item` do anything? (Joined players
@@ -87,6 +89,14 @@ impl Game {
             self.pop_drop(pos, WOOL, n);
             self.sfx(Sfx::Snip, Some(pos));
             return Interaction::Sheared;
+        }
+        if self.mobs[i].kind == MobKind::Galloper {
+            let rider = if record_key(&self.player_name) == who && !self.dedicated {
+                self.my_id + 1
+            } else {
+                self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| id + 1).unwrap_or(0)
+            };
+            return self.galloper_interact(who, i, item, rider);
         }
         let m = &mut self.mobs[i];
         match m.kind {
@@ -142,6 +152,11 @@ impl Game {
         let held = self.inv.held();
         let mob = &self.mobs[mob_index];
         let id = mob.id;
+        // A Name Tag asks for a name (see nametags.rs).
+        if held == NAME_TAG {
+            self.naming = Some(id);
+            return true;
+        }
         if mob.kind == MobKind::Hmmer {
             self.open_trade(id);
             return true;
@@ -172,6 +187,10 @@ impl Game {
                 true
             }
             Interaction::Toggled => true,
+            Interaction::Mounted(id) => {
+                self.mount_mob(id);
+                true
+            }
         }
     }
 
@@ -185,12 +204,13 @@ impl Game {
         match self.interact_mob(&who, at, mob, item) {
             Interaction::Ate if !self.creative => self.take_peer(from, item, 1),
             Interaction::Sheared => self.host_wear(from, SHEARS, 1),
+            Interaction::Mounted(id) => self.net_send_to(from, Msg::MountMob { mob: id }),
             _ => {}
         }
     }
 
     /// A message for one player (by record key).
-    fn tell(&mut self, who: &str, text: &str) {
+    pub fn tell(&mut self, who: &str, text: &str) {
         if record_key(&self.player_name) == who && !self.dedicated {
             self.msg(text);
         } else if let Some(id) = self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| *id) {
@@ -199,7 +219,7 @@ impl Game {
     }
 
     /// Advancements are only for the local player.
-    fn advance_for(&mut self, who: &str, key: &str) {
+    pub fn advance_for(&mut self, who: &str, key: &str) {
         if record_key(&self.player_name) == who && !self.dedicated {
             self.advance(key);
         }
@@ -364,7 +384,7 @@ impl Game {
 // ------------------------------------------------------------------ saving
 
 /// A mob kept in the save file (only the ones worth keeping: see `Mob::persistent`).
-pub fn encode_mobs(mobs: &[Mob]) -> Vec<u8> {
+pub fn encode_mobs(mobs: &[Mob], names: &std::collections::HashMap<u32, String>) -> Vec<u8> {
     let mut out = Vec::new();
     let keep: Vec<&Mob> = mobs.iter().filter(|m| m.persistent && m.health > 0.0).collect();
     out.extend_from_slice(&(keep.len() as u32).to_le_bytes());
@@ -374,7 +394,9 @@ pub fn encode_mobs(mobs: &[Mob]) -> Vec<u8> {
             out.extend_from_slice(&v.to_le_bytes());
         }
         out.push(m.size as u8);
-        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2);
+        let name = names.get(&m.id).map(String::as_str).unwrap_or("");
+        let name = &name.as_bytes()[..name.len().min(64)];
+        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2 | (m.saddled as u8) << 3 | (!name.is_empty() as u8) << 4);
         out.extend_from_slice(&m.seed.to_le_bytes());
         let home = m.home.unwrap_or(Vec3::ZERO);
         for v in [home.x, home.y, home.z] {
@@ -384,12 +406,24 @@ pub fn encode_mobs(mobs: &[Mob]) -> Vec<u8> {
         let owner = &owner.as_bytes()[..owner.len().min(64)];
         out.push(owner.len() as u8);
         out.extend_from_slice(owner);
+        // A Name Tag's name (only when the flag above says there is one).
+        if !name.is_empty() {
+            out.push(name.len() as u8);
+            out.extend_from_slice(name);
+        }
     }
     out
 }
 
-/// Unpack `encode_mobs` (stops at anything malformed). Ids are handed out by the caller.
+/// Unpack `encode_mobs` without the names.
+#[cfg(test)]
 pub fn decode_mobs(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<Mob> {
+    decode_mobs_named(b, rng).into_iter().map(|(m, _)| m).collect()
+}
+
+/// Unpack `encode_mobs` (stops at anything malformed), with each mob's name
+/// if it has one. Ids are handed out by the caller.
+pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Option<String>)> {
     let mut v = Vec::new();
     let mut i = 0usize;
     let mut take = |n: usize| -> Option<&[u8]> {
@@ -406,21 +440,29 @@ pub fn decode_mobs(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<Mob> {
         let Some(home) = take(12).map(|s| (0..3).map(|k| f32::from_le_bytes([s[k * 4], s[k * 4 + 1], s[k * 4 + 2], s[k * 4 + 3]])).collect::<Vec<f32>>()) else { break };
         let Some(len) = take(1).map(|s| s[0] as usize) else { break };
         let Some(owner) = take(len).map(|s| String::from_utf8_lossy(s).into_owned()) else { break };
+        let name = if flags & 16 != 0 {
+            let Some(len) = take(1).map(|s| s[0] as usize) else { break };
+            let Some(name) = take(len).map(|s| crate::nametags::clean_name(&String::from_utf8_lossy(s))) else { break };
+            Some(name).filter(|n| !n.is_empty())
+        } else {
+            None
+        };
         if !f.iter().all(|x| x.is_finite()) {
             continue;
         }
         let mut m = Mob::new(kind, Vec3::new(f[0], f[1], f[2]), rng).with_size(size.max(1));
         m.yaw = f[3];
-        m.health = f[4].clamp(1.0, 100.0);
+        m.health = f[4].clamp(1.0, kind.max_health() * 16.0);
         m.set_baby(f[5].clamp(0.0, GROW_SECS));
         m.breed_cd = f[6].clamp(0.0, BREED_REST);
         m.sheared = flags & 1 != 0;
         m.sitting = flags & 2 != 0;
+        m.saddled = flags & 8 != 0;
         m.owner = (!owner.is_empty()).then_some(owner);
         m.seed = seed & 0xFF_FFFF;
         m.home = (flags & 4 != 0 && home.iter().all(|v| v.is_finite())).then(|| Vec3::new(home[0], home[1], home[2]));
         m.persistent = true;
-        v.push(m);
+        v.push((m, name));
     }
     v
 }

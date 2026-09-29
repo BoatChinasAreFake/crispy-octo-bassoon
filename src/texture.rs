@@ -224,6 +224,53 @@ pub const T_CART_ITEM: u16 = 254;
 pub const T_FRAME: u16 = 255;
 pub const T_COMPASS: u16 = 256;
 pub const T_MAP: u16 = 257;
+pub const T_SAPLING: u16 = 258;
+pub const T_APPLE: u16 = 259;
+pub const T_LADDER: u16 = 260;
+pub const T_TRAPDOOR: u16 = 261;
+/// Seven dyed wools (colours 1..8), eight stained glasses and eight dyes.
+pub const T_DYED_WOOL: u16 = 262;
+pub const T_STAINED_GLASS: u16 = 269;
+pub const T_DYE_FIRST: u16 = 277;
+pub const T_FIRE: u16 = 285;
+pub const T_GLASS_BOTTLE: u16 = 286;
+pub const T_WATER_BOTTLE: u16 = 287;
+pub const T_POTION_FIRST: u16 = 288;
+pub const T_SPLASH_FIRST: u16 = 293;
+pub const T_TUSK: u16 = 298;
+pub const T_EMBER_SHROOM: u16 = 299;
+pub const T_BREWING_TOP: u16 = 300;
+pub const T_BREWING_SIDE: u16 = 301;
+pub const T_ZTORCH_ON: u16 = 302;
+pub const T_ZTORCH_OFF: u16 = 303;
+pub const T_REPEATER: u16 = 304;
+pub const T_REPEATER_ON: u16 = 305;
+pub const T_PISTON_FACE: u16 = 306;
+pub const T_STICKY_FACE: u16 = 307;
+pub const T_PISTON_SIDE: u16 = 308;
+pub const T_PISTON_BACK: u16 = 309;
+pub const T_DISPENSER_FACE: u16 = 310;
+pub const T_HOPPER_TOP: u16 = 311;
+pub const T_HOPPER_SIDE: u16 = 312;
+pub const T_GALLOPER: u16 = 313;
+pub const T_GALLOP_FACE: u16 = 314;
+pub const T_GALLOP_MANE: u16 = 315;
+pub const T_SADDLE_LEATHER: u16 = 316;
+pub const T_SADDLE: u16 = 317;
+pub const T_HOLLOW_STONE: u16 = 318;
+pub const T_HOLLOW_PORTAL: u16 = 319;
+pub const T_EYE_FRAME_TOP: u16 = 320;
+pub const T_EYE_FRAME_FULL: u16 = 321;
+pub const T_EYE_FRAME_SIDE: u16 = 322;
+pub const T_WYRM_CRYSTAL: u16 = 323;
+pub const T_WYRM_EGG: u16 = 324;
+pub const T_STARING_EYE: u16 = 325;
+pub const T_WYRM_SKIN: u16 = 326;
+pub const T_WYRM_WING: u16 = 327;
+pub const T_WYRM_FACE: u16 = 328;
+/// Player skins: four tiles each (tone, face, shirt, trousers; see nametags.rs).
+pub const T_SKIN_FIRST: u16 = 329;
+pub const T_NAME_TAG: u16 = 353;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1624,6 +1671,32 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     a.speckle(T_STOVE_SHIRT, rgb(60, 170, 170), 0.08);
     a.speckle(T_STOVE_PANTS, rgb(60, 60, 150), 0.08);
+    // Player skins (see nametags.rs): the same face, different people.
+    for (k, (_, tone, hair, shirt, pants)) in crate::nametags::SKINS.iter().enumerate() {
+        let [t_tone, t_face, t_shirt, t_pants] = crate::nametags::skin_tiles(k as u16);
+        let c = |v: [u8; 3]| rgb(v[0], v[1], v[2]);
+        a.speckle(t_tone, c(*tone), 0.05);
+        a.copy(t_tone, t_face);
+        for y in 0..4 {
+            for x in 0..16 {
+                a.set(t_face, x, y, c(*hair));
+            }
+        }
+        for (x, e) in [(3usize, rgb(255, 255, 255)), (4, rgb(60, 60, 170)), (11, rgb(60, 60, 170)), (12, rgb(255, 255, 255))] {
+            a.set(t_face, x, 8, e);
+        }
+        for x in 6..10 {
+            a.set(t_face, x, 12, rgb(120, 70, 50));
+        }
+        a.speckle(t_shirt, c(*shirt), 0.08);
+        a.speckle(t_pants, c(*pants), 0.08);
+    }
+    a.each(T_NAME_TAG, |x, y, r, _| {
+        let tag = (3..14).contains(&x) && (5..12).contains(&y) && !(x == 3 && (y == 5 || y == 11));
+        let hole = x == 5 && y == 8;
+        let string = (x == 1 || x == 2) && (y == 8 || y == 7);
+        if string { rgb(230, 230, 230) } else if hole { [0, 0, 0, 0] } else if tag { shade(rgb(215, 190, 140), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
 
     // ---- The "More Parody" update
     a.ore(T_GOLD_ORE, rgb(252, 220, 70), rgb(200, 150, 30));
@@ -2271,6 +2344,225 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         if rim { shade(rgb(140, 100, 60), r.range(0.85, 1.1)) } else { shade(rgb(150, 115, 80), r.range(0.9, 1.05) * 0.8) }
     });
     a.sprite(T_COMPASS, &COMPASS_SPRITE, &[('#', rgb(40, 40, 45)), ('i', rgb(190, 190, 198)), ('w', rgb(235, 235, 225)), ('r', rgb(220, 30, 30)), ('k', rgb(60, 60, 70))]);
+    a.each(T_SAPLING, |x, y, r, _| {
+        // A thin stem with a few leafy tufts.
+        let stem = x == 7 && y >= 8;
+        let d = |cx: i32, cy: i32, rad: i32| (x as i32 - cx).pow(2) + (y as i32 - cy).pow(2) <= rad * rad;
+        if stem {
+            shade(rgb(100, 70, 40), r.range(0.85, 1.1))
+        } else if d(7, 5, 3) || d(4, 8, 2) || d(10, 8, 2) {
+            shade(rgb(60, 140, 45), r.range(0.75, 1.15))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_APPLE, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        if x == 8 && (2..5).contains(&y) {
+            rgb(90, 60, 30)
+        } else if (9..12).contains(&x) && y == 3 {
+            rgb(70, 150, 50)
+        } else if dx * dx * 1.1 + dy * dy < 26.0 {
+            let hi = dx < -1.5 && dy < -1.5;
+            if hi { rgb(255, 140, 130) } else { shade(rgb(210, 35, 35), r.range(0.85, 1.05)) }
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_FIRE, |x, y, r, p| {
+        // Flickering tongues: taller in the middle, yellow at the heart.
+        let fx = x as f32 / 15.0;
+        let wave = p.noise2(fx * 5.0, 0.3) * 0.25;
+        let height = 0.9 - (fx - 0.5).abs() * 0.9 + wave;
+        let h = 1.0 - y as f32 / 15.0;
+        if h > height || r.chance(0.08) {
+            return [0, 0, 0, 0];
+        }
+        let core = h < height * 0.55 && (fx - 0.5).abs() < 0.3;
+        if core { rgb(255, 225, 90) } else { shade(rgb(240, 110, 30), r.range(0.8, 1.1)) }
+    });
+    // Bottles: glass, filled with water or a potion's colour (splash ones have a band).
+    let bottle = |a: &mut Atlas, tile: u16, fill: Option<[u8; 3]>, band: bool| {
+        a.each(tile, |x, y, r, _| {
+            let (x, y) = (x as i32, y as i32);
+            let neck = (6..10).contains(&x) && (2..6).contains(&y);
+            let body = (x - 8).pow(2) * 3 / 2 + (y - 10).pow(2) < 26 && y >= 5;
+            let cork = (6..10).contains(&x) && y == 1;
+            if cork {
+                return rgb(150, 110, 70);
+            }
+            if !(neck || body) {
+                return [0, 0, 0, 0];
+            }
+            let rim = !((x - 8).pow(2) * 3 / 2 + (y - 10).pow(2) < 16) && body || (neck && (x == 6 || x == 9));
+            if rim {
+                return [210, 230, 240, 255];
+            }
+            match fill {
+                Some(c) if y >= 8 => {
+                    if band && y == 11 {
+                        return rgb(80, 80, 85);
+                    }
+                    let k = if x < 7 && y < 11 { 1.3 } else { r.range(0.85, 1.0) };
+                    [(c[0] as f32 * k).min(255.0) as u8, (c[1] as f32 * k).min(255.0) as u8, (c[2] as f32 * k).min(255.0) as u8, 255]
+                }
+                _ => [220, 235, 245, 90],
+            }
+        });
+    };
+    bottle(&mut a, T_GLASS_BOTTLE, None, false);
+    bottle(&mut a, T_WATER_BOTTLE, Some([60, 100, 220]), false);
+    for (i, p) in crate::potions::ALL.iter().enumerate() {
+        bottle(&mut a, T_POTION_FIRST + i as u16, Some(p.colour()), false);
+        bottle(&mut a, T_SPLASH_FIRST + i as u16, Some(p.colour()), true);
+    }
+    a.each(T_TUSK, |x, y, r, _| {
+        let (fx, fy) = (x as f32, y as f32);
+        let curve = (fy - 3.0 - (fx - 3.0).powi(2) * 0.12).abs();
+        if (3..14).contains(&x) && curve < 2.2 - fx * 0.12 { shade(rgb(235, 225, 195), r.range(0.85, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_EMBER_SHROOM, |x, y, r, _| {
+        let cap = (4..12).contains(&x) && (4..8).contains(&y) && !((x == 4 || x == 11) && y == 4);
+        let stem = (7..9).contains(&x) && y >= 8;
+        if cap {
+            if (x + y) % 3 == 0 { rgb(255, 210, 90) } else { shade(rgb(230, 90, 30), r.range(0.85, 1.1)) }
+        } else if stem {
+            shade(rgb(200, 150, 110), r.range(0.9, 1.05))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_BREWING_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(rgb(110, 105, 100), r.range(0.8, 1.05) * if edge { 0.7 } else { 1.0 })
+    });
+    a.each(T_BREWING_SIDE, |x, _, r, _| shade(rgb(200, 170, 60), r.range(0.8, 1.1) * if x % 4 == 0 { 0.8 } else { 1.0 }));
+    // Contraptions.
+    for (tile, lit) in [(T_ZTORCH_ON, true), (T_ZTORCH_OFF, false)] {
+        a.each(tile, |x, y, r, _| {
+            if (7..9).contains(&x) && y >= 6 {
+                shade(rgb(120, 90, 50), r.range(0.8, 1.1))
+            } else if (7..9).contains(&x) && (3..6).contains(&y) {
+                if lit { if y == 3 { rgb(255, 200, 190) } else { rgb(240, 40, 30) } } else { rgb(90, 30, 25) }
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    for (tile, lit) in [(T_REPEATER, false), (T_REPEATER_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            let arrow = x == 7 || x == 8 || (y < 6 && (x as i32 - 7).abs() + y as i32 <= 6 && (x as i32 - 7).abs() + y as i32 >= 4);
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            if arrow { if lit { rgb(250, 60, 40) } else { rgb(110, 30, 25) } } else { shade(rgb(160, 160, 160), r.range(0.85, 1.05) * if edge { 0.8 } else { 1.0 }) }
+        });
+    }
+    a.each(T_PISTON_SIDE, |x, y, r, _| {
+        if y < 4 { shade(rgb(160, 125, 80), r.range(0.85, 1.1)) } else { shade(rgb(115, 115, 115), r.range(0.8, 1.05) * if x % 5 == 0 { 0.85 } else { 1.0 }) }
+    });
+    a.each(T_PISTON_FACE, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(rgb(165, 130, 85), r.range(0.85, 1.1) * if edge { 0.75 } else { 1.0 })
+    });
+    a.each(T_STICKY_FACE, |x, y, r, _| {
+        let edge = x < 2 || y < 2 || x > 13 || y > 13;
+        if edge { shade(rgb(165, 130, 85), r.range(0.85, 1.1)) } else { shade(rgb(110, 190, 90), r.range(0.8, 1.1)) }
+    });
+    a.each(T_PISTON_BACK, |x, y, r, _| {
+        let hole = (6..10).contains(&x) && (6..10).contains(&y);
+        if hole { rgb(60, 60, 60) } else { shade(rgb(115, 115, 115), r.range(0.8, 1.05)) }
+    });
+    a.each(T_HOPPER_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        if rim { shade(rgb(70, 70, 75), r.range(0.85, 1.1)) } else { shade(rgb(35, 35, 38), r.range(0.8, 1.1)) }
+    });
+    a.each(T_HOPPER_SIDE, |x, y, r, _| shade(rgb(75, 75, 80), r.range(0.8, 1.1) * if y % 5 == 0 || x % 8 == 0 { 0.8 } else { 1.0 }));
+    // The Hollow.
+    a.each(T_HOLLOW_STONE, |_, _, r, _| shade(rgb(222, 222, 170), r.range(0.85, 1.05)));
+    a.each(T_HOLLOW_PORTAL, |_, _, r, _| if r.chance(0.06) { rgb(220, 230, 255) } else { shade(rgb(15, 25, 40), r.range(0.6, 1.4)) });
+    let eye_frame = |a: &mut Atlas, tile: u16, eye: bool| {
+        a.each(tile, |x, y, r, _| {
+            let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+            let hole = dx * dx + dy * dy < 16;
+            if hole && eye {
+                if dx * dx + dy * dy < 4 { rgb(10, 20, 15) } else { rgb(40, 170, 120) }
+            } else if hole {
+                rgb(30, 60, 50)
+            } else {
+                shade(rgb(60, 110, 90), r.range(0.8, 1.1))
+            }
+        });
+    };
+    eye_frame(&mut a, T_EYE_FRAME_TOP, false);
+    eye_frame(&mut a, T_EYE_FRAME_FULL, true);
+    a.each(T_EYE_FRAME_SIDE, |_, y, r, _| if y < 4 { shade(rgb(60, 110, 90), r.range(0.8, 1.1)) } else { shade(rgb(222, 222, 170), r.range(0.85, 1.05)) });
+    a.each(T_WYRM_CRYSTAL, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15 || x == y || x + y == 15;
+        if edge { rgb(255, 230, 250) } else { shade(rgb(230, 120, 220), r.range(0.8, 1.2)) }
+    });
+    a.each(T_WYRM_EGG, |_, _, r, _| if r.chance(0.08) { rgb(170, 60, 200) } else { shade(rgb(25, 10, 35), r.range(0.8, 1.2)) });
+    a.each(T_STARING_EYE, |x, y, _, _| {
+        let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+        let d = dx * dx + dy * dy;
+        if d < 6 { rgb(10, 20, 15) } else if d < 30 { rgb(40, 170, 120) } else if d < 40 { rgb(20, 90, 70) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_WYRM_SKIN, |x, y, r, _| shade(rgb(30, 25, 40), r.range(0.7, 1.2) * if (x + y) % 6 == 0 { 0.7 } else { 1.0 }));
+    a.each(T_WYRM_WING, |x, _, r, _| shade(rgb(55, 40, 70), r.range(0.8, 1.1) * if x % 4 == 0 { 0.6 } else { 1.0 }));
+    a.copy(T_WYRM_SKIN, T_WYRM_FACE);
+    for (x, y) in [(3, 6), (4, 6), (11, 6), (12, 6)] {
+        a.set(T_WYRM_FACE, x, y, rgb(200, 60, 230));
+    }
+    a.copy(T_COBBLE, T_DISPENSER_FACE);
+    for y in 5..11 {
+        for x in 4..12 {
+            let edge = y == 5 || y == 10 || x == 4 || x == 11;
+            a.set(T_DISPENSER_FACE, x, y, if edge { rgb(70, 70, 70) } else { rgb(25, 25, 25) });
+        }
+    }
+    a.each(T_LADDER, |x, y, r, _| {
+        let rail = x < 2 || x > 13;
+        let rung = y % 4 == 1 && (2..14).contains(&x);
+        if rail || rung { shade(rgb(125, 90, 50), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_TRAPDOOR, |x, y, r, _| {
+        let frame = x < 2 || y < 2 || x > 13 || y > 13 || x == 7 || x == 8;
+        let hole = !frame && (y % 5 == 3) && (3..13).contains(&x);
+        if hole { [0, 0, 0, 0] } else { shade(rgb(150, 110, 65), r.range(0.8, 1.1) * if frame { 0.85 } else { 1.0 }) }
+    });
+    for c in 0..8u16 {
+        let tint = crate::carpentry::colour_rgb(c as usize);
+        if c > 0 {
+            let to = T_DYED_WOOL + c - 1;
+            a.copy(T_WOOL, to);
+            for y in 0..16 {
+                for x in 0..16 {
+                    let p = a.get(to, x, y);
+                    let k = (p[0] as f32 + p[1] as f32 + p[2] as f32) / (3.0 * 235.0);
+                    a.set(to, x, y, rgb((tint[0] as f32 * k).min(255.0) as u8, (tint[1] as f32 * k).min(255.0) as u8, (tint[2] as f32 * k).min(255.0) as u8));
+                }
+            }
+        }
+        let to = T_STAINED_GLASS + c;
+        a.each(to, |x, y, r, _| {
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            let glint = (x + y == 9 || x + y == 11) && (3..9).contains(&x);
+            let pane = (x + y) % 3 == 0;
+            let m = |k: f32| [(tint[0] as f32 * k) as u8, (tint[1] as f32 * k) as u8, (tint[2] as f32 * k) as u8, 255];
+            if edge { m(r.range(0.6, 0.75)) } else if glint { [255, 255, 255, 200] } else if pane { m(r.range(0.9, 1.0)) } else { [0, 0, 0, 0] }
+        });
+        a.each(T_DYE_FIRST + c, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 9.0);
+            let blob = dx * dx + dy * dy * 1.4 < 22.0 && y > 4;
+            let nozzle = (6..10).contains(&x) && (3..6).contains(&y);
+            if nozzle {
+                rgb(200, 200, 205)
+            } else if blob {
+                let k = if dx < -1.0 && dy < -1.0 { 1.25 } else { r.range(0.85, 1.05) };
+                [(tint[0] as f32 * k).min(255.0) as u8, (tint[1] as f32 * k).min(255.0) as u8, (tint[2] as f32 * k).min(255.0) as u8, 255]
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
     a.sprite(T_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(225, 210, 170)), ('g', rgb(110, 160, 80)), ('b', rgb(80, 120, 210)), ('r', rgb(200, 40, 40))]);
     a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
     a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);
@@ -2284,6 +2576,19 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     a.each(T_HMM_ROBE, |x, _, r, _| shade(rgb(115, 75, 45), r.range(0.85, 1.08) * if x % 7 == 0 { 0.85 } else { 1.0 }));
     // ---- Animals
+    a.speckle(T_GALLOPER, rgb(140, 95, 55), 0.08);
+    a.copy(T_GALLOPER, T_GALLOP_FACE);
+    for (x, y, c) in [(3, 5, rgb(20, 15, 10)), (12, 5, rgb(20, 15, 10)), (6, 11, rgb(60, 40, 25)), (9, 11, rgb(60, 40, 25))] {
+        a.set(T_GALLOP_FACE, x, y, c);
+    }
+    a.speckle(T_GALLOP_MANE, rgb(45, 30, 20), 0.1);
+    a.speckle(T_SADDLE_LEATHER, rgb(120, 60, 30), 0.06);
+    a.each(T_SADDLE, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
+        let seat = dx * dx * 0.5 + dy * dy * 1.6 < 22.0 && y > 3;
+        let strap = (x == 4 || x == 11) && y >= 8 && y < 14;
+        if strap { rgb(70, 40, 20) } else if seat { shade(rgb(130, 65, 30), r.range(0.85, 1.1) * if dy < -1.0 { 1.15 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
     a.speckle(T_WOOF_SKIN, rgb(200, 196, 190), 0.07);
     a.copy(T_WOOF_SKIN, T_WOOF_FACE);
     for (x, y, c) in [(3, 5, rgb(20, 20, 20)), (4, 5, rgb(255, 255, 255)), (11, 5, rgb(255, 255, 255)), (12, 5, rgb(20, 20, 20))] {

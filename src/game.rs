@@ -24,6 +24,7 @@ use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 600.0;
 
+#[derive(Default)]
 pub struct Controls {
     pub input: Input,
     pub attack_held: bool,
@@ -144,6 +145,30 @@ pub struct Game {
     pub saved_players: std::collections::BTreeMap<String, crate::players::PlayerRecord>,
     /// Allow-list and operators (see admin.rs).
     pub admin: crate::admin::Admin,
+    /// Leaves withering away (seconds left), and the sapling growth clock (see trees.rs).
+    pub decaying: Vec<(IVec3, f32)>,
+    pub sapling_timer: f32,
+    /// Fire update clock (see fire.rs).
+    pub fire_timer: f32,
+    /// Potion effects on the local player, with seconds left (see potions.rs).
+    pub effects: Vec<(crate::potions::Potion, f32)>,
+    /// Dispensers that were powered last time we looked (they fire on the change).
+    pub dispensers_on: std::collections::HashSet<IVec3>,
+    /// Hopper clock (see hoppers.rs).
+    pub hopper_timer: f32,
+    /// The Galloper we're riding, and when we last told the host (see horses.rs).
+    pub mounted: Option<u32>,
+    pub ride_sync: f32,
+    /// The last hundred messages (see `msg`).
+    pub chat_log: std::collections::VecDeque<String>,
+    /// Names given to mobs with Name Tags, by mob id (see nametags.rs).
+    pub mob_names: HashMap<u32, String>,
+    /// How the local player looks (see nametags.rs).
+    pub skin: u8,
+    /// The mob a Name Tag is being written for (the name screen is open).
+    pub naming: Option<u32>,
+    /// Draw the world through the colour-blind filter (a setting; see access.rs).
+    pub colour_blind: bool,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -264,6 +289,19 @@ impl Game {
             enchant_count: 0,
             saved_players: Default::default(),
             admin: Default::default(),
+            decaying: Vec::new(),
+            sapling_timer: 0.0,
+            fire_timer: 0.0,
+            effects: Vec::new(),
+            dispensers_on: Default::default(),
+            hopper_timer: 0.0,
+            mounted: None,
+            ride_sync: 0.0,
+            chat_log: Default::default(),
+            mob_names: HashMap::new(),
+            skin: 0,
+            naming: None,
+            colour_blind: false,
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],
@@ -383,9 +421,12 @@ impl Game {
         for (kind, pos, yaw) in crate::vehicles::decode(&d.vehicles) {
             g.spawn_vehicle(kind, pos, yaw);
         }
-        for mut m in crate::animals::decode_mobs(&d.mobs, &mut g.rng) {
+        for (mut m, name) in crate::animals::decode_mobs_named(&d.mobs, &mut g.rng) {
             m.id = g.next_mob_id;
             g.next_mob_id += 1;
+            if let Some(name) = name {
+                g.mob_names.insert(m.id, name);
+            }
             g.mobs.push(m);
         }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
@@ -405,7 +446,8 @@ impl Game {
             spawn: self.spawn.to_array(),
             // The four worn armour slots go after the 36 inventory slots.
             slots: self.inv.slots.iter().chain(self.inv.armor.iter()).copied().collect(),
-            mods: self.world.mods.clone(),
+            // With region files the edits are written there instead (`flush_regions`).
+            mods: if self.world.regions.is_some() { HashMap::new() } else { self.world.mods.clone() },
             palette: mod_palette(reg()),
             script_vars: self.export_script_vars(),
             advancements: self.advancements.earned.clone(),
@@ -425,7 +467,7 @@ impl Game {
             weather: self.weather.kind.index(),
             weather_timer: self.weather.timer,
             enchant_count: self.enchant_count,
-            mobs: crate::animals::encode_mobs(&self.mobs),
+            mobs: crate::animals::encode_mobs(&self.mobs, &self.mob_names),
             portals: crate::scorch::encode_links(&self.portal_links),
             vehicles: crate::vehicles::encode(&self.vehicles),
             decor: crate::decor::encode(&self.world.signs, &self.world.frames),
@@ -483,6 +525,11 @@ impl Game {
         if self.dedicated {
             println!("[{}] {s}", crate::server::timestamp());
         }
+        // Everything said is kept a while, to scroll back through with chat open.
+        self.chat_log.push_back(s.clone());
+        if self.chat_log.len() > 100 {
+            self.chat_log.pop_front();
+        }
         self.messages.push((s, 7.0));
         if self.messages.len() > 6 {
             self.messages.remove(0);
@@ -504,6 +551,11 @@ impl Game {
         self.sun_angle().sin() < -0.05
     }
 
+    /// Somewhere other than the ordinary world (no weather, its own sky)?
+    pub fn elsewhere(&self) -> bool {
+        self.in_scorch() || self.in_hollow()
+    }
+
     /// Is the camera (or the local player) down in the Scorchlands?
     pub fn in_scorch(&self) -> bool {
         !self.menu && crate::scorch::in_scorch(self.player.body.pos.x)
@@ -512,6 +564,9 @@ impl Game {
     pub fn sky_color(&self) -> [f32; 3] {
         if self.in_scorch() {
             return [0.24, 0.06, 0.03];
+        }
+        if self.in_hollow() {
+            return [0.05, 0.02, 0.08];
         }
         let d = ((self.daylight() - 0.18) / 0.82).clamp(0.0, 1.0);
         let day = [0.55, 0.75, 1.0];
@@ -632,6 +687,7 @@ impl Game {
         self.liquid_tick(dt);
         self.zap_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
+        self.effects_tick(dt);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
@@ -657,8 +713,9 @@ impl Game {
             }
         }
         // In a boat or cart, the vehicle moves us (see vehicles.rs).
-        let mut fall = if self.riding.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
+        let mut fall = if self.riding.is_none() && self.mounted.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
         self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
+        self.ride_tick(dt, c.input.forward, c.input.strafe, c.input.jump, c.input.sneak);
         // Flowing water carries you along.
         if self.player.body.in_water && !self.player.flying {
             let push = crate::liquids::current(&self.world, self.player.body.pos + Vec3::Y * 0.3);
@@ -685,7 +742,9 @@ impl Game {
         self.footsteps(dt);
         self.block_effects();
         self.lava_tick(dt);
-        self.portal_tick(dt);
+        if !self.hollow_portal_tick() {
+            self.portal_tick(dt);
+        }
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
@@ -933,10 +992,10 @@ impl Game {
 
     /// Right-clicking a bed.
     fn sleep(&mut self, bed: IVec3) {
-        if self.in_scorch() {
-            // Beds don't like it down here.
+        if self.elsewhere() {
+            // Beds don't like it out here.
             self.world.set_v(bed, AIR);
-            self.msg("The bed exploded. Beds are not rated for the Scorchlands.");
+            self.msg(if self.in_scorch() { "The bed exploded. Beds are not rated for the Scorchlands." } else { "The bed exploded. There's no night to skip out here." });
             if !self.is_client() {
                 self.explode(bed.as_vec3() + Vec3::splat(0.5), 3.0, "tried to sleep in the Scorchlands");
             }
@@ -1345,6 +1404,12 @@ impl Game {
         if matches!(held, BUCKET | WATER_BUCKET | LAVA_BUCKET) && self.use_bucket(held) {
             return;
         }
+        if held == STARING_EYE && self.use_eye() {
+            return;
+        }
+        if self.use_potion(held) {
+            return;
+        }
         // Planting, tilling and soil science come before eating (carrots are both).
         if let Some(Target::Block(h)) = &self.target {
             let pos = h.pos;
@@ -1464,6 +1529,10 @@ impl Game {
         if !self.player.sneaking && crate::decor::is_frame(hit_id) && self.use_frame(hit_pos) {
             return;
         }
+        // Gates and trapdoors swing (sneak to place against them instead).
+        if !self.player.sneaking && self.toggle_hinged(hit_pos) {
+            return;
+        }
         // Doors open and close (sneak to place against one instead).
         if is_door(hit_id) && !self.player.sneaking {
             self.toggle_door(hit_pos);
@@ -1527,10 +1596,10 @@ impl Game {
         }
         let below = self.world.get_v(place - IVec3::Y);
         match held {
-            FLOWER | TALL_GRASS if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
+            FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
             TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | SIGN_FIRST if !is_solid(below) => return,
-            // Frames go on walls.
-            FRAME_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
+            // Frames and ladders go on walls.
+            FRAME_FIRST | LADDER_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -1593,6 +1662,9 @@ impl Game {
         self.stat_blocks_broken += 1;
         if self.stat_blocks_broken >= 100 {
             self.advance("centurion");
+        }
+        if id == WYRM_CRYSTAL {
+            self.crystal_broken(pos);
         }
         if id == ICE && !self.creative {
             self.world.set_v(pos, WATER);
@@ -1699,7 +1771,7 @@ impl Game {
         self.item_advancements(item);
     }
 
-    fn block_particles(&mut self, pos: IVec3, n: usize) {
+    pub fn block_particles(&mut self, pos: IVec3, n: usize) {
         let id = self.world.get_v(pos);
         self.block_particles_tile(pos, block(id).tex[1], n);
     }
@@ -1965,9 +2037,12 @@ impl Game {
         self.house_hmmers();
         self.animals_tick(dt);
         self.hmmers_tick(dt);
+        self.free_riderless();
+        self.tidy_mob_names();
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
-            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
+            // Ridden Gallopers go where their rider steers (see horses.rs).
+            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 {
                 continue;
             }
             let fuse_before = m.fuse;
@@ -1997,7 +2072,7 @@ impl Game {
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
-                    MobKind::Hisser | MobKind::Starer => {}
+                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm => {}
                 }
             }
         }
@@ -2068,6 +2143,9 @@ impl Game {
                     let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
                     let args = vec![m.kind.name().to_ascii_lowercase().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
                     self.fire("on_mob_death", args);
+                    if m.kind == MobKind::Wyrm {
+                        self.wyrm_defeated(at);
+                    }
                     let remote = m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker);
                     if !remote && !self.dedicated && at.distance(self.player.body.pos) < 32.0 {
                         match m.kind {
@@ -2078,7 +2156,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2131,7 +2209,11 @@ impl Game {
             self.try_spawn();
         }
         self.farm_tick(dt);
+        self.trees_tick(dt);
+        self.hollow_tick(dt);
+        self.fire_tick(dt);
         self.container_tick(dt);
+        self.hoppers_tick(dt);
         self.drops_tick(dt);
         self.orbs_tick(dt);
         if !self.rules.difficulty.monsters() {
@@ -2162,6 +2244,15 @@ impl Game {
             self.scorch_spawn(p);
             return;
         }
+        if crate::hollow::in_hollow(p.x) {
+            // Only Starers (and the Wyrm, see hollow.rs) out here.
+            let here = self.mobs.iter().filter(|m| m.kind == MobKind::Starer && crate::hollow::in_hollow(m.body.pos.x)).count();
+            let (x, z) = (p.x as i32 + self.rng.int(-30, 30), p.z as i32 + self.rng.int(-30, 30));
+            if here < 6 && self.world.is_loaded(x, z) && self.world.get(x, crate::hollow::ORIGIN.y, z) == HOLLOW_STONE && self.rules.difficulty.monsters() {
+                self.alloc_mob(MobKind::Starer, Vec3::new(x as f32 + 0.5, (crate::hollow::ORIGIN.y + 1) as f32, z as f32 + 0.5));
+            }
+            return;
+        }
         // Kept animals (bred, tamed) don't count against new ones turning up.
         let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent).count();
         let hostile = self.mobs.len() - passive;
@@ -2181,6 +2272,8 @@ impl Game {
                 MobKind::Woofer
             } else if top == SNOW_GRASS {
                 return;
+            } else if biome == crate::world::Biome::Plains && self.rng.chance(0.15) {
+                MobKind::Galloper
             } else {
                 [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize]
             };
@@ -2208,14 +2301,16 @@ impl Game {
         let clear = |w: &World, y: i32| clear(w, y) && (!tall || !is_solid(w.get(x, y + 2, z)));
         // Night, or a storm dark enough for monsters.
         let dark = self.is_night() || self.weather.kind == crate::weather::Weather::Thunder;
-        if dark && is_solid(top) && clear(&self.world, y + 1) {
+        // Torchlight keeps monsters away (block light 8 or more).
+        let torchlit = |w: &World, y: i32| w.block_level(x, y, z) >= 8;
+        if dark && is_solid(top) && clear(&self.world, y + 1) && !torchlit(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
             self.alloc_mob_sized(kind, pos, size);
             return;
         }
         // Caves are always spooky.
         let cy = self.rng.int(4, y.max(5));
-        if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 {
+        if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 && !torchlit(&self.world, cy) {
             let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
             self.alloc_mob_sized(kind, pos, size);
         }
@@ -2282,7 +2377,8 @@ impl Game {
 
         // Stars fade in at night (no sky at all under the Scorchlands' bedrock).
         let scorch = self.in_scorch();
-        let night = 1.0 - ((self.daylight() - 0.18) / 0.5).clamp(0.0, 1.0);
+        // The Hollow's sky is always starry.
+        let night = if self.in_hollow() { 1.0 } else { 1.0 - ((self.daylight() - 0.18) / 0.5).clamp(0.0, 1.0) };
         if night > 0.01 && !scorch {
             g.begin(Pass::Sky, [1.0, 1.0, 1.0, night], true);
             let rot = Mat4::from_rotation_z(a);
@@ -2293,6 +2389,8 @@ impl Game {
             }
         }
         g.begin(Pass::Sky, [1.0; 4], true);
+        // No sun, moon or clouds anywhere but the ordinary world.
+        let scorch = self.elsewhere();
         if !scorch {
             sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
             sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
@@ -2367,7 +2465,7 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
             let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw);
-            draw_model(&mut g, &root, &STOVE, p.anim, sky, true);
+            draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
             crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky);
         }
         // The player, in third person
@@ -2377,7 +2475,7 @@ impl Game {
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw);
-            draw_model(&mut g, &root, &STOVE, p.bob * 2.0, sky, true);
+            draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
             crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), p.bob * 2.0, sky);
         }
         // Primed TNT
@@ -2464,8 +2562,9 @@ impl Game {
             let sleeve = arm * Mat4::from_translation(Vec3::new(-w / 2.0 - 0.006, -w / 2.0 - 0.006, 0.0)) * Mat4::from_scale(Vec3::new(w + 0.012, w + 0.012, 0.25));
             let hand = arm * Mat4::from_translation(Vec3::new(-w / 2.0, -w / 2.0, -0.3)) * Mat4::from_scale(Vec3::new(w, w, 0.3));
             let light = sky.max(0.2);
-            g.cube(&sleeve, [T_STOVE_SHIRT; 6], light, [0.0, 0.0, 1.0, 1.0]);
-            g.cube(&hand, [T_SKIN; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
+            g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
         } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) {
             let tiles = {
                 let t = block(held).tex;
@@ -2496,6 +2595,8 @@ impl Game {
         } else if self.in_scorch() {
             // Hazy, hot air.
             (sky, far * 0.2, far * 0.8)
+        } else if self.in_hollow() {
+            ([0.1, 0.05, 0.14], far * 0.4, far)
         } else {
             (sky, far * 0.55, far - 4.0)
         };
@@ -2504,15 +2605,15 @@ impl Game {
         let held = self.inv.held();
         if !self.menu && is_block_item(held) && block(held).light > 0.0 {
             let e = self.player.eye();
-            extra.push([e.x, e.y, e.z, block(held).light * 0.8]);
+            extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.in_scorch() { 0.32 } else { 0.0 }, lights }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind }
     }
 }
 
 /// Names of every mod-added block and item, so saves survive mods being added or removed.
-fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
+pub(crate) fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
     let blocks = (NUM_BLOCKS..r.blocks.len() as Id).map(|id| (id, r.blocks[id as usize].key.to_string()));
     let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as Id, r.key_of(id as Id).to_string()));
     blocks.chain(items).collect()
@@ -2520,7 +2621,7 @@ fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
 
 /// Map ids in a save to ids in the current registry. Mod things that no longer
 /// exist become air (blocks) or vanish (items). None when nothing needs changing.
-fn palette_remap(r: &Registry, palette: &[(Id, String)]) -> Option<Vec<Id>> {
+pub(crate) fn palette_remap(r: &Registry, palette: &[(Id, String)]) -> Option<Vec<Id>> {
     let mut map: Vec<Id> = (0..=Id::MAX).collect();
     // Any mod-range id the save doesn't mention is unknown.
     for id in NUM_BLOCKS..FIRST_ITEM {
@@ -2593,7 +2694,7 @@ fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::inventory::Inventory;
 
@@ -4097,7 +4198,7 @@ mod tests {
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.
-    fn arena(seed: u32) -> Game {
+    pub(crate) fn arena(seed: u32) -> Game {
         let mut g = Game::new(seed, false, false);
         g.world = loaded_world(seed);
         g.ready = true;
