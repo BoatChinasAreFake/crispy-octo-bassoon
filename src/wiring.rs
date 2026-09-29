@@ -132,6 +132,11 @@ impl Game {
         }
         self.pressure_plates(dt);
         self.detector_rails(dt);
+        // Comparators watch their containers (which change without any block changing).
+        let comparators: Vec<IVec3> = self.world.comparators.iter().copied().filter(|p| self.world.is_loaded(p.x, p.z)).collect();
+        for p in comparators {
+            self.contraption_update(p);
+        }
         let dirty: Vec<IVec3> = self.world.zap_dirty.drain().collect();
         let mut check: HashSet<IVec3> = HashSet::new();
         let mut done: HashSet<IVec3> = HashSet::new();
@@ -324,6 +329,11 @@ impl Game {
             LEVER_ON => LEVER,
             BUTTON => BUTTON_ON,
             BUTTON_ON => return true,
+            c if crate::contraptions::is_comparator(c) => {
+                // Flip between "anything in it" and "half full".
+                let (f, more, _) = crate::contraptions::comparator_state(c);
+                crate::contraptions::comparator(f, !more, false)
+            }
             _ => return false,
         };
         self.world.set_v(pos, new);

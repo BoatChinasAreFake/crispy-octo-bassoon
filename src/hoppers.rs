@@ -88,7 +88,7 @@ impl Game {
     }
 
     /// The container in a cell: its block's, or a loaded cart's standing in it.
-    fn container_in(&self, cell: IVec3) -> Option<IVec3> {
+    pub(crate) fn container_in(&self, cell: IVec3) -> Option<IVec3> {
         if is_container(self.world.get_v(cell)) {
             return Some(cell);
         }

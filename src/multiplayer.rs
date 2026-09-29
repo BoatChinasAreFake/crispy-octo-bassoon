@@ -824,6 +824,10 @@ impl Game {
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
             return true;
         }
+        // Comparators switch mode (the host works out whether they're on).
+        if crate::contraptions::is_comparator(old) && crate::contraptions::is_comparator(new) {
+            return crate::contraptions::comparator_state(old).0 == crate::contraptions::comparator_state(new).0;
+        }
         // Two slabs make a block.
         if slab_of(old).is_some() {
             return new == AIR || (new == made_of(old) && new != AIR);

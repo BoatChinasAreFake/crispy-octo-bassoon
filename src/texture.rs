@@ -296,6 +296,8 @@ pub const T_CLANK_FACE: u16 = 375;
 pub const T_DETECTOR_RAIL: u16 = 376;
 pub const T_CHEST_CART_ITEM: u16 = 380;
 pub const T_HOPPER_CART_ITEM: u16 = 381;
+/// Comparators: any/off, any/on, half/off, half/on.
+pub const T_COMPARATOR: u16 = 382;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2594,6 +2596,22 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             let arrow = x == 7 || x == 8 || (y < 6 && (x as i32 - 7).abs() + y as i32 <= 6 && (x as i32 - 7).abs() + y as i32 >= 4);
             let edge = x == 0 || y == 0 || x == 15 || y == 15;
             if arrow { if lit { rgb(250, 60, 40) } else { rgb(110, 30, 25) } } else { shade(rgb(160, 160, 160), r.range(0.85, 1.05) * if edge { 0.8 } else { 1.0 }) }
+        });
+    }
+    // Comparators: two torches at the back and one at the front; the front one
+    // lights in "half full" mode. Red when putting out power.
+    for k in 0..4u16 {
+        let (more, on) = (k >= 2, k % 2 == 1);
+        a.each(T_COMPARATOR + k, |x, y, r, _| {
+            let dot = |cx: i32, cy: i32| (x as i32 - cx).abs() <= 1 && (y as i32 - cy).abs() <= 1;
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            if dot(4, 11) || dot(11, 11) {
+                if on { rgb(250, 60, 40) } else { rgb(110, 30, 25) }
+            } else if dot(7, 3) {
+                if more { rgb(250, 200, 60) } else { rgb(90, 80, 60) }
+            } else {
+                shade(rgb(160, 160, 160), r.range(0.85, 1.05) * if edge { 0.8 } else { 1.0 })
+            }
         });
     }
     a.each(T_PISTON_SIDE, |x, y, r, _| {

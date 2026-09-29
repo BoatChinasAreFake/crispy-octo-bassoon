@@ -632,6 +632,8 @@ pub struct World {
     pub saplings: HashSet<IVec3>,
     /// Every fire burning (see fire.rs).
     pub fires: HashSet<IVec3>,
+    /// Every comparator (they watch containers; see contraptions.rs).
+    pub comparators: HashSet<IVec3>,
     pub leaf_checks: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
@@ -678,6 +680,7 @@ impl World {
             new_clankers: Vec::new(),
             saplings: HashSet::new(),
             fires: HashSet::new(),
+            comparators: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
             frames: HashMap::new(),
@@ -749,11 +752,15 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE {
+                    if id == SAPLING || id == FIRE || crate::contraptions::is_comparator(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
-                        if id == SAPLING { self.saplings.insert(p); } else { self.fires.insert(p); }
+                        match id {
+                            SAPLING => self.saplings.insert(p),
+                            FIRE => self.fires.insert(p),
+                            _ => self.comparators.insert(p),
+                        };
                     }
                     // Liquids and contraptions pick up where they left off.
                     if self.simulate_liquids && (is_liquid(id) || is_zappy(id)) {
@@ -951,6 +958,11 @@ impl World {
             self.fires.insert(p);
         } else if old == FIRE {
             self.fires.remove(&p);
+        }
+        if crate::contraptions::is_comparator(id) {
+            self.comparators.insert(p);
+        } else if crate::contraptions::is_comparator(old) {
+            self.comparators.remove(&p);
         }
         let treeish = |b: Id| is_log(b) || is_leaves(b);
         if self.simulate_liquids && treeish(old) && !treeish(id) {
