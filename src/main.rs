@@ -21,6 +21,7 @@ mod fire;
 mod fishing;
 mod game;
 mod hoppers;
+mod horses;
 mod hunger;
 mod inventory;
 mod keybinds;

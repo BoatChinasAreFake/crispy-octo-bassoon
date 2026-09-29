@@ -66,6 +66,7 @@ pub const MOB_SHEARED: u8 = 2;
 pub const MOB_TAMED: u8 = 4;
 pub const MOB_SITTING: u8 = 8;
 pub const MOB_LOVE: u8 = 16;
+pub const MOB_SADDLED: u8 = 32;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
@@ -183,6 +184,10 @@ pub enum Msg {
     Splash { item: Id, at: Vec3 },
     /// host -> client: a splash potion caught you (`item` is the drinkable kind).
     PotionEffect { item: Id },
+    /// host -> client: you're on this Galloper now.
+    MountMob { mob: u32 },
+    /// client -> host: where the Galloper I'm riding is (`off`: I got off).
+    RideMob { mob: u32, pos: Vec3, yaw: f32, off: bool },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -663,6 +668,17 @@ impl Msg {
                 w.u8(57);
                 w.u16(*item);
             }
+            Msg::MountMob { mob } => {
+                w.u8(58);
+                w.u32(*mob);
+            }
+            Msg::RideMob { mob, pos, yaw, off } => {
+                w.u8(59);
+                w.u32(*mob);
+                w.v3(*pos);
+                w.f32(*yaw);
+                w.u8(*off as u8);
+            }
             Msg::FrameUse { x, y, z, item, wear, put } => {
                 w.u8(55);
                 w.i32(*x);
@@ -839,6 +855,8 @@ impl Msg {
             54 => Msg::FrameItem { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()? },
             56 => Msg::Splash { item: r.u16()?, at: r.v3()? },
             57 => Msg::PotionEffect { item: r.u16()? },
+            58 => Msg::MountMob { mob: r.u32()? },
+            59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
@@ -1297,6 +1315,8 @@ mod tests {
             Msg::FrameUse { x: 1, y: 2, z: 3, item: 0x8003, wear: 7, put: true },
             Msg::Splash { item: 0x8070, at: Vec3::new(1.0, 2.0, 3.0) },
             Msg::PotionEffect { item: 0x8065 },
+            Msg::MountMob { mob: 42 },
+            Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },

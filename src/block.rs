@@ -238,8 +238,10 @@ pub const POTION_FIRST: Id = FIRST_ITEM + 100;
 pub const SPLASH_FIRST: Id = FIRST_ITEM + 105;
 /// Dropped by Grumblers; makes a Brewing Stand.
 pub const GRUMBLER_TUSK: Id = FIRST_ITEM + 110;
+/// Goes on a tamed Galloper (see horses.rs).
+pub const SADDLE: Id = FIRST_ITEM + 111;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 111;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 112;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -1319,6 +1321,7 @@ impl Registry {
             }
         }
         items.push(item("grumbler_tusk", "Grumbler Tusk (Rude to Ask)", T_TUSK));
+        items.push(ItemDef { stack: 1, ..item("saddle", "Saddle (Some Assembly Required)", T_SADDLE) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1404,6 +1407,7 @@ impl Registry {
             r(&[(PISTON_FIRST, 1), (GOO, 1)], (STICKY_FIRST, 1)),
             r(&[(COBBLE, 7), (BOW, 1), (ZAP_DUST, 1)], (DISPENSER_FIRST, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
+            r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
             r(&[(BONE_DUST, 1)], (DYE_FIRST, 2)),
             r(&[(COAL, 1)], (DYE_FIRST + 1, 2)),
             r(&[(FLOWER, 1)], (DYE_FIRST + 2, 2)),

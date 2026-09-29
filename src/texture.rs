@@ -252,6 +252,11 @@ pub const T_PISTON_BACK: u16 = 309;
 pub const T_DISPENSER_FACE: u16 = 310;
 pub const T_HOPPER_TOP: u16 = 311;
 pub const T_HOPPER_SIDE: u16 = 312;
+pub const T_GALLOPER: u16 = 313;
+pub const T_GALLOP_FACE: u16 = 314;
+pub const T_GALLOP_MANE: u16 = 315;
+pub const T_SADDLE_LEATHER: u16 = 316;
+pub const T_SADDLE: u16 = 317;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2496,6 +2501,19 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     a.each(T_HMM_ROBE, |x, _, r, _| shade(rgb(115, 75, 45), r.range(0.85, 1.08) * if x % 7 == 0 { 0.85 } else { 1.0 }));
     // ---- Animals
+    a.speckle(T_GALLOPER, rgb(140, 95, 55), 0.08);
+    a.copy(T_GALLOPER, T_GALLOP_FACE);
+    for (x, y, c) in [(3, 5, rgb(20, 15, 10)), (12, 5, rgb(20, 15, 10)), (6, 11, rgb(60, 40, 25)), (9, 11, rgb(60, 40, 25))] {
+        a.set(T_GALLOP_FACE, x, y, c);
+    }
+    a.speckle(T_GALLOP_MANE, rgb(45, 30, 20), 0.1);
+    a.speckle(T_SADDLE_LEATHER, rgb(120, 60, 30), 0.06);
+    a.each(T_SADDLE, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
+        let seat = dx * dx * 0.5 + dy * dy * 1.6 < 22.0 && y > 3;
+        let strap = (x == 4 || x == 11) && y >= 8 && y < 14;
+        if strap { rgb(70, 40, 20) } else if seat { shade(rgb(130, 65, 30), r.range(0.85, 1.1) * if dy < -1.0 { 1.15 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
     a.speckle(T_WOOF_SKIN, rgb(200, 196, 190), 0.07);
     a.copy(T_WOOF_SKIN, T_WOOF_FACE);
     for (x, y, c) in [(3, 5, rgb(20, 20, 20)), (4, 5, rgb(255, 255, 255)), (11, 5, rgb(255, 255, 255)), (12, 5, rgb(20, 20, 20))] {

@@ -179,11 +179,13 @@ pub enum MobKind {
     Hmmer,
     /// Pig-person-ish: roams the Scorchlands, minds its own business until you hit one of them.
     Grumbler,
+    /// Horse-ish: wanders the plains; tame it, saddle it, ride it (see horses.rs).
+    Galloper,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 13] = [
+    pub const ALL: [MobKind; 14] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -197,6 +199,7 @@ impl MobKind {
         MobKind::Woofer,
         MobKind::Hmmer,
         MobKind::Grumbler,
+        MobKind::Galloper,
     ];
 
     pub fn index(self) -> u8 {
@@ -221,6 +224,7 @@ impl MobKind {
             "woofer" | "wolf" | "dog" => Some(MobKind::Woofer),
             "hmmer" | "villager" => Some(MobKind::Hmmer),
             "grumbler" | "zombified_piglin" | "zombie_pigman" => Some(MobKind::Grumbler),
+            "galloper" | "horse" => Some(MobKind::Galloper),
             _ => None,
         }
     }
@@ -239,6 +243,7 @@ impl MobKind {
             MobKind::Woofer => "Woofer",
             MobKind::Hmmer => "Hmmer",
             MobKind::Grumbler => "Grumbler",
+            MobKind::Galloper => "Galloper",
         }
     }
     /// Half-width and height at size 1.
@@ -257,6 +262,7 @@ impl MobKind {
             MobKind::Woofer => (0.3, 0.85),
             MobKind::Hmmer => (0.3, 1.95),
             MobKind::Grumbler => (0.3, 1.95),
+            MobKind::Galloper => (0.6, 1.6),
         }
     }
     pub fn max_health(self) -> f32 {
@@ -274,6 +280,7 @@ impl MobKind {
             MobKind::Woofer => 8.0,
             MobKind::Hmmer => 20.0,
             MobKind::Grumbler => 20.0,
+            MobKind::Galloper => 22.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -291,7 +298,7 @@ impl MobKind {
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper)
     }
     /// What it eats to fall in love (see animals.rs); Woofers only once tamed.
     pub fn breed_food(self) -> &'static [Id] {
@@ -299,6 +306,7 @@ impl MobKind {
             MobKind::Oinker => &[CARROT, POTATO],
             MobKind::Fluffer | MobKind::Mooer => &[WHEAT],
             MobKind::Cluckster => &[WHEAT_SEEDS],
+            MobKind::Galloper => &[APPLE],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             _ => &[],
         }
@@ -365,6 +373,12 @@ pub struct Mob {
     /// Times each trade was made since the last restock, and seconds to the next.
     pub trades_used: [u8; 8],
     pub restock: f32,
+    // ---- Gallopers (see horses.rs)
+    pub saddled: bool,
+    /// How used to people it is (tamed at `horses::TAME_AT`).
+    pub temper: u8,
+    /// Who's riding it: 0 nobody, else player id + 1.
+    pub rider: u32,
 }
 
 pub enum MobEvent {
@@ -434,6 +448,9 @@ impl Mob {
             home: None,
             trades_used: [0; 8],
             restock: crate::villagers::RESTOCK_SECS,
+            saddled: false,
+            temper: 0,
+            rider: 0,
         }
     }
 
@@ -514,7 +531,7 @@ impl Mob {
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
         match self.kind {
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -853,8 +870,11 @@ impl Mob {
             k => model(k),
         };
         draw_model(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, sky, false);
-        if self.owner.is_some() {
+        if self.owner.is_some() && self.kind == MobKind::Woofer {
             draw_model(geo, &root, &WOOFER_COLLAR, 0.0, sky, false);
+        }
+        if self.saddled {
+            draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
         }
     }
 }
@@ -1026,6 +1046,21 @@ static WOOFER: [Part; 8] = [
     part([0.06, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(1.0), [WF; 6]),
     part([-0.05, 0.55, 0.38], [0.1, 0.1, 0.4], [0.0, 0.6, 0.38], Limb::SwingY(1.5), [WF; 6]),
 ];
+const GL: u16 = T_GALLOPER;
+static GALLOPER: [Part; 9] = [
+    // Body, neck, head (with its face), four long legs, a tail.
+    part([-0.3, 0.8, -0.6], [0.6, 0.55, 1.2], [0.0; 3], Limb::Fixed, [GL; 6]),
+    part([-0.16, 1.05, -0.85], [0.32, 0.6, 0.35], [0.0; 3], Limb::Fixed, [GL; 6]),
+    part([-0.15, 1.45, -1.25], [0.3, 0.3, 0.55], [0.0; 3], Limb::Fixed, [GL, GL, GL, GL, GL, T_GALLOP_FACE]),
+    part([-0.28, 0.0, -0.55], [0.16, 0.85, 0.16], [0.0, 0.85, -0.47], Limb::Swing(1.0), [GL; 6]),
+    part([0.12, 0.0, -0.55], [0.16, 0.85, 0.16], [0.0, 0.85, -0.47], Limb::Swing(-1.0), [GL; 6]),
+    part([-0.28, 0.0, 0.4], [0.16, 0.85, 0.16], [0.0, 0.85, 0.48], Limb::Swing(-1.0), [GL; 6]),
+    part([0.12, 0.0, 0.4], [0.16, 0.85, 0.16], [0.0, 0.85, 0.48], Limb::Swing(1.0), [GL; 6]),
+    part([-0.06, 0.6, 0.6], [0.12, 0.6, 0.12], [0.0, 1.2, 0.6], Limb::SwingY(1.0), [T_GALLOP_MANE; 6]),
+    part([-0.05, 1.1, -0.95], [0.1, 0.6, 0.2], [0.0; 3], Limb::Fixed, [T_GALLOP_MANE; 6]),
+];
+/// A saddle on a Galloper's back.
+pub static SADDLE_PART: [Part; 1] = [part([-0.32, 1.3, -0.3], [0.64, 0.1, 0.5], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6])];
 static WOOFER_COLLAR: [Part; 1] = [part([-0.21, 0.52, -0.46], [0.42, 0.1, 0.08], [0.0; 3], Limb::Fixed, [T_COLLAR; 6])];
 static FLUFFER_SHEARED: [Part; 6] = [
     part([-0.3, 0.5, -0.45], [0.6, 0.5, 0.9], [0.0; 3], Limb::Fixed, [FS; 6]),
@@ -1051,6 +1086,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Woofer => &WOOFER,
         MobKind::Hmmer => &HMMER,
         MobKind::Grumbler => &GRUMBLER,
+        MobKind::Galloper => &GALLOPER,
     }
 }
 

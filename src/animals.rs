@@ -48,8 +48,10 @@ pub enum Interaction {
     Ate,
     /// Wore the shears once.
     Sheared,
-    /// A pet sat down or stood up.
+    /// A pet sat down or stood up (or a Galloper bucked someone off).
     Toggled,
+    /// Got on this Galloper (see horses.rs).
+    Mounted(u32),
 }
 
 /// Would right-clicking this mob with `item` do anything? (Joined players
@@ -87,6 +89,14 @@ impl Game {
             self.pop_drop(pos, WOOL, n);
             self.sfx(Sfx::Snip, Some(pos));
             return Interaction::Sheared;
+        }
+        if self.mobs[i].kind == MobKind::Galloper {
+            let rider = if record_key(&self.player_name) == who && !self.dedicated {
+                self.my_id + 1
+            } else {
+                self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| id + 1).unwrap_or(0)
+            };
+            return self.galloper_interact(who, i, item, rider);
         }
         let m = &mut self.mobs[i];
         match m.kind {
@@ -172,6 +182,10 @@ impl Game {
                 true
             }
             Interaction::Toggled => true,
+            Interaction::Mounted(id) => {
+                self.mount_mob(id);
+                true
+            }
         }
     }
 
@@ -185,12 +199,13 @@ impl Game {
         match self.interact_mob(&who, at, mob, item) {
             Interaction::Ate if !self.creative => self.take_peer(from, item, 1),
             Interaction::Sheared => self.host_wear(from, SHEARS, 1),
+            Interaction::Mounted(id) => self.net_send_to(from, Msg::MountMob { mob: id }),
             _ => {}
         }
     }
 
     /// A message for one player (by record key).
-    fn tell(&mut self, who: &str, text: &str) {
+    pub fn tell(&mut self, who: &str, text: &str) {
         if record_key(&self.player_name) == who && !self.dedicated {
             self.msg(text);
         } else if let Some(id) = self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| *id) {
@@ -199,7 +214,7 @@ impl Game {
     }
 
     /// Advancements are only for the local player.
-    fn advance_for(&mut self, who: &str, key: &str) {
+    pub fn advance_for(&mut self, who: &str, key: &str) {
         if record_key(&self.player_name) == who && !self.dedicated {
             self.advance(key);
         }
@@ -374,7 +389,7 @@ pub fn encode_mobs(mobs: &[Mob]) -> Vec<u8> {
             out.extend_from_slice(&v.to_le_bytes());
         }
         out.push(m.size as u8);
-        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2);
+        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2 | (m.saddled as u8) << 3);
         out.extend_from_slice(&m.seed.to_le_bytes());
         let home = m.home.unwrap_or(Vec3::ZERO);
         for v in [home.x, home.y, home.z] {
@@ -416,6 +431,7 @@ pub fn decode_mobs(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<Mob> {
         m.breed_cd = f[6].clamp(0.0, BREED_REST);
         m.sheared = flags & 1 != 0;
         m.sitting = flags & 2 != 0;
+        m.saddled = flags & 8 != 0;
         m.owner = (!owner.is_empty()).then_some(owner);
         m.seed = seed & 0xFF_FFFF;
         m.home = (flags & 4 != 0 && home.iter().all(|v| v.is_finite())).then(|| Vec3::new(home[0], home[1], home[2]));

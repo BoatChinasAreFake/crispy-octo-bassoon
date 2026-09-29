@@ -156,6 +156,9 @@ pub struct Game {
     pub dispensers_on: std::collections::HashSet<IVec3>,
     /// Hopper clock (see hoppers.rs).
     pub hopper_timer: f32,
+    /// The Galloper we're riding, and when we last told the host (see horses.rs).
+    pub mounted: Option<u32>,
+    pub ride_sync: f32,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -282,6 +285,8 @@ impl Game {
             effects: Vec::new(),
             dispensers_on: Default::default(),
             hopper_timer: 0.0,
+            mounted: None,
+            ride_sync: 0.0,
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],
@@ -676,8 +681,9 @@ impl Game {
             }
         }
         // In a boat or cart, the vehicle moves us (see vehicles.rs).
-        let mut fall = if self.riding.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
+        let mut fall = if self.riding.is_none() && self.mounted.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
         self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
+        self.ride_tick(dt, c.input.forward, c.input.strafe, c.input.jump, c.input.sneak);
         // Flowing water carries you along.
         if self.player.body.in_water && !self.player.flying {
             let push = crate::liquids::current(&self.world, self.player.body.pos + Vec3::Y * 0.3);
@@ -1991,9 +1997,11 @@ impl Game {
         self.house_hmmers();
         self.animals_tick(dt);
         self.hmmers_tick(dt);
+        self.free_riderless();
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
-            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
+            // Ridden Gallopers go where their rider steers (see horses.rs).
+            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 {
                 continue;
             }
             let fuse_before = m.fuse;
@@ -2023,7 +2031,7 @@ impl Game {
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
-                    MobKind::Hisser | MobKind::Starer => {}
+                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper => {}
                 }
             }
         }
@@ -2104,7 +2112,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2210,6 +2218,8 @@ impl Game {
                 MobKind::Woofer
             } else if top == SNOW_GRASS {
                 return;
+            } else if biome == crate::world::Biome::Plains && self.rng.chance(0.15) {
+                MobKind::Galloper
             } else {
                 [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize]
             };

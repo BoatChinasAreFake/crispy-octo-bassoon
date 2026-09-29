@@ -621,6 +621,7 @@ impl Game {
                 self.relay(from, Msg::Chat { from, text });
             }
             Msg::Splash { item, at } => self.host_splash(from, item, at),
+            Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
             Msg::UseItem { item } => {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
@@ -916,6 +917,7 @@ impl Game {
                 }
             }
             Msg::Time(t) => self.time = t.rem_euclid(1.0),
+            Msg::MountMob { mob } => self.mount_mob(mob),
             Msg::PotionEffect { item } => {
                 if let Some((p, false)) = crate::potions::potion_of(item) {
                     self.apply_potion(p);
@@ -944,7 +946,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } => {}
         }
     }
 
@@ -981,6 +983,7 @@ impl Game {
             m.owner = (s.flags & MOB_TAMED != 0).then(String::new);
             m.sitting = s.flags & MOB_SITTING != 0;
             m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
+            m.saddled = s.flags & MOB_SADDLED != 0;
             next.push(m);
         }
         self.mobs = next;
@@ -990,7 +993,12 @@ impl Game {
 
     /// Client-side entity tick: particles plus smoothing the host's mobs.
     pub fn client_entities(&mut self, dt: f32) {
+        let mounted = self.mounted;
         for m in self.mobs.iter_mut() {
+            // The Galloper we're riding goes where we steer it.
+            if Some(m.id) == mounted {
+                continue;
+            }
             let before = m.body.pos;
             let k = (dt * 12.0).min(1.0);
             m.body.pos += (m.net_pos - m.body.pos) * k;
@@ -1076,7 +1084,7 @@ impl Game {
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
-                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE,
+                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE | m.saddled as u8 * MOB_SADDLED,
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
