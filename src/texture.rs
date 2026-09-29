@@ -298,6 +298,8 @@ pub const T_CHEST_CART_ITEM: u16 = 380;
 pub const T_HOPPER_CART_ITEM: u16 = 381;
 /// Comparators: any/off, any/on, half/off, half/on.
 pub const T_COMPARATOR: u16 = 382;
+pub const T_BEACON: u16 = 386;
+pub const T_BEACON_BEAM: u16 = 387;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2614,6 +2616,22 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             }
         });
     }
+    a.each(T_BEACON, |x, y, r, _| {
+        // Glass round a glowing, pale core.
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        let core = (4..12).contains(&x) && (4..12).contains(&y);
+        if edge {
+            shade(rgb(200, 235, 240), r.range(0.9, 1.0))
+        } else if core {
+            shade(rgb(170, 250, 245), r.range(0.9, 1.1))
+        } else {
+            [180, 230, 240, 110]
+        }
+    });
+    a.each(T_BEACON_BEAM, |_, y, r, _| {
+        let a = 150 + (r.range(0.0, 60.0) as u8) - if y % 4 == 0 { 30 } else { 0 };
+        [200, 250, 255, a]
+    });
     a.each(T_PISTON_SIDE, |x, y, r, _| {
         if y < 4 { shade(rgb(160, 125, 80), r.range(0.85, 1.1)) } else { shade(rgb(115, 115, 115), r.range(0.8, 1.05) * if x % 5 == 0 { 0.85 } else { 1.0 }) }
     });

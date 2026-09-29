@@ -329,6 +329,11 @@ impl Game {
             LEVER_ON => LEVER,
             BUTTON => BUTTON_ON,
             BUTTON_ON => return true,
+            b if crate::beacon::is_beacon(b) => {
+                let next = crate::beacon::next_effect(b);
+                self.msg(format!("The beacon will give: {}.", crate::beacon::effect_of(next).name()));
+                next
+            }
             c if crate::contraptions::is_comparator(c) => {
                 // Flip between "anything in it" and "half full".
                 let (f, more, _) = crate::contraptions::comparator_state(c);

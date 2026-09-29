@@ -634,6 +634,8 @@ pub struct World {
     pub fires: HashSet<IVec3>,
     /// Every comparator (they watch containers; see contraptions.rs).
     pub comparators: HashSet<IVec3>,
+    /// Every beacon (see beacon.rs).
+    pub beacons: HashSet<IVec3>,
     pub leaf_checks: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
@@ -681,6 +683,7 @@ impl World {
             saplings: HashSet::new(),
             fires: HashSet::new(),
             comparators: HashSet::new(),
+            beacons: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
             frames: HashMap::new(),
@@ -752,13 +755,14 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE || crate::contraptions::is_comparator(id) {
+                    if id == SAPLING || id == FIRE || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
                         match id {
                             SAPLING => self.saplings.insert(p),
                             FIRE => self.fires.insert(p),
+                            b if crate::beacon::is_beacon(b) => self.beacons.insert(p),
                             _ => self.comparators.insert(p),
                         };
                     }
@@ -963,6 +967,11 @@ impl World {
             self.comparators.insert(p);
         } else if crate::contraptions::is_comparator(old) {
             self.comparators.remove(&p);
+        }
+        if crate::beacon::is_beacon(id) {
+            self.beacons.insert(p);
+        } else if crate::beacon::is_beacon(old) {
+            self.beacons.remove(&p);
         }
         let treeish = |b: Id| is_log(b) || is_leaves(b);
         if self.simulate_liquids && treeish(old) && !treeish(id) {

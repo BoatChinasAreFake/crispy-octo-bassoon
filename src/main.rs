@@ -7,6 +7,7 @@ mod access;
 mod advancements;
 mod animals;
 mod anvil;
+mod beacon;
 mod block;
 mod building;
 mod carpentry;
@@ -3050,7 +3051,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -3235,7 +3236,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3448,6 +3449,46 @@ async fn game_main() {
                 app.game.world.set_v(at(3, -5, 1), block::HOPPER_FIRST);
                 app.game.world.set_v(at(3, -5, 2), block::CHEST);
                 app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
+            }
+            if s.mode == "machines" && frames == 125 {
+                // A beacon on its pyramid; a detector rail under a cart lighting a lamp;
+                // chest and hopper carts; a comparator reading a chest.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                let top = at(12, 0, 2);
+                for k in 1..=2 {
+                    for dx in -k..=k {
+                        for dz in -k..=k {
+                            app.game.world.set_v(top + IVec3::new(dx, -k, dz), block::OBSIDIAN);
+                        }
+                    }
+                }
+                app.game.world.set_v(top, block::BEACON_FIRST + 1);
+                // Track across the front, a detector in it, a lamp beside that.
+                for k in -5..=2 {
+                    app.game.world.set_v(at(5, k, 0), block::RAIL_FIRST);
+                }
+                app.game.world.set_v(at(5, -1, 0), block::DETECTOR_RAIL);
+                app.game.world.set_v(at(6, -1, 0), block::LAMP);
+                let spot = |fo: i32, ro: i32| at(fo, ro, 0).as_vec3() + Vec3::new(0.5, 0.06, 0.5);
+                let yaw = (r.x as f32).atan2(-(r.z as f32));
+                app.game.spawn_vehicle(vehicles::CART_KIND, spot(5, -1), yaw);
+                let chest = app.game.spawn_vehicle(vehicles::CHEST_CART_KIND, spot(5, 1), yaw);
+                app.game.spawn_vehicle(vehicles::HOPPER_CART_KIND, spot(5, -4), yaw);
+                if let Some(c) = containers::store(&mut app.game.world, &mut app.game.vehicles, vehicles::cart_key(chest)) {
+                    c.slots[0] = Some((block::DIAMOND, 3));
+                }
+                // Chest -> comparator -> lamp.
+                app.game.world.set_v(at(3, -3, 0), block::CHEST);
+                if let Some(c) = app.game.world.containers.get_mut(&at(3, -3, 0)) {
+                    c.slots[0] = Some((block::COBBLE, 5));
+                }
+                app.game.world.set_v(at(3, -2, 0), contraptions::comparator(contraptions::facing_of(r), false, false));
+                app.game.world.set_v(at(3, -1, 0), block::LAMP);
             }
             if s.mode == "brewing" && frames == 125 {
                 // A brewing stand mid-brew, potions in hand, and a couple of effects on.

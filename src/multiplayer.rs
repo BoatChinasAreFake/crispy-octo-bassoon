@@ -824,6 +824,10 @@ impl Game {
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
             return true;
         }
+        // Beacons switch effect.
+        if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
+            return true;
+        }
         // Comparators switch mode (the host works out whether they're on).
         if crate::contraptions::is_comparator(old) && crate::contraptions::is_comparator(new) {
             return crate::contraptions::comparator_state(old).0 == crate::contraptions::comparator_state(new).0;
@@ -956,6 +960,11 @@ impl Game {
             Msg::PotionEffect { item } => {
                 if let Some((p, false)) = crate::potions::potion_of(item) {
                     self.apply_potion(p);
+                }
+            }
+            Msg::BeaconEffect { item } => {
+                if let Some((p, false)) = crate::potions::potion_of(item) {
+                    self.beacon_effect(p);
                 }
             }
             Msg::Chat { from: SYSTEM, text } => self.msg(text),

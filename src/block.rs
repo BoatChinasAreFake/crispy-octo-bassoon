@@ -173,7 +173,9 @@ pub const MELON: Id = 289;
 pub const DETECTOR_RAIL: Id = 290;
 /// Comparators: `COMPARATOR_FIRST + facing * 4 + more * 2 + on` (see contraptions.rs).
 pub const COMPARATOR_FIRST: Id = 294;
-pub const NUM_BLOCKS: Id = 310;
+/// Beacons: `BEACON_FIRST + ` the effect it gives (`potions::ALL` order; see beacon.rs).
+pub const BEACON_FIRST: Id = 310;
+pub const NUM_BLOCKS: Id = 315;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -1261,6 +1263,12 @@ impl Registry {
         }
         blocks.push(def("dead_bush", "Dead Bush (It's Fine)", Cross, false, false, [T_DEAD_BUSH; 3], 0.0, 0, false, STICK, 0.0, S_GRASS));
         blocks.push(def("melon", "Melon (Heavy Snack)", Cube, true, true, [T_MELON_TOP, T_MELON_SIDE, T_MELON_TOP], 1.0, 0, false, AIR, 0.0, S_WOOD));
+        for (k, key) in ["detector_rail", "detector_rail_on", "detector_rail_ew", "detector_rail_ew_on"].into_iter().enumerate() {
+            let mut d = def(key, "Detector Rail (Tattletale)", Shaped, false, false, [T_DETECTOR_RAIL + k as u16; 3], 0.7, 0, false, DETECTOR_RAIL, 0.0, S_STONE);
+            d.shape = Shape::Dust;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
         for facing in 0..4u8 {
             for more in [false, true] {
                 for on in [false, true] {
@@ -1274,14 +1282,19 @@ impl Registry {
                 }
             }
         }
-        for (k, key) in ["detector_rail", "detector_rail_on", "detector_rail_ew", "detector_rail_ew_on"].into_iter().enumerate() {
-            let mut d = def(key, "Detector Rail (Tattletale)", Shaped, false, false, [T_DETECTOR_RAIL + k as u16; 3], 0.7, 0, false, DETECTOR_RAIL, 0.0, S_STONE);
-            d.shape = Shape::Dust;
+        for (k, p) in crate::potions::ALL.iter().enumerate() {
+            let mut d = def(leak(&format!("beacon{}", if k == 0 { String::new() } else { format!("_{}", p.key()) })), "Beacon (Wyrm-Powered Lighthouse)", Cube, true, false, [T_BEACON; 3], 3.0, 0, false, BEACON_FIRST, 15.0, S_GLASS);
+            d.see_through = true;
             d.creative = k == 0;
             blocks.push(d);
         }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
+        debug_assert_eq!(blocks[SPRUCE_LOG as usize].key, "spruce_log");
+        debug_assert_eq!(blocks[MELON as usize].key, "melon");
+        debug_assert_eq!(blocks[DETECTOR_RAIL as usize].key, "detector_rail");
+        debug_assert_eq!(blocks[COMPARATOR_FIRST as usize].key, "comparator");
+        debug_assert_eq!(blocks[BEACON_FIRST as usize].key, "beacon");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
         debug_assert_eq!(blocks[FRAME_FIRST as usize].key, "item_frame");
         blocks[GLASS as usize].see_through = true;
@@ -1421,6 +1434,7 @@ impl Registry {
             r(&[(MINECART, 1), (HOPPER_FIRST, 1)], (HOPPER_MINECART, 1)),
             r(&[(IRON, 6), (PLATE, 1), (ZAP_DUST, 1)], (DETECTOR_RAIL, 6)),
             r(&[(STONE, 3), (ZTORCH_ON, 3), (GOLD_INGOT, 1)], (COMPARATOR_FIRST, 1)),
+            r(&[(WYRM_EGG, 1), (GLASS, 5), (OBSIDIAN, 3)], (BEACON_FIRST, 1)),
             r(&[(MUD, 4), (WHEAT, 1)], (BRICK, 4)),
             r(&[(RED_SAND, 4)], (SANDSTONE, 1)),
             r(&[(PLANKS, 2)], (STICK, 4)),
@@ -1753,8 +1767,30 @@ mod id_order_tests {
             (POWERED_RAIL, "powered_rail"),
             (SIGN_FIRST, "sign"),
             (FRAME_FIRST, "item_frame"),
+            (SAPLING, "sapling"),
+            (FIRE, "fire"),
+            (BREWING_STAND, "brewing_stand"),
+            (HOPPER_FIRST, "hopper"),
+            (WYRM_EGG, "wyrm_egg"),
+            (SPRUCE_LOG, "spruce_log"),
+            (SPRUCE_LEAVES, "spruce_leaves"),
+            (JUNGLE_LOG, "jungle_log"),
+            (JUNGLE_LEAVES, "jungle_leaves"),
+            (MUD, "mud"),
+            (LILY_PAD, "lily_pad"),
+            (RED_SAND, "red_sand"),
+            (TERRACOTTA, "terracotta"),
+            (DEAD_BUSH, "dead_bush"),
+            (MELON, "melon"),
+            (DETECTOR_RAIL, "detector_rail"),
+            (COMPARATOR_FIRST, "comparator"),
+            (BEACON_FIRST, "beacon"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
+        }
+        assert_eq!(reg().blocks.len(), NUM_BLOCKS as usize);
+        for (id, key) in [(MELON_SLICE, "melon_slice"), (CHEST_MINECART, "chest_minecart"), (HOPPER_MINECART, "hopper_minecart"), (NAME_TAG, "name_tag")] {
+            assert_eq!(reg().key_of(id), key, "item {id}");
         }
     }
 }

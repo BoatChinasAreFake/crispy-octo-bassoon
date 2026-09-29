@@ -150,6 +150,7 @@ pub struct Game {
     /// Leaves withering away (seconds left), and the sapling growth clock (see trees.rs).
     pub decaying: Vec<(IVec3, f32)>,
     pub sapling_timer: f32,
+    pub beacon_timer: f32,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
     /// Potion effects on the local player, with seconds left (see potions.rs).
@@ -294,6 +295,7 @@ impl Game {
             admin: Default::default(),
             decaying: Vec::new(),
             sapling_timer: 0.0,
+            beacon_timer: 0.0,
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
@@ -2050,6 +2052,7 @@ impl Game {
         self.house_hmmers();
         self.house_clankers();
         self.clankers_tick(dt);
+        self.beacons_tick(dt);
         self.animals_tick(dt);
         self.hmmers_tick(dt);
         self.free_riderless();
@@ -2514,6 +2517,7 @@ impl Game {
             self.draw_weather(&mut g, eye);
         }
         self.draw_vehicles(&mut g);
+        self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
