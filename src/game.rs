@@ -39,6 +39,8 @@ pub struct Controls {
 pub enum Target {
     Block(Hit),
     Mob(usize),
+    /// A boat or minecart (see vehicles.rs).
+    Vehicle(usize),
 }
 
 pub struct Camera {
@@ -166,6 +168,11 @@ pub struct Game {
     pub left_portal: bool,
     /// Which portal leads to which (by `scorch::portal_key`), both ways.
     pub portal_links: HashMap<IVec3, IVec3>,
+    /// Boats and minecarts (see vehicles.rs), the one we're in, and time to the next sync.
+    pub vehicles: Vec<crate::vehicles::Vehicle>,
+    pub next_vehicle_id: u32,
+    pub riding: Option<u32>,
+    pub vehicle_sync: f32,
 }
 
 impl Game {
@@ -268,6 +275,10 @@ impl Game {
             portal_cooldown: 0.0,
             left_portal: true,
             portal_links: HashMap::new(),
+            vehicles: Vec::new(),
+            next_vehicle_id: 0,
+            riding: None,
+            vehicle_sync: 0.0,
         }
     }
 
@@ -355,6 +366,9 @@ impl Game {
         g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle };
         g.enchant_count = d.enchant_count;
         g.portal_links = crate::scorch::decode_links(&d.portals);
+        for (kind, pos, yaw) in crate::vehicles::decode(&d.vehicles) {
+            g.spawn_vehicle(kind, pos, yaw);
+        }
         for mut m in crate::animals::decode_mobs(&d.mobs, &mut g.rng) {
             m.id = g.next_mob_id;
             g.next_mob_id += 1;
@@ -399,6 +413,7 @@ impl Game {
             enchant_count: self.enchant_count,
             mobs: crate::animals::encode_mobs(&self.mobs),
             portals: crate::scorch::encode_links(&self.portal_links),
+            vehicles: crate::vehicles::encode(&self.vehicles),
             version: crate::save::VERSION,
         }
     }
@@ -626,7 +641,9 @@ impl Game {
                 self.advance("cover_me");
             }
         }
-        let mut fall = self.player.update(dt, &c.input, &self.world, self.creative);
+        // In a boat or cart, the vehicle moves us (see vehicles.rs).
+        let mut fall = if self.riding.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
+        self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
         // Flowing water carries you along.
         if self.player.body.in_water && !self.player.flying {
             let push = crate::liquids::current(&self.world, self.player.body.pos + Vec3::Y * 0.3);
@@ -1099,9 +1116,22 @@ impl Game {
                 }
             }
         }
-        self.target = match (best, hit) {
-            (Some((i, _)), _) => Some(Target::Mob(i)),
-            (None, Some(h)) => Some(Target::Block(h)),
+        let mut ride: Option<(usize, f32)> = None;
+        for (i, v) in self.vehicles.iter().enumerate() {
+            let (min, max) = v.bounds();
+            if let Some(t) = ray_aabb(eye, dir, min, max)
+                && t < reach.min(block_dist)
+                && best.is_none_or(|b| t < b.1)
+                && ride.is_none_or(|r| t < r.1)
+                && Some(v.id) != self.riding
+            {
+                ride = Some((i, t));
+            }
+        }
+        self.target = match (ride, best, hit) {
+            (Some((i, _)), _, _) => Some(Target::Vehicle(i)),
+            (None, Some((i, _)), _) => Some(Target::Mob(i)),
+            (None, None, Some(h)) => Some(Target::Block(h)),
             _ => None,
         };
     }
@@ -1116,6 +1146,21 @@ impl Game {
         }
 
         match &self.target {
+            Some(Target::Vehicle(i)) => {
+                let i = *i;
+                self.breaking = None;
+                if c.attack_pressed && self.attack_cd <= 0.0 {
+                    let id = self.vehicles[i].id;
+                    self.attack_cd = 0.3;
+                    if self.is_client() {
+                        self.net_send_msg(Msg::VehicleUse { id, action: 2 });
+                        self.vehicles[i].hurt = 0.4;
+                    } else {
+                        let me = self.my_id + 1;
+                        self.hit_vehicle(id, me);
+                    }
+                }
+            }
             Some(Target::Mob(i)) => {
                 self.breaking = None;
                 if c.attack_pressed && self.attack_cd <= 0.0 {
@@ -1230,6 +1275,14 @@ impl Game {
         if let Some(Target::Mob(i)) = self.target
             && self.use_on_mob(i)
         {
+            return;
+        }
+        // Getting into a boat or cart; putting one down.
+        if let Some(Target::Vehicle(i)) = self.target {
+            self.mount(i);
+            return;
+        }
+        if matches!(held, BOAT | MINECART) && self.place_vehicle(held) {
             return;
         }
         // Chests, furnaces and anvils open (sneak to place against them instead).
@@ -1450,7 +1503,7 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH | LEVER | BUTTON | PLATE if !is_solid(below) => return,
+            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL if !is_solid(below) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -1822,6 +1875,7 @@ impl Game {
         self.weather_tick(dt);
         self.liquid_tick(dt);
         self.zap_tick(dt);
+        self.vehicles_tick(dt, 0.0, 0.0, false);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
         }
@@ -2307,6 +2361,7 @@ impl Game {
         if !scorch {
             self.draw_weather(&mut g, eye);
         }
+        self.draw_vehicles(&mut g);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
         self.draw_orbs(&mut g, eye, 48.0);
@@ -3851,6 +3906,78 @@ mod tests {
             g.zap_tick(0.05);
         }
         assert!((0..2).all(|dx| (0..3).all(|dy| g.world.get_v(base + IVec3::new(dx, dy, 0)) == AIR)));
+    }
+
+        #[test]
+    fn carts_ride_rails_and_boats_float() {
+        use crate::vehicles::{is_rail, rail_dirs};
+        let mut g = arena(74);
+        let run = |g: &mut Game, secs: f32, forward: f32| {
+            let mut t = 0.0;
+            while t < secs {
+                g.zap_tick(0.05);
+                g.vehicles_tick(0.05, forward, 0.0, false);
+                t += 0.05;
+            }
+        };
+        // An L of rails: they bend round the corner by themselves.
+        for z in 0..6 {
+            g.world.set_v(IVec3::new(0, 50, -z), RAIL_FIRST);
+        }
+        for x in 1..6 {
+            g.world.set_v(IVec3::new(x, 50, -5), RAIL_FIRST);
+        }
+        // A powered rail at the start, with a lever to power it.
+        g.world.set_v(IVec3::new(0, 50, 0), POWERED_RAIL);
+        g.world.set_v(IVec3::new(-1, 50, 0), LEVER_ON);
+        run(&mut g, 0.3, 0.0);
+        let corner = g.world.get_v(IVec3::new(0, 50, -5));
+        assert_eq!(rail_dirs(corner), Some([IVec3::Z, IVec3::X]), "the corner bent: {corner}");
+        assert_eq!(rail_dirs(g.world.get_v(IVec3::new(3, 50, -5))), Some([IVec3::X, IVec3::NEG_X]));
+        assert_eq!(g.world.get_v(IVec3::new(0, 50, 0)), POWERED_RAIL + 1, "powered and lit");
+        // A cart on the powered rail sets off round the corner and to the end.
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((MINECART, 1));
+        g.inv.selected = 0;
+        g.player.yaw = 0.0;
+        g.player.pitch = -0.6;
+        g.player.body.pos = Vec3::new(0.5, 50.0, 2.5);
+        assert!(g.place_vehicle(MINECART));
+        assert_eq!(g.vehicles.len(), 1);
+        g.mount(0);
+        assert!(g.riding.is_some());
+        run(&mut g, 4.0, 0.0);
+        let v = &g.vehicles[0];
+        assert!(v.pos.x > 4.5 && (v.pos.z + 4.5).abs() < 0.2, "at the end of the line: {}", v.pos);
+        assert!(g.player.body.pos.distance(v.seat()) < 0.01, "carrying us");
+        // Sneak to get out; hit it three times to pick it up.
+        g.vehicles_tick(0.05, 0.0, 0.0, true);
+        assert!(g.riding.is_none());
+        let id = g.vehicles[0].id;
+        for _ in 0..3 {
+            g.hit_vehicle(id, 1);
+        }
+        assert!(g.vehicles.is_empty());
+        assert!(g.drops.iter().any(|d| d.item == MINECART));
+        assert!(is_rail(RAIL_FIRST + 5));
+
+        // A boat on a pond floats, and rows forward.
+        for x in -8..=-2 {
+            for z in 2..=8 {
+                g.world.set(x, 49, z, WATER);
+            }
+        }
+        let id = g.spawn_vehicle(crate::vehicles::BOAT_KIND, Vec3::new(-5.0, 49.6, 5.0), 0.0);
+        let i = g.vehicles.iter().position(|v| v.id == id).unwrap();
+        g.mount(i);
+        run(&mut g, 1.0, 1.0);
+        let b = g.vehicles.iter().find(|v| v.id == id).unwrap();
+        assert!(b.pos.z < 4.5, "rowed north: {}", b.pos);
+        assert!((b.pos.y - 49.85).abs() < 0.3, "afloat: {}", b.pos.y);
+        // Vehicles are kept with the world.
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.vehicles.len(), 1);
+        assert_eq!(back.vehicles[0].rider, 0);
     }
 
         /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

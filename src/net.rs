@@ -165,6 +165,14 @@ pub enum Msg {
     Trade { mob: u32, index: u8 },
     /// client -> host: I've stood in the portal at x,y,z long enough: take me through.
     UsePortal { x: i32, y: i32, z: i32 },
+    /// host -> client: every boat and minecart: (id, kind, position, yaw, rider id + 1 or 0).
+    Vehicles(Vec<(u32, u8, Vec3, f32, u32)>),
+    /// client -> host: get in (0), get out (1) or hit (2) this vehicle.
+    VehicleUse { id: u32, action: u8 },
+    /// client -> host: where I've driven the vehicle I'm in.
+    Ride { id: u32, pos: Vec3, yaw: f32 },
+    /// client -> host: I put a boat (0) or minecart (1) down here.
+    PlaceVehicle { kind: u8, pos: Vec3, yaw: f32 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -590,6 +598,34 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
+            Msg::Vehicles(list) => {
+                w.u8(49);
+                w.u32(list.len() as u32);
+                for &(id, kind, pos, yaw, rider) in list {
+                    w.u32(id);
+                    w.u8(kind);
+                    w.v3(pos);
+                    w.f32(yaw);
+                    w.u32(rider);
+                }
+            }
+            Msg::VehicleUse { id, action } => {
+                w.u8(50);
+                w.u32(*id);
+                w.u8(*action);
+            }
+            Msg::Ride { id, pos, yaw } => {
+                w.u8(51);
+                w.u32(*id);
+                w.v3(*pos);
+                w.f32(*yaw);
+            }
+            Msg::PlaceVehicle { kind, pos, yaw } => {
+                w.u8(52);
+                w.u8(*kind);
+                w.v3(*pos);
+                w.f32(*yaw);
+            }
             Msg::Enchanted { item, ench, count } => {
                 w.u8(45);
                 w.u16(*item);
@@ -734,6 +770,17 @@ impl Msg {
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
             48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            49 => {
+                let n = r.count(25)?;
+                let mut list = Vec::with_capacity(n);
+                for _ in 0..n {
+                    list.push((r.u32()?, r.u8()?, r.v3()?, r.f32()?, r.u32()?));
+                }
+                Msg::Vehicles(list)
+            }
+            50 => Msg::VehicleUse { id: r.u32()?, action: r.u8()? },
+            51 => Msg::Ride { id: r.u32()?, pos: r.v3()?, yaw: r.f32()? },
+            52 => Msg::PlaceVehicle { kind: r.u8()?, pos: r.v3()?, yaw: r.f32()? },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0, ench: r.u16()?, other_ench: r.u16()? },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
@@ -1182,6 +1229,10 @@ mod tests {
             Msg::MobInteract { mob: 77, item: 0x8019 },
             Msg::Trade { mob: 12, index: 3 },
             Msg::UsePortal { x: 32800, y: 40, z: -3 },
+            Msg::Vehicles(vec![(3, 1, Vec3::new(1.0, 2.0, 3.0), 0.5, 2)]),
+            Msg::VehicleUse { id: 3, action: 2 },
+            Msg::Ride { id: 3, pos: Vec3::ONE, yaw: 1.0 },
+            Msg::PlaceVehicle { kind: 0, pos: Vec3::X, yaw: -1.0 },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },

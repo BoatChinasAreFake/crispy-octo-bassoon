@@ -36,6 +36,7 @@ mod server;
 mod structures;
 mod settings;
 mod upnp;
+mod vehicles;
 mod villagers;
 mod sound;
 mod texture;
@@ -2533,7 +2534,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2695,7 +2696,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2879,6 +2880,34 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "vehicles" && frames == 125 {
+                // A loop of rails with a cart, and a boat on a pond.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32| base + f * fo + r * ro;
+                for k in 0..7 {
+                    for (a, b) in [(3 + k, -4), (3 + k, 1), (3, -4 + k.min(5)), (9, -4 + k.min(5))] {
+                        app.game.world.set_v(at(a, b), block::RAIL_FIRST);
+                    }
+                }
+                app.game.world.set_v(at(3, -1), block::POWERED_RAIL);
+                app.game.world.set_v(at(3, -1) - r, block::LEVER_ON);
+                for a in 4..9 {
+                    for b in 3..7 {
+                        app.game.world.set_v(at(a, b) - IVec3::Y, block::WATER);
+                    }
+                }
+                let cart_at = at(6, -4).as_vec3() + Vec3::new(0.5, 1.0 / 16.0, 0.5);
+                app.game.spawn_vehicle(vehicles::CART_KIND, cart_at, 0.0);
+                let boat_at = at(6, 5).as_vec3() + Vec3::new(0.5, -0.15, 0.5);
+                app.game.spawn_vehicle(vehicles::BOAT_KIND, boat_at, 0.7);
+                app.game.inv.add(block::MINECART, 1);
+                app.game.inv.add(block::BOAT, 1);
+                app.game.inv.add(block::RAIL_FIRST, 32);
             }
             if s.mode == "trade" && frames == 125 {
                 // A Librarian and a purse of gold.

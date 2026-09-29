@@ -40,7 +40,7 @@ pub fn source_on(id: Id) -> bool {
 
 /// Things that sit on the floor and fall off when it goes.
 pub fn needs_floor(id: Id) -> bool {
-    is_wire(id) || matches!(id, LEVER | LEVER_ON | BUTTON | BUTTON_ON | PLATE | PLATE_ON)
+    is_wire(id) || matches!(id, LEVER | LEVER_ON | BUTTON | BUTTON_ON | PLATE | PLATE_ON) || crate::vehicles::is_rail(id)
 }
 
 /// Dust next to this dust: along the floor, and one step up or down.
@@ -144,6 +144,18 @@ impl Game {
                 self.buttons.insert(p, BUTTON_SECS);
             }
             check.insert(p);
+            // Rails bend to join their neighbours; powered ones follow the power.
+            if crate::vehicles::is_rail(id) {
+                let want = if crate::vehicles::is_powered_rail(id) {
+                    crate::vehicles::powered_shape(&self.world, p, powered(&self.world, p))
+                } else {
+                    crate::vehicles::rail_shape(&self.world, p)
+                };
+                if want != id {
+                    self.world.set_v(p, want);
+                }
+                continue;
+            }
             // A portal whose frame is broken falls apart.
             if crate::scorch::is_portal(id) {
                 let side = if id == PORTAL_X { IVec3::X } else { IVec3::Z };

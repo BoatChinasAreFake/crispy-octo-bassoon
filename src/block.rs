@@ -106,8 +106,13 @@ pub const EMBERSAND: Id = 125;
 pub const SCORCH_GOLD_ORE: Id = 126;
 pub const PORTAL_X: Id = 127;
 pub const PORTAL_Z: Id = 128;
+/// Rails (see vehicles.rs): `RAIL_FIRST + shape`, shapes north-south,
+/// east-west, then corners NE, NW, SE, SW. The north-south one is the item.
+pub const RAIL_FIRST: Id = 129;
+/// Powered rails: `POWERED_RAIL + axis * 2 + on` (axis 0 north-south, 1 east-west).
+pub const POWERED_RAIL: Id = 135;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 129;
+pub const NUM_BLOCKS: Id = 139;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -181,8 +186,10 @@ pub const ENCHANTED_BOOK: Id = FIRST_ITEM + 82;
 pub const SHIELD: Id = FIRST_ITEM + 83;
 /// Lights portals (and TNT).
 pub const SPARKER: Id = FIRST_ITEM + 84;
+pub const BOAT: Id = FIRST_ITEM + 85;
+pub const MINECART: Id = FIRST_ITEM + 86;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 85;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 87;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -196,7 +203,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id)
+    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -416,6 +423,10 @@ pub fn made_of(id: Id) -> Id {
 pub fn placing_item(id: Id) -> Option<Id> {
     if id == WIRE {
         return Some(ZAP_DUST);
+    }
+    // Any rail is placed as a straight one, then bends to fit (see vehicles.rs).
+    if id == RAIL_FIRST || id == POWERED_RAIL {
+        return Some(id);
     }
     if let Some((family, _)) = slab_of(id) {
         return Some(family);
@@ -830,6 +841,20 @@ impl Registry {
             d.creative = false;
             blocks.push(d);
         }
+        for (k, key) in ["rail", "rail_ew", "rail_ne", "rail_nw", "rail_se", "rail_sw"].into_iter().enumerate() {
+            let tile = T_RAIL + k as u16;
+            let mut d = def(key, "Rail (Choo Choo)", Shaped, false, false, [tile; 3], 0.7, 0, false, RAIL_FIRST, 0.0, S_STONE);
+            d.shape = Shape::Dust;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
+        for (k, key) in ["powered_rail", "powered_rail_on", "powered_rail_ew", "powered_rail_ew_on"].into_iter().enumerate() {
+            let tile = T_POWERED_RAIL + k as u16;
+            let mut d = def(key, "Powered Rail (Zoom)", Shaped, false, false, [tile; 3], 0.7, 0, false, POWERED_RAIL, 0.0, S_STONE);
+            d.shape = Shape::Dust;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
@@ -929,6 +954,8 @@ impl Registry {
             ItemDef { stack: 1, ..item("enchanted_book", "Enchanted Book (Spoilers Inside)", T_ENCHANTED_BOOK) },
             ItemDef { stack: 1, ..item("shield", "Shield (Door You Can Carry)", T_SHIELD) },
             ItemDef { stack: 1, ..item("sparker", "Sparker (Hot Hands in a Can)", T_SPARKER) },
+            ItemDef { stack: 1, ..item("boat", "Boat (Mostly Waterproof)", T_BOAT_ITEM) },
+            ItemDef { stack: 1, ..item("minecart", "Minecart (Wheeled Bucket)", T_CART_ITEM) },
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -998,6 +1025,10 @@ impl Registry {
             r(&[(WHEAT, 3), (STRING, 1)], (BOOK, 1)),
             r(&[(PLANKS, 6), (IRON, 1)], (SHIELD, 1)),
             r(&[(IRON, 1), (COAL, 1)], (SPARKER, 1)),
+            r(&[(PLANKS, 5)], (BOAT, 1)),
+            r(&[(IRON, 5)], (MINECART, 1)),
+            r(&[(IRON, 6), (STICK, 1)], (RAIL_FIRST, 16)),
+            r(&[(GOLD_INGOT, 6), (STICK, 1), (ZAP_DUST, 1)], (POWERED_RAIL, 6)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {

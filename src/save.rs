@@ -73,6 +73,8 @@ pub struct SaveData {
     pub mobs: Vec<u8>,
     /// Which portal leads to which, packed by `scorch::encode_links` (save v12+).
     pub portals: Vec<u8>,
+    /// Boats and minecarts, packed by `vehicles::encode` (save v12+).
+    pub vehicles: Vec<u8>,
     /// The format version it was read from (the container and drop blobs changed in v9).
     pub version: u32,
 }
@@ -205,6 +207,8 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     w.0.extend_from_slice(&d.mobs);
     w.u32(d.portals.len() as u32);
     w.0.extend_from_slice(&d.portals);
+    w.u32(d.vehicles.len() as u32);
+    w.0.extend_from_slice(&d.vehicles);
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -313,9 +317,10 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     }
     let mobs = if version >= 12 { r.bytes(4 << 20)? } else { Vec::new() };
     let portals = if version >= 12 { r.bytes(4 << 20)? } else { Vec::new() };
+    let vehicles = if version >= 12 { r.bytes(4 << 20)? } else { Vec::new() };
     let ok = |v: f32, d: f32| if v.is_finite() { v.clamp(0.0, 20.0) } else { d };
     let (food, saturation) = (ok(food, 20.0), ok(saturation, 5.0));
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, mobs, portals, version })
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, mobs, portals, vehicles, version })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -536,6 +541,7 @@ mod tests {
             enchant_count: 3,
             mobs: vec![1, 2, 3],
             portals: vec![4, 5],
+            vehicles: vec![6],
             version: VERSION,
         }
     }

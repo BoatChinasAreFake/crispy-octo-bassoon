@@ -215,6 +215,12 @@ pub const T_PORTAL: u16 = 238;
 pub const T_SPARKER: u16 = 239;
 pub const T_GRUMBLE_SKIN: u16 = 240;
 pub const T_GRUMBLE_FACE: u16 = 241;
+/// Six rail shapes in a row (see `RAIL_FIRST`), then four powered rails.
+pub const T_RAIL: u16 = 242;
+pub const T_POWERED_RAIL: u16 = 248;
+pub const T_CART: u16 = 252;
+pub const T_BOAT_ITEM: u16 = 253;
+pub const T_CART_ITEM: u16 = 254;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1142,6 +1148,44 @@ const WORM: [&str; 16] = [
     "................",
     "................",
     "................",
+    "................",
+    "................",
+];
+
+const BOAT_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "#..............#",
+    "##............##",
+    "#w#..........#w#",
+    "#ww##########ww#",
+    ".#wwwwwwwwwwww#.",
+    ".#dddddddddddd#.",
+    "..#dddddddddd#..",
+    "...##########...",
+    "................",
+    "................",
+    "................",
+];
+
+const CART_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "..############..",
+    "..#hbbbbbbbbh#..",
+    "..#bbbbbbbbbb#..",
+    "..#bbbbbbbbbb#..",
+    "..#bbbbbbbbbb#..",
+    "..#hbbbbbbbbh#..",
+    "..############..",
+    "...##......##...",
+    "..#kk#....#kk#..",
+    "...##......##...",
     "................",
     "................",
 ];
@@ -2137,6 +2181,52 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             a.set(T_GRUMBLE_FACE, x, y, if y > 8 && (x == 6 || x == 9) { rgb(90, 40, 40) } else { rgb(230, 160, 150) });
         }
     }
+    // ---- Rails and vehicles
+    for k in 0..10u16 {
+        let tile = T_RAIL + k;
+        let powered = k >= 6;
+        let (shape, on) = if powered { ((k - 6) / 2, (k - 6) % 2 == 1) } else { (k, false) };
+        let rail = if powered { rgb(235, 190, 60) } else { rgb(170, 170, 178) };
+        a.each(tile, |x, y, r, _| {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            // Distance across the track (0 at one rail's middle) and along it.
+            let (across, along) = match shape {
+                0 => (fx, fy),
+                1 => (fy, fx),
+                _ => {
+                    // Corners: arcs round the corner between the two ends.
+                    let (cx, cy) = match shape {
+                        2 => (16.0, 0.0),
+                        3 => (0.0, 0.0),
+                        4 => (16.0, 16.0),
+                        _ => (0.0, 16.0),
+                    };
+                    let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+                    let ang = (fy - cy).atan2(fx - cx);
+                    (d, ang * 16.0 / std::f32::consts::FRAC_PI_2)
+                }
+            };
+            let on_rail = (3.0..5.0).contains(&across) || (11.0..13.0).contains(&across);
+            let sleeper = (2.0..14.0).contains(&across) && along.rem_euclid(4.0) < 2.0;
+            let dust = powered && (7.0..9.0).contains(&across);
+            if on_rail {
+                shade(rail, r.range(0.9, 1.1))
+            } else if dust {
+                if on { rgb(255, 50, 40) } else { rgb(110, 15, 15) }
+            } else if sleeper {
+                shade(rgb(115, 85, 50), r.range(0.85, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    a.each(T_CART, |x, y, r, _| {
+        let rivet = (x % 5 == 2) && (y % 5 == 2);
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        if rivet { rgb(210, 210, 215) } else { shade(rgb(95, 95, 102), r.range(0.85, 1.1) * if rim { 0.75 } else { 1.0 }) }
+    });
+    a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
+    a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);
     // ---- Hmmers
     a.copy(T_SKIN, T_HMM_FACE);
     for (x, y, c) in [(3, 6, rgb(255, 255, 255)), (4, 6, rgb(40, 110, 40)), (11, 6, rgb(40, 110, 40)), (12, 6, rgb(255, 255, 255))] {

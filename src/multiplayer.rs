@@ -666,6 +666,17 @@ impl Game {
                     self.host_use_portal(from, IVec3::new(x, y, z));
                 }
             }
+            Msg::VehicleUse { id, action } => {
+                if self.peer_rate_ok(from, "vehicle", 0.05) {
+                    self.host_vehicle_use(from, id, action);
+                }
+            }
+            Msg::Ride { id, pos, yaw } => self.host_ride(from, id, pos, yaw),
+            Msg::PlaceVehicle { kind, pos, yaw } => {
+                if self.peer_rate_ok(from, "place_vehicle", 0.3) {
+                    self.host_place_vehicle(from, kind, pos, yaw);
+                }
+            }
             Msg::Enchant { x, y, z, item, choice } => {
                 if self.peer_rate_ok(from, "enchant", 0.2) {
                     self.host_enchant(from, IVec3::new(x, y, z), item, choice);
@@ -834,6 +845,7 @@ impl Game {
                 self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle };
             }
             Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
+            Msg::Vehicles(list) => self.apply_vehicles(list),
             Msg::Weather { kind } => self.weather.kind = crate::weather::Weather::from_index(kind),
             Msg::Lightning { at } => {
                 if at.is_finite() {
@@ -873,7 +885,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } => {}
         }
     }
 
@@ -1865,6 +1877,45 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert!(crate::scorch::in_scorch(client.player.body.pos.x));
+    }
+
+    #[test]
+    fn vehicles_through_the_host() {
+        let mut host = Game::new(793, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Rowy", "").unwrap();
+        let id = client.my_id;
+        host.give_peer(id, BOAT, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BOAT) == 1));
+        // Put a boat down: the host takes the boat from the ledger and everyone sees it.
+        let at = spawn + Vec3::new(2.0, 0.0, 0.0);
+        client.net_send_msg(Msg::PlaceVehicle { kind: crate::vehicles::BOAT_KIND, pos: at, yaw: 0.0 });
+        assert!(pump(&mut host, &mut client, |h, c| h.vehicles.len() == 1 && c.vehicles.len() == 1));
+        assert_eq!(host.peers[&id].ledger.bag.count(BOAT), 0);
+        // Get in and drive it: the host follows along.
+        client.mount(0);
+        assert!(pump(&mut host, &mut client, |h, _| h.vehicles[0].rider == id + 1));
+        let moved = at + Vec3::new(0.0, 0.0, -3.0);
+        client.vehicles[0].pos = moved;
+        assert!(pump(&mut host, &mut client, |h, _| h.vehicles[0].pos.distance(moved) < 0.5));
+        // Out, then hit it into an item.
+        for _ in 0..10 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.dismount();
+        assert!(pump(&mut host, &mut client, |h, _| h.vehicles[0].rider == 0));
+        for _ in 0..3 {
+            for _ in 0..12 {
+                host.update(0.016, &idle());
+                client.update(0.016, &idle());
+            }
+            client.net_send_msg(Msg::VehicleUse { id: host.vehicles.first().map(|v| v.id).unwrap_or(0), action: 2 });
+        }
+        assert!(pump(&mut host, &mut client, |h, c| h.vehicles.is_empty() && c.vehicles.is_empty()));
+        assert!(host.drops.iter().any(|d| d.item == BOAT));
     }
 
     #[test]
