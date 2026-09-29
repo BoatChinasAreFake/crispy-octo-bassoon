@@ -136,7 +136,9 @@ impl World {
             Ok(b) => b,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return,
             Err(e) => {
-                eprintln!("Couldn't read {}: {e}", path.display());
+                // Keep it aside too: writing over it later would lose what's in it.
+                eprintln!("Couldn't read {}: {e}; kept as .bad", path.display());
+                let _ = std::fs::rename(&path, path.with_extension("bad"));
                 return;
             }
         };
