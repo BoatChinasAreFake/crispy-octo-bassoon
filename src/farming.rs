@@ -345,11 +345,6 @@ pub fn water_offsets() -> impl Iterator<Item = IVec3> {
     (0..=1).flat_map(|dy| (-4..=4).flat_map(move |dz| (-4..=4).map(move |dx| ivec3(dx, dy, dz))))
 }
 
-/// A light source's reach counts as "a nearby torch" for crops.
-pub fn is_farm_light(id: Id) -> bool {
-    block(id).light > 0.0
-}
-
 /// Where a Cluckster at `pos` would peck: crop cells within 1.6 blocks.
 pub fn in_peck_range(cluckster: Vec3, crop: IVec3) -> bool {
     let c = crop.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
@@ -461,7 +456,7 @@ impl Game {
             // Water nearby, or rain falling on it.
             let wet = water_offsets().any(|o| is_water(self.world.get_v(p + o))) || self.rained_on(above.x, above.y, above.z);
             let sky = self.world.sky_light(above.x, above.y, above.z) * daylight;
-            let light = if sky < 0.5 && self.light_near(above, 5) { 0.8 } else { sky };
+            let light = sky.max(self.lamp_light(above));
             let watched = players.iter().any(|q| q.distance(above.as_vec3()) < 10.0);
             let weed_roll = self.rng.chance(step / 150.0);
             let Some(soil) = self.world.farm.get_mut(&p) else { continue };
@@ -533,8 +528,10 @@ impl Game {
         }
     }
 
-    fn light_near(&self, p: IVec3, r: i32) -> bool {
-        (-2..=2).any(|dy| (-r..=r).any(|dz| (-r..=r).any(|dx| is_farm_light(self.world.get_v(p + ivec3(dx, dy, dz))))))
+    /// Light from torches and lamps (not the sky) at a crop: bright enough close by.
+    fn lamp_light(&self, p: IVec3) -> f32 {
+        let level = self.world.block_level(p.x, p.y, p.z);
+        if level >= 9 { 0.8 } else { 0.0 }
     }
 
     fn scarecrow_near(&self, p: IVec3, r: i32) -> bool {
@@ -547,7 +544,7 @@ impl Game {
         let soil_pos = if is_farmland(self.world.get_v(pos)) { pos } else { pos - IVec3::Y };
         let above = soil_pos + IVec3::Y;
         let sky = self.world.sky_light(above.x, above.y, above.z) * self.daylight();
-        let light = if sky < 0.5 && self.light_near(above, 5) { 0.8 } else { sky };
+        let light = sky.max(self.lamp_light(above));
         let watched = true; // somebody is holding the probe
         let top = Crop::of_block(self.world.get_v(above));
         let soil = self.world.farm.get_mut(&soil_pos)?;

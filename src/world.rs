@@ -28,29 +28,15 @@ pub struct Chunk {
     /// Per column: one above the highest block that blocks or dapples sunlight
     /// (so at least `heights`; higher where there are leaves).
     pub canopy: [u8; 256],
+    /// Sky and block light levels (see light.rs).
+    pub light: crate::light::LightStore,
 }
 
-/// How much sky a cell sees, from its column's heights: full sky above everything,
-/// dappled shade under foliage, and fading light below solid blocks.
-#[inline]
-pub fn exposure(height: i32, canopy: i32, y: i32) -> f32 {
-    if y < height {
-        (1.0 - (height - y) as f32 * 0.09).max(0.0)
-    } else if y < canopy {
-        CANOPY_SHADE
-    } else {
-        1.0
-    }
-}
-
-/// Light under leaves. Foliage scatters light rather than stopping it, so shade
-/// under a tree is gentle (and the undersides of leaves aren't pitch black at dusk).
-pub const CANOPY_SHADE: f32 = 0.8;
 
 impl Chunk {
     /// A chunk whose heightmaps still need `recompute_heights`.
     pub fn new(blocks: PalettedBlocks) -> Chunk {
-        Chunk { blocks, heights: [0; 256], canopy: [0; 256] }
+        Chunk { blocks, heights: [0; 256], canopy: [0; 256], light: Default::default() }
     }
     fn recompute_height(&mut self, lx: i32, lz: i32) {
         let (mut h, mut canopy) = (0, 0);
@@ -486,7 +472,10 @@ impl World {
     /// `centers` are (position, radius) pairs: the local player plus, when hosting,
     /// the remote players, so mobs and physics keep working around them.
     pub fn stream(&mut self, centers: &[(Vec3, i32)]) -> Vec<(i32, i32)> {
-        while let Ok((cx, cz, blocks)) = self.res_rx.try_recv() {
+        // Lighting a new chunk takes a few milliseconds; spread arrivals over frames.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs_f32() < 0.008 {
+            let Ok((cx, cz, blocks)) = self.res_rx.try_recv() else { break };
             self.pending.remove(&(cx, cz));
             if self.chunks.contains_key(&(cx, cz)) {
                 continue; // made on the spot meanwhile (see `load_now`)
@@ -520,6 +509,7 @@ impl World {
         }
         chunk.recompute_heights();
         self.chunks.insert((cx, cz), chunk);
+        self.light_new_chunk(cx, cz);
         if self.structure_loot {
             self.fill_structure_chests(cx, cz);
         }
@@ -607,15 +597,10 @@ impl World {
         self.get(p.x, p.y, p.z)
     }
 
-    /// 0..1 sky exposure of a cell, used for lighting and mob burning/spawning.
+    /// 0..1 sky light of a cell (1: open sky), used for mob burning and
+    /// spawning, crops, rain and shading things that move (see light.rs).
     pub fn sky_light(&self, x: i32, y: i32, z: i32) -> f32 {
-        match self.chunks.get(&(x.div_euclid(CW), z.div_euclid(CW))) {
-            Some(c) => {
-                let i = (z.rem_euclid(CW) * CW + x.rem_euclid(CW)) as usize;
-                exposure(c.heights[i] as i32, c.canopy[i] as i32, y)
-            }
-            None => 1.0,
-        }
+        crate::light::sky_brightness(self.sky_level(x, y, z))
     }
 
     pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
@@ -685,6 +670,7 @@ impl World {
                 self.dirty.insert((cx + dx, cz + dz));
             }
         }
+        self.relight(p, old, id);
         Some(old)
     }
 

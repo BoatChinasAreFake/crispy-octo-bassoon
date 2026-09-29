@@ -2208,14 +2208,16 @@ impl Game {
         let clear = |w: &World, y: i32| clear(w, y) && (!tall || !is_solid(w.get(x, y + 2, z)));
         // Night, or a storm dark enough for monsters.
         let dark = self.is_night() || self.weather.kind == crate::weather::Weather::Thunder;
-        if dark && is_solid(top) && clear(&self.world, y + 1) {
+        // Torchlight keeps monsters away (block light 8 or more).
+        let torchlit = |w: &World, y: i32| w.block_level(x, y, z) >= 8;
+        if dark && is_solid(top) && clear(&self.world, y + 1) && !torchlit(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
             self.alloc_mob_sized(kind, pos, size);
             return;
         }
         // Caves are always spooky.
         let cy = self.rng.int(4, y.max(5));
-        if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 {
+        if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 && !torchlit(&self.world, cy) {
             let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
             self.alloc_mob_sized(kind, pos, size);
         }
@@ -2504,7 +2506,7 @@ impl Game {
         let held = self.inv.held();
         if !self.menu && is_block_item(held) && block(held).light > 0.0 {
             let e = self.player.eye();
-            extra.push([e.x, e.y, e.z, block(held).light * 0.8]);
+            extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
         FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.in_scorch() { 0.32 } else { 0.0 }, lights }

@@ -3,7 +3,8 @@
 
 use crate::block::*;
 use crate::texture::tile_uv;
-use crate::world::{exposure, idx, Chunk, World, CH, CW};
+use crate::light::{block_brightness, sky_brightness};
+use crate::world::{idx, Chunk, World, CH, CW};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -11,15 +12,16 @@ pub struct Vertex {
     pub pos: [f32; 3],
     /// Atlas coordinates, or (when `tile` is set) tile repeats from 0 up.
     pub uv: [f32; 2],
-    /// x: ambient occlusion * face shade, y: sky exposure.
-    pub light: [f32; 2],
+    /// x: ambient occlusion * face shade, y: sky light, z: block light
+    /// (below zero: use the nearby point lights instead, for things that move).
+    pub light: [f32; 3],
     /// Where a repeating tile starts in the atlas (x below zero: `uv` is plain).
     pub tile: [f32; 2],
 }
 
 impl Default for Vertex {
     fn default() -> Self {
-        Vertex { pos: [0.0; 3], uv: [0.0; 2], light: [0.0; 2], tile: [-1.0; 2] }
+        Vertex { pos: [0.0; 3], uv: [0.0; 2], light: [0.0, 0.0, -1.0], tile: [-1.0; 2] }
     }
 }
 
@@ -106,19 +108,29 @@ impl<'a> Hood<'a> {
             _ => STONE,
         }
     }
+    /// Light byte of a cell (see light.rs): sky in the high bits, block in the low.
     #[inline]
-    fn sky(&self, lx: i32, y: i32, lz: i32) -> f32 {
-        match self.chunk_of(lx, lz) {
-            (Some(c), x, z) => {
-                let i = (z * CW + x) as usize;
-                exposure(c.heights[i] as i32, c.canopy[i] as i32, y)
-            }
-            _ => 1.0,
+    fn raw_light(&self, lx: i32, y: i32, lz: i32) -> u8 {
+        if y >= CH {
+            return 0xF0;
         }
+        if y < 0 {
+            return 0;
+        }
+        match self.chunk_of(lx, lz) {
+            (Some(c), x, z) => c.light.get(idx(x, y, z)),
+            _ => 0xF0,
+        }
+    }
+    /// Sky and block brightness (0..1) of a cell.
+    #[inline]
+    fn lit(&self, lx: i32, y: i32, lz: i32) -> (f32, f32) {
+        let b = self.raw_light(lx, y, lz);
+        (sky_brightness(b >> 4), block_brightness(b & 15))
     }
 }
 
-fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 2]) -> Vertex {
+fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 3]) -> Vertex {
     let (u0, v0, s) = tile_uv(tile);
     let u = u0 + UV_EPS + uv[0] * (s - 2.0 * UV_EPS);
     let v = v0 + UV_EPS + uv[1] * (s - 2.0 * UV_EPS);
@@ -130,10 +142,10 @@ fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 2]) -> Vertex {
 #[derive(Clone, Copy, PartialEq)]
 struct Flat {
     tile: u16,
-    light: [[f32; 2]; 4],
+    light: [[f32; 3]; 4],
 }
 
-const NO_FLAT: Flat = Flat { tile: u16::MAX, light: [[0.0; 2]; 4] };
+const NO_FLAT: Flat = Flat { tile: u16::MAX, light: [[0.0; 3]; 4] };
 
 /// Greedy meshing: cube faces with the same tile and light join into big
 /// rectangles (the shader repeats the tile across them). Faces only join
@@ -257,7 +269,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                 match def.model {
                     Model::Empty => {}
                     Model::Cross => {
-                        let sky = hood.sky(lx, y, lz);
+                        let (sky, blk) = hood.lit(lx, y, lz);
                         let tile = def.tex[1];
                         let (a, b) = if id == TORCH { (0.3, 0.7) } else { (0.15, 0.85) };
                         let diag = [
@@ -265,10 +277,10 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             [[b, 0., a], [a, 0., b], [a, 1., b], [b, 1., a]],
                         ];
                         for d in diag {
-                            let v = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, CORNER_UV[i], [0.9, sky]);
+                            let v = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, CORNER_UV[i], [0.9, sky, blk]);
                             out.opaque.quad([v(0), v(1), v(2), v(3)], false);
                             // Back side with reversed winding.
-                            let w = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, CORNER_UV[i], [0.9, sky]);
+                            let w = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, CORNER_UV[i], [0.9, sky, blk]);
                             out.opaque.quad([w(1), w(0), w(3), w(2)], false);
                         }
                     }
@@ -316,9 +328,9 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             if same(nb) || (is_opaque(nb) && f != 2) || (f == 2 && is_opaque(nb)) {
                                 continue;
                             }
-                            let sky = hood.sky(lx + n[0], y + n[1].max(0), lz + n[2]);
+                            let (sky, blk) = hood.lit(lx + n[0], y + n[1].max(0), lz + n[2]);
                             // Lava lights itself (the shader reads x above 1.5 as "glowing").
-                            let light = if lava { [2.45, sky] } else { [*shade, sky] };
+                            let light = if lava { [2.45, sky, blk] } else { [*shade, sky, blk] };
                             let mut v = [Vertex::default(); 4];
                             for i in 0..4 {
                                 let c = corners[i];
@@ -336,7 +348,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         // Slabs, stairs, doors: each box's faces, skipping only those
                         // flush against an opaque neighbour. The texture follows the
                         // box's position in the cell, so a slab shows half a tile.
-                        let sky = hood.sky(lx, y, lz).max(hood.sky(lx, y + 1, lz));
+                        let ((s0, b0), (s1, b1)) = (hood.lit(lx, y, lz), hood.lit(lx, y + 1, lz));
+                        let (sky, blk) = (s0.max(s1), b0.max(b1));
                         let (boxes, n) = def.shape.boxes();
                         for &(bmin, bmax) in &boxes[..n] {
                             for (f, (nrm, corners, shade)) in FACES.iter().enumerate() {
@@ -360,7 +373,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                     };
                                     // Portals glow (see the shader's "above 1.5" rule).
                                     let lx = if crate::scorch::is_portal(id) { 2.3 } else { shade * 0.95 };
-                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [lx, sky]);
+                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [lx, sky, blk]);
                                 }
                                 out.opaque.quad(v, false);
                             }
@@ -397,22 +410,25 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 let sc = is_opaque(hood.get(pc.0, pc.1, pc.2));
                                 let level = if s1 && s2 { 0 } else { 3 - s1 as usize - s2 as usize - sc as usize };
                                 ao[i] = AO_CURVE[level];
-                                // Smooth sky light: average over the non-solid cells touching this corner.
-                                let mut sky = hood.sky(nx, ny, nz);
+                                // Smooth light: average over the non-solid cells touching this corner.
+                                let (mut sky, mut blk) = hood.lit(nx, ny, nz);
                                 let mut n_s = 1.0;
-                                if !s1 {
-                                    sky += hood.sky(p1.0, p1.1, p1.2);
+                                let mut add = |p: (i32, i32, i32)| {
+                                    let (s, b) = hood.lit(p.0, p.1, p.2);
+                                    sky += s;
+                                    blk += b;
                                     n_s += 1.0;
+                                };
+                                if !s1 {
+                                    add(p1);
                                 }
                                 if !s2 {
-                                    sky += hood.sky(p2.0, p2.1, p2.2);
-                                    n_s += 1.0;
+                                    add(p2);
                                 }
                                 if !sc && !(s1 && s2) {
-                                    sky += hood.sky(pc.0, pc.1, pc.2);
-                                    n_s += 1.0;
+                                    add(pc);
                                 }
-                                v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade, sky / n_s]);
+                                v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade, sky / n_s, blk / n_s]);
                             }
                             // Faces wait to be merged with their like (see `merge_flats`).
                             flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light) };
@@ -437,7 +453,7 @@ mod tests {
             for x in 0..dims[0] {
                 if let Some(tile) = fill(x, z) {
                     // Face 2 is the top, at y 0.
-                    flats[((2 * dims[1]) * dims[2] + z) as usize * dims[0] as usize + x as usize] = Flat { tile, light: [[1.0, 1.0]; 4] };
+                    flats[((2 * dims[1]) * dims[2] + z) as usize * dims[0] as usize + x as usize] = Flat { tile, light: [[1.0, 1.0, 0.0]; 4] };
                 }
             }
         }

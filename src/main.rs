@@ -21,6 +21,7 @@ mod hunger;
 mod inventory;
 mod keybinds;
 mod ledger;
+mod light;
 mod liquids;
 mod mesher;
 mod mods;
@@ -1496,6 +1497,18 @@ impl App {
                     let (bytes, bits) = g.world.chunks.values().fold((0, 0), |(b, t), c| (b + c.blocks.bytes(), t + c.blocks.total_bits()));
                     let blocks = (g.world.chunks.len() * (world::CW * world::CW * world::CH) as usize).max(1);
                     format!("Block memory: {:.1} MB ({:.1} bits/block, flat would be {:.1} MB)", bytes as f64 / 1e6, bits as f64 / blocks as f64, blocks as f64 * 2.0 / 1e6)
+                },
+                {
+                    // Light where you stand, and how much of it is stored cell by cell.
+                    let e = g.player.eye().floor().as_ivec3();
+                    let detailed: usize = g.world.chunks.values().map(|c| c.light.detailed()).sum();
+                    format!(
+                        "Light: sky {} block {}  ({} of {} sections stored in full)",
+                        g.world.sky_level(e.x, e.y, e.z),
+                        g.world.block_level(e.x, e.y, e.z),
+                        detailed,
+                        g.world.chunks.len() * (world::CH / 16) as usize
+                    )
                 },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),

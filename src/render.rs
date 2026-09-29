@@ -11,13 +11,13 @@ use std::collections::HashMap;
 const VERTEX_SHADER: &str = r#"#version 100
 attribute vec3 in_pos;
 attribute vec2 in_uv;
-attribute vec2 in_light;
+attribute vec3 in_light;
 attribute vec2 in_tile;
 
 uniform mat4 mvp;
 
 varying vec2 v_uv;
-varying vec2 v_light;
+varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 
@@ -40,7 +40,7 @@ precision mediump float;
 #endif
 
 varying vec2 v_uv;
-varying vec2 v_light;
+varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 
@@ -81,12 +81,15 @@ void main() {
         col = c.rgb * (v_light.x - 1.5);
     } else {
         float sky = v_light.y * params.x;
-        float bl = 0.0;
+        // The world carries its own block light (z); things that move use the
+        // nearby point lights. Lights marked moving (negative radius, like a
+        // held torch) shine on everything.
+        float bl = max(v_light.z, 0.0);
         for (int i = 0; i < 16; i++) {
             vec4 L = lights[i];
-            if (L.w > 0.0) {
+            if (L.w != 0.0 && (v_light.z < 0.0 || L.w < 0.0)) {
                 float d = distance(v_wpos, L.xyz);
-                bl = max(bl, clamp(1.0 - d / L.w, 0.0, 1.0));
+                bl = max(bl, clamp(1.0 - d / abs(L.w), 0.0, 1.0));
             }
         }
         float lvl = max(max(sky, bl), max(0.05, params2.y));
@@ -187,7 +190,7 @@ impl DynGeo {
         let uvs = [[a, d], [cc, d], [cc, b], [a, b]];
         let mut v = [Vertex::default(); 4];
         for i in 0..4 {
-            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light, tile: [-1.0; 2] };
+            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light: [light[0], light[1], -1.0], tile: [-1.0; 2] };
         }
         self.mesh.quad(v, false);
         self.end_batch();
@@ -272,7 +275,7 @@ impl Renderer {
         let attrs = [
             VertexAttribute::new("in_pos", VertexFormat::Float3),
             VertexAttribute::new("in_uv", VertexFormat::Float2),
-            VertexAttribute::new("in_light", VertexFormat::Float2),
+            VertexAttribute::new("in_light", VertexFormat::Float3),
             VertexAttribute::new("in_tile", VertexFormat::Float2),
         ];
         let alpha = Some(BlendState::new(
