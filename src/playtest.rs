@@ -95,6 +95,8 @@ struct Bot {
     /// How many things it has done (it takes turns at each kind).
     acts: u32,
     said: Vec<String>,
+    /// Every chat line it has seen (the game keeps only the last 100 on screen).
+    heard: HashSet<String>,
 }
 
 /// What happened, and what didn't match.
@@ -130,7 +132,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     for k in 0..bots {
         let name = format!("Bot{}", k + 1);
         let game = connect(&mut host, port, &name).map_err(|e| format!("{name} couldn't join: {e}"))?;
-        team.push(Bot { game, name, rng: Rng::new(seed as u64 * 31 + k as u64 + 1), heading: k as f32 * 2.1, towers: Vec::new(), next_act: 1.0 + k as f32 * 0.1, acts: 0, said: Vec::new() });
+        team.push(Bot { game, name, rng: Rng::new(seed as u64 * 31 + k as u64 + 1), heading: k as f32 * 2.1, towers: Vec::new(), next_act: 1.0 + k as f32 * 0.1, acts: 0, said: Vec::new(), heard: HashSet::new() });
     }
     // Everyone starts with some cobblestone (given by the host, so its ledger knows).
     let ids: Vec<u32> = team.iter().map(|b| b.game.my_id).collect();
@@ -162,6 +164,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
                 act(bot, &mut report, &mut touched, chest);
             }
             bot.game.update(DT, &c);
+            note_chat(bot);
         }
         std::thread::sleep(Duration::from_micros(300));
     }
@@ -170,11 +173,21 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
         host.update(DT, &idle());
         for bot in team.iter_mut() {
             bot.game.update(DT, &idle());
+            note_chat(bot);
         }
         std::thread::sleep(Duration::from_micros(300));
     }
     check(&host, &team, &touched, chest, &mut report);
     Ok(report)
+}
+
+/// Remember the chat lines a bot can see now (before they scroll away).
+fn note_chat(bot: &mut Bot) {
+    for line in bot.game.chat_log.iter().rev().take(16) {
+        if line.contains(" says hi #") {
+            bot.heard.insert(line.clone());
+        }
+    }
 }
 
 /// Do something: build, knock down, chat, or put something in the chest.
@@ -258,7 +271,7 @@ fn check(host: &Game, team: &[Bot], touched: &HashSet<IVec3>, chest: IVec3, repo
             if !g.peers.values().any(|p| p.name == other.name) {
                 report.problems.push(format!("{} can't see {}", bot.name, other.name));
             }
-            let heard = other.said.iter().filter(|line| g.chat_log.iter().any(|l| l.contains(line.as_str()))).count();
+            let heard = other.said.iter().filter(|line| bot.heard.iter().any(|l| l.contains(line.as_str()))).count();
             if heard < other.said.len() {
                 report.problems.push(format!("{} heard {} of {}'s {} lines", bot.name, heard, other.name, other.said.len()));
             }
@@ -315,6 +328,10 @@ mod tests {
     #[test]
     fn a_short_playtest_passes() {
         let r = super::playtest(2, 5.0, 77, 26150).expect("it runs");
+        assert!(r.ok(), "{:#?}", r.problems);
+        // Long enough that more chat goes by than a player's chat log keeps.
+        let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
+        assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
         assert!(r.ok(), "{:#?}", r.problems);
     }
