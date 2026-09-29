@@ -2160,8 +2160,8 @@ impl App {
     fn container_screen(&mut self) {
         use containers::{FUEL, INPUT, OUTPUT};
         let Some(pos) = self.game.open else { return };
-        let kind = self.game.world.get_v(pos);
-        let Some(c) = self.game.world.containers.get(&pos).cloned() else { return };
+        let kind = containers::store_kind(&self.game.world, &self.game.vehicles, pos);
+        let Some(c) = containers::store_ref(&self.game.world, &self.game.vehicles, pos).cloned() else { return };
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));

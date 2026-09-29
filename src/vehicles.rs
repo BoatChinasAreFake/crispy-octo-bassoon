@@ -6,7 +6,13 @@
 //!   Rails join up with their neighbours by themselves, curving round
 //!   corners. W pushes a cart the way you're looking. Powered rails (rails
 //!   with Zappy Dust) speed carts up when powered and brake them when not.
-//! - Hit a vehicle a few times to pick it back up.
+//! - A **Minecart with Chest** carries 27 stacks and a **Minecart with
+//!   Hopper** 5; right-click either to look inside. A hopper cart picks up
+//!   what it rolls over and takes from containers above the track. A hopper
+//!   under the track empties any loaded cart that stops or rolls over it,
+//!   and a hopper pointing at a cart fills it.
+//! - A **Detector Rail** powers things next to it while a cart is on it.
+//! - Hit a vehicle a few times to pick it back up (spilling what's in it).
 //!
 //! Vehicles live where the world lives. A joined player drives the one
 //! they're in themselves (telling the host where it is), and the host tells
@@ -23,6 +29,32 @@ use macroquad::math::{IVec3, Mat4, Vec3};
 
 pub const BOAT_KIND: u8 = 0;
 pub const CART_KIND: u8 = 1;
+pub const CHEST_CART_KIND: u8 = 2;
+pub const HOPPER_CART_KIND: u8 = 3;
+/// The highest kind there is.
+pub const LAST_KIND: u8 = HOPPER_CART_KIND;
+
+/// Carts' contents are reached by a key that's no place in the world
+/// (below bedrock, far west of even the Hollow; see containers.rs `store`).
+const CART_KEY_X: i32 = i32::MIN + 1;
+const CART_KEY_Y: i32 = -4096;
+pub fn cart_key(id: u32) -> IVec3 {
+    IVec3::new(CART_KEY_X, CART_KEY_Y, id as i32)
+}
+/// The cart a container key belongs to, if it's a cart's.
+pub fn cart_of_key(p: IVec3) -> Option<u32> {
+    (p.x == CART_KEY_X && p.y == CART_KEY_Y).then_some(p.z as u32)
+}
+/// The vehicle an item puts down.
+pub fn kind_of_item(item: Id) -> Option<u8> {
+    match item {
+        BOAT => Some(BOAT_KIND),
+        MINECART => Some(CART_KIND),
+        CHEST_MINECART => Some(CHEST_CART_KIND),
+        HOPPER_MINECART => Some(HOPPER_CART_KIND),
+        _ => None,
+    }
+}
 /// Top speeds (blocks a second), and how many hits pick one up.
 const BOAT_SPEED: f32 = 7.0;
 const CART_SPEED: f32 = 9.0;
@@ -45,15 +77,42 @@ pub struct Vehicle {
     pub past_middle: bool,
     pub hits: u8,
     pub hurt: f32,
+    /// What's in a chest or hopper cart.
+    pub contents: Option<crate::containers::Container>,
 }
 
 impl Vehicle {
     pub fn new(id: u32, kind: u8, pos: Vec3, yaw: f32) -> Vehicle {
-        Vehicle { id, kind, pos, vel: Vec3::ZERO, yaw, rider: 0, heading: IVec3::Z, speed: 0.0, past_middle: false, hits: 0, hurt: 0.0 }
+        let contents = match kind {
+            CHEST_CART_KIND => Some(crate::containers::Container::for_block(CHEST)),
+            HOPPER_CART_KIND => Some(crate::containers::Container::for_block(HOPPER_FIRST)),
+            _ => None,
+        };
+        Vehicle { id, kind, pos, vel: Vec3::ZERO, yaw, rider: 0, heading: IVec3::Z, speed: 0.0, past_middle: false, hits: 0, hurt: 0.0, contents }
     }
 
     pub fn item(&self) -> Id {
-        if self.kind == BOAT_KIND { BOAT } else { MINECART }
+        match self.kind {
+            BOAT_KIND => BOAT,
+            CHEST_CART_KIND => CHEST_MINECART,
+            HOPPER_CART_KIND => HOPPER_MINECART,
+            _ => MINECART,
+        }
+    }
+
+    /// Can someone sit in it? (Loaded carts are full of cargo.)
+    pub fn rideable(&self) -> bool {
+        self.contents.is_none()
+    }
+
+    /// The block its contents behave like (for the container screen and hoppers).
+    pub fn container_block(&self) -> Id {
+        if self.kind == HOPPER_CART_KIND { HOPPER_FIRST } else { CHEST }
+    }
+
+    /// The cell it's in.
+    pub fn cell(&self) -> IVec3 {
+        IVec3::new(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32)
     }
 
     /// Its box, for pointing at and bumping.
@@ -71,7 +130,16 @@ impl Vehicle {
 // ------------------------------------------------------------------ rails
 
 pub fn is_rail(id: Id) -> bool {
-    (RAIL_FIRST..RAIL_FIRST + 6).contains(&id) || (POWERED_RAIL..POWERED_RAIL + 4).contains(&id)
+    (RAIL_FIRST..RAIL_FIRST + 6).contains(&id) || (POWERED_RAIL..POWERED_RAIL + 4).contains(&id) || is_detector(id)
+}
+
+pub fn is_detector(id: Id) -> bool {
+    (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id)
+}
+
+/// A detector rail that has a cart on it (it powers what's around it).
+pub fn detector_on(id: Id) -> bool {
+    is_detector(id) && (id - DETECTOR_RAIL) % 2 == 1
 }
 
 pub fn is_powered_rail(id: Id) -> bool {
@@ -80,7 +148,15 @@ pub fn is_powered_rail(id: Id) -> bool {
 
 /// The two ways a rail leads: north-south, east-west, or round a corner.
 pub fn rail_dirs(id: Id) -> Option<[IVec3; 2]> {
-    let shape = if is_powered_rail(id) { ((id - POWERED_RAIL) / 2) as u8 } else if is_rail(id) { (id - RAIL_FIRST) as u8 } else { return None };
+    let shape = if is_powered_rail(id) {
+        ((id - POWERED_RAIL) / 2) as u8
+    } else if is_detector(id) {
+        ((id - DETECTOR_RAIL) / 2) as u8
+    } else if is_rail(id) {
+        (id - RAIL_FIRST) as u8
+    } else {
+        return None;
+    };
     let (n, s, e, w) = (IVec3::NEG_Z, IVec3::Z, IVec3::X, IVec3::NEG_X);
     Some(match shape {
         0 => [n, s],
@@ -114,6 +190,13 @@ pub fn powered_shape(world: &World, p: IVec3, on: bool) -> Id {
     let has = |d: IVec3| is_rail(world.get_v(p + d));
     let ew = (has(IVec3::X) || has(IVec3::NEG_X)) && !(has(IVec3::Z) || has(IVec3::NEG_Z));
     POWERED_RAIL + ew as Id * 2 + on as Id
+}
+
+/// A detector rail at `p`: its axis from the rails around it, on if a cart's there.
+pub fn detector_shape(world: &World, p: IVec3, on: bool) -> Id {
+    let has = |d: IVec3| is_rail(world.get_v(p + d));
+    let ew = (has(IVec3::X) || has(IVec3::NEG_X)) && !(has(IVec3::Z) || has(IVec3::NEG_Z));
+    DETECTOR_RAIL + ew as Id * 2 + on as Id
 }
 
 /// A cart's step along the rails. Returns false if it ran out of track.
@@ -171,6 +254,7 @@ impl Game {
         let eye = self.player.eye();
         let dir = self.player.look_dir();
         let reach = if self.creative { 6.5 } else { 5.0 };
+        let Some(kind) = kind_of_item(held) else { return false };
         let (kind, at) = if held == BOAT {
             let Some(h) = self.world.raycast_liquid(eye, dir, reach).or_else(|| self.world.raycast(eye, dir, reach)) else { return false };
             let top = if is_liquid(self.world.get_v(h.pos)) { h.pos.as_vec3() + Vec3::new(0.5, 0.6, 0.5) } else { (h.pos + h.normal).as_vec3() + Vec3::new(0.5, 0.0, 0.5) };
@@ -180,7 +264,7 @@ impl Game {
             if !is_rail(self.world.get_v(h.pos)) {
                 return false;
             }
-            (CART_KIND, h.pos.as_vec3() + Vec3::new(0.5, 1.0 / 16.0, 0.5))
+            (kind, h.pos.as_vec3() + Vec3::new(0.5, 1.0 / 16.0, 0.5))
         };
         let yaw = self.player.yaw;
         if self.is_client() {
@@ -200,7 +284,7 @@ impl Game {
         self.next_vehicle_id += 1;
         let id = self.next_vehicle_id;
         let mut v = Vehicle::new(id, kind, at, yaw);
-        if kind == CART_KIND {
+        if kind != BOAT_KIND {
             // Face along the rail.
             let cell = IVec3::new(at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
             if let Some(d) = rail_dirs(self.world.get_v(cell)) {
@@ -211,8 +295,13 @@ impl Game {
         id
     }
 
-    /// Get in (the local player).
+    /// Get in (the local player); a loaded cart opens up instead.
     pub fn mount(&mut self, i: usize) {
+        if !self.vehicles[i].rideable() {
+            let key = cart_key(self.vehicles[i].id);
+            self.open_container(key);
+            return;
+        }
         let me = self.my_id + 1;
         if self.vehicles[i].rider != 0 && self.vehicles[i].rider != me {
             return;
@@ -255,6 +344,15 @@ impl Game {
             let v = self.vehicles.remove(i);
             if !self.creative {
                 self.pop_drop(v.pos + Vec3::Y * 0.4, v.item(), 1);
+            }
+            // Whatever it carried spills out.
+            if let Some(c) = &v.contents {
+                for (item, n, wear) in c.contents() {
+                    self.pop_drop_worn(v.pos + Vec3::Y * 0.4, item, n, wear);
+                }
+            }
+            if self.open == Some(cart_key(v.id)) {
+                self.open = None;
             }
             if self.riding == Some(v.id) {
                 self.riding = None;
@@ -334,7 +432,7 @@ impl Game {
         let mine = self.riding;
         let old = std::mem::take(&mut self.vehicles);
         for (id, kind, pos, yaw, rider) in list {
-            if !pos.is_finite() || kind > CART_KIND {
+            if !pos.is_finite() || kind > LAST_KIND {
                 continue;
             }
             if Some(id) == mine
@@ -343,7 +441,7 @@ impl Game {
                 self.vehicles.push(v.clone());
                 continue;
             }
-            let mut v = old.iter().find(|v| v.id == id).cloned().unwrap_or_else(|| Vehicle::new(id, kind, pos, yaw));
+            let mut v = old.iter().find(|v| v.id == id && v.kind == kind).cloned().unwrap_or_else(|| Vehicle::new(id, kind, pos, yaw));
             v.pos += (pos - v.pos) * 0.5;
             if v.pos.distance(pos) > 4.0 {
                 v.pos = pos;
@@ -363,7 +461,7 @@ impl Game {
         let Some(i) = self.vehicles.iter().position(|v| v.id == id && v.pos.distance(me) < 7.0) else { return };
         let rider = from + 1;
         match action {
-            0 if self.vehicles[i].rider == 0 => self.vehicles[i].rider = rider,
+            0 if self.vehicles[i].rider == 0 && self.vehicles[i].rideable() => self.vehicles[i].rider = rider,
             1 if self.vehicles[i].rider == rider => self.vehicles[i].rider = 0,
             2 => self.hit_vehicle(id, rider),
             _ => {}
@@ -386,8 +484,8 @@ impl Game {
     /// The host: a joined player put down a boat or cart.
     pub fn host_place_vehicle(&mut self, from: u32, kind: u8, pos: Vec3, yaw: f32) {
         let Some(me) = self.peers.get(&from).map(|p| p.target) else { return };
-        let item = if kind == BOAT_KIND { BOAT } else { MINECART };
-        if kind > CART_KIND || !pos.is_finite() || pos.distance(me) > 8.0 || !self.peer_take(from, item, 1) {
+        let item = Vehicle::new(0, kind, Vec3::ZERO, 0.0).item();
+        if kind > LAST_KIND || !pos.is_finite() || pos.distance(me) > 8.0 || !self.peer_take(from, item, 1) {
             return;
         }
         self.spawn_vehicle(kind, pos, yaw);
@@ -409,6 +507,16 @@ impl Game {
             for &(min, size) in boxes {
                 let m = root * Mat4::from_translation(Vec3::from_array(min)) * Mat4::from_scale(Vec3::from_array(size));
                 g.cube(&m, [tile; 6], sky, [0.0, 0.0, 1.0, 1.0]);
+            }
+            // The cargo: a chest, or a hopper's funnel.
+            let cargo: Option<([f32; 3], [f32; 3], [u16; 6])> = match v.kind {
+                CHEST_CART_KIND => Some(([-0.35, 0.18, -0.4], [0.7, 0.62, 0.8], [T_CHEST_SIDE, T_CHEST_SIDE, T_CHEST_TOP, T_CHEST_TOP, T_CHEST_SIDE, T_CHEST_SIDE])),
+                HOPPER_CART_KIND => Some(([-0.37, 0.4, -0.45], [0.74, 0.45, 0.9], [T_HOPPER_SIDE, T_HOPPER_SIDE, T_HOPPER_TOP, T_HOPPER_SIDE, T_HOPPER_SIDE, T_HOPPER_SIDE])),
+                _ => None,
+            };
+            if let Some((min, size, tiles)) = cargo {
+                let m = root * Mat4::from_translation(Vec3::from_array(min)) * Mat4::from_scale(Vec3::from_array(size));
+                g.cube(&m, tiles, sky, [0.0, 0.0, 1.0, 1.0]);
             }
         }
     }
@@ -499,27 +607,45 @@ fn cart_step(world: &World, v: &mut Vehicle, dt: f32, forward: f32, look: Vec3) 
     }
 }
 
+/// The count's top bit marks the newer layout, where each vehicle is
+/// followed by its cargo (a length, then `containers::encode` of it).
+const WITH_CARGO: u32 = 1 << 31;
+
 /// Pack vehicles for the save file (nobody's in them when it loads).
 pub fn encode(vehicles: &[Vehicle]) -> Vec<u8> {
-    let mut out = (vehicles.len() as u32).to_le_bytes().to_vec();
+    let mut out = (vehicles.len() as u32 | WITH_CARGO).to_le_bytes().to_vec();
     for v in vehicles {
         out.push(v.kind);
         for f in [v.pos.x, v.pos.y, v.pos.z, v.yaw] {
             out.extend_from_slice(&f.to_le_bytes());
         }
+        let cargo = v.contents.as_ref().map(|c| crate::containers::encode(&std::collections::HashMap::from([(IVec3::ZERO, c.clone())]))).unwrap_or_default();
+        out.extend_from_slice(&(cargo.len() as u32).to_le_bytes());
+        out.extend_from_slice(&cargo);
     }
     out
 }
 
-pub fn decode(b: &[u8]) -> Vec<(u8, Vec3, f32)> {
-    let n = b.get(0..4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).unwrap_or(0) as usize;
+/// Unpack `encode` (and the older layout without cargo): kind, place, yaw, cargo.
+pub fn decode(b: &[u8]) -> Vec<(u8, Vec3, f32, Option<crate::containers::Container>)> {
+    let head = b.get(0..4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).unwrap_or(0);
+    let (n, cargo) = ((head & !WITH_CARGO) as usize, head & WITH_CARGO != 0);
     let mut v = Vec::new();
-    for k in 0..n.min(10_000) {
-        let at = 4 + k * 17;
+    let mut at = 4;
+    for _ in 0..n.min(10_000) {
         let Some(s) = b.get(at..at + 17) else { break };
+        at += 17;
         let f: Vec<f32> = (0..4).map(|i| f32::from_le_bytes([s[1 + i * 4], s[2 + i * 4], s[3 + i * 4], s[4 + i * 4]])).collect();
-        if s[0] <= CART_KIND && f.iter().all(|x| x.is_finite()) {
-            v.push((s[0], Vec3::new(f[0], f[1], f[2]), f[3]));
+        let mut contents = None;
+        if cargo {
+            let Some(len) = b.get(at..at + 4).map(|l| u32::from_le_bytes([l[0], l[1], l[2], l[3]]) as usize) else { break };
+            at += 4;
+            let Some(blob) = b.get(at..at + len) else { break };
+            at += len;
+            contents = crate::containers::decode(blob, 4).remove(&IVec3::ZERO);
+        }
+        if s[0] <= LAST_KIND && f.iter().all(|x| x.is_finite()) {
+            v.push((s[0], Vec3::new(f[0], f[1], f[2]), f[3], contents));
         }
     }
     v
@@ -535,5 +661,27 @@ mod tests {
         assert_eq!(rail_dirs(RAIL_FIRST + 2), Some([IVec3::NEG_Z, IVec3::X]));
         assert!(rail_dirs(STONE).is_none());
         assert!(is_rail(POWERED_RAIL + 3) && is_powered_rail(POWERED_RAIL + 1) && !is_powered_rail(RAIL_FIRST));
+        assert!(is_rail(DETECTOR_RAIL + 2) && detector_on(DETECTOR_RAIL + 3) && !detector_on(DETECTOR_RAIL));
+        assert_eq!(rail_dirs(DETECTOR_RAIL + 2), Some([IVec3::X, IVec3::NEG_X]));
+    }
+
+    #[test]
+    fn carts_keep_their_cargo_in_saves() {
+        let mut chest = Vehicle::new(4, CHEST_CART_KIND, Vec3::new(1.5, 50.0, 2.5), 0.3);
+        chest.contents.as_mut().unwrap().slots[10] = Some((DIAMOND, 5));
+        let plain = Vehicle::new(5, CART_KIND, Vec3::new(3.5, 50.0, 2.5), 0.0);
+        let back = decode(&encode(&[chest, plain]));
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].3.as_ref().unwrap().slots[10], Some((DIAMOND, 5)));
+        assert!(back[1].3.is_none() && back[1].0 == CART_KIND);
+        // The old layout (no cargo) still reads.
+        let mut old = 1u32.to_le_bytes().to_vec();
+        old.push(BOAT_KIND);
+        for f in [1.0f32, 2.0, 3.0, 0.5] {
+            old.extend_from_slice(&f.to_le_bytes());
+        }
+        assert_eq!(decode(&old).len(), 1);
+        assert_eq!(cart_of_key(cart_key(77)), Some(77));
+        assert_eq!(cart_of_key(IVec3::new(1, 2, 3)), None);
     }
 }

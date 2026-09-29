@@ -169,7 +169,9 @@ pub const RED_SAND: Id = 283;
 pub const TERRACOTTA: Id = 284;
 pub const DEAD_BUSH: Id = 288;
 pub const MELON: Id = 289;
-pub const NUM_BLOCKS: Id = 290;
+/// Detector rails: `DETECTOR_RAIL + axis * 2 + on`, like powered rails (see vehicles.rs).
+pub const DETECTOR_RAIL: Id = 290;
+pub const NUM_BLOCKS: Id = 294;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -265,8 +267,11 @@ pub const STARING_EYE: Id = FIRST_ITEM + 112;
 pub const NAME_TAG: Id = FIRST_ITEM + 113;
 /// From melons (jungles).
 pub const MELON_SLICE: Id = FIRST_ITEM + 114;
+/// Carts with a chest or a hopper in them (see vehicles.rs).
+pub const CHEST_MINECART: Id = FIRST_ITEM + 115;
+pub const HOPPER_MINECART: Id = FIRST_ITEM + 116;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 115;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 117;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -280,7 +285,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -651,7 +656,7 @@ pub fn placing_item(id: Id) -> Option<Id> {
         return Some(ZAP_DUST);
     }
     // Any rail is placed as a straight one, then bends to fit (see vehicles.rs).
-    if id == RAIL_FIRST || id == POWERED_RAIL {
+    if id == RAIL_FIRST || id == POWERED_RAIL || id == DETECTOR_RAIL {
         return Some(id);
     }
     // Signs and frames come in four facings; the item is the first.
@@ -1254,6 +1259,12 @@ impl Registry {
         }
         blocks.push(def("dead_bush", "Dead Bush (It's Fine)", Cross, false, false, [T_DEAD_BUSH; 3], 0.0, 0, false, STICK, 0.0, S_GRASS));
         blocks.push(def("melon", "Melon (Heavy Snack)", Cube, true, true, [T_MELON_TOP, T_MELON_SIDE, T_MELON_TOP], 1.0, 0, false, AIR, 0.0, S_WOOD));
+        for (k, key) in ["detector_rail", "detector_rail_on", "detector_rail_ew", "detector_rail_ew_on"].into_iter().enumerate() {
+            let mut d = def(key, "Detector Rail (Tattletale)", Shaped, false, false, [T_DETECTOR_RAIL + k as u16; 3], 0.7, 0, false, DETECTOR_RAIL, 0.0, S_STONE);
+            d.shape = Shape::Dust;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1381,6 +1392,8 @@ impl Registry {
         items.push(item("staring_eye", "Staring Eye (It Knows)", T_STARING_EYE));
         items.push(item("name_tag", "Name Tag (Hello, My Name Is)", T_NAME_TAG));
         items.push(ItemDef { food: Some(2.0), ..item("melon_slice", "Melon Slice (Mostly Water)", T_MELON_SLICE) });
+        items.push(ItemDef { stack: 1, ..item("chest_minecart", "Minecart with Chest (Freight)", T_CHEST_CART_ITEM) });
+        items.push(ItemDef { stack: 1, ..item("hopper_minecart", "Minecart with Hopper (Vacuum)", T_HOPPER_CART_ITEM) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1389,6 +1402,9 @@ impl Registry {
             r(&[(SPRUCE_LOG, 1)], (PLANKS, 4)),
             r(&[(JUNGLE_LOG, 1)], (PLANKS, 4)),
             r(&[(MELON_SLICE, 9)], (MELON, 1)),
+            r(&[(MINECART, 1), (CHEST, 1)], (CHEST_MINECART, 1)),
+            r(&[(MINECART, 1), (HOPPER_FIRST, 1)], (HOPPER_MINECART, 1)),
+            r(&[(IRON, 6), (PLATE, 1), (ZAP_DUST, 1)], (DETECTOR_RAIL, 6)),
             r(&[(MUD, 4), (WHEAT, 1)], (BRICK, 4)),
             r(&[(RED_SAND, 4)], (SANDSTONE, 1)),
             r(&[(PLANKS, 2)], (STICK, 4)),

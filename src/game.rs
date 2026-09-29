@@ -120,6 +120,8 @@ pub struct Game {
     pub viewers: HashMap<IVec3, HashSet<u32>>,
     /// Containers whose contents changed since viewers were last told.
     pub dirty_containers: HashSet<IVec3>,
+    /// Detector rails with a cart on (or just off) them: seconds until they switch off.
+    pub detectors: HashMap<IVec3, f32>,
     pub container_sync_timer: f32,
     /// Items on the ground (see drops.rs).
     pub drops: Vec<crate::drops::ItemDrop>,
@@ -272,6 +274,7 @@ impl Game {
             open: None,
             viewers: HashMap::new(),
             dirty_containers: HashSet::new(),
+            detectors: HashMap::new(),
             container_sync_timer: 0.0,
             drops: Vec::new(),
             next_drop_id: 0,
@@ -418,8 +421,18 @@ impl Game {
                 g.world.frames.insert(p, (item, wear));
             }
         }
-        for (kind, pos, yaw) in crate::vehicles::decode(&d.vehicles) {
-            g.spawn_vehicle(kind, pos, yaw);
+        for (kind, pos, yaw, cargo) in crate::vehicles::decode(&d.vehicles) {
+            let id = g.spawn_vehicle(kind, pos, yaw);
+            if let (Some(mut c), Some(v)) = (cargo, g.vehicles.iter_mut().find(|v| v.id == id)) {
+                if let Some(r) = &remap {
+                    for s in c.slots.iter_mut() {
+                        *s = s.map(|(id, n)| (r[id as usize], n)).filter(|(id, _)| *id != AIR);
+                    }
+                }
+                if v.contents.as_ref().is_some_and(|have| have.slots.len() == c.slots.len()) {
+                    v.contents = Some(c);
+                }
+            }
         }
         for (mut m, name) in crate::animals::decode_mobs_named(&d.mobs, &mut g.rng) {
             m.id = g.next_mob_id;
@@ -1362,7 +1375,7 @@ impl Game {
             self.mount(i);
             return;
         }
-        if matches!(held, BOAT | MINECART) && self.place_vehicle(held) {
+        if matches!(held, BOAT | MINECART | CHEST_MINECART | HOPPER_MINECART) && self.place_vehicle(held) {
             return;
         }
         // Chests, furnaces and anvils open (sneak to place against them instead).
@@ -1597,7 +1610,7 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
             FRAME_FIRST | LADDER_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}

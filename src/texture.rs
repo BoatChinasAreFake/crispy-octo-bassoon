@@ -292,6 +292,10 @@ pub const T_SQUAWK_FACE: u16 = 372;
 pub const T_SQUAWK_WING: u16 = 373;
 pub const T_CLANK: u16 = 374;
 pub const T_CLANK_FACE: u16 = 375;
+/// Detector rails: north-south off/on, east-west off/on.
+pub const T_DETECTOR_RAIL: u16 = 376;
+pub const T_CHEST_CART_ITEM: u16 = 380;
+pub const T_HOPPER_CART_ITEM: u16 = 381;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2355,6 +2359,22 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             }
         });
     }
+    // Detector rails: rails with a pressure plate in the middle, red when a cart's on it.
+    for k in 0..4u16 {
+        let (ew, on) = (k >= 2, k % 2 == 1);
+        a.each(T_DETECTOR_RAIL + k, |x, y, r, _| {
+            let (across, along) = if ew { (y as f32 + 0.5, x as f32 + 0.5) } else { (x as f32 + 0.5, y as f32 + 0.5) };
+            if (3.0..5.0).contains(&across) || (11.0..13.0).contains(&across) {
+                shade(rgb(170, 170, 178), r.range(0.9, 1.1))
+            } else if (5.5..10.5).contains(&across) && (5.0..11.0).contains(&along) {
+                if on { rgb(230, 50, 40) } else { shade(rgb(120, 115, 110), r.range(0.9, 1.05)) }
+            } else if (2.0..14.0).contains(&across) && along.rem_euclid(4.0) < 2.0 {
+                shade(rgb(115, 85, 50), r.range(0.85, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
     a.each(T_CART, |x, y, r, _| {
         let rivet = (x % 5 == 2) && (y % 5 == 2);
         let rim = x == 0 || y == 0 || x == 15 || y == 15;
@@ -2686,6 +2706,19 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.sprite(T_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(225, 210, 170)), ('g', rgb(110, 160, 80)), ('b', rgb(80, 120, 210)), ('r', rgb(200, 40, 40))]);
     a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
     a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);
+    // Loaded carts: the cart with a chest lid, or a hopper's funnel, poking out of the top.
+    a.copy(T_CART_ITEM, T_CHEST_CART_ITEM);
+    a.copy(T_CART_ITEM, T_HOPPER_CART_ITEM);
+    for x in 3..13 {
+        for y in 2..7 {
+            let chest = if y == 4 && (7..9).contains(&x) { rgb(200, 190, 90) } else if y == 2 || x == 3 || x == 12 { rgb(110, 75, 40) } else { rgb(160, 115, 60) };
+            a.set(T_CHEST_CART_ITEM, x, y, chest);
+            let funnel = y == 2 || ((y as i32 - 2) <= (x as i32 - 3).min(12 - x as i32));
+            if funnel {
+                a.set(T_HOPPER_CART_ITEM, x, y, if y == 2 { rgb(60, 60, 65) } else { rgb(95, 95, 102) });
+            }
+        }
+    }
     // ---- Hmmers
     a.copy(T_SKIN, T_HMM_FACE);
     for (x, y, c) in [(3, 6, rgb(255, 255, 255)), (4, 6, rgb(40, 110, 40)), (11, 6, rgb(40, 110, 40)), (12, 6, rgb(255, 255, 255))] {

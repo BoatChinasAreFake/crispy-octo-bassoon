@@ -14,6 +14,7 @@ use crate::game::Game;
 use crate::inventory::{click_stack, right_click_stack, Stack, Wear};
 use crate::net::Msg;
 use crate::sound::{Mat, Sfx};
+use crate::world::World;
 use macroquad::math::{IVec3, Vec3};
 
 pub const CHEST_SLOTS: usize = 27;
@@ -302,11 +303,45 @@ pub fn decode(b: &[u8], wear_bytes: usize) -> std::collections::HashMap<IVec3, C
 /// How close you must be to use a container (a little over reach, for lag).
 const REACH: f32 = 10.0;
 
+// Containers are found by position: a block's, or a loaded cart's key (see
+// `vehicles::cart_key`), so chest and hopper carts work like chests.
+
+/// The container at `p` (a block's, or a cart's).
+pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a mut Container> {
+    match crate::vehicles::cart_of_key(p) {
+        Some(id) => vehicles.iter_mut().find(|v| v.id == id)?.contents.as_mut(),
+        None => world.containers.get_mut(&p),
+    }
+}
+
+pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a Container> {
+    match crate::vehicles::cart_of_key(p) {
+        Some(id) => vehicles.iter().find(|v| v.id == id)?.contents.as_ref(),
+        None => world.containers.get(&p),
+    }
+}
+
+/// The block a container behaves like (a cart's: a chest's or a hopper's).
+pub fn store_kind(world: &World, vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Id {
+    match crate::vehicles::cart_of_key(p) {
+        Some(id) => vehicles.iter().find(|v| v.id == id && v.contents.is_some()).map(|v| v.container_block()).unwrap_or(AIR),
+        None => world.get_v(p),
+    }
+}
+
+/// Where a container is (for reach checks).
+pub fn store_centre(vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Vec3 {
+    match crate::vehicles::cart_of_key(p) {
+        Some(id) => vehicles.iter().find(|v| v.id == id).map(|v| v.pos + Vec3::Y * 0.5).unwrap_or(Vec3::splat(f32::MAX)),
+        None => p.as_vec3() + Vec3::splat(0.5),
+    }
+}
+
 impl Game {
     /// Right-clicked a chest or furnace: open it.
     pub fn open_container(&mut self, pos: IVec3) {
         self.open = Some(pos);
-        self.sfx(Sfx::Place(Mat::Wood), Some(pos.as_vec3() + Vec3::splat(0.5)));
+        self.sfx(Sfx::Place(Mat::Wood), Some(store_centre(&self.vehicles, pos)));
         if self.is_client() {
             // The host has the contents; it sends them (and any changes) while it's open.
             self.net_send_msg(Msg::OpenContainer { x: pos.x, y: pos.y, z: pos.z });
@@ -326,8 +361,8 @@ impl Game {
     /// shift: move the whole stack to the inventory).
     pub fn container_click(&mut self, slot: usize, right: bool, shift: bool) {
         let Some(pos) = self.open else { return };
-        let kind = self.world.get_v(pos);
-        let Some(c) = self.world.containers.get_mut(&pos) else { return };
+        let kind = store_kind(&self.world, &self.vehicles, pos);
+        let Some(c) = store(&mut self.world, &mut self.vehicles, pos) else { return };
         let Some(&before) = c.slots.get(slot) else { return };
         let mut s = before;
         let mut cursor = self.inv.cursor;
@@ -389,8 +424,8 @@ impl Game {
     pub fn container_quick_put(&mut self, inv_slot: usize) {
         let Some(pos) = self.open else { return };
         let Some((id, n)) = self.inv.slots.get(inv_slot).copied().flatten() else { return };
-        let kind = self.world.get_v(pos);
-        let Some(c) = self.world.containers.get_mut(&pos) else { return };
+        let kind = store_kind(&self.world, &self.vehicles, pos);
+        let Some(c) = store(&mut self.world, &mut self.vehicles, pos) else { return };
         let mut left = n;
         let mut changed: Vec<(usize, Stack)> = Vec::new();
         // Furnaces: fuel to the fuel slot (unless it's also cookable), the rest to the input.
@@ -437,7 +472,7 @@ impl Game {
 
     /// Joined players: close the screen if the container vanished under us.
     pub fn container_still_there(&self) -> bool {
-        self.open.map(|p| is_container(self.world.get_v(p))).unwrap_or(false)
+        self.open.map(|p| is_container(store_kind(&self.world, &self.vehicles, p)) && (crate::vehicles::cart_of_key(p).is_none() || store_centre(&self.vehicles, p).distance(self.player.eye()) < REACH)).unwrap_or(false)
     }
 
     /// Breaking a container spills what was inside onto the ground.
@@ -487,7 +522,7 @@ impl Game {
 
     /// Send a container's contents to everyone looking at it (or just `only`).
     pub fn send_container(&mut self, p: IVec3, only: Option<u32>) {
-        let Some(c) = self.world.containers.get(&p) else { return };
+        let Some(c) = store_ref(&self.world, &self.vehicles, p) else { return };
         let (burn, cook) = c.gauges();
         let slots = c.slots.iter().zip(&c.wear).map(|(s, w)| s.map(|(id, n)| (id, n, *w)).unwrap_or((AIR, 0, 0))).collect();
         let msg = Msg::Container { x: p.x, y: p.y, z: p.z, slots, burn, cook };
@@ -501,11 +536,11 @@ impl Game {
     }
 
     pub fn peer_near(&self, from: u32, p: IVec3) -> bool {
-        self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH).unwrap_or(false)
+        self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(store_centre(&self.vehicles, p)) <= REACH).unwrap_or(false)
     }
 
     pub fn host_open(&mut self, from: u32, p: IVec3) {
-        if !self.peer_near(from, p) || !is_container(self.world.get_v(p)) {
+        if !self.peer_near(from, p) || !is_container(store_kind(&self.world, &self.vehicles, p)) {
             return;
         }
         self.viewers.entry(p).or_default().insert(from);
@@ -535,8 +570,8 @@ impl Game {
     #[allow(clippy::too_many_arguments)]
     pub fn host_container_move(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8, put: bool, wear: Wear) {
         let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
-        let kind = self.world.get_v(p);
-        let ok = open && self.peer_near(from, p) && n > 0 && valid_item(item) && self.world.containers.get(&p).map(|c| slot < c.slots.len()).unwrap_or(false);
+        let kind = store_kind(&self.world, &self.vehicles, p);
+        let ok = open && self.peer_near(from, p) && n > 0 && valid_item(item) && store_ref(&self.world, &self.vehicles, p).map(|c| slot < c.slots.len()).unwrap_or(false);
         let done = ok && if put { self.container_put(from, p, kind, slot, item, n, wear) } else { self.container_take(from, p, slot, item, n) };
         if done {
             // Everyone else looking sees it too.
@@ -551,7 +586,7 @@ impl Game {
         if !accepts(kind, slot, item) {
             return false;
         }
-        let fits = match self.world.containers.get(&p).and_then(|c| c.slots[slot]) {
+        let fits = match store_ref(&self.world, &self.vehicles, p).and_then(|c| c.slots[slot]) {
             None => n <= max_stack(item),
             Some((id, have)) => id == item && have as u32 + n as u32 <= max_stack(item) as u32,
         };
@@ -559,7 +594,7 @@ impl Game {
             return false;
         }
         let wear = self.launder(from, item, wear);
-        let c = self.world.containers.get_mut(&p).expect("checked");
+        let c = store(&mut self.world, &mut self.vehicles, p).expect("checked");
         let have = c.slots[slot].map(|s| s.1).unwrap_or(0);
         c.slots[slot] = Some((item, have + n));
         if have == 0 {
@@ -570,8 +605,8 @@ impl Game {
     }
 
     fn container_take(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8) -> bool {
-        let furnace = is_furnace(self.world.get_v(p));
-        let Some(c) = self.world.containers.get_mut(&p) else { return false };
+        let furnace = is_furnace(store_kind(&self.world, &self.vehicles, p));
+        let Some(c) = store(&mut self.world, &mut self.vehicles, p) else { return false };
         let ench = (c.wear.get(slot).copied().unwrap_or(0) >> 16) as u16;
         match c.slots[slot] {
             Some((id, have)) if id == item && have >= n => {
@@ -595,8 +630,13 @@ impl Game {
 
     /// Joined players: the host's copy of what's in a container.
     pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, Wear)>, burn: f32, cook: f32) {
-        let kind = self.world.get_v(p);
-        let c = self.world.containers.entry(p).or_insert_with(|| Container::for_block(kind));
+        let c = if crate::vehicles::cart_of_key(p).is_some() {
+            let Some(c) = store(&mut self.world, &mut self.vehicles, p) else { return };
+            c
+        } else {
+            let kind = self.world.get_v(p);
+            self.world.containers.entry(p).or_insert_with(|| Container::for_block(kind))
+        };
         c.wear = slots.iter().map(|s| s.2).collect();
         c.slots = slots.into_iter().map(|(id, n, _)| (n > 0 && valid_item(id)).then_some((id, n.min(64)))).collect();
         // Gauges come as fractions; show them against nominal totals.
