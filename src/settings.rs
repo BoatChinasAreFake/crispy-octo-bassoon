@@ -21,6 +21,8 @@ pub struct Settings {
     /// Last name and server used on the Multiplayer screen (empty: pick a fresh name).
     pub mp_name: String,
     pub mp_addr: String,
+    /// Keys and mouse buttons (see keybinds.rs).
+    pub binds: crate::keybinds::Bindings,
 }
 
 impl Default for Settings {
@@ -34,6 +36,7 @@ impl Default for Settings {
             music_on: true,
             mp_name: String::new(),
             mp_addr: "127.0.0.1".into(),
+            binds: Default::default(),
         }
     }
 }
@@ -60,7 +63,7 @@ impl Settings {
             self.music_on,
             clean(&self.mp_name, 16),
             clean(&self.mp_addr, 128),
-        )
+        ) + self.binds.to_text().as_str()
     }
 
     pub fn from_text(text: &str) -> Settings {
@@ -87,7 +90,9 @@ impl Settings {
                 "music" => s.music_on = flag(s.music_on),
                 "name" => s.mp_name = clean(v, 16),
                 "server" => s.mp_addr = clean(v, 128),
-                _ => {}
+                k => {
+                    s.binds.read(k, v);
+                }
             }
         }
         s.render_distance = s.render_distance.clamp(3, MAX_RENDER_DISTANCE);
@@ -127,6 +132,11 @@ mod tests {
             music_on: false,
             mp_name: "Stove42".into(),
             mp_addr: "[::1]:25565".into(),
+            binds: {
+                let mut b = crate::keybinds::Bindings::default();
+                b.set(crate::keybinds::Action::Sprint, false, crate::keybinds::Bind::parse("F"));
+                b
+            },
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

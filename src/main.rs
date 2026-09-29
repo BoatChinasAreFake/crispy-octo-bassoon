@@ -18,6 +18,7 @@ mod fishing;
 mod game;
 mod hunger;
 mod inventory;
+mod keybinds;
 mod ledger;
 mod liquids;
 mod mesher;
@@ -26,6 +27,7 @@ mod multiplayer;
 mod navigation;
 mod net;
 mod noise;
+mod pad;
 mod palette;
 mod player;
 mod players;
@@ -106,6 +108,8 @@ enum Screen {
     WorldSettings,
     Dead,
     Options { from_title: bool },
+    /// Rebinding keys and buttons (reached from Options).
+    Controls { from_title: bool },
     Help { from_title: bool },
     Advancements,
     FishLog,
@@ -163,6 +167,13 @@ struct App {
     /// Lines being written on a sign, and which line.
     sign_lines: [String; 4],
     sign_line: usize,
+    /// A game controller, if one is plugged in, and what it did this frame.
+    pad: pad::Pad,
+    pad_frame: pad::PadFrame,
+    /// The action (and which of its two slots) waiting for a new key.
+    rebinding: Option<(keybinds::Action, bool)>,
+    /// Skip the click that started rebinding, so it isn't taken as the new binding.
+    rebind_armed: bool,
     mods_scroll: usize,
     adv_scroll: usize,
     /// Joined a server, so its mods (not ours) are active.
@@ -265,7 +276,7 @@ impl App {
             drain_chars();
         }
         // Leaving a screen where settings change: keep them for next time.
-        if matches!(self.screen, Screen::Options { .. } | Screen::Multiplayer) && self.screen != s {
+        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Multiplayer) && self.screen != s {
             self.save_settings();
         }
         self.screen = s;
@@ -400,39 +411,28 @@ impl App {
     }
 
     fn controls(&mut self) -> Controls {
-        let playing = self.screen == Screen::Playing && self.chat.is_none();
-        let key = |k: KeyCode| playing && is_key_down(k);
-        let mut forward = 0.0;
-        let mut strafe = 0.0;
-        if key(KeyCode::W) || key(KeyCode::Up) {
-            forward += 1.0;
-        }
-        if key(KeyCode::S) || key(KeyCode::Down) {
-            forward -= 1.0;
-        }
-        if key(KeyCode::D) || key(KeyCode::Right) {
-            strafe += 1.0;
-        }
-        if key(KeyCode::A) || key(KeyCode::Left) {
-            strafe -= 1.0;
-        }
-        let mouse = |b: MouseButton| playing && is_mouse_button_down(b);
-        let mouse_p = |b: MouseButton| playing && is_mouse_button_pressed(b);
+        use keybinds::Action as A;
+        let playing = self.screen == Screen::Playing && self.chat.is_none() && self.rebinding.is_none();
+        let b = &self.settings.binds;
+        let down = |a: A| playing && b.down(a);
+        let hit = |a: A| playing && b.pressed(a);
+        let pad = if playing { self.pad_frame } else { pad::PadFrame::default() };
+        let axis = |plus: A, minus: A, stick: f32| (down(plus) as i32 - down(minus) as i32) as f32 + stick;
         Controls {
             input: Input {
-                forward,
-                strafe,
-                jump: key(KeyCode::Space),
-                jump_pressed: playing && is_key_pressed(KeyCode::Space),
-                sneak: key(KeyCode::LeftShift) || key(KeyCode::RightShift),
-                sprint: key(KeyCode::LeftControl) || key(KeyCode::R),
+                forward: axis(A::Forward, A::Back, pad.walk[1]).clamp(-1.0, 1.0),
+                strafe: axis(A::Right, A::Left, pad.walk[0]).clamp(-1.0, 1.0),
+                jump: down(A::Jump) || pad.jump,
+                jump_pressed: hit(A::Jump) || pad.jump_pressed,
+                sneak: down(A::Sneak) || pad.sneak,
+                sprint: down(A::Sprint) || pad.sprint,
             },
-            attack_held: mouse(MouseButton::Left),
-            attack_pressed: mouse_p(MouseButton::Left),
-            use_held: mouse(MouseButton::Right),
-            use_pressed: mouse_p(MouseButton::Right),
-            pick: mouse_p(MouseButton::Middle),
-            drop: playing && is_key_pressed(KeyCode::Q),
+            attack_held: down(A::Attack) || pad.attack,
+            attack_pressed: hit(A::Attack) || pad.attack_pressed,
+            use_held: down(A::Use) || pad.use_held,
+            use_pressed: hit(A::Use) || pad.use_pressed,
+            pick: hit(A::PickBlock),
+            drop: hit(A::Drop) || pad.drop,
             drop_all: is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl),
         }
     }
@@ -451,6 +451,14 @@ impl App {
             }
         }
         self.last_mouse = Some(m);
+        // The right stick looks around, faster the further it's pushed.
+        let look = self.pad_frame.look;
+        if self.screen == Screen::Playing && look != [0.0; 2] {
+            let s = get_frame_time().min(0.05) * 2.8 * self.settings.sensitivity;
+            let p = &mut self.game.player;
+            p.yaw = (p.yaw + look[0] * s).rem_euclid(std::f32::consts::TAU);
+            p.pitch = (p.pitch + look[1] * s * 0.8).clamp(-1.55, 1.55);
+        }
     }
 
     fn handle_keys(&mut self) {
@@ -533,16 +541,18 @@ impl App {
         }
         match self.screen {
             Screen::Playing => {
-                if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Slash) {
+                let binds = &self.settings.binds;
+                let command = binds.pressed(keybinds::Action::Command);
+                if binds.pressed(keybinds::Action::Chat) || command {
                     drain_chars();
-                    let start = if is_key_pressed(KeyCode::Slash) { "/" } else { "" };
+                    let start = if command { "/" } else { "" };
                     self.chat = Some(start.to_string());
                     self.set_screen(Screen::Playing);
                     return;
                 }
-                if is_key_pressed(KeyCode::Escape) {
+                if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause {
                     self.set_screen(Screen::Paused);
-                } else if is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
+                } else if self.settings.binds.pressed(keybinds::Action::Inventory) || self.pad_frame.inventory {
                     self.recipe_scroll = 0.0;
                     self.set_screen(Screen::Inventory);
                 }
@@ -554,22 +564,23 @@ impl App {
                     }
                 }
                 let wheel = mouse_wheel().1;
-                if wheel.abs() > 0.1 {
-                    let d = if wheel > 0.0 { 8 } else { 1 };
-                    self.game.inv.selected = (self.game.inv.selected + d) % 9;
+                let step = if wheel.abs() > 0.1 { -wheel.signum() as i32 } else { self.pad_frame.hotbar };
+                if step != 0 {
+                    self.game.inv.selected = (self.game.inv.selected as i32 + step).rem_euclid(9) as usize;
                     self.game.held_name = 2.0;
                 }
-                if is_key_pressed(KeyCode::F5) {
+                if self.settings.binds.pressed(keybinds::Action::Perspective) || self.pad_frame.perspective {
                     self.game.third_person = !self.game.third_person;
                 }
             }
             Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade => {
-                if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Tab) {
+                let pad = self.pad_frame;
+                if is_key_pressed(KeyCode::Escape) || self.settings.binds.pressed(keybinds::Action::Inventory) || pad.inventory || pad.back {
                     self.set_screen(Screen::Playing);
                 }
             }
             Screen::Paused => {
-                if is_key_pressed(KeyCode::Escape) {
+                if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause || self.pad_frame.back {
                     self.set_screen(Screen::Playing);
                 }
             }
@@ -587,6 +598,12 @@ impl App {
             Screen::Advancements | Screen::FishLog | Screen::WorldSettings => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
+                }
+            }
+            Screen::Controls { from_title } => {
+                // Esc while waiting for a key clears that slot (see `controls_screen`).
+                if self.rebinding.is_none() && is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Options { from_title });
                 }
             }
             Screen::Options { from_title } | Screen::Help { from_title } => {
@@ -614,6 +631,7 @@ impl App {
         let dt = get_frame_time().min(0.05);
         self.fps = self.fps * 0.95 + (1.0 / get_frame_time().max(1e-4)) * 0.05;
         self.ui.begin_frame();
+        self.pad_frame = self.pad.poll();
         self.handle_keys();
         self.mouse_look();
 
@@ -1280,7 +1298,7 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Help { .. } | Screen::Advancements | Screen::FishLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Help { .. } | Screen::Advancements | Screen::FishLog);
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
                 self.audio.play(s, at, listener);
@@ -1302,6 +1320,10 @@ impl App {
             Screen::Help { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.help_screen(from_title);
+            }
+            Screen::Controls { from_title } => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
+                self.controls_screen(from_title);
             }
             Screen::Mods => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
@@ -1778,9 +1800,71 @@ impl App {
             self.settings.fullscreen = !self.settings.fullscreen;
             set_fullscreen(self.settings.fullscreen);
         }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Controls...", true) {
+            self.set_screen(Screen::Controls { from_title });
+        }
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
+        }
+    }
+
+    /// Every action with its two bindings; click one, then press the new key.
+    fn controls_screen(&mut self, from_title: bool) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.ui.text_centered("Controls", w / 2.0, h * 0.09, 16.0, WHITE);
+        // Take the next key or button for the slot being changed (Esc empties it).
+        if let Some((action, secondary)) = self.rebinding {
+            if !self.rebind_armed {
+                self.rebind_armed = true;
+            } else if is_key_pressed(KeyCode::Escape) {
+                self.settings.binds.set(action, secondary, None);
+                self.rebinding = None;
+            } else if let Some(b) = keybinds::Bind::just_pressed() {
+                self.settings.binds.set(action, secondary, Some(b));
+                self.rebinding = None;
+            }
+        }
+        let col_w = ((w - 24.0 * s) / 2.0).min(260.0 * s);
+        let bh = 15.0 * s;
+        let per_col = keybinds::ACTIONS.len().div_ceil(2);
+        let top = h * 0.14;
+        for (i, &action) in keybinds::ACTIONS.iter().enumerate() {
+            let (col, row) = (i / per_col, i % per_col);
+            let x = w / 2.0 + if col == 0 { -col_w - 4.0 * s } else { 4.0 * s };
+            let y = top + row as f32 * (bh + 3.0 * s);
+            self.ui.text(action.label(), x, y + bh * 0.7, 9.0, WHITE);
+            let binds = self.settings.binds.get(action);
+            let bw = col_w * 0.28;
+            for (slot, bind) in binds.iter().enumerate() {
+                let r = Rect::new(x + col_w - (2 - slot) as f32 * (bw + 3.0 * s), y, bw, bh);
+                let waiting = self.rebinding == Some((action, slot == 1));
+                let label = if waiting { "> press <".to_string() } else { bind.map(|b| b.display()).unwrap_or_else(|| "-".into()) };
+                if self.ui.button(r, &label, self.rebinding.is_none() || waiting) {
+                    self.rebinding = Some((action, slot == 1));
+                    self.rebind_armed = false;
+                }
+            }
+        }
+        let y = top + per_col as f32 * (bh + 3.0 * s) + 4.0 * s;
+        let hint = if self.rebinding.is_some() {
+            "Press a key or mouse button (Esc: leave it empty).".to_string()
+        } else {
+            match &self.pad.name {
+                Some(name) => format!("Controller: {name} (sticks walk and look; triggers mine and place; A jumps; Y inventory)"),
+                None => "No controller found. Plug one in any time.".to_string(),
+            }
+        };
+        self.ui.text_centered(&hint, w / 2.0, y + 8.0 * s, 8.0, Color::new(0.8, 0.8, 0.8, 1.0));
+        let bw = (110.0 * s).min(w * 0.4);
+        let by = y + 16.0 * s;
+        if self.ui.button(Rect::new(w / 2.0 - bw - 4.0 * s, by, bw, 18.0 * s), "Reset to Defaults", self.rebinding.is_none()) {
+            self.settings.binds = Default::default();
+        }
+        if self.ui.button(Rect::new(w / 2.0 + 4.0 * s, by, bw, 18.0 * s), "Done", self.rebinding.is_none()) {
+            self.set_screen(Screen::Options { from_title });
         }
     }
 
@@ -1788,13 +1872,24 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         self.ui.text_centered("How to Play Minceraft", w / 2.0, h * 0.1, 16.0, WHITE);
+        use keybinds::Action as A;
+        let k = |a: A| self.settings.binds.describe(a);
+        let walk = format!("{}/{}/{}/{}", k(A::Forward), k(A::Left), k(A::Back), k(A::Right));
+        let keys = [
+            format!("{walk} ... walk    {} ... jump / swim up", k(A::Jump)),
+            format!("{} ... sprint    {} ... sneak (won't fall off ledges)", k(A::Sprint), k(A::Sneak)),
+            format!("{} ... mine / attack    {} ... place / eat / light TNT with a torch", k(A::Attack), k(A::Use)),
+            format!("1-9 / wheel ... pick hotbar    {} ... pick block (creative)", k(A::PickBlock)),
+            format!("{} ... inventory + crafting    {} ... throw held item (Ctrl: stack)", k(A::Inventory), k(A::Drop)),
+            format!("{} ... third person    F3 ... debug info    F11 ... fullscreen    Esc ... pause", k(A::Perspective)),
+        ];
         let lines = [
-            "WASD / arrows ... walk          Space ... jump / swim up",
-            "Ctrl or R ... sprint            Shift ... sneak (won't fall off ledges)",
-            "Left mouse ... mine / attack    Right mouse ... place / eat / light TNT with a torch",
-            "1-9 / wheel ... pick hotbar     Middle mouse ... pick block (creative)",
-            "E or Tab ... inventory + crafting    Q ... throw held item (Ctrl+Q: stack)",
-            "F5 ... third person    F3 ... debug info    F11 ... fullscreen    Esc ... pause",
+            keys[0].as_str(),
+            keys[1].as_str(),
+            keys[2].as_str(),
+            keys[3].as_str(),
+            keys[4].as_str(),
+            keys[5].as_str(),
             "Creative: double-tap Space to fly, Shift to descend.",
             "",
             "Survival tips: punch a Tree Chunk, craft Planks, then Sticks, then a Wooden Pickaxe.",
@@ -1805,12 +1900,13 @@ impl App {
             "Fishing: cast, wait for the real bite (not the nibbles!), reel in. Big fish: mind the line tension.",
             "Crafting works anywhere (the table is decorative. Satire!). Chests hold things; Furnaces cook with coal or wood.",
             "Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.",
+            "Change any key in Options > Controls. Game controllers work too (sticks walk and look).",
         ];
         for (i, l) in lines.iter().enumerate() {
             self.ui.text_centered(l, w / 2.0, h * 0.18 + i as f32 * 11.5 * s, 9.0, if l.is_empty() { WHITE } else { Color::new(0.9, 0.9, 0.9, 1.0) });
         }
         let bw = (160.0 * s).min(w * 0.8);
-        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.18 + 17.5 * 11.5 * s, bw, 20.0 * s), "Got it", true) {
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.18 + 18.5 * 11.5 * s, bw, 20.0 * s), "Got it", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
         }
     }
@@ -2606,6 +2702,10 @@ async fn game_main() {
         map_timer: 0.0,
         sign_lines: Default::default(),
         sign_line: 0,
+        pad: pad::Pad::new(),
+        pad_frame: Default::default(),
+        rebinding: None,
+        rebind_armed: false,
         mods_scroll: 0,
         adv_scroll: 0,
         using_server_mods: false,
@@ -2805,6 +2905,13 @@ async fn game_main() {
             "options" => {
                 app.game = Game::new(424242, true, true);
                 app.set_screen(Screen::Options { from_title: true });
+            }
+            "controls" => {
+                app.game = Game::new(424242, true, true);
+                // Show a changed binding and one waiting for a key.
+                app.settings.binds.set(keybinds::Action::Sprint, true, keybinds::Bind::parse("F"));
+                app.set_screen(Screen::Controls { from_title: true });
+                app.rebinding = Some((keybinds::Action::Drop, true));
             }
             _ => {
                 app.game = Game::new(424242, true, true);
