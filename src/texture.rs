@@ -290,6 +290,8 @@ pub const T_MELON_SLICE: u16 = 370;
 pub const T_SQUAWK: u16 = 371;
 pub const T_SQUAWK_FACE: u16 = 372;
 pub const T_SQUAWK_WING: u16 = 373;
+pub const T_CLANK: u16 = 374;
+pub const T_CLANK_FACE: u16 = 375;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2452,6 +2454,26 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             rgb(240, 200, 40)
         } else {
             shade(rgb(215, 35, 35), r.range(0.9, 1.05))
+        }
+    });
+    a.each(T_CLANK, |x, y, r, p| {
+        // Riveted iron, with vines creeping up it.
+        let vine = p.noise2(x as f32 / 3.0, y as f32 / 6.0) > 0.35;
+        if vine {
+            shade(rgb(60, 120, 40), r.range(0.8, 1.1))
+        } else if (x % 8 == 1 || x % 8 == 6) && y % 5 == 2 {
+            rgb(120, 115, 110)
+        } else {
+            shade(rgb(205, 200, 190), r.range(0.85, 1.05))
+        }
+    });
+    a.each(T_CLANK_FACE, |x, y, r, _| {
+        if (5..7).contains(&y) && (x == 4 || x == 11) {
+            rgb(150, 30, 20) // glowing, slightly worried eyes
+        } else if (3..5).contains(&y) && (3..13).contains(&x) {
+            rgb(150, 145, 135) // a heavy brow
+        } else {
+            shade(rgb(200, 195, 185), r.range(0.88, 1.04))
         }
     });
     a.each(T_APPLE, |x, y, r, _| {

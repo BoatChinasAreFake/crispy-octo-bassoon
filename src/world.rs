@@ -625,6 +625,8 @@ pub struct World {
     /// Huts whose chests were just filled for the first time: a Hmmer should
     /// move in (where to stand, and its seed; see villagers.rs).
     pub new_huts: Vec<(Vec3, u32)>,
+    /// Villages whose square chest was just filled: a Clanker should move in (where).
+    pub new_clankers: Vec<Vec3>,
     /// Every sapling in loaded or edited chunks, and leaves that should check
     /// whether they still hang on to a tree (see trees.rs).
     pub saplings: HashSet<IVec3>,
@@ -673,6 +675,7 @@ impl World {
             liquid_dirty: HashSet::new(),
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
+            new_clankers: Vec::new(),
             saplings: HashSet::new(),
             fires: HashSet::new(),
             leaf_checks: HashSet::new(),

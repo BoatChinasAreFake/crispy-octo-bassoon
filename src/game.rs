@@ -1995,7 +1995,7 @@ impl Game {
         self.sounds.clear();
     }
 
-    fn update_entities(&mut self, dt: f32) {
+    pub(crate) fn update_entities(&mut self, dt: f32) {
         if self.is_client() {
             self.client_entities(dt);
             return;
@@ -2035,6 +2035,8 @@ impl Game {
             self.advance("dont_blink");
         }
         self.house_hmmers();
+        self.house_clankers();
+        self.clankers_tick(dt);
         self.animals_tick(dt);
         self.hmmers_tick(dt);
         self.free_riderless();
@@ -2073,7 +2075,7 @@ impl Game {
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Squawker => noises.push((Sfx::Squawk, m.body.pos)),
-                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm => {}
+                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker => {}
                 }
             }
         }
@@ -2157,7 +2159,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2741,8 +2743,9 @@ pub(crate) mod tests {
                 }
             }
         }
-        // This chunk is a stepped hill (little to merge), yet it still comes out smaller.
-        assert!(merged > 0 && quads < faces, "{quads} quads ({merged} cube) for {faces} faces");
+        // This chunk is a stepped hill (little to merge), yet its cube faces still
+        // come out as fewer quads (plants and other shapes aren't counted in `faces`).
+        assert!(merged > 0 && merged < faces, "{quads} quads ({merged} cube) for {faces} faces");
     }
 
     #[test]

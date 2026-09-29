@@ -21,6 +21,7 @@ mod farming;
 mod fire;
 mod fishing;
 mod game;
+mod golems;
 mod hollow;
 mod hoppers;
 mod horses;
@@ -2762,6 +2763,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "tower" => Kind::Tower,
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
+        "village" => Kind::Village,
         "swamp" | "jungle" | "badlands" | "taiga" => {
             let want = match mode {
                 "swamp" => world::Biome::Swamp,
@@ -2813,6 +2815,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             return Some(match kind {
                 Kind::Dungeon => look(o + Vec3::new(2.6, 2.4, 2.6), o + Vec3::new(-3.0, 0.5, -1.0)),
                 Kind::Tower => look(o + Vec3::new(-11.0, 9.0, -11.0), o + Vec3::Y * 4.0),
+                Kind::Village => look(o + Vec3::new(-20.0, 18.0, -20.0), o + Vec3::Y * 2.0),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -3056,7 +3059,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);

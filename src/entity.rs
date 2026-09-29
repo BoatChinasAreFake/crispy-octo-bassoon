@@ -185,11 +185,13 @@ pub enum MobKind {
     Wyrm,
     /// Parrot-ish: a loud, bright bird of the jungle. Flutters like a Cluckster.
     Squawker,
+    /// Iron-golem-ish: guards a village from monsters (see golems.rs).
+    Clanker,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 16] = [
+    pub const ALL: [MobKind; 17] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -206,6 +208,7 @@ impl MobKind {
         MobKind::Galloper,
         MobKind::Wyrm,
         MobKind::Squawker,
+        MobKind::Clanker,
     ];
 
     pub fn index(self) -> u8 {
@@ -233,6 +236,7 @@ impl MobKind {
             "galloper" | "horse" => Some(MobKind::Galloper),
             "wyrm" | "hollow wyrm" | "hollow_wyrm" | "ender_dragon" | "dragon" => Some(MobKind::Wyrm),
             "squawker" | "parrot" => Some(MobKind::Squawker),
+            "clanker" | "iron_golem" | "golem" => Some(MobKind::Clanker),
             _ => None,
         }
     }
@@ -254,6 +258,7 @@ impl MobKind {
             MobKind::Galloper => "Galloper",
             MobKind::Wyrm => "Hollow Wyrm",
             MobKind::Squawker => "Squawker",
+            MobKind::Clanker => "Clanker",
         }
     }
     /// Half-width and height at size 1.
@@ -275,6 +280,7 @@ impl MobKind {
             MobKind::Galloper => (0.6, 1.6),
             MobKind::Wyrm => (2.5, 2.0),
             MobKind::Squawker => (0.2, 0.8),
+            MobKind::Clanker => (0.7, 2.7),
         }
     }
     pub fn max_health(self) -> f32 {
@@ -295,6 +301,7 @@ impl MobKind {
             MobKind::Galloper => 22.0,
             MobKind::Wyrm => 200.0,
             MobKind::Squawker => 6.0,
+            MobKind::Clanker => 100.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -308,7 +315,7 @@ impl MobKind {
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
@@ -514,6 +521,12 @@ impl Mob {
             MobKind::Woofer if self.owner.is_none() => self.angry = true,
             MobKind::Hmmer => self.flee = 4.0,
             MobKind::Grumbler => self.angry = true,
+            MobKind::Clanker => {
+                // Hard to shift, and it remembers who did that.
+                self.angry = true;
+                self.knock *= 0.15;
+                self.body.vel.y = 1.0;
+            }
             MobKind::Starer => {
                 self.angry = true;
                 // Takes the hit, then blinks away to think about it (flee = "wants to warp").
@@ -561,6 +574,27 @@ impl Mob {
                         want = Some((d.x.atan2(-d.z), 1.8));
                     } else {
                         self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        may_wander = false;
+                    }
+                }
+            }
+            MobKind::Clanker => {
+                if !player_visible || dist > 24.0 {
+                    self.angry = false;
+                }
+                if self.angry && player_visible {
+                    want = Some((face, 2.6));
+                    if flat.length() < 1.9 && to_player.y.abs() < 2.2 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(7.0, "was flattened by a Clanker"));
+                        self.attack_cd = 1.4;
+                    }
+                } else if let Some(g) = self.goal {
+                    // After a monster (see golems.rs), else back to its square.
+                    let d = g - self.body.pos;
+                    let fd = Vec3::new(d.x, 0.0, d.z).length();
+                    if fd > 1.6 {
+                        want = Some((d.x.atan2(-d.z), if self.prey.is_some() { 2.6 } else { 1.4 }));
+                    } else {
                         may_wander = false;
                     }
                 }
@@ -826,6 +860,7 @@ impl Mob {
             // Only the smallest Bloops leave anything; bigger ones split instead.
             MobKind::Bloop if n > 0 && self.size <= 1.0 => Some((GOO, n)),
             MobKind::Grumbler if n > 0 => Some((GOO, n)),
+            MobKind::Clanker => Some((IRON, 3 + n)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -1016,6 +1051,18 @@ static SQUAWKER: [Part; 7] = [
     part([-0.07, 0.12, 0.16], [0.14, 0.2, 0.3], [0.0; 3], Limb::Fixed, [T_SQUAWK_WING; 6]),
 ];
 
+// Broad shoulders, long arms, a small head and a big nose.
+const CK: u16 = T_CLANK;
+static CLANKER: [Part; 7] = [
+    part([-0.42, 0.0, -0.2], [0.34, 1.0, 0.4], [0.0, 1.0, 0.0], Limb::Swing(0.6), [CK; 6]),
+    part([0.08, 0.0, -0.2], [0.34, 1.0, 0.4], [0.0, 1.0, 0.0], Limb::Swing(-0.6), [CK; 6]),
+    part([-0.66, 1.0, -0.32], [1.32, 1.2, 0.64], [0.0; 3], Limb::Fixed, [CK; 6]),
+    part([-0.96, 0.55, -0.2], [0.3, 1.6, 0.4], [0.0, 2.15, 0.0], Limb::Swing(-0.5), [CK; 6]),
+    part([0.66, 0.55, -0.2], [0.3, 1.6, 0.4], [0.0, 2.15, 0.0], Limb::Swing(0.5), [CK; 6]),
+    part([-0.28, 2.2, -0.36], [0.56, 0.5, 0.56], [0.0; 3], Limb::Fixed, [CK, CK, CK, CK, CK, T_CLANK_FACE]),
+    part([-0.07, 2.2, -0.5], [0.14, 0.3, 0.14], [0.0; 3], Limb::Fixed, [T_CLANK_FACE; 6]),
+];
+
 const MS: u16 = T_MOO_SKIN;
 static MOOER: [Part; 8] = [
     part([-0.38, 0.62, -0.62], [0.76, 0.66, 1.24], [0.0; 3], Limb::Fixed, [MS; 6]),
@@ -1133,6 +1180,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Galloper => &GALLOPER,
         MobKind::Wyrm => &WYRM,
         MobKind::Squawker => &SQUAWKER,
+        MobKind::Clanker => &CLANKER,
     }
 }
 
