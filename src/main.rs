@@ -2762,6 +2762,26 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "tower" => Kind::Tower,
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
+        "swamp" | "jungle" | "badlands" | "taiga" => {
+            let want = match mode {
+                "swamp" => world::Biome::Swamp,
+                "jungle" => world::Biome::Jungle,
+                "badlands" => world::Biome::Badlands,
+                _ => world::Biome::Taiga,
+            };
+            // Somewhere well inside the biome (all nine columns around agree), looking across it.
+            for r in 0..160 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.column(x + i * 24, z + j * 24).1 == want));
+                    if inside {
+                        let h = generator.column(x, z).0.max(world::SEA);
+                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + 12.0, z as f32 + 0.5), 0.8, -0.35));
+                    }
+                }
+            }
+            return None;
+        }
         "ravine" | "snow" | "rain" | "thunder" => {
             for r in 0..60 {
                 for (dx, dz) in ring(r) {
@@ -3036,7 +3056,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "ravine" | "rain" | "thunder" | "snow" => {
+            "hut" | "tower" | "well" | "dungeon" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);

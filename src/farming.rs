@@ -329,9 +329,10 @@ pub fn random_drops(id: Id, rng: &mut Rng) -> Vec<(Id, u8)> {
     }
     let r = rng.f32();
     match id {
-        LEAVES if r < 0.05 => vec![(SAPLING, 1)],
-        LEAVES if r < 0.12 => vec![(STICK, 1)],
+        id if is_leaves(id) && r < 0.05 => vec![(SAPLING, 1)],
+        id if is_leaves(id) && r < 0.12 => vec![(STICK, 1)],
         LEAVES if r < 0.13 => vec![(APPLE, 1)],
+        MELON => vec![(MELON_SLICE, 3 + (r * 5.0) as u8)],
         GRAVEL if r < 0.1 => vec![(COAL, 1)],
         TALL_GRASS if r < 0.12 => vec![(WHEAT_SEEDS, 1)],
         TALL_GRASS if r < 0.15 => vec![(CARROT, 1)],

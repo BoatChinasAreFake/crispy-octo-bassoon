@@ -271,6 +271,25 @@ pub const T_WYRM_FACE: u16 = 328;
 /// Player skins: four tiles each (tone, face, shirt, trousers; see nametags.rs).
 pub const T_SKIN_FIRST: u16 = 329;
 pub const T_NAME_TAG: u16 = 353;
+// Biomes (see world.rs).
+pub const T_SPRUCE_LOG_SIDE: u16 = 354;
+pub const T_SPRUCE_LOG_TOP: u16 = 355;
+pub const T_SPRUCE_LEAVES: u16 = 356;
+pub const T_JUNGLE_LOG_SIDE: u16 = 357;
+pub const T_JUNGLE_LOG_TOP: u16 = 358;
+pub const T_JUNGLE_LEAVES: u16 = 359;
+pub const T_MUD: u16 = 360;
+pub const T_LILY_PAD: u16 = 361;
+pub const T_RED_SAND: u16 = 362;
+/// Four terracottas: plain, orange, red, yellow.
+pub const T_TERRACOTTA: u16 = 363;
+pub const T_DEAD_BUSH: u16 = 367;
+pub const T_MELON_SIDE: u16 = 368;
+pub const T_MELON_TOP: u16 = 369;
+pub const T_MELON_SLICE: u16 = 370;
+pub const T_SQUAWK: u16 = 371;
+pub const T_SQUAWK_FACE: u16 = 372;
+pub const T_SQUAWK_WING: u16 = 373;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2354,6 +2373,85 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             shade(rgb(60, 140, 45), r.range(0.75, 1.15))
         } else {
             [0, 0, 0, 0]
+        }
+    });
+    // Biomes.
+    let bark = |a: &mut Atlas, side: u16, top: u16, bark: [u8; 3], heart: [u8; 3]| {
+        a.each(side, |x, _y, r, _| {
+            let stripe = if x % 3 == 0 { 0.72 } else if x % 5 == 2 { 0.88 } else { 1.0 };
+            shade(rgb(bark[0], bark[1], bark[2]), stripe * r.range(0.88, 1.1))
+        });
+        a.each(top, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let d = dx.abs().max(dy.abs());
+            if d > 6.5 {
+                shade(rgb(bark[0], bark[1], bark[2]), r.range(0.85, 1.05))
+            } else {
+                let ring = if (d as i32) % 2 == 0 { 1.0 } else { 0.85 };
+                shade(rgb(heart[0], heart[1], heart[2]), ring * r.range(0.95, 1.05))
+            }
+        });
+    };
+    bark(&mut a, T_SPRUCE_LOG_SIDE, T_SPRUCE_LOG_TOP, [70, 50, 32], [140, 105, 65]);
+    bark(&mut a, T_JUNGLE_LOG_SIDE, T_JUNGLE_LOG_TOP, [110, 90, 45], [175, 130, 80]);
+    a.each(T_SPRUCE_LEAVES, |x, y, r, _| {
+        // Needles: darker, bluer, in little diagonal strokes.
+        if r.chance(0.2) { return [40, 80, 55, 0]; }
+        shade(rgb(40, 85, 55), r.range(0.7, 1.1) * if (x + y) % 3 == 0 { 0.8 } else { 1.0 })
+    });
+    a.each(T_JUNGLE_LEAVES, |_, _, r, _| if r.chance(0.15) { [50, 150, 30, 0] } else { shade(rgb(50, 155, 30), r.range(0.7, 1.2)) });
+    a.each(T_MUD, |x, y, r, p| {
+        let wet = p.noise2(x as f32 / 5.0, y as f32 / 5.0) > 0.2;
+        shade(if wet { rgb(60, 50, 45) } else { rgb(80, 65, 55) }, r.range(0.85, 1.1))
+    });
+    a.each(T_LILY_PAD, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let notch = dx > 0.0 && dy.abs() < dx * 0.35;
+        if dx * dx + dy * dy < 52.0 && !notch { shade(rgb(50, 120, 40), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_RED_SAND, |_, _, r, _| shade(rgb(190, 100, 45), r.range(0.85, 1.1)));
+    for (i, c) in [[150, 95, 70], [165, 85, 40], [140, 60, 45], [185, 135, 55]].iter().enumerate() {
+        let c = *c;
+        a.each(T_TERRACOTTA + i as u16, move |_, _, r, _| shade(rgb(c[0], c[1], c[2]), r.range(0.9, 1.06)));
+    }
+    a.each(T_DEAD_BUSH, |x, y, _, _| {
+        // A few bare twigs from one root.
+        let (fx, fy) = (x as f32 - 7.5, 15.0 - y as f32);
+        let twig = |slope: f32, from: f32| fy > from && (fx - (fy - from) * slope).abs() < 0.7;
+        if (fx.abs() < 0.7 && fy < 9.0) || twig(0.8, 3.0) || twig(-0.7, 4.0) || twig(0.35, 6.0) || twig(-1.2, 7.0) { rgb(125, 85, 45) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_MELON_SIDE, |x, _, r, _| shade(if x % 5 < 2 { rgb(60, 120, 30) } else { rgb(100, 160, 40) }, r.range(0.85, 1.1)));
+    a.each(T_MELON_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        shade(if ((dx * dx + dy * dy).sqrt() as i32) % 3 == 0 { rgb(70, 125, 30) } else { rgb(105, 160, 45) }, r.range(0.85, 1.1))
+    });
+    a.each(T_MELON_SLICE, |x, y, _, _| {
+        // A wedge: green rind along the bottom, red flesh, black seeds.
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 3.0);
+        let d = (dx * dx + dy * dy).sqrt();
+        if y < 3 || d > 10.5 {
+            [0, 0, 0, 0]
+        } else if d > 9.0 {
+            rgb(70, 140, 40)
+        } else if d > 8.0 {
+            rgb(230, 235, 190)
+        } else if (x * 7 + y * 3) % 11 == 0 && d < 7.0 {
+            rgb(25, 20, 20)
+        } else {
+            rgb(225, 55, 60)
+        }
+    });
+    a.each(T_SQUAWK, |x, y, r, _| shade(if (x + y) % 7 == 0 { rgb(240, 200, 40) } else { rgb(215, 35, 35) }, r.range(0.85, 1.1)));
+    a.each(T_SQUAWK_WING, |_, y, r, _| shade(if y < 6 { rgb(40, 90, 210) } else if y < 11 { rgb(245, 200, 40) } else { rgb(215, 35, 35) }, r.range(0.85, 1.1)));
+    a.each(T_SQUAWK_FACE, |x, y, r, _| {
+        if (4..6).contains(&y) && (x == 3 || x == 12) {
+            rgb(15, 15, 15)
+        } else if y >= 7 && (6..10).contains(&x) {
+            rgb(50, 45, 40) // a big curved beak
+        } else if y < 4 {
+            rgb(240, 200, 40)
+        } else {
+            shade(rgb(215, 35, 35), r.range(0.9, 1.05))
         }
     });
     a.each(T_APPLE, |x, y, r, _| {

@@ -60,6 +60,7 @@ impl Sfx {
             crate::entity::MobKind::Oinker => Sfx::Oink,
             crate::entity::MobKind::Fluffer => Sfx::Baa,
             crate::entity::MobKind::Cluckster => Sfx::Cluck,
+            crate::entity::MobKind::Squawker => Sfx::Squawk,
             crate::entity::MobKind::Mooer => Sfx::Moo,
             crate::entity::MobKind::Rattler => Sfx::Rattle,
             crate::entity::MobKind::Bloop => Sfx::Bloop,
@@ -118,6 +119,8 @@ pub enum Sfx {
     Snip,
     /// A Hmmer, hmming.
     Hmm,
+    /// A Squawker, squawking.
+    Squawk,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -460,6 +463,15 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             }
             finish(v, 1.1)
         }
+        Sfx::Squawk => {
+            // Two harsh, high screeches, falling.
+            let mut v = vec![0.0; samples(0.5)];
+            let p = rng.range(0.9, 1.2);
+            for k in 0..2 {
+                voice(&mut v, k as f32 * 0.2 + rng.range(0.0, 0.03), 0.14, 1500.0 * p, 900.0 * p, 3600.0, 0.08, 1.0, rng);
+            }
+            finish(v, 1.0)
+        }
         Sfx::Woof => {
             // Two short barks.
             let mut v = vec![0.0; samples(0.5)];
@@ -634,6 +646,7 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Woof,
         Sfx::Snip,
         Sfx::Hmm,
+        Sfx::Squawk,
     ]);
     v
 }
@@ -677,7 +690,7 @@ impl Audio {
             Sfx::Pop => 0.45,
             Sfx::Explode | Sfx::Thunder => 1.0,
             // Voices are dense; keep them level with the percussive sounds.
-            Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck => 0.4,
+            Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck | Sfx::Squawk => 0.4,
             Sfx::Fanfare => 0.5,
             Sfx::Hurt | Sfx::MobHurt => 0.5,
             _ => 0.8,

@@ -47,6 +47,7 @@ pub fn caption(s: Sfx) -> Option<&'static str> {
         Sfx::Woof => "Woofer woofs",
         Sfx::Snip => "Shears snip",
         Sfx::Hmm => "Hmmer hmms",
+        Sfx::Squawk => "Squawker squawks",
     })
 }
 

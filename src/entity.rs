@@ -183,11 +183,13 @@ pub enum MobKind {
     Galloper,
     /// Dragon-ish: the Hollow's boss (see hollow.rs).
     Wyrm,
+    /// Parrot-ish: a loud, bright bird of the jungle. Flutters like a Cluckster.
+    Squawker,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 15] = [
+    pub const ALL: [MobKind; 16] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -203,6 +205,7 @@ impl MobKind {
         MobKind::Grumbler,
         MobKind::Galloper,
         MobKind::Wyrm,
+        MobKind::Squawker,
     ];
 
     pub fn index(self) -> u8 {
@@ -229,6 +232,7 @@ impl MobKind {
             "grumbler" | "zombified_piglin" | "zombie_pigman" => Some(MobKind::Grumbler),
             "galloper" | "horse" => Some(MobKind::Galloper),
             "wyrm" | "hollow wyrm" | "hollow_wyrm" | "ender_dragon" | "dragon" => Some(MobKind::Wyrm),
+            "squawker" | "parrot" => Some(MobKind::Squawker),
             _ => None,
         }
     }
@@ -249,6 +253,7 @@ impl MobKind {
             MobKind::Grumbler => "Grumbler",
             MobKind::Galloper => "Galloper",
             MobKind::Wyrm => "Hollow Wyrm",
+            MobKind::Squawker => "Squawker",
         }
     }
     /// Half-width and height at size 1.
@@ -269,6 +274,7 @@ impl MobKind {
             MobKind::Grumbler => (0.3, 1.95),
             MobKind::Galloper => (0.6, 1.6),
             MobKind::Wyrm => (2.5, 2.0),
+            MobKind::Squawker => (0.2, 0.8),
         }
     }
     pub fn max_health(self) -> f32 {
@@ -288,6 +294,7 @@ impl MobKind {
             MobKind::Grumbler => 20.0,
             MobKind::Galloper => 22.0,
             MobKind::Wyrm => 200.0,
+            MobKind::Squawker => 6.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -305,14 +312,14 @@ impl MobKind {
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker)
     }
     /// What it eats to fall in love (see animals.rs); Woofers only once tamed.
     pub fn breed_food(self) -> &'static [Id] {
         match self {
             MobKind::Oinker => &[CARROT, POTATO],
             MobKind::Fluffer | MobKind::Mooer => &[WHEAT],
-            MobKind::Cluckster => &[WHEAT_SEEDS],
+            MobKind::Cluckster | MobKind::Squawker => &[WHEAT_SEEDS],
             MobKind::Galloper => &[APPLE],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             _ => &[],
@@ -543,7 +550,7 @@ impl Mob {
         let face = flat.x.atan2(-flat.z);
         match self.kind {
             // (The Wyrm flies on its own, see hollow.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -779,7 +786,7 @@ impl Mob {
             self.body.vel.y = (self.body.vel.y + 14.0 * dt).min(2.5);
         } else {
             self.body.vel.y = (self.body.vel.y - GRAVITY * dt).max(-50.0);
-            if self.kind == MobKind::Cluckster {
+            if matches!(self.kind, MobKind::Cluckster | MobKind::Squawker) {
                 // Flap flap: Clucksters flutter down instead of falling.
                 self.body.vel.y = self.body.vel.y.max(-2.5);
             }
@@ -812,7 +819,7 @@ impl Mob {
             MobKind::Groaner if n > 0 => Some((GOO, n)),
             MobKind::Fluffer if !self.sheared => Some((WOOL, n.max(1))),
             MobKind::Starer if n > 0 => Some((PEARL, 1)),
-            MobKind::Cluckster if n > 0 => Some((FEATHER, n)),
+            MobKind::Cluckster | MobKind::Squawker if n > 0 => Some((FEATHER, n)),
             MobKind::Mooer => Some((MOO_STEAK, n + 1)),
             MobKind::Rattler if n > 0 => Some((BONE, n)),
             MobKind::Webber if n > 0 => Some((STRING, n)),
@@ -997,6 +1004,18 @@ static CLUCKSTER: [Part; 7] = [
     part([-0.08, 0.5, 0.2], [0.16, 0.15, 0.1], [0.0; 3], Limb::Fixed, [CB; 6]),
 ];
 
+// Upright, with a long tail and a big beak.
+const SQ: u16 = T_SQUAWK;
+static SQUAWKER: [Part; 7] = [
+    part([-0.16, 0.25, -0.18], [0.32, 0.45, 0.36], [0.0; 3], Limb::Fixed, [SQ; 6]),
+    part([-0.13, 0.66, -0.3], [0.26, 0.26, 0.26], [0.0; 3], Limb::Fixed, [SQ, SQ, SQ, SQ, SQ, T_SQUAWK_FACE]),
+    part([-0.09, 0.0, -0.02], [0.06, 0.25, 0.06], [0.0, 0.25, 0.0], Limb::Swing(1.0), [CL; 6]),
+    part([0.03, 0.0, -0.02], [0.06, 0.25, 0.06], [0.0, 0.25, 0.0], Limb::Swing(-1.0), [CL; 6]),
+    part([-0.21, 0.3, -0.14], [0.05, 0.36, 0.3], [-0.18, 0.66, 0.0], Limb::Swing(0.4), [T_SQUAWK_WING; 6]),
+    part([0.16, 0.3, -0.14], [0.05, 0.36, 0.3], [0.18, 0.66, 0.0], Limb::Swing(-0.4), [T_SQUAWK_WING; 6]),
+    part([-0.07, 0.12, 0.16], [0.14, 0.2, 0.3], [0.0; 3], Limb::Fixed, [T_SQUAWK_WING; 6]),
+];
+
 const MS: u16 = T_MOO_SKIN;
 static MOOER: [Part; 8] = [
     part([-0.38, 0.62, -0.62], [0.76, 0.66, 1.24], [0.0; 3], Limb::Fixed, [MS; 6]),
@@ -1113,6 +1132,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Grumbler => &GRUMBLER,
         MobKind::Galloper => &GALLOPER,
         MobKind::Wyrm => &WYRM,
+        MobKind::Squawker => &SQUAWKER,
     }
 }
 

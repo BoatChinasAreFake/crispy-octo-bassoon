@@ -494,7 +494,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
-            LOG => "getting_wood",
+            LOG | SPRUCE_LOG | JUNGLE_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
             DIAMOND => "dimonds",
@@ -2072,6 +2072,7 @@ impl Game {
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
+                    MobKind::Squawker => noises.push((Sfx::Squawk, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm => {}
                 }
             }
@@ -2156,7 +2157,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2266,14 +2267,17 @@ impl Game {
         let top = self.world.get(x, y, z);
         let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && !is_liquid(w.get(x, y, z));
         let (_, biome) = self.world.generator.column(x, z);
-        let woofy = matches!(biome, crate::world::Biome::Forest | crate::world::Biome::Snowy);
+        use crate::world::Biome;
+        let woofy = matches!(biome, Biome::Forest | Biome::Snowy | Biome::Taiga);
         if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS) && clear(&self.world, y + 1) {
-            let kind = if woofy && self.rng.chance(0.25) {
+            let kind = if woofy && self.rng.chance(if biome == Biome::Taiga { 0.4 } else { 0.25 }) {
                 MobKind::Woofer
             } else if top == SNOW_GRASS {
                 return;
-            } else if biome == crate::world::Biome::Plains && self.rng.chance(0.15) {
+            } else if biome == Biome::Plains && self.rng.chance(0.15) {
                 MobKind::Galloper
+            } else if biome == Biome::Jungle && self.rng.chance(0.5) {
+                MobKind::Squawker
             } else {
                 [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize]
             };
@@ -2288,6 +2292,9 @@ impl Game {
         }
         let roll = self.rng.f32();
         let kind = match roll {
+            // Swamps are Bloop country; the badlands rattle.
+            r if biome == Biome::Swamp && r < 0.35 => MobKind::Bloop,
+            r if biome == Biome::Badlands && r < 0.3 => MobKind::Rattler,
             r if r < 0.28 => MobKind::Hisser,
             r if r < 0.56 => MobKind::Groaner,
             r if r < 0.74 => MobKind::Rattler,

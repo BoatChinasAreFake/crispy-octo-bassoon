@@ -69,6 +69,14 @@ pub enum Biome {
     Desert,
     Snowy,
     Ocean,
+    /// Low, wet and warm-ish: mud, shallow pools, lily pads, droopy oaks, Bloops.
+    Swamp,
+    /// Hot and wet: tall trees with wide crowns, melons, Squawkers.
+    Jungle,
+    /// Hot and very dry: red sand over bands of terracotta, dead bushes, more gold.
+    Badlands,
+    /// Cool and damp: spruce forests and Woofers.
+    Taiga,
 }
 
 impl Biome {
@@ -79,7 +87,160 @@ impl Biome {
             Biome::Desert => "Desert (Dry Humour)",
             Biome::Snowy => "Snowy (Chilly)",
             Biome::Ocean => "Ocean (Wet)",
+            Biome::Swamp => "Swamp (Squelchy)",
+            Biome::Jungle => "Jungle (Humid)",
+            Biome::Badlands => "Badlands (Stripy)",
+            Biome::Taiga => "Taiga (Pointy Trees)",
         }
+    }
+
+    /// Too dry for rain (it just stays cloudy).
+    pub fn dry(self) -> bool {
+        matches!(self, Biome::Desert | Biome::Badlands)
+    }
+
+    /// What kind of tree grows here.
+    pub fn tree(self) -> TreeKind {
+        match self {
+            Biome::Snowy | Biome::Taiga => TreeKind::Spruce,
+            Biome::Jungle => TreeKind::Jungle,
+            Biome::Swamp => TreeKind::Swamp,
+            _ => TreeKind::Oak,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TreeKind {
+    Oak,
+    /// Tall and conical, with needles.
+    Spruce,
+    /// Very tall, with a wide flat crown.
+    Jungle,
+    /// An oak with a wide crown and leaves hanging off it.
+    Swamp,
+}
+
+impl TreeKind {
+    pub fn log(self) -> Id {
+        match self {
+            TreeKind::Spruce => SPRUCE_LOG,
+            TreeKind::Jungle => JUNGLE_LOG,
+            _ => LOG,
+        }
+    }
+    pub fn leaves(self) -> Id {
+        match self {
+            TreeKind::Spruce => SPRUCE_LEAVES,
+            TreeKind::Jungle => JUNGLE_LEAVES,
+            _ => LEAVES,
+        }
+    }
+    /// How tall its trunk grows, from a 0..1 roll.
+    pub fn trunk(self, roll: f32) -> i32 {
+        let (lo, span) = match self {
+            TreeKind::Oak => (4, 3.0),
+            TreeKind::Spruce => (6, 4.0),
+            TreeKind::Jungle => (9, 5.0),
+            TreeKind::Swamp => (4, 3.0),
+        };
+        lo + (roll * span) as i32
+    }
+    /// Where its blocks go, relative to the ground block under it: (offset,
+    /// block, whether it pushes through what's there). `roll` gives a
+    /// repeatable 0..1 per cell (the generator hashes, saplings use dice).
+    /// Every leaf is within reach of the trunk (see `trees::LEAF_REACH`).
+    pub fn shape(self, trunk: i32, mut roll: impl FnMut(IVec3) -> f32) -> Vec<(IVec3, Id, bool)> {
+        let (log, leaves) = (self.log(), self.leaves());
+        let top = trunk; // the highest log, above the ground block at 0
+        let mut out = Vec::new();
+        let leaf = |o: IVec3, out: &mut Vec<(IVec3, Id, bool)>| out.push((o, leaves, false));
+        match self {
+            TreeKind::Oak => {
+                for dy in -2..=1 {
+                    let rad: i32 = if dy <= -1 { 2 } else { 1 };
+                    for dz in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let corner = dx.abs() == rad && dz.abs() == rad;
+                            let o = ivec3(dx, top + dy, dz);
+                            if corner && (dy == 1 || roll(o) < 0.5) {
+                                continue;
+                            }
+                            leaf(o, &mut out);
+                        }
+                    }
+                }
+            }
+            TreeKind::Spruce => {
+                // A cone: a tuft on top, then rings widening and narrowing down the trunk.
+                leaf(ivec3(0, top + 1, 0), &mut out);
+                let mut y = top;
+                let mut k = 0;
+                while y >= 3 {
+                    let rad = [1, 2, 1, 2, 3, 2, 3][k.min(6)];
+                    for dz in -rad..=rad {
+                        for dx in -rad..=rad {
+                            if dx == 0 && dz == 0 || dx * dx + dz * dz > rad * rad + 1 {
+                                continue;
+                            }
+                            leaf(ivec3(dx, y, dz), &mut out);
+                        }
+                    }
+                    y -= 1;
+                    k += 1;
+                }
+            }
+            TreeKind::Jungle => {
+                // A wide, flat crown round the top of the trunk.
+                for dy in -1..=1 {
+                    let rad: i32 = if dy == 1 { 2 } else { 3 };
+                    for dz in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let o = ivec3(dx, top + dy, dz);
+                            if dx * dx + dz * dz > rad * rad || (dx == 0 && dz == 0 && dy < 1) || (dx.abs() + dz.abs() == rad + 1 && roll(o) < 0.5) {
+                                continue;
+                            }
+                            leaf(o, &mut out);
+                        }
+                    }
+                }
+                // Tufts sprouting from the trunk lower down.
+                for y in 3..top - 2 {
+                    for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+                        let o = d + IVec3::Y * y;
+                        if roll(o) < 0.12 {
+                            leaf(o, &mut out);
+                        }
+                    }
+                }
+            }
+            TreeKind::Swamp => {
+                for dy in -1..=1 {
+                    let rad: i32 = if dy == 1 { 2 } else { 3 };
+                    for dz in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let o = ivec3(dx, top + dy, dz);
+                            // No far corners (they'd be out of reach of the trunk).
+                            if dx.abs() + dz.abs() > rad + 1 || (dx == 0 && dz == 0 && dy < 1) {
+                                continue;
+                            }
+                            leaf(o, &mut out);
+                        }
+                    }
+                }
+                // Leaves hanging down from the crown's edge.
+                for (dx, dz) in [(2, 0), (-2, 0), (0, 2), (0, -2), (2, 1), (-1, 2), (1, -2), (-2, -1)] {
+                    let o = ivec3(dx, top - 2, dz);
+                    if roll(o) < 0.5 {
+                        leaf(o, &mut out);
+                    }
+                }
+            }
+        }
+        for y in 1..=top {
+            out.push((ivec3(0, y, 0), log, true));
+        }
+        out
     }
 }
 
@@ -131,12 +292,28 @@ impl Generator {
         let h = (h as i32).clamp(4, CH - 20);
         let t = self.temp.fbm2(fx / 520.0 + 300.0, fz / 520.0, 3);
         let m = self.moist.fbm2(fx / 380.0, fz / 380.0 - 200.0, 3);
+        // Swamps: where it's wet but not hot, the land sinks toward the sea.
+        let swampy = ((m - 0.18) / 0.1).clamp(0.0, 1.0) * (1.0 - ((t - 0.15) / 0.1).clamp(0.0, 1.0)) * ((t + 0.15) / 0.1).clamp(0.0, 1.0);
+        // ...to a bumpy level just under it: pools and islands of mud and grass.
+        let bumps = SEA as f32 - 0.6 + self.hills.noise2(fx / 9.0, fz / 9.0) * 2.2;
+        let h = if swampy > 0.0 && h > SEA - 3 { (h as f32 + (bumps - h as f32) * swampy.min(0.95)).round() as i32 } else { h };
+        // Badlands: hot and dry land rises into steep, stripy hills.
+        let mesa = ((t - 0.4) / 0.1).clamp(0.0, 1.0) * ((0.05 - m) / 0.1).clamp(0.0, 1.0);
+        let h = if mesa > 0.0 && h > SEA { (h + ((h - SEA) as f32 * 0.9 * mesa) as i32).min(CH - 20) } else { h };
         let biome = if h < SEA - 1 {
             Biome::Ocean
         } else if t < -0.3 || h > 92 {
             Biome::Snowy
+        } else if swampy > 0.5 && h <= SEA + 2 {
+            Biome::Swamp
+        } else if t < -0.12 && m > -0.05 {
+            Biome::Taiga
+        } else if t > 0.4 && m < 0.05 {
+            Biome::Badlands
         } else if t > 0.25 && m < 0.05 {
             Biome::Desert
+        } else if t > 0.15 && m > 0.15 {
+            Biome::Jungle
         } else if m > 0.08 {
             Biome::Forest
         } else {
@@ -150,19 +327,25 @@ impl Generator {
         self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
     }
 
-    pub fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32)> {
+    /// A tree rooted at this column: ground height, trunk height and kind.
+    pub fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32, TreeKind)> {
         let (h, biome) = self.column(x, z);
         let density = match biome {
             Biome::Forest => 0.035,
             Biome::Plains => 0.004,
             Biome::Snowy => 0.012,
+            Biome::Taiga => 0.03,
+            Biome::Jungle => 0.045,
+            Biome::Swamp => 0.012,
             _ => 0.0,
         };
-        if h <= SEA + 1 || hash2(self.seed ^ 0x7EE, x, z) >= density {
+        // Swamp trees stand in the shallows too.
+        let ground = if biome == Biome::Swamp { SEA - 2 } else { SEA + 1 };
+        if h <= ground || hash2(self.seed ^ 0x7EE, x, z) >= density {
             return None;
         }
-        let trunk = 4 + (hash2(self.seed ^ 0x7E1, x, z) * 3.0) as i32;
-        Some((h, trunk))
+        let kind = biome.tree();
+        Some((h, kind.trunk(hash2(self.seed ^ 0x7E1, x, z)), kind))
     }
 
     /// Ravines: long, narrow cracks down from the surface. Returns the bottom
@@ -234,18 +417,31 @@ impl Generator {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
                 let (h, biome) = self.column(x, z);
                 cols[(lz * CW + lx) as usize] = (h, biome);
-                let beach = (SEA - 1..=SEA + 1).contains(&h) && biome != Biome::Snowy;
+                let beach = (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands);
+                let swamp = biome == Biome::Swamp;
+                let badlands = biome == Biome::Badlands;
+                // Steep badlands slopes show their stripes; flatter ground is red sand.
+                let steep = badlands && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| (self.column(x + dx, z + dz).0 - h).abs() >= 2);
+                // Badlands stripes wobble a little up and down across the land.
+                let wobble = (self.hills.noise2(x as f32 / 40.0, z as f32 / 40.0) * 3.0) as i32;
                 for y in 0..CH.min(h.max(SEA) + 1) {
                     let id = if y == 0 || (y <= 2 && hash3(s, x, y, z) < 0.5) {
                         BEDROCK
+                    } else if badlands && y >= h - 14 && (y < h || (y == h && steep)) {
+                        // Bands of terracotta.
+                        TERRACOTTA + [0, 1, 0, 2, 3, 0, 1, 2][((y + wobble).rem_euclid(24) / 3) as usize] as Id
                     } else if y < h - 3 {
                         // Deserts sit on a few layers of sandstone.
                         if biome == Biome::Desert && y >= h - 8 { SANDSTONE } else { STONE }
                     } else if y < h {
-                        if biome == Biome::Desert || beach { SAND } else { DIRT }
+                        if biome == Biome::Desert || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else { DIRT }
                     } else if y == h {
-                        if h < SEA - 1 {
+                        if swamp {
+                            if hash2(s ^ 0x3D, x, z) < 0.3 { MUD } else if h < SEA { DIRT } else { GRASS }
+                        } else if h < SEA - 1 {
                             if hash2(s ^ 0x6A, x, z) < 0.3 { GRAVEL } else if h > SEA - 6 { SAND } else { DIRT }
+                        } else if badlands && !steep {
+                            RED_SAND
                         } else if biome == Biome::Desert || beach {
                             SAND
                         } else if biome == Biome::Snowy {
@@ -279,7 +475,7 @@ impl Generator {
                             b[i] = IRON_ORE;
                         } else if y < 18 && (0.019..0.0215).contains(&r) && r2 < 0.5 {
                             b[i] = DIAMOND_ORE;
-                        } else if y < 32 && (0.0215..0.0245).contains(&r) && r2 < 0.55 {
+                        } else if (y < 32 || (badlands && y < 70)) && (0.0215..0.0245).contains(&r) && r2 < 0.55 {
                             b[i] = GOLD_ORE;
                         } else if y < 16 && (0.0245..0.029).contains(&r) && r2 < 0.55 {
                             b[i] = ZAP_ORE;
@@ -321,12 +517,24 @@ impl Generator {
                         b[idx(lx, top, lz)] = TALL_GRASS;
                     } else if r < 0.1125 && biome == Biome::Plains {
                         b[idx(lx, top, lz)] = PUMPKIN;
-                    } else if r < 0.125 && biome == Biome::Forest {
+                    } else if r < 0.125 && matches!(biome, Biome::Forest | Biome::Taiga) {
                         b[idx(lx, top, lz)] = MUSHROOM;
+                    } else if r < 0.2 && biome == Biome::Jungle {
+                        // Jungles are thick with undergrowth.
+                        b[idx(lx, top, lz)] = TALL_GRASS;
+                    } else if r < 0.206 && biome == Biome::Jungle {
+                        b[idx(lx, top, lz)] = MELON;
                     }
                 }
-                // Pokey Plants in the desert, 1-3 tall.
-                if biome == Biome::Desert && top + 3 < CH && b[idx(lx, h, lz)] == SAND && hash2(s ^ 0xCAC, x, z) < 0.005 {
+                // Dead bushes on red sand; lily pads on swamp water.
+                if top < CH && badlands && b[idx(lx, h, lz)] == RED_SAND && b[idx(lx, top, lz)] == AIR && hash2(s ^ 0xDB, x, z) < 0.02 {
+                    b[idx(lx, top, lz)] = DEAD_BUSH;
+                }
+                if swamp && h < SEA && b[idx(lx, SEA, lz)] == WATER && hash2(s ^ 0x111, x, z) < 0.08 {
+                    b[idx(lx, SEA + 1, lz)] = LILY_PAD;
+                }
+                // Pokey Plants in the desert (and badlands), 1-3 tall.
+                if biome.dry() && top + 3 < CH && matches!(b[idx(lx, h, lz)], SAND | RED_SAND) && hash2(s ^ 0xCAC, x, z) < 0.005 {
                     let tall = 1 + (hash2(s ^ 0xCAD, x, z) * 3.0) as i32;
                     for y in top..top + tall.min(3) {
                         b[idx(lx, y, lz)] = CACTUS;
@@ -348,36 +556,26 @@ impl Generator {
             }
         }
         // Trees may overhang from neighbouring chunks, so scan a margin around this one.
-        for tz in cz * CW - 3..cz * CW + CW + 3 {
-            for tx in cx * CW - 3..cx * CW + CW + 3 {
-                let Some((h, trunk)) = self.tree_at(tx, tz) else { continue };
-                let top = h + trunk;
-                let mut put = |x: i32, y: i32, z: i32, id: Id, force: bool| {
-                    let (lx, lz) = (x - cx * CW, z - cz * CW);
-                    if !(0..CW).contains(&lx) || !(0..CW).contains(&lz) || !(0..CH).contains(&y) {
-                        return;
+        for tz in cz * CW - 4..cz * CW + CW + 4 {
+            for tx in cx * CW - 4..cx * CW + CW + 4 {
+                let Some((h, trunk, kind)) = self.tree_at(tx, tz) else { continue };
+                let base = ivec3(tx, h, tz);
+                for (o, id, force) in kind.shape(trunk, |o| hash3(s ^ 0x1EA, base.x + o.x, base.y + o.y, base.z + o.z)) {
+                    let p = base + o;
+                    let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
+                    if !(0..CW).contains(&lx) || !(0..CW).contains(&lz) || !(0..CH).contains(&p.y) {
+                        continue;
                     }
-                    let i = idx(lx, y, lz);
-                    if force || b[i] == AIR || b[i] == TALL_GRASS || b[i] == FLOWER {
+                    let i = idx(lx, p.y, lz);
+                    if force || matches!(b[i], AIR | TALL_GRASS | FLOWER | LILY_PAD) {
                         b[i] = id;
                     }
-                };
-                for dy in -2..=1 {
-                    let rad: i32 = if dy <= -1 { 2 } else { 1 };
-                    for dz in -rad..=rad {
-                        for dx in -rad..=rad {
-                            let corner = dx.abs() == rad && dz.abs() == rad;
-                            if corner && (dy == 1 || hash3(s ^ 0x1EA, tx + dx, top + dy, tz + dz) < 0.5) {
-                                continue;
-                            }
-                            put(tx + dx, top + dy, tz + dz, LEAVES, false);
-                        }
-                    }
                 }
-                for y in h + 1..top {
-                    put(tx, y, tz, LOG, true);
+                // Roots: dirt under the trunk (swamp trees stand in water on it).
+                let (lx, lz) = (tx - cx * CW, tz - cz * CW);
+                if (0..CW).contains(&lx) && (0..CW).contains(&lz) {
+                    b[idx(lx, h, lz)] = DIRT;
                 }
-                put(tx, h, tz, DIRT, true);
             }
         }
         self.place_structures(cx, cz, &mut b);
@@ -751,7 +949,8 @@ impl World {
         } else if old == FIRE {
             self.fires.remove(&p);
         }
-        if self.simulate_liquids && matches!(old, LOG | LEAVES) && !matches!(id, LOG | LEAVES) {
+        let treeish = |b: Id| is_log(b) || is_leaves(b);
+        if self.simulate_liquids && treeish(old) && !treeish(id) {
             self.wake_leaves(p);
         }
         // Fences and panes join whatever is beside them (where the world lives; see carpentry.rs).
@@ -885,7 +1084,9 @@ impl World {
             for (dx, dz) in [(r, 0), (0, r), (-r, 0), (0, -r), (r, r), (-r, -r)] {
                 let (x, z) = (dx * 4, dz * 4);
                 let (h, biome) = self.generator.column(x, z);
-                if h > SEA + 1 && biome != Biome::Ocean && self.generator.tree_at(x, z).is_none() {
+                // Solid ground: no cave mouth or ravine to drop straight into.
+                let solid = (h - 4..=h).all(|y| !self.generator.is_cave(x, y, z, h)) && self.generator.ravine_floor(x, z).is_none();
+                if h > SEA + 1 && biome != Biome::Ocean && solid && self.generator.tree_at(x, z).is_none() {
                     return Vec3::new(x as f32 + 0.5, h as f32 + 1.0, z as f32 + 0.5);
                 }
             }
@@ -942,3 +1143,44 @@ pub fn ray_box(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<(f32, IVec3)> {
     }
     Some((t0, normal))
 }
+
+#[cfg(test)]
+mod biome_tests {
+    use super::*;
+
+    #[test]
+    fn every_biome_turns_up_with_its_own_ground() {
+        let g = Generator::new(2024);
+        let mut seen: HashMap<&str, (i32, i32)> = HashMap::new();
+        for z in (-6000..6000).step_by(40) {
+            for x in (-6000..6000).step_by(40) {
+                seen.entry(g.column(x, z).1.name()).or_insert((x, z));
+            }
+        }
+        for b in [Biome::Swamp, Biome::Jungle, Biome::Badlands, Biome::Taiga, Biome::Desert, Biome::Forest, Biome::Plains, Biome::Snowy, Biome::Ocean] {
+            assert!(seen.contains_key(b.name()), "no {} found", b.name());
+        }
+        // Look at a chunk in the middle of each new biome.
+        let top = |b: &Vec<Id>, lx: i32, lz: i32| (0..CH).rev().map(|y| b[idx(lx, y, lz)]).find(|&id| id != AIR && !is_leaves(id) && !is_log(id) && block(id).model != Model::Cross);
+        let has = |biome: Biome, what: &dyn Fn(Id) -> bool| {
+            let (x, z) = seen[biome.name()];
+            let chunk = g.generate(x.div_euclid(CW), z.div_euclid(CW));
+            (0..CW).any(|lz| (0..CW).any(|lx| top(&chunk, lx, lz).is_some_and(what))) || chunk.iter().any(|&id| what(id))
+        };
+        assert!(has(Biome::Badlands, &|id| id == RED_SAND || (TERRACOTTA..TERRACOTTA + 4).contains(&id)));
+        assert!(has(Biome::Swamp, &|id| id == MUD || id == WATER));
+    }
+
+    #[test]
+    fn spawn_is_on_solid_ground() {
+        for seed in 0..12 {
+            let w = World::new(seed);
+            let s = w.find_spawn();
+            let (x, z) = (s.x.floor() as i32, s.z.floor() as i32);
+            let chunk = w.generator.generate(x.div_euclid(CW), z.div_euclid(CW));
+            let under = chunk[idx(x.rem_euclid(CW), s.y as i32 - 1, z.rem_euclid(CW))];
+            assert!(is_solid(under), "seed {seed}: spawn at {s} stands on {}", block(under).name);
+        }
+    }
+}
+
