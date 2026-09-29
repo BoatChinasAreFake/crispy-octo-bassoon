@@ -16,7 +16,7 @@ use crate::scripting::{Cmd, ScriptHost};
 use rhai::{Dynamic, INT};
 use crate::sound::{material, Sfx};
 use crate::texture::*;
-use crate::world::{Hit, World, CH, SEA};
+use crate::world::{Hit, World, CH};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
 use macroquad::miniquad::RenderingBackend;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -143,6 +143,11 @@ pub struct Game {
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
+    /// Seconds since the last water and lava steps, and lava cells waiting for theirs (see liquids.rs).
+    pub liquid_timers: [f32; 2],
+    pub lava_waiting: HashSet<IVec3>,
+    /// Seconds the local player stays on fire (lava).
+    pub on_fire: f32,
 }
 
 impl Game {
@@ -231,6 +236,9 @@ impl Game {
             saved_players: Default::default(),
             report_timer: 0.0,
             weather: Default::default(),
+            liquid_timers: [0.0; 2],
+            lava_waiting: HashSet::new(),
+            on_fire: 0.0,
         }
     }
 
@@ -285,7 +293,7 @@ impl Game {
                 (s, _) => s,
             };
             let wear = d.wear.get(i).copied().unwrap_or(0);
-            let wear = s.and_then(|(id, _)| durability(id)).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min(max - 1))).unwrap_or(0);
+            let wear = s.and_then(|(id, _)| crate::inventory::max_uses(id, wear)).map(|max| crate::inventory::with_uses(wear, crate::inventory::uses(wear).min((max - 1).min(u16::MAX as u32) as u16))).unwrap_or(0);
             if i < 36 {
                 g.inv.slots[i] = s;
                 g.inv.wear[i] = wear;
@@ -546,6 +554,7 @@ impl Game {
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         }
         self.weather_tick(dt);
+        self.liquid_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
@@ -572,6 +581,11 @@ impl Game {
             }
         }
         let mut fall = self.player.update(dt, &c.input, &self.world, self.creative);
+        // Flowing water carries you along.
+        if self.player.body.in_water && !self.player.flying {
+            let push = crate::liquids::current(&self.world, self.player.body.pos + Vec3::Y * 0.3);
+            self.player.body.vel += push * dt * if self.player.body.in_lava { 2.0 } else { 9.0 };
+        }
         self.hunger_tick(dt);
         let landed = self.player.landed.take();
         let feet = self.player.body.pos - Vec3::Y * 0.05;
@@ -592,6 +606,7 @@ impl Game {
         }
         self.footsteps(dt);
         self.block_effects();
+        self.lava_tick(dt);
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
@@ -991,7 +1006,7 @@ impl Game {
             for dz in -3..=3 {
                 for dx in -3..=3 {
                     let p = at + ivec3(dx, dy, dz);
-                    if self.world.get_v(p) == WATER {
+                    if is_water(self.world.get_v(p)) {
                         self.world.set_v(p, AIR);
                         n += 1;
                     }
@@ -1166,6 +1181,9 @@ impl Game {
             self.inv.equip(slot);
             self.sfx(Sfx::Place(crate::sound::Mat::Glass), None);
             self.msg(format!("You put on the {}. Dashing.", item_name(held)));
+            return;
+        }
+        if matches!(held, BUCKET | WATER_BUCKET | LAVA_BUCKET) && self.use_bucket(held) {
             return;
         }
         // Planting, tilling and soil science come before eating (carrots are both).
@@ -1435,13 +1453,6 @@ impl Game {
                 self.pop_drop(above.as_vec3() + Vec3::splat(0.5), block(a).drop, 1);
             }
         }
-        // Water flows (lazily) into the hole.
-        for n in [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z, IVec3::Y] {
-            if self.world.get_v(pos + n) == WATER && pos.y <= SEA {
-                self.world.set_v(pos, WATER);
-                break;
-            }
-        }
     }
 
     /// Carry out mod-defined behaviour (see MODDING.md).
@@ -1531,7 +1542,7 @@ impl Game {
         }
     }
 
-    fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
+    pub(crate) fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
         if self.dedicated {
             return;
         }
@@ -1635,7 +1646,8 @@ impl Game {
                     }
                     let id = self.world.get_v(p);
                     match id {
-                        AIR | WATER | BEDROCK => {}
+                        AIR | BEDROCK => {}
+                        _ if is_liquid(id) => {}
                         TNT => {
                             self.world.set_v(p, AIR);
                             let fuse = self.rng.range(0.3, 0.9);
@@ -1693,7 +1705,7 @@ impl Game {
     /// Particles and sound for a block someone else changed.
     pub fn block_change_feedback(&mut self, pos: IVec3, old: Id, new: Id) {
         let center = pos.as_vec3() + Vec3::splat(0.5);
-        if new == AIR || new == WATER {
+        if new == AIR || is_liquid(new) {
             if targetable(old) {
                 let tile = block(old).tex[1];
                 self.block_particles_tile(pos, tile, 10);
@@ -1712,6 +1724,7 @@ impl Game {
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
         }
         self.weather_tick(dt);
+        self.liquid_tick(dt);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
         }
@@ -1952,7 +1965,7 @@ impl Game {
         }
         let y = self.world.surface_y(x, z);
         let top = self.world.get(x, y, z);
-        let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && w.get(x, y, z) != WATER;
+        let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && !is_liquid(w.get(x, y, z));
         if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
             let kind = [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize];
             for i in 0..self.rng.int(1, 3) {
@@ -2616,6 +2629,13 @@ mod tests {
         g.target = Some(Target::Block(crate::world::Hit { pos, normal, dist }));
     }
 
+    /// Turn the player to look at a point (for things that raycast themselves).
+    fn look_at(g: &mut Game, at: Vec3) {
+        let d = at - g.player.eye();
+        g.player.yaw = d.x.atan2(-d.z);
+        g.player.pitch = d.y.atan2(Vec3::new(d.x, 0.0, d.z).length());
+    }
+
     #[test]
     fn slabs_stairs_and_doors() {
         let mut g = arena(41);
@@ -3177,6 +3197,74 @@ mod tests {
             20.0 - g.player.health
         };
         assert!(hit(4) < hit(0) - 1.0, "{} vs {}", hit(4), hit(0));
+    }
+
+    #[test]
+    fn buckets_and_flowing_liquids() {
+        let mut g = arena(68);
+        let step = |g: &mut Game, secs: f32| {
+            let mut t = 0.0;
+            while t < secs {
+                g.liquid_tick(0.05);
+                t += 0.05;
+            }
+        };
+        // A pool of water two blocks deep to scoop from.
+        let pool = IVec3::new(3, 49, 0);
+        g.world.set_v(pool, WATER);
+        g.inv.slots = [None; 36];
+        g.inv.slots[0] = Some((BUCKET, 2));
+        g.inv.selected = 0;
+        look_at(&mut g, pool.as_vec3() + Vec3::new(0.5, 0.9, 0.5));
+        g.use_item();
+        assert_eq!(g.world.get_v(pool), AIR, "scooped up");
+        assert_eq!((g.inv.count(BUCKET), g.inv.count(WATER_BUCKET)), (1, 1));
+        // Pour it out on the floor: it spreads seven blocks and no further.
+        let slot = g.inv.slots.iter().position(|s| *s == Some((WATER_BUCKET, 1))).unwrap();
+        g.inv.selected = slot;
+        let spot = IVec3::new(0, 50, 3);
+        look_at(&mut g, spot.as_vec3() + Vec3::new(0.5, 0.02, 0.5));
+        g.use_item();
+        assert_eq!(g.world.get_v(spot), WATER);
+        assert_eq!(g.inv.slots[slot], Some((BUCKET, 1)));
+        step(&mut g, 4.0);
+        assert_eq!(g.world.get_v(spot + IVec3::new(0, 0, 1)), liquid_at(false, 1));
+        assert_eq!(g.world.get_v(spot + IVec3::new(0, 0, 7)), liquid_at(false, 7));
+        assert_eq!(g.world.get_v(pool), liquid_at(false, 1), "it pours into the hole left behind");
+        assert_eq!(g.world.get_v(spot + IVec3::new(-7, 0, 0)), liquid_at(false, 7));
+        assert_eq!(g.world.get_v(spot + IVec3::new(-8, 0, 0)), AIR);
+        // It carries things downstream.
+        assert!(crate::liquids::current(&g.world, (spot + IVec3::new(-3, 0, 0)).as_vec3() + Vec3::splat(0.5)).x < 0.0);
+        // Scoop the source back up and it all drains away.
+        g.inv.selected = slot;
+        look_at(&mut g, spot.as_vec3() + Vec3::new(0.5, 0.5, 0.5));
+        g.use_item();
+        assert_eq!(g.inv.slots[slot], Some((WATER_BUCKET, 1)));
+        step(&mut g, 5.0);
+        assert!((-8..=8).all(|d| g.world.get_v(spot + IVec3::new(d, 0, 0)) == AIR));
+
+        // Lava next to water turns to obsidian; standing in lava hurts and sets you alight.
+        let lava = IVec3::new(-4, 50, -4);
+        g.world.set_v(lava, LAVA);
+        g.world.set_v(lava + IVec3::X, WATER);
+        step(&mut g, 2.0);
+        assert_eq!(g.world.get_v(lava), OBSIDIAN);
+        g.world.set_v(IVec3::new(5, 50, 5), LAVA);
+        g.player.body.pos = Vec3::new(5.5, 50.0, 5.5);
+        g.player.hurt = 0.0;
+        let before = g.player.health;
+        g.lava_tick(0.05);
+        assert!(g.player.health < before && g.on_fire > 0.0);
+        assert!(g.advancements.has("hot_stuff"));
+        // Out of the lava it keeps burning until water (or rain) puts it out.
+        g.world.set_v(IVec3::new(5, 50, 5), AIR);
+        g.player.hurt = 0.0;
+        let before = g.player.health;
+        g.lava_tick(1.0);
+        assert!(g.player.health < before);
+        g.player.body.in_water = true;
+        g.lava_tick(0.05);
+        assert_eq!(g.on_fire, 0.0);
     }
 
     /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

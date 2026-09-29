@@ -52,6 +52,9 @@ void main() {
     vec3 col;
     if (params2.x > 0.5) {
         col = c.rgb;
+    } else if (v_light.x > 1.5) {
+        // Glowing (lava): its own light, whatever the time of day.
+        col = c.rgb * (v_light.x - 1.5);
     } else {
         float sky = v_light.y * params.x;
         float bl = 0.0;

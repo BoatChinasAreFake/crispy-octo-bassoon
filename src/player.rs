@@ -73,7 +73,7 @@ impl Player {
 
     pub fn head_in_water(&self, world: &World) -> bool {
         let e = self.eye();
-        world.get(e.x.floor() as i32, (e.y + 0.05).floor() as i32, e.z.floor() as i32) == WATER
+        is_water(world.get(e.x.floor() as i32, (e.y + 0.05).floor() as i32, e.z.floor() as i32))
     }
 
     /// Advance physics. Returns fall damage taken, if any.
@@ -119,7 +119,9 @@ impl Player {
         }
 
         let in_water = b.in_water;
-        let speed = if in_water {
+        let speed = if b.in_lava {
+            1.2
+        } else if in_water {
             2.6
         } else if self.sneaking {
             1.4

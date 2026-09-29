@@ -17,12 +17,14 @@ pub struct Body {
     pub height: f32,
     pub on_ground: bool,
     pub hit_wall: bool,
+    /// Swimming (in water or lava; `in_lava` says which).
     pub in_water: bool,
+    pub in_lava: bool,
 }
 
 impl Body {
     pub fn new(pos: Vec3, half: f32, height: f32) -> Self {
-        Body { pos, vel: Vec3::ZERO, half, height, on_ground: false, hit_wall: false, in_water: false }
+        Body { pos, vel: Vec3::ZERO, half, height, on_ground: false, hit_wall: false, in_water: false, in_lava: false }
     }
     pub fn min(&self) -> Vec3 {
         self.pos - Vec3::new(self.half, 0.0, self.half)
@@ -144,7 +146,8 @@ pub fn move_body(world: &World, b: &mut Body, dt: f32, edge_guard: bool) {
         b.on_ground = true;
     }
     let feet = world.get(b.pos.x.floor() as i32, (b.pos.y + 0.3).floor() as i32, b.pos.z.floor() as i32);
-    b.in_water = feet == WATER;
+    b.in_water = is_liquid(feet);
+    b.in_lava = is_lava(feet);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -284,6 +287,8 @@ pub struct Mob {
     pub anim: f32,
     knock: Vec3,
     pub burning: bool,
+    /// Seconds left on fire (from lava; water puts it out).
+    pub on_fire: f32,
     /// Starer: provoked (looked at or hit). Synced as `fuse > 0` for clients.
     pub angry: bool,
     /// Starer: seconds until it may teleport again.
@@ -315,7 +320,7 @@ pub fn warp_spot(world: &World, around: Vec3, radius: f32, rng: &mut Rng) -> Opt
         let base = around.y.floor() as i32;
         for dy in [0, 1, -1, 2, -2, 3, -3, 4, -4] {
             let y = base + dy;
-            if is_solid(world.get(x, y - 1, z)) && (0..3).all(|h| !is_solid(world.get(x, y + h, z)) && world.get(x, y + h, z) != WATER) {
+            if is_solid(world.get(x, y - 1, z)) && (0..3).all(|h| !is_solid(world.get(x, y + h, z)) && !is_liquid(world.get(x, y + h, z))) {
                 return Some(Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5));
             }
         }
@@ -343,6 +348,7 @@ impl Mob {
             anim: 0.0,
             knock: Vec3::ZERO,
             burning: false,
+            on_fire: 0.0,
             angry: false,
             warp_cd: 0.0,
             size: 1.0,
@@ -539,6 +545,22 @@ impl Mob {
                 if rng.chance(dt * 8.0) {
                     ev.push(MobEvent::Smoke(head));
                 }
+            }
+        }
+        // Lava hurts and sets things alight; water puts them out.
+        if self.body.in_lava {
+            self.on_fire = 6.0;
+            self.health -= dt * 6.0;
+            self.hurt = self.hurt.max(0.2);
+        } else if self.body.in_water {
+            self.on_fire = 0.0;
+        }
+        if self.on_fire > 0.0 {
+            self.on_fire -= dt;
+            self.health -= dt;
+            self.burning = true;
+            if rng.chance(dt * 8.0) {
+                ev.push(MobEvent::Smoke(self.eye()));
             }
         }
         if want.is_none() && may_wander {

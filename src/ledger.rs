@@ -315,7 +315,33 @@ impl Game {
         if let Some((crop, 0)) = Crop::of_block(new) {
             return self.peer_take(from, seed_of(crop), 1);
         }
-        if replaceable(old) && !matches!(new, AIR | WATER) {
+        // Buckets: scooping up a source fills one, pouring one out empties it.
+        // (A sponge nearby drinks water for free.)
+        if matches!(old, WATER | LAVA) && new == AIR {
+            let sponge = old == WATER && (-3..=3).any(|dy| (-3..=3).any(|dz| (-3..=3).any(|dx| self.world.get_v(at + macroquad::math::IVec3::new(dx, dy, dz)) == SPONGE)));
+            if sponge {
+                return true;
+            }
+            if !self.peer_take(from, BUCKET, 1) {
+                return false;
+            }
+            let full = if old == WATER { WATER_BUCKET } else { LAVA_BUCKET };
+            if let Some(l) = self.ledger(from) {
+                l.bag.add(full, 1);
+            }
+            return true;
+        }
+        if matches!(new, WATER | LAVA) && old != ICE {
+            let full = if new == WATER { WATER_BUCKET } else { LAVA_BUCKET };
+            if !self.peer_take(from, full, 1) {
+                return false;
+            }
+            if let Some(l) = self.ledger(from) {
+                l.bag.add(BUCKET, 1);
+            }
+            return true;
+        }
+        if replaceable(old) && new != AIR && !is_liquid(new) {
             return match placing_item(new) {
                 Some(item) => self.peer_take(from, item, 1),
                 // A door's top half comes with the bottom (edit_allowed checked it's there).

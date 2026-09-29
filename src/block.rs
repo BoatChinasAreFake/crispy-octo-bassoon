@@ -79,8 +79,14 @@ pub const ANVIL_DAMAGED: Id = 96;
 pub const GLOWSHROOM: Id = 97;
 pub const POINTY_ROCK: Id = 98;
 pub const ENCHANTING_TABLE: Id = 99;
+/// Flowing water: `WATER_FLOW + level - 1`, levels 1 (next to the source) to 7 (see liquids.rs).
+pub const WATER_FLOW: Id = 100;
+pub const LAVA: Id = 107;
+/// Flowing lava: `LAVA_FLOW + level - 1`, levels 1 to 3.
+pub const LAVA_FLOW: Id = 108;
+pub const OBSIDIAN: Id = 111;
 /// Number of base-game blocks; mod blocks start here.
-pub const NUM_BLOCKS: Id = 100;
+pub const NUM_BLOCKS: Id = 112;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -143,8 +149,43 @@ pub const COOKED_BOOT: Id = FIRST_ITEM + 58;
 pub const DOOR: Id = FIRST_ITEM + 59;
 /// Armour: `ARMOR_FIRST + tier * 4 + slot` (see `armor_of`).
 pub const ARMOR_FIRST: Id = FIRST_ITEM + 60;
+pub const BUCKET: Id = FIRST_ITEM + 76;
+pub const WATER_BUCKET: Id = FIRST_ITEM + 77;
+pub const LAVA_BUCKET: Id = FIRST_ITEM + 78;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 76;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 79;
+
+/// Longest a liquid runs from its source: water 7 blocks, lava 3.
+pub const WATER_REACH: u8 = 7;
+pub const LAVA_REACH: u8 = 3;
+
+pub fn is_water(id: Id) -> bool {
+    id == WATER || (WATER_FLOW..WATER_FLOW + WATER_REACH as Id).contains(&id)
+}
+pub fn is_lava(id: Id) -> bool {
+    id == LAVA || (LAVA_FLOW..LAVA_FLOW + LAVA_REACH as Id).contains(&id)
+}
+pub fn is_liquid(id: Id) -> bool {
+    is_water(id) || is_lava(id)
+}
+/// How far a liquid block is from its source (0: it is the source).
+pub fn liquid_level(id: Id) -> u8 {
+    match id {
+        WATER | LAVA => 0,
+        _ if is_water(id) => (id - WATER_FLOW) as u8 + 1,
+        _ if is_lava(id) => (id - LAVA_FLOW) as u8 + 1,
+        _ => 0,
+    }
+}
+/// Water or lava at `level` (0: a source).
+pub fn liquid_at(lava: bool, level: u8) -> Id {
+    match (lava, level) {
+        (false, 0) => WATER,
+        (true, 0) => LAVA,
+        (false, l) => WATER_FLOW + l.min(WATER_REACH) as Id - 1,
+        (true, l) => LAVA_FLOW + l.min(LAVA_REACH) as Id - 1,
+    }
+}
 
 /// What slabs and stairs are made of: the full block, and its name.
 pub const MATERIALS: [(Id, &str); 3] = [(PLANKS, "Planks"), (COBBLE, "Cobblestun"), (STONE_BRICKS, "Stone Brick")];
@@ -684,12 +725,24 @@ impl Registry {
         let mut table = def("enchanting_table", "Enchanting Table (Bookshelf-Powered Guesswork)", Shaped, true, false, [T_ENCH_TOP, T_ENCH_SIDE, T_ENCH_BOTTOM], 5.0, 1, true, ENCHANTING_TABLE, 7.0, S_STONE);
         table.shape = Shape::Table;
         blocks.push(table);
+        for level in 1..=WATER_REACH {
+            let mut d = def(leak(&format!("water_flowing_{level}")), "Water (In a Hurry)", Liquid, false, false, [T_WATER; 3], -1.0, 0, false, AIR, 0.0, S_GRASS);
+            d.creative = false;
+            blocks.push(d);
+        }
+        blocks.push(def("lava", "Lava (Spicy Water)", Liquid, false, false, [T_LAVA; 3], -1.0, 0, false, AIR, 0.0, S_STONE));
+        for level in 1..=LAVA_REACH {
+            let mut d = def(leak(&format!("lava_flowing_{level}")), "Lava (On the Move)", Liquid, false, false, [T_LAVA; 3], -1.0, 0, false, AIR, 0.0, S_STONE);
+            d.creative = false;
+            blocks.push(d);
+        }
+        blocks.push(def("obsidian", "Obsidian (Very Committed)", Cube, true, true, [T_OBSIDIAN; 3], 50.0, 4, true, OBSIDIAN, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         blocks[GLASS as usize].see_through = true;
         blocks[ICE as usize].speed = 1.6;
         blocks[BOUNCY as usize].bounce = 0.85;
         blocks[LANTERN as usize].see_through = true;
-        for id in [AIR, WATER, BEDROCK] {
+        for id in [AIR, WATER, LAVA, BEDROCK] {
             blocks[id as usize].creative = false;
         }
 
@@ -773,6 +826,11 @@ impl Registry {
                 items.push(ItemDef { stack: 1, ..item(leak(&format!("{tier}_{part}")), armor_names[t][slot], T_ARMOR_ITEMS + (t * 4 + slot) as u16) });
             }
         }
+        items.extend([
+            ItemDef { stack: 16, ..item("bucket", "Bucket (Empty, Optimistic)", T_BUCKET) },
+            ItemDef { stack: 1, ..item("water_bucket", "Bucket of Water (Sloshy)", T_WATER_BUCKET) },
+            ItemDef { stack: 1, ..item("lava_bucket", "Bucket of Lava (Hold Level)", T_LAVA_BUCKET) },
+        ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -830,6 +888,7 @@ impl Registry {
             // A real anvil takes 31 iron. This one is a bargain.
             r(&[(IRON, 10)], (ANVIL, 1)),
             r(&[(BOOKSHELF, 1), (DIAMOND, 2), (COBBLE, 4)], (ENCHANTING_TABLE, 1)),
+            r(&[(IRON, 3)], (BUCKET, 1)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {
@@ -911,12 +970,12 @@ pub fn dapples_sky(id: Id) -> bool {
 /// Can the player point at it (and break it)?
 #[inline]
 pub fn targetable(id: Id) -> bool {
-    id != AIR && id != WATER
+    id != AIR && !is_liquid(id)
 }
 /// Placing into this cell simply replaces it.
 #[inline]
 pub fn replaceable(id: Id) -> bool {
-    matches!(id, AIR | WATER | TALL_GRASS | WEEDS)
+    matches!(id, AIR | TALL_GRASS | WEEDS) || is_liquid(id)
 }
 
 pub fn is_block_item(id: Id) -> bool {

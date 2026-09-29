@@ -269,8 +269,8 @@ impl Generator {
                         continue;
                     }
                     if self.is_cave(x, y, z, h) || ravine.is_some_and(|f| y >= f) {
-                        // Deep caverns are flooded.
-                        b[i] = if y <= 11 && self.cavern.noise3(x as f32 / 55.0, y as f32 / 28.0, z as f32 / 55.0) > 0.42 { WATER } else { AIR };
+                        // The deepest caverns are lakes of lava.
+                        b[i] = if y <= 10 && self.cavern.noise3(x as f32 / 55.0, y as f32 / 28.0, z as f32 / 55.0) > 0.42 { LAVA } else { AIR };
                         continue;
                     }
                     if b[i] == STONE {
@@ -407,6 +407,10 @@ pub struct World {
     /// Fill structure chests when their chunks first arrive (off for joined
     /// players: the host has the real contents).
     pub structure_loot: bool,
+    /// Cells where water or lava may need to move (see liquids.rs). Only
+    /// collected where the world lives (`simulate_liquids`).
+    pub liquid_dirty: HashSet<IVec3>,
+    pub simulate_liquids: bool,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
     pub log_edits: bool,
@@ -442,6 +446,8 @@ impl World {
             farm: HashMap::new(),
             containers: HashMap::new(),
             structure_loot: true,
+            liquid_dirty: HashSet::new(),
+            simulate_liquids: true,
             pending: HashSet::new(),
             edit_log: Vec::new(),
             log_edits: false,
@@ -467,6 +473,12 @@ impl World {
                     // Saves and hosts can't be trusted to stay in bounds.
                     if (i as usize) < CHUNK_VOL && valid_block(id) {
                         chunk.blocks.set(i as usize, id);
+                        // Liquids placed or moved by players pick up where they left off.
+                        if self.simulate_liquids && is_liquid(id) {
+                            let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
+                            let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
+                            self.liquid_dirty.insert(ivec3(cx * CW + lx, y, cz * CW + lz));
+                        }
                     }
                 }
             }
@@ -617,6 +629,9 @@ impl World {
         }
         c.recompute_height(lx, lz);
         self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
+        if self.simulate_liquids {
+            self.wake_liquids(p, is_liquid(id) || is_liquid(old));
+        }
         let xs: &[i32] = if lx == 0 { &[-1, 0] } else if lx == CW - 1 { &[0, 1] } else { &[0] };
         let zs: &[i32] = if lz == 0 { &[-1, 0] } else if lz == CW - 1 { &[0, 1] } else { &[0] };
         for &dx in xs {
@@ -625,6 +640,18 @@ impl World {
             }
         }
         Some(old)
+    }
+
+    /// A cell changed: it and its neighbours may need to flow (only if a
+    /// liquid is involved, which is rare, so this stays cheap).
+    fn wake_liquids(&mut self, p: IVec3, involved: bool) {
+        const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z];
+        if involved || SIDES.iter().any(|d| is_liquid(self.get_v(p + *d))) {
+            self.liquid_dirty.insert(p);
+            for d in SIDES {
+                self.liquid_dirty.insert(p + d);
+            }
+        }
     }
 
     /// Set a block even if its chunk isn't loaded here (it's applied when the
@@ -645,8 +672,17 @@ impl World {
         self.set(p.x, p.y, p.z, id)
     }
 
-    /// Voxel DDA (Amanatides & Woo).
+    /// Voxel DDA (Amanatides & Woo), stopping at anything a player can point at.
     pub fn raycast(&self, origin: Vec3, dir: Vec3, max: f32) -> Option<Hit> {
+        self.raycast_where(origin, dir, max, targetable)
+    }
+
+    /// The same, also stopping at water and lava sources (buckets reach through flows to them).
+    pub fn raycast_liquid(&self, origin: Vec3, dir: Vec3, max: f32) -> Option<Hit> {
+        self.raycast_where(origin, dir, max, |id| targetable(id) || id == WATER || id == LAVA)
+    }
+
+    fn raycast_where(&self, origin: Vec3, dir: Vec3, max: f32, stop: impl Fn(Id) -> bool) -> Option<Hit> {
         let mut p = ivec3(origin.x.floor() as i32, origin.y.floor() as i32, origin.z.floor() as i32);
         let step = ivec3(dir.x.signum() as i32, dir.y.signum() as i32, dir.z.signum() as i32);
         let inv = |d: f32| if d.abs() < 1e-9 { f32::INFINITY } else { 1.0 / d.abs() };
@@ -657,7 +693,7 @@ impl World {
         let mut t = 0.0;
         while t <= max {
             let id = self.get_v(p);
-            if targetable(id) {
+            if stop(id) {
                 if block(id).model != Model::Shaped {
                     return Some(Hit { pos: p, normal, dist: t });
                 }
@@ -717,7 +753,7 @@ impl World {
     pub fn surface_y(&self, x: i32, z: i32) -> i32 {
         for y in (0..CH).rev() {
             let b = self.get(x, y, z);
-            if is_solid(b) || b == WATER {
+            if is_solid(b) || is_liquid(b) {
                 return y;
             }
         }

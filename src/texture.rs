@@ -185,11 +185,16 @@ pub const T_POINTY_ROCK: u16 = 208;
 pub const T_ENCH_TOP: u16 = 209;
 pub const T_ENCH_SIDE: u16 = 210;
 pub const T_ENCH_BOTTOM: u16 = 211;
+pub const T_LAVA: u16 = 212;
+pub const T_OBSIDIAN: u16 = 213;
+pub const T_BUCKET: u16 = 214;
+pub const T_WATER_BUCKET: u16 = 215;
+pub const T_LAVA_BUCKET: u16 = 216;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
-/// keeps the first 256 tiles; mods look textures up by name, so this can move).
-pub const FIRST_MOD_TILE: u16 = 256;
+/// keeps the first 512 tiles; mods look textures up by name, so this can move).
+pub const FIRST_MOD_TILE: u16 = 512;
 
 /// Names mods can use to refer to built-in textures.
 pub const BASE_TEXTURES: &[(&str, u16)] = &[
@@ -274,6 +279,8 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("anvil_top", T_ANVIL_TOP),
     ("glowshroom", T_GLOWSHROOM),
     ("pointy_rock", T_POINTY_ROCK),
+    ("lava", T_LAVA),
+    ("obsidian", T_OBSIDIAN),
 ];
 
 pub fn base_texture(name: &str) -> Option<u16> {
@@ -1114,6 +1121,25 @@ const WORM: [&str; 16] = [
     "................",
 ];
 
+const BUCKET_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "....########....",
+    "...#........#...",
+    "..#..........#..",
+    "..##########.#..",
+    "..#ffffffffff#..",
+    "..#bhbbbbbbdb#..",
+    "...#hbbbbbbd#...",
+    "...#hbbbbbbd#...",
+    "...#bbbbbbdd#...",
+    "....#bbbbbd#....",
+    "....#bbbbdd#....",
+    "....########....",
+    "................",
+    "................",
+];
+
 pub fn build_atlas(seed: u64) -> Vec<u8> {
     let mut a = Atlas { px: vec![0u8; ATLAS * ATLAS * 4], rng: Rng::new(seed), perlin: Perlin::new(seed) };
 
@@ -1881,6 +1907,26 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         }
     });
     a.each(T_ENCH_BOTTOM, |_, _, r, _| shade(rgb(30, 20, 45), r.range(0.8, 1.1)));
+    // ---- Liquids
+    a.each(T_LAVA, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.3 + 20.0, y as f32 * 0.3) + r.range(-0.08, 0.08);
+        if n > 0.35 {
+            rgb(255, 230, 120)
+        } else if n > 0.0 {
+            rgb(250, 150, 30)
+        } else {
+            shade(rgb(215, 80, 15), 1.0 + n * 0.4)
+        }
+    });
+    a.each(T_OBSIDIAN, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.5 + 90.0, y as f32 * 0.5);
+        let glint = (x * 7 + y * 3) % 23 == 0;
+        if glint { rgb(120, 90, 170) } else { shade(rgb(28, 20, 40), 1.0 + n * 0.5 + r.range(-0.1, 0.1)) }
+    });
+    for (tile, fill) in [(T_BUCKET, None), (T_WATER_BUCKET, Some(rgb(50, 95, 220))), (T_LAVA_BUCKET, Some(rgb(245, 120, 25)))] {
+        let pal = [('#', rgb(50, 50, 55)), ('b', rgb(190, 190, 198)), ('d', rgb(130, 130, 138)), ('h', rgb(235, 235, 240)), ('f', fill.unwrap_or(rgb(70, 70, 76)))];
+        a.sprite(tile, &BUCKET_SPRITE, &pal);
+    }
     a.sprite(T_HUNGER_ICON, &DRUMSTICK, &[('#', rgb(60, 30, 10)), ('p', rgb(170, 95, 40)), ('P', rgb(205, 130, 60)), ('w', rgb(235, 190, 120)), ('b', rgb(235, 230, 210))]);
     a.sprite(T_ARMOR_ICON, &CHESTPLATE, &[('#', rgb(30, 30, 30)), ('b', rgb(210, 210, 215)), ('d', rgb(150, 150, 155)), ('h', rgb(245, 245, 250))]);
 

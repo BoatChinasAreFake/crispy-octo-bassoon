@@ -129,6 +129,7 @@ impl Game {
         g.player_name = sanitize_name(name);
         g.world.log_edits = true;
         g.world.structure_loot = false;
+        g.world.simulate_liquids = false;
         g.net = Some(Net::Client(conn));
         g.pending_msgs = leftover;
         g.msg("Connected! Say hi with T.");
@@ -466,7 +467,7 @@ impl Game {
                     // Scripts may veto what remote players do, just like the host's own actions.
                     if old != id && self.scripts.is_some() {
                         let who = self.peer_name(from);
-                        let (hook, key) = if id == AIR || id == WATER { ("on_block_break", old) } else { ("on_block_place", id) };
+                        let (hook, key) = if id == AIR || is_liquid(id) { ("on_block_break", old) } else { ("on_block_place", id) };
                         let args = vec![who.into(), (x as rhai::INT).into(), (y as rhai::INT).into(), (z as rhai::INT).into(), reg().key_of(key).into()];
                         if !self.fire(hook, args) {
                             corrections.push((x, y, z, old));
@@ -702,7 +703,6 @@ impl Game {
         if block(old).hardness < 0.0 && !replaceable(old) {
             return false;
         }
-        let p = IVec3::new(x, y, z);
         // Crops only appear on farmland, and only as seedlings: the host grows them.
         if let Some((_, stage)) = Crop::of_block(new) {
             let on_farmland = is_farmland(self.world.get(x, y - 1, z));
@@ -721,8 +721,9 @@ impl Game {
         }
         match new {
             AIR => true,
-            // Melting ice, or water running into a hole next to water.
-            WATER => old == ICE || [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z, IVec3::Y].iter().any(|d| self.world.get_v(p + *d) == WATER),
+            // Melting ice, or pouring out a bucket (the ledger checks they have one).
+            WATER => old == ICE || replaceable(old) || crate::liquids::open(old),
+            LAVA => replaceable(old) || crate::liquids::open(old),
             // Tilling, and trampling.
             n if is_farmland(n) => matches!(old, GRASS | DIRT | SNOW_GRASS),
             DIRT if is_farmland(old) => true,
@@ -1604,6 +1605,44 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(client.inv.count(DIAMOND), 7);
+    }
+
+    #[test]
+    fn buckets_go_through_the_ledger() {
+        let mut host = Game::new(787, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Sloshy", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 2, spawn.z.floor() as i32);
+        let y = host.world.surface_y(x, z) + 1;
+        let pond = IVec3::new(x, y, z);
+        // A source walled in, so it doesn't run anywhere.
+        for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+            host.world.set_v(pond + d, COBBLE);
+        }
+        host.world.set_v(pond, WATER);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(pond) == WATER));
+        host.give_peer(id, BUCKET, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BUCKET) == 1));
+        // Scooping it up: the host swaps the bucket for a full one.
+        client.world.set_v(pond, AIR);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(pond) == AIR));
+        let l = &host.peers[&id].ledger;
+        assert_eq!((l.bag.count(BUCKET), l.bag.count(WATER_BUCKET)), (0, 1));
+        // Pouring it back is fine; pouring lava they don't have is not.
+        client.world.set_v(pond, WATER);
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(pond) == WATER));
+        assert_eq!(host.peers[&id].ledger.bag.count(BUCKET), 1);
+        let dry = pond + IVec3::Y * 2;
+        client.world.set_v(dry, LAVA);
+        for _ in 0..60 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.world.get_v(dry), AIR);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(dry) == AIR), "the client is put right");
     }
 
     #[test]

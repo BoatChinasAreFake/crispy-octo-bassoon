@@ -171,24 +171,63 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         }
                     }
                     Model::Liquid => {
-                        let above = hood.get(lx, y + 1, lz);
-                        let top_h = if above == WATER { 1.0 } else { 0.875 };
+                        // Water is translucent; lava glows and hides what's behind it.
+                        let lava = is_lava(id);
+                        let same = |b: Id| if lava { is_lava(b) } else { is_water(b) };
+                        // Surface height of a same-kind cell (1.0 if more of it sits on top).
+                        let height = |x: i32, z: i32| -> Option<f32> {
+                            let b = hood.get(x, y, z);
+                            if !same(b) {
+                                return None;
+                            }
+                            if same(hood.get(x, y + 1, z)) {
+                                return Some(1.0);
+                            }
+                            let reach = if lava { LAVA_REACH } else { WATER_REACH } as f32;
+                            Some(0.875 * (1.0 - liquid_level(b) as f32 / (reach + 1.0)))
+                        };
+                        // Each top corner averages the cells around it, so flows slope.
+                        let corner = |cx: i32, cz: i32| -> f32 {
+                            let mut sum = 0.0;
+                            let mut n = 0.0;
+                            for dz in cz - 1..=cz {
+                                for dx in cx - 1..=cx {
+                                    match height(lx + dx, lz + dz) {
+                                        Some(1.0) => return 1.0,
+                                        Some(h) => {
+                                            sum += h;
+                                            n += 1.0;
+                                        }
+                                        None => {}
+                                    }
+                                }
+                            }
+                            if n > 0.0 { sum / n } else { 0.1 }
+                        };
+                        let tops = [[corner(0, 0), corner(1, 0)], [corner(0, 1), corner(1, 1)]];
+                        let tile = def.tex[1];
+                        if lava && (wx as i32).rem_euclid(3) == 0 && (wz as i32).rem_euclid(3) == 0 && !same(hood.get(lx, y + 1, lz)) {
+                            out.lights.push([wx + 0.5, wy + 1.0, wz + 0.5, 9.0]);
+                        }
                         for (f, (n, corners, shade)) in FACES.iter().enumerate() {
                             let nb = hood.get(lx + n[0], y + n[1], lz + n[2]);
-                            if nb == WATER || is_opaque(nb) && f != 2 {
-                                continue;
-                            }
-                            if f == 2 && is_opaque(nb) {
+                            if same(nb) || (is_opaque(nb) && f != 2) || (f == 2 && is_opaque(nb)) {
                                 continue;
                             }
                             let sky = hood.sky(lx + n[0], y + n[1].max(0), lz + n[2]);
+                            // Lava lights itself (the shader reads x above 1.5 as "glowing").
+                            let light = if lava { [2.45, sky] } else { [*shade, sky] };
                             let mut v = [Vertex::default(); 4];
                             for i in 0..4 {
                                 let c = corners[i];
-                                let cy = if c[1] > 0.5 { top_h } else { 0.0 };
-                                v[i] = vert([wx + c[0], wy + cy, wz + c[2]], T_WATER_TILE, CORNER_UV[i], [*shade, sky]);
+                                let cy = if c[1] > 0.5 { tops[c[2] as usize][c[0] as usize] } else { 0.0 };
+                                v[i] = vert([wx + c[0], wy + cy, wz + c[2]], tile, CORNER_UV[i], light);
                             }
-                            out.water.quad(v, false);
+                            if lava {
+                                out.opaque.quad(v, false);
+                            } else {
+                                out.water.quad(v, false);
+                            }
                         }
                     }
                     Model::Shaped => {
@@ -283,4 +322,3 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
     out
 }
 
-const T_WATER_TILE: u16 = crate::texture::T_WATER;

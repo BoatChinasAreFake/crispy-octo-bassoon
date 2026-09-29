@@ -16,6 +16,7 @@ mod game;
 mod hunger;
 mod inventory;
 mod ledger;
+mod liquids;
 mod mesher;
 mod mods;
 mod multiplayer;
@@ -1196,6 +1197,17 @@ impl App {
         }
         if g.player.hurt > 0.0 {
             draw_rectangle(0.0, 0.0, w, h, Color::new(0.8, 0.0, 0.0, g.player.hurt * 0.5));
+        }
+        if !g.menu && (g.on_fire > 0.0 || g.player.body.in_lava) {
+            // On fire: an orange haze and flames licking up the edges.
+            draw_rectangle(0.0, 0.0, w, h, Color::new(1.0, 0.45, 0.05, if g.player.body.in_lava { 0.55 } else { 0.18 }));
+            let size = 48.0 * s;
+            let flick = (g.clock * 9.0).sin() * 4.0 * s;
+            for i in 0..((w / size) as i32 + 1) {
+                let x = i as f32 * size;
+                let lift = if i % 2 == 0 { flick } else { -flick };
+                self.ui.tile(texture::T_FLAME, x, h - size * 1.4 + lift, size * 1.2, Color::new(1.0, 1.0, 1.0, 0.8));
+            }
         }
         if !g.ready {
             draw_rectangle(0.0, 0.0, w, h, Color::new(0.1, 0.07, 0.05, 1.0));
@@ -2422,7 +2434,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2551,7 +2563,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2735,6 +2747,28 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "liquids" && frames == 125 {
+                // A waterfall off a pillar, a lava pool, and where they met.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let at = |f: f32, r: f32, up: i32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, p.y.floor() as i32 + up, v.z.floor() as i32)
+                };
+                for up in 0..4 {
+                    app.game.world.set_v(at(9.0, -3.0, up), block::STONE_BRICKS);
+                }
+                app.game.world.set_v(at(9.0, -3.0, 4), block::WATER);
+                for (f, r) in [(6.0, 3.0), (6.0, 4.0), (7.0, 3.0), (7.0, 4.0)] {
+                    app.game.world.set_v(at(f, r, -1), block::LAVA);
+                }
+                app.game.world.set_v(at(8.0, 3.5, 0), block::OBSIDIAN);
+                app.game.world.set_v(at(8.0, 3.5, 1), block::OBSIDIAN);
+                app.game.inv.add(block::WATER_BUCKET, 1);
+                app.game.inv.add(block::LAVA_BUCKET, 1);
+                app.game.inv.add(block::BUCKET, 3);
             }
             if matches!(s.mode.as_str(), "enchant" | "table") && frames == 125 {
                 // An enchanting table in a ring of bookshelves, and something to enchant.
