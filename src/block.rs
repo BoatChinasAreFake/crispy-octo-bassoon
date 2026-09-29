@@ -150,7 +150,14 @@ pub const HEAD_FIRST: Id = 248;
 pub const DISPENSER_FIRST: Id = 260;
 /// Hoppers: `HOPPER_FIRST` spouts down, `+ 1 + facing` to a side (see hoppers.rs).
 pub const HOPPER_FIRST: Id = 266;
-pub const NUM_BLOCKS: Id = 271;
+/// The Hollow (see hollow.rs).
+pub const HOLLOW_STONE: Id = 271;
+pub const HOLLOW_PORTAL: Id = 272;
+pub const EYE_FRAME: Id = 273;
+pub const EYE_FRAME_FULL: Id = 274;
+pub const WYRM_CRYSTAL: Id = 275;
+pub const WYRM_EGG: Id = 276;
+pub const NUM_BLOCKS: Id = 277;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -240,8 +247,12 @@ pub const SPLASH_FIRST: Id = FIRST_ITEM + 105;
 pub const GRUMBLER_TUSK: Id = FIRST_ITEM + 110;
 /// Goes on a tamed Galloper (see horses.rs).
 pub const SADDLE: Id = FIRST_ITEM + 111;
+/// Points the way to a Crypt, and opens its portal (see hollow.rs).
+pub const STARING_EYE: Id = FIRST_ITEM + 112;
+/// Names a mob (see nametags.rs).
+pub const NAME_TAG: Id = FIRST_ITEM + 113;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 112;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 114;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -404,6 +415,8 @@ pub enum Shape {
     PistonHead { facing: u8 },
     /// A hopper: a bowl, a funnel and a spout (0 down, else 1 + a side facing).
     Hopper { spout: u8 },
+    /// A thin sheet three quarters of the way up (the Hollow's portal).
+    Sheet,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -558,6 +571,7 @@ impl Shape {
                 };
                 ([bowl, funnel, tip], 3)
             }
+            Shape::Sheet => ([([0.0, 0.7, 0.0], [1.0, 0.75, 1.0]), full, full], 1),
             Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
             Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
             Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
@@ -1198,6 +1212,18 @@ impl Registry {
             blocks.push(d);
         }
         blocks.extend(hoppers);
+        blocks.push(def("hollow_stone", "Hollow Stone (Pale, Suspicious)", Cube, true, true, [T_HOLLOW_STONE; 3], 3.0, 1, true, HOLLOW_STONE, 0.0, S_STONE));
+        let mut sheet = def("hollow_portal", "Hollow Portal (Starry)", Shaped, false, false, [T_HOLLOW_PORTAL; 3], -1.0, 0, false, AIR, 11.0, S_GLASS);
+        sheet.shape = Shape::Sheet;
+        sheet.creative = false;
+        blocks.push(sheet);
+        for (key, name, top) in [("eye_frame", "Eye Frame (Empty)", T_EYE_FRAME_TOP), ("eye_frame_full", "Eye Frame (Staring Back)", T_EYE_FRAME_FULL)] {
+            let mut d = def(key, name, Cube, true, true, [top, T_EYE_FRAME_SIDE, T_HOLLOW_STONE], -1.0, 0, false, AIR, 0.0, S_STONE);
+            d.creative = key == "eye_frame";
+            blocks.push(d);
+        }
+        blocks.push(def("wyrm_crystal", "Wyrm Crystal (Do Not Touch)", Cube, true, false, [T_WYRM_CRYSTAL; 3], 0.3, 0, false, AIR, 12.0, S_GLASS));
+        blocks.push(def("wyrm_egg", "Wyrm Egg (Trophy, Allegedly)", Cube, true, true, [T_WYRM_EGG; 3], 3.0, 0, false, WYRM_EGG, 2.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1322,6 +1348,8 @@ impl Registry {
         }
         items.push(item("grumbler_tusk", "Grumbler Tusk (Rude to Ask)", T_TUSK));
         items.push(ItemDef { stack: 1, ..item("saddle", "Saddle (Some Assembly Required)", T_SADDLE) });
+        items.push(item("staring_eye", "Staring Eye (It Knows)", T_STARING_EYE));
+        items.push(item("name_tag", "Name Tag (Hello, My Name Is)", T_NAME_TAG));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1408,6 +1436,8 @@ impl Registry {
             r(&[(COBBLE, 7), (BOW, 1), (ZAP_DUST, 1)], (DISPENSER_FIRST, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
+            r(&[(PEARL, 1), (EMBER_SHROOM, 1)], (STARING_EYE, 1)),
+            r(&[(STRING, 1), (BOOK, 1)], (NAME_TAG, 2)),
             r(&[(BONE_DUST, 1)], (DYE_FIRST, 2)),
             r(&[(COAL, 1)], (DYE_FIRST + 1, 2)),
             r(&[(FLOWER, 1)], (DYE_FIRST + 2, 2)),

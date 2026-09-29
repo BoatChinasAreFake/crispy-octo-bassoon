@@ -38,11 +38,13 @@ pub struct Peer {
     pub ledger: crate::ledger::Ledger,
     /// Their last report of their inventory, health and hunger (see players.rs).
     pub report: Option<crate::players::Report>,
+    /// How they look (see nametags.rs).
+    pub skin: u8,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0 }
     }
     pub fn alive(&self) -> bool {
         self.flags & FLAG_DEAD == 0
@@ -414,6 +416,12 @@ impl Game {
                 roster.push(Msg::PlayerJoin { id: self.my_id, name: self.player_name.clone() });
             }
             roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
+            // How everyone looks, and what the mobs are called.
+            if !self.dedicated {
+                roster.push(Msg::PlayerSkin { id: self.my_id, skin: self.skin });
+            }
+            roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerSkin { id, skin: p.skin }));
+            roster.extend(self.mob_names.iter().map(|(&mob, name)| Msg::MobName { mob, name: name.clone() }));
             roster.push(self.rules_msg());
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
             // Words on signs and things in frames.
@@ -622,6 +630,18 @@ impl Game {
             }
             Msg::Splash { item, at } => self.host_splash(from, item, at),
             Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
+            Msg::MobName { mob, name } => {
+                if self.peer_rate_ok(from, "name", 0.5) {
+                    self.host_mob_name(from, mob, name);
+                }
+            }
+            Msg::PlayerSkin { skin, .. } => {
+                let skin = skin % crate::nametags::SKINS.len() as u8;
+                if let Some(p) = self.peers.get_mut(&from) {
+                    p.skin = skin;
+                }
+                self.relay(from, Msg::PlayerSkin { id: from, skin });
+            }
             Msg::UseItem { item } => {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
@@ -918,6 +938,17 @@ impl Game {
             }
             Msg::Time(t) => self.time = t.rem_euclid(1.0),
             Msg::MountMob { mob } => self.mount_mob(mob),
+            Msg::MobName { mob, name } => {
+                let name = crate::nametags::clean_name(&name);
+                if !name.is_empty() {
+                    self.mob_names.insert(mob, name);
+                }
+            }
+            Msg::PlayerSkin { id, skin } => {
+                if let Some(p) = self.peers.get_mut(&id) {
+                    p.skin = skin % crate::nametags::SKINS.len() as u8;
+                }
+            }
             Msg::PotionEffect { item } => {
                 if let Some((p, false)) = crate::potions::potion_of(item) {
                     self.apply_potion(p);

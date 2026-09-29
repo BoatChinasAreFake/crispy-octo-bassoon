@@ -159,6 +159,14 @@ pub struct Game {
     /// The Galloper we're riding, and when we last told the host (see horses.rs).
     pub mounted: Option<u32>,
     pub ride_sync: f32,
+    /// The last hundred messages (see `msg`).
+    pub chat_log: std::collections::VecDeque<String>,
+    /// Names given to mobs with Name Tags, by mob id (see nametags.rs).
+    pub mob_names: HashMap<u32, String>,
+    /// How the local player looks (see nametags.rs).
+    pub skin: u8,
+    /// The mob a Name Tag is being written for (the name screen is open).
+    pub naming: Option<u32>,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -287,6 +295,10 @@ impl Game {
             hopper_timer: 0.0,
             mounted: None,
             ride_sync: 0.0,
+            chat_log: Default::default(),
+            mob_names: HashMap::new(),
+            skin: 0,
+            naming: None,
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],
@@ -406,9 +418,12 @@ impl Game {
         for (kind, pos, yaw) in crate::vehicles::decode(&d.vehicles) {
             g.spawn_vehicle(kind, pos, yaw);
         }
-        for mut m in crate::animals::decode_mobs(&d.mobs, &mut g.rng) {
+        for (mut m, name) in crate::animals::decode_mobs_named(&d.mobs, &mut g.rng) {
             m.id = g.next_mob_id;
             g.next_mob_id += 1;
+            if let Some(name) = name {
+                g.mob_names.insert(m.id, name);
+            }
             g.mobs.push(m);
         }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
@@ -448,7 +463,7 @@ impl Game {
             weather: self.weather.kind.index(),
             weather_timer: self.weather.timer,
             enchant_count: self.enchant_count,
-            mobs: crate::animals::encode_mobs(&self.mobs),
+            mobs: crate::animals::encode_mobs(&self.mobs, &self.mob_names),
             portals: crate::scorch::encode_links(&self.portal_links),
             vehicles: crate::vehicles::encode(&self.vehicles),
             decor: crate::decor::encode(&self.world.signs, &self.world.frames),
@@ -506,6 +521,11 @@ impl Game {
         if self.dedicated {
             println!("[{}] {s}", crate::server::timestamp());
         }
+        // Everything said is kept a while, to scroll back through with chat open.
+        self.chat_log.push_back(s.clone());
+        if self.chat_log.len() > 100 {
+            self.chat_log.pop_front();
+        }
         self.messages.push((s, 7.0));
         if self.messages.len() > 6 {
             self.messages.remove(0);
@@ -527,6 +547,11 @@ impl Game {
         self.sun_angle().sin() < -0.05
     }
 
+    /// Somewhere other than the ordinary world (no weather, its own sky)?
+    pub fn elsewhere(&self) -> bool {
+        self.in_scorch() || self.in_hollow()
+    }
+
     /// Is the camera (or the local player) down in the Scorchlands?
     pub fn in_scorch(&self) -> bool {
         !self.menu && crate::scorch::in_scorch(self.player.body.pos.x)
@@ -535,6 +560,9 @@ impl Game {
     pub fn sky_color(&self) -> [f32; 3] {
         if self.in_scorch() {
             return [0.24, 0.06, 0.03];
+        }
+        if self.in_hollow() {
+            return [0.05, 0.02, 0.08];
         }
         let d = ((self.daylight() - 0.18) / 0.82).clamp(0.0, 1.0);
         let day = [0.55, 0.75, 1.0];
@@ -710,7 +738,9 @@ impl Game {
         self.footsteps(dt);
         self.block_effects();
         self.lava_tick(dt);
-        self.portal_tick(dt);
+        if !self.hollow_portal_tick() {
+            self.portal_tick(dt);
+        }
         if self.player.body.pos.y < -30.0 {
             self.hurt_player(100.0, "fell out of the world. Classic.");
         }
@@ -958,10 +988,10 @@ impl Game {
 
     /// Right-clicking a bed.
     fn sleep(&mut self, bed: IVec3) {
-        if self.in_scorch() {
-            // Beds don't like it down here.
+        if self.elsewhere() {
+            // Beds don't like it out here.
             self.world.set_v(bed, AIR);
-            self.msg("The bed exploded. Beds are not rated for the Scorchlands.");
+            self.msg(if self.in_scorch() { "The bed exploded. Beds are not rated for the Scorchlands." } else { "The bed exploded. There's no night to skip out here." });
             if !self.is_client() {
                 self.explode(bed.as_vec3() + Vec3::splat(0.5), 3.0, "tried to sleep in the Scorchlands");
             }
@@ -1370,6 +1400,9 @@ impl Game {
         if matches!(held, BUCKET | WATER_BUCKET | LAVA_BUCKET) && self.use_bucket(held) {
             return;
         }
+        if held == STARING_EYE && self.use_eye() {
+            return;
+        }
         if self.use_potion(held) {
             return;
         }
@@ -1625,6 +1658,9 @@ impl Game {
         self.stat_blocks_broken += 1;
         if self.stat_blocks_broken >= 100 {
             self.advance("centurion");
+        }
+        if id == WYRM_CRYSTAL {
+            self.crystal_broken(pos);
         }
         if id == ICE && !self.creative {
             self.world.set_v(pos, WATER);
@@ -1998,6 +2034,7 @@ impl Game {
         self.animals_tick(dt);
         self.hmmers_tick(dt);
         self.free_riderless();
+        self.tidy_mob_names();
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             // Ridden Gallopers go where their rider steers (see horses.rs).
@@ -2031,7 +2068,7 @@ impl Game {
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
-                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper => {}
+                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm => {}
                 }
             }
         }
@@ -2102,6 +2139,9 @@ impl Game {
                     let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
                     let args = vec![m.kind.name().to_ascii_lowercase().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
                     self.fire("on_mob_death", args);
+                    if m.kind == MobKind::Wyrm {
+                        self.wyrm_defeated(at);
+                    }
                     let remote = m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker);
                     if !remote && !self.dedicated && at.distance(self.player.body.pos) < 32.0 {
                         match m.kind {
@@ -2112,7 +2152,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2166,6 +2206,7 @@ impl Game {
         }
         self.farm_tick(dt);
         self.trees_tick(dt);
+        self.hollow_tick(dt);
         self.fire_tick(dt);
         self.container_tick(dt);
         self.hoppers_tick(dt);
@@ -2197,6 +2238,15 @@ impl Game {
         let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
         if crate::scorch::in_scorch(p.x) {
             self.scorch_spawn(p);
+            return;
+        }
+        if crate::hollow::in_hollow(p.x) {
+            // Only Starers (and the Wyrm, see hollow.rs) out here.
+            let here = self.mobs.iter().filter(|m| m.kind == MobKind::Starer && crate::hollow::in_hollow(m.body.pos.x)).count();
+            let (x, z) = (p.x as i32 + self.rng.int(-30, 30), p.z as i32 + self.rng.int(-30, 30));
+            if here < 6 && self.world.is_loaded(x, z) && self.world.get(x, crate::hollow::ORIGIN.y, z) == HOLLOW_STONE && self.rules.difficulty.monsters() {
+                self.alloc_mob(MobKind::Starer, Vec3::new(x as f32 + 0.5, (crate::hollow::ORIGIN.y + 1) as f32, z as f32 + 0.5));
+            }
             return;
         }
         // Kept animals (bred, tamed) don't count against new ones turning up.
@@ -2323,7 +2373,8 @@ impl Game {
 
         // Stars fade in at night (no sky at all under the Scorchlands' bedrock).
         let scorch = self.in_scorch();
-        let night = 1.0 - ((self.daylight() - 0.18) / 0.5).clamp(0.0, 1.0);
+        // The Hollow's sky is always starry.
+        let night = if self.in_hollow() { 1.0 } else { 1.0 - ((self.daylight() - 0.18) / 0.5).clamp(0.0, 1.0) };
         if night > 0.01 && !scorch {
             g.begin(Pass::Sky, [1.0, 1.0, 1.0, night], true);
             let rot = Mat4::from_rotation_z(a);
@@ -2334,6 +2385,8 @@ impl Game {
             }
         }
         g.begin(Pass::Sky, [1.0; 4], true);
+        // No sun, moon or clouds anywhere but the ordinary world.
+        let scorch = self.elsewhere();
         if !scorch {
             sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
             sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
@@ -2408,7 +2461,7 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
             let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw);
-            draw_model(&mut g, &root, &STOVE, p.anim, sky, true);
+            draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
             crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky);
         }
         // The player, in third person
@@ -2418,7 +2471,7 @@ impl Game {
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw);
-            draw_model(&mut g, &root, &STOVE, p.bob * 2.0, sky, true);
+            draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
             crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), p.bob * 2.0, sky);
         }
         // Primed TNT
@@ -2505,8 +2558,9 @@ impl Game {
             let sleeve = arm * Mat4::from_translation(Vec3::new(-w / 2.0 - 0.006, -w / 2.0 - 0.006, 0.0)) * Mat4::from_scale(Vec3::new(w + 0.012, w + 0.012, 0.25));
             let hand = arm * Mat4::from_translation(Vec3::new(-w / 2.0, -w / 2.0, -0.3)) * Mat4::from_scale(Vec3::new(w, w, 0.3));
             let light = sky.max(0.2);
-            g.cube(&sleeve, [T_STOVE_SHIRT; 6], light, [0.0, 0.0, 1.0, 1.0]);
-            g.cube(&hand, [T_SKIN; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
+            g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
         } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) {
             let tiles = {
                 let t = block(held).tex;
@@ -2537,6 +2591,8 @@ impl Game {
         } else if self.in_scorch() {
             // Hazy, hot air.
             (sky, far * 0.2, far * 0.8)
+        } else if self.in_hollow() {
+            ([0.1, 0.05, 0.14], far * 0.4, far)
         } else {
             (sky, far * 0.55, far - 4.0)
         };
@@ -2548,7 +2604,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else { 0.0 }, lights }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights }
     }
 }
 

@@ -69,7 +69,11 @@ pub const ALL: &[Advancement] = &[
     adv("good_as_new", "Good as New(ish)", "Repair something at an anvil. Hit it until it's fixed."),
     adv("ominous", "Drops Ominously", "Use an anvil until it crumbles. It warned you."),
     adv("level_30", "Experienced", "Reach level 30. Nothing to spend it on but anvils. For now."),
+    adv("eye_spy", "Eye Spy", "Fill a Crypt's ring of Eye Frames. Something opened."),
+    adv("hollow", "The Hollow", "Step into the Hollow. It's very quiet. Too quiet."),
+    adv("wyrm_slayer", "Wyrm Slayer", "Beat the Hollow Wyrm. Roll credits (there are none)."),
     adv("giddy_up", "Giddy Up", "Tame a Galloper. It only took several hundred attempts."),
+    adv("hello_my_name_is", "Hello, My Name Is", "Name a mob with a Name Tag. It won't answer to it."),
     adv("brewmaster", "Local Brewery", "Drink a potion you brewed. Or found. We don't judge."),
     adv("lumberjack_reforms", "Reformed Lumberjack", "Grow a tree from a sapling with Bone Dust. Balance restored."),
 ];

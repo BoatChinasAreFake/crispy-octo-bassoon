@@ -20,6 +20,7 @@ mod farming;
 mod fire;
 mod fishing;
 mod game;
+mod hollow;
 mod hoppers;
 mod horses;
 mod hunger;
@@ -31,6 +32,7 @@ mod liquids;
 mod mesher;
 mod mods;
 mod multiplayer;
+mod nametags;
 mod navigation;
 mod net;
 mod noise;
@@ -113,6 +115,8 @@ enum Screen {
     Trade,
     /// Writing on a sign (see decor.rs).
     Sign,
+    /// Writing a Name Tag for a mob (see nametags.rs).
+    NameTag,
     /// Keep inventory, difficulty, daylight cycle (the world's owner can change them).
     WorldSettings,
     Dead,
@@ -156,6 +160,13 @@ struct App {
     joining: Option<(net::Conn, f64)>,
     /// Chat line being typed, if the chat box is open.
     chat: Option<String>,
+    /// Lines already sent (Up/Down bring them back), which one is showing,
+    /// and how far the chat log is scrolled back.
+    chat_sent: Vec<String>,
+    /// The name being written on a Name Tag.
+    name_line: String,
+    chat_pick: Option<usize>,
+    chat_scroll: usize,
     last_view_proj: Mat4,
     lan_addr: Option<String>,
     /// Password for joining, and for hosting if set.
@@ -310,6 +321,9 @@ impl App {
         gl.flush();
         self.renderer.clear(gl.quad_context);
         self.game = game;
+        // We look like our settings say (joined players tell the host).
+        let skin = self.settings.skin;
+        self.game.set_skin(skin);
         self.set_screen(Screen::Playing);
     }
 
@@ -473,13 +487,44 @@ impl App {
     fn handle_keys(&mut self) {
         if let Some(line) = &mut self.chat {
             type_into(line, 200);
+            // Up and Down bring back what you said before; Page Up/Down and the wheel scroll the log.
+            let recall = if is_key_pressed(KeyCode::Up) && !self.chat_sent.is_empty() {
+                Some(self.chat_pick.map_or(0, |p| p + 1).min(self.chat_sent.len() - 1))
+            } else if is_key_pressed(KeyCode::Down) {
+                self.chat_pick.and_then(|p| p.checked_sub(1))
+            } else {
+                self.chat_pick
+            };
+            if recall != self.chat_pick {
+                self.chat_pick = recall;
+                match recall {
+                    Some(p) => *line = self.chat_sent[self.chat_sent.len() - 1 - p].clone(),
+                    None => line.clear(),
+                }
+            }
+            let wheel = mouse_wheel().1;
+            if is_key_pressed(KeyCode::PageUp) || wheel > 0.1 {
+                self.chat_scroll = (self.chat_scroll + 3).min(self.game.chat_log.len().saturating_sub(1));
+            } else if is_key_pressed(KeyCode::PageDown) || wheel < -0.1 {
+                self.chat_scroll = self.chat_scroll.saturating_sub(3);
+            }
             if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
                 let text = line.clone();
                 self.chat = None;
+                if !text.trim().is_empty() && self.chat_sent.last() != Some(&text) {
+                    self.chat_sent.push(text.clone());
+                    if self.chat_sent.len() > 50 {
+                        self.chat_sent.remove(0);
+                    }
+                }
+                self.chat_pick = None;
+                self.chat_scroll = 0;
                 self.game.send_chat(&text);
                 self.set_screen(Screen::Playing);
             } else if is_key_pressed(KeyCode::Escape) {
                 self.chat = None;
+                self.chat_pick = None;
+                self.chat_scroll = 0;
                 self.set_screen(Screen::Playing);
             }
             return;
@@ -593,6 +638,15 @@ impl App {
                     self.set_screen(Screen::Playing);
                 }
             }
+            Screen::NameTag => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.finish_name_tag(false);
+                } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                    self.finish_name_tag(true);
+                } else {
+                    type_into(&mut self.name_line, nametags::NAME_LEN);
+                }
+            }
             Screen::Sign => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Playing);
@@ -668,6 +722,10 @@ impl App {
         }
         if self.game.editing_sign.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Sign);
+        }
+        if self.game.naming.is_some() && self.screen == Screen::Playing {
+            drain_chars();
+            self.set_screen(Screen::NameTag);
         }
         if self.game.trading.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Trade);
@@ -1230,7 +1288,48 @@ impl App {
         }
     }
 
-    /// A compass and a map, while you hold them.
+    /// Writing a Name Tag for a mob.
+    fn name_tag_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        let (bw, bh) = (200.0 * s, 34.0 * s);
+        let (x0, y0) = ((w - bw) / 2.0, (h - bh) / 2.0 - 20.0 * s);
+        draw_rectangle(x0, y0, bw, bh, Color::new(0.84, 0.75, 0.55, 1.0));
+        draw_rectangle_lines(x0, y0, bw, bh, 2.0 * s, Color::new(0.45, 0.35, 0.2, 1.0));
+        self.ui.text_centered("Name it (Enter: done, Esc: never mind)", w / 2.0, y0 - 8.0 * s, 9.0, WHITE);
+        let cursor = if (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+        self.ui.text_centered(&format!("{}{cursor}", self.name_line), w / 2.0, y0 + 22.0 * s, 11.0, Color::new(0.1, 0.07, 0.03, 1.0));
+        if self.ui.button(Rect::new(w / 2.0 - 50.0 * s, y0 + bh + 10.0 * s, 100.0 * s, 20.0 * s), "Done", true) {
+            self.finish_name_tag(true);
+        }
+    }
+
+    /// Leave the Name Tag screen, naming the mob or not.
+    fn finish_name_tag(&mut self, confirm: bool) {
+        if let Some(id) = self.game.naming.take()
+            && confirm
+        {
+            let name = self.name_line.clone();
+            self.game.name_mob(id, &name);
+        }
+        self.name_line.clear();
+        self.set_screen(Screen::Playing);
+    }
+
+    /// The Hollow Wyrm's health, across the top while it's near.
+    fn boss_bar(&self) {
+        let g = &self.game;
+        let Some(m) = g.mobs.iter().find(|m| m.kind == entity::MobKind::Wyrm && m.body.pos.distance(g.player.body.pos) < 150.0) else { return };
+        let (w, s) = (screen_width(), self.ui.s);
+        let bw = (180.0 * s).min(w * 0.7);
+        let (x, y) = (w / 2.0 - bw / 2.0, 18.0 * s);
+        let frac = (m.health / m.kind.max_health()).clamp(0.0, 1.0);
+        self.ui.text_centered("Hollow Wyrm", w / 2.0, y - 3.0 * s, 9.0, Color::new(0.85, 0.6, 1.0, 1.0));
+        draw_rectangle(x, y, bw, 5.0 * s, Color::new(0.1, 0.05, 0.12, 0.9));
+        draw_rectangle(x, y, bw * frac, 5.0 * s, Color::new(0.75, 0.25, 0.9, 1.0));
+    }
+
     /// Potion effects and their time left, down the left side.
     fn effects_hud(&self) {
         let s = self.ui.s;
@@ -1244,6 +1343,7 @@ impl App {
         }
     }
 
+    /// A compass and a map, while you hold them.
     fn navigation_hud(&mut self, dt: f32) {
         let (w, _) = (screen_width(), screen_height());
         let s = self.ui.s;
@@ -1312,6 +1412,22 @@ impl App {
             draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 10.0 * s, tw + 6.0 * s, 12.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
             self.ui.text_centered(&p.name, sx, sy, 9.0, WHITE);
         }
+        // Mobs with Name Tags.
+        for m in &self.game.mobs {
+            let Some(name) = self.game.mob_names.get(&m.id) else { continue };
+            let at = m.body.pos + Vec3::Y * (m.body.height + 0.4);
+            if at.distance(eye) > 32.0 {
+                continue;
+            }
+            let clip = self.last_view_proj * at.extend(1.0);
+            if clip.w < 0.1 {
+                continue;
+            }
+            let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
+            let tw = self.ui.text_width(name, 8.0);
+            draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4));
+            self.ui.text_centered(name, sx, sy, 8.0, Color::new(1.0, 0.95, 0.8, 1.0));
+        }
     }
 
     fn play_sounds(&mut self, dt: f32) {
@@ -1369,6 +1485,7 @@ impl App {
                 if !self.game.menu && self.game.ready {
                     self.navigation_hud(get_frame_time().min(0.05));
                     self.effects_hud();
+                    self.boss_bar();
                 }
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
@@ -1380,6 +1497,7 @@ impl App {
                     Screen::Enchant => self.enchant_screen(),
                     Screen::Trade => self.trade_screen(),
                     Screen::Sign => self.sign_screen(),
+                    Screen::NameTag => self.name_tag_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
                     _ => {}
@@ -1473,14 +1591,23 @@ impl App {
             }
         }
 
-        // Chat-ish messages (all recent ones stay visible while typing)
+        // Chat-ish messages. While typing, the whole log (scrollable) instead.
         let typing = self.chat.is_some();
-        for (i, (m, t)) in g.messages.iter().rev().enumerate() {
-            let a = if typing { 1.0 } else { t.min(1.0) };
+        let lines: Vec<(&str, f32)> = if typing {
+            let n = g.chat_log.len();
+            let end = n.saturating_sub(self.chat_scroll);
+            g.chat_log.iter().take(end).rev().take(14).map(|m| (m.as_str(), 1.0)).collect()
+        } else {
+            g.messages.iter().rev().map(|(m, t)| (m.as_str(), t.min(1.0))).collect()
+        };
+        for (i, (m, a)) in lines.into_iter().enumerate() {
             let y = h - 40.0 * s - i as f32 * 11.0 * s;
             let tw = self.ui.text_width(m, 9.0);
             draw_rectangle(4.0 * s, y - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4 * a));
             self.ui.text(m, 7.0 * s, y, 9.0, Color::new(1.0, 1.0, 1.0, a));
+        }
+        if typing && self.chat_scroll > 0 {
+            self.ui.text(&format!("(scrolled back {} lines: Page Down to return)", self.chat_scroll), 7.0 * s, h - 40.0 * s - 14.5 * 11.0 * s, 8.0, GRAY);
         }
 
         if let Some(line) = &self.chat {
@@ -1824,20 +1951,36 @@ impl App {
         *vol = (*vol + 0.1 * row(&self.ui, format!("Sound Volume: {:.0}%", *vol * 100.0), y) as f32).clamp(0.0, 1.0);
         *vol = (*vol * 10.0).round() / 10.0;
         y += bh + 5.0 * s;
-        let music = if self.audio.music_on { "Music: ON (occasionally, tastefully)" } else { "Music: OFF" };
-        if self.ui.button(Rect::new(x, y, bw, bh), music, true) {
+        // Two to a row from here on.
+        let half = (bw - 4.0 * s) / 2.0;
+        let (left, right) = (x, x + half + 4.0 * s);
+        let music = if self.audio.music_on { "Music: ON" } else { "Music: OFF" };
+        if self.ui.button(Rect::new(left, y, half, bh), music, true) {
             self.audio.music_on = !self.audio.music_on;
         }
-        y += bh + 5.0 * s;
-        let st = &mut self.settings;
-        let fs = if st.fullscreen { "Fullscreen: ON (F11)" } else { "Fullscreen: OFF (F11)" };
-        if self.ui.button(Rect::new(x, y, bw, bh), fs, true) {
+        let fs = if self.settings.fullscreen { "Fullscreen: ON" } else { "Fullscreen: OFF" };
+        if self.ui.button(Rect::new(right, y, half, bh), fs, true) {
             self.settings.fullscreen = !self.settings.fullscreen;
             set_fullscreen(self.settings.fullscreen);
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Controls...", true) {
+        if self.ui.button(Rect::new(left, y, half, bh), "Controls...", true) {
             self.set_screen(Screen::Controls { from_title });
+        }
+        let skin = format!("Skin: {}", nametags::skin_name(self.settings.skin));
+        if self.ui.button(Rect::new(right, y, half, bh), &skin, true) {
+            self.settings.skin = (self.settings.skin + 1) % nametags::SKINS.len() as u8;
+            let k = self.settings.skin;
+            self.game.set_skin(k);
+        }
+        y += bh + 5.0 * s;
+        let subs = if self.settings.subtitles { "Subtitles: ON" } else { "Subtitles: OFF" };
+        if self.ui.button(Rect::new(left, y, half, bh), subs, true) {
+            self.settings.subtitles = !self.settings.subtitles;
+        }
+        let cb = if self.settings.colour_blind { "Colour-blind: ON" } else { "Colour-blind: OFF" };
+        if self.ui.button(Rect::new(right, y, half, bh), cb, true) {
+            self.settings.colour_blind = !self.settings.colour_blind;
         }
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
@@ -2739,6 +2882,10 @@ async fn game_main() {
         connect_next: None,
         joining: None,
         chat: None,
+        chat_sent: Vec::new(),
+        name_line: String::new(),
+        chat_pick: None,
+        chat_scroll: 0,
         last_view_proj: Mat4::IDENTITY,
         lan_addr: None,
         mp_password: String::new(),
@@ -2894,6 +3041,22 @@ async fn game_main() {
                         s.yaw = 0.0;
                         s.pitch = -0.05;
                     }
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "hollow" => {
+                // On the island's edge, looking in at the pillars (and whatever circles them).
+                let mut g = Game::new(424242, true, false);
+                let to = g.hollow_destination(IVec3::ZERO);
+                g.player.body.pos = to;
+                let o = hollow::ORIGIN.as_vec3();
+                g.world.load_now(hollow::ORIGIN.x.div_euclid(16), 0);
+                g.alloc_mob(entity::MobKind::Wyrm, o + Vec3::new(20.0, 24.0, -10.0));
+                if s.pos.is_none() {
+                    s.pos = Some(to + Vec3::Y * 2.0);
+                    s.yaw = -std::f32::consts::FRAC_PI_2;
+                    s.pitch = 0.12;
                 }
                 app.start_game(g);
                 app.show_debug = false;

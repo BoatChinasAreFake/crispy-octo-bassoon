@@ -209,7 +209,7 @@ mod tests {
         g.ride_tick(1.0 / 60.0, 0.0, 0.0, false, true);
         assert!(g.mounted.is_none() && g.mobs[0].rider == 0);
         // Saddle and owner are saved.
-        let back = crate::animals::decode_mobs(&crate::animals::encode_mobs(&g.mobs), &mut g.rng);
+        let back = crate::animals::decode_mobs(&crate::animals::encode_mobs(&g.mobs, &g.mob_names), &mut g.rng);
         assert!(back[0].saddled && back[0].owner.is_some());
     }
 }

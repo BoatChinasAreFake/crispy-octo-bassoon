@@ -75,12 +75,12 @@ const LIGHTNING_RADIUS: f32 = 3.0;
 impl Game {
     /// Is it raining (or snowing) right here, on this spot under the open sky?
     pub fn rained_on(&self, x: i32, y: i32, z: i32) -> bool {
-        self.weather.kind.wet() && self.world.sky_light(x, y, z) >= 1.0 && self.world.generator.column(x, z).1 != Biome::Desert
+        self.weather.kind.wet() && !crate::hollow::in_hollow(x as f32) && self.world.sky_light(x, y, z) >= 1.0 && self.world.generator.column(x, z).1 != Biome::Desert
     }
 
     /// Every side: ease the look in and out; the owner also decides what's next.
     pub fn weather_tick(&mut self, dt: f32) {
-        let target = if self.weather.kind.wet() { 1.0 } else { 0.0 };
+        let target = if self.weather.kind.wet() && !self.in_hollow() { 1.0 } else { 0.0 };
         let s = &mut self.weather.strength;
         *s += (target - *s).clamp(-dt * 0.15, dt * 0.15);
         if let Some((_, life)) = &mut self.weather.bolt {

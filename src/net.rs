@@ -188,6 +188,10 @@ pub enum Msg {
     MountMob { mob: u32 },
     /// client -> host: where the Galloper I'm riding is (`off`: I got off).
     RideMob { mob: u32, pos: Vec3, yaw: f32, off: bool },
+    /// Both ways: a mob's Name Tag name.
+    MobName { mob: u32, name: String },
+    /// Both ways: how a player looks (client -> host: me; `id` is ignored).
+    PlayerSkin { id: u32, skin: u8 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -672,6 +676,16 @@ impl Msg {
                 w.u8(58);
                 w.u32(*mob);
             }
+            Msg::MobName { mob, name } => {
+                w.u8(60);
+                w.u32(*mob);
+                w.str(name);
+            }
+            Msg::PlayerSkin { id, skin } => {
+                w.u8(61);
+                w.u32(*id);
+                w.u8(*skin);
+            }
             Msg::RideMob { mob, pos, yaw, off } => {
                 w.u8(59);
                 w.u32(*mob);
@@ -856,6 +870,8 @@ impl Msg {
             56 => Msg::Splash { item: r.u16()?, at: r.v3()? },
             57 => Msg::PotionEffect { item: r.u16()? },
             58 => Msg::MountMob { mob: r.u32()? },
+            60 => Msg::MobName { mob: r.u32()?, name: r.str()? },
+            61 => Msg::PlayerSkin { id: r.u32()?, skin: r.u8()? },
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -1316,6 +1332,8 @@ mod tests {
             Msg::Splash { item: 0x8070, at: Vec3::new(1.0, 2.0, 3.0) },
             Msg::PotionEffect { item: 0x8065 },
             Msg::MountMob { mob: 42 },
+            Msg::MobName { mob: 42, name: "Sir Oinks".into() },
+            Msg::PlayerSkin { id: 3, skin: 4 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },

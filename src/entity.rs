@@ -181,11 +181,13 @@ pub enum MobKind {
     Grumbler,
     /// Horse-ish: wanders the plains; tame it, saddle it, ride it (see horses.rs).
     Galloper,
+    /// Dragon-ish: the Hollow's boss (see hollow.rs).
+    Wyrm,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 14] = [
+    pub const ALL: [MobKind; 15] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -200,6 +202,7 @@ impl MobKind {
         MobKind::Hmmer,
         MobKind::Grumbler,
         MobKind::Galloper,
+        MobKind::Wyrm,
     ];
 
     pub fn index(self) -> u8 {
@@ -225,6 +228,7 @@ impl MobKind {
             "hmmer" | "villager" => Some(MobKind::Hmmer),
             "grumbler" | "zombified_piglin" | "zombie_pigman" => Some(MobKind::Grumbler),
             "galloper" | "horse" => Some(MobKind::Galloper),
+            "wyrm" | "hollow wyrm" | "hollow_wyrm" | "ender_dragon" | "dragon" => Some(MobKind::Wyrm),
             _ => None,
         }
     }
@@ -244,6 +248,7 @@ impl MobKind {
             MobKind::Hmmer => "Hmmer",
             MobKind::Grumbler => "Grumbler",
             MobKind::Galloper => "Galloper",
+            MobKind::Wyrm => "Hollow Wyrm",
         }
     }
     /// Half-width and height at size 1.
@@ -263,6 +268,7 @@ impl MobKind {
             MobKind::Hmmer => (0.3, 1.95),
             MobKind::Grumbler => (0.3, 1.95),
             MobKind::Galloper => (0.6, 1.6),
+            MobKind::Wyrm => (2.5, 2.0),
         }
     }
     pub fn max_health(self) -> f32 {
@@ -281,6 +287,7 @@ impl MobKind {
             MobKind::Hmmer => 20.0,
             MobKind::Grumbler => 20.0,
             MobKind::Galloper => 22.0,
+            MobKind::Wyrm => 200.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -522,6 +529,10 @@ impl Mob {
                 self.set_baby(0.0);
             }
         }
+        if self.kind == MobKind::Wyrm {
+            crate::hollow::wyrm_update(self, dt, player, player_visible, &mut ev);
+            return ev;
+        }
         let to_player = player - self.body.pos;
         let dist = to_player.length();
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
@@ -531,7 +542,8 @@ impl Mob {
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
         match self.kind {
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper => {
+            // (The Wyrm flies on its own, see hollow.rs.)
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -898,6 +910,8 @@ pub enum Limb {
     Forward,
     /// Sweeps side to side around the vertical axis (Webber legs).
     SwingY(f32),
+    /// Flaps up and down around the body's length (the Wyrm's wings).
+    Wing(f32),
 }
 
 #[derive(Clone, Copy)]
@@ -936,7 +950,7 @@ static HISSER: [Part; 6] = [
     part([0.01, 0.0, 0.16], [0.24, 0.4, 0.26], [0.0, 0.4, 0.3], Limb::Swing(1.0), [HS; 6]),
 ];
 
-const fn humanoid(skin: u16, face: u16, shirt: u16, pants: u16, arms: Limb, arms2: Limb) -> [Part; 6] {
+pub const fn humanoid(skin: u16, face: u16, shirt: u16, pants: u16, arms: Limb, arms2: Limb) -> [Part; 6] {
     [
         part([-0.25, 0.0, -0.125], [0.25, 0.75, 0.25], [0.0, 0.75, 0.0], Limb::Swing(1.0), [pants; 6]),
         part([0.0, 0.0, -0.125], [0.25, 0.75, 0.25], [0.0, 0.75, 0.0], Limb::Swing(-1.0), [pants; 6]),
@@ -969,7 +983,6 @@ static STARER: [Part; 6] = [
     part([0.24, 0.9, -0.08], [0.16, 1.45, 0.16], [0.0, 2.35, 0.0], Limb::Swing(0.4), [SS; 6]),
     part([-0.24, 2.4, -0.24], [0.48, 0.48, 0.48], [0.0; 3], Limb::Fixed, [SS, SS, SS, SS, SS, T_STARER_FACE]),
 ];
-pub static STOVE: [Part; 6] = humanoid(T_SKIN, T_STOVE_FACE, T_STOVE_SHIRT, T_STOVE_PANTS, Limb::Swing(-1.0), Limb::Swing(1.0));
 
 const CB: u16 = T_CLUCK_BODY;
 const CL: u16 = T_CLUCK_LEG;
@@ -1046,6 +1059,18 @@ static WOOFER: [Part; 8] = [
     part([0.06, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(1.0), [WF; 6]),
     part([-0.05, 0.55, 0.38], [0.1, 0.1, 0.4], [0.0, 0.6, 0.38], Limb::SwingY(1.5), [WF; 6]),
 ];
+const WY: u16 = T_WYRM_SKIN;
+static WYRM: [Part; 8] = [
+    // A long body, neck and head, two great wings, and a tail.
+    part([-0.8, 1.0, -2.0], [1.6, 1.0, 4.0], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.35, 1.3, -3.6], [0.7, 0.6, 1.7], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.55, 1.2, -4.8], [1.1, 0.8, 1.3], [0.0; 3], Limb::Fixed, [WY, WY, WY, WY, WY, T_WYRM_FACE]),
+    part([-4.8, 1.8, -1.2], [4.0, 0.15, 2.4], [-0.8, 1.9, 0.0], Limb::Wing(1.0), [T_WYRM_WING; 6]),
+    part([0.8, 1.8, -1.2], [4.0, 0.15, 2.4], [0.8, 1.9, 0.0], Limb::Wing(-1.0), [T_WYRM_WING; 6]),
+    part([-0.3, 1.2, 2.0], [0.6, 0.5, 2.5], [0.0, 1.45, 2.0], Limb::SwingY(0.6), [WY; 6]),
+    part([-0.8, 0.2, -1.2], [0.4, 0.8, 0.4], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([0.4, 0.2, -1.2], [0.4, 0.8, 0.4], [0.0; 3], Limb::Fixed, [WY; 6]),
+];
 const GL: u16 = T_GALLOPER;
 static GALLOPER: [Part; 9] = [
     // Body, neck, head (with its face), four long legs, a tail.
@@ -1087,6 +1112,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Hmmer => &HMMER,
         MobKind::Grumbler => &GRUMBLER,
         MobKind::Galloper => &GALLOPER,
+        MobKind::Wyrm => &WYRM,
     }
 }
 
@@ -1098,6 +1124,7 @@ pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky:
             Limb::Swing(s) => Mat4::from_rotation_x(swing * s),
             Limb::Forward => Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2 + swing * 0.1),
             Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
+            Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
         };
         let pivot = Vec3::from_array(p.pivot);
         let m = *root

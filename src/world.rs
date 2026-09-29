@@ -222,6 +222,10 @@ impl Generator {
         if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL {
             return self.generate_scorch(cx, cz);
         }
+        // Far west: the wall, then the Hollow (see hollow.rs).
+        if cx * CW < crate::hollow::HOLLOW_X + crate::hollow::WALL {
+            return self.generate_hollow(cx, cz);
+        }
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -377,6 +381,7 @@ impl Generator {
             }
         }
         self.place_structures(cx, cz, &mut b);
+        self.place_crypts(cx, cz, &mut b);
         b
     }
 }

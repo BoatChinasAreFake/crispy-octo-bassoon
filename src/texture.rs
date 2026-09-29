@@ -257,6 +257,20 @@ pub const T_GALLOP_FACE: u16 = 314;
 pub const T_GALLOP_MANE: u16 = 315;
 pub const T_SADDLE_LEATHER: u16 = 316;
 pub const T_SADDLE: u16 = 317;
+pub const T_HOLLOW_STONE: u16 = 318;
+pub const T_HOLLOW_PORTAL: u16 = 319;
+pub const T_EYE_FRAME_TOP: u16 = 320;
+pub const T_EYE_FRAME_FULL: u16 = 321;
+pub const T_EYE_FRAME_SIDE: u16 = 322;
+pub const T_WYRM_CRYSTAL: u16 = 323;
+pub const T_WYRM_EGG: u16 = 324;
+pub const T_STARING_EYE: u16 = 325;
+pub const T_WYRM_SKIN: u16 = 326;
+pub const T_WYRM_WING: u16 = 327;
+pub const T_WYRM_FACE: u16 = 328;
+/// Player skins: four tiles each (tone, face, shirt, trousers; see nametags.rs).
+pub const T_SKIN_FIRST: u16 = 329;
+pub const T_NAME_TAG: u16 = 353;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1657,6 +1671,32 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     a.speckle(T_STOVE_SHIRT, rgb(60, 170, 170), 0.08);
     a.speckle(T_STOVE_PANTS, rgb(60, 60, 150), 0.08);
+    // Player skins (see nametags.rs): the same face, different people.
+    for (k, (_, tone, hair, shirt, pants)) in crate::nametags::SKINS.iter().enumerate() {
+        let [t_tone, t_face, t_shirt, t_pants] = crate::nametags::skin_tiles(k as u16);
+        let c = |v: [u8; 3]| rgb(v[0], v[1], v[2]);
+        a.speckle(t_tone, c(*tone), 0.05);
+        a.copy(t_tone, t_face);
+        for y in 0..4 {
+            for x in 0..16 {
+                a.set(t_face, x, y, c(*hair));
+            }
+        }
+        for (x, e) in [(3usize, rgb(255, 255, 255)), (4, rgb(60, 60, 170)), (11, rgb(60, 60, 170)), (12, rgb(255, 255, 255))] {
+            a.set(t_face, x, 8, e);
+        }
+        for x in 6..10 {
+            a.set(t_face, x, 12, rgb(120, 70, 50));
+        }
+        a.speckle(t_shirt, c(*shirt), 0.08);
+        a.speckle(t_pants, c(*pants), 0.08);
+    }
+    a.each(T_NAME_TAG, |x, y, r, _| {
+        let tag = (3..14).contains(&x) && (5..12).contains(&y) && !(x == 3 && (y == 5 || y == 11));
+        let hole = x == 5 && y == 8;
+        let string = (x == 1 || x == 2) && (y == 8 || y == 7);
+        if string { rgb(230, 230, 230) } else if hole { [0, 0, 0, 0] } else if tag { shade(rgb(215, 190, 140), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
 
     // ---- The "More Parody" update
     a.ore(T_GOLD_ORE, rgb(252, 220, 70), rgb(200, 150, 30));
@@ -2436,6 +2476,41 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         if rim { shade(rgb(70, 70, 75), r.range(0.85, 1.1)) } else { shade(rgb(35, 35, 38), r.range(0.8, 1.1)) }
     });
     a.each(T_HOPPER_SIDE, |x, y, r, _| shade(rgb(75, 75, 80), r.range(0.8, 1.1) * if y % 5 == 0 || x % 8 == 0 { 0.8 } else { 1.0 }));
+    // The Hollow.
+    a.each(T_HOLLOW_STONE, |_, _, r, _| shade(rgb(222, 222, 170), r.range(0.85, 1.05)));
+    a.each(T_HOLLOW_PORTAL, |_, _, r, _| if r.chance(0.06) { rgb(220, 230, 255) } else { shade(rgb(15, 25, 40), r.range(0.6, 1.4)) });
+    let eye_frame = |a: &mut Atlas, tile: u16, eye: bool| {
+        a.each(tile, |x, y, r, _| {
+            let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+            let hole = dx * dx + dy * dy < 16;
+            if hole && eye {
+                if dx * dx + dy * dy < 4 { rgb(10, 20, 15) } else { rgb(40, 170, 120) }
+            } else if hole {
+                rgb(30, 60, 50)
+            } else {
+                shade(rgb(60, 110, 90), r.range(0.8, 1.1))
+            }
+        });
+    };
+    eye_frame(&mut a, T_EYE_FRAME_TOP, false);
+    eye_frame(&mut a, T_EYE_FRAME_FULL, true);
+    a.each(T_EYE_FRAME_SIDE, |_, y, r, _| if y < 4 { shade(rgb(60, 110, 90), r.range(0.8, 1.1)) } else { shade(rgb(222, 222, 170), r.range(0.85, 1.05)) });
+    a.each(T_WYRM_CRYSTAL, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15 || x == y || x + y == 15;
+        if edge { rgb(255, 230, 250) } else { shade(rgb(230, 120, 220), r.range(0.8, 1.2)) }
+    });
+    a.each(T_WYRM_EGG, |_, _, r, _| if r.chance(0.08) { rgb(170, 60, 200) } else { shade(rgb(25, 10, 35), r.range(0.8, 1.2)) });
+    a.each(T_STARING_EYE, |x, y, _, _| {
+        let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+        let d = dx * dx + dy * dy;
+        if d < 6 { rgb(10, 20, 15) } else if d < 30 { rgb(40, 170, 120) } else if d < 40 { rgb(20, 90, 70) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_WYRM_SKIN, |x, y, r, _| shade(rgb(30, 25, 40), r.range(0.7, 1.2) * if (x + y) % 6 == 0 { 0.7 } else { 1.0 }));
+    a.each(T_WYRM_WING, |x, _, r, _| shade(rgb(55, 40, 70), r.range(0.8, 1.1) * if x % 4 == 0 { 0.6 } else { 1.0 }));
+    a.copy(T_WYRM_SKIN, T_WYRM_FACE);
+    for (x, y) in [(3, 6), (4, 6), (11, 6), (12, 6)] {
+        a.set(T_WYRM_FACE, x, y, rgb(200, 60, 230));
+    }
     a.copy(T_COBBLE, T_DISPENSER_FACE);
     for y in 5..11 {
         for x in 4..12 {

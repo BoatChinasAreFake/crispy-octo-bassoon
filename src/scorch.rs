@@ -190,6 +190,16 @@ impl Game {
     pub fn host_use_portal(&mut self, from: u32, at: IVec3) {
         let Some(p) = self.peers.get(&from) else { return };
         let near = p.target.distance(at.as_vec3() + Vec3::splat(0.5)) < 3.0;
+        // The Hollow's portals go straight there (or home).
+        if near && self.world.get_v(at) == HOLLOW_PORTAL {
+            let to = self.hollow_destination(at);
+            if let Some(p) = self.peers.get_mut(&from) {
+                p.target = to;
+                p.pos = to;
+            }
+            self.net_send_to(from, Msg::Effect { heal: 0.0, teleport: Some(to), launch: None, take: None });
+            return;
+        }
         let here = is_portal(self.world.get_v(at)) || is_portal(self.world.get_v(at + IVec3::Y));
         if !near || !here {
             return;

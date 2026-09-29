@@ -23,6 +23,11 @@ pub struct Settings {
     pub mp_addr: String,
     /// Keys and mouse buttons (see keybinds.rs).
     pub binds: crate::keybinds::Bindings,
+    /// How you look (see nametags.rs).
+    pub skin: u8,
+    /// Captions for sounds, and colours that don't lean on red and green (see access.rs).
+    pub subtitles: bool,
+    pub colour_blind: bool,
 }
 
 impl Default for Settings {
@@ -37,6 +42,9 @@ impl Default for Settings {
             mp_name: String::new(),
             mp_addr: "127.0.0.1".into(),
             binds: Default::default(),
+            skin: 0,
+            subtitles: false,
+            colour_blind: false,
         }
     }
 }
@@ -54,7 +62,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -63,6 +71,9 @@ impl Settings {
             self.music_on,
             clean(&self.mp_name, 16),
             clean(&self.mp_addr, 128),
+            self.skin,
+            self.subtitles,
+            self.colour_blind,
         ) + self.binds.to_text().as_str()
     }
 
@@ -90,6 +101,9 @@ impl Settings {
                 "music" => s.music_on = flag(s.music_on),
                 "name" => s.mp_name = clean(v, 16),
                 "server" => s.mp_addr = clean(v, 128),
+                "skin" => s.skin = v.parse::<u8>().unwrap_or(0) % crate::nametags::SKINS.len() as u8,
+                "subtitles" => s.subtitles = flag(s.subtitles),
+                "colour_blind" | "color_blind" => s.colour_blind = flag(s.colour_blind),
                 k => {
                     s.binds.read(k, v);
                 }
@@ -137,6 +151,9 @@ mod tests {
                 b.set(crate::keybinds::Action::Sprint, false, crate::keybinds::Bind::parse("F"));
                 b
             },
+            skin: 3,
+            subtitles: true,
+            colour_blind: true,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));
