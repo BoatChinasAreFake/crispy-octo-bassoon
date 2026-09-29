@@ -304,6 +304,12 @@ impl Game {
         {
             return true;
         }
+        if crate::contraptions::is_comparator(old) && crate::contraptions::is_comparator(new) {
+            return true;
+        }
+        if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
+            return true;
+        }
         // Fire comes from a Sparker (which wears a little).
         if new == FIRE {
             let ok = self.peer_has(from, SPARKER);

@@ -16,9 +16,10 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// rule and experience points; v11 widens tool wear to carry enchantments and
 /// adds joined players' records and the weather; v12 adds animals worth
 /// keeping (tamed, bred, fed), Hmmers, and which portal leads to which; v13
-/// moves block edits out into region files beside the save (see regions.rs).
+/// moves block edits out into region files beside the save (see regions.rs);
+/// v14 moves soil, containers, signs and frames there too.
 /// Older saves still load.
-pub const VERSION: u32 = 13;
+pub const VERSION: u32 = 14;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -402,6 +403,11 @@ pub fn write_name(root: &Path, id: &str, name: &str) -> io::Result<()> {
     std::fs::write(root.join(id).join(INFO_FILE), format!("name={}\n", clean_name(name)))
 }
 
+/// Total size of the files directly in a folder (0 if there's no folder).
+fn dir_size(dir: &Path) -> u64 {
+    std::fs::read_dir(dir).map(|es| es.flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum()).unwrap_or(0)
+}
+
 /// Every world with a save file, most recently played first.
 pub fn list_worlds(root: &Path) -> Vec<WorldEntry> {
     let mut out = Vec::new();
@@ -424,7 +430,8 @@ pub fn list_worlds(root: &Path) -> Vec<WorldEntry> {
             creative,
             seed,
             last_played: meta.as_ref().and_then(|m| m.modified().ok()),
-            size: meta.map(|m| m.len()).unwrap_or(0),
+            // The save plus its region files (where the block edits are).
+            size: meta.map(|m| m.len()).unwrap_or(0) + dir_size(&crate::regions::region_dir(&file)),
             problem,
         });
     }
@@ -630,6 +637,12 @@ mod tests {
         let play = list.iter().find(|w| w.id == "my-base-2").unwrap();
         assert_eq!((play.name.as_str(), play.seed, play.creative), ("Creative Playground", 99, true));
         assert!(play.size > 0 && play.problem.is_none());
+        // Region files count toward a world's size.
+        let regions = crate::regions::region_dir(&world_file(&root, &b));
+        std::fs::create_dir_all(&regions).unwrap();
+        std::fs::write(regions.join("r.0.0.mnrg"), vec![0u8; 5000]).unwrap();
+        let bigger = list_worlds(&root).into_iter().find(|w| w.id == "my-base-2").unwrap();
+        assert_eq!(bigger.size, play.size + 5000);
 
         write_name(&root, &a, "Renamed").unwrap();
         assert_eq!(read_name(&root, &a), "Renamed");

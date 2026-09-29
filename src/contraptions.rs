@@ -10,6 +10,10 @@
 //! - A **Piston** pushes up to 12 blocks in front of it when powered and
 //!   pulls its head back when not. A **Sticky Piston** also pulls the block
 //!   in front back with it. Bedrock, obsidian, containers and doors don't move.
+//! - A **Comparator** looks at the container behind it (a chest, furnace,
+//!   hopper, or a loaded cart on a rail) and powers what's in front while
+//!   there's anything in it; right-click it to switch to "half full", when
+//!   it only switches on once the container is at least half full.
 //! - A **Dispenser** holds nine stacks and, each time power reaches it,
 //!   fires out one thing: arrows fly, buckets pour or scoop, TNT lights,
 //!   splash potions burst, Bone Dust fertilises, anything else is spat out.
@@ -55,6 +59,22 @@ pub fn repeater_state(id: Id) -> (u8, bool) {
 pub fn repeater(facing: u8, on: bool) -> Id {
     REPEATER_FIRST + (facing % 4) as Id * 2 + on as Id
 }
+pub fn is_comparator(id: Id) -> bool {
+    (COMPARATOR_FIRST..COMPARATOR_FIRST + 16).contains(&id)
+}
+/// (facing, half-full mode, on)
+pub fn comparator_state(id: Id) -> (u8, bool, bool) {
+    let k = id - COMPARATOR_FIRST;
+    ((k / 4) as u8, (k / 2) % 2 == 1, k % 2 == 1)
+}
+pub fn comparator(facing: u8, more: bool, on: bool) -> Id {
+    COMPARATOR_FIRST + (facing % 4) as Id * 4 + more as Id * 2 + on as Id
+}
+/// How full a container is, 0 to 1 (each slot counts as full at a whole stack).
+pub fn fullness(c: &crate::containers::Container) -> f32 {
+    let n = c.slots.len().max(1) as f32;
+    c.slots.iter().flatten().map(|&(id, k)| k as f32 / max_stack(id).max(1) as f32).sum::<f32>() / n
+}
 pub fn is_piston(id: Id) -> bool {
     (PISTON_FIRST..PISTON_FIRST + 12).contains(&id) || (STICKY_FIRST..STICKY_FIRST + 12).contains(&id)
 }
@@ -84,7 +104,7 @@ pub fn is_dispenser(id: Id) -> bool {
 
 /// Everything in this module, for the wiring's "is this zappy?" check.
 pub fn is_contraption(id: Id) -> bool {
-    (ZTORCH_ON..DISPENSER_FIRST + 6).contains(&id)
+    (ZTORCH_ON..DISPENSER_FIRST + 6).contains(&id) || is_comparator(id)
 }
 
 /// The item a family member is placed from (and drops as).
@@ -99,6 +119,8 @@ pub fn family(id: Id) -> Option<Id> {
         Some(STICKY_FIRST)
     } else if is_dispenser(id) {
         Some(DISPENSER_FIRST)
+    } else if is_comparator(id) {
+        Some(COMPARATOR_FIRST)
     } else {
         None
     }
@@ -153,6 +175,10 @@ pub fn powers(world: &World, from: IVec3, to: IVec3) -> bool {
         let (f, on) = repeater_state(id);
         return on && from + dir4(f) == to;
     }
+    if is_comparator(id) {
+        let (f, _, on) = comparator_state(id);
+        return on && from + dir4(f) == to;
+    }
     false
 }
 
@@ -174,6 +200,14 @@ impl Game {
             let fed = crate::wiring::source_on(b) || b == WIRE_ON || powers(&self.world, back, p);
             if fed != on {
                 self.world.set_v(p, repeater(f, fed));
+            }
+        } else if is_comparator(id) {
+            let (f, more, on) = comparator_state(id);
+            let back = p - dir4(f);
+            let full = self.container_in(back).and_then(|k| crate::containers::store_ref(&self.world, &self.vehicles, k)).map(fullness).unwrap_or(0.0);
+            let want = if more { full >= 0.5 } else { full > 0.0 };
+            if want != on {
+                self.world.set_v(p, comparator(f, more, want));
             }
         } else if is_piston(id) {
             let (f, extended, sticky) = piston_state(id);
@@ -223,6 +257,9 @@ impl Game {
         self.world.set_v(p, piston(f, true, sticky));
         self.shove_bodies(p + d, line.len() + 1, d);
         self.sfx(Sfx::Place(Mat::Stone), Some(p.as_vec3() + Vec3::splat(0.5)));
+        if !line.is_empty() && !self.dedicated && self.player.body.pos.distance(p.as_vec3()) < 16.0 {
+            self.advance("pushy");
+        }
     }
 
     fn piston_pull(&mut self, p: IVec3, f: u8, sticky: bool) {
@@ -429,5 +466,37 @@ mod tests {
         settle(&mut g);
         assert_eq!(g.arrows.len(), 2);
         assert_eq!(g.world.containers[&d].slots[0], None);
+    }
+
+    #[test]
+    fn comparators_read_how_full_a_chest_is() {
+        let mut g = crate::game::tests::arena(72);
+        let chest = IVec3::new(0, 50, 4);
+        // Comparator east of the chest, pointing east (facing 1), a lamp after it.
+        let cmp = chest + IVec3::X;
+        let lamp = cmp + IVec3::X;
+        g.world.set_v(chest, CHEST);
+        g.world.set_v(cmp, comparator(1, false, false));
+        g.world.set_v(lamp, LAMP);
+        let tick = |g: &mut Game| {
+            for _ in 0..5 {
+                g.zap_tick(0.1);
+            }
+        };
+        tick(&mut g);
+        assert_eq!(g.world.get_v(lamp), LAMP, "empty chest, no power");
+        g.world.containers.get_mut(&chest).unwrap().slots[0] = Some((COBBLE, 1));
+        tick(&mut g);
+        assert!(comparator_state(g.world.get_v(cmp)).2);
+        assert_eq!(g.world.get_v(lamp), LAMP_ON);
+        // Half-full mode wants more.
+        assert!(g.use_switch(cmp, g.world.get_v(cmp)));
+        tick(&mut g);
+        assert_eq!(g.world.get_v(lamp), LAMP);
+        for s in 0..14 {
+            g.world.containers.get_mut(&chest).unwrap().slots[s] = Some((COBBLE, 64));
+        }
+        tick(&mut g);
+        assert_eq!(g.world.get_v(lamp), LAMP_ON);
     }
 }

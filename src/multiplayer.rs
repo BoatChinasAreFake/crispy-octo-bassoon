@@ -824,6 +824,14 @@ impl Game {
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
             return true;
         }
+        // Beacons switch effect.
+        if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
+            return true;
+        }
+        // Comparators switch mode (the host works out whether they're on).
+        if crate::contraptions::is_comparator(old) && crate::contraptions::is_comparator(new) {
+            return crate::contraptions::comparator_state(old).0 == crate::contraptions::comparator_state(new).0;
+        }
         // Two slabs make a block.
         if slab_of(old).is_some() {
             return new == AIR || (new == made_of(old) && new != AIR);
@@ -954,6 +962,11 @@ impl Game {
                     self.apply_potion(p);
                 }
             }
+            Msg::BeaconEffect { item } => {
+                if let Some((p, false)) = crate::potions::potion_of(item) {
+                    self.beacon_effect(p);
+                }
+            }
             Msg::Chat { from: SYSTEM, text } => self.msg(text),
             Msg::Chat { from, text } => {
                 let name = self.peer_name(from);
@@ -1076,14 +1089,22 @@ impl Game {
         for chunk in edits.chunks(4096) {
             self.net_send_msg(Msg::Blocks(chunk.to_vec()));
         }
-        // Edits just read from a region file go to everyone (they may be near it).
+        // What was just read from a region file goes to everyone (they may be near it).
         let news = self.world.regions.as_mut().map(|r| std::mem::take(&mut r.news)).unwrap_or_default();
-        if matches!(self.net, Some(Net::Host(_))) {
-            for (cx, cz) in news {
+        if matches!(self.net, Some(Net::Host(_))) && !news.is_empty() {
+            for &(cx, cz) in &news {
                 if let Some(m) = self.world.mods.get(&(cx, cz)) {
                     let entries = m.iter().map(|(&i, &b)| (i, b)).collect();
                     self.net_send_msg(Msg::Mods { cx, cz, entries });
                 }
+            }
+            // And the signs and frames in them.
+            let chunks: std::collections::HashSet<(i32, i32)> = news.into_iter().collect();
+            let inside = |p: &IVec3| chunks.contains(&(p.x.div_euclid(16), p.z.div_euclid(16)));
+            let mut out: Vec<Msg> = self.world.signs.iter().filter(|(p, _)| inside(p)).map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }).collect();
+            out.extend(self.world.frames.iter().filter(|(p, _)| inside(p)).map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+            for m in out {
+                self.net_send_msg(m);
             }
         }
 

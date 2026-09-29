@@ -271,6 +271,35 @@ pub const T_WYRM_FACE: u16 = 328;
 /// Player skins: four tiles each (tone, face, shirt, trousers; see nametags.rs).
 pub const T_SKIN_FIRST: u16 = 329;
 pub const T_NAME_TAG: u16 = 353;
+// Biomes (see world.rs).
+pub const T_SPRUCE_LOG_SIDE: u16 = 354;
+pub const T_SPRUCE_LOG_TOP: u16 = 355;
+pub const T_SPRUCE_LEAVES: u16 = 356;
+pub const T_JUNGLE_LOG_SIDE: u16 = 357;
+pub const T_JUNGLE_LOG_TOP: u16 = 358;
+pub const T_JUNGLE_LEAVES: u16 = 359;
+pub const T_MUD: u16 = 360;
+pub const T_LILY_PAD: u16 = 361;
+pub const T_RED_SAND: u16 = 362;
+/// Four terracottas: plain, orange, red, yellow.
+pub const T_TERRACOTTA: u16 = 363;
+pub const T_DEAD_BUSH: u16 = 367;
+pub const T_MELON_SIDE: u16 = 368;
+pub const T_MELON_TOP: u16 = 369;
+pub const T_MELON_SLICE: u16 = 370;
+pub const T_SQUAWK: u16 = 371;
+pub const T_SQUAWK_FACE: u16 = 372;
+pub const T_SQUAWK_WING: u16 = 373;
+pub const T_CLANK: u16 = 374;
+pub const T_CLANK_FACE: u16 = 375;
+/// Detector rails: north-south off/on, east-west off/on.
+pub const T_DETECTOR_RAIL: u16 = 376;
+pub const T_CHEST_CART_ITEM: u16 = 380;
+pub const T_HOPPER_CART_ITEM: u16 = 381;
+/// Comparators: any/off, any/on, half/off, half/on.
+pub const T_COMPARATOR: u16 = 382;
+pub const T_BEACON: u16 = 386;
+pub const T_BEACON_BEAM: u16 = 387;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2334,6 +2363,22 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             }
         });
     }
+    // Detector rails: rails with a pressure plate in the middle, red when a cart's on it.
+    for k in 0..4u16 {
+        let (ew, on) = (k >= 2, k % 2 == 1);
+        a.each(T_DETECTOR_RAIL + k, |x, y, r, _| {
+            let (across, along) = if ew { (y as f32 + 0.5, x as f32 + 0.5) } else { (x as f32 + 0.5, y as f32 + 0.5) };
+            if (3.0..5.0).contains(&across) || (11.0..13.0).contains(&across) {
+                shade(rgb(170, 170, 178), r.range(0.9, 1.1))
+            } else if (5.5..10.5).contains(&across) && (5.0..11.0).contains(&along) {
+                if on { rgb(230, 50, 40) } else { shade(rgb(120, 115, 110), r.range(0.9, 1.05)) }
+            } else if (2.0..14.0).contains(&across) && along.rem_euclid(4.0) < 2.0 {
+                shade(rgb(115, 85, 50), r.range(0.85, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
     a.each(T_CART, |x, y, r, _| {
         let rivet = (x % 5 == 2) && (y % 5 == 2);
         let rim = x == 0 || y == 0 || x == 15 || y == 15;
@@ -2354,6 +2399,105 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             shade(rgb(60, 140, 45), r.range(0.75, 1.15))
         } else {
             [0, 0, 0, 0]
+        }
+    });
+    // Biomes.
+    let bark = |a: &mut Atlas, side: u16, top: u16, bark: [u8; 3], heart: [u8; 3]| {
+        a.each(side, |x, _y, r, _| {
+            let stripe = if x % 3 == 0 { 0.72 } else if x % 5 == 2 { 0.88 } else { 1.0 };
+            shade(rgb(bark[0], bark[1], bark[2]), stripe * r.range(0.88, 1.1))
+        });
+        a.each(top, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let d = dx.abs().max(dy.abs());
+            if d > 6.5 {
+                shade(rgb(bark[0], bark[1], bark[2]), r.range(0.85, 1.05))
+            } else {
+                let ring = if (d as i32) % 2 == 0 { 1.0 } else { 0.85 };
+                shade(rgb(heart[0], heart[1], heart[2]), ring * r.range(0.95, 1.05))
+            }
+        });
+    };
+    bark(&mut a, T_SPRUCE_LOG_SIDE, T_SPRUCE_LOG_TOP, [70, 50, 32], [140, 105, 65]);
+    bark(&mut a, T_JUNGLE_LOG_SIDE, T_JUNGLE_LOG_TOP, [110, 90, 45], [175, 130, 80]);
+    a.each(T_SPRUCE_LEAVES, |x, y, r, _| {
+        // Needles: darker, bluer, in little diagonal strokes.
+        if r.chance(0.2) { return [40, 80, 55, 0]; }
+        shade(rgb(40, 85, 55), r.range(0.7, 1.1) * if (x + y) % 3 == 0 { 0.8 } else { 1.0 })
+    });
+    a.each(T_JUNGLE_LEAVES, |_, _, r, _| if r.chance(0.15) { [50, 150, 30, 0] } else { shade(rgb(50, 155, 30), r.range(0.7, 1.2)) });
+    a.each(T_MUD, |x, y, r, p| {
+        let wet = p.noise2(x as f32 / 5.0, y as f32 / 5.0) > 0.2;
+        shade(if wet { rgb(60, 50, 45) } else { rgb(80, 65, 55) }, r.range(0.85, 1.1))
+    });
+    a.each(T_LILY_PAD, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let notch = dx > 0.0 && dy.abs() < dx * 0.35;
+        if dx * dx + dy * dy < 52.0 && !notch { shade(rgb(50, 120, 40), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_RED_SAND, |_, _, r, _| shade(rgb(190, 100, 45), r.range(0.85, 1.1)));
+    for (i, c) in [[150, 95, 70], [165, 85, 40], [140, 60, 45], [185, 135, 55]].iter().enumerate() {
+        let c = *c;
+        a.each(T_TERRACOTTA + i as u16, move |_, _, r, _| shade(rgb(c[0], c[1], c[2]), r.range(0.9, 1.06)));
+    }
+    a.each(T_DEAD_BUSH, |x, y, _, _| {
+        // A few bare twigs from one root.
+        let (fx, fy) = (x as f32 - 7.5, 15.0 - y as f32);
+        let twig = |slope: f32, from: f32| fy > from && (fx - (fy - from) * slope).abs() < 0.7;
+        if (fx.abs() < 0.7 && fy < 9.0) || twig(0.8, 3.0) || twig(-0.7, 4.0) || twig(0.35, 6.0) || twig(-1.2, 7.0) { rgb(125, 85, 45) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_MELON_SIDE, |x, _, r, _| shade(if x % 5 < 2 { rgb(60, 120, 30) } else { rgb(100, 160, 40) }, r.range(0.85, 1.1)));
+    a.each(T_MELON_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        shade(if ((dx * dx + dy * dy).sqrt() as i32) % 3 == 0 { rgb(70, 125, 30) } else { rgb(105, 160, 45) }, r.range(0.85, 1.1))
+    });
+    a.each(T_MELON_SLICE, |x, y, _, _| {
+        // A wedge: green rind along the bottom, red flesh, black seeds.
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 3.0);
+        let d = (dx * dx + dy * dy).sqrt();
+        if y < 3 || d > 10.5 {
+            [0, 0, 0, 0]
+        } else if d > 9.0 {
+            rgb(70, 140, 40)
+        } else if d > 8.0 {
+            rgb(230, 235, 190)
+        } else if (x * 7 + y * 3) % 11 == 0 && d < 7.0 {
+            rgb(25, 20, 20)
+        } else {
+            rgb(225, 55, 60)
+        }
+    });
+    a.each(T_SQUAWK, |x, y, r, _| shade(if (x + y) % 7 == 0 { rgb(240, 200, 40) } else { rgb(215, 35, 35) }, r.range(0.85, 1.1)));
+    a.each(T_SQUAWK_WING, |_, y, r, _| shade(if y < 6 { rgb(40, 90, 210) } else if y < 11 { rgb(245, 200, 40) } else { rgb(215, 35, 35) }, r.range(0.85, 1.1)));
+    a.each(T_SQUAWK_FACE, |x, y, r, _| {
+        if (4..6).contains(&y) && (x == 3 || x == 12) {
+            rgb(15, 15, 15)
+        } else if y >= 7 && (6..10).contains(&x) {
+            rgb(50, 45, 40) // a big curved beak
+        } else if y < 4 {
+            rgb(240, 200, 40)
+        } else {
+            shade(rgb(215, 35, 35), r.range(0.9, 1.05))
+        }
+    });
+    a.each(T_CLANK, |x, y, r, p| {
+        // Riveted iron, with vines creeping up it.
+        let vine = p.noise2(x as f32 / 3.0, y as f32 / 6.0) > 0.35;
+        if vine {
+            shade(rgb(60, 120, 40), r.range(0.8, 1.1))
+        } else if (x % 8 == 1 || x % 8 == 6) && y % 5 == 2 {
+            rgb(120, 115, 110)
+        } else {
+            shade(rgb(205, 200, 190), r.range(0.85, 1.05))
+        }
+    });
+    a.each(T_CLANK_FACE, |x, y, r, _| {
+        if (5..7).contains(&y) && (x == 4 || x == 11) {
+            rgb(150, 30, 20) // glowing, slightly worried eyes
+        } else if (3..5).contains(&y) && (3..13).contains(&x) {
+            rgb(150, 145, 135) // a heavy brow
+        } else {
+            shade(rgb(200, 195, 185), r.range(0.88, 1.04))
         }
     });
     a.each(T_APPLE, |x, y, r, _| {
@@ -2456,6 +2600,38 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             if arrow { if lit { rgb(250, 60, 40) } else { rgb(110, 30, 25) } } else { shade(rgb(160, 160, 160), r.range(0.85, 1.05) * if edge { 0.8 } else { 1.0 }) }
         });
     }
+    // Comparators: two torches at the back and one at the front; the front one
+    // lights in "half full" mode. Red when putting out power.
+    for k in 0..4u16 {
+        let (more, on) = (k >= 2, k % 2 == 1);
+        a.each(T_COMPARATOR + k, |x, y, r, _| {
+            let dot = |cx: i32, cy: i32| (x as i32 - cx).abs() <= 1 && (y as i32 - cy).abs() <= 1;
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            if dot(4, 11) || dot(11, 11) {
+                if on { rgb(250, 60, 40) } else { rgb(110, 30, 25) }
+            } else if dot(7, 3) {
+                if more { rgb(250, 200, 60) } else { rgb(90, 80, 60) }
+            } else {
+                shade(rgb(160, 160, 160), r.range(0.85, 1.05) * if edge { 0.8 } else { 1.0 })
+            }
+        });
+    }
+    a.each(T_BEACON, |x, y, r, _| {
+        // Glass round a glowing, pale core.
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        let core = (4..12).contains(&x) && (4..12).contains(&y);
+        if edge {
+            shade(rgb(200, 235, 240), r.range(0.9, 1.0))
+        } else if core {
+            shade(rgb(170, 250, 245), r.range(0.9, 1.1))
+        } else {
+            [180, 230, 240, 110]
+        }
+    });
+    a.each(T_BEACON_BEAM, |_, y, r, _| {
+        let a = 150 + (r.range(0.0, 60.0) as u8) - if y % 4 == 0 { 30 } else { 0 };
+        [200, 250, 255, a]
+    });
     a.each(T_PISTON_SIDE, |x, y, r, _| {
         if y < 4 { shade(rgb(160, 125, 80), r.range(0.85, 1.1)) } else { shade(rgb(115, 115, 115), r.range(0.8, 1.05) * if x % 5 == 0 { 0.85 } else { 1.0 }) }
     });
@@ -2566,6 +2742,19 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.sprite(T_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(225, 210, 170)), ('g', rgb(110, 160, 80)), ('b', rgb(80, 120, 210)), ('r', rgb(200, 40, 40))]);
     a.sprite(T_BOAT_ITEM, &BOAT_SPRITE, &[('#', rgb(60, 40, 20)), ('w', rgb(170, 130, 78)), ('d', rgb(130, 95, 55))]);
     a.sprite(T_CART_ITEM, &CART_SPRITE, &[('#', rgb(30, 30, 35)), ('b', rgb(120, 120, 128)), ('h', rgb(180, 180, 188)), ('k', rgb(50, 50, 55))]);
+    // Loaded carts: the cart with a chest lid, or a hopper's funnel, poking out of the top.
+    a.copy(T_CART_ITEM, T_CHEST_CART_ITEM);
+    a.copy(T_CART_ITEM, T_HOPPER_CART_ITEM);
+    for x in 3..13 {
+        for y in 2..7 {
+            let chest = if y == 4 && (7..9).contains(&x) { rgb(200, 190, 90) } else if y == 2 || x == 3 || x == 12 { rgb(110, 75, 40) } else { rgb(160, 115, 60) };
+            a.set(T_CHEST_CART_ITEM, x, y, chest);
+            let funnel = y == 2 || ((y as i32 - 2) <= (x as i32 - 3).min(12 - x as i32));
+            if funnel {
+                a.set(T_HOPPER_CART_ITEM, x, y, if y == 2 { rgb(60, 60, 65) } else { rgb(95, 95, 102) });
+            }
+        }
+    }
     // ---- Hmmers
     a.copy(T_SKIN, T_HMM_FACE);
     for (x, y, c) in [(3, 6, rgb(255, 255, 255)), (4, 6, rgb(40, 110, 40)), (11, 6, rgb(40, 110, 40)), (12, 6, rgb(255, 255, 255))] {

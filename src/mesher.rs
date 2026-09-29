@@ -133,6 +133,19 @@ impl<'a> Hood<'a> {
     }
 }
 
+/// Smooth lighting (Options): light blends across each face, with ambient
+/// occlusion in the corners. Off, each face is lit evenly by the cell in front
+/// of it (flat faces also merge into fewer, bigger quads).
+static SMOOTH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_smooth(on: bool) {
+    SMOOTH.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn smooth() -> bool {
+    SMOOTH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 3]) -> Vertex {
     let (u0, v0, s) = tile_uv(tile);
     let u = u0 + UV_EPS + uv[0] * (s - 2.0 * UV_EPS);
@@ -399,6 +412,15 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             };
                             let mut v = [Vertex::default(); 4];
                             let mut ao = [0.0f32; 4];
+                            if !smooth() {
+                                let (sky, blk) = hood.lit(nx, ny, nz);
+                                for i in 0..4 {
+                                    let c = corners[i];
+                                    v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [shade * 1.0, sky, blk]);
+                                }
+                                flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light) };
+                                continue;
+                            }
                             for i in 0..4 {
                                 let c = corners[i];
                                 let mut d1 = [0i32; 3];

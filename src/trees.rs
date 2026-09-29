@@ -17,7 +17,7 @@ use crate::block::*;
 use crate::game::Game;
 use crate::noise::Rng;
 use crate::sound::{Mat, Sfx};
-use crate::world::{World, CH};
+use crate::world::{TreeKind, World, CH};
 use macroquad::math::{ivec3, IVec3, Vec3};
 use std::collections::VecDeque;
 
@@ -30,26 +30,11 @@ pub const LEAF_REACH: i32 = 4;
 /// Leaf checks handled per tick, so a felled forest doesn't stall the game.
 const CHECKS_PER_TICK: usize = 64;
 
-/// Where a tree grown at `base` (the sapling's cell) puts its blocks.
-pub fn tree_shape(base: IVec3, trunk: i32, rng: &mut Rng) -> Vec<(IVec3, Id)> {
-    let top = base.y + trunk - 1;
-    let mut out = Vec::new();
-    for dy in -2..=1 {
-        let rad: i32 = if dy <= -1 { 2 } else { 1 };
-        for dz in -rad..=rad {
-            for dx in -rad..=rad {
-                let corner = dx.abs() == rad && dz.abs() == rad;
-                if corner && (dy == 1 || rng.chance(0.5)) {
-                    continue;
-                }
-                out.push((ivec3(base.x + dx, top + dy, base.z + dz), LEAVES));
-            }
-        }
-    }
-    for y in base.y..top {
-        out.push((ivec3(base.x, y, base.z), LOG));
-    }
-    out
+/// Where a tree of `kind` grown at `base` (the sapling's cell) puts its
+/// blocks, and whether each pushes through what's there.
+pub fn tree_shape(kind: TreeKind, base: IVec3, trunk: i32, rng: &mut Rng) -> Vec<(IVec3, Id, bool)> {
+    let ground = base - IVec3::Y;
+    kind.shape(trunk, |_| rng.f32()).into_iter().map(|(o, id, force)| (ground + o, id, force)).collect()
 }
 
 /// Is this leaf within reach of a log, stepping through leaves?
@@ -59,10 +44,10 @@ pub fn leaf_supported(world: &World, p: IVec3) -> bool {
     while let Some((q, d)) = queue.pop_front() {
         for n in [q + IVec3::X, q - IVec3::X, q + IVec3::Y, q - IVec3::Y, q + IVec3::Z, q - IVec3::Z] {
             let id = world.get_v(n);
-            if id == LOG {
+            if is_log(id) {
                 return true;
             }
-            if id == LEAVES && d + 1 < LEAF_REACH && !seen.contains(&n) {
+            if is_leaves(id) && d + 1 < LEAF_REACH && !seen.contains(&n) {
                 seen.push(n);
                 queue.push_back((n, d + 1));
             }
@@ -79,7 +64,7 @@ impl World {
             for dz in -r..=r {
                 for dx in -r..=r {
                     let q = p + ivec3(dx, dy, dz);
-                    if self.get_v(q) == LEAVES {
+                    if is_leaves(self.get_v(q)) {
                         self.leaf_checks.insert(q);
                     }
                 }
@@ -98,7 +83,7 @@ impl Game {
         let batch: Vec<IVec3> = self.world.leaf_checks.iter().take(CHECKS_PER_TICK).copied().collect();
         for p in batch {
             self.world.leaf_checks.remove(&p);
-            if self.world.get_v(p) == LEAVES && !leaf_supported(&self.world, p) && !self.decaying.iter().any(|d| d.0 == p) {
+            if is_leaves(self.world.get_v(p)) && !leaf_supported(&self.world, p) && !self.decaying.iter().any(|d| d.0 == p) {
                 let delay = self.rng.range(0.5, 6.0);
                 self.decaying.push((p, delay));
             }
@@ -114,13 +99,14 @@ impl Game {
             }
         });
         for p in wither {
-            if self.world.get_v(p) != LEAVES || leaf_supported(&self.world, p) {
+            let id = self.world.get_v(p);
+            if !is_leaves(id) || leaf_supported(&self.world, p) {
                 continue;
             }
             self.world.set_v(p, AIR);
             self.block_particles(p, 4);
             let center = p.as_vec3() + Vec3::splat(0.5);
-            for (item, n) in crate::farming::random_drops(LEAVES, &mut self.rng) {
+            for (item, n) in crate::farming::random_drops(id, &mut self.rng) {
                 self.pop_drop(center, item, n);
             }
         }
@@ -148,25 +134,27 @@ impl Game {
         if self.world.get_v(p) != SAPLING || !self.sapling_lit(p) {
             return false;
         }
-        let trunk = self.rng.int(4, 7);
+        // Whatever grows around here: spruce in the cold, jungle trees in the jungle...
+        let kind = self.world.generator.column(p.x, p.z).1.tree();
+        let trunk = kind.trunk(self.rng.f32());
         if p.y + trunk + 2 >= CH {
             return false;
         }
         // Room for the trunk and the crown's middle.
         let room = (1..trunk + 2).all(|dy| {
             let id = self.world.get_v(p + IVec3::Y * dy);
-            id == AIR || id == LEAVES || block(id).model == Model::Cross
+            id == AIR || is_leaves(id) || block(id).model == Model::Cross
         });
         if !room {
             return false;
         }
-        for (q, id) in tree_shape(p, trunk, &mut self.rng) {
+        for (q, id, force) in tree_shape(kind, p, trunk, &mut self.rng) {
             let here = self.world.get_v(q);
-            if id == LOG || here == AIR || block(here).model == Model::Cross && here != SAPLING {
+            if force || here == AIR || block(here).model == Model::Cross && here != SAPLING {
                 self.world.set_v(q, id);
             }
         }
-        self.world.set_v(p, LOG);
+        self.world.set_v(p, kind.log());
         self.sfx(Sfx::Place(Mat::Wood), Some(p.as_vec3() + Vec3::splat(0.5)));
         true
     }
@@ -192,11 +180,34 @@ mod tests {
     #[test]
     fn tree_shape_has_a_trunk_and_a_crown() {
         let mut rng = Rng::new(3);
-        let blocks = tree_shape(ivec3(0, 10, 0), 5, &mut rng);
+        let blocks = tree_shape(TreeKind::Oak, ivec3(0, 10, 0), 5, &mut rng);
         let logs: Vec<_> = blocks.iter().filter(|b| b.1 == LOG).collect();
-        assert_eq!(logs.len(), 4);
+        assert_eq!(logs.len(), 5);
         assert!(blocks.iter().filter(|b| b.1 == LEAVES).count() > 20);
         assert!(blocks.iter().all(|b| b.0.y >= 10));
+    }
+
+    #[test]
+    fn every_kind_of_tree_holds_on_to_all_its_leaves() {
+        // Built on a stone floor, no leaf should start out too far from the trunk to stay.
+        for kind in [TreeKind::Oak, TreeKind::Spruce, TreeKind::Jungle, TreeKind::Swamp] {
+            for seed in 0..6 {
+                let mut g = crate::game::tests::arena(40 + seed);
+                let at = ivec3(0, 50, 0);
+                let mut rng = Rng::new(seed as u64);
+                let trunk = kind.trunk(rng.f32());
+                let blocks = tree_shape(kind, at, trunk, &mut rng);
+                for &(q, id, _) in &blocks {
+                    g.world.set_v(q, id);
+                }
+                for &(q, id, _) in &blocks {
+                    if is_leaves(id) && g.world.get_v(q) == id {
+                        assert!(leaf_supported(&g.world, q), "{kind:?} leaf at {} (trunk {trunk}) would rot", q - at);
+                    }
+                }
+                assert!(blocks.iter().any(|b| b.1 == kind.log()) && blocks.iter().filter(|b| b.1 == kind.leaves()).count() > 15, "{kind:?}");
+            }
+        }
     }
 
     #[test]
@@ -211,11 +222,11 @@ mod tests {
         g.world.set_v(at, SAPLING);
         assert!(g.world.saplings.contains(&at));
         assert!(g.grow_sapling(at));
-        assert_eq!(g.world.get_v(at), LOG);
+        assert!(is_log(g.world.get_v(at)));
         assert!(!g.world.saplings.contains(&at));
         // Chop the trunk: the crown withers, dropping things.
         let mut y = at.y;
-        while g.world.get_v(ivec3(at.x, y, at.z)) == LOG {
+        while is_log(g.world.get_v(ivec3(at.x, y, at.z))) {
             g.world.set_v(ivec3(at.x, y, at.z), AIR);
             y += 1;
         }
@@ -223,7 +234,7 @@ mod tests {
         for _ in 0..600 {
             g.trees_tick(0.05);
         }
-        let left = (-2..=2).flat_map(|dx| (-2..=2).flat_map(move |dz| (0..9).map(move |dy| ivec3(dx, dy, dz)))).filter(|&o| g.world.get_v(at + o) == LEAVES).count();
+        let left = (-3..=3).flat_map(|dx| (-3..=3).flat_map(move |dz| (0..16).map(move |dy| ivec3(dx, dy, dz)))).filter(|&o| is_leaves(g.world.get_v(at + o))).count();
         assert_eq!(left, 0);
     }
 

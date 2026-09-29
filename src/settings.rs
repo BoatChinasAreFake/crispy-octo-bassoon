@@ -28,6 +28,10 @@ pub struct Settings {
     /// Captions for sounds, and colours that don't lean on red and green (see access.rs).
     pub subtitles: bool,
     pub colour_blind: bool,
+    /// Graphics: leaves sway, water reflects the sky, light blends smoothly across faces.
+    pub waving_leaves: bool,
+    pub water_reflections: bool,
+    pub smooth_lighting: bool,
 }
 
 impl Default for Settings {
@@ -45,6 +49,9 @@ impl Default for Settings {
             skin: 0,
             subtitles: false,
             colour_blind: false,
+            waving_leaves: true,
+            water_reflections: true,
+            smooth_lighting: true,
         }
     }
 }
@@ -62,7 +69,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -74,6 +81,9 @@ impl Settings {
             self.skin,
             self.subtitles,
             self.colour_blind,
+            self.waving_leaves,
+            self.water_reflections,
+            self.smooth_lighting,
         ) + self.binds.to_text().as_str()
     }
 
@@ -104,6 +114,9 @@ impl Settings {
                 "skin" => s.skin = v.parse::<u8>().unwrap_or(0) % crate::nametags::SKINS.len() as u8,
                 "subtitles" => s.subtitles = flag(s.subtitles),
                 "colour_blind" | "color_blind" => s.colour_blind = flag(s.colour_blind),
+                "waving_leaves" => s.waving_leaves = flag(s.waving_leaves),
+                "water_reflections" => s.water_reflections = flag(s.water_reflections),
+                "smooth_lighting" => s.smooth_lighting = flag(s.smooth_lighting),
                 k => {
                     s.binds.read(k, v);
                 }
@@ -154,6 +167,9 @@ mod tests {
             skin: 3,
             subtitles: true,
             colour_blind: true,
+            waving_leaves: false,
+            water_reflections: false,
+            smooth_lighting: false,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

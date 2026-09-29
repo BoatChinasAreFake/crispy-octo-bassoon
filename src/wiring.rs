@@ -35,7 +35,7 @@ pub fn is_wire(id: Id) -> bool {
 
 /// A switch that's on (or the block that always is).
 pub fn source_on(id: Id) -> bool {
-    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK)
+    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK) || crate::vehicles::detector_on(id)
 }
 
 /// Things that sit on the floor and fall off when it goes.
@@ -131,6 +131,12 @@ impl Game {
             }
         }
         self.pressure_plates(dt);
+        self.detector_rails(dt);
+        // Comparators watch their containers (which change without any block changing).
+        let comparators: Vec<IVec3> = self.world.comparators.iter().copied().filter(|p| self.world.is_loaded(p.x, p.z)).collect();
+        for p in comparators {
+            self.contraption_update(p);
+        }
         let dirty: Vec<IVec3> = self.world.zap_dirty.drain().collect();
         let mut check: HashSet<IVec3> = HashSet::new();
         let mut done: HashSet<IVec3> = HashSet::new();
@@ -146,7 +152,9 @@ impl Game {
             check.insert(p);
             // Rails bend to join their neighbours; powered ones follow the power.
             if crate::vehicles::is_rail(id) {
-                let want = if crate::vehicles::is_powered_rail(id) {
+                let want = if crate::vehicles::is_detector(id) {
+                    crate::vehicles::detector_shape(&self.world, p, crate::vehicles::detector_on(id))
+                } else if crate::vehicles::is_powered_rail(id) {
                     crate::vehicles::powered_shape(&self.world, p, powered(&self.world, p))
                 } else {
                     crate::vehicles::rail_shape(&self.world, p)
@@ -285,6 +293,39 @@ impl Game {
         }
     }
 
+    /// Detector rails switch on under a cart, and off a moment after it's gone.
+    fn detector_rails(&mut self, dt: f32) {
+        use crate::vehicles::{detector_on, detector_shape, is_detector, BOAT_KIND};
+        let carts: HashSet<IVec3> = self.vehicles.iter().filter(|v| v.kind != BOAT_KIND).map(|v| v.cell()).filter(|c| is_detector(self.world.get_v(*c))).collect();
+        for &p in &carts {
+            self.detectors.insert(p, 0.5);
+            let id = self.world.get_v(p);
+            if !detector_on(id) {
+                let mine = self.riding.is_some_and(|r| self.vehicles.iter().any(|v| v.id == r && v.cell() == p));
+                if mine {
+                    self.advance("tattletale");
+                }
+                self.world.set_v(p, detector_shape(&self.world, p, true));
+                self.sfx(Sfx::Click, Some(p.as_vec3() + Vec3::splat(0.5)));
+            }
+        }
+        let mut off = Vec::new();
+        for (p, t) in self.detectors.iter_mut() {
+            if !carts.contains(p) {
+                *t -= dt;
+                if *t <= 0.0 {
+                    off.push(*p);
+                }
+            }
+        }
+        for p in off {
+            self.detectors.remove(&p);
+            if detector_on(self.world.get_v(p)) {
+                self.world.set_v(p, detector_shape(&self.world, p, false));
+            }
+        }
+    }
+
     /// Right-click on a lever or button (the local player). True if it was one.
     pub fn use_switch(&mut self, pos: IVec3, id: Id) -> bool {
         let new = match id {
@@ -292,6 +333,16 @@ impl Game {
             LEVER_ON => LEVER,
             BUTTON => BUTTON_ON,
             BUTTON_ON => return true,
+            b if crate::beacon::is_beacon(b) => {
+                let next = crate::beacon::next_effect(b);
+                self.msg(format!("The beacon will give: {}.", crate::beacon::effect_of(next).name()));
+                next
+            }
+            c if crate::contraptions::is_comparator(c) => {
+                // Flip between "anything in it" and "half full".
+                let (f, more, _) = crate::contraptions::comparator_state(c);
+                crate::contraptions::comparator(f, !more, false)
+            }
             _ => return false,
         };
         self.world.set_v(pos, new);
@@ -326,5 +377,27 @@ mod tests {
         assert!(is_zappy(WIRE) && is_zappy(LAMP_ON) && !is_zappy(ZAP_ORE) && !is_zappy(STONE));
         assert_eq!(placing_item(WIRE), Some(ZAP_DUST));
         assert_eq!(placing_item(WIRE_ON), None);
+    }
+
+    #[test]
+    fn detector_rails_power_things_while_a_cart_is_on_them() {
+        let mut g = crate::game::tests::arena(71);
+        let rail = IVec3::new(0, 50, 2);
+        let lamp = rail + IVec3::X;
+        g.world.set_v(rail, DETECTOR_RAIL);
+        g.world.set_v(lamp, LAMP);
+        g.world.set_v(rail + IVec3::Z, RAIL_FIRST);
+        let id = g.spawn_vehicle(crate::vehicles::CART_KIND, rail.as_vec3() + Vec3::new(0.5, 0.06, 0.5), 0.0);
+        for _ in 0..10 {
+            g.zap_tick(0.1);
+        }
+        assert!(crate::vehicles::detector_on(g.world.get_v(rail)), "on under a cart");
+        assert_eq!(g.world.get_v(lamp), LAMP_ON);
+        g.vehicles.retain(|v| v.id != id);
+        for _ in 0..20 {
+            g.zap_tick(0.1);
+        }
+        assert!(!crate::vehicles::detector_on(g.world.get_v(rail)) && crate::vehicles::is_detector(g.world.get_v(rail)));
+        assert_eq!(g.world.get_v(lamp), LAMP);
     }
 }

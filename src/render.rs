@@ -15,17 +15,32 @@ attribute vec3 in_light;
 attribute vec2 in_tile;
 
 uniform mat4 mvp;
+uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections
+uniform vec4 wave;     // where leaf tiles start in the atlas: oak (xy), spruce (zw)
+uniform vec4 wave2;    // jungle leaves (xy), water (zw)
 
 varying vec2 v_uv;
 varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 
+bool starts_at(vec2 t, vec2 o) {
+    return abs(t.x - o.x) < 0.0001 && abs(t.y - o.y) < 0.0001;
+}
+
 void main() {
-    gl_Position = mvp * vec4(in_pos, 1.0);
+    vec3 p = in_pos;
+    // Leaves sway a little in the wind. Neighbouring leaves share corners, which
+    // move together, so the canopy bends without opening gaps.
+    if (params3.y > 0.5 && in_tile.x >= 0.0 && (starts_at(in_tile, wave.xy) || starts_at(in_tile, wave.zw) || starts_at(in_tile, wave2.xy))) {
+        float t = params3.x;
+        p.x += sin(t * 1.6 + p.x * 0.6 + p.y * 0.4 + p.z * 0.2) * 0.04;
+        p.z += cos(t * 1.3 + p.z * 0.6 + p.y * 0.3 + p.x * 0.2) * 0.04;
+    }
+    gl_Position = mvp * vec4(p, 1.0);
     v_uv = in_uv;
     v_light = in_light;
-    v_wpos = in_pos;
+    v_wpos = p;
     v_tile = in_tile;
 }
 "#;
@@ -49,6 +64,8 @@ uniform vec4 cam_pos;
 uniform vec4 fog_color;
 uniform vec4 params;   // x: daylight, y: fog start, z: fog end, w: alpha multiplier
 uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow), z: colour-blind view
+uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections
+uniform vec4 wave2;    // zw: where the water tile starts in the atlas
 DALTONIZE
 uniform vec4 tint;
 uniform vec4 lights[16];
@@ -98,6 +115,22 @@ void main() {
         vec3 warm = mix(vec3(1.0), vec3(1.0, 0.85, 0.6), clamp(bl - sky, 0.0, 1.0));
         col = c.rgb * v_light.x * lvl * warm;
     }
+#ifdef GL_OES_standard_derivatives
+    // Water reflects the sky: more of it at a glancing angle, and the sun glints off ripples.
+    vec2 rel = v_uv - wave2.zw;
+    bool water = v_tile.x < 0.0 && rel.x >= 0.0 && rel.y >= 0.0 && rel.x <= TILE && rel.y <= TILE;
+    if (params3.z > 0.5 && water && params2.x < 0.5) {
+        vec3 n = normalize(cross(dFdx(v_wpos), dFdy(v_wpos)));
+        if (abs(n.y) > 0.7) {
+            vec3 view = normalize(v_wpos - cam_pos.xyz);
+            float fresnel = pow(1.0 - abs(view.y), 3.0);
+            col = mix(col, fog_color.rgb * (0.55 + 0.45 * params.x), clamp(0.12 + fresnel * 0.7, 0.0, 0.8));
+            float t = params3.x;
+            float ripple = sin(v_wpos.x * 3.1 + t * 1.7 + sin(v_wpos.z * 1.3)) * sin(v_wpos.z * 2.7 - t * 1.3 + sin(v_wpos.x * 1.1));
+            col += vec3(pow(max(ripple, 0.0), 20.0) * 0.6 * params.x);
+        }
+    }
+#endif
     if (params.z > 0.0) {
         float d = distance(v_wpos, cam_pos.xyz);
         float f = clamp((d - params.y) / (params.z - params.y), 0.0, 1.0);
@@ -121,6 +154,9 @@ pub struct Uniforms {
     pub params2: Vec4,
     pub tint: Vec4,
     pub lights: [Vec4; 16],
+    pub params3: Vec4,
+    pub wave: Vec4,
+    pub wave2: Vec4,
 }
 
 fn shader_meta() -> ShaderMeta {
@@ -135,6 +171,9 @@ fn shader_meta() -> ShaderMeta {
                 UniformDesc::new("params2", UniformType::Float4),
                 UniformDesc::new("tint", UniformType::Float4),
                 UniformDesc::new("lights", UniformType::Float4).array(16),
+                UniformDesc::new("params3", UniformType::Float4),
+                UniformDesc::new("wave", UniformType::Float4),
+                UniformDesc::new("wave2", UniformType::Float4),
             ],
         },
     }
@@ -222,6 +261,10 @@ pub struct FrameParams {
     pub lights: [Vec4; 16],
     /// Show the world through the colour-blind filter (see access.rs).
     pub colour_blind: bool,
+    /// Graphics options: leaves sway, water reflects the sky; and the clock for both.
+    pub waving_leaves: bool,
+    pub water_reflections: bool,
+    pub time: f32,
 }
 
 pub struct Renderer {
@@ -393,6 +436,15 @@ impl Renderer {
             params2: Vec4::new(0.0, fp.ambient, fp.colour_blind as u8 as f32, 0.0),
             tint: Vec4::ONE,
             lights: fp.lights,
+            params3: Vec4::new(fp.time, fp.waving_leaves as u8 as f32, fp.water_reflections as u8 as f32, 0.0),
+            wave: {
+                let (a, b) = (tile_uv(crate::texture::T_LEAVES), tile_uv(crate::texture::T_SPRUCE_LEAVES));
+                Vec4::new(a.0, a.1, b.0, b.1)
+            },
+            wave2: {
+                let (a, b) = (tile_uv(crate::texture::T_JUNGLE_LEAVES), tile_uv(crate::texture::T_WATER));
+                Vec4::new(a.0, a.1, b.0, b.1)
+            },
         };
 
         // Upload streaming geometry (clamped to capacity).

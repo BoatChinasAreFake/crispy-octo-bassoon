@@ -76,6 +76,19 @@ pub const ALL: &[Advancement] = &[
     adv("hello_my_name_is", "Hello, My Name Is", "Name a mob with a Name Tag. It won't answer to it."),
     adv("brewmaster", "Local Brewery", "Drink a potion you brewed. Or found. We don't judge."),
     adv("lumberjack_reforms", "Reformed Lumberjack", "Grow a tree from a sapling with Bone Dust. Balance restored."),
+    adv("welcome_to_the_jungle", "Welcome to the Jungle", "Visit a jungle. It's got fun and games (and melons)."),
+    adv("swamp_thing", "Swamp Thing", "Visit a swamp. Mind the Bloops."),
+    adv("stripy", "Earn Your Stripes", "Visit the badlands. Admire the terracotta. Don't lick it."),
+    adv("needles", "Needle in a Haystack", "Visit a taiga. Spruce yourself up."),
+    adv("village_people", "Village People", "Find a village. An actual one, this time."),
+    adv("clank_you", "Clank You Very Much", "Watch a Clanker flatten a monster. It's on your side. Probably."),
+    adv("pretty_polly", "Pretty Polly", "Feed a Squawker some seeds. It will tell everyone."),
+    adv("melon_baller", "Melon Baller", "Eat a Melon Slice. Mostly water, entirely delicious."),
+    adv("fire_starter", "Fire Starter", "Light a fire with a Sparker. Twisted, apparently."),
+    adv("pushy", "Pushy", "Watch a piston push something. Personal space is a myth."),
+    adv("freight", "Freight Train", "Load a Minecart with Chest. Choo choo, cargo."),
+    adv("tattletale", "Tattletale", "Ride over a Detector Rail. It told everyone."),
+    adv("beaconator", "Beaconator", "Stand in a beacon's light. The Wyrm's egg, finally useful."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {
@@ -136,5 +149,33 @@ mod tests {
         assert_eq!(p.grant("dimonds").map(|a| a.title), Some("DIMONDS!"));
         assert_eq!(p.count(), 2);
         assert!(p.earned.contains(&"from_the_future".to_string()), "unknown keys survive");
+    }
+
+    #[test]
+    fn every_advancement_the_game_awards_exists() {
+        // Scan the source for advance("key") and advance_for(who, "key"): a typo would
+        // otherwise just never award anything.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut used = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+            for pat in ["advance(\"", "advance_for(who, \""] {
+                for (at, _) in text.match_indices(pat) {
+                    let rest = &text[at + pat.len()..];
+                    if let Some(end) = rest.find('"') {
+                        used.push(rest[..end].to_string());
+                    }
+                }
+            }
+        }
+        assert!(used.len() > 40, "found only {} uses", used.len());
+        for key in used.into_iter().filter(|k| k != "key") {
+            assert!(find(&key).is_some(), "advancement {key:?} is awarded but not defined");
+        }
+        let mut keys: Vec<&str> = ALL.iter().map(|a| a.key).collect();
+        keys.sort_unstable();
+        let n = keys.len();
+        keys.dedup();
+        assert_eq!(keys.len(), n, "duplicate keys");
     }
 }

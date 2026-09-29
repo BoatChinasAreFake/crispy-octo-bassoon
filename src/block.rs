@@ -157,7 +157,25 @@ pub const EYE_FRAME: Id = 273;
 pub const EYE_FRAME_FULL: Id = 274;
 pub const WYRM_CRYSTAL: Id = 275;
 pub const WYRM_EGG: Id = 276;
-pub const NUM_BLOCKS: Id = 277;
+/// Biome blocks (see world.rs): two more kinds of tree, swamp, badlands and jungle bits.
+pub const SPRUCE_LOG: Id = 277;
+pub const SPRUCE_LEAVES: Id = 278;
+pub const JUNGLE_LOG: Id = 279;
+pub const JUNGLE_LEAVES: Id = 280;
+pub const MUD: Id = 281;
+pub const LILY_PAD: Id = 282;
+pub const RED_SAND: Id = 283;
+/// Terracotta: plain, then orange, red and yellow bands.
+pub const TERRACOTTA: Id = 284;
+pub const DEAD_BUSH: Id = 288;
+pub const MELON: Id = 289;
+/// Detector rails: `DETECTOR_RAIL + axis * 2 + on`, like powered rails (see vehicles.rs).
+pub const DETECTOR_RAIL: Id = 290;
+/// Comparators: `COMPARATOR_FIRST + facing * 4 + more * 2 + on` (see contraptions.rs).
+pub const COMPARATOR_FIRST: Id = 294;
+/// Beacons: `BEACON_FIRST + ` the effect it gives (`potions::ALL` order; see beacon.rs).
+pub const BEACON_FIRST: Id = 310;
+pub const NUM_BLOCKS: Id = 315;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -251,8 +269,13 @@ pub const SADDLE: Id = FIRST_ITEM + 111;
 pub const STARING_EYE: Id = FIRST_ITEM + 112;
 /// Names a mob (see nametags.rs).
 pub const NAME_TAG: Id = FIRST_ITEM + 113;
+/// From melons (jungles).
+pub const MELON_SLICE: Id = FIRST_ITEM + 114;
+/// Carts with a chest or a hopper in them (see vehicles.rs).
+pub const CHEST_MINECART: Id = FIRST_ITEM + 115;
+pub const HOPPER_MINECART: Id = FIRST_ITEM + 116;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 114;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 117;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -266,7 +289,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -637,7 +660,7 @@ pub fn placing_item(id: Id) -> Option<Id> {
         return Some(ZAP_DUST);
     }
     // Any rail is placed as a straight one, then bends to fit (see vehicles.rs).
-    if id == RAIL_FIRST || id == POWERED_RAIL {
+    if id == RAIL_FIRST || id == POWERED_RAIL || id == DETECTOR_RAIL {
         return Some(id);
     }
     // Signs and frames come in four facings; the item is the first.
@@ -1224,8 +1247,54 @@ impl Registry {
         }
         blocks.push(def("wyrm_crystal", "Wyrm Crystal (Do Not Touch)", Cube, true, false, [T_WYRM_CRYSTAL; 3], 0.3, 0, false, AIR, 12.0, S_GLASS));
         blocks.push(def("wyrm_egg", "Wyrm Egg (Trophy, Allegedly)", Cube, true, true, [T_WYRM_EGG; 3], 3.0, 0, false, WYRM_EGG, 2.0, S_STONE));
+        // Biome blocks.
+        blocks.push(def("spruce_log", "Spruce Log (Pointy Tree Chunk)", Cube, true, true, [T_SPRUCE_LOG_TOP, T_SPRUCE_LOG_SIDE, T_SPRUCE_LOG_TOP], 2.0, 0, false, SPRUCE_LOG, 0.0, S_WOOD));
+        blocks.push(def("spruce_leaves", "Spruce Needles", Cube, true, false, [T_SPRUCE_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("jungle_log", "Jungle Log (Tall Tree Chunk)", Cube, true, true, [T_JUNGLE_LOG_TOP, T_JUNGLE_LOG_SIDE, T_JUNGLE_LOG_TOP], 2.0, 0, false, JUNGLE_LOG, 0.0, S_WOOD));
+        blocks.push(def("jungle_leaves", "Jungle Leaves (Extra Leafy)", Cube, true, false, [T_JUNGLE_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("mud", "Mud (Squelchy)", Cube, true, true, [T_MUD; 3], 0.5, 0, false, MUD, 0.0, S_GRASS));
+        let mut lily = def("lily_pad", "Lily Pad (Frog Not Included)", Shaped, false, false, [T_LILY_PAD; 3], 0.0, 0, false, LILY_PAD, 0.0, S_GRASS);
+        lily.shape = Shape::Dust;
+        blocks.push(lily);
+        blocks.push(def("red_sand", "Red Sand (Sunburnt)", Cube, true, true, [T_RED_SAND; 3], 0.5, 0, false, RED_SAND, 0.0, S_SAND));
+        for (i, (key, name)) in [("terracotta", "Terracotta (Fancy Mud)"), ("orange_terracotta", "Orange Terracotta"), ("red_terracotta", "Red Terracotta"), ("yellow_terracotta", "Yellow Terracotta")].into_iter().enumerate() {
+            let id = TERRACOTTA + i as Id;
+            blocks.push(def(key, name, Cube, true, true, [T_TERRACOTTA + i as u16; 3], 1.2, 1, true, id, 0.0, S_STONE));
+        }
+        blocks.push(def("dead_bush", "Dead Bush (It's Fine)", Cross, false, false, [T_DEAD_BUSH; 3], 0.0, 0, false, STICK, 0.0, S_GRASS));
+        blocks.push(def("melon", "Melon (Heavy Snack)", Cube, true, true, [T_MELON_TOP, T_MELON_SIDE, T_MELON_TOP], 1.0, 0, false, AIR, 0.0, S_WOOD));
+        for (k, key) in ["detector_rail", "detector_rail_on", "detector_rail_ew", "detector_rail_ew_on"].into_iter().enumerate() {
+            let mut d = def(key, "Detector Rail (Tattletale)", Shaped, false, false, [T_DETECTOR_RAIL + k as u16; 3], 0.7, 0, false, DETECTOR_RAIL, 0.0, S_STONE);
+            d.shape = Shape::Dust;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            for more in [false, true] {
+                for on in [false, true] {
+                    let key = format!("comparator{}{}{}", ["", "_east", "_south", "_west"][facing as usize], if more { "_half" } else { "" }, if on { "_on" } else { "" });
+                    let tile = T_COMPARATOR + more as u16 * 2 + on as u16;
+                    let mut d = def(leak(&key), "Comparator (Counts Your Stuff)", Shaped, true, false, [tile, T_STONE, T_STONE], 0.0, 0, false, COMPARATOR_FIRST, 0.0, S_STONE);
+                    d.shape = Shape::Repeater { facing };
+                    d.creative = facing == 0 && !more && !on;
+                    d.see_through = true;
+                    blocks.push(d);
+                }
+            }
+        }
+        for (k, p) in crate::potions::ALL.iter().enumerate() {
+            let mut d = def(leak(&format!("beacon{}", if k == 0 { String::new() } else { format!("_{}", p.key()) })), "Beacon (Wyrm-Powered Lighthouse)", Cube, true, false, [T_BEACON; 3], 3.0, 0, false, BEACON_FIRST, 15.0, S_GLASS);
+            d.see_through = true;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
+        debug_assert_eq!(blocks[SPRUCE_LOG as usize].key, "spruce_log");
+        debug_assert_eq!(blocks[MELON as usize].key, "melon");
+        debug_assert_eq!(blocks[DETECTOR_RAIL as usize].key, "detector_rail");
+        debug_assert_eq!(blocks[COMPARATOR_FIRST as usize].key, "comparator");
+        debug_assert_eq!(blocks[BEACON_FIRST as usize].key, "beacon");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
         debug_assert_eq!(blocks[FRAME_FIRST as usize].key, "item_frame");
         blocks[GLASS as usize].see_through = true;
@@ -1350,11 +1419,24 @@ impl Registry {
         items.push(ItemDef { stack: 1, ..item("saddle", "Saddle (Some Assembly Required)", T_SADDLE) });
         items.push(item("staring_eye", "Staring Eye (It Knows)", T_STARING_EYE));
         items.push(item("name_tag", "Name Tag (Hello, My Name Is)", T_NAME_TAG));
+        items.push(ItemDef { food: Some(2.0), ..item("melon_slice", "Melon Slice (Mostly Water)", T_MELON_SLICE) });
+        items.push(ItemDef { stack: 1, ..item("chest_minecart", "Minecart with Chest (Freight)", T_CHEST_CART_ITEM) });
+        items.push(ItemDef { stack: 1, ..item("hopper_minecart", "Minecart with Hopper (Vacuum)", T_HOPPER_CART_ITEM) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
         let recipes = vec![
             r(&[(LOG, 1)], (PLANKS, 4)),
+            r(&[(SPRUCE_LOG, 1)], (PLANKS, 4)),
+            r(&[(JUNGLE_LOG, 1)], (PLANKS, 4)),
+            r(&[(MELON_SLICE, 9)], (MELON, 1)),
+            r(&[(MINECART, 1), (CHEST, 1)], (CHEST_MINECART, 1)),
+            r(&[(MINECART, 1), (HOPPER_FIRST, 1)], (HOPPER_MINECART, 1)),
+            r(&[(IRON, 6), (PLATE, 1), (ZAP_DUST, 1)], (DETECTOR_RAIL, 6)),
+            r(&[(STONE, 3), (ZTORCH_ON, 3), (GOLD_INGOT, 1)], (COMPARATOR_FIRST, 1)),
+            r(&[(WYRM_EGG, 1), (GLASS, 5), (OBSIDIAN, 3)], (BEACON_FIRST, 1)),
+            r(&[(MUD, 4), (WHEAT, 1)], (BRICK, 4)),
+            r(&[(RED_SAND, 4)], (SANDSTONE, 1)),
             r(&[(PLANKS, 2)], (STICK, 4)),
             r(&[(PLANKS, 4)], (TABLE, 1)),
             r(&[(STICK, 1), (COAL, 1)], (TORCH, 4)),
@@ -1534,7 +1616,17 @@ pub fn blocks_sky(id: Id) -> bool {
 /// Foliage: lets dappled sunlight through instead of blocking it (see `world::exposure`).
 #[inline]
 pub fn dapples_sky(id: Id) -> bool {
-    id == LEAVES
+    is_leaves(id)
+}
+/// Any kind of tree trunk.
+#[inline]
+pub fn is_log(id: Id) -> bool {
+    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG)
+}
+/// Any kind of leaves.
+#[inline]
+pub fn is_leaves(id: Id) -> bool {
+    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES)
 }
 /// Can the player point at it (and break it)?
 #[inline]
@@ -1675,8 +1767,30 @@ mod id_order_tests {
             (POWERED_RAIL, "powered_rail"),
             (SIGN_FIRST, "sign"),
             (FRAME_FIRST, "item_frame"),
+            (SAPLING, "sapling"),
+            (FIRE, "fire"),
+            (BREWING_STAND, "brewing_stand"),
+            (HOPPER_FIRST, "hopper"),
+            (WYRM_EGG, "wyrm_egg"),
+            (SPRUCE_LOG, "spruce_log"),
+            (SPRUCE_LEAVES, "spruce_leaves"),
+            (JUNGLE_LOG, "jungle_log"),
+            (JUNGLE_LEAVES, "jungle_leaves"),
+            (MUD, "mud"),
+            (LILY_PAD, "lily_pad"),
+            (RED_SAND, "red_sand"),
+            (TERRACOTTA, "terracotta"),
+            (DEAD_BUSH, "dead_bush"),
+            (MELON, "melon"),
+            (DETECTOR_RAIL, "detector_rail"),
+            (COMPARATOR_FIRST, "comparator"),
+            (BEACON_FIRST, "beacon"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
+        }
+        assert_eq!(reg().blocks.len(), NUM_BLOCKS as usize);
+        for (id, key) in [(MELON_SLICE, "melon_slice"), (CHEST_MINECART, "chest_minecart"), (HOPPER_MINECART, "hopper_minecart"), (NAME_TAG, "name_tag")] {
+            assert_eq!(reg().key_of(id), key, "item {id}");
         }
     }
 }

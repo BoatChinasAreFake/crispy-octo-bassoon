@@ -383,6 +383,140 @@ impl World {
     }
 }
 
+/// Light a chunk on its own, as if nothing were around it: sky straight
+/// down, whatever glows, spread within the chunk. Generator threads do this
+/// so the main thread only has to join the light up across chunk borders
+/// (`World::light_prelit_chunk`). Same rules as `World::spread`.
+pub fn light_alone(blocks: &crate::palette::PalettedBlocks) -> LightStore {
+    let top = |lx: i32, lz: i32| {
+        let mut y = CH;
+        while y > 0 && pass(blocks.get(idx(lx, y - 1, lz))) == Pass::Clear {
+            y -= 1;
+        }
+        y
+    };
+    let mut tops = [[CH; CW as usize]; CW as usize];
+    for lz in 0..CW {
+        for lx in 0..CW {
+            tops[lz as usize][lx as usize] = top(lx, lz);
+        }
+    }
+    let mut store = LightStore::default();
+    let lowest = tops.iter().flatten().copied().min().unwrap_or(0);
+    for s in 0..SECTIONS {
+        if (s as i32) * 16 >= lowest {
+            store.fill_section(s, MAX << 4);
+        }
+    }
+    let mut sky = VecDeque::new();
+    let mut blk = VecDeque::new();
+    let top_at = |lx: i32, lz: i32| if (0..CW).contains(&lx) && (0..CW).contains(&lz) { tops[lz as usize][lx as usize] } else { 0 };
+    for lz in 0..CW {
+        for lx in 0..CW {
+            let t = tops[lz as usize][lx as usize];
+            for y in t..CH {
+                store.set(idx(lx, y, lz), MAX << 4);
+            }
+            if t >= CH {
+                continue;
+            }
+            let near = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().map(|&(dx, dz)| top_at(lx + dx, lz + dz)).max().unwrap_or(0);
+            for y in t..=near.min(CH - 1).max(t) {
+                sky.push_back(ivec3(lx, y, lz));
+            }
+        }
+    }
+    for y in 0..CH {
+        if blocks.sections()[y as usize / 16].is_uniform(AIR) {
+            continue;
+        }
+        for lz in 0..CW {
+            for lx in 0..CW {
+                let e = emission(blocks.get(idx(lx, y, lz)));
+                if e > 0 {
+                    let i = idx(lx, y, lz);
+                    store.set(i, (store.get(i) & 0xF0) | e);
+                    blk.push_back(ivec3(lx, y, lz));
+                }
+            }
+        }
+    }
+    let inside = |p: IVec3| (0..CW).contains(&p.x) && (0..CH).contains(&p.y) && (0..CW).contains(&p.z);
+    for (ch, mut queue) in [(Channel::Sky, sky), (Channel::Block, blk)] {
+        let get = |st: &LightStore, p: IVec3| {
+            let b = st.get(idx(p.x, p.y, p.z));
+            if ch == Channel::Sky { b >> 4 } else { b & 15 }
+        };
+        while let Some(p) = queue.pop_front() {
+            let l = get(&store, p);
+            if l <= 1 {
+                continue;
+            }
+            for d in DIRS {
+                let n = p + d;
+                if !inside(n) {
+                    continue;
+                }
+                let have = get(&store, n);
+                let into = pass(blocks.get(idx(n.x, n.y, n.z)));
+                if let Some(v) = step(ch, l, d, into).filter(|&v| v > have) {
+                    let i = idx(n.x, n.y, n.z);
+                    let old = store.get(i);
+                    store.set(i, if ch == Channel::Sky { (old & 15) | (v << 4) } else { (old & 0xF0) | v });
+                    if into != Pass::Sink {
+                        queue.push_back(n);
+                    }
+                }
+            }
+        }
+    }
+    store
+}
+
+impl World {
+    /// A chunk that arrived already lit on its own (`light_alone`): join its
+    /// light up with its neighbours', both ways, from border cells that would
+    /// brighten the cell across the border.
+    pub fn light_prelit_chunk(&mut self, cx: i32, cz: i32) {
+        let (bx, bz) = (cx * CW, cz * CW);
+        let mut queues = [VecDeque::new(), VecDeque::new()];
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            if !self.chunks.contains_key(&(cx + dx, cz + dz)) {
+                continue;
+            }
+            let d = ivec3(dx, 0, dz);
+            for y in 0..CH {
+                for k in 0..CW {
+                    let a = match (dx, dz) {
+                        (1, 0) => ivec3(bx + CW - 1, y, bz + k),
+                        (-1, 0) => ivec3(bx, y, bz + k),
+                        (0, 1) => ivec3(bx + k, y, bz + CW - 1),
+                        _ => ivec3(bx + k, y, bz),
+                    };
+                    let b = a + d;
+                    let (Some(ra), Some(rb)) = (self.raw_light(a), self.raw_light(b)) else { continue };
+                    if ra == rb && (ra == 0 || ra == MAX << 4) {
+                        continue; // both dark, or both open sky: nothing to gain
+                    }
+                    for (q, ch) in [Channel::Sky, Channel::Block].into_iter().enumerate() {
+                        let lv = |r: u8| if ch == Channel::Sky { r >> 4 } else { r & 15 };
+                        let (la, lb) = (lv(ra), lv(rb));
+                        if step(ch, la, d, pass(self.get_v(b))).is_some_and(|v| v > lb) {
+                            queues[q].push_back(a);
+                        }
+                        if step(ch, lb, -d, pass(self.get_v(a))).is_some_and(|v| v > la) {
+                            queues[q].push_back(b);
+                        }
+                    }
+                }
+            }
+        }
+        let [sky, blk] = queues;
+        self.spread(Channel::Sky, sky);
+        self.spread(Channel::Block, blk);
+    }
+}
+
 /// The lowest cell of a column that sees straight up to the sky.
 fn column_top(c: &crate::world::Chunk, lx: i32, lz: i32) -> i32 {
     let mut y = CH;
@@ -396,6 +530,41 @@ fn column_top(c: &crate::world::Chunk, lx: i32, lz: i32) -> i32 {
 mod tests {
     use super::*;
     use crate::palette::PalettedBlocks;
+
+    #[test]
+    fn chunks_lit_on_their_own_join_up_the_same() {
+        // Real terrain (caves, overhangs, trees, water) plus some torches, arriving
+        // in two different orders: lit whole on the main thread, and lit alone on
+        // a worker then joined at the borders. Every cell must end up the same.
+        let g = crate::world::Generator::new(777);
+        let mut chunks = Vec::new();
+        for cz in -1..=1 {
+            for cx in -1..=1 {
+                let mut ids = g.generate(cx, cz);
+                for k in 0..6 {
+                    let (x, y, z) = ((k * 5 + cx * 3).rem_euclid(CW), 20 + k * 7, (k * 3 + cz * 7).rem_euclid(CW));
+                    ids[idx(x, y, z)] = TORCH;
+                }
+                chunks.push((cx, cz, crate::palette::PalettedBlocks::from_ids(&ids)));
+            }
+        }
+        let mut whole = World::new(777);
+        for (cx, cz, b) in chunks.iter() {
+            whole.insert_chunk(*cx, *cz, b.clone());
+        }
+        let mut joined = World::new(777);
+        for (cx, cz, b) in chunks.iter().rev() {
+            joined.insert_chunk_lit(*cx, *cz, b.clone(), Some(light_alone(b)));
+        }
+        for x in -CW..2 * CW {
+            for z in -CW..2 * CW {
+                for y in 0..CH {
+                    let p = ivec3(x, y, z);
+                    assert_eq!(whole.raw_light(p), joined.raw_light(p), "at {p}");
+                }
+            }
+        }
+    }
 
     /// A world of flat stone chunks (top at y 10) without the generator.
     fn flat(n: i32) -> World {

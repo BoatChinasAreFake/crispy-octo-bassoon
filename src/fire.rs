@@ -30,11 +30,11 @@ const SIDES: [IVec3; 6] = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3
 /// How readily a block catches (0: never), and how fast it burns away.
 pub fn flammability(id: Id) -> (f32, f32) {
     use crate::carpentry::{is_fence, is_gate, is_ladder, is_trapdoor};
-    if matches!(id, LEAVES | TALL_GRASS | FLOWER | WEEDS | SAPLING | HAY | SCARECROW) || id == WOOL || (DYED_WOOL..DYED_WOOL + 7).contains(&id) {
+    if is_leaves(id) || matches!(id, TALL_GRASS | FLOWER | WEEDS | SAPLING | HAY | SCARECROW | DEAD_BUSH | LILY_PAD) || id == WOOL || (DYED_WOOL..DYED_WOOL + 7).contains(&id) {
         (0.6, 0.6)
     } else if matches!(id, PLANKS | BOOKSHELF | TABLE) || is_fence(id) || is_gate(id) || is_ladder(id) || is_trapdoor(id) || is_door(id) || ((slab_of(id).is_some() || stairs_of(id).is_some()) && made_of(id) == PLANKS) {
         (0.25, 0.2)
-    } else if id == LOG {
+    } else if is_log(id) {
         (0.1, 0.08)
     } else if id == TNT {
         (1.0, 1.0)
@@ -77,6 +77,7 @@ impl Game {
         self.sfx(Sfx::Place(Mat::Wood), Some(at.as_vec3() + Vec3::splat(0.5)));
         self.use_tool(1);
         self.player.swing = 1.0;
+        self.advance("fire_starter");
         true
     }
 

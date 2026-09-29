@@ -7,6 +7,7 @@ mod access;
 mod advancements;
 mod animals;
 mod anvil;
+mod beacon;
 mod block;
 mod building;
 mod carpentry;
@@ -21,6 +22,7 @@ mod farming;
 mod fire;
 mod fishing;
 mod game;
+mod golems;
 mod hollow;
 mod hoppers;
 mod horses;
@@ -40,6 +42,7 @@ mod noise;
 mod pad;
 mod palette;
 mod player;
+mod playtest;
 mod potions;
 mod players;
 mod regions;
@@ -1479,6 +1482,14 @@ impl App {
         }
         self.captions.tick(dt);
         self.game.colour_blind = self.settings.colour_blind;
+        self.game.waving_leaves = self.settings.waving_leaves;
+        self.game.water_reflections = self.settings.water_reflections;
+        if mesher::smooth() != self.settings.smooth_lighting {
+            // Every chunk has to be meshed again with the other kind of lighting.
+            mesher::set_smooth(self.settings.smooth_lighting);
+            let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
+            self.game.world.dirty.extend(all);
+        }
         let in_game = !self.game.menu && self.screen != Screen::Dead;
         self.audio.update_music(dt, in_game);
     }
@@ -1959,12 +1970,14 @@ impl App {
     fn options_screen(&mut self, from_title: bool) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
-        self.ui.text_centered("Options", w / 2.0, h * 0.2, 16.0, WHITE);
         let bw = (220.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
         let small = bh * 1.3;
-        let mut y = h * 0.3;
+        // Ten rows (and the title above them), centred in whatever room there is.
+        let total = 10.0 * bh + 9.0 * 5.0 * s + 7.0 * s;
+        let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
+        self.ui.text_centered("Options", w / 2.0, y - 18.0 * s, 16.0, WHITE);
         let row = |ui: &Ui, label: String, y: f32| -> i32 {
             let mut d = 0;
             if ui.button(Rect::new(x, y, small, bh), "-", true) {
@@ -2017,8 +2030,22 @@ impl App {
             self.settings.subtitles = !self.settings.subtitles;
         }
         let cb = if self.settings.colour_blind { "Colour-blind: ON" } else { "Colour-blind: OFF" };
+        let waving = if self.settings.waving_leaves { "Leaves: Waving" } else { "Leaves: Still" };
+        let shiny = if self.settings.water_reflections { "Water: Shiny" } else { "Water: Plain" };
+        let lighting = if self.settings.smooth_lighting { "Lighting: Smooth" } else { "Lighting: Flat" };
         if self.ui.button(Rect::new(right, y, half, bh), cb, true) {
             self.settings.colour_blind = !self.settings.colour_blind;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), waving, true) {
+            self.settings.waving_leaves = !self.settings.waving_leaves;
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), shiny, true) {
+            self.settings.water_reflections = !self.settings.water_reflections;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), lighting, true) {
+            self.settings.smooth_lighting = !self.settings.smooth_lighting;
         }
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
@@ -2159,8 +2186,8 @@ impl App {
     fn container_screen(&mut self) {
         use containers::{FUEL, INPUT, OUTPUT};
         let Some(pos) = self.game.open else { return };
-        let kind = self.game.world.get_v(pos);
-        let Some(c) = self.game.world.containers.get(&pos).cloned() else { return };
+        let kind = containers::store_kind(&self.game.world, &self.game.vehicles, pos);
+        let Some(c) = containers::store_ref(&self.game.world, &self.game.vehicles, pos).cloned() else { return };
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
@@ -2762,6 +2789,27 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "tower" => Kind::Tower,
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
+        "village" => Kind::Village,
+        "swamp" | "jungle" | "badlands" | "taiga" => {
+            let want = match mode {
+                "swamp" => world::Biome::Swamp,
+                "jungle" => world::Biome::Jungle,
+                "badlands" => world::Biome::Badlands,
+                _ => world::Biome::Taiga,
+            };
+            // Somewhere well inside the biome (all nine columns around agree), looking across it.
+            for r in 0..160 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.column(x + i * 24, z + j * 24).1 == want));
+                    if inside {
+                        let h = generator.column(x, z).0.max(world::SEA);
+                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + 12.0, z as f32 + 0.5), 0.8, -0.35));
+                    }
+                }
+            }
+            return None;
+        }
         "ravine" | "snow" | "rain" | "thunder" => {
             for r in 0..60 {
                 for (dx, dz) in ring(r) {
@@ -2793,6 +2841,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             return Some(match kind {
                 Kind::Dungeon => look(o + Vec3::new(2.6, 2.4, 2.6), o + Vec3::new(-3.0, 0.5, -1.0)),
                 Kind::Tower => look(o + Vec3::new(-11.0, 9.0, -11.0), o + Vec3::Y * 4.0),
+                Kind::Village => look(o + Vec3::new(-20.0, 18.0, -20.0), o + Vec3::Y * 2.0),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -2871,6 +2920,9 @@ fn main() {
     // Headless modes run before any window (or GPU) is touched.
     if args.iter().any(|a| a == "--server") {
         std::process::exit(server::run(&args));
+    }
+    if args.iter().any(|a| a == "--playtest") {
+        std::process::exit(playtest::run(&args));
     }
     if let Some(i) = args.iter().position(|a| a == "--export-sounds") {
         let dir = args.get(i + 1).map(String::as_str).unwrap_or("sounds");
@@ -2976,6 +3028,7 @@ async fn game_main() {
     let flag = |f: &str| std::env::args().any(|a| a == f);
     if shot.is_some() {
         app.settings.colour_blind = flag("--colour-blind");
+        app.settings.smooth_lighting = !flag("--flat-lighting");
         app.settings.subtitles = flag("--subtitles");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
@@ -3027,7 +3080,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -3036,7 +3089,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "ravine" | "rain" | "thunder" | "snow" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
@@ -3212,7 +3265,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3425,6 +3478,46 @@ async fn game_main() {
                 app.game.world.set_v(at(3, -5, 1), block::HOPPER_FIRST);
                 app.game.world.set_v(at(3, -5, 2), block::CHEST);
                 app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
+            }
+            if s.mode == "machines" && frames == 125 {
+                // A beacon on its pyramid; a detector rail under a cart lighting a lamp;
+                // chest and hopper carts; a comparator reading a chest.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                let top = at(12, 0, 2);
+                for k in 1..=2 {
+                    for dx in -k..=k {
+                        for dz in -k..=k {
+                            app.game.world.set_v(top + IVec3::new(dx, -k, dz), block::OBSIDIAN);
+                        }
+                    }
+                }
+                app.game.world.set_v(top, block::BEACON_FIRST + 1);
+                // Track across the front, a detector in it, a lamp beside that.
+                for k in -5..=2 {
+                    app.game.world.set_v(at(5, k, 0), block::RAIL_FIRST);
+                }
+                app.game.world.set_v(at(5, -1, 0), block::DETECTOR_RAIL);
+                app.game.world.set_v(at(6, -1, 0), block::LAMP);
+                let spot = |fo: i32, ro: i32| at(fo, ro, 0).as_vec3() + Vec3::new(0.5, 0.06, 0.5);
+                let yaw = (r.x as f32).atan2(-(r.z as f32));
+                app.game.spawn_vehicle(vehicles::CART_KIND, spot(5, -1), yaw);
+                let chest = app.game.spawn_vehicle(vehicles::CHEST_CART_KIND, spot(5, 1), yaw);
+                app.game.spawn_vehicle(vehicles::HOPPER_CART_KIND, spot(5, -4), yaw);
+                if let Some(c) = containers::store(&mut app.game.world, &mut app.game.vehicles, vehicles::cart_key(chest)) {
+                    c.slots[0] = Some((block::DIAMOND, 3));
+                }
+                // Chest -> comparator -> lamp.
+                app.game.world.set_v(at(3, -3, 0), block::CHEST);
+                if let Some(c) = app.game.world.containers.get_mut(&at(3, -3, 0)) {
+                    c.slots[0] = Some((block::COBBLE, 5));
+                }
+                app.game.world.set_v(at(3, -2, 0), contraptions::comparator(contraptions::facing_of(r), false, false));
+                app.game.world.set_v(at(3, -1, 0), block::LAMP);
             }
             if s.mode == "brewing" && frames == 125 {
                 // A brewing stand mid-brew, potions in hand, and a couple of effects on.

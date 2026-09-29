@@ -24,7 +24,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// Restore), weather (Weather, Lightning) and enchanting (Enchant).
 /// v13: liquids, animals (MobInteract, mob flags), Zappy Dust, trading
 /// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
-pub const PROTOCOL: u32 = 14;
+pub const PROTOCOL: u32 = 15;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -192,6 +192,8 @@ pub enum Msg {
     MobName { mob: u32, name: String },
     /// Both ways: how a player looks (client -> host: me; `id` is ignored).
     PlayerSkin { id: u32, skin: u8 },
+    /// host -> client: a beacon's effect on you, for a little longer (the potion item says which).
+    BeaconEffect { item: Id },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -686,6 +688,10 @@ impl Msg {
                 w.u32(*id);
                 w.u8(*skin);
             }
+            Msg::BeaconEffect { item } => {
+                w.u8(62);
+                w.u16(*item);
+            }
             Msg::RideMob { mob, pos, yaw, off } => {
                 w.u8(59);
                 w.u32(*mob);
@@ -872,6 +878,7 @@ impl Msg {
             58 => Msg::MountMob { mob: r.u32()? },
             60 => Msg::MobName { mob: r.u32()?, name: r.str()? },
             61 => Msg::PlayerSkin { id: r.u32()?, skin: r.u8()? },
+            62 => Msg::BeaconEffect { item: r.u16()? },
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -1334,6 +1341,7 @@ mod tests {
             Msg::MountMob { mob: 42 },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },
+            Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },

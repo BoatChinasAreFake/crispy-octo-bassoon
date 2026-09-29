@@ -120,6 +120,8 @@ pub struct Game {
     pub viewers: HashMap<IVec3, HashSet<u32>>,
     /// Containers whose contents changed since viewers were last told.
     pub dirty_containers: HashSet<IVec3>,
+    /// Detector rails with a cart on (or just off) them: seconds until they switch off.
+    pub detectors: HashMap<IVec3, f32>,
     pub container_sync_timer: f32,
     /// Items on the ground (see drops.rs).
     pub drops: Vec<crate::drops::ItemDrop>,
@@ -148,6 +150,11 @@ pub struct Game {
     /// Leaves withering away (seconds left), and the sapling growth clock (see trees.rs).
     pub decaying: Vec<(IVec3, f32)>,
     pub sapling_timer: f32,
+    pub beacon_timer: f32,
+    pub explore_timer: f32,
+    /// Graphics options (from settings.txt; see render.rs).
+    pub waving_leaves: bool,
+    pub water_reflections: bool,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
     /// Potion effects on the local player, with seconds left (see potions.rs).
@@ -272,6 +279,7 @@ impl Game {
             open: None,
             viewers: HashMap::new(),
             dirty_containers: HashSet::new(),
+            detectors: HashMap::new(),
             container_sync_timer: 0.0,
             drops: Vec::new(),
             next_drop_id: 0,
@@ -291,6 +299,10 @@ impl Game {
             admin: Default::default(),
             decaying: Vec::new(),
             sapling_timer: 0.0,
+            beacon_timer: 0.0,
+            explore_timer: 0.0,
+            waving_leaves: true,
+            water_reflections: true,
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
@@ -418,8 +430,18 @@ impl Game {
                 g.world.frames.insert(p, (item, wear));
             }
         }
-        for (kind, pos, yaw) in crate::vehicles::decode(&d.vehicles) {
-            g.spawn_vehicle(kind, pos, yaw);
+        for (kind, pos, yaw, cargo) in crate::vehicles::decode(&d.vehicles) {
+            let id = g.spawn_vehicle(kind, pos, yaw);
+            if let (Some(mut c), Some(v)) = (cargo, g.vehicles.iter_mut().find(|v| v.id == id)) {
+                if let Some(r) = &remap {
+                    for s in c.slots.iter_mut() {
+                        *s = s.map(|(id, n)| (r[id as usize], n)).filter(|(id, _)| *id != AIR);
+                    }
+                }
+                if v.contents.as_ref().is_some_and(|have| have.slots.len() == c.slots.len()) {
+                    v.contents = Some(c);
+                }
+            }
         }
         for (mut m, name) in crate::animals::decode_mobs_named(&d.mobs, &mut g.rng) {
             m.id = g.next_mob_id;
@@ -446,14 +468,14 @@ impl Game {
             spawn: self.spawn.to_array(),
             // The four worn armour slots go after the 36 inventory slots.
             slots: self.inv.slots.iter().chain(self.inv.armor.iter()).copied().collect(),
-            // With region files the edits are written there instead (`flush_regions`).
+            // With region files, edits, soil, containers and decor are written there instead (`flush_regions`).
             mods: if self.world.regions.is_some() { HashMap::new() } else { self.world.mods.clone() },
             palette: mod_palette(reg()),
             script_vars: self.export_script_vars(),
             advancements: self.advancements.earned.clone(),
-            farm: crate::farming::encode(&self.world.farm),
+            farm: if self.world.regions.is_some() { Vec::new() } else { crate::farming::encode(&self.world.farm) },
             fish_log: self.fish_log.encode(),
-            containers: crate::containers::encode(&self.world.containers),
+            containers: if self.world.regions.is_some() { Vec::new() } else { crate::containers::encode(&self.world.containers) },
             drops: crate::drops::encode(&self.drops),
             wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).copied().collect(),
             food: self.player.hunger.food,
@@ -470,7 +492,7 @@ impl Game {
             mobs: crate::animals::encode_mobs(&self.mobs, &self.mob_names),
             portals: crate::scorch::encode_links(&self.portal_links),
             vehicles: crate::vehicles::encode(&self.vehicles),
-            decor: crate::decor::encode(&self.world.signs, &self.world.frames),
+            decor: if self.world.regions.is_some() { Vec::new() } else { crate::decor::encode(&self.world.signs, &self.world.frames) },
             version: crate::save::VERSION,
         }
     }
@@ -491,10 +513,36 @@ impl Game {
         }
     }
 
+    /// Advancements for going places: the new biomes, and villages.
+    fn explore_advancements(&mut self, dt: f32) {
+        self.explore_timer += dt;
+        if self.explore_timer < 0.5 || self.menu || self.dedicated || !self.ready {
+            return;
+        }
+        self.explore_timer = 0.0;
+        use crate::world::Biome;
+        let p = self.player.body.pos;
+        let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
+        let key = match self.world.generator.column(x, z).1 {
+            Biome::Jungle => Some("welcome_to_the_jungle"),
+            Biome::Swamp => Some("swamp_thing"),
+            Biome::Badlands => Some("stripy"),
+            Biome::Taiga => Some("needles"),
+            _ => None,
+        };
+        if let Some(k) = key {
+            self.advance(k);
+        }
+        let near_village = self.world.generator.villages_near(x.div_euclid(16), z.div_euclid(16)).iter().any(|v| v.origin.as_vec3().distance(p) < 24.0);
+        if near_village {
+            self.advance("village_people");
+        }
+    }
+
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
-            LOG => "getting_wood",
+            LOG | SPRUCE_LOG | JUNGLE_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
             DIAMOND => "dimonds",
@@ -688,6 +736,7 @@ impl Game {
         self.zap_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.effects_tick(dt);
+        self.explore_advancements(dt);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
@@ -1362,7 +1411,7 @@ impl Game {
             self.mount(i);
             return;
         }
-        if matches!(held, BOAT | MINECART) && self.place_vehicle(held) {
+        if matches!(held, BOAT | MINECART | CHEST_MINECART | HOPPER_MINECART) && self.place_vehicle(held) {
             return;
         }
         // Chests, furnaces and anvils open (sneak to place against them instead).
@@ -1492,6 +1541,9 @@ impl Game {
                 if held == GOLDEN_CHOP {
                     self.advance("golden_boy");
                 }
+                if held == MELON_SLICE {
+                    self.advance("melon_baller");
+                }
                 return;
             }
         }
@@ -1597,7 +1649,7 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
             FRAME_FIRST | LADDER_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
@@ -1995,7 +2047,7 @@ impl Game {
         self.sounds.clear();
     }
 
-    fn update_entities(&mut self, dt: f32) {
+    pub(crate) fn update_entities(&mut self, dt: f32) {
         if self.is_client() {
             self.client_entities(dt);
             return;
@@ -2035,6 +2087,9 @@ impl Game {
             self.advance("dont_blink");
         }
         self.house_hmmers();
+        self.house_clankers();
+        self.clankers_tick(dt);
+        self.beacons_tick(dt);
         self.animals_tick(dt);
         self.hmmers_tick(dt);
         self.free_riderless();
@@ -2072,7 +2127,8 @@ impl Game {
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
-                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm => {}
+                    MobKind::Squawker => noises.push((Sfx::Squawk, m.body.pos)),
+                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker => {}
                 }
             }
         }
@@ -2156,7 +2212,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2266,14 +2322,17 @@ impl Game {
         let top = self.world.get(x, y, z);
         let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && !is_liquid(w.get(x, y, z));
         let (_, biome) = self.world.generator.column(x, z);
-        let woofy = matches!(biome, crate::world::Biome::Forest | crate::world::Biome::Snowy);
+        use crate::world::Biome;
+        let woofy = matches!(biome, Biome::Forest | Biome::Snowy | Biome::Taiga);
         if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS) && clear(&self.world, y + 1) {
-            let kind = if woofy && self.rng.chance(0.25) {
+            let kind = if woofy && self.rng.chance(if biome == Biome::Taiga { 0.4 } else { 0.25 }) {
                 MobKind::Woofer
             } else if top == SNOW_GRASS {
                 return;
-            } else if biome == crate::world::Biome::Plains && self.rng.chance(0.15) {
+            } else if biome == Biome::Plains && self.rng.chance(0.15) {
                 MobKind::Galloper
+            } else if biome == Biome::Jungle && self.rng.chance(0.5) {
+                MobKind::Squawker
             } else {
                 [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize]
             };
@@ -2288,6 +2347,9 @@ impl Game {
         }
         let roll = self.rng.f32();
         let kind = match roll {
+            // Swamps are Bloop country; the badlands rattle.
+            r if biome == Biome::Swamp && r < 0.35 => MobKind::Bloop,
+            r if biome == Biome::Badlands && r < 0.3 => MobKind::Rattler,
             r if r < 0.28 => MobKind::Hisser,
             r if r < 0.56 => MobKind::Groaner,
             r if r < 0.74 => MobKind::Rattler,
@@ -2492,6 +2554,7 @@ impl Game {
             self.draw_weather(&mut g, eye);
         }
         self.draw_vehicles(&mut g);
+        self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
@@ -2608,7 +2671,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock }
     }
 }
 
@@ -2734,8 +2797,9 @@ pub(crate) mod tests {
                 }
             }
         }
-        // This chunk is a stepped hill (little to merge), yet it still comes out smaller.
-        assert!(merged > 0 && quads < faces, "{quads} quads ({merged} cube) for {faces} faces");
+        // This chunk is a stepped hill (little to merge), yet its cube faces still
+        // come out as fewer quads (plants and other shapes aren't counted in `faces`).
+        assert!(merged > 0 && merged < faces, "{quads} quads ({merged} cube) for {faces} faces");
     }
 
     #[test]

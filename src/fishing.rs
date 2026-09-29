@@ -278,8 +278,8 @@ pub fn roll_catch(world: &World, p: Vec3, time: f32, level: u32, bait: bool, rng
             Catch { item, n: 1, cm: None, category }
         }
         Category::Fish => {
-            let warm = matches!(biome, Biome::Desert | Biome::Plains);
-            let cold = biome == Biome::Snowy || world.get(p.x.floor() as i32, SEA, p.z.floor() as i32) == ICE;
+            let warm = matches!(biome, Biome::Desert | Biome::Plains | Biome::Jungle | Biome::Swamp | Biome::Badlands);
+            let cold = matches!(biome, Biome::Snowy | Biome::Taiga) || world.get(p.x.floor() as i32, SEA, p.z.floor() as i32) == ICE;
             let f = rng.f32();
             let (item, min, max) = if f < 0.08 {
                 (PUFFER, 15.0, 35.0)

@@ -84,26 +84,66 @@ impl Game {
             self.hopper_pull(p);
             self.hopper_push(p);
         }
+        self.hopper_carts();
+    }
+
+    /// The container in a cell: its block's, or a loaded cart's standing in it.
+    pub(crate) fn container_in(&self, cell: IVec3) -> Option<IVec3> {
+        if is_container(self.world.get_v(cell)) {
+            return Some(cell);
+        }
+        self.vehicles.iter().find(|v| v.contents.is_some() && v.cell() == cell).map(|v| crate::vehicles::cart_key(v.id))
+    }
+
+    /// Move one item from container `from` (only `slots` of it) to `to`
+    /// (arriving from above or the side). True if one moved.
+    fn move_one(&mut self, from: IVec3, slots: Option<Vec<usize>>, to: IVec3, from_above: bool) -> bool {
+        use crate::containers::{store, store_kind, store_ref};
+        let (src_kind, dst_kind) = (store_kind(&self.world, &self.vehicles, from), store_kind(&self.world, &self.vehicles, to));
+        let (Some(src), Some(dst)) = (store_ref(&self.world, &self.vehicles, from), store_ref(&self.world, &self.vehicles, to)) else { return false };
+        let slots = slots.unwrap_or_else(|| takeable(src_kind, src));
+        let pick = slots.into_iter().find(|&i| src.slots.get(i).copied().flatten().is_some_and(|(id, _)| landing_slot(dst_kind, dst, id, src.wear[i], from_above).is_some()));
+        let Some(i) = pick else { return false };
+        let Some((item, wear)) = store(&mut self.world, &mut self.vehicles, from).and_then(|c| take_one(c, i)) else { return false };
+        if let Some(c) = store(&mut self.world, &mut self.vehicles, to)
+            && let Some(j) = landing_slot(dst_kind, c, item, wear, from_above)
+        {
+            put_one(c, j, item, wear);
+        }
+        self.dirty_containers.insert(from);
+        self.dirty_containers.insert(to);
+        true
+    }
+
+    /// Hopper carts take from containers above the track and swallow what they roll over.
+    fn hopper_carts(&mut self) {
+        let carts: Vec<(u32, IVec3, Vec3)> = self.vehicles.iter().filter(|v| v.kind == crate::vehicles::HOPPER_CART_KIND).map(|v| (v.id, v.cell(), v.pos)).collect();
+        for (id, cell, pos) in carts {
+            let key = crate::vehicles::cart_key(id);
+            let above = cell + IVec3::Y;
+            if is_container(self.world.get_v(above)) && self.move_one(above, None, key, true) {
+                continue;
+            }
+            let Some(k) = self.drops.iter().position(|d| (d.body.pos - pos).abs().max_element() < 1.0) else { continue };
+            let (item, wear) = (self.drops[k].item, self.drops[k].wear);
+            let Some(c) = crate::containers::store(&mut self.world, &mut self.vehicles, key) else { continue };
+            let Some(j) = landing_slot(HOPPER_FIRST, c, item, wear, true) else { continue };
+            put_one(c, j, item, wear);
+            self.drops[k].n -= 1;
+            if self.drops[k].n == 0 {
+                self.drops.remove(k);
+            }
+            self.dirty_containers.insert(key);
+        }
     }
 
     /// Take one item from above (a container, or the ground).
     fn hopper_pull(&mut self, p: IVec3) {
         let hopper = self.world.get_v(p);
         let above = p + IVec3::Y;
-        let above_id = self.world.get_v(above);
-        if is_container(above_id) {
-            let Some(src) = self.world.containers.get(&above) else { return };
-            let Some(dst) = self.world.containers.get(&p) else { return };
-            let pick = takeable(above_id, src).into_iter().find(|&i| src.slots[i].is_some_and(|(id, _)| landing_slot(hopper, dst, id, src.wear[i], true).is_some()));
-            let Some(i) = pick else { return };
-            let Some((item, wear)) = self.world.containers.get_mut(&above).and_then(|c| take_one(c, i)) else { return };
-            if let Some(c) = self.world.containers.get_mut(&p)
-                && let Some(j) = landing_slot(hopper, c, item, wear, true)
-            {
-                put_one(c, j, item, wear);
-            }
-            self.dirty_containers.insert(above);
-            self.dirty_containers.insert(p);
+        // A container above (or a loaded cart on a rail on top of it).
+        if let Some(src) = self.container_in(above) {
+            self.move_one(src, None, p, true);
             return;
         }
         // Items lying on top.
@@ -124,23 +164,10 @@ impl Game {
     fn hopper_push(&mut self, p: IVec3) {
         let hopper = self.world.get_v(p);
         let d = spout(hopper);
-        let to = p + d;
-        let kind = self.world.get_v(to);
-        if !is_container(kind) {
-            return;
-        }
-        let (Some(src), Some(dst)) = (self.world.containers.get(&p), self.world.containers.get(&to)) else { return };
-        let from_above = d == IVec3::NEG_Y;
-        let pick = (0..src.slots.len()).find(|&i| src.slots[i].is_some_and(|(id, _)| landing_slot(kind, dst, id, src.wear[i], from_above).is_some()));
-        let Some(i) = pick else { return };
-        let Some((item, wear)) = self.world.containers.get_mut(&p).and_then(|c| take_one(c, i)) else { return };
-        if let Some(c) = self.world.containers.get_mut(&to)
-            && let Some(j) = landing_slot(kind, c, item, wear, from_above)
-        {
-            put_one(c, j, item, wear);
-        }
-        self.dirty_containers.insert(p);
-        self.dirty_containers.insert(to);
+        // Into whatever's there: a container, or a loaded cart.
+        let Some(to) = self.container_in(p + d) else { return };
+        let all = self.world.containers.get(&p).map(|c| (0..c.slots.len()).collect());
+        self.move_one(p, all, to, d == IVec3::NEG_Y);
     }
 
     /// The hopper to place: spout down, or toward the block it was put against.
@@ -179,6 +206,40 @@ mod tests {
             g.hoppers_tick(0.1);
         }
         assert_eq!(g.world.containers[&chest].slots[0], Some((COAL, 2)));
+    }
+
+    #[test]
+    fn carts_are_loaded_and_unloaded_by_hoppers() {
+        use crate::vehicles::{cart_key, CHEST_CART_KIND, HOPPER_CART_KIND};
+        let mut g = crate::game::tests::arena(83);
+        // A hopper under the track, with a chest cart parked on a rail above it.
+        let under = ivec3(3, 50, 3);
+        g.world.set_v(under, HOPPER_FIRST);
+        g.world.set_v(under + IVec3::Y, RAIL_FIRST);
+        let cart = g.spawn_vehicle(CHEST_CART_KIND, (under + IVec3::Y).as_vec3() + Vec3::new(0.5, 0.06, 0.5), 0.0);
+        let key = cart_key(cart);
+        crate::containers::store(&mut g.world, &mut g.vehicles, key).unwrap().slots[4] = Some((COBBLE, 3));
+        for _ in 0..20 {
+            g.hoppers_tick(0.1);
+        }
+        assert_eq!(g.world.containers[&under].slots[0], Some((COBBLE, 3)), "unloaded into the hopper");
+        // A hopper pointing sideways at the cart fills it back up.
+        g.world.set_v(under, STONE);
+        let side = under + IVec3::Y + IVec3::X;
+        g.world.set_v(side, HOPPER_FIRST + 1 + crate::contraptions::facing_of(IVec3::NEG_X) as Id);
+        g.world.containers.get_mut(&side).unwrap().slots[1] = Some((DIAMOND, 2));
+        for _ in 0..20 {
+            g.hoppers_tick(0.1);
+        }
+        let c = crate::containers::store_ref(&g.world, &g.vehicles, key).unwrap();
+        assert!(c.slots.contains(&Some((DIAMOND, 2))), "{:?}", c.slots);
+        // A hopper cart swallows what it's on top of.
+        let hc = g.spawn_vehicle(HOPPER_CART_KIND, Vec3::new(-3.5, 50.06, -3.5), 0.0);
+        g.spawn_drop(Vec3::new(-3.5, 50.2, -3.5), APPLE, 2, 0, Vec3::ZERO, 0.0);
+        for _ in 0..20 {
+            g.hoppers_tick(0.1);
+        }
+        assert_eq!(crate::containers::store_ref(&g.world, &g.vehicles, cart_key(hc)).unwrap().slots[0], Some((APPLE, 2)));
     }
 
     #[test]
