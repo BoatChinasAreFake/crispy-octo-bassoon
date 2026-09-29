@@ -70,6 +70,9 @@ impl Game {
                 o.damage(PUNCH, from);
                 o.body.vel.y = 10.0;
                 let at = o.body.pos;
+                if !self.dedicated && self.player.body.pos.distance(at) < GUARD_RANGE {
+                    self.advance("clank_you");
+                }
                 self.sfx(Sfx::Thud, Some(at));
                 self.sfx(Sfx::MobHurt, Some(at));
             }

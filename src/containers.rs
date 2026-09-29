@@ -406,6 +406,10 @@ impl Game {
         }
         let wear = c.wear[slot];
         self.dirty_containers.insert(pos);
+        // Loading a chest cart.
+        if s.is_some() && s != before && crate::vehicles::cart_of_key(pos).is_some() && kind == CHEST {
+            self.advance("freight");
+        }
         if self.is_client() {
             for (item, n, put) in moves(before, s) {
                 self.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: slot as u8, item, n, put, wear });

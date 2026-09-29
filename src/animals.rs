@@ -141,6 +141,9 @@ impl Game {
                 m.love = LOVE_SECS;
                 m.persistent = true;
                 self.hearts(pos, 4);
+                if k == MobKind::Squawker {
+                    self.advance_for(who, "pretty_polly");
+                }
                 Interaction::Ate
             }
             _ => Interaction::Nothing,

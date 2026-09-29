@@ -77,6 +77,7 @@ impl Game {
         self.sfx(Sfx::Place(Mat::Wood), Some(at.as_vec3() + Vec3::splat(0.5)));
         self.use_tool(1);
         self.player.swing = 1.0;
+        self.advance("fire_starter");
         true
     }
 

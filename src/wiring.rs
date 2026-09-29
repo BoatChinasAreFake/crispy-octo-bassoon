@@ -301,6 +301,10 @@ impl Game {
             self.detectors.insert(p, 0.5);
             let id = self.world.get_v(p);
             if !detector_on(id) {
+                let mine = self.riding.is_some_and(|r| self.vehicles.iter().any(|v| v.id == r && v.cell() == p));
+                if mine {
+                    self.advance("tattletale");
+                }
                 self.world.set_v(p, detector_shape(&self.world, p, true));
                 self.sfx(Sfx::Click, Some(p.as_vec3() + Vec3::splat(0.5)));
             }

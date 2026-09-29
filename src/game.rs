@@ -151,6 +151,7 @@ pub struct Game {
     pub decaying: Vec<(IVec3, f32)>,
     pub sapling_timer: f32,
     pub beacon_timer: f32,
+    pub explore_timer: f32,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
     /// Potion effects on the local player, with seconds left (see potions.rs).
@@ -296,6 +297,7 @@ impl Game {
             decaying: Vec::new(),
             sapling_timer: 0.0,
             beacon_timer: 0.0,
+            explore_timer: 0.0,
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
@@ -506,6 +508,32 @@ impl Game {
         }
     }
 
+    /// Advancements for going places: the new biomes, and villages.
+    fn explore_advancements(&mut self, dt: f32) {
+        self.explore_timer += dt;
+        if self.explore_timer < 0.5 || self.menu || self.dedicated || !self.ready {
+            return;
+        }
+        self.explore_timer = 0.0;
+        use crate::world::Biome;
+        let p = self.player.body.pos;
+        let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
+        let key = match self.world.generator.column(x, z).1 {
+            Biome::Jungle => Some("welcome_to_the_jungle"),
+            Biome::Swamp => Some("swamp_thing"),
+            Biome::Badlands => Some("stripy"),
+            Biome::Taiga => Some("needles"),
+            _ => None,
+        };
+        if let Some(k) = key {
+            self.advance(k);
+        }
+        let near_village = self.world.generator.villages_near(x.div_euclid(16), z.div_euclid(16)).iter().any(|v| v.origin.as_vec3().distance(p) < 24.0);
+        if near_village {
+            self.advance("village_people");
+        }
+    }
+
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
@@ -703,6 +731,7 @@ impl Game {
         self.zap_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.effects_tick(dt);
+        self.explore_advancements(dt);
         self.held_name = (self.held_name - dt).max(0.0);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
@@ -1506,6 +1535,9 @@ impl Game {
                 });
                 if held == GOLDEN_CHOP {
                     self.advance("golden_boy");
+                }
+                if held == MELON_SLICE {
+                    self.advance("melon_baller");
                 }
                 return;
             }
