@@ -71,6 +71,9 @@ const FOLIAGE_SHADE: [f32; 6] = [0.9, 0.9, 1.0, 0.8, 0.95, 0.95];
 const UV_EPS: f32 = 1.0 / 4096.0;
 
 pub fn face_tile(id: Id, face: usize) -> u16 {
+    if let Some(t) = crate::contraptions::face_tile(id, face) {
+        return t;
+    }
     let t = block(id).tex;
     match face {
         2 => t[0],
@@ -271,7 +274,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                     Model::Cross => {
                         let (sky, blk) = hood.lit(lx, y, lz);
                         let tile = def.tex[1];
-                        let (a, b) = if id == TORCH { (0.3, 0.7) } else { (0.15, 0.85) };
+                        let (a, b) = if id == TORCH || crate::contraptions::is_ztorch(id) { (0.3, 0.7) } else { (0.15, 0.85) };
                         let diag = [
                             [[a, 0., a], [b, 0., b], [b, 1., b], [a, 1., a]],
                             [[b, 0., a], [a, 0., b], [a, 1., b], [b, 1., a]],

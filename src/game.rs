@@ -152,6 +152,8 @@ pub struct Game {
     pub fire_timer: f32,
     /// Potion effects on the local player, with seconds left (see potions.rs).
     pub effects: Vec<(crate::potions::Potion, f32)>,
+    /// Dispensers that were powered last time we looked (they fire on the change).
+    pub dispensers_on: std::collections::HashSet<IVec3>,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -276,6 +278,7 @@ impl Game {
             sapling_timer: 0.0,
             fire_timer: 0.0,
             effects: Vec::new(),
+            dispensers_on: Default::default(),
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],

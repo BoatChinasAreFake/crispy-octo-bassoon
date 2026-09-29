@@ -241,6 +241,15 @@ pub const T_TUSK: u16 = 298;
 pub const T_EMBER_SHROOM: u16 = 299;
 pub const T_BREWING_TOP: u16 = 300;
 pub const T_BREWING_SIDE: u16 = 301;
+pub const T_ZTORCH_ON: u16 = 302;
+pub const T_ZTORCH_OFF: u16 = 303;
+pub const T_REPEATER: u16 = 304;
+pub const T_REPEATER_ON: u16 = 305;
+pub const T_PISTON_FACE: u16 = 306;
+pub const T_STICKY_FACE: u16 = 307;
+pub const T_PISTON_SIDE: u16 = 308;
+pub const T_PISTON_BACK: u16 = 309;
+pub const T_DISPENSER_FACE: u16 = 310;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2381,6 +2390,47 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         shade(rgb(110, 105, 100), r.range(0.8, 1.05) * if edge { 0.7 } else { 1.0 })
     });
     a.each(T_BREWING_SIDE, |x, _, r, _| shade(rgb(200, 170, 60), r.range(0.8, 1.1) * if x % 4 == 0 { 0.8 } else { 1.0 }));
+    // Contraptions.
+    for (tile, lit) in [(T_ZTORCH_ON, true), (T_ZTORCH_OFF, false)] {
+        a.each(tile, |x, y, r, _| {
+            if (7..9).contains(&x) && y >= 6 {
+                shade(rgb(120, 90, 50), r.range(0.8, 1.1))
+            } else if (7..9).contains(&x) && (3..6).contains(&y) {
+                if lit { if y == 3 { rgb(255, 200, 190) } else { rgb(240, 40, 30) } } else { rgb(90, 30, 25) }
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    for (tile, lit) in [(T_REPEATER, false), (T_REPEATER_ON, true)] {
+        a.each(tile, |x, y, r, _| {
+            let arrow = x == 7 || x == 8 || (y < 6 && (x as i32 - 7).abs() + y as i32 <= 6 && (x as i32 - 7).abs() + y as i32 >= 4);
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            if arrow { if lit { rgb(250, 60, 40) } else { rgb(110, 30, 25) } } else { shade(rgb(160, 160, 160), r.range(0.85, 1.05) * if edge { 0.8 } else { 1.0 }) }
+        });
+    }
+    a.each(T_PISTON_SIDE, |x, y, r, _| {
+        if y < 4 { shade(rgb(160, 125, 80), r.range(0.85, 1.1)) } else { shade(rgb(115, 115, 115), r.range(0.8, 1.05) * if x % 5 == 0 { 0.85 } else { 1.0 }) }
+    });
+    a.each(T_PISTON_FACE, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(rgb(165, 130, 85), r.range(0.85, 1.1) * if edge { 0.75 } else { 1.0 })
+    });
+    a.each(T_STICKY_FACE, |x, y, r, _| {
+        let edge = x < 2 || y < 2 || x > 13 || y > 13;
+        if edge { shade(rgb(165, 130, 85), r.range(0.85, 1.1)) } else { shade(rgb(110, 190, 90), r.range(0.8, 1.1)) }
+    });
+    a.each(T_PISTON_BACK, |x, y, r, _| {
+        let hole = (6..10).contains(&x) && (6..10).contains(&y);
+        if hole { rgb(60, 60, 60) } else { shade(rgb(115, 115, 115), r.range(0.8, 1.05)) }
+    });
+    a.copy(T_COBBLE, T_DISPENSER_FACE);
+    for y in 5..11 {
+        for x in 4..12 {
+            let edge = y == 5 || y == 10 || x == 4 || x == 11;
+            a.set(T_DISPENSER_FACE, x, y, if edge { rgb(70, 70, 70) } else { rgb(25, 25, 25) });
+        }
+    }
     a.each(T_LADDER, |x, y, r, _| {
         let rail = x < 2 || x > 13;
         let rung = y % 4 == 1 && (2..14).contains(&x);

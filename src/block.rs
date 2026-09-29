@@ -136,7 +136,19 @@ pub const FIRE: Id = 211;
 /// Potions (see potions.rs): a Scorchlands ingredient, and the stand.
 pub const EMBER_SHROOM: Id = 212;
 pub const BREWING_STAND: Id = 213;
-pub const NUM_BLOCKS: Id = 214;
+/// Contraptions (see contraptions.rs). Zappy Torches lit and out.
+pub const ZTORCH_ON: Id = 214;
+pub const ZTORCH_OFF: Id = 215;
+/// Repeaters: `REPEATER_FIRST + facing * 2 + on` (facing: the way power goes).
+pub const REPEATER_FIRST: Id = 216;
+/// Pistons and sticky pistons: `+ facing * 2 + extended` (six facings, see contraptions::dir6).
+pub const PISTON_FIRST: Id = 224;
+pub const STICKY_FIRST: Id = 236;
+/// Piston heads: `HEAD_FIRST + facing * 2 + sticky`.
+pub const HEAD_FIRST: Id = 248;
+/// Dispensers: `DISPENSER_FIRST + facing`.
+pub const DISPENSER_FIRST: Id = 260;
+pub const NUM_BLOCKS: Id = 266;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -239,7 +251,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id)
+    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -380,6 +392,46 @@ pub enum Shape {
     Trapdoor { facing: u8, open: bool },
     /// A brewing stand: a base and a rod.
     Brewer,
+    /// A repeater: a thin plate (with a little post showing which way it points).
+    Repeater { facing: u8 },
+    /// A piston's body (shorter when its head is out), facing one of six ways.
+    Piston { facing: u8, extended: bool },
+    /// A piston's head: a plate at the front and a rod back to the body.
+    PistonHead { facing: u8 },
+}
+
+/// A box covering `a..b` of a cell measured along direction `facing` (see
+/// contraptions::dir6), and all of it across.
+fn along(facing: u8, a: f32, b: f32) -> Aabb {
+    let (mut lo, mut hi) = ([0.0f32; 3], [1.0f32; 3]);
+    let (axis, pos) = match facing % 6 {
+        0 => (2, false),
+        1 => (0, true),
+        2 => (2, true),
+        3 => (0, false),
+        4 => (1, true),
+        _ => (1, false),
+    };
+    if pos {
+        lo[axis] = a;
+        hi[axis] = b;
+    } else {
+        lo[axis] = 1.0 - b;
+        hi[axis] = 1.0 - a;
+    }
+    (lo, hi)
+}
+
+/// The rod through the middle of a cell along `facing`, over `a..b`.
+fn rod(facing: u8, a: f32, b: f32) -> Aabb {
+    let (mut lo, mut hi) = along(facing, a, b);
+    for k in 0..3 {
+        if lo[k] == 0.0 && hi[k] == 1.0 {
+            lo[k] = 0.375;
+            hi[k] = 0.625;
+        }
+    }
+    (lo, hi)
 }
 
 /// An axis-aligned box inside a block cell, in 0..1 coordinates.
@@ -480,6 +532,14 @@ impl Shape {
                 };
                 ([b, full, full], 1)
             }
+            Shape::Repeater { facing } => {
+                let d = [[0.5, 0.2], [0.8, 0.5], [0.5, 0.8], [0.2, 0.5]][(facing % 4) as usize];
+                let post = ([d[0] - 0.07, 0.125, d[1] - 0.07], [d[0] + 0.07, 0.3125, d[1] + 0.07]);
+                ([([0.0; 3], [1.0, 0.125, 1.0]), post, full], 2)
+            }
+            Shape::Piston { extended: false, .. } => ([full, full, full], 1),
+            Shape::Piston { facing, extended: true } => ([along(facing, 0.0, 0.75), full, full], 1),
+            Shape::PistonHead { facing } => ([along(facing, 0.75, 1.0), rod(facing, -0.25, 0.75), full], 2),
             Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
             Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
             Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
@@ -555,7 +615,7 @@ pub fn placing_item(id: Id) -> Option<Id> {
     if (FRAME_FIRST..FRAME_FIRST + 4).contains(&id) {
         return Some(FRAME_FIRST);
     }
-    if let Some(f) = crate::carpentry::family(id) {
+    if let Some(f) = crate::carpentry::family(id).or_else(|| crate::contraptions::family(id)) {
         return Some(f);
     }
     if let Some((family, _)) = slab_of(id) {
@@ -1061,6 +1121,52 @@ impl Registry {
         let mut stand = def("brewing_stand", "Brewing Stand (Chemistry, Loosely)", Shaped, true, false, [T_BREWING_TOP, T_BREWING_SIDE, T_BREWING_TOP], 1.0, 0, false, BREWING_STAND, 2.0, S_STONE);
         stand.shape = Shape::Brewer;
         blocks.push(stand);
+        // Contraptions (see contraptions.rs).
+        for lit in [true, false] {
+            let mut d = def(if lit { "zappy_torch" } else { "zappy_torch_off" }, "Zappy Torch (Contrarian)", Cross, false, false, [if lit { T_ZTORCH_ON } else { T_ZTORCH_OFF }; 3], 0.0, 0, false, ZTORCH_ON, if lit { 4.0 } else { 0.0 }, S_WOOD);
+            d.creative = lit;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            for on in [false, true] {
+                let key = format!("repeater{}{}", ["", "_east", "_south", "_west"][facing as usize], if on { "_on" } else { "" });
+                let mut d = def(leak(&key), "Repeater (Says It Again)", Shaped, true, false, [if on { T_REPEATER_ON } else { T_REPEATER }, T_STONE, T_STONE], 0.0, 0, false, REPEATER_FIRST, 0.0, S_STONE);
+                d.shape = Shape::Repeater { facing };
+                d.creative = facing == 0 && !on;
+                d.see_through = true;
+                blocks.push(d);
+            }
+        }
+        for sticky in [false, true] {
+            for facing in 0..6u8 {
+                for extended in [false, true] {
+                    let key = format!("{}piston_{}{}", if sticky { "sticky_" } else { "" }, ["north", "east", "south", "west", "up", "down"][facing as usize], if extended { "_out" } else { "" });
+                    let name = if sticky { "Sticky Piston (Clingy)" } else { "Piston (Pushy)" };
+                    let family = if sticky { STICKY_FIRST } else { PISTON_FIRST };
+                    let mut d = def(leak(&key), name, Shaped, true, !extended, [T_PISTON_SIDE; 3], 1.5, 0, false, family, 0.0, S_STONE);
+                    d.shape = Shape::Piston { facing, extended };
+                    d.creative = facing == 0 && !extended;
+                    d.see_through = extended;
+                    blocks.push(d);
+                }
+            }
+        }
+        for facing in 0..6u8 {
+            for sticky in [false, true] {
+                let key = format!("piston_head_{}{}", ["north", "east", "south", "west", "up", "down"][facing as usize], if sticky { "_sticky" } else { "" });
+                let mut d = def(leak(&key), "Piston Head", Shaped, true, false, [T_PISTON_SIDE; 3], 1.5, 0, false, AIR, 0.0, S_STONE);
+                d.shape = Shape::PistonHead { facing };
+                d.creative = false;
+                d.see_through = true;
+                blocks.push(d);
+            }
+        }
+        for facing in 0..6u8 {
+            let key = format!("dispenser{}", ["", "_east", "_south", "_west", "_up", "_down"][facing as usize]);
+            let mut d = def(leak(&key), "Dispenser (Spits Things)", Cube, true, true, [T_COBBLE; 3], 3.5, 1, true, DISPENSER_FIRST, 0.0, S_STONE);
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1263,6 +1369,11 @@ impl Registry {
             r(&[(GLASS, 6)], (PANE_FIRST, 16)),
             r(&[(GLASS, 3)], (GLASS_BOTTLE, 3)),
             r(&[(COBBLE, 3), (GRUMBLER_TUSK, 1)], (BREWING_STAND, 1)),
+            r(&[(STICK, 1), (ZAP_DUST, 1)], (ZTORCH_ON, 1)),
+            r(&[(STONE, 3), (ZTORCH_ON, 2), (ZAP_DUST, 1)], (REPEATER_FIRST, 1)),
+            r(&[(PLANKS, 3), (COBBLE, 4), (IRON, 1), (ZAP_DUST, 1)], (PISTON_FIRST, 1)),
+            r(&[(PISTON_FIRST, 1), (GOO, 1)], (STICKY_FIRST, 1)),
+            r(&[(COBBLE, 7), (BOW, 1), (ZAP_DUST, 1)], (DISPENSER_FIRST, 1)),
             r(&[(BONE_DUST, 1)], (DYE_FIRST, 2)),
             r(&[(COAL, 1)], (DYE_FIRST + 1, 2)),
             r(&[(FLOWER, 1)], (DYE_FIRST + 2, 2)),

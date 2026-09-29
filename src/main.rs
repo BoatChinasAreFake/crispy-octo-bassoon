@@ -11,6 +11,7 @@ mod building;
 mod carpentry;
 mod combat;
 mod containers;
+mod contraptions;
 mod decor;
 mod drops;
 mod enchant;
@@ -1998,7 +1999,7 @@ impl App {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
         } else {
-            (0..containers::CHEST_SLOTS).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
+            (0..c.slots.len()).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
         };
         for &(i, x, y) in &spots {
             let (l, r, hov) = self.ui.slot_worn(c.slots[i], c.wear[i], x, y, slot, false);
@@ -2833,7 +2834,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" => {
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" => {
                 let mut g = Game::new(424242, s.mode == "farm", false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -3002,7 +3003,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3186,6 +3187,30 @@ async fn game_main() {
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
                 }
+            }
+            if s.mode == "contraptions" && frames == 125 {
+                // Lever -> dust -> repeater -> lamp; a torch inverter; pistons out; a dispenser.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                app.game.world.set_v(at(3, -3, 0), block::LEVER_ON);
+                for k in -2..0 {
+                    app.game.world.set_v(at(3, k, 0), block::WIRE);
+                }
+                app.game.world.set_v(at(3, 0, 0), contraptions::repeater(contraptions::facing_of(r), false));
+                app.game.world.set_v(at(3, 1, 0), block::LAMP);
+                app.game.world.set_v(at(5, -2, 0), block::STONE);
+                app.game.world.set_v(at(5, -2, 1), block::ZTORCH_ON);
+                app.game.world.set_v(at(5, -1, 1), block::LAMP);
+                for k in 0..3 {
+                    app.game.world.set_v(at(6, k, 0), contraptions::piston(contraptions::facing_of(f), false, k == 1));
+                    app.game.world.set_v(at(7, k, 0), block::PLANKS);
+                    app.game.world.set_v(at(6, k, 1), block::ZAP_BLOCK);
+                }
+                app.game.world.set_v(at(4, 3, 0), block::DISPENSER_FIRST + contraptions::facing_of(-f) as block::Id);
             }
             if s.mode == "brewing" && frames == 125 {
                 // A brewing stand mid-brew, potions in hand, and a couple of effects on.

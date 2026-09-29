@@ -17,6 +17,7 @@ use crate::sound::{Mat, Sfx};
 use macroquad::math::{IVec3, Vec3};
 
 pub const CHEST_SLOTS: usize = 27;
+pub const DISPENSER_SLOTS: usize = 9;
 /// Furnace slots.
 pub const INPUT: usize = 0;
 pub const FUEL: usize = 1;
@@ -37,7 +38,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND)
+    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND) || crate::contraptions::is_dispenser(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -95,6 +96,9 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
             _ => false,
         };
     }
+    if crate::contraptions::is_dispenser(kind) {
+        return slot < DISPENSER_SLOTS;
+    }
     if !is_furnace(kind) {
         return slot < CHEST_SLOTS;
     }
@@ -107,7 +111,7 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
 
 impl Container {
     pub fn for_block(id: Id) -> Container {
-        let n = if is_three_slot(id) { 3 } else { CHEST_SLOTS };
+        let n = if is_three_slot(id) { 3 } else if crate::contraptions::is_dispenser(id) { DISPENSER_SLOTS } else { CHEST_SLOTS };
         Container { slots: vec![None; n], wear: vec![0; n], burn: 0.0, burn_total: 0.0, cook: 0.0 }
     }
 

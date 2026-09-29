@@ -44,6 +44,14 @@ impl Game {
         if let Some(id) = self.hinged_facing(held, normal) {
             return id;
         }
+        // Pistons and dispensers face you; repeaters point away from you.
+        match held {
+            PISTON_FIRST => return crate::contraptions::piston(self.facing6(), false, false),
+            STICKY_FIRST => return crate::contraptions::piston(self.facing6(), false, true),
+            DISPENSER_FIRST => return DISPENSER_FIRST + self.facing6() as Id,
+            REPEATER_FIRST => return crate::contraptions::repeater(self.facing(), false),
+            _ => {}
+        }
         if held == FRAME_FIRST {
             return FRAME_FIRST + crate::decor::frame_facing(normal).unwrap_or(0) as Id;
         }
