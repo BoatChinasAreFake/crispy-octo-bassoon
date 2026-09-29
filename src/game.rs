@@ -154,6 +154,8 @@ pub struct Game {
     pub effects: Vec<(crate::potions::Potion, f32)>,
     /// Dispensers that were powered last time we looked (they fire on the change).
     pub dispensers_on: std::collections::HashSet<IVec3>,
+    /// Hopper clock (see hoppers.rs).
+    pub hopper_timer: f32,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -279,6 +281,7 @@ impl Game {
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
+            hopper_timer: 0.0,
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],
@@ -2157,6 +2160,7 @@ impl Game {
         self.trees_tick(dt);
         self.fire_tick(dt);
         self.container_tick(dt);
+        self.hoppers_tick(dt);
         self.drops_tick(dt);
         self.orbs_tick(dt);
         if !self.rules.difficulty.monsters() {

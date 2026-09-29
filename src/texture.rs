@@ -250,6 +250,8 @@ pub const T_STICKY_FACE: u16 = 307;
 pub const T_PISTON_SIDE: u16 = 308;
 pub const T_PISTON_BACK: u16 = 309;
 pub const T_DISPENSER_FACE: u16 = 310;
+pub const T_HOPPER_TOP: u16 = 311;
+pub const T_HOPPER_SIDE: u16 = 312;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2424,6 +2426,11 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let hole = (6..10).contains(&x) && (6..10).contains(&y);
         if hole { rgb(60, 60, 60) } else { shade(rgb(115, 115, 115), r.range(0.8, 1.05)) }
     });
+    a.each(T_HOPPER_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        if rim { shade(rgb(70, 70, 75), r.range(0.85, 1.1)) } else { shade(rgb(35, 35, 38), r.range(0.8, 1.1)) }
+    });
+    a.each(T_HOPPER_SIDE, |x, y, r, _| shade(rgb(75, 75, 80), r.range(0.8, 1.1) * if y % 5 == 0 || x % 8 == 0 { 0.8 } else { 1.0 }));
     a.copy(T_COBBLE, T_DISPENSER_FACE);
     for y in 5..11 {
         for x in 4..12 {

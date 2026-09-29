@@ -38,7 +38,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND) || crate::contraptions::is_dispenser(id)
+    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND) || crate::contraptions::is_dispenser(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -99,6 +99,9 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if crate::contraptions::is_dispenser(kind) {
         return slot < DISPENSER_SLOTS;
     }
+    if crate::hoppers::is_hopper(kind) {
+        return slot < crate::hoppers::SLOTS;
+    }
     if !is_furnace(kind) {
         return slot < CHEST_SLOTS;
     }
@@ -111,7 +114,15 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
 
 impl Container {
     pub fn for_block(id: Id) -> Container {
-        let n = if is_three_slot(id) { 3 } else if crate::contraptions::is_dispenser(id) { DISPENSER_SLOTS } else { CHEST_SLOTS };
+        let n = if is_three_slot(id) {
+            3
+        } else if crate::contraptions::is_dispenser(id) {
+            DISPENSER_SLOTS
+        } else if crate::hoppers::is_hopper(id) {
+            crate::hoppers::SLOTS
+        } else {
+            CHEST_SLOTS
+        };
         Container { slots: vec![None; n], wear: vec![0; n], burn: 0.0, burn_total: 0.0, cook: 0.0 }
     }
 

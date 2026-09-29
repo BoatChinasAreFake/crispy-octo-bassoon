@@ -20,6 +20,7 @@ mod farming;
 mod fire;
 mod fishing;
 mod game;
+mod hoppers;
 mod hunger;
 mod inventory;
 mod keybinds;
@@ -3211,6 +3212,11 @@ async fn game_main() {
                     app.game.world.set_v(at(6, k, 1), block::ZAP_BLOCK);
                 }
                 app.game.world.set_v(at(4, 3, 0), block::DISPENSER_FIRST + contraptions::facing_of(-f) as block::Id);
+                // A chest feeding a furnace through a hopper.
+                app.game.world.set_v(at(3, -5, 0), block::FURNACE);
+                app.game.world.set_v(at(3, -5, 1), block::HOPPER_FIRST);
+                app.game.world.set_v(at(3, -5, 2), block::CHEST);
+                app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
             }
             if s.mode == "brewing" && frames == 125 {
                 // A brewing stand mid-brew, potions in hand, and a couple of effects on.

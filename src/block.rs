@@ -148,7 +148,9 @@ pub const STICKY_FIRST: Id = 236;
 pub const HEAD_FIRST: Id = 248;
 /// Dispensers: `DISPENSER_FIRST + facing`.
 pub const DISPENSER_FIRST: Id = 260;
-pub const NUM_BLOCKS: Id = 266;
+/// Hoppers: `HOPPER_FIRST` spouts down, `+ 1 + facing` to a side (see hoppers.rs).
+pub const HOPPER_FIRST: Id = 266;
+pub const NUM_BLOCKS: Id = 271;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -398,6 +400,8 @@ pub enum Shape {
     Piston { facing: u8, extended: bool },
     /// A piston's head: a plate at the front and a rod back to the body.
     PistonHead { facing: u8 },
+    /// A hopper: a bowl, a funnel and a spout (0 down, else 1 + a side facing).
+    Hopper { spout: u8 },
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -540,6 +544,18 @@ impl Shape {
             Shape::Piston { extended: false, .. } => ([full, full, full], 1),
             Shape::Piston { facing, extended: true } => ([along(facing, 0.0, 0.75), full, full], 1),
             Shape::PistonHead { facing } => ([along(facing, 0.75, 1.0), rod(facing, -0.25, 0.75), full], 2),
+            Shape::Hopper { spout } => {
+                let bowl = ([0.0, 0.625, 0.0], [1.0, 1.0, 1.0]);
+                let funnel = ([0.25, 0.25, 0.25], [0.75, 0.625, 0.75]);
+                let tip = match spout {
+                    0 => ([0.375, 0.0, 0.375], [0.625, 0.25, 0.625]),
+                    k => {
+                        let (lo, hi) = rod(k - 1, 0.0, 0.25);
+                        ([lo[0], 0.25, lo[2]], [hi[0], 0.5, hi[2]])
+                    }
+                };
+                ([bowl, funnel, tip], 3)
+            }
             Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
             Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
             Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
@@ -614,6 +630,9 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if (FRAME_FIRST..FRAME_FIRST + 4).contains(&id) {
         return Some(FRAME_FIRST);
+    }
+    if crate::hoppers::is_hopper(id) {
+        return Some(HOPPER_FIRST);
     }
     if let Some(f) = crate::carpentry::family(id).or_else(|| crate::contraptions::family(id)) {
         return Some(f);
@@ -1161,12 +1180,22 @@ impl Registry {
                 blocks.push(d);
             }
         }
+        let mut hoppers = Vec::new();
+        for spout in 0..5u8 {
+            let key = format!("hopper{}", ["", "_north", "_east", "_south", "_west"][spout as usize]);
+            let mut d = def(leak(&key), "Hopper (Funnel With Ambition)", Shaped, true, false, [T_HOPPER_TOP, T_HOPPER_SIDE, T_HOPPER_SIDE], 3.0, 1, true, HOPPER_FIRST, 0.0, S_STONE);
+            d.shape = Shape::Hopper { spout };
+            d.creative = spout == 0;
+            d.see_through = true;
+            hoppers.push(d);
+        }
         for facing in 0..6u8 {
             let key = format!("dispenser{}", ["", "_east", "_south", "_west", "_up", "_down"][facing as usize]);
             let mut d = def(leak(&key), "Dispenser (Spits Things)", Cube, true, true, [T_COBBLE; 3], 3.5, 1, true, DISPENSER_FIRST, 0.0, S_STONE);
             d.creative = facing == 0;
             blocks.push(d);
         }
+        blocks.extend(hoppers);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SIGN_FIRST as usize].key, "sign");
@@ -1374,6 +1403,7 @@ impl Registry {
             r(&[(PLANKS, 3), (COBBLE, 4), (IRON, 1), (ZAP_DUST, 1)], (PISTON_FIRST, 1)),
             r(&[(PISTON_FIRST, 1), (GOO, 1)], (STICKY_FIRST, 1)),
             r(&[(COBBLE, 7), (BOW, 1), (ZAP_DUST, 1)], (DISPENSER_FIRST, 1)),
+            r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(BONE_DUST, 1)], (DYE_FIRST, 2)),
             r(&[(COAL, 1)], (DYE_FIRST + 1, 2)),
             r(&[(FLOWER, 1)], (DYE_FIRST + 2, 2)),
