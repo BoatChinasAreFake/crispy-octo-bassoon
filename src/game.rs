@@ -152,6 +152,9 @@ pub struct Game {
     pub sapling_timer: f32,
     pub beacon_timer: f32,
     pub explore_timer: f32,
+    /// Graphics options (from settings.txt; see render.rs).
+    pub waving_leaves: bool,
+    pub water_reflections: bool,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
     /// Potion effects on the local player, with seconds left (see potions.rs).
@@ -298,6 +301,8 @@ impl Game {
             sapling_timer: 0.0,
             beacon_timer: 0.0,
             explore_timer: 0.0,
+            waving_leaves: true,
+            water_reflections: true,
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
@@ -2666,7 +2671,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock }
     }
 }
 

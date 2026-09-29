@@ -1482,6 +1482,14 @@ impl App {
         }
         self.captions.tick(dt);
         self.game.colour_blind = self.settings.colour_blind;
+        self.game.waving_leaves = self.settings.waving_leaves;
+        self.game.water_reflections = self.settings.water_reflections;
+        if mesher::smooth() != self.settings.smooth_lighting {
+            // Every chunk has to be meshed again with the other kind of lighting.
+            mesher::set_smooth(self.settings.smooth_lighting);
+            let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
+            self.game.world.dirty.extend(all);
+        }
         let in_game = !self.game.menu && self.screen != Screen::Dead;
         self.audio.update_music(dt, in_game);
     }
@@ -1962,12 +1970,14 @@ impl App {
     fn options_screen(&mut self, from_title: bool) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
-        self.ui.text_centered("Options", w / 2.0, h * 0.2, 16.0, WHITE);
         let bw = (220.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
         let small = bh * 1.3;
-        let mut y = h * 0.3;
+        // Ten rows (and the title above them), centred in whatever room there is.
+        let total = 10.0 * bh + 9.0 * 5.0 * s + 7.0 * s;
+        let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
+        self.ui.text_centered("Options", w / 2.0, y - 18.0 * s, 16.0, WHITE);
         let row = |ui: &Ui, label: String, y: f32| -> i32 {
             let mut d = 0;
             if ui.button(Rect::new(x, y, small, bh), "-", true) {
@@ -2020,8 +2030,22 @@ impl App {
             self.settings.subtitles = !self.settings.subtitles;
         }
         let cb = if self.settings.colour_blind { "Colour-blind: ON" } else { "Colour-blind: OFF" };
+        let waving = if self.settings.waving_leaves { "Leaves: Waving" } else { "Leaves: Still" };
+        let shiny = if self.settings.water_reflections { "Water: Shiny" } else { "Water: Plain" };
+        let lighting = if self.settings.smooth_lighting { "Lighting: Smooth" } else { "Lighting: Flat" };
         if self.ui.button(Rect::new(right, y, half, bh), cb, true) {
             self.settings.colour_blind = !self.settings.colour_blind;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), waving, true) {
+            self.settings.waving_leaves = !self.settings.waving_leaves;
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), shiny, true) {
+            self.settings.water_reflections = !self.settings.water_reflections;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), lighting, true) {
+            self.settings.smooth_lighting = !self.settings.smooth_lighting;
         }
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
@@ -3004,6 +3028,7 @@ async fn game_main() {
     let flag = |f: &str| std::env::args().any(|a| a == f);
     if shot.is_some() {
         app.settings.colour_blind = flag("--colour-blind");
+        app.settings.smooth_lighting = !flag("--flat-lighting");
         app.settings.subtitles = flag("--subtitles");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
