@@ -28,30 +28,20 @@ OPTIONS:
     --keep-inventory    Players keep their things when they die (default: they drop them)
     --difficulty <D>    peaceful, easy, normal or hard (default: the world's own, normal if new)
     --max-players <N>   Player limit (default 16)
+    --allow-list        Only let in players on allow-list.txt (and operators)
     --upnp              Ask your router to forward the port (for home servers)
     --help              Show this help
 
 CONSOLE COMMANDS:
-    list, say <text>, kick <name>, save, time <day|night|0.0-1.0>,
-    password <pw|off>, ban <name|ip>, unban <ip>, bans, help, stop
+    list, players, info <name>, say <text>, kick <name>, save, stop, help,
+    time <day|noon|night|midnight|0.0-1.0>, password <pw|off>,
+    ban <name|ip>, unban <ip>, bans, op <name>, deop <name>, ops,
+    allowlist <on|off|list|add <name>|remove <name>>, forget <name>
 
-Bans are by IP address and kept in banned-ips.txt next to the server.
-Five wrong passwords from one address lock it out for ten minutes.";
-
-const BAN_FILE: &str = "banned-ips.txt";
-
-fn load_bans() -> Vec<std::net::IpAddr> {
-    std::fs::read_to_string(BAN_FILE).unwrap_or_default().lines().filter_map(|l| l.split('#').next()?.trim().parse().ok()).collect()
-}
-
-fn save_bans(bans: &std::collections::HashSet<std::net::IpAddr>) {
-    let mut list: Vec<String> = bans.iter().map(|ip| ip.to_string()).collect();
-    list.sort();
-    let text = format!("# One IP address per line. Managed by the server's ban/unban commands.\n{}\n", list.join("\n"));
-    if let Err(e) = std::fs::write(BAN_FILE, text) {
-        log(&format!("Couldn't write {BAN_FILE}: {e}"));
-    }
-}
+Operators (ops.txt) can use the same commands in chat: /kick Bob.
+The allow-list (allow-list.txt) and bans (banned-ips.txt, by IP address)
+live next to the server. Five wrong passwords from one address lock it
+out for ten minutes.";
 
 pub fn timestamp() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -105,6 +95,10 @@ pub fn run(args: &[String]) -> i32 {
             None => log(&format!("Unknown difficulty '{d}' (try peaceful, easy, normal or hard); keeping {}", game.rules.difficulty.name())),
         }
     }
+    game.admin = crate::admin::Admin::load(std::path::Path::new("."));
+    if args.iter().any(|a| a == "--allow-list") {
+        game.admin.enforce = true;
+    }
     game.dedicated = true;
     game.ready = true;
     game.messages.clear();
@@ -118,9 +112,15 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     log(&format!("Listening on TCP port {port} (IPv4{}), max {max_players} players", if crate::net::public_ipv6().is_some() { " + IPv6" } else { "" }));
-    let bans = load_bans();
+    let bans = crate::admin::Admin::load_bans(std::path::Path::new("."));
     if !bans.is_empty() {
-        log(&format!("{} banned address(es) loaded from {BAN_FILE}", bans.len()));
+        log(&format!("{} banned address(es) loaded from {}", bans.len(), crate::admin::BAN_FILE));
+    }
+    if game.admin.enforce {
+        log(&format!("Allow-list on: {} player(s) listed in {}", game.admin.allowed.len(), crate::admin::ALLOW_FILE));
+    }
+    if !game.admin.ops.is_empty() {
+        log(&format!("Operators: {}", game.admin.ops.iter().cloned().collect::<Vec<_>>().join(", ")));
     }
     if let Some(Net::Host(s)) = &mut game.net {
         s.banned.extend(bans);
@@ -183,93 +183,22 @@ pub fn run(args: &[String]) -> i32 {
             save_world(&mut game);
         }
         while let Ok(cmd) = rx.try_recv() {
-            let (word, rest) = cmd.split_once(' ').map(|(a, b)| (a, b.trim())).unwrap_or((cmd.as_str(), ""));
+            let word = cmd.split_whitespace().next().unwrap_or("");
             match word {
                 "" => {}
                 "help" | "?" => println!("{HELP}"),
                 "stop" | "exit" | "quit" => break 'outer,
                 "save" => save_world(&mut game),
-                "list" => {
-                    let names: Vec<&str> = game.peers.values().map(|p| p.name.as_str()).collect();
-                    log(&format!("{} player(s) online: {}", names.len(), names.join(", ")));
-                }
-                "say" if !rest.is_empty() => game.send_chat(rest),
-                "kick" if !rest.is_empty() => {
-                    if !game.kick_player(rest, "Kicked by the server operator.") {
-                        log(&format!("No player called {rest}"));
-                    }
-                }
-                "time" => {
-                    let t = match rest {
-                        "day" => Some(0.05),
-                        "noon" => Some(0.25),
-                        "night" => Some(0.55),
-                        "midnight" => Some(0.75),
-                        v => v.parse::<f32>().ok(),
-                    };
-                    match t {
-                        Some(t) => {
-                            game.time = t.rem_euclid(1.0);
-                            game.net_broadcast(crate::net::Msg::Time(game.time));
-                            log(&format!("Time set to {:.2}", game.time));
-                        }
-                        None => log("Usage: time <day|noon|night|midnight|0.0-1.0>"),
-                    }
-                }
-                "ban" if !rest.is_empty() => {
-                    // A player's name, or an address.
-                    let by_name = game.peer_by_name(rest);
-                    if let Some(Net::Host(s)) = &mut game.net {
-                        let ip = match by_name {
-                            Some(id) => s.ip_of(id),
-                            None => rest.parse().ok(),
-                        };
-                        match ip {
-                            Some(ip) => {
-                                s.banned.insert(ip);
-                                save_bans(&s.banned);
-                                let ids: Vec<u32> = s.clients.iter().filter(|c| c.conn.peer_ip() == Some(ip)).map(|c| c.id).collect();
-                                for id in ids {
-                                    s.kick(id, "You have been banned from this server.");
-                                }
-                                log(&format!("Banned {ip}"));
-                            }
-                            None => log(&format!("No player or address called {rest}")),
-                        }
-                    }
-                }
-                "unban" if !rest.is_empty() => {
-                    if let Some(Net::Host(s)) = &mut game.net {
-                        match rest.parse::<std::net::IpAddr>() {
-                            Ok(ip) if s.banned.remove(&ip) => {
-                                save_bans(&s.banned);
-                                log(&format!("Unbanned {ip}"));
-                            }
-                            _ => log(&format!("{rest} isn't banned (unban takes an IP address; see 'bans')")),
-                        }
-                    }
-                }
-                "bans" => {
-                    if let Some(Net::Host(s)) = &game.net {
-                        let list: Vec<String> = s.banned.iter().map(|ip| ip.to_string()).collect();
-                        log(&format!("{} banned: {}", list.len(), list.join(", ")));
-                    }
-                }
-                "password" => {
-                    let pw = if rest.is_empty() || rest == "off" { None } else { Some(rest.to_string()) };
-                    let on = pw.is_some();
-                    if let Some(Net::Host(s)) = &mut game.net {
-                        s.password = pw;
-                    }
-                    log(if on { "Password set (applies to new logins)." } else { "Password removed: anyone can join." });
-                }
                 // "/something" goes to script mods as chat from "Server".
                 _ if cmd.starts_with('/') => {
                     if game.fire("on_chat", vec!["Server".into(), cmd.clone().into()]) {
                         log(&format!("No script handled {cmd}"));
                     }
                 }
-                _ => log(&format!("Unknown command \"{cmd}\". Type help, or /command for script mods.")),
+                _ => match game.admin_command(crate::admin::Caller::Console, &cmd) {
+                    Some(lines) => lines.iter().for_each(|l| log(l)),
+                    None => log(&format!("Unknown command \"{cmd}\". Type help, or /command for script mods.")),
+                },
             }
         }
         next += Duration::from_secs_f32(TICK);

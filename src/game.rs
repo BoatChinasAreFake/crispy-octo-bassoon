@@ -142,6 +142,8 @@ pub struct Game {
     pub enchant_count: u32,
     /// Joined players we remember, by name (see players.rs).
     pub saved_players: std::collections::BTreeMap<String, crate::players::PlayerRecord>,
+    /// Allow-list and operators (see admin.rs).
+    pub admin: crate::admin::Admin,
     pub report_timer: f32,
     /// Rain, snow, storms (see weather.rs).
     pub weather: crate::weather::WeatherState,
@@ -261,6 +263,7 @@ impl Game {
             enchanting: None,
             enchant_count: 0,
             saved_players: Default::default(),
+            admin: Default::default(),
             report_timer: 0.0,
             weather: Default::default(),
             liquid_timers: [0.0; 2],

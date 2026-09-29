@@ -216,7 +216,14 @@ impl Game {
             return; // a script handled it
         }
         if text.starts_with('/') {
-            self.msg(format!("Unknown command {}. Commands come from script mods.", text.split_whitespace().next().unwrap_or("")));
+            match self.admin_command(crate::admin::Caller::Host, &text) {
+                Some(lines) => {
+                    for l in lines {
+                        self.msg(l);
+                    }
+                }
+                None => self.msg(format!("Unknown command {}. Try /help, or commands from script mods.", text.split_whitespace().next().unwrap_or(""))),
+            }
             return;
         }
         self.msg(format!("<{me}> {text}"));
@@ -340,6 +347,12 @@ impl Game {
                     }
                     if server.joined_count() >= server.max_players {
                         server.kick(from, &format!("The server is full ({} players).", server.max_players));
+                        return;
+                    }
+                    if !self.admin.admits(&sanitize_name(&name)) {
+                        let who = server.get(from).map(|c| c.conn.peer_addr()).unwrap_or_default();
+                        server.kick(from, "You're not on this server's allow-list.");
+                        self.msg(format!("Turned away {} from {who} (not on the allow-list)", sanitize_name(&name)));
                         return;
                     }
                     let password = server.password.is_some();
@@ -591,8 +604,17 @@ impl Game {
                     return;
                 }
                 if text.starts_with('/') {
-                    let cmd = text.split_whitespace().next().unwrap_or("").to_string();
-                    self.system_message(Some(from), &format!("Unknown command {cmd}. Commands come from script mods."));
+                    match self.admin_command(crate::admin::Caller::Player(from), &text) {
+                        Some(lines) => {
+                            for l in lines {
+                                self.system_message(Some(from), &l);
+                            }
+                        }
+                        None => {
+                            let cmd = text.split_whitespace().next().unwrap_or("").to_string();
+                            self.system_message(Some(from), &format!("Unknown command {cmd}. Try /help, or commands from script mods."));
+                        }
+                    }
                     return;
                 }
                 self.msg(format!("<{who}> {text}"));
@@ -1261,6 +1283,34 @@ mod tests {
         let mut client = Game::new_client(id, seed, time, creative, spawn, conn, name, leftover);
         load_around(&mut client, spawn);
         Ok(client)
+    }
+
+    #[test]
+    fn allow_list_and_operators() {
+        let mut host = Game::new(779, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        host.admin_command(crate::admin::Caller::Host, "allowlist add Friendly");
+        host.admin_command(crate::admin::Caller::Host, "allowlist on");
+        let err = join(&mut host, port, "Stranger", "").err().expect("strangers are turned away");
+        assert!(err.contains("allow-list"), "{err}");
+        let mut client = join(&mut host, port, "Friendly", "").unwrap();
+        let id = client.my_id;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.contains_key(&id)));
+
+        // Not an operator yet: commands are refused, but /list works for anyone.
+        client.send_chat("/time night");
+        client.send_chat("/list");
+        assert!(pump(&mut host, &mut client, |_, c| c.messages.iter().any(|m| m.0.contains("Only operators")) && c.messages.iter().any(|m| m.0.contains("2 online"))));
+        assert!((host.time - 0.55).abs() > 0.01);
+
+        host.admin_command(crate::admin::Caller::Host, "op friendly");
+        assert!(pump(&mut host, &mut client, |_, c| c.messages.iter().any(|m| m.0.contains("made you an operator"))));
+        // Now the same player can use the commands.
+        client.send_chat("/time noon");
+        client.send_chat("/info friendly");
+        assert!(pump(&mut host, &mut client, |h, c| (h.time - 0.25).abs() < 0.01 && c.messages.iter().any(|m| m.0.contains("health"))));
     }
 
     #[test]

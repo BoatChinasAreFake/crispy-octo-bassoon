@@ -2,6 +2,7 @@
 //! Rust + raw OpenGL (via miniquad/macroquad). No asset files: everything is
 //! generated at startup.
 
+mod admin;
 mod advancements;
 mod animals;
 mod anvil;
