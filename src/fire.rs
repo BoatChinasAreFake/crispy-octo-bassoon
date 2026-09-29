@@ -118,14 +118,14 @@ impl Game {
                 let (catch, eat) = flammability(self.world.get_v(q));
                 if self.rng.chance(eat * STEP) {
                     burn.push(q);
-                } else if self.rng.chance(catch * 0.3) {
+                } else if self.rng.chance(catch * 0.12) {
                     // Catch the air beside it too.
                     let side = q + SIDES[self.rng.int(0, 5) as usize];
                     spread.push(side);
                 }
             }
             // Leap a little, to air near fuel.
-            if self.rng.chance(0.15) {
+            if self.rng.chance(0.05) {
                 let jump = p + ivec3(self.rng.int(-1, 1), self.rng.int(-1, 1), self.rng.int(-1, 1));
                 if SIDES.iter().any(|d| flammable(self.world.get_v(jump + *d))) {
                     spread.push(jump);

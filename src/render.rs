@@ -48,7 +48,8 @@ uniform sampler2D tex;
 uniform vec4 cam_pos;
 uniform vec4 fog_color;
 uniform vec4 params;   // x: daylight, y: fog start, z: fog end, w: alpha multiplier
-uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow)
+uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow), z: colour-blind view
+DALTONIZE
 uniform vec4 tint;
 uniform vec4 lights[16];
 
@@ -101,6 +102,10 @@ void main() {
         float d = distance(v_wpos, cam_pos.xyz);
         float f = clamp((d - params.y) / (params.z - params.y), 0.0, 1.0);
         col = mix(col, fog_color.rgb, f);
+    }
+    // Colour-blind friendly view (see access.rs).
+    if (params2.z > 0.5) {
+        col = daltonize(col);
     }
     gl_FragColor = vec4(col, c.a * params.w);
 }
@@ -215,6 +220,8 @@ pub struct FrameParams {
     /// Least light anywhere (0 for the ordinary world).
     pub ambient: f32,
     pub lights: [Vec4; 16],
+    /// Show the world through the colour-blind filter (see access.rs).
+    pub colour_blind: bool,
 }
 
 pub struct Renderer {
@@ -267,7 +274,7 @@ impl Renderer {
         ctx.texture_generate_mipmaps(texture);
 
         let (_, _, tile) = tile_uv(0);
-        let fragment = FRAGMENT_SHADER.replace("TILE_SIZE", &format!("{tile:.8}"));
+        let fragment = FRAGMENT_SHADER.replace("TILE_SIZE", &format!("{tile:.8}")).replace("DALTONIZE", crate::access::DALTONIZE_GLSL);
         let shader = ctx
             .new_shader(ShaderSource::Glsl { vertex: VERTEX_SHADER, fragment: &fragment }, shader_meta())
             .unwrap_or_else(|e| panic!("shader failed to compile: {e:?}"));
@@ -383,7 +390,7 @@ impl Renderer {
             cam_pos: fp.cam_pos.extend(1.0),
             fog_color: Vec4::new(fp.fog_color[0], fp.fog_color[1], fp.fog_color[2], 1.0),
             params: Vec4::new(fp.daylight, fp.fog_start, fp.fog_end, 1.0),
-            params2: Vec4::new(0.0, fp.ambient, 0.0, 0.0),
+            params2: Vec4::new(0.0, fp.ambient, fp.colour_blind as u8 as f32, 0.0),
             tint: Vec4::ONE,
             lights: fp.lights,
         };

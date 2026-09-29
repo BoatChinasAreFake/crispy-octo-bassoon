@@ -3,6 +3,7 @@
 //! generated at startup.
 
 mod admin;
+mod access;
 mod advancements;
 mod animals;
 mod anvil;
@@ -165,6 +166,8 @@ struct App {
     chat_sent: Vec<String>,
     /// The name being written on a Name Tag.
     name_line: String,
+    /// Sound subtitles on screen (see access.rs).
+    captions: access::Captions,
     chat_pick: Option<usize>,
     chat_scroll: usize,
     last_view_proj: Mat4,
@@ -1317,6 +1320,23 @@ impl App {
         self.set_screen(Screen::Playing);
     }
 
+    /// Sound subtitles, bottom right (see access.rs).
+    fn captions_hud(&self) {
+        let (w, h, s) = (screen_width(), screen_height(), self.ui.s);
+        for (i, (text, side, left)) in self.captions.lines.iter().rev().enumerate() {
+            let line = match side {
+                -1 => format!("< {text}"),
+                1 => format!("{text} >"),
+                _ => text.to_string(),
+            };
+            let a = left.min(1.0);
+            let tw = self.ui.text_width(&line, 8.0);
+            let (x, y) = (w - tw - 10.0 * s, h - 60.0 * s - i as f32 * 10.0 * s);
+            draw_rectangle(x - 3.0 * s, y - 8.0 * s, tw + 6.0 * s, 10.0 * s, Color::new(0.0, 0.0, 0.0, 0.6 * a));
+            self.ui.text(&line, x, y, 8.0, Color::new(1.0, 1.0, 1.0, a));
+        }
+    }
+
     /// The Hollow Wyrm's health, across the top while it's near.
     fn boss_bar(&self) {
         let g = &self.game;
@@ -1437,11 +1457,19 @@ impl App {
         }
         // Keep the game world quiet while paused or in menus layered over it.
         let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Help { .. } | Screen::Advancements | Screen::FishLog);
+        let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
                 self.audio.play(s, at, listener);
+                // Captions for what's heard (only what's close enough to hear).
+                let heard = at.is_none_or(|p| p.distance(listener) < 24.0);
+                if self.settings.subtitles && heard && let Some(text) = access::caption(s) {
+                    self.captions.add(text, access::side(listener, yaw, at));
+                }
             }
         }
+        self.captions.tick(dt);
+        self.game.colour_blind = self.settings.colour_blind;
         let in_game = !self.game.menu && self.screen != Screen::Dead;
         self.audio.update_music(dt, in_game);
     }
@@ -1486,6 +1514,7 @@ impl App {
                     self.navigation_hud(get_frame_time().min(0.05));
                     self.effects_hud();
                     self.boss_bar();
+                    self.captions_hud();
                 }
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
@@ -2884,6 +2913,7 @@ async fn game_main() {
         chat: None,
         chat_sent: Vec::new(),
         name_line: String::new(),
+        captions: Default::default(),
         chat_pick: None,
         chat_scroll: 0,
         last_view_proj: Mat4::IDENTITY,
@@ -2933,6 +2963,11 @@ async fn game_main() {
     }
     if let Some(d) = shot.as_ref().and_then(|s| s.distance) {
         app.settings.render_distance = d.clamp(3, settings::MAX_RENDER_DISTANCE);
+    }
+    let flag = |f: &str| std::env::args().any(|a| a == f);
+    if shot.is_some() {
+        app.settings.colour_blind = flag("--colour-blind");
+        app.settings.subtitles = flag("--subtitles");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {
