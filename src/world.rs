@@ -395,8 +395,11 @@ pub struct Hit {
 pub struct World {
     pub generator: Arc<Generator>,
     pub chunks: HashMap<(i32, i32), Chunk>,
-    /// Player edits, keyed by chunk then block index. Re-applied when chunks regenerate.
+    /// Player edits, keyed by chunk then block index. Re-applied when chunks
+    /// regenerate. With region files, only the regions near someone are here.
     pub mods: HashMap<(i32, i32), HashMap<u32, Id>>,
+    /// Where edits are kept on disk, if anywhere (see regions.rs).
+    pub regions: Option<crate::regions::Regions>,
     /// Chunks whose mesh is stale.
     pub dirty: HashSet<(i32, i32)>,
     pending: HashSet<(i32, i32)>,
@@ -456,6 +459,7 @@ impl World {
             generator,
             chunks: HashMap::new(),
             mods: HashMap::new(),
+            regions: None,
             dirty: HashSet::new(),
             farm: HashMap::new(),
             containers: HashMap::new(),
@@ -501,6 +505,7 @@ impl World {
 
     /// A freshly generated chunk: replay edits, fill chests, wake liquids, mark for meshing.
     pub(crate) fn insert_chunk(&mut self, cx: i32, cz: i32, blocks: PalettedBlocks) {
+        self.ensure_region(cx, cz);
         let mut chunk = Chunk::new(blocks);
         if let Some(m) = self.mods.get(&(cx, cz)) {
             for (&i, &id) in m {
@@ -587,7 +592,15 @@ impl World {
             self.chunks.remove(k);
             self.dirty.remove(k);
         }
+        if !gone.is_empty() {
+            self.drop_idle_regions();
+        }
         gone
+    }
+
+    /// Chunks asked for but not yet generated.
+    pub(crate) fn pending_chunks(&self) -> impl Iterator<Item = &(i32, i32)> {
+        self.pending.iter()
     }
 
     pub fn is_loaded(&self, x: i32, z: i32) -> bool {
@@ -638,7 +651,7 @@ impl World {
         if !self.chunks.contains_key(&(x.div_euclid(CW), z.div_euclid(CW))) && (0..CH).contains(&y) {
             // Not loaded here: remember it so the chunk is right when it generates.
             let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
-            self.mods.entry((cx, cz)).or_default().insert(idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
+            self.record_edit(cx, cz, idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
             return None;
         }
         self.set_inner(x, y, z, id)
@@ -678,7 +691,7 @@ impl World {
             self.frames.remove(&p);
         }
         c.recompute_height(lx, lz);
-        self.mods.entry((cx, cz)).or_default().insert(i as u32, id);
+        self.record_edit(cx, cz, i as u32, id);
         if id == SAPLING {
             self.saplings.insert(p);
         } else if old == SAPLING {
@@ -743,7 +756,7 @@ impl World {
             self.set(x, y, z, id);
         } else if (0..CH).contains(&y) && valid_block(id) {
             let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
-            self.mods.entry((cx, cz)).or_default().insert(idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
+            self.record_edit(cx, cz, idx(x.rem_euclid(CW), y, z.rem_euclid(CW)) as u32, id);
             if self.log_edits {
                 self.edit_log.push((x, y, z, id));
             }

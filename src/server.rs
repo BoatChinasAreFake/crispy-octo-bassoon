@@ -168,7 +168,8 @@ pub fn run(args: &[String]) -> i32 {
         }
     });
 
-    let save_world = |game: &mut Game| match save::write_to(&world_path, &game.to_save()) {
+    game.world.use_regions(crate::regions::region_dir(&world_path));
+    let save_world = |game: &mut Game| match game.world.flush_regions().and_then(|_| save::write_to(&world_path, &game.to_save())) {
         Ok(()) => log(&format!("Saved {}", world_path.display())),
         Err(e) => log(&format!("SAVE FAILED: {e}")),
     };

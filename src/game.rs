@@ -446,7 +446,8 @@ impl Game {
             spawn: self.spawn.to_array(),
             // The four worn armour slots go after the 36 inventory slots.
             slots: self.inv.slots.iter().chain(self.inv.armor.iter()).copied().collect(),
-            mods: self.world.mods.clone(),
+            // With region files the edits are written there instead (`flush_regions`).
+            mods: if self.world.regions.is_some() { HashMap::new() } else { self.world.mods.clone() },
             palette: mod_palette(reg()),
             script_vars: self.export_script_vars(),
             advancements: self.advancements.earned.clone(),
@@ -2612,7 +2613,7 @@ impl Game {
 }
 
 /// Names of every mod-added block and item, so saves survive mods being added or removed.
-fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
+pub(crate) fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
     let blocks = (NUM_BLOCKS..r.blocks.len() as Id).map(|id| (id, r.blocks[id as usize].key.to_string()));
     let items = (FIRST_MOD_ITEM as usize..FIRST_ITEM as usize + r.items.len()).map(|id| (id as Id, r.key_of(id as Id).to_string()));
     blocks.chain(items).collect()
@@ -2620,7 +2621,7 @@ fn mod_palette(r: &Registry) -> Vec<(Id, String)> {
 
 /// Map ids in a save to ids in the current registry. Mod things that no longer
 /// exist become air (blocks) or vanish (items). None when nothing needs changing.
-fn palette_remap(r: &Registry, palette: &[(Id, String)]) -> Option<Vec<Id>> {
+pub(crate) fn palette_remap(r: &Registry, palette: &[(Id, String)]) -> Option<Vec<Id>> {
     let mut map: Vec<Id> = (0..=Id::MAX).collect();
     // Any mod-range id the save doesn't mention is unknown.
     for id in NUM_BLOCKS..FIRST_ITEM {

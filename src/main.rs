@@ -42,6 +42,7 @@ mod palette;
 mod player;
 mod potions;
 mod players;
+mod regions;
 mod render;
 mod rules;
 mod save;
@@ -324,6 +325,11 @@ impl App {
         gl.flush();
         self.renderer.clear(gl.quad_context);
         self.game = game;
+        // A world of our own keeps its block edits in region files beside its save.
+        if let Some(id) = &self.current_world {
+            let dir = regions::region_dir(&save::world_file(&save::saves_dir(), id));
+            self.game.world.use_regions(dir);
+        }
         // We look like our settings say (joined players tell the host).
         let skin = self.settings.skin;
         self.game.set_skin(skin);
@@ -432,6 +438,9 @@ impl App {
     /// Write the game into its world slot (None if it has no slot, e.g. a joined server).
     fn write_current_world(&mut self) -> Option<std::io::Result<()>> {
         let id = self.current_world.clone()?;
+        if let Err(e) = self.game.world.flush_regions() {
+            return Some(Err(e));
+        }
         let data = self.game.to_save();
         Some(save::write_to(&save::world_file(&save::saves_dir(), &id), &data))
     }
@@ -1668,7 +1677,7 @@ impl App {
                         None => "Nearest structure: none nearby".to_string(),
                     }
                 },
-                format!("Chunks: {} meshed, {} loaded", self.renderer.chunks.len(), g.world.chunks.len()),
+                format!("Chunks: {} meshed, {} loaded; {} regions of edits in memory", self.renderer.chunks.len(), g.world.chunks.len(), g.world.regions_loaded()),
                 {
                     // Palette-packed block storage vs. two bytes per block.
                     let (bytes, bits) = g.world.chunks.values().fold((0, 0), |(b, t), c| (b + c.blocks.bytes(), t + c.blocks.total_bits()));

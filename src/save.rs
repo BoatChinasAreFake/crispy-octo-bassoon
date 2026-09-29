@@ -15,9 +15,10 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// hunger and the keep-inventory rule; v10 adds difficulty, the daylight cycle
 /// rule and experience points; v11 widens tool wear to carry enchantments and
 /// adds joined players' records and the weather; v12 adds animals worth
-/// keeping (tamed, bred, fed), Hmmers, and which portal leads to which.
+/// keeping (tamed, bred, fed), Hmmers, and which portal leads to which; v13
+/// moves block edits out into region files beside the save (see regions.rs).
 /// Older saves still load.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -82,28 +83,28 @@ pub struct SaveData {
 }
 
 
-struct W(Vec<u8>);
+pub(crate) struct W(pub Vec<u8>);
 impl W {
-    fn u8(&mut self, v: u8) {
+    pub(crate) fn u8(&mut self, v: u8) {
         self.0.push(v)
     }
-    fn u16(&mut self, v: u16) {
+    pub(crate) fn u16(&mut self, v: u16) {
         self.0.extend_from_slice(&v.to_le_bytes())
     }
-    fn u32(&mut self, v: u32) {
+    pub(crate) fn u32(&mut self, v: u32) {
         self.0.extend_from_slice(&v.to_le_bytes())
     }
-    fn i32(&mut self, v: i32) {
+    pub(crate) fn i32(&mut self, v: i32) {
         self.0.extend_from_slice(&v.to_le_bytes())
     }
-    fn f32(&mut self, v: f32) {
+    pub(crate) fn f32(&mut self, v: f32) {
         self.0.extend_from_slice(&v.to_le_bytes())
     }
 }
 
-struct R<'a>(&'a [u8]);
+pub(crate) struct R<'a>(pub &'a [u8]);
 impl R<'_> {
-    fn take<const N: usize>(&mut self) -> io::Result<[u8; N]> {
+    pub(crate) fn take<const N: usize>(&mut self) -> io::Result<[u8; N]> {
         if self.0.len() < N {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "save file truncated"));
         }
@@ -111,23 +112,23 @@ impl R<'_> {
         self.0 = b;
         Ok(a.try_into().unwrap())
     }
-    fn u8(&mut self) -> io::Result<u8> {
+    pub(crate) fn u8(&mut self) -> io::Result<u8> {
         Ok(self.take::<1>()?[0])
     }
-    fn u16(&mut self) -> io::Result<u16> {
+    pub(crate) fn u16(&mut self) -> io::Result<u16> {
         Ok(u16::from_le_bytes(self.take()?))
     }
-    fn u32(&mut self) -> io::Result<u32> {
+    pub(crate) fn u32(&mut self) -> io::Result<u32> {
         Ok(u32::from_le_bytes(self.take()?))
     }
-    fn i32(&mut self) -> io::Result<i32> {
+    pub(crate) fn i32(&mut self) -> io::Result<i32> {
         Ok(i32::from_le_bytes(self.take()?))
     }
-    fn f32(&mut self) -> io::Result<f32> {
+    pub(crate) fn f32(&mut self) -> io::Result<f32> {
         Ok(f32::from_le_bytes(self.take()?))
     }
     /// A u32 length followed by that many bytes, at most `max`.
-    fn bytes(&mut self, max: usize) -> io::Result<Vec<u8>> {
+    pub(crate) fn bytes(&mut self, max: usize) -> io::Result<Vec<u8>> {
         let n = self.u32()? as usize;
         if n > max || n > self.0.len() {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "save file damaged (bad length)"));

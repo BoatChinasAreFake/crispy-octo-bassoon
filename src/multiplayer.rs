@@ -1076,6 +1076,16 @@ impl Game {
         for chunk in edits.chunks(4096) {
             self.net_send_msg(Msg::Blocks(chunk.to_vec()));
         }
+        // Edits just read from a region file go to everyone (they may be near it).
+        let news = self.world.regions.as_mut().map(|r| std::mem::take(&mut r.news)).unwrap_or_default();
+        if matches!(self.net, Some(Net::Host(_))) {
+            for (cx, cz) in news {
+                if let Some(m) = self.world.mods.get(&(cx, cz)) {
+                    let entries = m.iter().map(|(&i, &b)| (i, b)).collect();
+                    self.net_send_msg(Msg::Mods { cx, cz, entries });
+                }
+            }
+        }
 
         for t in self.net_timers.iter_mut() {
             *t -= dt;
