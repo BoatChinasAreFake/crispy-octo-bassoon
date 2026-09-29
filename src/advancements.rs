@@ -58,6 +58,8 @@ pub const ALL: &[Advancement] = &[
     adv("open_door_policy", "Open Door Policy", "Open a door. Then close it. Then open it again."),
     adv("butterfingers", "Butterfingers", "Throw something on the floor with Q. On purpose, surely."),
     adv("hot_stuff", "Hot Stuff", "Get a bucket of lava. Or get into lava. One of those is a good idea."),
+    adv("good_boy", "Who's a Good Boy?", "Tame a Woofer with a bone. It's you. You're the good boy now."),
+    adv("the_birds_and_the_bees", "The Birds and the Bees", "Breed two animals. We won't ask how."),
     adv("enchanter", "Enchanter", "Enchant something. The table knows words you don't."),
     adv("good_as_new", "Good as New(ish)", "Repair something at an anvil. Hit it until it's fixed."),
     adv("ominous", "Drops Ominously", "Use an anvil until it crumbles. It warned you."),

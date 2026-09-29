@@ -162,11 +162,13 @@ pub enum MobKind {
     Rattler,
     Webber,
     Bloop,
+    /// Wolf-ish: neutral in the wild, tameable with bones (see animals.rs).
+    Woofer,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 10] = [
+    pub const ALL: [MobKind; 11] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -177,6 +179,7 @@ impl MobKind {
         MobKind::Rattler,
         MobKind::Webber,
         MobKind::Bloop,
+        MobKind::Woofer,
     ];
 
     pub fn index(self) -> u8 {
@@ -198,6 +201,7 @@ impl MobKind {
             "rattler" | "skeleton" => Some(MobKind::Rattler),
             "webber" | "spider" => Some(MobKind::Webber),
             "bloop" | "slime" => Some(MobKind::Bloop),
+            "woofer" | "wolf" | "dog" => Some(MobKind::Woofer),
             _ => None,
         }
     }
@@ -213,6 +217,7 @@ impl MobKind {
             MobKind::Rattler => "Rattler",
             MobKind::Webber => "Webber",
             MobKind::Bloop => "Bloop",
+            MobKind::Woofer => "Woofer",
         }
     }
     /// Half-width and height at size 1.
@@ -228,6 +233,7 @@ impl MobKind {
             MobKind::Rattler => (0.3, 1.95),
             MobKind::Webber => (0.7, 0.9),
             MobKind::Bloop => (0.26, 0.52),
+            MobKind::Woofer => (0.3, 0.85),
         }
     }
     fn max_health(self) -> f32 {
@@ -242,24 +248,35 @@ impl MobKind {
             MobKind::Rattler => 20.0,
             MobKind::Webber => 16.0,
             MobKind::Bloop => 1.0, // times size squared
+            MobKind::Woofer => 8.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
     pub fn xp_value(self, size: f32, rng: &mut Rng) -> u32 {
         match self {
             MobKind::Bloop => size as u32,
-            k if k.passive() => rng.int(1, 3) as u32,
+            k if !k.hostile() => rng.int(1, 3) as u32,
             _ => 5,
         }
     }
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !self.passive()
+        !self.passive() && self != MobKind::Woofer
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
         matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer)
+    }
+    /// What it eats to fall in love (see animals.rs); Woofers only once tamed.
+    pub fn breed_food(self) -> &'static [Id] {
+        match self {
+            MobKind::Oinker => &[CARROT, POTATO],
+            MobKind::Fluffer | MobKind::Mooer => &[WHEAT],
+            MobKind::Cluckster => &[WHEAT_SEEDS],
+            MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
+            _ => &[],
+        }
     }
     /// Undead: burn in sunlight.
     fn burns(self) -> bool {
@@ -297,6 +314,24 @@ pub struct Mob {
     pub size: f32,
     /// Bloop: seconds until the next hop.
     hop_cd: f32,
+    // ---- animals (see animals.rs)
+    /// Seconds left "in love" (fed its favourite food: looking for a partner).
+    pub love: f32,
+    /// Seconds before it can breed again.
+    pub breed_cd: f32,
+    /// Seconds until a baby grows up (0: grown).
+    pub baby: f32,
+    /// Fluffers: sheared (the wool grows back after some grass).
+    pub sheared: bool,
+    /// Tamed Woofers: their player (by `players::record_key`), and whether they're sitting.
+    pub owner: Option<String>,
+    pub sitting: bool,
+    /// Tamed Woofers: the mob they're after.
+    pub prey: Option<u32>,
+    /// Where the game wants it to go (a partner, its owner, prey, someone holding food).
+    pub goal: Option<Vec3>,
+    /// Kept when players are far away (tamed, bred or fed; saved with the world).
+    pub persistent: bool,
 }
 
 pub enum MobEvent {
@@ -353,7 +388,30 @@ impl Mob {
             warp_cd: 0.0,
             size: 1.0,
             hop_cd: rng.range(0.5, 2.0),
+            love: 0.0,
+            breed_cd: 0.0,
+            baby: 0.0,
+            sheared: false,
+            owner: None,
+            sitting: false,
+            prey: None,
+            goal: None,
+            persistent: false,
         }
+    }
+
+    /// Make it a baby for `secs` (half size until it grows up).
+    pub fn set_baby(&mut self, secs: f32) {
+        let (half, h) = self.kind.dims();
+        self.baby = secs;
+        let k = if secs > 0.0 { 0.5 } else { 1.0 };
+        self.body.half = half * k * self.size;
+        self.body.height = h * k * self.size;
+    }
+
+    /// Can it fall in love right now?
+    pub fn ready_to_breed(&self) -> bool {
+        self.baby <= 0.0 && self.breed_cd <= 0.0 && self.love <= 0.0 && (self.kind != MobKind::Woofer || self.owner.is_some())
     }
 
     /// Resize (Bloops): scales the body, and health with the square of the size.
@@ -385,6 +443,7 @@ impl Mob {
         match self.kind {
             k if k.passive() => self.flee = 4.0,
             MobKind::Webber => self.angry = true,
+            MobKind::Woofer if self.owner.is_none() => self.angry = true,
             MobKind::Starer => {
                 self.angry = true;
                 // Takes the hit, then blinks away to think about it (flee = "wants to warp").
@@ -399,6 +458,14 @@ impl Mob {
         self.hurt = (self.hurt - dt).max(0.0);
         self.attack_cd = (self.attack_cd - dt).max(0.0);
         self.flee = (self.flee - dt).max(0.0);
+        self.love = (self.love - dt).max(0.0);
+        self.breed_cd = (self.breed_cd - dt).max(0.0);
+        if self.baby > 0.0 {
+            self.baby -= dt;
+            if self.baby <= 0.0 {
+                self.set_baby(0.0);
+            }
+        }
         let to_player = player - self.body.pos;
         let dist = to_player.length();
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
@@ -411,6 +478,48 @@ impl Mob {
             MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
+                } else if let Some(g) = self.goal {
+                    // A partner, or someone holding something tasty.
+                    let d = g - self.body.pos;
+                    let fd = Vec3::new(d.x, 0.0, d.z).length();
+                    if fd > 1.1 {
+                        want = Some((d.x.atan2(-d.z), 1.8));
+                    } else {
+                        self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        may_wander = false;
+                    }
+                }
+            }
+            MobKind::Woofer => {
+                if self.sitting {
+                    may_wander = false;
+                } else if self.owner.is_some() {
+                    // Tamed: after its prey, else at its owner's heel.
+                    if let Some(g) = self.goal {
+                        let d = g - self.body.pos;
+                        let fd = Vec3::new(d.x, 0.0, d.z).length();
+                        let (near, speed) = if self.prey.is_some() { (0.9, 4.6) } else { (2.5, 4.3) };
+                        if fd > near {
+                            want = Some((d.x.atan2(-d.z), if fd > 6.0 { speed } else { speed * 0.7 }));
+                        } else {
+                            may_wander = false;
+                        }
+                    }
+                } else if self.angry && player_visible && dist < 32.0 {
+                    // Wild and provoked: bite back.
+                    want = Some((face, 4.0));
+                    if flat.length() < 1.3 && to_player.y.abs() < 1.5 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(3.0, "was bitten by a Woofer. Should have brought a bone"));
+                        self.attack_cd = 1.0;
+                    }
+                } else {
+                    self.angry = false;
+                    if let Some(g) = self.goal {
+                        let d = g - self.body.pos;
+                        if Vec3::new(d.x, 0.0, d.z).length() > 1.1 {
+                            want = Some((d.x.atan2(-d.z), 1.8));
+                        }
+                    }
                 }
             }
             MobKind::Hisser => {
@@ -619,7 +728,7 @@ impl Mob {
             MobKind::Oinker => Some((PORKCHOP, n.max(1))),
             MobKind::Hisser if n > 0 && self.health > -50.0 => Some((GUNPOWDER, n)),
             MobKind::Groaner if n > 0 => Some((GOO, n)),
-            MobKind::Fluffer => Some((WOOL, n.max(1))),
+            MobKind::Fluffer if !self.sheared => Some((WOOL, n.max(1))),
             MobKind::Starer if n > 0 => Some((PEARL, 1)),
             MobKind::Cluckster if n > 0 => Some((FEATHER, n)),
             MobKind::Mooer => Some((MOO_STEAK, n + 1)),
@@ -629,6 +738,7 @@ impl Mob {
             MobKind::Bloop if n > 0 && self.size <= 1.0 => Some((GOO, n)),
             _ => None,
         }
+        .filter(|_| self.baby <= 0.0)
     }
 
     /// Anything dropped besides `loot` (Baa-con, Cluckets, spare Pointy Sticks).
@@ -639,6 +749,7 @@ impl Mob {
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             _ => None,
         }
+        .filter(|_| self.baby <= 0.0)
     }
 
     /// Is someone at `eye` looking at `dir` staring this mob in the face?
@@ -672,13 +783,23 @@ impl Mob {
         let sky = world.sky_light(p.x.floor() as i32, (p.y + 0.5).floor() as i32, p.z.floor() as i32);
         geo.begin(Pass::Opaque, tint, false);
         let swell = if self.kind == MobKind::Hisser { 1.0 + self.fuse * 0.08 } else { 1.0 };
-        let mut scale = Vec3::splat(swell * self.size);
+        let mut scale = Vec3::splat(swell * self.size * if self.baby > 0.0 { 0.55 } else { 1.0 });
         if self.kind == MobKind::Bloop && !self.body.on_ground {
             // Stretch a little mid-hop.
             scale *= Vec3::new(0.9, 1.2, 0.9);
         }
+        if self.sitting {
+            p.y -= 0.15 * scale.y;
+        }
         let root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
-        draw_model(geo, &root, model(self.kind), self.anim, sky, false);
+        let parts = match self.kind {
+            MobKind::Fluffer if self.sheared => &FLUFFER_SHEARED[..],
+            k => model(k),
+        };
+        draw_model(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, sky, false);
+        if self.owner.is_some() {
+            draw_model(geo, &root, &WOOFER_COLLAR, 0.0, sky, false);
+        }
     }
 }
 
@@ -821,6 +942,27 @@ static WEBBER: [Part; 10] = [
 const BL: u16 = T_BLOOP;
 static BLOOP: [Part; 1] = [part([-0.26, 0.0, -0.26], [0.52, 0.52, 0.52], [0.0; 3], Limb::Fixed, [BL, BL, BL, BL, BL, T_BLOOP_FACE])];
 
+const WF: u16 = T_WOOF_SKIN;
+static WOOFER: [Part; 8] = [
+    part([-0.2, 0.42, -0.4], [0.4, 0.32, 0.8], [0.0; 3], Limb::Fixed, [WF; 6]),
+    part([-0.2, 0.55, -0.72], [0.4, 0.36, 0.34], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_FACE]),
+    part([-0.08, 0.55, -0.9], [0.16, 0.14, 0.2], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_FACE]),
+    part([-0.18, 0.0, -0.36], [0.12, 0.44, 0.12], [0.0, 0.44, -0.3], Limb::Swing(1.0), [WF; 6]),
+    part([0.06, 0.0, -0.36], [0.12, 0.44, 0.12], [0.0, 0.44, -0.3], Limb::Swing(-1.0), [WF; 6]),
+    part([-0.18, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(-1.0), [WF; 6]),
+    part([0.06, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(1.0), [WF; 6]),
+    part([-0.05, 0.55, 0.38], [0.1, 0.1, 0.4], [0.0, 0.6, 0.38], Limb::SwingY(1.5), [WF; 6]),
+];
+static WOOFER_COLLAR: [Part; 1] = [part([-0.21, 0.52, -0.46], [0.42, 0.1, 0.08], [0.0; 3], Limb::Fixed, [T_COLLAR; 6])];
+static FLUFFER_SHEARED: [Part; 6] = [
+    part([-0.3, 0.5, -0.45], [0.6, 0.5, 0.9], [0.0; 3], Limb::Fixed, [FS; 6]),
+    part([-0.22, 0.75, -0.85], [0.44, 0.45, 0.4], [0.0; 3], Limb::Fixed, [FS, FS, FS, FS, FS, T_FLUFF_FACE]),
+    part([-0.3, 0.0, -0.4], [0.18, 0.5, 0.18], [0.0, 0.5, -0.3], Limb::Swing(1.0), [FS; 6]),
+    part([0.12, 0.0, -0.4], [0.18, 0.5, 0.18], [0.0, 0.5, -0.3], Limb::Swing(-1.0), [FS; 6]),
+    part([-0.3, 0.0, 0.22], [0.18, 0.5, 0.18], [0.0, 0.5, 0.3], Limb::Swing(-1.0), [FS; 6]),
+    part([0.12, 0.0, 0.22], [0.18, 0.5, 0.18], [0.0, 0.5, 0.3], Limb::Swing(1.0), [FS; 6]),
+];
+
 fn model(kind: MobKind) -> &'static [Part] {
     match kind {
         MobKind::Oinker => &OINKER,
@@ -833,6 +975,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Rattler => &RATTLER,
         MobKind::Webber => &WEBBER,
         MobKind::Bloop => &BLOOP,
+        MobKind::Woofer => &WOOFER,
     }
 }
 

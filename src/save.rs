@@ -14,8 +14,9 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// furnaces; v8 adds items lying on the ground; v9 adds tool and armour wear,
 /// hunger and the keep-inventory rule; v10 adds difficulty, the daylight cycle
 /// rule and experience points; v11 widens tool wear to carry enchantments and
-/// adds joined players' records and the weather. Older saves still load.
-pub const VERSION: u32 = 11;
+/// adds joined players' records and the weather; v12 adds animals worth
+/// keeping (tamed, bred, fed). Older saves still load.
+pub const VERSION: u32 = 12;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -67,6 +68,8 @@ pub struct SaveData {
     pub weather_cycle: bool,
     /// How many times the player has enchanted something (save v11+; seeds the table's offers).
     pub enchant_count: u32,
+    /// Tamed, bred and fed animals, packed by `animals::encode_mobs` (save v12+).
+    pub mobs: Vec<u8>,
     /// The format version it was read from (the container and drop blobs changed in v9).
     pub version: u32,
 }
@@ -195,6 +198,8 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     w.f32(d.weather_timer);
     w.u8(d.weather_cycle as u8);
     w.u32(d.enchant_count);
+    w.u32(d.mobs.len() as u32);
+    w.0.extend_from_slice(&d.mobs);
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -301,9 +306,10 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
             weather_timer = 600.0;
         }
     }
+    let mobs = if version >= 12 { r.bytes(4 << 20)? } else { Vec::new() };
     let ok = |v: f32, d: f32| if v.is_finite() { v.clamp(0.0, 20.0) } else { d };
     let (food, saturation) = (ok(food, 20.0), ok(saturation, 5.0));
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, version })
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, mobs, version })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -522,6 +528,7 @@ mod tests {
             weather_timer: 600.0,
             weather_cycle: true,
             enchant_count: 3,
+            mobs: vec![1, 2, 3],
             version: VERSION,
         }
     }

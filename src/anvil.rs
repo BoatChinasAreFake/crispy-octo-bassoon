@@ -38,6 +38,7 @@ pub fn repair_material(id: Id) -> Option<Id> {
         PICK_IRON | SWORD_IRON => IRON,
         PICK_DIAMOND | SWORD_DIAMOND => DIAMOND,
         BOW | ROD => STRING,
+        SHEARS => IRON,
         _ => return None,
     })
 }

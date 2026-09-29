@@ -544,6 +544,9 @@ impl Game {
                     self.sfx(Sfx::hurt_of(kind), Some(pos));
                     let held = self.verified_held(from);
                     self.host_wear(from, held, hit_wear(held));
+                    if let Some(name) = self.peers.get(&from).map(|p| crate::players::record_key(&p.name)) {
+                        self.sic_pets(&name, mob);
+                    }
                 }
             }
             Msg::Ignite { x, y, z } => {
@@ -646,6 +649,11 @@ impl Game {
             Msg::Repair { x, y, z, item, material, used, combine } => {
                 if self.peer_rate_ok(from, "repair", 0.2) {
                     self.host_repair(from, IVec3::new(x, y, z), item, material, used, combine);
+                }
+            }
+            Msg::MobInteract { mob, item } => {
+                if self.peer_rate_ok(from, "mob", 0.15) {
+                    self.host_mob_interact(from, mob, item);
                 }
             }
             Msg::Enchant { x, y, z, item, choice } => {
@@ -843,7 +851,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } => {}
         }
     }
 
@@ -868,6 +876,14 @@ impl Game {
             m.fuse = if m.angry { 0.0 } else { s.fuse };
             m.hurt = m.hurt.max(s.hurt);
             m.burning = s.burning;
+            // Animals: just what's needed to draw them (and guess at shearing).
+            if (s.flags & MOB_BABY != 0) != (m.baby > 0.0) {
+                m.set_baby(if s.flags & MOB_BABY != 0 { 1.0 } else { 0.0 });
+            }
+            m.sheared = s.flags & MOB_SHEARED != 0;
+            m.owner = (s.flags & MOB_TAMED != 0).then(String::new);
+            m.sitting = s.flags & MOB_SITTING != 0;
+            m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
             next.push(m);
         }
         self.mobs = next;
@@ -886,6 +902,16 @@ impl Game {
             }
             m.anim += Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length() * 5.0;
             m.hurt = (m.hurt - dt).max(0.0);
+            // Babies stay babies until the host says otherwise.
+            if m.baby > 0.0 {
+                m.baby = 1.0;
+            }
+        }
+        let love: Vec<Vec3> = self.mobs.iter().filter(|m| m.love > 0.0).map(|m| m.body.pos + Vec3::Y * m.body.height).collect();
+        for p in love {
+            if self.rng.chance(dt * 2.0) {
+                self.hearts(p, 1);
+            }
         }
         // Arrows in flight keep moving between snapshots.
         for a in self.arrows.iter_mut().filter(|a| !a.stuck) {
@@ -952,6 +978,7 @@ impl Game {
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
+                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE,
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
@@ -1643,6 +1670,40 @@ mod tests {
         }
         assert_eq!(host.world.get_v(dry), AIR);
         assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(dry) == AIR), "the client is put right");
+    }
+
+    #[test]
+    fn feeding_goes_through_the_host() {
+        let mut host = Game::new(788, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Farmy", "").unwrap();
+        let id = client.my_id;
+        host.give_peer(id, WHEAT, 3);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(WHEAT) == 3));
+        host.mobs.clear();
+        host.alloc_mob(MobKind::Mooer, spawn + Vec3::new(2.0, 0.5, 0.0));
+        let cow = host.mobs[0].id;
+        assert!(pump(&mut host, &mut client, |_, c| c.mobs.iter().any(|m| m.id == cow)));
+        // Feeding it: the host takes the wheat and the Mooer falls in love (and says so).
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == WHEAT)).unwrap();
+        client.inv.selected = slot;
+        client.net_send_msg(Msg::MobInteract { mob: cow, item: WHEAT });
+        assert!(pump(&mut host, &mut client, |h, c| h.mobs[0].love > 0.0 && c.inv.count(WHEAT) == 2 && c.mobs.iter().any(|m| m.id == cow && m.love > 0.0)));
+        assert_eq!(host.peers[&id].ledger.bag.count(WHEAT), 2);
+        // Food they don't have does nothing.
+        host.mobs[0].love = 0.0;
+        for _ in 0..20 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.net_send_msg(Msg::MobInteract { mob: cow, item: CARROT });
+        for _ in 0..30 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.mobs[0].love, 0.0);
     }
 
     #[test]

@@ -55,7 +55,15 @@ pub struct MobSnap {
     pub burning: bool,
     /// Bloops come in sizes 1, 2 and 4; everything else is 1.
     pub size: u8,
+    /// `MOB_*` bits: baby, sheared, tamed, sitting, in love.
+    pub flags: u8,
 }
+
+pub const MOB_BABY: u8 = 1;
+pub const MOB_SHEARED: u8 = 2;
+pub const MOB_TAMED: u8 = 4;
+pub const MOB_SITTING: u8 = 8;
+pub const MOB_LOVE: u8 = 16;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
@@ -148,6 +156,8 @@ pub enum Msg {
     /// host -> client: what that enchanting gave (`ench` 0: refused), and how
     /// many times you've enchanted (it seeds the table's next offers).
     Enchanted { item: Id, ench: u16, count: u32 },
+    /// client -> host: I right-clicked this mob holding this (feeding, shearing, taming).
+    MobInteract { mob: u32, item: Id },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -331,6 +341,7 @@ impl Msg {
                     w.f32(m.hurt);
                     w.u8(m.burning as u8);
                     w.u8(m.size);
+                    w.u8(m.flags);
                 }
                 w.u32(tnts.len() as u32);
                 for &(p, f) in tnts {
@@ -556,6 +567,11 @@ impl Msg {
                 w.u16(*item);
                 w.u8(*choice);
             }
+            Msg::MobInteract { mob, item } => {
+                w.u8(46);
+                w.u32(*mob);
+                w.u16(*item);
+            }
             Msg::Enchanted { item, ench, count } => {
                 w.u8(45);
                 w.u16(*item);
@@ -603,10 +619,10 @@ impl Msg {
             6 => Msg::PlayerLeave { id: r.u32()? },
             7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()? },
             8 => {
-                let n = r.count(31)?;
+                let n = r.count(32)?;
                 let mut mobs = Vec::with_capacity(n);
                 for _ in 0..n {
-                    mobs.push(MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0, size: r.u8()? });
+                    mobs.push(MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0, size: r.u8()?, flags: r.u8()? });
                 }
                 let n = r.count(16)?;
                 let mut tnts = Vec::with_capacity(n);
@@ -695,6 +711,7 @@ impl Msg {
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
+            46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
             39 => Msg::Repair { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, material: r.u16()?, used: r.u8()?, combine: r.u8()? != 0 },
             t => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown message type {t}"))),
@@ -1140,12 +1157,13 @@ mod tests {
             Msg::Lightning { at: Vec3::new(4.0, 70.0, -9.5) },
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },
             Msg::Enchanted { item: 0x8003, ench: 0x0249, count: 7 },
+            Msg::MobInteract { mob: 77, item: 0x8019 },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false },
             Msg::CloseContainer { x: 1, y: 2, z: 3 },
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },
             Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1, 0), (0, 0, 0), (0x800c, 1, 99)], burn: 0.5, cook: 0.25 },
             Msg::Mobs {
-                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4 }],
+                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4, flags: MOB_BABY | MOB_TAMED }],
                 tnts: vec![(Vec3::Z, 2.0)],
                 arrows: vec![(Vec3::Y, Vec3::new(20.0, 3.0, -1.0))],
             },

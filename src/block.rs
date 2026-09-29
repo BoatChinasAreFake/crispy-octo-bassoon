@@ -152,8 +152,9 @@ pub const ARMOR_FIRST: Id = FIRST_ITEM + 60;
 pub const BUCKET: Id = FIRST_ITEM + 76;
 pub const WATER_BUCKET: Id = FIRST_ITEM + 77;
 pub const LAVA_BUCKET: Id = FIRST_ITEM + 78;
+pub const SHEARS: Id = FIRST_ITEM + 79;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 79;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 80;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -232,6 +233,7 @@ pub fn durability(id: Id) -> Option<u16> {
         PICK_DIAMOND | SWORD_DIAMOND => 1561,
         BOW => 384,
         ROD => 64,
+        SHEARS => 238,
         _ => return item_def(id).and_then(|i| i.durability),
     })
 }
@@ -252,7 +254,7 @@ pub fn dig_wear(held: Id, broken: Id) -> u16 {
 
 /// Wear from hitting a mob with `held` (anything but a sword is a clumsy weapon).
 pub fn hit_wear(held: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD) {
+    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS) {
         return 0;
     }
     if is_sword(held) { 1 } else { 2 }
@@ -830,6 +832,7 @@ impl Registry {
             ItemDef { stack: 16, ..item("bucket", "Bucket (Empty, Optimistic)", T_BUCKET) },
             ItemDef { stack: 1, ..item("water_bucket", "Bucket of Water (Sloshy)", T_WATER_BUCKET) },
             ItemDef { stack: 1, ..item("lava_bucket", "Bucket of Lava (Hold Level)", T_LAVA_BUCKET) },
+            ItemDef { stack: 1, ..item("shears", "Shears (For Fluffers, Not Haircuts)", T_SHEARS) },
         ]);
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
@@ -889,6 +892,7 @@ impl Registry {
             r(&[(IRON, 10)], (ANVIL, 1)),
             r(&[(BOOKSHELF, 1), (DIAMOND, 2), (COBBLE, 4)], (ENCHANTING_TABLE, 1)),
             r(&[(IRON, 3)], (BUCKET, 1)),
+            r(&[(IRON, 2)], (SHEARS, 1)),
         ];
         let mut recipes = recipes;
         for (m, (full, _)) in MATERIALS.iter().enumerate() {

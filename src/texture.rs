@@ -190,6 +190,10 @@ pub const T_OBSIDIAN: u16 = 213;
 pub const T_BUCKET: u16 = 214;
 pub const T_WATER_BUCKET: u16 = 215;
 pub const T_LAVA_BUCKET: u16 = 216;
+pub const T_WOOF_SKIN: u16 = 217;
+pub const T_WOOF_FACE: u16 = 218;
+pub const T_COLLAR: u16 = 219;
+pub const T_SHEARS: u16 = 220;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1121,6 +1125,25 @@ const WORM: [&str; 16] = [
     "................",
 ];
 
+const SHEARS_SPRITE: [&str; 16] = [
+    "................",
+    "...........##...",
+    "..........#hb#..",
+    ".........#hb#...",
+    "..##....#hb#....",
+    ".#hb#..#hb#.....",
+    "..#hb##hb#......",
+    "...#hbhb#.......",
+    "....#bb#........",
+    "...#r##r#.......",
+    "..#r#..#r#......",
+    ".#r#....#r#.....",
+    ".#r#....#r#.....",
+    "..##.....##.....",
+    "................",
+    "................",
+];
+
 const BUCKET_SPRITE: [&str; 16] = [
     "................",
     "................",
@@ -1923,6 +1946,19 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let glint = (x * 7 + y * 3) % 23 == 0;
         if glint { rgb(120, 90, 170) } else { shade(rgb(28, 20, 40), 1.0 + n * 0.5 + r.range(-0.1, 0.1)) }
     });
+    // ---- Animals
+    a.speckle(T_WOOF_SKIN, rgb(200, 196, 190), 0.07);
+    a.copy(T_WOOF_SKIN, T_WOOF_FACE);
+    for (x, y, c) in [(3, 5, rgb(20, 20, 20)), (4, 5, rgb(255, 255, 255)), (11, 5, rgb(255, 255, 255)), (12, 5, rgb(20, 20, 20))] {
+        a.set(T_WOOF_FACE, x, y, c);
+    }
+    for y in 9..12 {
+        for x in 6..10 {
+            a.set(T_WOOF_FACE, x, y, if y == 9 { rgb(40, 30, 30) } else { rgb(170, 165, 160) });
+        }
+    }
+    a.each(T_COLLAR, |x, _, r, _| if x % 5 == 2 { rgb(240, 210, 60) } else { shade(rgb(200, 30, 35), r.range(0.9, 1.05)) });
+    a.sprite(T_SHEARS, &SHEARS_SPRITE, &[('#', rgb(40, 40, 45)), ('b', rgb(200, 200, 208)), ('h', rgb(240, 240, 245)), ('r', rgb(190, 40, 40))]);
     for (tile, fill) in [(T_BUCKET, None), (T_WATER_BUCKET, Some(rgb(50, 95, 220))), (T_LAVA_BUCKET, Some(rgb(245, 120, 25)))] {
         let pal = [('#', rgb(50, 50, 55)), ('b', rgb(190, 190, 198)), ('d', rgb(130, 130, 138)), ('h', rgb(235, 235, 240)), ('f', fill.unwrap_or(rgb(70, 70, 76)))];
         a.sprite(tile, &BUCKET_SPRITE, &pal);

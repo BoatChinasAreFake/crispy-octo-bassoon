@@ -325,6 +325,11 @@ impl Game {
         }
         g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle };
         g.enchant_count = d.enchant_count;
+        for mut m in crate::animals::decode_mobs(&d.mobs, &mut g.rng) {
+            m.id = g.next_mob_id;
+            g.next_mob_id += 1;
+            g.mobs.push(m);
+        }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -362,6 +367,7 @@ impl Game {
             weather: self.weather.kind.index(),
             weather_timer: self.weather.timer,
             enchant_count: self.enchant_count,
+            mobs: crate::animals::encode_mobs(&self.mobs),
             version: crate::save::VERSION,
         }
     }
@@ -1065,6 +1071,11 @@ impl Game {
                         self.player.hunger.exhaust(crate::hunger::ATTACK);
                     }
                     let from = self.player.body.pos;
+                    if !self.is_client() {
+                        // Pets join in.
+                        let (me, id) = (crate::players::record_key(&self.player_name), self.mobs[i].id);
+                        self.sic_pets(&me, id);
+                    }
                     if self.is_client() {
                         // The host owns mobs: ask it to apply the hit (it echoes the sound back).
                         let mob = self.mobs[i].id;
@@ -1147,6 +1158,12 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        // Feeding, shearing and taming animals.
+        if let Some(Target::Mob(i)) = self.target
+            && self.use_on_mob(i)
+        {
+            return;
+        }
         // Chests, furnaces and anvils open (sneak to place against them instead).
         if let Some(Target::Block(h)) = &self.target
             && !self.player.sneaking
@@ -1779,6 +1796,7 @@ impl Game {
             self.msg("You made eye contact with a Starer. Bold. Also a mistake.");
             self.advance("dont_blink");
         }
+        self.animals_tick(dt);
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) {
@@ -1792,7 +1810,8 @@ impl Game {
                 .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
                 .unwrap_or((u32::MAX, ppos));
             let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
-            events.extend(evs.into_iter().map(|e| (target_id, target, e)));
+            let id = m.id;
+            events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
             if fuse_before == 0.0 && m.fuse > 0.0 {
                 noises.push((Sfx::Hiss, m.body.pos));
             }
@@ -1807,6 +1826,7 @@ impl Game {
                     MobKind::Rattler => noises.push((Sfx::Rattle, m.body.pos)),
                     MobKind::Webber => noises.push((Sfx::Skitter, m.body.pos)),
                     MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
+                    MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer => {}
                 }
             }
@@ -1828,14 +1848,19 @@ impl Game {
                 }
             }
         }
-        for (target_id, target, e) in events {
+        for (target_id, target, mob_id, e) in events {
             match e {
                 MobEvent::HurtPlayer(d, cause) if target_id != self.my_id => {
                     let d = self.rules.difficulty.mob_damage(d);
                     self.hurt_peer(target_id, d, cause, Vec3::Y * 3.0);
                     let _ = target;
+                    if let Some(name) = self.peers.get(&target_id).map(|p| crate::players::record_key(&p.name)) {
+                        self.sic_pets(&name, mob_id);
+                    }
                 }
                 MobEvent::HurtPlayer(d, cause) => {
+                    let me = crate::players::record_key(&self.player_name);
+                    self.sic_pets(&me, mob_id);
                     let d = self.rules.difficulty.mob_damage(d);
                     self.hurt_player_armored(d, cause);
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
@@ -1856,7 +1881,7 @@ impl Game {
         let mut i = 0;
         while i < self.mobs.len() {
             let m = &self.mobs[i];
-            let far = (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
+            let far = !m.persistent && (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
                 if m.health <= 0.0 && m.health > -50.0 {
@@ -1875,7 +1900,7 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -1936,7 +1961,7 @@ impl Game {
         }
     }
 
-    fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
+    pub(crate) fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
         self.alloc_mob_sized(kind, pos, 1);
     }
 
@@ -1955,7 +1980,8 @@ impl Game {
             return;
         }
         let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
-        let passive = self.mobs.iter().filter(|m| !m.kind.hostile()).count();
+        // Kept animals (bred, tamed) don't count against new ones turning up.
+        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent).count();
         let hostile = self.mobs.len() - passive;
         let a = self.rng.range(0.0, TAU);
         let d = self.rng.range(24.0, 56.0);
@@ -1966,8 +1992,16 @@ impl Game {
         let y = self.world.surface_y(x, z);
         let top = self.world.get(x, y, z);
         let clear = |w: &World, y: i32| !is_solid(w.get(x, y, z)) && !is_solid(w.get(x, y + 1, z)) && !is_liquid(w.get(x, y, z));
-        if !self.is_night() && passive < 8 && top == GRASS && clear(&self.world, y + 1) {
-            let kind = [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize];
+        let (_, biome) = self.world.generator.column(x, z);
+        let woofy = matches!(biome, crate::world::Biome::Forest | crate::world::Biome::Snowy);
+        if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS) && clear(&self.world, y + 1) {
+            let kind = if woofy && self.rng.chance(0.25) {
+                MobKind::Woofer
+            } else if top == SNOW_GRASS {
+                return;
+            } else {
+                [MobKind::Oinker, MobKind::Fluffer, MobKind::Cluckster, MobKind::Mooer][self.rng.int(0, 3) as usize]
+            };
             for i in 0..self.rng.int(1, 3) {
                 let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.7, y as f32 + 1.0, z as f32 + 0.5);
                 self.alloc_mob(kind, pos);
@@ -3265,6 +3299,112 @@ mod tests {
         g.player.body.in_water = true;
         g.lava_tick(0.05);
         assert_eq!(g.on_fire, 0.0);
+    }
+
+    #[test]
+    fn feeding_breeding_shearing_and_taming() {
+        use crate::animals::{Interaction, GROW_SECS};
+        use crate::players::record_key;
+        let mut g = arena(5150);
+        for x in -12..12 {
+            for z in -12..12 {
+                g.world.set(x, 49, z, GRASS);
+            }
+        }
+        g.mobs.clear();
+        let me = record_key(&g.player_name);
+        let at = g.player.body.pos;
+        let spawn = |g: &mut Game, kind: MobKind, x: f32| {
+            let mut m = Mob::new(kind, Vec3::new(x, 50.0, 2.5), &mut g.rng);
+            m.id = g.next_mob_id;
+            g.next_mob_id += 1;
+            g.mobs.push(m);
+            m_id(g)
+        };
+        fn m_id(g: &Game) -> u32 {
+            g.mobs.last().unwrap().id
+        }
+        // Wheat for Mooers; not carrots.
+        let a = spawn(&mut g, MobKind::Mooer, 1.5);
+        let b = spawn(&mut g, MobKind::Mooer, 3.0);
+        assert_eq!(g.interact_mob(&me, at, a, CARROT), Interaction::Nothing);
+        assert_eq!(g.interact_mob(&me, at, a, WHEAT), Interaction::Ate);
+        assert_eq!(g.interact_mob(&me, at, a, WHEAT), Interaction::Nothing, "already in love");
+        assert_eq!(g.interact_mob(&me, at, b, WHEAT), Interaction::Ate);
+        // They find each other and a calf appears.
+        for _ in 0..400 {
+            g.animals_tick(0.05);
+            let (daylight, world) = (1.0, &g.world);
+            for m in g.mobs.iter_mut() {
+                m.update(0.05, world, Vec3::new(0.0, 50.0, -20.0), false, daylight, &mut g.rng);
+            }
+            if g.mobs.len() == 3 {
+                break;
+            }
+        }
+        assert_eq!(g.mobs.len(), 3, "a baby");
+        let calf = g.mobs.last().unwrap();
+        assert!(calf.baby > 0.0 && calf.persistent && calf.body.height < 1.0);
+        assert!(g.mobs.iter().take(2).all(|m| m.breed_cd > 0.0 && m.love == 0.0));
+        assert_eq!(g.interact_mob(&me, at, a, WHEAT), Interaction::Nothing, "resting");
+        assert!(g.advancements.has("the_birds_and_the_bees"));
+        // Babies grow up.
+        let mut calf = g.mobs.pop().unwrap();
+        calf.update(GROW_SECS + 1.0, &g.world, Vec3::ZERO, false, 1.0, &mut g.rng);
+        assert!(calf.baby <= 0.0 && calf.body.height > 1.0);
+
+        // Shearing.
+        let f = spawn(&mut g, MobKind::Fluffer, -2.0);
+        let drops = g.drops.len();
+        assert_eq!(g.interact_mob(&me, at, f, SHEARS), Interaction::Sheared);
+        assert!(g.drops.len() > drops && g.drops.last().unwrap().item == WOOL);
+        assert_eq!(g.interact_mob(&me, at, f, SHEARS), Interaction::Nothing, "nothing left to shear");
+        // It grows back after some grass.
+        let fi = g.mobs.len() - 1;
+        g.mobs[fi].body.on_ground = true;
+        for _ in 0..2000 {
+            g.animals_tick(0.1);
+            if !g.mobs[fi].sheared {
+                break;
+            }
+        }
+        assert!(!g.mobs[fi].sheared);
+
+        // Taming takes a few bones; then it follows, sits and fights.
+        let w = spawn(&mut g, MobKind::Woofer, -4.0);
+        g.rng = crate::noise::Rng::new(2);
+        let mut bones = 0;
+        while g.mobs.iter().find(|m| m.id == w).unwrap().owner.is_none() {
+            assert_eq!(g.interact_mob(&me, at, w, BONE), Interaction::Ate);
+            bones += 1;
+            assert!(bones < 50);
+        }
+        let wi = g.mobs.iter().position(|m| m.id == w).unwrap();
+        assert!(g.mobs[wi].sitting && g.mobs[wi].persistent && g.advancements.has("good_boy"));
+        assert_eq!(g.interact_mob(&me, at, w, AIR), Interaction::Toggled);
+        assert!(!g.mobs[wi].sitting);
+        g.animals_tick(0.05);
+        assert!(g.mobs[wi].goal.is_some(), "heads for its owner");
+        // Someone else's Woofer ignores you.
+        assert_eq!(g.interact_mob("somebody_else", at, w, AIR), Interaction::Nothing);
+        // Hit a mob and the Woofer goes for it.
+        let target = spawn(&mut g, MobKind::Oinker, -4.5);
+        g.sic_pets(&me, target);
+        assert_eq!(g.mobs[wi].prey, Some(target));
+        let hp = g.mobs.last().unwrap().health;
+        for _ in 0..10 {
+            g.mobs[wi].attack_cd = 0.0;
+            g.animals_tick(0.05);
+        }
+        assert!(g.mobs.last().unwrap().health < hp);
+        // Tamed, bred and fed animals are saved with the world (wild ones aren't).
+        let wild = spawn(&mut g, MobKind::Oinker, 5.0);
+        let back = Game::from_save(g.to_save());
+        let pet = back.mobs.iter().find(|m| m.kind == MobKind::Woofer).expect("the Woofer came back");
+        assert_eq!(pet.owner.as_deref(), Some(me.as_str()));
+        assert!(back.mobs.iter().any(|m| m.kind == MobKind::Fluffer));
+        assert_eq!(back.mobs.iter().filter(|m| m.kind == MobKind::Mooer).count(), 2);
+        assert!(back.mobs.len() < g.mobs.len(), "not the wild Oinker {wild}");
     }
 
     /// A flat, empty arena: stone floor at y = 49, air above, around the origin.

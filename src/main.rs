@@ -3,6 +3,7 @@
 //! generated at startup.
 
 mod advancements;
+mod animals;
 mod anvil;
 mod block;
 mod building;
@@ -2463,7 +2464,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "zoo" => {
+            "zoo" | "animals" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
@@ -2563,7 +2564,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2652,10 +2653,10 @@ async fn game_main() {
                 let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
                 let mut rng = noise::Rng::new(9);
                 for (i, kind) in entity::MobKind::ALL.into_iter().enumerate() {
-                    // The five newest in front, the originals behind (offset so they show between).
-                    let (row, col) = (1 - i / 5, i % 5);
+                    // The six newest in front, the originals behind (offset so they show between).
+                    let (row, col) = (1 - (i / 6).min(1), i % 6);
                     let off = if row == 1 { 0.5 } else { 0.0 };
-                    let at = p + fwd * (6.0 + row as f32 * 5.0) + right * ((col as f32 - 2.0 + off) * 2.8) + Vec3::Y * 2.0;
+                    let at = p + fwd * (6.0 + row as f32 * 5.0) + right * ((col as f32 - 2.5 + off) * 2.6) + Vec3::Y * 2.0;
                     let mut m = entity::Mob::new(kind, at, &mut rng).with_size(if kind == entity::MobKind::Bloop { 2 } else { 1 });
                     m.yaw = s.yaw + std::f32::consts::PI;
                     m.id = 1000 + i as u32;
@@ -2864,6 +2865,54 @@ async fn game_main() {
                 app.game.inv.add(block::DIAMOND, 3);
                 app.game.player.hurt = 0.0;
                 app.game.hurt_player(100.0, "was defeated by a screenshot");
+            }
+            if s.mode == "animals" && frames == 150 {
+                // A family of Mooers, a shorn Fluffer and a lamb, a pet Woofer sitting nicely.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(4);
+                let owner = players::record_key(&app.game.player_name);
+                let herd: [(entity::MobKind, f32, f32, bool); 7] = [
+                    (entity::MobKind::Mooer, 7.0, -3.0, false),
+                    (entity::MobKind::Mooer, 7.5, -1.2, false),
+                    (entity::MobKind::Mooer, 5.5, -2.0, true),
+                    (entity::MobKind::Fluffer, 6.0, 1.5, false),
+                    (entity::MobKind::Fluffer, 4.8, 2.6, true),
+                    (entity::MobKind::Woofer, 3.2, 0.0, false),
+                    (entity::MobKind::Oinker, 8.5, 3.2, false),
+                ];
+                for (i, (kind, f, r, baby)) in herd.into_iter().enumerate() {
+                    let at = p + fwd * f + right * r + Vec3::Y * 1.0;
+                    let mut m = entity::Mob::new(kind, at, &mut rng);
+                    m.yaw = s.yaw + std::f32::consts::PI + (i as f32 - 3.0) * 0.3;
+                    m.id = 2000 + i as u32;
+                    if baby {
+                        m.set_baby(100.0);
+                    }
+                    if kind == entity::MobKind::Fluffer && !baby {
+                        m.sheared = true;
+                    }
+                    if kind == entity::MobKind::Woofer {
+                        m.owner = Some(owner.clone());
+                        m.sitting = true;
+                    }
+                    if i == 6 {
+                        m.love = 20.0;
+                    }
+                    m.persistent = true;
+                    app.game.mobs.push(m);
+                }
+                app.game.inv.add(block::SHEARS, 1);
+                app.game.inv.add(block::WHEAT, 12);
+                app.game.inv.add(block::BONE, 5);
+            }
+            if s.mode == "animals" && frames > 150 {
+                for m in app.game.mobs.iter_mut() {
+                    m.goal = None;
+                    m.body.vel.x = 0.0;
+                    m.body.vel.z = 0.0;
+                }
             }
             if s.mode == "zoo" && frames > 150 {
                 // Hold still for the photo.
