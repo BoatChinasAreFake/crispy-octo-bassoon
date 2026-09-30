@@ -3217,6 +3217,19 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
+        "ocean" => {
+            // Above deep-ish open sea.
+            for r in 0..160 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let (h, biome) = generator.column(x, z);
+                    if biome == world::Biome::Ocean && h < world::SEA - 6 && !generator.cold(x, z) {
+                        return Some((Vec3::new(x as f32 + 0.5, world::SEA as f32 - 3.0, z as f32 + 0.5), 0.8, -0.4));
+                    }
+                }
+            }
+            return None;
+        }
         "ravine" | "snow" | "rain" | "thunder" => {
             for r in 0..60 {
                 for (dx, dz) in ring(r) {
@@ -3538,8 +3551,8 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" => {
-                let mut g = Game::new(424242, s.mode == "farm", false);
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks" | "glider" => {
+                let mut g = Game::new(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
                     g.inv.slots[0] = Some((block::ROD, 1));
@@ -3738,6 +3751,37 @@ async fn game_main() {
                 app.game = Game::new(424242, true, true);
                 app.set_screen(Screen::Options { from_title: true });
             }
+            "video" => {
+                app.game = Game::new(424242, true, true);
+                app.settings.max_fps = 144;
+                app.settings.particles = 1;
+                app.set_screen(Screen::Video { from_title: true });
+            }
+            "reef" => {
+                // Under a warm sea, somewhere with coral (found once the chunks are in).
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.25);
+                if let Some((pos, yaw, pitch)) = scenic_view(&g, "ocean") {
+                    (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "spire" => {
+                // One of the Hollow's outer islands, from a little way off.
+                let mut g = Game::new(424242, true, false);
+                g.time = 0.25;
+                let seed = g.world.seed();
+                let spire = (1..12).flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)])).find_map(|(gx, gz)| hollow::outer_island(seed, gx, gz).filter(|i| i.2));
+                if let Some((c, _, _)) = spire {
+                    let from = c.as_vec3() + Vec3::new(14.0, 9.0, 14.0);
+                    let d = c.as_vec3() + Vec3::new(0.5, 4.0, 0.5) - from;
+                    (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                }
+                g.player.flying = true;
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "controls" => {
                 app.game = Game::new(424242, true, true);
                 // Show a changed binding and one waiting for a key.
@@ -3794,7 +3838,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3928,6 +3972,69 @@ async fn game_main() {
                     "furnace" => app.game.open_container(busy),
                     _ => {}
                 }
+            }
+            if s.mode == "newblocks" && frames == 125 {
+                // Copper as it ages (and waxed), bamboo things, coral, a Hollow Box.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y = p.y.floor() as i32;
+                let at = |f: f32, r: f32, up: i32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y + up, v.z.floor() as i32)
+                };
+                let w = &mut app.game.world;
+                for i in 0..4 {
+                    w.set_v(at(6.0, i as f32 - 5.0, 0), block::COPPER_FIRST + i);
+                    w.set_v(at(6.0, i as f32 - 5.0, 1), block::WAXED_COPPER_FIRST + i);
+                    w.set_v(at(8.0, i as f32 - 5.0, 0), block::CORAL_FIRST + i);
+                }
+                w.set_v(at(8.0, -1.0, 0), block::DEAD_CORAL);
+                w.set_v(at(6.0, 0.0, 0), block::COPPER_ORE);
+                w.set_v(at(6.0, 1.0, 0), block::BAMBOO_BLOCK);
+                w.set_v(at(6.0, 2.0, 0), block::BAMBOO_PLANKS);
+                w.set_v(at(6.0, 3.0, 0), block::BAMBOO_MOSAIC);
+                w.set_v(at(5.0, 1.0, 0), block::BAMBOO_SLAB);
+                w.set_v(at(5.0, 2.0, 0), block::BAMBOO_STAIRS);
+                w.set_v(at(5.0, 3.0, 0), block::HOLLOW_BOX);
+                for up in 0..6 {
+                    w.set_v(at(8.0, 3.0, up), block::BAMBOO);
+                    w.set_v(at(9.0, 2.0, up.min(3)), block::BAMBOO);
+                }
+                app.game.inv.slots[0] = Some((block::GLIDER, 1));
+                app.game.inv.slots[1] = Some((block::ROCKET, 16));
+                app.game.inv.slots[2] = Some((block::SPEAR, 1));
+                app.game.inv.slots[3] = Some((block::COPPER_INGOT, 12));
+                app.game.inv.slots[4] = Some((block::HOLLOW_BOX, 1));
+                app.game.inv.slots[5] = Some((block::BAMBOO, 32));
+            }
+            if s.mode == "glider" && frames == 125 {
+                // Soaring: worn Glider, seen from behind.
+                app.game.inv.armor[block::CHESTPLATE] = Some((block::GLIDER, 1));
+                app.game.player.body.pos += Vec3::Y * 40.0;
+                app.game.player.body.vel = Vec3::new(s.yaw.sin(), -0.2, -s.yaw.cos()) * 18.0;
+                app.game.player.body.on_ground = false;
+                app.game.player.gliding = true;
+                app.game.third_person = true;
+            }
+            if s.mode == "reef" && frames == 150 {
+                // Some sea life in front of the camera.
+                let eye = app.game.player.eye();
+                let fwd = Vec3::new(s.yaw.sin() * s.pitch.cos(), s.pitch.sin(), -s.yaw.cos() * s.pitch.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(3);
+                for i in 0..5 {
+                    let at = eye + fwd * (4.0 + (i % 2) as f32) + right * (i as f32 * 0.7 - 1.4) + Vec3::Y * ((i % 3) as f32 * 0.4 - 0.4);
+                    let mut m = entity::Mob::new(entity::MobKind::Fishy, at, &mut rng);
+                    m.id = 5000 + i;
+                    m.yaw = s.yaw + 1.2;
+                    app.game.mobs.push(m);
+                }
+                let mut m = entity::Mob::new(entity::MobKind::Soggy, eye + fwd * 8.0 - right * 3.0 - Vec3::Y * 1.0, &mut rng);
+                m.seed = 1;
+                m.id = 5100;
+                m.yaw = s.yaw + std::f32::consts::PI;
+                app.game.mobs.push(m);
             }
             if matches!(s.mode.as_str(), "building" | "armour") && frames == 125 {
                 // A little staircase, slabs, a pair of doors and some things on the floor.

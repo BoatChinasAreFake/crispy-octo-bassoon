@@ -1184,7 +1184,7 @@ impl Game {
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
-                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE | m.saddled as u8 * MOB_SADDLED | (m.kind == crate::entity::MobKind::Soggy && m.seed == 1) as u8 * MOB_ARMED,
+                        flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((m.kind == crate::entity::MobKind::Soggy && m.seed == 1) as u8 * MOB_ARMED),
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();

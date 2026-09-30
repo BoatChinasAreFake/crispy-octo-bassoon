@@ -323,7 +323,7 @@ impl Generator {
     }
 
     /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
-    fn cold(&self, x: i32, z: i32) -> bool {
+    pub fn cold(&self, x: i32, z: i32) -> bool {
         self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
     }
 
