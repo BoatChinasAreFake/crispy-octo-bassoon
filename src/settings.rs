@@ -34,7 +34,16 @@ pub struct Settings {
     pub smooth_lighting: bool,
     /// How much dim places are lifted: 0 moody, 1 bright (see light::shade).
     pub brightness: f32,
+    /// Clouds as thick blocks (Fancy) or a flat layer (Fast).
+    pub fancy_clouds: bool,
+    /// Menus and HUD size, times the automatic size for the window (see ui.rs).
+    pub ui_scale: f32,
+    /// Ask GitHub whether there's a newer version (release builds only).
+    pub check_updates: bool,
 }
+
+/// The UI Size choices (Options), as multipliers of the automatic size.
+pub const UI_SCALES: [(f32, &str); 4] = [(0.8, "Small"), (1.0, "Normal"), (1.2, "Large"), (1.4, "Huge")];
 
 impl Default for Settings {
     fn default() -> Self {
@@ -55,6 +64,9 @@ impl Default for Settings {
             water_reflections: true,
             smooth_lighting: true,
             brightness: crate::light::DEFAULT_BRIGHTNESS,
+            fancy_clouds: true,
+            ui_scale: 1.0,
+            check_updates: true,
         }
     }
 }
@@ -72,7 +84,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -88,6 +100,9 @@ impl Settings {
             self.water_reflections,
             self.smooth_lighting,
             self.brightness,
+            self.fancy_clouds,
+            self.ui_scale,
+            self.check_updates,
         ) + self.binds.to_text().as_str()
     }
 
@@ -122,6 +137,9 @@ impl Settings {
                 "water_reflections" => s.water_reflections = flag(s.water_reflections),
                 "smooth_lighting" => s.smooth_lighting = flag(s.smooth_lighting),
                 "brightness" => s.brightness = num(s.brightness),
+                "fancy_clouds" => s.fancy_clouds = flag(s.fancy_clouds),
+                "ui_scale" => s.ui_scale = num(s.ui_scale),
+                "check_updates" => s.check_updates = flag(s.check_updates),
                 k => {
                     s.binds.read(k, v);
                 }
@@ -132,6 +150,7 @@ impl Settings {
         s.sensitivity = s.sensitivity.clamp(0.1, 3.0);
         s.volume = s.volume.clamp(0.0, 1.0);
         s.brightness = s.brightness.clamp(0.0, 1.0);
+        s.ui_scale = s.ui_scale.clamp(UI_SCALES[0].0, UI_SCALES[UI_SCALES.len() - 1].0);
         if s.mp_addr.is_empty() {
             s.mp_addr = Settings::default().mp_addr;
         }
@@ -177,6 +196,9 @@ mod tests {
             water_reflections: false,
             smooth_lighting: false,
             brightness: 0.8,
+            fancy_clouds: false,
+            ui_scale: 1.2,
+            check_updates: false,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

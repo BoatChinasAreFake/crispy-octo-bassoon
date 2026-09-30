@@ -2192,9 +2192,17 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         }
     });
     a.each(T_POINTY_ROCK, |x, y, r, _| {
-        // A narrow cone, point at the top (flipped by nothing: good enough both ways up).
-        let half = (y as f32 + 1.0) * 0.28;
-        if (x as f32 - 7.5).abs() <= half { shade(rgb(125, 115, 105), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+        // A stone cone, point at the top (the mesher flips it for ones hanging
+        // from ceilings). Lit from the left, with ridges and a paler, worn tip.
+        let half = ((y as f32 + 1.0) * 0.46).min(7.0);
+        let dx = x as f32 - 7.5;
+        if dx.abs() > half {
+            return [0, 0, 0, 0];
+        }
+        let round = 1.1 - 0.35 * (dx / half.max(1.0) + 1.0) / 2.0;
+        let ridge = if y % 4 == 0 { 0.85 } else { 1.0 };
+        let tip = if y < 4 { 1.12 } else { 1.0 };
+        shade(rgb(118, 116, 112), round * ridge * tip * r.range(0.9, 1.06))
     });
     a.each(T_ENCH_TOP, |x, y, r, _| {
         let edge = x == 0 || y == 0 || x == 15 || y == 15;

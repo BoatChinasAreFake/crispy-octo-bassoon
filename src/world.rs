@@ -903,6 +903,14 @@ impl World {
         crate::light::shade(self.sky_level(x, y, z))
     }
 
+    /// How lit a small thing at `p` looks: the brighter of its own cell and the
+    /// one above (so an item lying under a log or a ledge isn't drawn black
+    /// just because the block overhead is solid).
+    pub fn shade_near(&self, p: macroquad::math::Vec3) -> f32 {
+        let (x, y, z) = (p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+        self.sky_shade(x, y, z).max(self.sky_shade(x, y + 1, z))
+    }
+
     pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
         if self.set_inner(x, y, z, id).is_some() && self.log_edits {
             self.edit_log.push((x, y, z, id));

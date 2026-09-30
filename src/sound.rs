@@ -3,7 +3,7 @@
 
 use crate::block::*;
 use crate::noise::Rng;
-use macroquad::audio::{load_sound_from_bytes, play_sound, stop_sound, PlaySoundParams, Sound};
+use macroquad::audio::{load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams, Sound};
 use macroquad::math::Vec3;
 use std::f32::consts::TAU;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -542,44 +542,189 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
     }
 }
 
-/// A calm, meandering pentatonic tune. Sounds vaguely like a certain composer, if you squint.
-fn synth_music(seed: u64) -> Vec<f32> {
-    let mut rng = Rng::new(seed);
-    let len = 48.0;
+/// A piano-ish note: bright attack, higher partials fading faster, a touch of
+/// detune between strings.
+fn piano(out: &mut [f32], start: f32, len: f32, f: f32, gain: f32) {
+    let s0 = samples(start);
+    let n = samples(len);
+    let partials = [(1.0, 1.0, 1.0), (2.0, 0.45, 1.8), (3.0, 0.22, 2.6), (4.0, 0.1, 3.4), (5.0, 0.05, 4.2)];
+    let (mut p1, mut p2) = ([0.0f32; 5], [0.0f32; 5]);
+    for i in 0..n {
+        if s0 + i >= out.len() {
+            break;
+        }
+        let t = t_of(i);
+        let mut v = 0.0;
+        for (k, &(h, a, d)) in partials.iter().enumerate() {
+            let fk = f * h * (1.0 + 0.0004 * h * h);
+            p1[k] += TAU * fk / SR as f32;
+            p2[k] += TAU * fk * 1.0015 / SR as f32;
+            v += (p1[k].sin() + p2[k].sin()) * 0.5 * a * (-t * d).exp();
+        }
+        let attack = (t / 0.004).min(1.0);
+        let release = ((len - t) / 0.3).clamp(0.0, 1.0);
+        out[s0 + i] += v * attack * release * gain;
+    }
+}
+
+/// A soft, slowly swelling pad (for chords under the melody).
+fn pad(out: &mut [f32], start: f32, len: f32, f: f32, gain: f32) {
+    let s0 = samples(start);
+    let n = samples(len);
+    let mut ph = [0.0f32; 3];
+    for i in 0..n {
+        if s0 + i >= out.len() {
+            break;
+        }
+        let t = t_of(i);
+        let k = i as f32 / n as f32;
+        let mut v = 0.0;
+        for (j, det) in [0.997f32, 1.0, 1.003].iter().enumerate() {
+            ph[j] += TAU * f * det / SR as f32;
+            v += ph[j].sin() + (ph[j] * 2.0).sin() * 0.15;
+        }
+        let env = (k / 0.35).min(1.0) * ((1.0 - k) / 0.4).min(1.0) * (1.0 + (t * 0.7 * TAU).sin() * 0.08);
+        out[s0 + i] += v / 3.0 * env * gain;
+    }
+}
+
+/// A small room/hall: parallel combs into series allpasses (Schroeder), mixed in.
+fn reverb(v: &mut [f32], mix: f32, size: f32) {
+    let dry = v.to_vec();
+    let mut wet = vec![0.0f32; v.len()];
+    for (d, g) in [(0.0297, 0.80), (0.0371, 0.78), (0.0411, 0.76), (0.0437, 0.74)] {
+        let n = samples(d * size).max(1);
+        let mut buf = vec![0.0f32; n];
+        let mut lp = 0.0f32;
+        for i in 0..v.len() {
+            let y = buf[i % n];
+            lp += 0.4 * (y - lp);
+            buf[i % n] = dry[i] + lp * g;
+            wet[i] += y * 0.25;
+        }
+    }
+    for d in [0.005, 0.0017] {
+        let n = samples(d * size).max(1);
+        let mut buf = vec![0.0f32; n];
+        for (i, x) in wet.iter_mut().enumerate() {
+            let y = buf[i % n];
+            let input = *x + y * 0.5;
+            buf[i % n] = input;
+            *x = y - input * 0.5;
+        }
+    }
+    for (o, w) in v.iter_mut().zip(wet) {
+        *o += w * mix;
+    }
+}
+
+/// A music track's mood: which scale, how fast, what plays.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mood {
+    /// Calm, meandering, pentatonic: the daytime tune.
+    Day,
+    /// Slow, minor, sparse, with long pads.
+    Night,
+    /// Rolling major arpeggios, a little brighter.
+    Morning,
+    /// Low, dark and far apart: caves and the other dimensions.
+    Deep,
+}
+
+pub const MOODS: [Mood; 4] = [Mood::Day, Mood::Night, Mood::Morning, Mood::Deep];
+
+/// One piece of music for a mood (different seeds, different tunes).
+fn synth_music_mood(mood: Mood, seed: u64) -> Vec<f32> {
+    let mut rng = Rng::new(seed ^ (mood as u64 * 0x9E37));
+    let len = 60.0;
     let mut v = vec![0.0f32; samples(len)];
-    let scale = [0, 2, 4, 7, 9];
-    let root = 196.0; // G3
+    let (scale, root, steps, chord_chance, low, high): (&[i32], f32, &[f32], f32, i32, i32) = match mood {
+        Mood::Day => (&[0, 2, 4, 7, 9], 196.0, &[0.6, 0.9, 1.2, 1.8, 2.4], 0.3, 2, 11),
+        Mood::Night => (&[0, 2, 3, 5, 7, 8, 10], 174.6, &[1.2, 1.8, 2.4, 3.6], 0.45, 3, 12),
+        Mood::Morning => (&[0, 2, 4, 5, 7, 9, 11], 220.0, &[0.3, 0.3, 0.6, 0.6, 0.9], 0.2, 4, 14),
+        Mood::Deep => (&[0, 1, 3, 7, 8], 98.0, &[2.4, 3.6, 4.8], 0.6, 0, 8),
+    };
+    let n = scale.len() as i32;
     let note = |deg: i32| -> f32 {
-        let oct = deg.div_euclid(5);
-        let st = scale[deg.rem_euclid(5) as usize] + oct * 12;
+        let st = scale[deg.rem_euclid(n) as usize] + deg.div_euclid(n) * 12;
         root * 2f32.powf(st as f32 / 12.0)
     };
-    let mut t = 0.8;
-    let mut deg = 5;
-    while t < len - 5.0 {
+    let mut t = 1.0;
+    let mut deg = (low + high) / 2;
+    while t < len - 6.0 {
         let f = note(deg);
-        tone(&mut v, t, 4.0, f, f, 1.3, 0.5, &[1.0, 0.35, 0.12, 0.05]);
-        if rng.chance(0.3) {
-            // A soft chord underneath.
-            for d in [deg - 5, deg - 3] {
-                let g = note(d);
-                tone(&mut v, t, 5.0, g, g, 0.8, 0.18, &[1.0, 0.2]);
+        match mood {
+            Mood::Deep => pad(&mut v, t, 5.0, f, 0.35),
+            _ => piano(&mut v, t, 4.0, f, 0.5),
+        }
+        if rng.chance(chord_chance) {
+            // A soft chord underneath: the third and fifth below (in scale steps).
+            for d in [deg - n, deg - n + 2, deg - n + 4] {
+                pad(&mut v, t, 5.5, note(d), 0.1);
             }
         }
-        deg = (deg + rng.int(-2, 2)).clamp(2, 11);
-        t += [0.6, 0.9, 1.2, 1.8, 2.4][rng.int(0, 4) as usize];
+        if mood == Mood::Morning && rng.chance(0.35) {
+            // A quick run upward.
+            for (k, step) in [1, 2, 4].iter().enumerate() {
+                piano(&mut v, t + 0.15 * (k + 1) as f32, 1.5, note(deg + step), 0.28);
+            }
+        }
+        deg = (deg + rng.int(-2, 2)).clamp(low, high);
+        t += steps[rng.int(0, steps.len() as i32 - 1) as usize];
     }
-    // Cheap echo for a sense of space.
-    let d = samples(0.43);
-    for i in d..v.len() {
-        v[i] += v[i - d] * 0.35;
-    }
-    let n = v.len();
-    let fade = samples(4.0);
+    reverb(&mut v, if mood == Mood::Deep { 0.8 } else { 0.45 }, if mood == Mood::Deep { 2.2 } else { 1.4 });
+    let total = v.len();
+    let fade = samples(5.0);
     for i in 0..fade {
-        v[n - 1 - i] *= i as f32 / fade as f32;
+        v[total - 1 - i] *= i as f32 / fade as f32;
     }
     finish(v, 0.8)
+}
+
+/// A daytime tune (for the tests).
+#[cfg(test)]
+fn synth_music(seed: u64) -> Vec<f32> {
+    synth_music_mood(Mood::Day, seed)
+}
+
+/// Rain on everything: a loop of soft, filtered noise with the odd heavier drop.
+fn synth_rain(rng: &mut Rng) -> Vec<f32> {
+    let len = 4.0;
+    let mut v = vec![0.0f32; samples(len)];
+    let (mut lp, mut hp) = (Lp::new(), Lp::new());
+    for (i, x) in v.iter_mut().enumerate() {
+        let n = rng.range(-1.0, 1.0);
+        let y = lp.run(n, 5000.0);
+        let band = y - hp.run(y, 500.0);
+        let t = t_of(i);
+        *x = band * (0.8 + 0.2 * (t * 0.5 * TAU).sin());
+    }
+    for _ in 0..70 {
+        let at = rng.range(0.0, len - 0.05);
+        burst(&mut v, at, 0.04, 90.0, 1200.0, 6000.0, rng.range(0.4, 1.1), rng);
+    }
+    // Cross-fade the ends so the loop has no click.
+    let fade = samples(0.25);
+    let total = v.len();
+    for i in 0..fade {
+        let k = i as f32 / fade as f32;
+        let a = v[i];
+        v[i] = a * k + v[total - fade + i] * (1.0 - k);
+    }
+    v.truncate(total - fade);
+    finish(v, 0.6)
+}
+
+/// The dark underground: a low swell with a distant, uneasy drone. Plays now and then in caves.
+fn synth_cave(rng: &mut Rng) -> Vec<f32> {
+    let len = 5.0;
+    let mut v = vec![0.0f32; samples(len)];
+    let f = rng.range(45.0, 70.0);
+    pad(&mut v, 0.0, len, f, 0.9);
+    pad(&mut v, 0.3, len - 0.3, f * rng.range(1.41, 1.5), 0.35);
+    burst(&mut v, rng.range(0.5, 2.5), 1.5, 2.0, 60.0, 400.0, 0.5, rng);
+    reverb(&mut v, 0.9, 2.5);
+    finish(v, 0.7)
 }
 
 /// Write every effect (one variant each) and the music as WAV files, for listening
@@ -593,8 +738,12 @@ pub fn export_wavs(dir: &std::path::Path) -> std::io::Result<usize> {
         std::fs::write(dir.join(format!("{name}.wav")), wav(&synth(s, &mut rng)))?;
         n += 1;
     }
-    std::fs::write(dir.join("music.wav"), wav(&synth_music(7)))?;
-    Ok(n + 1)
+    for (i, m) in MOODS.iter().enumerate() {
+        std::fs::write(dir.join(format!("music_{}.wav", format!("{m:?}").to_lowercase())), wav(&synth_music_mood(*m, 7 + i as u64)))?;
+    }
+    std::fs::write(dir.join("rain.wav"), wav(&synth_rain(&mut rng)))?;
+    std::fs::write(dir.join("cave.wav"), wav(&synth_cave(&mut rng)))?;
+    Ok(n + MOODS.len() + 2)
 }
 
 // ---------------------------------------------------------------- playback
@@ -603,12 +752,37 @@ const VARIANTS: usize = 4;
 
 pub struct Audio {
     bank: Vec<(Sfx, Vec<Sound>)>,
-    music: Option<Sound>,
+    /// Music, one track per mood, arriving from a background thread (see `poll`).
+    music: Vec<(Mood, Sound)>,
+    pending: Option<std::sync::mpsc::Receiver<(Mood, Vec<u8>)>>,
+    current: Option<usize>,
     music_playing: f32,
     music_timer: f32,
+    rain: Option<Sound>,
+    rain_vol: f32,
+    rain_playing: bool,
+    cave: Option<Sound>,
+    cave_timer: f32,
     rng: Rng,
     pub volume: f32,
     pub music_on: bool,
+}
+
+/// What the surroundings sound like right now (worked out by the game each frame).
+#[derive(Clone, Copy, Debug)]
+pub struct Ambience {
+    /// Which music suits the moment.
+    pub mood: Mood,
+    /// How loud the rain is where you are: 0 (none, or snow) to 1 (out in a downpour).
+    pub rain: f32,
+    /// Deep in the dark underground, where caves make their noises.
+    pub cave: bool,
+}
+
+impl Default for Ambience {
+    fn default() -> Self {
+        Ambience { mood: Mood::Day, rain: 0.0, cave: false }
+    }
 }
 
 pub(crate) fn all_sfx() -> Vec<Sfx> {
@@ -674,8 +848,61 @@ impl Audio {
                 bank.push((s, sounds));
             }
         }
-        let music = if AUDIO_DEAD.load(Ordering::Relaxed) { None } else { load_sound_from_bytes(&wav(&synth_music(7))).await.ok() };
-        Audio { bank, music, music_playing: 0.0, music_timer: 25.0, rng, volume: 0.8, music_on: true }
+        let dead = AUDIO_DEAD.load(Ordering::Relaxed);
+        // The music takes a few seconds to make, so it's made in the background.
+        let pending = (!dead).then(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = std::thread::Builder::new().name("music".into()).spawn(move || {
+                for (i, m) in MOODS.iter().enumerate() {
+                    if tx.send((*m, wav(&synth_music_mood(*m, 7 + i as u64)))).is_err() {
+                        break;
+                    }
+                }
+            });
+            rx
+        });
+        let (rain, cave) = if dead {
+            (None, None)
+        } else {
+            (load_sound_from_bytes(&wav(&synth_rain(&mut rng))).await.ok(), load_sound_from_bytes(&wav(&synth_cave(&mut rng))).await.ok())
+        };
+        Audio {
+            bank,
+            music: Vec::new(),
+            pending,
+            current: None,
+            music_playing: 0.0,
+            music_timer: 25.0,
+            rain,
+            rain_vol: 0.0,
+            rain_playing: false,
+            cave,
+            cave_timer: 30.0,
+            rng,
+            volume: 0.8,
+            music_on: true,
+        }
+    }
+
+    /// Pick up music finished in the background (call once a frame).
+    pub async fn poll(&mut self) {
+        let Some(rx) = &self.pending else { return };
+        let mut ready = Vec::new();
+        loop {
+            match rx.try_recv() {
+                Ok(t) => ready.push(t),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.pending = None;
+                    break;
+                }
+            }
+        }
+        for (m, bytes) in ready {
+            if let Ok(snd) = load_sound_from_bytes(&bytes).await {
+                self.music.push((m, snd));
+            }
+        }
     }
 
     fn alive(&self) -> bool {
@@ -719,13 +946,16 @@ impl Audio {
         play_sound(&sounds[i], PlaySoundParams { looped: false, volume });
     }
 
-    /// Occasionally drift some music in, like a certain other block game.
-    pub fn update_music(&mut self, dt: f32, in_game: bool) {
-        let Some(m) = &self.music else { return };
+    /// Occasionally drift some music in, like a certain other block game (a
+    /// track to suit the moment), and keep the rain and caves sounding.
+    pub fn update_music(&mut self, dt: f32, in_game: bool, amb: Ambience) {
+        self.ambience(dt, in_game, amb);
         if self.music_playing > 0.0 {
             self.music_playing -= dt;
             if !self.music_on || !self.alive() {
-                stop_sound(m);
+                if let Some((_, m)) = self.current.and_then(|i| self.music.get(i)) {
+                    stop_sound(m);
+                }
                 self.music_playing = 0.0;
             }
             return;
@@ -735,9 +965,54 @@ impl Audio {
         }
         self.music_timer -= dt;
         if self.music_timer <= 0.0 {
-            play_sound(m, PlaySoundParams { looped: false, volume: 0.45 * self.volume });
-            self.music_playing = 48.0;
+            // Day and morning tunes are interchangeable; don't play the same one twice running.
+            let fits = |m: Mood| m == amb.mood || matches!((m, amb.mood), (Mood::Day, Mood::Morning) | (Mood::Morning, Mood::Day));
+            let mut choices: Vec<usize> = (0..self.music.len()).filter(|&i| fits(self.music[i].0) && Some(i) != self.current).collect();
+            if choices.is_empty() {
+                choices = (0..self.music.len()).filter(|&i| fits(self.music[i].0)).collect();
+            }
+            if choices.is_empty() {
+                // Nothing ready yet (or nothing fits): try again shortly.
+                self.music_timer = 10.0;
+                return;
+            }
+            let i = choices[self.rng.int(0, choices.len() as i32 - 1) as usize];
+            play_sound(&self.music[i].1, PlaySoundParams { looped: false, volume: 0.45 * self.volume });
+            self.current = Some(i);
+            self.music_playing = 60.0;
             self.music_timer = self.rng.range(150.0, 300.0);
+        }
+    }
+
+    fn ambience(&mut self, dt: f32, in_game: bool, amb: Ambience) {
+        let live = in_game && self.alive();
+        // Rain fades in and out rather than switching.
+        let target = if live { amb.rain.clamp(0.0, 1.0) * 0.5 * self.volume } else { 0.0 };
+        self.rain_vol += (target - self.rain_vol) * (dt * 1.5).min(1.0);
+        if let Some(r) = &self.rain {
+            if self.rain_vol > 0.005 {
+                if !self.rain_playing {
+                    play_sound(r, PlaySoundParams { looped: true, volume: self.rain_vol });
+                    self.rain_playing = true;
+                } else {
+                    set_sound_volume(r, self.rain_vol);
+                }
+            } else if self.rain_playing {
+                stop_sound(r);
+                self.rain_playing = false;
+            }
+        }
+        // Now and then, something rumbles in the dark.
+        if live && amb.cave {
+            self.cave_timer -= dt;
+            if self.cave_timer <= 0.0 {
+                if let Some(c) = &self.cave {
+                    play_sound(c, PlaySoundParams { looped: false, volume: 0.5 * self.volume });
+                }
+                self.cave_timer = self.rng.range(45.0, 120.0);
+            }
+        } else {
+            self.cave_timer = self.cave_timer.max(20.0);
         }
     }
 }
@@ -760,5 +1035,29 @@ mod tests {
         }
         let m = synth_music(3);
         assert!(m.len() > SR as usize * 40 && m.iter().all(|x| x.is_finite()));
+    }
+
+    #[test]
+    fn music_moods_rain_and_caves_are_sound() {
+        let mut rng = Rng::new(2);
+        for m in MOODS {
+            let v = synth_music_mood(m, 5);
+            assert_eq!(v.len(), samples(60.0), "{m:?}");
+            assert!(v.iter().all(|x| x.is_finite() && x.abs() <= 1.0), "{m:?} out of range");
+            // Something plays through most of it (no long dead stretches).
+            let quiet = v.chunks(samples(5.0)).take(10).filter(|c| c.iter().fold(0.0f32, |a, x| a.max(x.abs())) < 0.02).count();
+            assert!(quiet <= 1, "{m:?} has {quiet} silent stretches");
+            // Fades out at the end.
+            assert!(v[v.len() - 10..].iter().all(|x| x.abs() < 0.01), "{m:?} ends abruptly");
+        }
+        let rain = synth_rain(&mut rng);
+        assert!(rain.len() > SR as usize * 3 && rain.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+        // A loop: wrapping from the end to the start jumps no more than the sound does anyway.
+        let biggest = rain.windows(2).fold(0.0f32, |a, w| a.max((w[1] - w[0]).abs()));
+        assert!((rain[0] - rain[rain.len() - 1]).abs() <= biggest, "rain loop clicks");
+        let rms = (rain.iter().map(|x| x * x).sum::<f32>() / rain.len() as f32).sqrt();
+        assert!(rms > 0.05, "rain is too quiet: {rms}");
+        let cave = synth_cave(&mut rng);
+        assert!(cave.iter().any(|x| x.abs() > 0.2) && cave.iter().all(|x| x.is_finite()));
     }
 }

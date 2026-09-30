@@ -38,3 +38,24 @@ jobs:
         run: cargo clippy --release --all-targets --locked
       - name: Minimal build (no sound or controller libraries)
         run: cargo check --release --locked --no-default-features
+
+  # The release builds Windows and macOS too; build (and test, on Windows) them
+  # here so a platform-only problem shows up on the pull request, not at release.
+  other-platforms:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-latest, test: true }
+          - { name: macos, os: macos-latest, test: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - name: Tests
+        if: matrix.test
+        run: cargo test --release --locked

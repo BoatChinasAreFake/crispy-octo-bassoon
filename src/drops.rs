@@ -84,7 +84,7 @@ impl ItemDrop {
 
     pub fn draw(&self, g: &mut DynGeo, world: &World, clock: f32) {
         let at = self.draw_pos(clock);
-        let sky = world.sky_shade(at.x.floor() as i32, at.y.floor() as i32 + 1, at.z.floor() as i32);
+        let sky = world.shade_near(at);
         let spin = clock * 1.6 + self.id as f32 * 0.7;
         let copies = if self.n > 16 { 3 } else if self.n > 1 { 2 } else { 1 };
         for c in 0..copies {

@@ -61,6 +61,8 @@ pub const FACES: [([i32; 3], [[f32; 3]; 4], f32); 6] = [
     ([0, 0, -1], [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]], 0.85),
 ];
 const CORNER_UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
+/// How far merged faces are grown past their edges (see `merge_flats`).
+const SEAM: f32 = 1.0 / 2048.0;
 const AO_CURVE: [f32; 4] = [0.58, 0.73, 0.87, 1.0];
 /// Face shading for foliage (same order as `FACES`). Light scatters through
 /// leaves, so their sides and undersides are much less dark than solid blocks',
@@ -230,7 +232,10 @@ fn merge_flats(flats: &[Flat], dims: [i32; 3], origin: [f32; 3], out: &mut MeshD
                     let mut v = [Vertex::default(); 4];
                     for i in 0..4 {
                         let c = corners[i];
-                        let pos = [0, 1, 2].map(|k| origin[k] + p[k] as f32 + c[k] * ext[k]);
+                        // Grown a hair within its plane, so where a big merged face meets
+                        // several small ones (a T-junction) no pixel-wide gaps open up.
+                        let grow = |k: usize| if k == t1 || k == t2 { (c[k] * 2.0 - 1.0) * SEAM } else { 0.0 };
+                        let pos = [0, 1, 2].map(|k| origin[k] + p[k] as f32 + c[k] * ext[k] + grow(k));
                         let uv = [CORNER_UV[i][0] * ext[u_axis], CORNER_UV[i][1] * ext[v_axis]];
                         v[i] = Vertex { pos, uv, light: key.light[i], tile: [u0, v0] };
                     }
@@ -292,11 +297,14 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             [[a, 0., a], [b, 0., b], [b, 1., b], [a, 1., a]],
                             [[b, 0., a], [a, 0., b], [a, 1., b], [b, 1., a]],
                         ];
+                        // A pointy rock hanging from a ceiling points down (a stalactite).
+                        let hanging = id == POINTY_ROCK && is_solid(hood.get(lx, y + 1, lz)) && !is_solid(hood.get(lx, y - 1, lz));
+                        let uv = if hanging { [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] } else { CORNER_UV };
                         for d in diag {
-                            let v = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, CORNER_UV[i], [0.9, sky, blk]);
+                            let v = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]);
                             out.opaque.quad([v(0), v(1), v(2), v(3)], false);
                             // Back side with reversed winding.
-                            let w = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, CORNER_UV[i], [0.9, sky, blk]);
+                            let w = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]);
                             out.opaque.quad([w(1), w(0), w(3), w(2)], false);
                         }
                     }
@@ -504,8 +512,9 @@ mod tests {
         merge_flats(&tops(dims, |x, z| if (x, z) == (5, 5) { Some(4) } else if x == 9 { None } else { Some(3) }), dims, [0.0; 3], &mut out);
         let quads = out.verts.len() / 4;
         assert!(quads > 2 && quads < 12, "{quads} quads");
-        // Every face is still covered exactly once: 255 - 16 of tile 3, one of tile 4.
+        // Every face is still covered once (255 - 16 of tile 3, one of tile 4), give or
+        // take the hair each merged face is grown by to close seams.
         let area: f32 = out.verts.chunks(4).map(|q| (q[1].pos[0] - q[0].pos[0]).abs().max((q[2].pos[0] - q[1].pos[0]).abs()) * (q[1].pos[2] - q[0].pos[2]).abs().max((q[2].pos[2] - q[1].pos[2]).abs())).sum();
-        assert_eq!(area, 256.0 - 16.0);
+        assert!((area - (256.0 - 16.0)).abs() < quads as f32 * 0.02, "area {area}");
     }
 }
