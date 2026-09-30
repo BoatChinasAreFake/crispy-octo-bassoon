@@ -168,7 +168,7 @@ impl Game {
             }
             let Some(facing) = self.world.get_v(pos).checked_sub(FRAME_FIRST).filter(|f| *f < 4) else { continue };
             let out = outward(facing as u8);
-            let sky = self.world.sky_light(pos.x, pos.y, pos.z).max(0.3);
+            let sky = self.world.sky_shade(pos.x, pos.y, pos.z).max(0.3);
             // Just off the wall.
             let at = center - out * 0.4;
             let yaw = out.x.atan2(out.z);

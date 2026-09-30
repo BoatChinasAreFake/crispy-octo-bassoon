@@ -120,6 +120,19 @@ impl Ui {
         draw_texture_ex(&self.tex, dx, dy, color, DrawTextureParams { dest_size: Some(vec2(dw, dh)), source: Some(src), ..Default::default() });
     }
 
+    /// The right-hand `fx` of a tile, for bars that empty from the left.
+    pub fn tile_part_right(&self, tile: u16, x: f32, y: f32, size: f32, fx: f32, color: Color) {
+        let f = fx.clamp(0.0, 1.0);
+        if f <= 0.0 {
+            return;
+        }
+        let mut src = Self::tile_src(tile);
+        let cut = src.w * (1.0 - f);
+        src.x += cut;
+        src.w -= cut;
+        draw_texture_ex(&self.tex, x + size * (1.0 - f), y, color, DrawTextureParams { dest_size: Some(vec2(size * f, size)), source: Some(src), ..Default::default() });
+    }
+
     /// Item icon: blocks become a little isometric block (slabs and stairs keep
     /// their shape), everything else a flat sprite.
     pub fn icon(&self, item: Id, x: f32, y: f32, size: f32) {
@@ -249,8 +262,8 @@ impl Ui {
         for i in 0..10 {
             let hx = right - (i + 1) as f32 * (size - self.s);
             let v = food - i as f32 * 2.0;
-            self.tile(T_HUNGER_ICON, hx, y, size, Color::new(0.25, 0.25, 0.25, 0.6));
-            self.tile_part(T_HUNGER_ICON, hx, y, size, (v / 2.0).clamp(0.0, 1.0), false, WHITE);
+            self.tile(T_HUNGER_EMPTY, hx, y, size, WHITE);
+            self.tile_part_right(T_HUNGER_ICON, hx, y, size, (v / 2.0).clamp(0.0, 1.0), WHITE);
         }
     }
 
@@ -260,7 +273,7 @@ impl Ui {
         for i in 0..10 {
             let ax = x + i as f32 * (size - self.s);
             let v = points as f32 - i as f32 * 2.0;
-            self.tile(T_ARMOR_ICON, ax, y, size, Color::new(0.25, 0.25, 0.25, 0.6));
+            self.tile(T_ARMOR_EMPTY, ax, y, size, WHITE);
             self.tile_part(T_ARMOR_ICON, ax, y, size, (v / 2.0).clamp(0.0, 1.0), false, WHITE);
         }
     }

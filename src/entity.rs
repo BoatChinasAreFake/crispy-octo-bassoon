@@ -837,7 +837,7 @@ impl Mob {
             }
         }
         let spd = Vec3::new(self.body.vel.x, 0.0, self.body.vel.z).length();
-        self.anim += spd * dt * 5.0;
+        step_anim(&mut self.anim, spd, dt, 5.0);
         if self.body.pos.y < -20.0 {
             self.health = -100.0;
         }
@@ -907,7 +907,7 @@ impl Mob {
             p.x += (self.anim * 37.0 + self.id as f32).sin() * 0.03;
             p.z += (self.anim * 29.0).cos() * 0.03;
         }
-        let sky = world.sky_light(p.x.floor() as i32, (p.y + 0.5).floor() as i32, p.z.floor() as i32);
+        let sky = world.sky_shade(p.x.floor() as i32, (p.y + 0.5).floor() as i32, p.z.floor() as i32);
         geo.begin(Pass::Opaque, tint, false);
         let swell = if self.kind == MobKind::Hisser { 1.0 + self.fuse * 0.08 } else { 1.0 };
         let mut scale = Vec3::splat(swell * self.size * if self.baby > 0.0 { 0.55 } else { 1.0 });
@@ -1184,6 +1184,22 @@ fn model(kind: MobKind) -> &'static [Part] {
     }
 }
 
+/// Advance a walk cycle by `speed` (blocks a second); once nearly still, ease
+/// it back to a rest pose (a multiple of pi, where the limbs hang straight)
+/// instead of freezing mid-stride.
+pub fn step_anim(anim: &mut f32, speed: f32, dt: f32, rate: f32) {
+    if speed > 0.25 {
+        *anim += speed * dt * rate;
+        return;
+    }
+    let rest = (*anim / std::f32::consts::PI).round() * std::f32::consts::PI;
+    let k = (dt * 10.0).min(1.0);
+    *anim += (rest - *anim) * k;
+    if (rest - *anim).abs() < 0.01 {
+        *anim = rest;
+    }
+}
+
 pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky: f32, _player: bool) {
     let swing = anim.sin() * 0.7;
     for p in parts {
@@ -1270,7 +1286,7 @@ impl Particle {
         }
     }
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {
-        let sky = world.sky_light(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32);
+        let sky = world.sky_shade(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32);
         let s = self.size;
         let m = Mat4::from_translation(self.pos - Vec3::splat(s * 0.5)) * Mat4::from_scale(Vec3::splat(s));
         let r = [self.uv[0], self.uv[1], self.uv[0] + 0.25, self.uv[1] + 0.25];
@@ -1335,7 +1351,7 @@ impl Arrow {
     }
 
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {
-        let sky = world.sky_light(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32);
+        let sky = world.sky_shade(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32);
         let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, self.dir);
         let m = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.03, -0.03, -0.55)) * Mat4::from_scale(Vec3::new(0.06, 0.06, 0.6));
         geo.cube(&m, [T_PLANKS; 6], sky, [0.0, 0.0, 0.25, 0.25]);

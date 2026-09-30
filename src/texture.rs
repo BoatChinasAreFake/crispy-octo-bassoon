@@ -300,6 +300,9 @@ pub const T_HOPPER_CART_ITEM: u16 = 381;
 pub const T_COMPARATOR: u16 = 382;
 pub const T_BEACON: u16 = 386;
 pub const T_BEACON_BEAM: u16 = 387;
+/// Empty slots for the hunger and armour bars.
+pub const T_HUNGER_EMPTY: u16 = 388;
+pub const T_ARMOR_EMPTY: u16 = 389;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2796,6 +2799,11 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     a.sprite(T_HUNGER_ICON, &DRUMSTICK, &[('#', rgb(60, 30, 10)), ('p', rgb(170, 95, 40)), ('P', rgb(205, 130, 60)), ('w', rgb(235, 190, 120)), ('b', rgb(235, 230, 210))]);
     a.sprite(T_ARMOR_ICON, &CHESTPLATE, &[('#', rgb(30, 30, 30)), ('b', rgb(210, 210, 215)), ('d', rgb(150, 150, 155)), ('h', rgb(245, 245, 250))]);
+    // Empty ones keep the outline over a flat dark fill, like an empty heart.
+    let hollow = rgb(52, 40, 34);
+    a.sprite(T_HUNGER_EMPTY, &DRUMSTICK, &[('#', rgb(30, 18, 8)), ('p', hollow), ('P', hollow), ('w', hollow), ('b', rgb(70, 62, 56))]);
+    let hollow = rgb(48, 48, 52);
+    a.sprite(T_ARMOR_EMPTY, &CHESTPLATE, &[('#', rgb(20, 20, 20)), ('b', hollow), ('d', hollow), ('h', hollow)]);
 
     let cooked = |raw: Rgba| shade([raw[0] / 2 + 70, raw[1] / 2 + 40, raw[2] / 3 + 20, 255], 1.0);
     a.sprite(T_COOKED_CHOP, &PORK, &[('#', rgb(60, 30, 15)), ('p', cooked(rgb(230, 110, 110))), ('P', cooked(rgb(245, 150, 150))), ('w', rgb(230, 200, 160)), ('b', rgb(230, 225, 200))]);

@@ -3109,6 +3109,46 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
+            "cave" => {
+                // Standing in a roomy cave pocket near spawn, well below the surface.
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.3);
+                let (cx0, cz0) = ((g.spawn.x / 16.0).floor() as i32, (g.spawn.z / 16.0).floor() as i32);
+                for cz in cz0 - 4..=cz0 + 4 {
+                    for cx in cx0 - 4..=cx0 + 4 {
+                        g.world.load_now(cx, cz);
+                    }
+                }
+                let air = |g: &Game, x: i32, y: i32, z: i32| g.world.get(x, y, z) == AIR;
+                let mut found = None;
+                'search: for r in 0i32..56 {
+                    for dz in -r..=r {
+                        for dx in -r..=r {
+                            if dx.abs().max(dz.abs()) != r {
+                                continue;
+                            }
+                            let (x, z) = (cx0 * 16 + 8 + dx, cz0 * 16 + 8 + dz);
+                            let top = (0..world::CH).rev().find(|&y| !air(&g, x, y, z)).unwrap_or(0);
+                            for y in (14..top - 8).rev() {
+                                let roomy = (-1..=1).all(|i| (-1..=1).all(|k| (0..3).all(|h| air(&g, x + i, y + h, z + k))));
+                                let floor = is_solid(g.world.get(x, y - 1, z)) && (0..=8).all(|i| !is_liquid(g.world.get(x + i, y - 1, z)));
+                                let far = (3..9).filter(|d| air(&g, x + d, y + 1, z)).count() >= 4;
+                                if roomy && floor && far {
+                                    found = Some(Vec3::new(x as f32 + 0.5, y as f32 + 1.6, z as f32 + 0.5));
+                                    break 'search;
+                                }
+                            }
+                        }
+                    }
+                }
+                if s.pos.is_none() {
+                    s.pos = found;
+                    s.yaw = std::f32::consts::FRAC_PI_2;
+                    s.pitch = -0.2;
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "scorch" | "portal" => {
                 // Through a portal (built on the spot), or looking at one.
                 let mut g = Game::new(424242, s.mode == "scorch", false);
@@ -3853,7 +3893,7 @@ async fn game_main() {
                 let p = app.game.player.body.pos;
                 let mut rng = noise::Rng::new(9);
                 let dist = if s.mode == "parody" { 9.0 } else { 6.0 };
-                for (i, kind) in entity::MobKind::ALL.into_iter().enumerate() {
+                for (i, kind) in entity::MobKind::ALL.into_iter().filter(|k| *k != entity::MobKind::Wyrm).enumerate() {
                     let at = p + Vec3::new(2.4f32.sin() * dist + (i as f32 - 2.0) * 2.4, 2.0, -2.4f32.cos() * dist);
                     let m = entity::Mob::new(kind, at, &mut rng);
                     app.game.mobs.push(m);

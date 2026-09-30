@@ -110,7 +110,7 @@ void main() {
                 bl = max(bl, clamp(1.0 - d / abs(L.w), 0.0, 1.0));
             }
         }
-        float lvl = max(max(sky, bl), max(0.05, params2.y));
+        float lvl = max(max(sky, bl), max(0.06, params2.y));
         // Torchlight is warm, daylight is neutral.
         vec3 warm = mix(vec3(1.0), vec3(1.0, 0.85, 0.6), clamp(bl - sky, 0.0, 1.0));
         col = c.rgb * v_light.x * lvl * warm;

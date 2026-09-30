@@ -2465,21 +2465,31 @@ impl Game {
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
         let reach = if scorch { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
         g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
+        // Each row's runs of cloudy cells become one strip. Edges come from whole
+        // cells plus one shared fraction, so neighbours meet exactly, and the
+        // plain white tile is sampled at its middle so distant (mipmapped)
+        // clouds never pick up the atlas tiles around it.
+        let shift = (scroll / cell).floor();
+        let frac = scroll - shift * cell;
+        let edge = |ci: i32| (ci - shift as i32) as f32 * cell - frac;
+        let cloudy = |ci: i32, cj: i32| self.clouds.noise2(ci as f32 * 0.17, cj as f32 * 0.17) + hash2(7, ci, cj) * 0.12 >= 0.12;
+        let (fi, fj) = (ox.floor() as i32, oz.floor() as i32);
         for j in -reach..=reach {
-            for i in -reach..=reach {
-                let (ci, cj) = (ox.floor() as i32 + i, oz.floor() as i32 + j);
-                if self.clouds.noise2(ci as f32 * 0.17, cj as f32 * 0.17) + hash2(7, ci, cj) * 0.12 < 0.12 {
+            let cj = fj + j;
+            let (z0, z1) = (cj as f32 * cell, (cj + 1) as f32 * cell);
+            let mut i = -reach;
+            while i <= reach {
+                if !cloudy(fi + i, cj) {
+                    i += 1;
                     continue;
                 }
-                let x0 = ci as f32 * cell - scroll;
-                let z0 = cj as f32 * cell;
-                let c = [
-                    Vec3::new(x0, cloud_y, z0 + cell),
-                    Vec3::new(x0 + cell, cloud_y, z0 + cell),
-                    Vec3::new(x0 + cell, cloud_y, z0),
-                    Vec3::new(x0, cloud_y, z0),
-                ];
-                g.quad(c, T_CLOUD, [0.0, 0.0, 1.0, 1.0], [1.0, 1.0]);
+                let start = fi + i;
+                while i <= reach && cloudy(fi + i, cj) {
+                    i += 1;
+                }
+                let (x0, x1) = (edge(start), edge(fi + i));
+                let c = [Vec3::new(x0, cloud_y, z1), Vec3::new(x1, cloud_y, z1), Vec3::new(x1, cloud_y, z0), Vec3::new(x0, cloud_y, z0)];
+                g.quad(c, T_CLOUD, [0.5, 0.5, 0.5, 0.5], [1.0, 1.0]);
             }
         }
 
@@ -2499,7 +2509,7 @@ impl Game {
         // The fishing line and bobber
         if let Some(b) = &self.bobber {
             let at = b.draw_pos(self.clock);
-            let sky = self.world.sky_light(at.x.floor() as i32, at.y.floor() as i32 + 1, at.z.floor() as i32);
+            let sky = self.world.sky_shade(at.x.floor() as i32, at.y.floor() as i32 + 1, at.z.floor() as i32);
             g.begin(Pass::Opaque, [1.0; 4], false);
             let m = Mat4::from_translation(at - Vec3::new(0.08, 0.0, 0.08)) * Mat4::from_scale(Vec3::new(0.16, 0.16, 0.16));
             g.cube(&m, [T_BOBBER; 6], sky, [0.0, 0.0, 1.0, 1.0]);
@@ -2522,7 +2532,7 @@ impl Game {
         }
         // Other players
         for p in self.peers.values().filter(|p| p.alive()) {
-            let sky = self.world.sky_light(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
+            let sky = self.world.sky_shade(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
             let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
@@ -2533,7 +2543,7 @@ impl Game {
         // The player, in third person
         if self.third_person && !self.menu {
             let p = &self.player;
-            let sky = self.world.sky_light(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
+            let sky = self.world.sky_shade(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw);
@@ -2546,7 +2556,7 @@ impl Game {
             g.begin(Pass::Opaque, if flash { [3.0, 3.0, 3.0, 1.0] } else { [1.0; 4] }, false);
             let s = 1.0 + (1.0 - t.fuse.min(1.0)) * 0.15;
             let m = Mat4::from_translation(t.pos + Vec3::splat(0.5)) * Mat4::from_scale(Vec3::splat(s)) * Mat4::from_translation(Vec3::splat(-0.5));
-            let sky = self.world.sky_light(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
+            let sky = self.world.sky_shade(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
         // Rain, snow and lightning
@@ -2608,7 +2618,7 @@ impl Game {
         let up = right.cross(fwd);
         let basis = Mat4::from_cols(right.extend(0.0), up.extend(0.0), (-fwd).extend(0.0), cam.pos.extend(1.0));
         let e = self.player.eye();
-        let sky = self.world.sky_light(e.x.floor() as i32, e.y.floor() as i32, e.z.floor() as i32);
+        let sky = self.world.sky_shade(e.x.floor() as i32, e.y.floor() as i32, e.z.floor() as i32);
         let s = self.player.swing;
         let swing = (s * PI).sin();
         let bob = self.player.bob;
@@ -2618,16 +2628,26 @@ impl Game {
         let tint = if self.player.hurt > 0.3 { [1.0, 0.6, 0.6, 1.0] } else { [1.0; 4] };
         g.begin(Pass::Overlay, tint, false);
         if held == AIR {
-            // A short forearm poking in from the bottom-right corner, angled up and inward,
-            // with a shirt sleeve at the near end so it reads as an arm rather than a plank.
-            let arm = basis * local * Mat4::from_translation(Vec3::new(0.1, -0.1, 0.1)) * Mat4::from_rotation_y(0.35) * Mat4::from_rotation_x(0.6);
-            let w = 0.16;
-            let sleeve = arm * Mat4::from_translation(Vec3::new(-w / 2.0 - 0.006, -w / 2.0 - 0.006, 0.0)) * Mat4::from_scale(Vec3::new(w + 0.012, w + 0.012, 0.25));
-            let hand = arm * Mat4::from_translation(Vec3::new(-w / 2.0, -w / 2.0, -0.3)) * Mat4::from_scale(Vec3::new(w, w, 0.3));
-            let light = sky.max(0.2);
+            // The forearm rises from below the bottom-right corner toward the
+            // crosshair, like a raised fist; the sleeve covers its near end.
+            // The overlay draws without depth, so the far part (the hand) goes
+            // first and the nearer sleeve over it.
+            let bobv = (bob * 2.0).sin().abs() * 0.02;
+            let base = Vec3::new(0.56 - swing * 0.18, -0.62 + bobv + swing * 0.1, -0.5 - swing * 0.12);
+            let tip = Vec3::new(0.34 - swing * 0.12, -0.3 + bobv + swing * 0.22, -0.98 - swing * 0.2);
+            let len = base.distance(tip);
+            let z = (base - tip) / len;
+            let x = Vec3::Y.cross(z).normalize();
+            let y = z.cross(x);
+            let frame = basis * Mat4::from_cols(x.extend(0.0), y.extend(0.0), z.extend(0.0), base.extend(1.0)) * Mat4::from_rotation_z(-0.3);
+            let w = 0.15;
+            let hand = frame * Mat4::from_translation(Vec3::new(-w / 2.0, -w / 2.0, -len)) * Mat4::from_scale(Vec3::new(w, w, len));
+            let sw = w + 0.016;
+            let sleeve = frame * Mat4::from_translation(Vec3::new(-sw / 2.0, -sw / 2.0, -len * 0.45)) * Mat4::from_scale(Vec3::new(sw, sw, len * 0.45 + 0.3));
+            let light = sky;
             let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
-            g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
         } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) {
             let tiles = {
                 let t = block(held).tex;
@@ -2637,15 +2657,15 @@ impl Game {
             for &(a, b) in &boxes[..n] {
                 let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
                 let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.14)) * Mat4::from_scale(Vec3::splat(0.28)) * Mat4::from_translation(a) * Mat4::from_scale(b - a);
-                g.cube(&m, tiles, sky.max(0.2), [a.x, 1.0 - b.y, b.x, 1.0 - a.y]);
+                g.cube(&m, tiles, sky, [a.x, 1.0 - b.y, b.x, 1.0 - a.y]);
             }
         } else {
             let tile = if is_block_item(held) { block(held).tex[1] } else { item_tile(held) };
             let m = basis * local * Mat4::from_rotation_y(-0.5) * Mat4::from_rotation_z(0.2);
             let s = 0.42;
             let c = [Vec3::new(-s / 2.0, -s / 2.0, 0.0), Vec3::new(s / 2.0, -s / 2.0, 0.0), Vec3::new(s / 2.0, s / 2.0, 0.0), Vec3::new(-s / 2.0, s / 2.0, 0.0)].map(|p| m.transform_point3(p));
-            g.quad(c, tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky.max(0.2)]);
-            g.quad([c[1], c[0], c[3], c[2]], tile, [1.0, 0.0, 0.0, 1.0], [1.0, sky.max(0.2)]);
+            g.quad(c, tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky]);
+            g.quad([c[1], c[0], c[3], c[2]], tile, [1.0, 0.0, 0.0, 1.0], [1.0, sky]);
         }
     }
 
@@ -2917,6 +2937,30 @@ pub(crate) mod tests {
         assert!(s.stared_at(eye, -Vec3::Z), "looking straight at its face");
         assert!(!s.stared_at(eye, Vec3::new(0.3, 0.0, -1.0).normalize()), "looking past it");
         assert!(!s.stared_at(eye, Vec3::Z), "looking away");
+    }
+
+    #[test]
+    fn idle_mobs_settle_into_a_standing_pose() {
+        let mut a = 0.0;
+        crate::entity::step_anim(&mut a, 3.0, 0.3, 5.0);
+        assert!(a.sin().abs() > 0.5, "mid-stride while walking");
+        for _ in 0..60 {
+            crate::entity::step_anim(&mut a, 0.0, 1.0 / 60.0, 5.0);
+        }
+        assert!(a.sin().abs() < 1e-3, "limbs straight once stopped, not frozen mid-stride");
+        let settled = a;
+        crate::entity::step_anim(&mut a, 0.1, 1.0 / 60.0, 5.0);
+        assert_eq!(a, settled, "drifting slowly doesn't shuffle the legs");
+    }
+
+    #[test]
+    fn light_levels_look_steadily_brighter() {
+        use crate::light::{shade, DARKEST};
+        assert_eq!(shade(0), DARKEST);
+        assert!((shade(15) - 1.0).abs() < 1e-6);
+        for l in 0..15 {
+            assert!(shade(l + 1) > shade(l), "level {l}");
+        }
     }
 
     #[test]
