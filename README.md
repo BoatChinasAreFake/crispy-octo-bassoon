@@ -8,7 +8,13 @@ Its only dependencies are macroquad (window, input, audio), [Rhai](https://rhai.
 
 ## Download and play
 
-Ready-made builds are on the [Releases page](https://github.com/BoatChinasAreFake/crispy-octo-bassoon/releases). Download the zip for your computer, unzip it anywhere, and run the game inside it: on **Windows**, double-click `minceraft.exe` (if Windows warns about an unrecognised app, click **More info**, then **Run anyway**). Worlds and settings are saved next to the game.
+Ready-made builds are on the [Releases page](https://github.com/BoatChinasAreFake/crispy-octo-bassoon/releases). Download the zip for your computer, unzip it anywhere, and run the game inside it: on **Windows**, double-click `minceraft.exe` (if Windows warns about an unrecognised app, click **More info**, then **Run anyway**). Worlds, settings and mods are kept in your own data folder, so a new version can be unzipped anywhere and picks up where you left off:
+
+- **Windows:** `%APPDATA%\Minceraft` (paste that into File Explorer's address bar)
+- **macOS:** `~/Library/Application Support/Minceraft`
+- **Linux:** `~/.local/share/minceraft`
+
+The first time a version with this runs, it copies any `saves`, `settings.txt` and `mods` it finds beside it into that folder (so unzipping over an older version brings its worlds along; the originals stay where they were). The world list and the Mods screen show the folder. To keep everything beside the game instead (on a USB stick, say), put an empty file named `portable.txt` next to it. If the game ever crashes it writes `crash.txt` to the same folder: please include it when you report the bug.
 
 New releases are built by GitHub Actions (`.github/workflows/release.yml`) whenever a version tag like `v0.2.0` is pushed, or from the Actions tab with **Run workflow**.
 
@@ -38,7 +44,7 @@ Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy
   - **Spruce** and **Jungle** logs make planks, burn and smelt like oak; saplings grow into whatever tree suits the biome they're planted in.
 - **Custom voxel renderer.** It culls hidden faces, adds per-vertex ambient occlusion and smoothed sky lighting, and uses frustum culling, translucent sorted water, cutout leaves and glass, fog, and mipmaps. **Greedy meshing** joins neighbouring faces with the same texture and light into one big rectangle (the shader repeats the texture across it). Faces only join along a direction their shading doesn't change in, so it looks the same as before at a fraction of the triangles, and the render distance goes up to 32 chunks.
 - **Compact world storage.** Like Minecraft, each 16-block-tall section of a chunk stores a small palette of the blocks it contains plus packed indices (0 bits per block for all-air or all-stone sections, 4–8 bits for mixed ones, direct ids past 256 kinds). Typical terrain averages under 2 bits per block. F3 shows the live figure.
-- **Graphics options.** **Leaves: Waving** sways the canopy in the wind, **Water: Shiny** reflects the sky (more at a glancing angle) with the sun glinting off ripples, and **Lighting: Smooth** blends light across faces with shading in the corners (Flat lights each face evenly, and is a bit faster). All in Options.
+- **Graphics options.** **Leaves: Waving** sways the canopy in the wind, **Water: Shiny** reflects the sky (more at a glancing angle) with the sun glinting off ripples, and **Lighting: Smooth** blends light across faces with shading in the corners (Flat lights each face evenly, and is a bit faster). **Brightness** runs from Moody (dark caves, like Minecraft's lowest setting) to Bright; the default lifts dim places so caves fade out gradually rather than going black. All in Options.
 - **Real light.** Every block has a sky light and a block light level from 0 to 15, spread Minecraft style: sky light pours straight down and fades one level per step under an overhang, while torches (14), lava and Glowrock (15) and lamps light their surroundings, fading a level per block. Solid blocks stop light, leaves and water dim it, and it all updates as you dig and build, across chunk borders. Caves are properly dark, torchlight is warm, and a held torch lights your way.
 - **Day/night cycle** (10 minutes), with a sun, moon, stars, sunrise/sunset glow and scrolling clouds.
 - **Physics.** AABB collision, gravity, sprint-jumping, sneaking (it stops you walking off ledges), swimming and fall damage.
@@ -146,7 +152,7 @@ Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy
   | Right trigger / left trigger | Mine or attack / place or use |
   | Bumpers, D-pad left and right | Hotbar |
   | Start / Select | Pause / third person |
-- **Saved settings.** Render distance, FOV, sensitivity, fullscreen, volume, music, key bindings, skin, subtitles, colour-blind mode, graphics options, and your multiplayer name and last server are kept in `settings.txt` next to the game. It's plain `key=value` text: edit it by hand if you like, and anything it can't make sense of falls back to the default.
+- **Saved settings.** Render distance, FOV, sensitivity, fullscreen, volume, music, key bindings, skin, subtitles, colour-blind mode, graphics options, brightness, and your multiplayer name and last server are kept in `settings.txt` in the data folder (see Download and play). It's plain `key=value` text: edit it by hand if you like, and anything it can't make sense of falls back to the default.
 
 ## Controls
 
@@ -291,6 +297,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/players.rs` | Remembering joined players between visits |
 | `src/rules.rs` | World rules: keep inventory, difficulty, daylight and weather cycles |
 | `src/settings.rs` | `settings.txt` |
+| `src/paths.rs` | The data folder (and carrying files over into it), the crash log |
 | `src/keybinds.rs` | Rebindable keys and mouse buttons |
 | `src/pad.rs` | Game controllers |
 | `src/liquids.rs` | Flowing water and lava, buckets |
@@ -327,7 +334,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|controls|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow|liquids|animals|zappy|trade|scorch|portal|vehicles|decor|carpentry|brewing|contraptions|hollow|machines|village|swamp|jungle|badlands|taiga|cave [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z] [--distance chunks] [--colour-blind] [--subtitles] [--flat-lighting]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|controls|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow|liquids|animals|zappy|trade|scorch|portal|vehicles|decor|carpentry|brewing|contraptions|hollow|machines|village|swamp|jungle|badlands|taiga|cave [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z] [--distance chunks] [--colour-blind] [--subtitles] [--flat-lighting] [--brightness 0..1]` renders a scene and saves a PNG.
 
 `minceraft --playtest [--bots N] [--seconds S] [--seed N] [--port N]` is a multiplayer check in one command: it hosts a world and connects bot players to it over real sockets (no window needed). The bots wander, build and knock down blocks, chat and fill a shared chest, then it checks that the host and every bot agree on every block, that the bots see and hear each other, that each bot's inventory matches the host's ledger, and that the chest holds what went in. It exits non-zero on any mismatch; CI runs it with six bots for a minute.
 

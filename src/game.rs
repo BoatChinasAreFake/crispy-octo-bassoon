@@ -2955,8 +2955,9 @@ pub(crate) mod tests {
 
     #[test]
     fn light_levels_look_steadily_brighter() {
-        use crate::light::{shade, DARKEST};
-        assert_eq!(shade(0), DARKEST);
+        use crate::light::{brightness, darkest, shade, DEFAULT_BRIGHTNESS};
+        assert_eq!(brightness(), DEFAULT_BRIGHTNESS);
+        assert!((shade(0) - darkest(DEFAULT_BRIGHTNESS)).abs() < 1e-6);
         assert!((shade(15) - 1.0).abs() < 1e-6);
         for l in 0..15 {
             assert!(shade(l + 1) > shade(l), "level {l}");
