@@ -313,6 +313,10 @@ impl Game {
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
             return true;
         }
+        // Goo waxes copper.
+        if crate::copper::waxed(old) == Some(new) {
+            return self.peer_take(from, GOO, 1);
+        }
         // Fire comes from a Sparker (which wears a little).
         if new == FIRE {
             let ok = self.peer_has(from, SPARKER);

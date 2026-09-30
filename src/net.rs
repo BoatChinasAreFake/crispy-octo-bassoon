@@ -68,6 +68,8 @@ pub const MOB_TAMED: u8 = 4;
 pub const MOB_SITTING: u8 = 8;
 pub const MOB_LOVE: u8 = 16;
 pub const MOB_SADDLED: u8 = 32;
+/// A Soggy Groaner carrying a spear.
+pub const MOB_ARMED: u8 = 64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {

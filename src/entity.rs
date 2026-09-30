@@ -187,11 +187,15 @@ pub enum MobKind {
     Squawker,
     /// Iron-golem-ish: guards a village from monsters (see golems.rs).
     Clanker,
+    /// Fish-ish: swims in schools in the sea; flops about on land.
+    Fishy,
+    /// Drowned-ish: a waterlogged Groaner that swims after you, some with a Soggy Spear.
+    Soggy,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 17] = [
+    pub const ALL: [MobKind; 19] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -209,6 +213,8 @@ impl MobKind {
         MobKind::Wyrm,
         MobKind::Squawker,
         MobKind::Clanker,
+        MobKind::Fishy,
+        MobKind::Soggy,
     ];
 
     pub fn index(self) -> u8 {
@@ -237,6 +243,8 @@ impl MobKind {
             "wyrm" | "hollow wyrm" | "hollow_wyrm" | "ender_dragon" | "dragon" => Some(MobKind::Wyrm),
             "squawker" | "parrot" => Some(MobKind::Squawker),
             "clanker" | "iron_golem" | "golem" => Some(MobKind::Clanker),
+            "fishy" | "fish" | "cod" => Some(MobKind::Fishy),
+            "soggy" | "soggy groaner" | "soggy_groaner" | "drowned" => Some(MobKind::Soggy),
             _ => None,
         }
     }
@@ -259,6 +267,8 @@ impl MobKind {
             MobKind::Wyrm => "Hollow Wyrm",
             MobKind::Squawker => "Squawker",
             MobKind::Clanker => "Clanker",
+            MobKind::Fishy => "Fishy",
+            MobKind::Soggy => "Soggy Groaner",
         }
     }
     /// Half-width and height at size 1.
@@ -281,6 +291,8 @@ impl MobKind {
             MobKind::Wyrm => (2.5, 2.0),
             MobKind::Squawker => (0.2, 0.8),
             MobKind::Clanker => (0.7, 2.7),
+            MobKind::Fishy => (0.25, 0.45),
+            MobKind::Soggy => (0.3, 1.95),
         }
     }
     pub fn max_health(self) -> f32 {
@@ -302,6 +314,8 @@ impl MobKind {
             MobKind::Wyrm => 200.0,
             MobKind::Squawker => 6.0,
             MobKind::Clanker => 100.0,
+            MobKind::Fishy => 3.0,
+            MobKind::Soggy => 20.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -315,7 +329,7 @@ impl MobKind {
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
@@ -528,7 +542,7 @@ impl Mob {
             k if k.passive() => self.flee = 4.0,
             MobKind::Webber => self.angry = true,
             MobKind::Woofer if self.owner.is_none() => self.angry = true,
-            MobKind::Hmmer => self.flee = 4.0,
+            MobKind::Hmmer | MobKind::Fishy => self.flee = 4.0,
             MobKind::Grumbler => self.angry = true,
             MobKind::Clanker => {
                 // Hard to shift, and it remembers who did that.
@@ -567,6 +581,8 @@ impl Mob {
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
 
         let mut want: Option<(f32, f32)> = None; // (yaw, speed)
+        // Swimmers choose how fast to rise or sink instead of bobbing up.
+        let mut swim_vy: Option<f32> = None;
         // Wander when there's nothing better to do (Bloops only ever hop).
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
@@ -670,6 +686,56 @@ impl Mob {
                 if self.fuse >= 1.5 {
                     ev.push(MobEvent::Explode(self.body.pos + Vec3::Y * 0.8, 3.0, "was blown up by a Hisser"));
                     self.health = -100.0;
+                }
+            }
+            MobKind::Fishy => {
+                if self.body.in_water {
+                    // Drift about, never out of the water.
+                    let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
+                    if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                        self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
+                        self.wander_t = rng.range(1.0, 3.0);
+                    }
+                    if self.flee > 0.0 {
+                        want = Some(((-flat.x).atan2(flat.z), 4.5));
+                    }
+                    let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + 0.8).floor() as i32, self.body.pos.z.floor() as i32);
+                    let drift = (self.wander_t * 1.7 + self.id as f32).sin() * 0.8;
+                    swim_vy = Some(if is_water(above) { drift } else { drift.min(0.0) - 0.3 });
+                } else {
+                    // Out of the water: flop, and slowly dry out.
+                    may_wander = false;
+                    self.health -= dt * 0.5;
+                    if self.body.on_ground && rng.chance(dt * 2.0) {
+                        self.body.vel.y = 4.5;
+                        self.yaw = rng.range(0.0, std::f32::consts::TAU);
+                        self.knock = Vec3::new(self.yaw.sin(), 0.0, -self.yaw.cos()) * 2.0;
+                    }
+                }
+            }
+            MobKind::Soggy => {
+                if player_visible && dist < 28.0 {
+                    let armed = self.seed == 1;
+                    // Armed ones keep a throwing distance and hurl their spear now and then.
+                    if armed && (5.0..14.0).contains(&flat.length()) && self.attack_cd <= 0.0 {
+                        let eye = self.eye();
+                        let aim = player + Vec3::Y * 0.9 - eye;
+                        if world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none() {
+                            let vel = aim.normalize_or_zero() * Arrow::SPEED + Vec3::Y * aim.length() * 0.3;
+                            ev.push(MobEvent::Shoot(eye + aim.normalize_or_zero() * 0.5, vel));
+                            self.attack_cd = rng.range(2.5, 4.0);
+                        }
+                    }
+                    want = Some((face, if self.body.in_water { 2.8 } else { 2.2 }));
+                    if self.body.in_water {
+                        swim_vy = Some((to_player.y * 2.0).clamp(-3.0, 3.0));
+                    }
+                    if flat.length() < 1.3 && to_player.y.abs() < 1.6 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(if armed { 6.0 } else { 3.0 }, "was dragged under by a Soggy Groaner"));
+                        self.attack_cd = 1.0;
+                    }
+                } else if self.body.in_water {
+                    swim_vy = Some(-0.4);
                 }
             }
             MobKind::Groaner => {
@@ -825,7 +891,9 @@ impl Mob {
         self.body.vel.x += (target_vel.x + self.knock.x - self.body.vel.x) * k;
         self.body.vel.z += (target_vel.z + self.knock.z - self.body.vel.z) * k;
         self.knock *= (1.0 - dt * 6.0).max(0.0);
-        if self.body.in_water {
+        if let (true, Some(vy)) = (self.body.in_water, swim_vy) {
+            self.body.vel.y += (vy - self.body.vel.y) * k;
+        } else if self.body.in_water {
             self.body.vel.y = (self.body.vel.y + 14.0 * dt).min(2.5);
         } else {
             self.body.vel.y = (self.body.vel.y - GRAVITY * dt).max(-50.0);
@@ -871,6 +939,10 @@ impl Mob {
             MobKind::Bloop if n > 0 && self.size <= 1.0 => Some((GOO, n)),
             MobKind::Grumbler if n > 0 => Some((GOO, n)),
             MobKind::Clanker => Some((IRON, 3 + n)),
+            MobKind::Fishy => Some(([COD, COD, SALMON, TROPICAL][rng.int(0, 3) as usize], 1)),
+            // An armed one drops its spear now and then; otherwise it's soggy goo.
+            MobKind::Soggy if self.seed == 1 && rng.chance(0.25) => Some((SPEAR, 1)),
+            MobKind::Soggy if n > 0 => Some((GOO, n)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -884,6 +956,7 @@ impl Mob {
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             MobKind::Grumbler if rng.chance(0.4) => Some((GOLD_INGOT, 1)),
             MobKind::Grumbler if rng.chance(0.5) => Some((GRUMBLER_TUSK, 1)),
+            MobKind::Soggy if rng.chance(0.11) => Some((COPPER_INGOT, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -931,6 +1004,7 @@ impl Mob {
         let root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
         let parts = match self.kind {
             MobKind::Fluffer if self.sheared => &FLUFFER_SHEARED[..],
+            MobKind::Soggy if self.seed == 1 => &SOGGY_ARMED[..],
             k => model(k),
         };
         draw_posed(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, self.flap, sky);
@@ -1090,6 +1164,20 @@ static MOOER: [Part; 8] = [
     part([0.14, 0.0, 0.28], [0.22, 0.62, 0.22], [0.0, 0.62, 0.4], Limb::Swing(1.0), [MS; 6]),
 ];
 
+// A fish: a long body, a tail that waggles, a fin on top.
+static FISHY: [Part; 3] = [
+    part([-0.12, 0.05, -0.3], [0.24, 0.3, 0.55], [0.0; 3], Limb::Fixed, [T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY_FACE]),
+    part([-0.02, 0.06, 0.25], [0.04, 0.28, 0.22], [0.0, 0.2, 0.25], Limb::SwingY(2.0), [T_FISHY_FIN; 6]),
+    part([-0.02, 0.35, -0.12], [0.04, 0.1, 0.24], [0.0; 3], Limb::Fixed, [T_FISHY_FIN; 6]),
+];
+
+static SOGGY: [Part; 6] = humanoid(T_SOGGY_SKIN, T_SOGGY_FACE, T_SOGGY_SHIRT, T_SOGGY_PANTS, Limb::Forward, Limb::Forward);
+/// With a spear in its right hand.
+static SOGGY_ARMED: [Part; 7] = {
+    let h = SOGGY;
+    [h[0], h[1], h[2], h[3], h[4], h[5], part([0.34, -0.2, -0.03], [0.06, 1.7, 0.06], [0.0, 1.4, 0.0], Limb::Forward, [T_COPPER + 3; 6])]
+};
+
 static RATTLER: [Part; 6] = humanoid(T_BONE, T_RATTLER_FACE, T_BONE, T_BONE, Limb::Forward, Limb::Forward);
 
 static GRUMBLER: [Part; 6] = humanoid(T_GRUMBLE_SKIN, T_GRUMBLE_FACE, T_GRUMBLE_SKIN, T_GOLD, Limb::Swing(-0.8), Limb::Swing(0.8));
@@ -1205,6 +1293,8 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Wyrm => &WYRM,
         MobKind::Squawker => &SQUAWKER,
         MobKind::Clanker => &CLANKER,
+        MobKind::Fishy => &FISHY,
+        MobKind::Soggy => &SOGGY,
     }
 }
 
@@ -1346,6 +1436,9 @@ pub struct Arrow {
     pub stuck: bool,
     /// Which way it points (kept once it stops moving).
     pub dir: Vec3,
+    /// A thrown Soggy Spear (with its wear) instead of a Pointy Stick: it
+    /// drops where it lands, to be picked up again.
+    pub spear: Option<u32>,
 }
 
 impl Arrow {
@@ -1353,7 +1446,7 @@ impl Arrow {
     const GRAVITY: f32 = 20.0;
 
     pub fn new(pos: Vec3, vel: Vec3, shooter: Option<u32>, damage: f32) -> Arrow {
-        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z) }
+        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z), spear: None }
     }
 
     /// Fly for `dt`. Returns true if it just hit a block (and stuck there).
@@ -1387,7 +1480,7 @@ impl Arrow {
     /// A client's copy, from the host's snapshot.
     pub fn from_wire(pos: Vec3, v: Vec3) -> Arrow {
         let stuck = v.length() < 0.01;
-        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z) }
+        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z), spear: None }
     }
 
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {

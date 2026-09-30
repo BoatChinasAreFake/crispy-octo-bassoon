@@ -89,6 +89,8 @@ pub struct Game {
     pub stats: crate::stats::Stats,
     /// Seconds of gliding not yet charged to the Glider (see glider.rs).
     pub glide_wear: f32,
+    /// Time owed to random block ticks (see copper.rs).
+    pub random_tick_acc: f32,
     /// What's packed inside broken Hollow Boxes, by number (see boxes.rs).
     pub boxes: HashMap<u16, crate::containers::Container>,
     /// Sound effects requested this frame (effect, world position if positional).
@@ -166,6 +168,11 @@ pub struct Game {
     pub waving_leaves: bool,
     /// Clouds as thick blocks (Options: Clouds: Fancy) rather than a flat layer.
     pub fancy_clouds: bool,
+    /// Video options (see settings.rs): clouds at all, distance fog, camera bob, particle level.
+    pub clouds_on: bool,
+    pub fog_on: bool,
+    pub view_bobbing: bool,
+    pub particle_level: u8,
     pub water_reflections: bool,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
@@ -271,6 +278,7 @@ impl Game {
             stats: Default::default(),
             glide_wear: 0.0,
             boxes: HashMap::new(),
+            random_tick_acc: 0.0,
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -319,6 +327,10 @@ impl Game {
             explore_timer: 0.0,
             waving_leaves: true,
             fancy_clouds: true,
+            clouds_on: true,
+            fog_on: true,
+            view_bobbing: true,
+            particle_level: 0,
             water_reflections: true,
             fire_timer: 0.0,
             effects: Vec::new(),
@@ -736,7 +748,7 @@ impl Game {
                 let back = self.world.raycast(eye, -dir, 4.0).map(|h| (h.dist - 0.3).max(0.2)).unwrap_or(4.0);
                 (eye - dir * back, dir)
             } else {
-                let b = self.player.bob;
+                let b = if self.view_bobbing { self.player.bob } else { 0.0 };
                 let bob = Vec3::new(0.0, (b * 2.0).sin().abs() * 0.06, 0.0);
                 (eye + bob, dir)
             }
@@ -1175,6 +1187,34 @@ impl Game {
         }
     }
 
+    /// Throw the held Soggy Spear (the host owns thrown things, so clients ask it to).
+    fn throw_spear(&mut self) {
+        let wear = self.inv.wear[self.inv.selected];
+        self.player.swing = 1.0;
+        self.use_cd = 0.8;
+        self.advance("spear_it");
+        if self.is_client() {
+            // The host takes it from its ledger and throws it for us.
+            self.net_send_msg(Msg::UseItem { item: SPEAR });
+            self.inv.consume_held();
+            return;
+        }
+        if !self.creative {
+            self.inv.consume_held();
+        }
+        let dir = self.player.look_dir();
+        let me = self.my_id;
+        self.throw_spear_from(self.player.eye() + dir * 0.5, dir, me, crate::inventory::with_uses(wear, crate::inventory::uses(wear).saturating_add(1)));
+    }
+
+    /// Launch a spear (host side).
+    pub fn throw_spear_from(&mut self, pos: Vec3, dir: Vec3, shooter: u32, wear: crate::inventory::Wear) {
+        let mut a = Arrow::new(pos, dir * Arrow::SPEED * 1.1, Some(shooter), 8.0);
+        a.spear = Some(wear);
+        self.arrows.push(a);
+        self.sfx(Sfx::Twang, Some(pos));
+    }
+
     /// Fire an arrow: from a player's bow (`shooter` = their id) or a Rattler (None).
     pub fn spawn_arrow(&mut self, pos: Vec3, vel: Vec3, shooter: Option<u32>) {
         let damage = if shooter.is_some() { 5.0 } else { 3.0 };
@@ -1188,9 +1228,17 @@ impl Game {
     /// Move arrows and see what they hit (host / single player only).
     fn update_arrows(&mut self, dt: f32) {
         let mut arrows = std::mem::take(&mut self.arrows);
+        let mut landed = Vec::new();
         arrows.retain_mut(|a| {
             if a.fly(dt, &self.world) {
                 self.sfx(Sfx::Thunk, Some(a.pos));
+            }
+            // A spear that hits the ground drops, ready to be picked up.
+            if let Some(wear) = a.spear
+                && (a.stuck || a.life <= 0.0)
+            {
+                landed.push((a.pos - a.dir * 0.3, wear));
+                return false;
             }
             if a.life <= 0.0 {
                 return false;
@@ -1212,7 +1260,9 @@ impl Game {
                     m.last_attacker = pid;
                     let (kind, at) = (m.kind, m.body.pos);
                     self.sfx(Sfx::hurt_of(kind), Some(at));
-                    if pid == self.my_id && !self.dedicated {
+                    if let Some(wear) = a.spear {
+                        landed.push((a.pos - a.dir * 0.5, wear));
+                    } else if pid == self.my_id && !self.dedicated {
                         self.advance("robin_hood");
                     }
                     false
@@ -1241,6 +1291,9 @@ impl Game {
         // Anything fired while we were busy (none today, but keep them).
         arrows.append(&mut self.arrows);
         self.arrows = arrows;
+        for (at, wear) in landed {
+            self.spawn_drop(at, SPEAR, 1, wear, Vec3::ZERO, 0.5);
+        }
     }
 
     /// Placing a sponge soaks up water around it.
@@ -1447,6 +1500,15 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        // Goo waxes copper so it stops ageing.
+        if held == GOO
+            && let Some(Target::Block(h)) = &self.target
+        {
+            let pos = h.pos;
+            if self.wax_copper(pos) {
+                return;
+            }
+        }
         // Feeding, shearing and taming animals.
         if let Some(Target::Mob(i)) = self.target
             && self.use_on_mob(i)
@@ -1549,6 +1611,10 @@ impl Game {
         }
         if held == ROCKET {
             self.use_rocket();
+            return;
+        }
+        if held == SPEAR {
+            self.throw_spear();
             return;
         }
         if held == BOTTLE {
@@ -1814,6 +1880,15 @@ impl Game {
             if !self.creative && !self.is_client() && block(a).drop != AIR {
                 self.pop_drop(above.as_vec3() + Vec3::splat(0.5), block(a).drop, 1);
             }
+        }
+        // Bamboo: the whole stalk above comes down.
+        let mut q = above + IVec3::Y;
+        while a == BAMBOO && self.world.get_v(q) == BAMBOO {
+            self.world.set_v(q, AIR);
+            if !self.creative && !self.is_client() {
+                self.pop_drop(q.as_vec3() + Vec3::splat(0.5), BAMBOO, 1);
+            }
+            q += IVec3::Y;
         }
     }
 
@@ -2186,8 +2261,9 @@ impl Game {
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
+                    MobKind::Soggy => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Squawker => noises.push((Sfx::Squawk, m.body.pos)),
-                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker => {}
+                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy => {}
                 }
             }
         }
@@ -2274,6 +2350,8 @@ impl Game {
                             MobKind::Rattler => self.advance("bone_zone"),
                             MobKind::Webber => self.advance("arachno"),
                             MobKind::Bloop => self.advance("split_decision"),
+                            MobKind::Soggy => self.advance("soggy"),
+                            MobKind::Fishy => self.advance("fishy_business"),
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker => {}
                         }
                     }
@@ -2304,6 +2382,12 @@ impl Game {
             p.update(dt, &self.world);
         }
         self.particles.retain(|p| p.life > 0.0);
+        // Fewer (or hardly any) particles, as the video options ask.
+        let most = [usize::MAX, 160, 24][self.particle_level.min(2) as usize];
+        if self.particles.len() > most {
+            let extra = self.particles.len() - most;
+            self.particles.drain(..extra);
+        }
         if self.particles.len() > 1500 {
             let n = self.particles.len() - 1500;
             self.particles.drain(0..n);
@@ -2328,6 +2412,7 @@ impl Game {
         }
         self.farm_tick(dt);
         self.trees_tick(dt);
+        self.random_ticks(dt);
         self.hollow_tick(dt);
         self.fire_tick(dt);
         self.container_tick(dt);
@@ -2372,7 +2457,7 @@ impl Game {
             return;
         }
         // Kept animals (bred, tamed) don't count against new ones turning up.
-        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent).count();
+        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent && m.kind != MobKind::Fishy).count();
         let hostile = self.mobs.len() - passive;
         let a = self.rng.range(0.0, TAU);
         let d = self.rng.range(24.0, 56.0);
@@ -2386,6 +2471,29 @@ impl Game {
         let (_, biome) = self.world.generator.column(x, z);
         use crate::world::Biome;
         let woofy = matches!(biome, Biome::Forest | Biome::Snowy | Biome::Taiga);
+        // The sea: schools of Fishies any time, Soggy Groaners in the dark.
+        if is_water(top) {
+            let depth = (0..y).take_while(|d| is_water(self.world.get(x, y - d, z))).count() as i32;
+            let fish = self.mobs.iter().filter(|m| m.kind == MobKind::Fishy).count();
+            if fish < 12 && depth >= 2 && self.rng.chance(0.6) {
+                let n = self.rng.int(2, 4);
+                for i in 0..n {
+                    let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.6, (y - depth / 2) as f32, z as f32 + 0.5 - i as f32 * 0.4);
+                    self.alloc_mob(MobKind::Fishy, pos);
+                }
+                return;
+            }
+            let dark = self.is_night() || self.weather.kind == crate::weather::Weather::Thunder;
+            if dark && depth >= 3 && hostile < 12 + 4 * self.peers.len() && self.rules.difficulty.monsters() && self.rng.chance(0.5) {
+                self.alloc_mob(MobKind::Soggy, Vec3::new(x as f32 + 0.5, (y - depth + 1) as f32, z as f32 + 0.5));
+                if self.rng.chance(0.3)
+                    && let Some(m) = self.mobs.last_mut()
+                {
+                    m.seed = 1;
+                }
+            }
+            return;
+        }
         if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS) && clear(&self.world, y + 1) {
             let kind = if woofy && self.rng.chance(if biome == Biome::Taiga { 0.4 } else { 0.25 }) {
                 MobKind::Woofer
@@ -2525,7 +2633,7 @@ impl Game {
         let cell = 12.0;
         let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
-        let reach = if scorch { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
+        let reach = if scorch || !self.clouds_on { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
         // Each row's runs of cloudy cells become one strip (Fast) or one box
         // (Fancy). Edges come from whole cells plus one shared fraction, so
         // neighbours meet exactly, and the plain white tile is sampled at its
@@ -2781,6 +2889,8 @@ impl Game {
             (sky, far * 0.2, far * 0.8)
         } else if self.in_hollow() {
             ([0.1, 0.05, 0.14], far * 0.4, far)
+        } else if !self.fog_on {
+            (sky, 0.0, 0.0)
         } else {
             (sky, far * 0.55, far - 4.0)
         };

@@ -656,6 +656,18 @@ impl Game {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
                 }
+                // A thrown spear leaves their hands and flies from where they look.
+                if item == SPEAR && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, SPEAR) {
+                    let ench = if self.verified_held(from) == SPEAR { self.verified_ench(from) } else { 0 };
+                    if let Some(p) = self.peers.get(&from) {
+                        let dir = Vec3::new(p.yaw.sin() * p.pitch.cos(), p.pitch.sin(), -p.yaw.cos() * p.pitch.cos());
+                        let eye = p.target + Vec3::Y * 1.6;
+                        if self.peer_take(from, SPEAR, 1) {
+                            self.throw_spear_from(eye + dir * 0.5, dir, from, (ench as u32) << 16);
+                        }
+                    }
+                    return;
+                }
                 if valid_item(item) && self.peer_rate_ok(from, "use", 0.1) && self.peer_has(from, item) {
                     let who = self.peer_name(from);
                     self.fire("on_use_item", vec![who.into(), reg().key_of(item).into()]);
@@ -1043,6 +1055,9 @@ impl Game {
             m.sitting = s.flags & MOB_SITTING != 0;
             m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
             m.saddled = s.flags & MOB_SADDLED != 0;
+            if m.kind == crate::entity::MobKind::Soggy {
+                m.seed = (s.flags & MOB_ARMED != 0) as u32;
+            }
             next.push(m);
         }
         self.mobs = next;
@@ -1169,7 +1184,7 @@ impl Game {
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
-                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE | m.saddled as u8 * MOB_SADDLED,
+                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE | m.saddled as u8 * MOB_SADDLED | (m.kind == crate::entity::MobKind::Soggy && m.seed == 1) as u8 * MOB_ARMED,
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();

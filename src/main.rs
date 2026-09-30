@@ -17,6 +17,7 @@ mod carpentry;
 mod cheats;
 mod combat;
 mod containers;
+mod copper;
 mod contraptions;
 mod decor;
 mod drops;
@@ -137,6 +138,8 @@ enum Screen {
     Options { from_title: bool },
     /// Rebinding keys and buttons (reached from Options).
     Controls { from_title: bool },
+    /// Graphics and frame rate (reached from Options).
+    Video { from_title: bool },
     Help { from_title: bool },
     Advancements,
     /// What you've done in this world (see stats.rs).
@@ -158,6 +161,8 @@ struct App {
     renderer: Renderer,
     ui: Ui,
     settings: Settings,
+    /// VSync and anti-aliasing as the window was opened with (they need a restart).
+    video_at_start: (bool, u8),
     /// Screenshot runs neither read nor write settings.txt.
     no_settings_file: bool,
     splash: &'static str,
@@ -282,14 +287,17 @@ fn window_conf() -> Conf {
             big: texture::icon_rgba(&atlas, 64).try_into().ok()?,
         })
     })();
+    // Anti-aliasing and vsync have to be chosen before the window opens.
+    let video = settings::Settings::load(&settings::Settings::early_path());
     Conf {
         window_title: "Minceraft".to_owned(),
         icon,
         window_width: 1280,
         window_height: 720,
         high_dpi: false,
-        sample_count: 4,
+        sample_count: video.msaa.max(1) as i32,
         window_resizable: true,
+        platform: macroquad::miniquad::conf::Platform { swap_interval: Some(if video.vsync { 1 } else { 0 }), ..Default::default() },
         ..Default::default()
     }
 }
@@ -352,7 +360,7 @@ impl App {
             drain_chars();
         }
         // Leaving a screen where settings change: keep them for next time.
-        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Multiplayer) && self.screen != s {
+        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Multiplayer) && self.screen != s {
             self.save_settings();
         }
         self.screen = s;
@@ -737,6 +745,11 @@ impl App {
             Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
+                }
+            }
+            Screen::Video { from_title } => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Options { from_title });
                 }
             }
             Screen::Controls { from_title } => {
@@ -1640,7 +1653,7 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog);
         let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
@@ -1656,6 +1669,10 @@ impl App {
         self.game.colour_blind = self.settings.colour_blind;
         self.game.waving_leaves = self.settings.waving_leaves;
         self.game.fancy_clouds = self.settings.fancy_clouds;
+        self.game.clouds_on = self.settings.clouds;
+        self.game.fog_on = self.settings.fog;
+        self.game.view_bobbing = self.settings.view_bobbing;
+        self.game.particle_level = self.settings.particles;
         self.game.water_reflections = self.settings.water_reflections;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
@@ -1687,6 +1704,10 @@ impl App {
             Screen::Help { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.help_screen(from_title);
+            }
+            Screen::Video { from_title } => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+                self.video_screen(from_title);
             }
             Screen::Controls { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
@@ -2244,49 +2265,42 @@ impl App {
         self.ui.text(&self.ui.fit(a.title, 9.0, tw - th - 6.0 * s), tx, y + 24.0 * s, 9.0, WHITE);
     }
 
+    /// A "- label +" row for the Options screens; returns -1, 0 or 1.
+    fn stepper(&self, label: &str, x: f32, y: f32, bw: f32, bh: f32) -> i32 {
+        let s = self.ui.s;
+        let small = bh * 1.3;
+        let mut d = 0;
+        if self.ui.button(Rect::new(x, y, small, bh), "-", true) {
+            d = -1;
+        }
+        let r = Rect::new(x + small + 4.0 * s, y, bw - 2.0 * small - 8.0 * s, bh);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.15, 0.15, 0.18, 0.9));
+        self.ui.text_centered(label, r.x + r.w / 2.0, r.y + r.h * 0.68, 10.0, WHITE);
+        if self.ui.button(Rect::new(x + bw - small, y, small, bh), "+", true) {
+            d = 1;
+        }
+        d
+    }
+
     fn options_screen(&mut self, from_title: bool) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let bw = (220.0 * s).min(w * 0.8);
         // Rows shrink a little on short windows so Done stays on screen.
-        let bh = (20.0 * s).min((h - 100.0 * s) / 12.0);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 10.0);
         let x = w / 2.0 - bw / 2.0;
-        let small = bh * 1.3;
-        // Twelve rows (and the title above them), centred in whatever room there is.
-        let total = 12.0 * bh + 11.0 * 5.0 * s + 7.0 * s;
+        let total = 8.0 * bh + 7.0 * 5.0 * s + 7.0 * s;
         let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
         self.ui.text_centered("Options", w / 2.0, y - 18.0 * s, 16.0, WHITE);
-        let row = |ui: &Ui, label: String, y: f32| -> i32 {
-            let mut d = 0;
-            if ui.button(Rect::new(x, y, small, bh), "-", true) {
-                d = -1;
-            }
-            let r = Rect::new(x + small + 4.0 * s, y, bw - 2.0 * small - 8.0 * s, bh);
-            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.15, 0.15, 0.18, 0.9));
-            ui.text_centered(&label, r.x + r.w / 2.0, r.y + r.h * 0.68, 10.0, WHITE);
-            if ui.button(Rect::new(x + bw - small, y, small, bh), "+", true) {
-                d = 1;
-            }
-            d
-        };
-        let st = &mut self.settings;
-        st.render_distance = (st.render_distance + row(&self.ui, format!("Render Distance: {} chunks", st.render_distance), y)).clamp(3, settings::MAX_RENDER_DISTANCE);
+        let d = self.stepper(&format!("FOV: {:.0}", self.settings.fov), x, y, bw, bh);
+        self.settings.fov = (self.settings.fov + 5.0 * d as f32).clamp(50.0, 110.0);
         y += bh + 5.0 * s;
-        st.fov = (st.fov + 5.0 * row(&self.ui, format!("FOV: {:.0}", st.fov), y) as f32).clamp(50.0, 110.0);
+        let d = self.stepper(&format!("Mouse Sensitivity: {:.0}%", self.settings.sensitivity * 100.0), x, y, bw, bh);
+        self.settings.sensitivity = (self.settings.sensitivity + 0.1 * d as f32).clamp(0.1, 3.0);
         y += bh + 5.0 * s;
-        st.sensitivity = (st.sensitivity + 0.1 * row(&self.ui, format!("Mouse Sensitivity: {:.0}%", st.sensitivity * 100.0), y) as f32).clamp(0.1, 3.0);
-        y += bh + 5.0 * s;
-        let bright = match (st.brightness * 100.0).round() as i32 {
-            0 => "Moody".to_string(),
-            100 => "Bright".to_string(),
-            p => format!("{p}%"),
-        };
-        st.brightness = (st.brightness + 0.1 * row(&self.ui, format!("Brightness: {bright}"), y) as f32).clamp(0.0, 1.0);
-        st.brightness = (st.brightness * 10.0).round() / 10.0;
-        y += bh + 5.0 * s;
+        let d = self.stepper(&format!("Sound Volume: {:.0}%", self.audio.volume * 100.0), x, y, bw, bh);
         let vol = &mut self.audio.volume;
-        *vol = (*vol + 0.1 * row(&self.ui, format!("Sound Volume: {:.0}%", *vol * 100.0), y) as f32).clamp(0.0, 1.0);
-        *vol = (*vol * 10.0).round() / 10.0;
+        *vol = ((*vol + 0.1 * d as f32).clamp(0.0, 1.0) * 10.0).round() / 10.0;
         y += bh + 5.0 * s;
         // Two to a row from here on.
         let half = (bw - 4.0 * s) / 2.0;
@@ -2295,15 +2309,6 @@ impl App {
         if self.ui.button(Rect::new(left, y, half, bh), music, true) {
             self.audio.music_on = !self.audio.music_on;
         }
-        let fs = if self.settings.fullscreen { "Fullscreen: ON" } else { "Fullscreen: OFF" };
-        if self.ui.button(Rect::new(right, y, half, bh), fs, true) {
-            self.settings.fullscreen = !self.settings.fullscreen;
-            set_fullscreen(self.settings.fullscreen);
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), "Controls...", true) {
-            self.set_screen(Screen::Controls { from_title });
-        }
         let skin = format!("Skin: {}", nametags::skin_name(self.settings.skin));
         if self.ui.button(Rect::new(right, y, half, bh), &skin, true) {
             self.settings.skin = (self.settings.skin + 1) % nametags::SKINS.len() as u8;
@@ -2311,31 +2316,20 @@ impl App {
             self.game.set_skin(k);
         }
         y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), "Video Settings...", true) {
+            self.set_screen(Screen::Video { from_title });
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), "Controls...", true) {
+            self.set_screen(Screen::Controls { from_title });
+        }
+        y += bh + 5.0 * s;
         let subs = if self.settings.subtitles { "Subtitles: ON" } else { "Subtitles: OFF" };
         if self.ui.button(Rect::new(left, y, half, bh), subs, true) {
             self.settings.subtitles = !self.settings.subtitles;
         }
         let cb = if self.settings.colour_blind { "Colour-blind: ON" } else { "Colour-blind: OFF" };
-        let waving = if self.settings.waving_leaves { "Leaves: Waving" } else { "Leaves: Still" };
-        let shiny = if self.settings.water_reflections { "Water: Shiny" } else { "Water: Plain" };
-        let lighting = if self.settings.smooth_lighting { "Lighting: Smooth" } else { "Lighting: Flat" };
         if self.ui.button(Rect::new(right, y, half, bh), cb, true) {
             self.settings.colour_blind = !self.settings.colour_blind;
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), waving, true) {
-            self.settings.waving_leaves = !self.settings.waving_leaves;
-        }
-        if self.ui.button(Rect::new(right, y, half, bh), shiny, true) {
-            self.settings.water_reflections = !self.settings.water_reflections;
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), lighting, true) {
-            self.settings.smooth_lighting = !self.settings.smooth_lighting;
-        }
-        let clouds = if self.settings.fancy_clouds { "Clouds: Fancy" } else { "Clouds: Fast" };
-        if self.ui.button(Rect::new(right, y, half, bh), clouds, true) {
-            self.settings.fancy_clouds = !self.settings.fancy_clouds;
         }
         y += bh + 5.0 * s;
         let size_i = settings::UI_SCALES.iter().position(|(m, _)| (*m - self.settings.ui_scale).abs() < 0.01).unwrap_or(1);
@@ -2349,6 +2343,100 @@ impl App {
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
+        }
+    }
+
+    /// Everything about how the game looks and how fast it draws.
+    fn video_screen(&mut self, from_title: bool) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let bw = (240.0 * s).min(w * 0.85);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 11.0);
+        let x = w / 2.0 - bw / 2.0;
+        let total = 9.0 * bh + 8.0 * 5.0 * s + 20.0 * s;
+        let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
+        self.ui.text_centered("Video Settings", w / 2.0, y - 18.0 * s, 16.0, WHITE);
+        let st = self.settings.clone();
+        let d = self.stepper(&format!("Render Distance: {} chunks", st.render_distance), x, y, bw, bh);
+        self.settings.render_distance = (st.render_distance + d).clamp(3, settings::MAX_RENDER_DISTANCE);
+        y += bh + 5.0 * s;
+        let bright = match (st.brightness * 100.0).round() as i32 {
+            0 => "Moody".to_string(),
+            100 => "Bright".to_string(),
+            p => format!("{p}%"),
+        };
+        let d = self.stepper(&format!("Brightness: {bright}"), x, y, bw, bh);
+        self.settings.brightness = (((st.brightness + 0.1 * d as f32).clamp(0.0, 1.0)) * 10.0).round() / 10.0;
+        y += bh + 5.0 * s;
+        let caps = settings::FPS_CAPS;
+        let ci = caps.iter().position(|&c| c == st.max_fps).unwrap_or(caps.len() - 1);
+        let label = if st.max_fps == 0 { "Max FPS: Unlimited".to_string() } else { format!("Max FPS: {}", st.max_fps) };
+        let d = self.stepper(&label, x, y, bw, bh);
+        self.settings.max_fps = caps[(ci as i32 + d).clamp(0, caps.len() as i32 - 1) as usize];
+        y += bh + 5.0 * s;
+        let half = (bw - 4.0 * s) / 2.0;
+        let (left, right) = (x, x + half + 4.0 * s);
+        let on_off = |name: &str, on: bool| format!("{name}: {}", if on { "ON" } else { "OFF" });
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Fullscreen", st.fullscreen), true) {
+            self.settings.fullscreen = !st.fullscreen;
+            set_fullscreen(self.settings.fullscreen);
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), &on_off("VSync", st.vsync), true) {
+            self.settings.vsync = !st.vsync;
+        }
+        y += bh + 5.0 * s;
+        let aa = if st.msaa == 0 { "Anti-aliasing: OFF".to_string() } else { format!("Anti-aliasing: {}x", st.msaa) };
+        if self.ui.button(Rect::new(left, y, half, bh), &aa, true) {
+            let levels = settings::MSAA_LEVELS;
+            let i = levels.iter().position(|&l| l == st.msaa).unwrap_or(2);
+            self.settings.msaa = levels[(i + 1) % levels.len()];
+        }
+        let parts = ["Particles: All", "Particles: Fewer", "Particles: Minimal"][st.particles.min(2) as usize];
+        if self.ui.button(Rect::new(right, y, half, bh), parts, true) {
+            self.settings.particles = (st.particles + 1) % 3;
+        }
+        y += bh + 5.0 * s;
+        let waving = if st.waving_leaves { "Leaves: Waving" } else { "Leaves: Still" };
+        if self.ui.button(Rect::new(left, y, half, bh), waving, true) {
+            self.settings.waving_leaves = !st.waving_leaves;
+        }
+        let shiny = if st.water_reflections { "Water: Shiny" } else { "Water: Plain" };
+        if self.ui.button(Rect::new(right, y, half, bh), shiny, true) {
+            self.settings.water_reflections = !st.water_reflections;
+        }
+        y += bh + 5.0 * s;
+        let lighting = if st.smooth_lighting { "Lighting: Smooth" } else { "Lighting: Flat" };
+        if self.ui.button(Rect::new(left, y, half, bh), lighting, true) {
+            self.settings.smooth_lighting = !st.smooth_lighting;
+        }
+        let clouds = match (st.clouds, st.fancy_clouds) {
+            (false, _) => "Clouds: OFF",
+            (true, true) => "Clouds: Fancy",
+            (true, false) => "Clouds: Fast",
+        };
+        if self.ui.button(Rect::new(right, y, half, bh), clouds, true) {
+            // Fancy -> Fast -> Off -> Fancy.
+            (self.settings.clouds, self.settings.fancy_clouds) = match (st.clouds, st.fancy_clouds) {
+                (true, true) => (true, false),
+                (true, false) => (false, false),
+                (false, _) => (true, true),
+            };
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("View Bobbing", st.view_bobbing), true) {
+            self.settings.view_bobbing = !st.view_bobbing;
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), &on_off("Fog", st.fog), true) {
+            self.settings.fog = !st.fog;
+        }
+        y += bh + 4.0 * s;
+        // VSync and anti-aliasing are set when the window opens.
+        if (self.settings.vsync, self.settings.msaa) != self.video_at_start {
+            self.ui.text_centered("VSync and anti-aliasing change next time the game starts.", w / 2.0, y + 9.0 * s, 8.0, GOLD);
+        }
+        y += 16.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
+            self.set_screen(Screen::Options { from_title });
         }
     }
 
@@ -3359,6 +3447,7 @@ async fn game_main() {
         frame_times: std::collections::VecDeque::with_capacity(FRAME_GRAPH),
         gpu: gl_strings(),
         stage_ms: [0.0; 5],
+        video_at_start: (true, 4),
     };
     // Screenshots always use the defaults, whatever the player last picked.
     if shot.is_none() {
@@ -3372,6 +3461,7 @@ async fn game_main() {
         if saved.fullscreen {
             set_fullscreen(true);
         }
+        app.video_at_start = (saved.vsync, saved.msaa);
         app.settings = saved;
         app.updates = updates::UpdateCheck::start(app.settings.check_updates);
     }
@@ -3668,6 +3758,7 @@ async fn game_main() {
         app.game.inv.slots[sel] = Some((id, 1));
     }
     let mut frames = 0u32;
+    let mut last_frame = std::time::Instant::now();
     loop {
         if let Some(s) = &shot {
             if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette" | "worlds" | "newworld" | "createform") || (s.mode == "join" && app.game.is_client()) {
@@ -4314,6 +4405,18 @@ async fn game_main() {
             app.save_settings();
             app.game.disconnect();
             break;
+        }
+        // Max FPS: wait out the rest of this frame's share of a second.
+        if shot.is_none() && app.settings.max_fps > 0 {
+            let share = std::time::Duration::from_secs_f64(1.0 / app.settings.max_fps as f64);
+            let due = last_frame + share;
+            let now = std::time::Instant::now();
+            if due > now {
+                std::thread::sleep(due - now);
+            }
+            last_frame = due.max(now - share);
+        } else {
+            last_frame = std::time::Instant::now();
         }
         next_frame().await;
     }
