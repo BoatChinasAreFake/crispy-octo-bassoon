@@ -2841,3 +2841,109 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
 
     a.px
 }
+
+/// Mipmap levels 1.. for the atlas, built tile by tile (down to one texel a
+/// tile) so no tile ever picks up its neighbours. Colour is averaged from the
+/// visible texels only, so see-through pixels never darken edges. Cut-out tiles
+/// (grass, flowers, saplings: every texel fully clear or fully solid) stay
+/// clear-or-solid at every level and keep the share of solid texels they
+/// start with, so far-off plants neither swell into dark blobs nor vanish.
+pub fn mip_levels(atlas: &[u8]) -> Vec<Vec<u8>> {
+    let tiles = ATLAS / TILE;
+    let mut cutout = vec![false; tiles * tiles];
+    let mut coverage = vec![1.0f32; tiles * tiles];
+    for ty in 0..tiles {
+        for tx in 0..tiles {
+            let (mut binary, mut solid) = (true, 0usize);
+            for y in 0..TILE {
+                for x in 0..TILE {
+                    let a = atlas[((ty * TILE + y) * ATLAS + tx * TILE + x) * 4 + 3];
+                    binary &= a == 0 || a == 255;
+                    solid += (a == 255) as usize;
+                }
+            }
+            cutout[ty * tiles + tx] = binary && solid < TILE * TILE;
+            coverage[ty * tiles + tx] = solid as f32 / (TILE * TILE) as f32;
+        }
+    }
+    let mut levels: Vec<Vec<u8>> = Vec::new();
+    let mut size = ATLAS;
+    let mut tile = TILE;
+    while tile > 1 {
+        let prev: &[u8] = levels.last().map(|v| v.as_slice()).unwrap_or(atlas);
+        let (half, th) = (size / 2, tile / 2);
+        let mut out = vec![0u8; half * half * 4];
+        let mut alpha = vec![0f32; half * half];
+        for y in 0..half {
+            for x in 0..half {
+                let (mut rgb, mut wsum, mut asum, mut plain) = ([0f32; 3], 0f32, 0f32, [0f32; 3]);
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let i = ((y * 2 + dy) * size + x * 2 + dx) * 4;
+                    let a = prev[i + 3] as f32 / 255.0;
+                    for k in 0..3 {
+                        rgb[k] += prev[i + k] as f32 * a;
+                        plain[k] += prev[i + k] as f32 / 4.0;
+                    }
+                    wsum += a;
+                    asum += a / 4.0;
+                }
+                let o = (y * half + x) * 4;
+                for k in 0..3 {
+                    out[o + k] = if wsum > 0.0 { (rgb[k] / wsum).round() as u8 } else { plain[k].round() as u8 };
+                }
+                alpha[y * half + x] = asum;
+                out[o + 3] = (asum * 255.0).round() as u8;
+            }
+        }
+        for ty in 0..tiles {
+            for tx in 0..tiles {
+                if !cutout[ty * tiles + tx] {
+                    continue;
+                }
+                // Keep the most-covered texels solid, as many as the full-size tile had.
+                let mut cells: Vec<(f32, usize)> = (0..th).flat_map(|y| (0..th).map(move |x| (ty * th + y) * half + tx * th + x)).map(|i| (alpha[i], i)).collect();
+                cells.sort_by(|a, b| b.0.total_cmp(&a.0));
+                let keep = ((coverage[ty * tiles + tx] * cells.len() as f32).round() as usize).max(1);
+                for (n, (a, i)) in cells.into_iter().enumerate() {
+                    out[i * 4 + 3] = if n < keep && a > 0.0 { 255 } else { 0 };
+                }
+            }
+        }
+        levels.push(out);
+        size = half;
+        tile = th;
+    }
+    levels
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plant_mipmaps_keep_their_shape_and_colour() {
+        let atlas = build_atlas(1);
+        let levels = mip_levels(&atlas);
+        assert_eq!(levels.len(), 4, "down to one texel a tile");
+        let solid = |px: &[u8], size: usize, tile: usize| {
+            let (tx, ty) = ((T_TALLGRASS % TILES_PER_ROW) as usize, (T_TALLGRASS / TILES_PER_ROW) as usize);
+            let mut n = 0;
+            for y in 0..tile {
+                for x in 0..tile {
+                    let i = ((ty * tile + y) * size + tx * tile + x) * 4;
+                    assert!(px[i + 3] == 0 || px[i + 3] == 255, "cut-out stays clear or solid");
+                    if px[i + 3] == 255 {
+                        n += 1;
+                        assert!(px[i + 1] > 60, "visible grass stays green, not darkened by clear texels");
+                    }
+                }
+            }
+            n as f32 / (tile * tile) as f32
+        };
+        let full = solid(&atlas, ATLAS, TILE);
+        for (l, px) in levels.iter().enumerate().take(2) {
+            let share = solid(px, ATLAS >> (l + 1), TILE >> (l + 1));
+            assert!((share - full).abs() < 0.1, "level {}: {share} solid vs {full}", l + 1);
+        }
+    }
+}
