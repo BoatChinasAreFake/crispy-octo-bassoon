@@ -228,6 +228,8 @@ struct App {
     /// Recent frame times in ms, newest last (the F3 graph).
     frame_times: std::collections::VecDeque<f32>,
     /// The graphics card and OpenGL version, as the driver names them.
+    /// Smoothed CPU time per frame stage, ms: tick, meshing, scene, draw calls, UI (F3).
+    stage_ms: [f32; 5],
     gpu: (String, String),
     updates: updates::UpdateCheck,
     backup_list: Vec<backups::Backup>,
@@ -765,9 +767,11 @@ impl App {
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
         let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let t_tick = std::time::Instant::now();
         if simulate {
             self.game.update(dt, &controls);
         }
+        let tick_ms = t_tick.elapsed().as_secs_f32() * 1000.0;
         // Right-clicked a chest or furnace: show it. Broken under us: close it.
         if self.game.open.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Container);
@@ -820,7 +824,7 @@ impl App {
             self.map_colors = navigation::block_colors(&atlas);
             let gl = unsafe { get_internal_gl() };
             self.renderer.update_atlas(gl.quad_context, &atlas);
-            self.ui.tex.update_from_bytes(texture::ATLAS as u32, texture::ATLAS as u32, &atlas);
+            self.ui.tex.update_from_bytes(texture::UI_ATLAS as u32, texture::UI_ATLAS as u32, &texture::ui_atlas(&atlas));
         }
 
         // 3D world
@@ -830,18 +834,34 @@ impl App {
             let mut gl = unsafe { get_internal_gl() };
             gl.flush();
             let rd = self.settings.render_distance;
+            let t = std::time::Instant::now();
             self.game.stream(&mut self.renderer, gl.quad_context, rd);
+            let mesh_ms = t.elapsed().as_secs_f32() * 1000.0;
+            let t = std::time::Instant::now();
             let aspect = screen_width() / screen_height().max(1.0);
             let cam = self.game.camera(aspect, self.settings.fov);
             self.last_view_proj = cam.view_proj;
             let geo = self.game.build_geo(&cam, rd);
             let fp = self.game.frame_params(&cam, &self.renderer, rd);
+            let scene_ms = t.elapsed().as_secs_f32() * 1000.0;
+            let t = std::time::Instant::now();
             self.renderer.draw(gl.quad_context, &fp, &geo);
+            let draw_ms = t.elapsed().as_secs_f32() * 1000.0;
+            self.note_stages([tick_ms, mesh_ms, scene_ms, draw_ms, self.stage_ms[4]]);
         }
 
         set_default_camera();
+        let t = std::time::Instant::now();
         self.draw_ui();
         self.play_sounds(dt);
+        self.stage_ms[4] = self.stage_ms[4] * 0.9 + t.elapsed().as_secs_f32() * 1000.0 * 0.1;
+    }
+
+    /// Smooth the per-stage CPU times shown in F3 (UI is smoothed where it's measured).
+    fn note_stages(&mut self, now: [f32; 5]) {
+        for (k, v) in now.iter().enumerate().take(4) {
+            self.stage_ms[k] = self.stage_ms[k] * 0.9 + v * 0.1;
+        }
     }
 
     /// Drive the connect -> Hello -> Welcome handshake without freezing the menu.
@@ -1868,6 +1888,12 @@ impl App {
                 Some(format!("OpenGL {}", self.gpu.1)),
                 Some(format!("Render distance: {} chunks  Clouds: {}", self.settings.render_distance, if self.settings.fancy_clouds { "Fancy" } else { "Fast" })),
                 Some(format!("Frame time: {avg:.1} ms average, {worst:.1} ms worst")),
+                {
+                    // Where the time goes on the CPU; the rest of a frame is the graphics card (or vsync).
+                    let [tick, mesh, scene, draw, ui] = self.stage_ms;
+                    let cpu = tick + mesh + scene + draw + ui;
+                    Some(format!("ms: game {tick:.1} mesh {mesh:.1} scene {scene:.1} draw {draw:.1} UI {ui:.1} | GPU {:.1}", (avg - cpu).max(0.0)))
+                },
                 target,
             ];
             for (i, l) in right.iter().flatten().enumerate() {
@@ -3166,7 +3192,7 @@ async fn game_main() {
         let gl = unsafe { get_internal_gl() };
         Renderer::new(gl.quad_context, &atlas)
     };
-    let tex = Texture2D::from_rgba8(texture::ATLAS as u16, texture::ATLAS as u16, &atlas);
+    let tex = Texture2D::from_rgba8(texture::UI_ATLAS as u16, texture::UI_ATLAS as u16, &texture::ui_atlas(&atlas));
     tex.set_filter(FilterMode::Nearest);
 
     let audio = Audio::load().await;
@@ -3233,6 +3259,7 @@ async fn game_main() {
         updates: updates::UpdateCheck::start(false),
         frame_times: std::collections::VecDeque::with_capacity(FRAME_GRAPH),
         gpu: gl_strings(),
+        stage_ms: [0.0; 5],
     };
     // Screenshots always use the defaults, whatever the player last picked.
     if shot.is_none() {
@@ -3279,7 +3306,9 @@ async fn game_main() {
     if let Some(s) = &mut shot {
         match s.mode.as_str() {
             "survival" | "creative" | "inventory" | "night" | "death" => {
-                let mut g = Game::new(424242, s.mode == "creative", false);
+                // --seed N shows someone else's world (to look at a reported bug).
+                let seed = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--seed").and_then(|w| w[1].parse().ok()).unwrap_or(424242);
+                let mut g = Game::new(seed, s.mode == "creative", false);
                 if s.mode == "inventory" {
                     for (item, n) in [(LOG, 12), (COBBLE, 20), (COAL, 5), (IRON, 3), (DIAMOND, 2), (GUNPOWDER, 5), (SAND, 9), (PORKCHOP, 3), (block::stairs(1, 0), 8), (block::slab(0, false), 12), (block::DOOR, 2)] {
                         g.inv.add(item, n);

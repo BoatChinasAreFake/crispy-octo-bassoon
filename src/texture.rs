@@ -2929,6 +2929,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ui_tiles_have_a_border_of_their_own_edge() {
+        let atlas = build_atlas(1);
+        let ui = ui_atlas(&atlas);
+        assert_eq!(ui.len(), UI_ATLAS * UI_ATLAS * 4);
+        let px = |buf: &[u8], w: usize, x: usize, y: usize| buf[(y * w + x) * 4..(y * w + x) * 4 + 4].to_vec();
+        for tile in [T_HUNGER_ICON, T_HEART, T_WATER, T_GRASS_SIDE] {
+            let (tx, ty) = ((tile % TILES_PER_ROW) as usize, (tile / TILES_PER_ROW) as usize);
+            let (ax, ay, ux, uy) = (tx * TILE, ty * TILE, tx * UI_CELL + 1, ty * UI_CELL + 1);
+            for i in 0..TILE {
+                // The tile itself, unchanged...
+                assert_eq!(px(&ui, UI_ATLAS, ux + i, uy + 3), px(&atlas, ATLAS, ax + i, ay + 3));
+                // ...and each border pixel repeats the edge next to it, not the neighbouring tile.
+                assert_eq!(px(&ui, UI_ATLAS, ux + TILE, uy + i), px(&atlas, ATLAS, ax + TILE - 1, ay + i), "{tile} right");
+                assert_eq!(px(&ui, UI_ATLAS, ux - 1, uy + i), px(&atlas, ATLAS, ax, ay + i), "{tile} left");
+                assert_eq!(px(&ui, UI_ATLAS, ux + i, uy + TILE), px(&atlas, ATLAS, ax + i, ay + TILE - 1), "{tile} bottom");
+            }
+            let (u, v, s) = ui_tile_uv(tile);
+            assert_eq!(((u * UI_ATLAS as f32).round() as usize, (v * UI_ATLAS as f32).round() as usize, (s * UI_ATLAS as f32).round() as usize), (ux, uy, TILE));
+        }
+    }
+
+    #[test]
     fn plant_mipmaps_keep_their_shape_and_colour() {
         let atlas = build_atlas(1);
         let levels = mip_levels(&atlas);
@@ -3086,4 +3108,39 @@ pub fn solid(tile: u16, x: usize, y: usize) -> bool {
     }
     let (tx, ty) = ((tile % TILES_PER_ROW) as usize * TILE, (tile / TILES_PER_ROW) as usize * TILE);
     a.get((ty + y) * ATLAS + tx + x).is_none_or(|&v| v >= 128)
+}
+
+/// Each tile's cell in the UI atlas: the tile plus a one-pixel border that
+/// repeats its edge. Menus and the HUD draw from this copy, so a GPU that
+/// samples a hair outside a tile (multisampling does, at the edges of shapes)
+/// still gets that tile's own colour, not a line of its neighbour.
+pub const UI_CELL: usize = TILE + 2;
+pub const UI_ATLAS: usize = TILES_PER_ROW as usize * UI_CELL;
+
+/// The atlas re-laid-out for the UI (see `UI_CELL`).
+pub fn ui_atlas(atlas: &[u8]) -> Vec<u8> {
+    let tiles = TILES_PER_ROW as usize;
+    let mut out = vec![0u8; UI_ATLAS * UI_ATLAS * 4];
+    for ty in 0..tiles {
+        for tx in 0..tiles {
+            for y in 0..UI_CELL {
+                for x in 0..UI_CELL {
+                    // Border pixels copy the nearest edge pixel of the tile.
+                    let sx = (x as i32 - 1).clamp(0, TILE as i32 - 1) as usize;
+                    let sy = (y as i32 - 1).clamp(0, TILE as i32 - 1) as usize;
+                    let s = ((ty * TILE + sy) * ATLAS + tx * TILE + sx) * 4;
+                    let d = ((ty * UI_CELL + y) * UI_ATLAS + tx * UI_CELL + x) * 4;
+                    out[d..d + 4].copy_from_slice(&atlas[s..s + 4]);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Where a tile sits in the UI atlas, as (u, v, size) in 0..1 coordinates.
+pub fn ui_tile_uv(tile: u16) -> (f32, f32, f32) {
+    let (tx, ty) = ((tile % TILES_PER_ROW) as usize, (tile / TILES_PER_ROW) as usize);
+    let n = UI_ATLAS as f32;
+    ((tx * UI_CELL + 1) as f32 / n, (ty * UI_CELL + 1) as f32 / n, TILE as f32 / n)
 }

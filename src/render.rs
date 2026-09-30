@@ -76,6 +76,14 @@ const float EDGE = 1.0 / 4096.0;
 
 vec4 sample_tile() {
     if (v_tile.x < 0.0) {
+        // A face with one tile carries its corner as -corner - 2. With
+        // multisampling, pixels on a shape's edge are shaded from their centre,
+        // which can lie just outside the shape: keep that sample inside the tile
+        // so no line of the next tile over shows along block edges.
+        if (v_tile.x < -1.5) {
+            vec2 o = -v_tile - 2.0;
+            return texture2D(tex, clamp(v_uv, o + EDGE, o + TILE - EDGE));
+        }
         return texture2D(tex, v_uv);
     }
     // A merged face repeats its tile. Mipmap choice follows the unwrapped
@@ -234,7 +242,7 @@ impl DynGeo {
         let uvs = [[a, d], [cc, d], [cc, b], [a, b]];
         let mut v = [Vertex::default(); 4];
         for i in 0..4 {
-            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light: [light[0], light[1], -1.0], tile: [-1.0; 2] };
+            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light: [light[0], light[1], -1.0], tile: [-u0 - 2.0, -v0 - 2.0] };
         }
         self.mesh.quad(v, false);
         self.end_batch();

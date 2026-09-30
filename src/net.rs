@@ -1049,10 +1049,17 @@ impl Server {
             let mut listeners = Vec::new();
             // On Linux/macOS "[::]" is dual-stack and also takes IPv4, so the IPv4
             // bind may then fail harmlessly; on Windows both are needed.
-            if let Ok(l) = TcpListener::bind(("::", port)) {
-                listeners.push(l);
+            let v6 = TcpListener::bind(("::", port)).ok();
+            let v4 = TcpListener::bind(("0.0.0.0", port));
+            // Windows keeps the two separate: if we got IPv6 but someone else has
+            // this port's IPv4 side, players joining by an IPv4 address would reach
+            // them, not us. Take the next port instead.
+            if cfg!(windows) && v6.is_some() && v4.is_err() {
+                last = v4.err();
+                continue;
             }
-            match TcpListener::bind(("0.0.0.0", port)) {
+            listeners.extend(v6);
+            match v4 {
                 Ok(l) => listeners.push(l),
                 Err(e) => last = Some(e),
             }
