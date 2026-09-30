@@ -8,6 +8,10 @@ gilrs = { version = "0.11.2", optional = true }
 macroquad = { version = "0.4", default-features = false }
 rhai = "1.26.1"
 
+[build-dependencies]
+# Embeds the icon in Windows builds (see build.rs).
+winresource = { version = "0.1", default-features = false }
+
 [features]
 default = ["sound", "gamepad"]
 # Real audio output (ALSA on Linux, WASAPI on Windows, CoreAudio on macOS).

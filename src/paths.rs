@@ -88,7 +88,7 @@ pub fn carry_over(from: &[PathBuf], to: &Path) -> Vec<String> {
     notes
 }
 
-fn copy_all(src: &Path, dest: &Path) -> std::io::Result<()> {
+pub fn copy_all(src: &Path, dest: &Path) -> std::io::Result<()> {
     if src.is_dir() {
         std::fs::create_dir_all(dest)?;
         for entry in std::fs::read_dir(src)? {
@@ -124,7 +124,7 @@ fn crash_report(what: &str, thread: &str, stack: &str) -> String {
 }
 
 /// "YYYY-MM-DD hh:mm:ss" for seconds since 1970 (UTC).
-fn utc_date_time(secs: u64) -> String {
+pub fn utc_date_time(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     // Civil date from a day count (Howard Hinnant's algorithm).
