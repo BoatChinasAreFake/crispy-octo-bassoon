@@ -152,7 +152,9 @@ fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 3]) -> Vertex {
     let (u0, v0, s) = tile_uv(tile);
     let u = u0 + UV_EPS + uv[0] * (s - 2.0 * UV_EPS);
     let v = v0 + UV_EPS + uv[1] * (s - 2.0 * UV_EPS);
-    Vertex { pos, uv: [u, v], light, tile: [-1.0; 2] }
+    // The tile's corner rides along (as -corner - 2, below the -1 that means
+    // "no tile") so the shader can keep samples inside it (see render.rs).
+    Vertex { pos, uv: [u, v], light, tile: [-u0 - 2.0, -v0 - 2.0] }
 }
 
 /// A face of a plain cube waiting to be merged with its like: its tile and the

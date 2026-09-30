@@ -93,11 +93,11 @@ impl Ui {
         fired
     }
 
-    /// A tile's pixels in the atlas, a hair inside its edges: sampled right at
-    /// the border, a scaled sprite picks up a line of the tile next door.
+    /// A tile's pixels in the UI atlas (each tile there has a border repeating
+    /// its edge, so sampling a hair outside never shows the tile next door).
     fn tile_src(tile: u16) -> Rect {
-        let (t, e) = (TILE as f32, 0.05);
-        Rect::new((tile % TILES_PER_ROW) as f32 * t + e, (tile / TILES_PER_ROW) as f32 * t + e, t - 2.0 * e, t - 2.0 * e)
+        let (c, t) = (UI_CELL as f32, TILE as f32);
+        Rect::new((tile % TILES_PER_ROW) as f32 * c + 1.0, (tile / TILES_PER_ROW) as f32 * c + 1.0, t, t)
     }
 
     pub fn tile(&self, tile: u16, x: f32, y: f32, size: f32, color: Color) {
@@ -156,14 +156,11 @@ impl Ui {
                     ([p(b[0], b[1], b[2]), p(b[0], b[1], a[2]), p(b[0], a[1], a[2]), p(b[0], a[1], b[2])], t[1], 0.6, [[1.0 - b[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - a[1]], [1.0 - b[2], 1.0 - a[1]]]),
                 ];
                 for (quad, tile, shade, uvs) in faces {
-                    let (u0, v0, s) = tile_uv(tile);
+                    let (u0, v0, s) = ui_tile_uv(tile);
                     let base = verts.len() as u16;
-                    // Kept just inside the tile, like `tile_src`.
-                    let e = 0.05 / TILE as f32;
-                    let inset = |u: f32| e + u * (1.0 - 2.0 * e);
                     for (i, q) in quad.iter().enumerate() {
                         let c = Color::new(shade, shade, shade, 1.0);
-                        verts.push(Vertex::new(q.x, q.y, 0.0, u0 + inset(uvs[i][0]) * s, v0 + inset(uvs[i][1]) * s, c));
+                        verts.push(Vertex::new(q.x, q.y, 0.0, u0 + uvs[i][0] * s, v0 + uvs[i][1] * s, c));
                     }
                     idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }
