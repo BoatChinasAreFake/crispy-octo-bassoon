@@ -97,6 +97,10 @@ vec4 sample_tile() {
 }
 
 void main() {
+#ifdef GL_OES_standard_derivatives
+    // Which way the surface faces, worked out before any pixel is discarded.
+    vec3 surface = cross(dFdx(v_wpos), dFdy(v_wpos));
+#endif
     vec4 c = sample_tile() * tint;
     if (c.a < 0.08) discard;
     vec3 col;
@@ -128,8 +132,7 @@ void main() {
     vec2 rel = v_uv - wave2.zw;
     bool water = v_tile.x < 0.0 && rel.x >= 0.0 && rel.y >= 0.0 && rel.x <= TILE && rel.y <= TILE;
     if (params3.z > 0.5 && water && params2.x < 0.5) {
-        vec3 n = normalize(cross(dFdx(v_wpos), dFdy(v_wpos)));
-        if (abs(n.y) > 0.7) {
+        if (abs(surface.y) > 0.7 * length(surface)) {
             vec3 view = normalize(v_wpos - cam_pos.xyz);
             float fresnel = pow(1.0 - abs(view.y), 3.0);
             col = mix(col, fog_color.rgb * (0.55 + 0.45 * params.x), clamp(0.12 + fresnel * 0.7, 0.0, 0.8));
@@ -151,6 +154,22 @@ void main() {
     gl_FragColor = vec4(col, c.a * params.w);
 }
 "#;
+
+/// The world shaders rewritten for GLSL 1.50 (OpenGL 3.2 and later), with
+/// every varying sampled at the centroid of the covered samples.
+fn centroid_glsl(vertex: &str, fragment: &str) -> (String, String) {
+    let vertex = vertex.replace("#version 100", "#version 150").replace("attribute ", "in ").replace("varying ", "centroid out ");
+    let body: String = fragment.lines().filter(|l| !l.starts_with("#version") && !l.starts_with("#extension")).map(|l| format!("{l}\n")).collect();
+    let body = body
+        .replace("GL_OES_standard_derivatives", "HAS_DERIVATIVES")
+        .replace("GL_EXT_shader_texture_lod", "HAS_TEXTURE_LOD")
+        .replace("varying ", "centroid in ")
+        .replace("texture2DGradEXT(", "textureGrad(")
+        .replace("texture2D(", "texture(")
+        .replace("gl_FragColor", "frag_color");
+    let fragment = format!("#version 150\n#define HAS_DERIVATIVES 1\n#define HAS_TEXTURE_LOD 1\nout vec4 frag_color;\n{body}");
+    (vertex, fragment)
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -326,8 +345,15 @@ impl Renderer {
 
         let (_, _, tile) = tile_uv(0);
         let fragment = FRAGMENT_SHADER.replace("TILE_SIZE", &format!("{tile:.8}")).replace("DALTONIZE", crate::access::DALTONIZE_GLSL);
-        let shader = ctx
-            .new_shader(ShaderSource::Glsl { vertex: VERTEX_SHADER, fragment: &fragment }, shader_meta())
+        // Newer OpenGL can shade the pixels on a shape's edge from inside the
+        // shape (centroid sampling), so thin faces seen edge-on don't pick up
+        // light or texture from beyond their corners under multisampling.
+        let glsl = ctx.info().glsl_support;
+        let modern = (glsl.v150 || glsl.v330).then(|| centroid_glsl(VERTEX_SHADER, &fragment));
+        let shader = modern
+            .and_then(|(v, f)| ctx.new_shader(ShaderSource::Glsl { vertex: &v, fragment: &f }, shader_meta()).ok())
+            .map(Ok)
+            .unwrap_or_else(|| ctx.new_shader(ShaderSource::Glsl { vertex: VERTEX_SHADER, fragment: &fragment }, shader_meta()))
             .unwrap_or_else(|e| panic!("shader failed to compile: {e:?}"));
         let layout = [BufferLayout::default()];
         let attrs = [

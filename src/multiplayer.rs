@@ -1051,6 +1051,7 @@ impl Game {
             }
             let moved = Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length();
             crate::entity::step_anim(&mut m.anim, moved / dt.max(1e-4), dt, 5.0);
+            m.flutter(before.y - m.body.pos.y > 0.5 * dt, dt);
             m.hurt = (m.hurt - dt).max(0.0);
             // Babies stay babies until the host says otherwise.
             if m.baby > 0.0 {

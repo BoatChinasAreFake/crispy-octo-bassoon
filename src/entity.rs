@@ -356,6 +356,8 @@ pub struct Mob {
     wander_t: f32,
     wander_dir: Option<f32>,
     pub anim: f32,
+    /// Wingbeats while a bird drops through the air.
+    pub flap: f32,
     knock: Vec3,
     pub burning: bool,
     /// Seconds left on fire (from lava; water puts it out).
@@ -432,6 +434,12 @@ pub fn warp_spot(world: &World, around: Vec3, radius: f32, rng: &mut Rng) -> Opt
 }
 
 impl Mob {
+    /// Birds beat their wings while `falling`, and fold them once down.
+    pub fn flutter(&mut self, falling: bool, dt: f32) {
+        let bird = matches!(self.kind, MobKind::Cluckster | MobKind::Squawker);
+        step_anim(&mut self.flap, if bird && falling { 5.0 } else { 0.0 }, dt, 5.0);
+    }
+
     pub fn new(kind: MobKind, pos: Vec3, rng: &mut Rng) -> Self {
         let (half, h) = kind.dims();
         Mob {
@@ -449,6 +457,7 @@ impl Mob {
             wander_t: rng.range(0.0, 3.0),
             wander_dir: None,
             anim: 0.0,
+            flap: 0.0,
             knock: Vec3::ZERO,
             burning: false,
             on_fire: 0.0,
@@ -838,6 +847,7 @@ impl Mob {
         }
         let spd = Vec3::new(self.body.vel.x, 0.0, self.body.vel.z).length();
         step_anim(&mut self.anim, spd, dt, 5.0);
+        self.flutter(!self.body.on_ground && !self.body.in_water && self.body.vel.y < -0.5, dt);
         if self.body.pos.y < -20.0 {
             self.health = -100.0;
         }
@@ -923,7 +933,7 @@ impl Mob {
             MobKind::Fluffer if self.sheared => &FLUFFER_SHEARED[..],
             k => model(k),
         };
-        draw_model(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, sky, false);
+        draw_posed(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, self.flap, sky);
         if self.owner.is_some() && self.kind == MobKind::Woofer {
             draw_model(geo, &root, &WOOFER_COLLAR, 0.0, sky, false);
         }
@@ -954,6 +964,11 @@ pub enum Limb {
     SwingY(f32),
     /// Flaps up and down around the body's length (the Wyrm's wings).
     Wing(f32),
+    /// Held at a fixed lean (radians about x; negative leans forward).
+    Tilt(f32),
+    /// A bird's wing: out and back while it falls, a little sway as it walks.
+    /// The sign says which side (-1 left, 1 right).
+    Flap(f32),
 }
 
 #[derive(Clone, Copy)]
@@ -1034,8 +1049,8 @@ static CLUCKSTER: [Part; 7] = [
     part([-0.1, 0.0, -0.05], [0.06, 0.26, 0.06], [0.0, 0.26, 0.0], Limb::Swing(1.0), [CL; 6]),
     part([0.04, 0.0, -0.05], [0.06, 0.26, 0.06], [0.0, 0.26, 0.0], Limb::Swing(-1.0), [CL; 6]),
     // Wings (they flap when it walks, and it only really walks when fleeing).
-    part([-0.24, 0.3, -0.2], [0.05, 0.22, 0.4], [-0.2, 0.52, 0.0], Limb::Swing(0.3), [CB; 6]),
-    part([0.19, 0.3, -0.2], [0.05, 0.22, 0.4], [0.2, 0.52, 0.0], Limb::Swing(-0.3), [CB; 6]),
+    part([-0.24, 0.3, -0.2], [0.05, 0.22, 0.4], [-0.2, 0.52, 0.0], Limb::Flap(-1.0), [CB; 6]),
+    part([0.19, 0.3, -0.2], [0.05, 0.22, 0.4], [0.2, 0.52, 0.0], Limb::Flap(1.0), [CB; 6]),
     part([-0.08, 0.5, 0.2], [0.16, 0.15, 0.1], [0.0; 3], Limb::Fixed, [CB; 6]),
 ];
 
@@ -1046,8 +1061,8 @@ static SQUAWKER: [Part; 7] = [
     part([-0.13, 0.66, -0.3], [0.26, 0.26, 0.26], [0.0; 3], Limb::Fixed, [SQ, SQ, SQ, SQ, SQ, T_SQUAWK_FACE]),
     part([-0.09, 0.0, -0.02], [0.06, 0.25, 0.06], [0.0, 0.25, 0.0], Limb::Swing(1.0), [CL; 6]),
     part([0.03, 0.0, -0.02], [0.06, 0.25, 0.06], [0.0, 0.25, 0.0], Limb::Swing(-1.0), [CL; 6]),
-    part([-0.21, 0.3, -0.14], [0.05, 0.36, 0.3], [-0.18, 0.66, 0.0], Limb::Swing(0.4), [T_SQUAWK_WING; 6]),
-    part([0.16, 0.3, -0.14], [0.05, 0.36, 0.3], [0.18, 0.66, 0.0], Limb::Swing(-0.4), [T_SQUAWK_WING; 6]),
+    part([-0.21, 0.3, -0.14], [0.05, 0.36, 0.3], [-0.18, 0.66, 0.0], Limb::Flap(-1.0), [T_SQUAWK_WING; 6]),
+    part([0.16, 0.3, -0.14], [0.05, 0.36, 0.3], [0.18, 0.66, 0.0], Limb::Flap(1.0), [T_SQUAWK_WING; 6]),
     part([-0.07, 0.12, 0.16], [0.14, 0.2, 0.3], [0.0; 3], Limb::Fixed, [T_SQUAWK_WING; 6]),
 ];
 
@@ -1118,7 +1133,7 @@ const WF: u16 = T_WOOF_SKIN;
 static WOOFER: [Part; 8] = [
     part([-0.2, 0.42, -0.4], [0.4, 0.32, 0.8], [0.0; 3], Limb::Fixed, [WF; 6]),
     part([-0.2, 0.55, -0.72], [0.4, 0.36, 0.34], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_FACE]),
-    part([-0.08, 0.55, -0.9], [0.16, 0.14, 0.2], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_FACE]),
+    part([-0.08, 0.55, -0.9], [0.16, 0.14, 0.2], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_NOSE]),
     part([-0.18, 0.0, -0.36], [0.12, 0.44, 0.12], [0.0, 0.44, -0.3], Limb::Swing(1.0), [WF; 6]),
     part([0.06, 0.0, -0.36], [0.12, 0.44, 0.12], [0.0, 0.44, -0.3], Limb::Swing(-1.0), [WF; 6]),
     part([-0.18, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(-1.0), [WF; 6]),
@@ -1138,20 +1153,29 @@ static WYRM: [Part; 8] = [
     part([0.4, 0.2, -1.2], [0.4, 0.8, 0.4], [0.0; 3], Limb::Fixed, [WY; 6]),
 ];
 const GL: u16 = T_GALLOPER;
-static GALLOPER: [Part; 9] = [
-    // Body, neck, head (with its face), four long legs, a tail.
-    part([-0.3, 0.8, -0.6], [0.6, 0.55, 1.2], [0.0; 3], Limb::Fixed, [GL; 6]),
-    part([-0.16, 1.05, -0.85], [0.32, 0.6, 0.35], [0.0; 3], Limb::Fixed, [GL; 6]),
-    part([-0.15, 1.45, -1.25], [0.3, 0.3, 0.55], [0.0; 3], Limb::Fixed, [GL, GL, GL, GL, GL, T_GALLOP_FACE]),
-    part([-0.28, 0.0, -0.55], [0.16, 0.85, 0.16], [0.0, 0.85, -0.47], Limb::Swing(1.0), [GL; 6]),
-    part([0.12, 0.0, -0.55], [0.16, 0.85, 0.16], [0.0, 0.85, -0.47], Limb::Swing(-1.0), [GL; 6]),
-    part([-0.28, 0.0, 0.4], [0.16, 0.85, 0.16], [0.0, 0.85, 0.48], Limb::Swing(-1.0), [GL; 6]),
-    part([0.12, 0.0, 0.4], [0.16, 0.85, 0.16], [0.0, 0.85, 0.48], Limb::Swing(1.0), [GL; 6]),
-    part([-0.06, 0.6, 0.6], [0.12, 0.6, 0.12], [0.0, 1.2, 0.6], Limb::SwingY(1.0), [T_GALLOP_MANE; 6]),
-    part([-0.05, 1.1, -0.95], [0.1, 0.6, 0.2], [0.0; 3], Limb::Fixed, [T_GALLOP_MANE; 6]),
+/// Where a Galloper's neck and head bend from, and by how much.
+const NECK: [f32; 3] = [0.0, 1.25, -0.77];
+const HEAD: [f32; 3] = [0.0, 1.71, -1.05];
+static GALLOPER: [Part; 13] = [
+    // A long body on four long legs, and a tail.
+    part([-0.3, 0.85, -0.75], [0.6, 0.6, 1.5], [0.0; 3], Limb::Fixed, [GL; 6]),
+    part([-0.28, 0.0, -0.72], [0.16, 0.85, 0.16], [0.0, 0.85, -0.64], Limb::Swing(1.0), [GL; 6]),
+    part([0.12, 0.0, -0.72], [0.16, 0.85, 0.16], [0.0, 0.85, -0.64], Limb::Swing(-1.0), [GL; 6]),
+    part([-0.28, 0.0, 0.5], [0.16, 0.85, 0.16], [0.0, 0.85, 0.58], Limb::Swing(-1.0), [GL; 6]),
+    part([0.12, 0.0, 0.5], [0.16, 0.85, 0.16], [0.0, 0.85, 0.58], Limb::Swing(1.0), [GL; 6]),
+    part([-0.06, 0.8, 0.72], [0.12, 0.6, 0.12], [0.0, 1.4, 0.75], Limb::SwingY(1.0), [T_GALLOP_MANE; 6]),
+    // The neck leans forward, with the mane down its back.
+    part([-0.14, 1.1, -0.98], [0.28, 0.8, 0.42], NECK, Limb::Tilt(-0.45), [GL; 6]),
+    part([-0.05, 1.3, -0.6], [0.1, 0.7, 0.1], NECK, Limb::Tilt(-0.45), [T_GALLOP_MANE; 6]),
+    // A long head, nose down: eyes on the sides, a narrower muzzle, two ears.
+    part([-0.15, 1.55, -1.4], [0.3, 0.32, 0.36], HEAD, Limb::Tilt(-0.5), [T_GALLOP_EYE, T_GALLOP_EYE, GL, GL, GL, GL]),
+    part([-0.12, 1.55, -1.75], [0.24, 0.26, 0.36], HEAD, Limb::Tilt(-0.5), [GL, GL, GL, GL, GL, T_GALLOP_FACE]),
+    part([-0.13, 1.86, -1.12], [0.07, 0.13, 0.06], HEAD, Limb::Tilt(-0.5), [GL; 6]),
+    part([0.06, 1.86, -1.12], [0.07, 0.13, 0.06], HEAD, Limb::Tilt(-0.5), [GL; 6]),
+    part([-0.16, 1.62, -1.3], [0.32, 0.06, 0.06], HEAD, Limb::Tilt(-0.5), [T_GALLOP_MANE; 6]),
 ];
 /// A saddle on a Galloper's back.
-pub static SADDLE_PART: [Part; 1] = [part([-0.32, 1.3, -0.3], [0.64, 0.1, 0.5], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6])];
+pub static SADDLE_PART: [Part; 1] = [part([-0.32, 1.44, -0.3], [0.64, 0.1, 0.5], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6])];
 static WOOFER_COLLAR: [Part; 1] = [part([-0.21, 0.52, -0.46], [0.42, 0.1, 0.08], [0.0; 3], Limb::Fixed, [T_COLLAR; 6])];
 static FLUFFER_SHEARED: [Part; 6] = [
     part([-0.3, 0.5, -0.45], [0.6, 0.5, 0.9], [0.0; 3], Limb::Fixed, [FS; 6]),
@@ -1201,6 +1225,11 @@ pub fn step_anim(anim: &mut f32, speed: f32, dt: f32, rate: f32) {
 }
 
 pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky: f32, _player: bool) {
+    draw_posed(geo, root, parts, anim, 0.0, sky);
+}
+
+/// `draw_model` with birds' wings beating to `flap`.
+fn draw_posed(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, flap: f32, sky: f32) {
     let swing = anim.sin() * 0.7;
     for p in parts {
         let rot = match p.limb {
@@ -1209,6 +1238,8 @@ pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky:
             Limb::Forward => Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2 + swing * 0.1),
             Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
             Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
+            Limb::Tilt(t) => Mat4::from_rotation_x(t),
+            Limb::Flap(s) => Mat4::from_rotation_z(flap.sin().abs() * 1.3 * s) * Mat4::from_rotation_x(swing * 0.3 * s),
         };
         let pivot = Vec3::from_array(p.pivot);
         let m = *root
