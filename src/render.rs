@@ -3,7 +3,7 @@
 //! one streaming buffer.
 
 use crate::mesher::{ChunkMesh, MeshData, Vertex};
-use crate::texture::{tile_uv, ATLAS};
+use crate::texture::{mip_levels, tile_uv, ATLAS};
 use macroquad::math::{Mat4, Vec3, Vec4};
 use macroquad::miniquad::*;
 use std::collections::HashMap;
@@ -110,7 +110,7 @@ void main() {
                 bl = max(bl, clamp(1.0 - d / abs(L.w), 0.0, 1.0));
             }
         }
-        float lvl = max(max(sky, bl), max(0.05, params2.y));
+        float lvl = max(max(sky, bl), max(0.06, params2.y));
         // Torchlight is warm, daylight is neutral.
         vec3 warm = mix(vec3(1.0), vec3(1.0, 0.85, 0.6), clamp(bl - sky, 0.0, 1.0));
         col = c.rgb * v_light.x * lvl * warm;
@@ -314,7 +314,7 @@ impl Renderer {
                 sample_count: 1,
             },
         );
-        ctx.texture_generate_mipmaps(texture);
+        upload_mips(ctx, texture, atlas);
 
         let (_, _, tile) = tile_uv(0);
         let fragment = FRAGMENT_SHADER.replace("TILE_SIZE", &format!("{tile:.8}")).replace("DALTONIZE", crate::access::DALTONIZE_GLSL);
@@ -384,7 +384,7 @@ impl Renderer {
     /// Replace the texture atlas (after mods change) and rebuild its mipmaps.
     pub fn update_atlas(&mut self, ctx: &mut dyn RenderingBackend, atlas: &[u8]) {
         ctx.texture_update(self.texture, atlas);
-        ctx.texture_generate_mipmaps(self.texture);
+        upload_mips(ctx, self.texture, atlas);
     }
 
     pub fn drop_chunk(&mut self, ctx: &mut dyn RenderingBackend, key: (i32, i32)) {
@@ -519,6 +519,28 @@ impl Renderer {
         draw_batches(ctx, Pass::Overlay, &self.overlay);
 
         ctx.end_render_pass();
+    }
+}
+
+/// Mipmaps built per tile (see `texture::mip_levels`). The driver fills the
+/// levels below one texel a tile, then those are cut off where GL allows, so
+/// distant faces never sample neighbouring tiles.
+fn upload_mips(ctx: &mut dyn RenderingBackend, texture: TextureId, atlas: &[u8]) {
+    ctx.texture_generate_mipmaps(texture);
+    let levels = mip_levels(atlas);
+    #[allow(irrefutable_let_patterns)] // Metal is another variant on Apple targets
+    let RawId::OpenGl(id) = (unsafe { ctx.texture_raw_id(texture) }) else { return };
+    unsafe {
+        gl::glBindTexture(gl::GL_TEXTURE_2D, id);
+        gl::glPixelStorei(gl::GL_UNPACK_ALIGNMENT, 1);
+        for (i, px) in levels.iter().enumerate() {
+            let size = (ATLAS >> (i + 1)) as i32;
+            gl::glTexSubImage2D(gl::GL_TEXTURE_2D, (i + 1) as i32, 0, 0, size, size, gl::GL_RGBA, gl::GL_UNSIGNED_BYTE, px.as_ptr() as *const _);
+        }
+        gl::glTexParameteri(gl::GL_TEXTURE_2D, gl::GL_TEXTURE_MAX_LEVEL, levels.len() as i32);
+        // Older GL ES has no max level; the driver's deeper levels stay then.
+        while gl::glGetError() != gl::GL_NO_ERROR {}
+        gl::glBindTexture(gl::GL_TEXTURE_2D, 0);
     }
 }
 

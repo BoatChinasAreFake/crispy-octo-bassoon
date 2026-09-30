@@ -494,7 +494,7 @@ impl Game {
     /// Draw every vehicle.
     pub fn draw_vehicles(&self, g: &mut DynGeo) {
         for v in &self.vehicles {
-            let sky = self.world.sky_light(v.pos.x.floor() as i32, (v.pos.y + 0.5).floor() as i32, v.pos.z.floor() as i32).max(0.25);
+            let sky = self.world.sky_shade(v.pos.x.floor() as i32, (v.pos.y + 0.5).floor() as i32, v.pos.z.floor() as i32).max(0.25);
             let tint = if v.hurt > 0.0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(v.pos) * Mat4::from_rotation_y(-v.yaw);

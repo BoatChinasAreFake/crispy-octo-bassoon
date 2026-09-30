@@ -3,7 +3,7 @@
 
 use crate::block::*;
 use crate::texture::tile_uv;
-use crate::light::{block_brightness, sky_brightness};
+use crate::light::shade;
 use crate::world::{idx, Chunk, World, CH, CW};
 
 #[repr(C)]
@@ -61,7 +61,7 @@ pub const FACES: [([i32; 3], [[f32; 3]; 4], f32); 6] = [
     ([0, 0, -1], [[1., 0., 0.], [0., 0., 0.], [0., 1., 0.], [1., 1., 0.]], 0.85),
 ];
 const CORNER_UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
-const AO_CURVE: [f32; 4] = [0.5, 0.68, 0.84, 1.0];
+const AO_CURVE: [f32; 4] = [0.58, 0.73, 0.87, 1.0];
 /// Face shading for foliage (same order as `FACES`). Light scatters through
 /// leaves, so their sides and undersides are much less dark than solid blocks',
 /// which keeps the dark bottom face and the brighter faces seen through its holes
@@ -129,7 +129,7 @@ impl<'a> Hood<'a> {
     #[inline]
     fn lit(&self, lx: i32, y: i32, lz: i32) -> (f32, f32) {
         let b = self.raw_light(lx, y, lz);
-        (sky_brightness(b >> 4), block_brightness(b & 15))
+        (shade(b >> 4), shade(b & 15))
     }
 }
 

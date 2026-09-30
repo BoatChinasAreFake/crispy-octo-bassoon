@@ -272,7 +272,7 @@ impl Game {
                 p.pos = p.target;
             }
             let moved = Vec3::new(p.pos.x - before.x, 0.0, p.pos.z - before.z).length();
-            p.anim += moved * 2.4;
+            crate::entity::step_anim(&mut p.anim, moved / dt.max(1e-4), dt, 2.4);
         }
 
         let mut inbox: Vec<(u32, Msg)> = std::mem::take(&mut self.pending_msgs).into_iter().map(|m| (0, m)).collect();
@@ -1049,7 +1049,8 @@ impl Game {
             if m.body.pos.distance(m.net_pos) > 8.0 {
                 m.body.pos = m.net_pos;
             }
-            m.anim += Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length() * 5.0;
+            let moved = Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length();
+            crate::entity::step_anim(&mut m.anim, moved / dt.max(1e-4), dt, 5.0);
             m.hurt = (m.hurt - dt).max(0.0);
             // Babies stay babies until the host says otherwise.
             if m.baby > 0.0 {

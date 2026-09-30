@@ -116,16 +116,26 @@ pub fn emission(id: Id) -> u8 {
     }
 }
 
-/// Brightness (0..1) for a sky level: a gentle curve, so shade under an overhang
-/// is soft and a cave a few steps in is properly dark.
+/// Brightness (0..1) for a sky level, for game rules (burning, spawning,
+/// crops, rain). Drawing uses `shade`.
 pub fn sky_brightness(level: u8) -> f32 {
     (level as f32 / MAX as f32).powf(1.6)
 }
 
-/// Brightness (0..1) for a block light level.
-pub fn block_brightness(level: u8) -> f32 {
-    level as f32 / MAX as f32
+/// How bright a light level looks on screen (sky and block light alike).
+/// Each step down dims by a steady fraction, like Minecraft's table, then a
+/// gamma lift keeps dim places readable: a cave a few blocks from a torch or
+/// an opening fades out gradually, and even an unlit one is a dim outline
+/// rather than solid black.
+pub fn shade(level: u8) -> f32 {
+    let r = level.min(MAX) as f32 / MAX as f32;
+    let b = r / (4.0 - 3.0 * r);
+    let lifted = 1.0 - (1.0 - b).powi(4);
+    DARKEST + (1.0 - DARKEST) * (b + (lifted - b) * 0.5)
 }
+
+/// The on-screen brightness of light level 0.
+pub const DARKEST: f32 = 0.08;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Channel {

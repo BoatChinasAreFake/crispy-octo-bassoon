@@ -897,6 +897,12 @@ impl World {
         crate::light::sky_brightness(self.sky_level(x, y, z))
     }
 
+    /// 0..1 sky light of a cell as it looks on screen, for drawing things that
+    /// move so they match the terrain around them.
+    pub fn sky_shade(&self, x: i32, y: i32, z: i32) -> f32 {
+        crate::light::shade(self.sky_level(x, y, z))
+    }
+
     pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
         if self.set_inner(x, y, z, id).is_some() && self.log_edits {
             self.edit_log.push((x, y, z, id));

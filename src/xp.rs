@@ -100,7 +100,7 @@ impl XpOrb {
     fn draw(&self, g: &mut DynGeo, world: &World, clock: f32, eye: Vec3) {
         let s = 0.12 + (self.value as f32).sqrt() * 0.025;
         let at = self.body.pos + Vec3::Y * (0.15 + (clock * 3.0 + self.id as f32).sin() * 0.05);
-        let sky = world.sky_light(at.x.floor() as i32, at.y.floor() as i32 + 1, at.z.floor() as i32);
+        let sky = world.sky_shade(at.x.floor() as i32, at.y.floor() as i32 + 1, at.z.floor() as i32);
         // A camera-facing square that pulses a little.
         let to_eye = (eye - at).normalize_or(Vec3::Z);
         let right = Vec3::Y.cross(to_eye).normalize_or(Vec3::X);
