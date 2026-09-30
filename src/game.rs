@@ -24,7 +24,7 @@ use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 600.0;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Controls {
     pub input: Input,
     pub attack_held: bool,
@@ -59,7 +59,12 @@ pub struct Game {
     /// Pointy Sticks in flight or stuck in things (owned by the host; clients mirror them).
     pub arrows: Vec<Arrow>,
     pub inv: Inventory,
+    /// The local player gets things for free and can't be hurt (spectators too).
     pub creative: bool,
+    /// The local player is spectating (see modes.rs).
+    pub spectator: bool,
+    /// What new players start in (the world's own mode).
+    pub default_creative: bool,
     /// Fraction of a day, 0 = sunrise.
     pub time: f32,
     pub clock: f32,
@@ -80,7 +85,8 @@ pub struct Game {
     spawn_timer: f32,
     stars: Vec<Vec3>,
     clouds: Perlin,
-    pub stat_blocks_broken: u32,
+    /// What the player has done here (see stats.rs).
+    pub stats: crate::stats::Stats,
     /// Sound effects requested this frame (effect, world position if positional).
     pub sounds: Vec<(Sfx, Option<Vec3>)>,
     dig_tick: f32,
@@ -238,6 +244,8 @@ impl Game {
             arrows: Vec::new(),
             inv,
             creative,
+            spectator: false,
+            default_creative: creative,
             time: 0.02,
             clock: 0.0,
             messages: Vec::new(),
@@ -256,7 +264,7 @@ impl Game {
             spawn_timer: 0.0,
             stars,
             clouds: Perlin::new(seed as u64 ^ 0xC10D),
-            stat_blocks_broken: 0,
+            stats: Default::default(),
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -422,8 +430,11 @@ impl Game {
                 rec.enchanted.retain(|e| e.0 != AIR);
             }
         }
-        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle };
+        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle, hardcore: d.hardcore };
         g.enchant_count = d.enchant_count;
+        g.rules.hardcore = d.hardcore;
+        g.stats = crate::stats::Stats::decode(&d.stats);
+        g.set_mode(crate::modes::GameMode::from_index(d.mode));
         g.portal_links = crate::scorch::decode_links(&d.portals);
         let (signs, frames) = crate::decor::decode(&d.decor);
         g.world.signs = signs;
@@ -462,7 +473,7 @@ impl Game {
         self.inv.return_cursor();
         SaveData {
             seed: self.world.seed(),
-            creative: self.creative,
+            creative: self.default_creative,
             time: self.time,
             pos: self.player.body.pos.to_array(),
             yaw: self.player.yaw,
@@ -496,6 +507,10 @@ impl Game {
             portals: crate::scorch::encode_links(&self.portal_links),
             vehicles: crate::vehicles::encode(&self.vehicles),
             decor: if self.world.regions.is_some() { Vec::new() } else { crate::decor::encode(&self.world.signs, &self.world.frames) },
+            mode: self.mode().index(),
+            hardcore: self.rules.hardcore,
+            stats: self.stats.encode(),
+            boxes: Vec::new(),
             version: crate::save::VERSION,
         }
     }
@@ -724,6 +739,14 @@ impl Game {
     }
 
     pub fn update(&mut self, dt: f32, c: &Controls) {
+        // Spectators move and look, and touch nothing.
+        let hands_off;
+        let c = if self.spectator {
+            hands_off = Controls { input: c.input.clone(), ..Default::default() };
+            &hands_off
+        } else {
+            c
+        };
         self.net_receive(dt);
         self.update_local(dt, c);
         self.net_send(dt);
@@ -765,9 +788,15 @@ impl Game {
             }
         }
         // In a boat or cart, the vehicle moves us (see vehicles.rs).
+        let before = self.player.body.pos;
+        self.player.jumped = false;
         let mut fall = if self.riding.is_none() && self.mounted.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
+        if self.player.jumped {
+            self.stats.jumps += 1;
+        }
         self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
         self.ride_tick(dt, c.input.forward, c.input.strafe, c.input.jump, c.input.sneak);
+        self.track_travel(before, dt);
         // Flowing water carries you along.
         if self.player.body.in_water && !self.player.flying {
             let push = crate::liquids::current(&self.world, self.player.body.pos + Vec3::Y * 0.3);
@@ -899,7 +928,7 @@ impl Game {
         self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.target)
     }
 
-    fn apply_cmds(&mut self, cmds: Vec<Cmd>) {
+    pub(crate) fn apply_cmds(&mut self, cmds: Vec<Cmd>) {
         let effect = |heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)>| Msg::Effect { heal, teleport, launch, take };
         for c in cmds {
             match c {
@@ -1260,6 +1289,9 @@ impl Game {
             (None, None, Some(h)) => Some(Target::Block(h)),
             _ => None,
         };
+        if self.spectator {
+            self.target = None;
+        }
     }
 
     fn handle_actions(&mut self, dt: f32, c: &Controls) {
@@ -1295,6 +1327,7 @@ impl Game {
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
                     let dmg = attack_damage_with(held, self.held_level(Enchant::Sharpness)) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
                     if !self.creative {
@@ -1517,6 +1550,7 @@ impl Game {
             let legendary = matches!(held, GOLDEN_CHOP | BIG_BOB);
             if !self.player.hunger.full() || legendary || self.creative {
                 self.player.hunger.eat(points, food_quality(held));
+                self.stats.eaten += 1;
                 if legendary {
                     self.player.health = MAX_HEALTH;
                 }
@@ -1673,6 +1707,7 @@ impl Game {
             self.editing_sign = Some(place);
         }
         self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
+        self.stats.placed += 1;
         self.player.swing = 1.0;
         if !self.creative {
             self.inv.consume_held();
@@ -1714,8 +1749,8 @@ impl Game {
         if !on_break.is_empty() {
             self.run_actions(on_break, pos.as_vec3() + Vec3::splat(0.5));
         }
-        self.stat_blocks_broken += 1;
-        if self.stat_blocks_broken >= 100 {
+        self.stats.mined += 1;
+        if self.stats.mined >= 100 {
             self.advance("centurion");
         }
         if id == WYRM_CRYSTAL {
@@ -1921,11 +1956,13 @@ impl Game {
             return;
         }
         self.player.hunger.exhaust(crate::hunger::HURT);
+        self.stats.damage_taken += amount.min(self.player.health).max(0.0) as f64;
         self.player.health -= amount;
         self.player.hurt = 0.5;
         self.sfx(Sfx::Hurt, None);
         if self.player.health <= 0.0 {
             self.player.health = 0.0;
+            self.stats.deaths += 1;
             self.dead = Some(format!("Stove {cause}"));
             // Everything falls out of your pockets, unless the world says otherwise.
             // (Joined players' experience is spilled by the host when it sees them die.)
@@ -1996,7 +2033,7 @@ impl Game {
     /// Mob AI targets and damage recipients: (player id, chest position).
     pub fn player_targets(&self) -> Vec<(u32, Vec3)> {
         let mut t = Vec::new();
-        if self.dead.is_none() && !self.dedicated {
+        if self.dead.is_none() && !self.dedicated && !self.spectator {
             t.push((self.my_id, self.player.body.pos + Vec3::Y * 0.9));
         }
         t.extend(self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target + Vec3::Y * 0.9)));
@@ -2206,6 +2243,9 @@ impl Game {
                         self.wyrm_defeated(at);
                     }
                     let remote = m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker);
+                    if m.last_attacker == self.my_id && !self.dedicated {
+                        self.stats.kills += 1;
+                    }
                     if !remote && !self.dedicated && at.distance(self.player.body.pos) < 32.0 {
                         match m.kind {
                             MobKind::Oinker => self.advance("bacon"),
@@ -2577,7 +2617,7 @@ impl Game {
             crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky);
         }
         // The player, in third person
-        if self.third_person && !self.menu {
+        if self.third_person && !self.menu && !self.spectator {
             let p = &self.player;
             let sky = self.world.sky_shade(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
@@ -2642,7 +2682,7 @@ impl Game {
             }
         }
 
-        if !self.third_person {
+        if !self.third_person && !self.spectator {
             self.draw_hand(&mut g, cam);
         }
         g
@@ -3659,7 +3699,7 @@ pub(crate) mod tests {
         assert!(g.dead.is_some());
         // A frozen sun, and all of it saved.
         let mut g = arena(69);
-        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false, weather_cycle: false };
+        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false, weather_cycle: false, hardcore: false };
         let t = g.time;
         let idle = Controls { input: Input { forward: 0.0, strafe: 0.0, jump: false, jump_pressed: false, sneak: false, sprint: false }, attack_held: false, attack_pressed: false, use_held: false, use_pressed: false, pick: false, drop: false, drop_all: false };
         for _ in 0..20 {

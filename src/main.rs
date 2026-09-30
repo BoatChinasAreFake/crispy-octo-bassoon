@@ -13,6 +13,7 @@ mod beacon;
 mod block;
 mod building;
 mod carpentry;
+mod cheats;
 mod combat;
 mod containers;
 mod contraptions;
@@ -35,6 +36,7 @@ mod ledger;
 mod light;
 mod liquids;
 mod mesher;
+mod modes;
 mod mods;
 mod multiplayer;
 mod nametags;
@@ -63,6 +65,7 @@ mod upnp;
 mod vehicles;
 mod villagers;
 mod sound;
+mod stats;
 mod texture;
 mod ui;
 mod weather;
@@ -134,6 +137,8 @@ enum Screen {
     Controls { from_title: bool },
     Help { from_title: bool },
     Advancements,
+    /// What you've done in this world (see stats.rs).
+    Stats,
     FishLog,
     Multiplayer,
     Mods,
@@ -222,6 +227,7 @@ struct App {
     form_seed: String,
     form_creative: bool,
     form_keep: bool,
+    form_hardcore: bool,
     form_focus: usize,
     /// The Backups screen's list and choice.
     /// Whether a newer release is out (see updates.rs).
@@ -424,6 +430,12 @@ impl App {
         let seed = save::parse_seed(&self.form_seed, random_seed());
         self.current_world = Some(id);
         self.new_world(self.form_creative, self.form_keep, seed);
+        if self.form_hardcore {
+            self.game.rules.hardcore = true;
+            self.game.rules.keep_inventory = false;
+            self.game.rules.difficulty = rules::Difficulty::Hard;
+            self.game.msg("Hardcore: one life, hard mode. Good luck.");
+        }
         // Save straight away so it's in the list even if the game is closed abruptly.
         self.save_quietly();
     }
@@ -668,7 +680,7 @@ impl App {
                 }
                 if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause {
                     self.set_screen(Screen::Paused);
-                } else if self.settings.binds.pressed(keybinds::Action::Inventory) || self.pad_frame.inventory {
+                } else if (self.settings.binds.pressed(keybinds::Action::Inventory) || self.pad_frame.inventory) && !self.game.spectator {
                     self.recipe_scroll = 0.0;
                     self.set_screen(Screen::Inventory);
                 }
@@ -720,7 +732,7 @@ impl App {
                     type_into(&mut self.sign_lines[self.sign_line], decor::LINE_LEN);
                 }
             }
-            Screen::Advancements | Screen::FishLog | Screen::WorldSettings => {
+            Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
                 }
@@ -1006,6 +1018,7 @@ impl App {
             self.form_seed.clear();
             self.form_creative = false;
             self.form_keep = false;
+            self.form_hardcore = false;
             self.form_focus = 0;
             drain_chars();
             self.set_screen(Screen::CreateWorld);
@@ -1054,17 +1067,38 @@ impl App {
             self.form_focus = 1;
         }
         y += bh + 8.0 * s;
-        let mode = if self.form_creative { "Game Mode: Creative" } else { "Game Mode: Survival" };
+        let mode = match (self.form_creative, self.form_hardcore) {
+            (true, _) => "Game Mode: Creative",
+            (false, true) => "Game Mode: Hardcore",
+            (false, false) => "Game Mode: Survival",
+        };
         if self.ui.button(Rect::new(x, y, bw, bh), mode, true) {
-            self.form_creative = !self.form_creative;
+            // Survival -> Creative -> Hardcore -> Survival.
+            (self.form_creative, self.form_hardcore) = match (self.form_creative, self.form_hardcore) {
+                (false, false) => (true, false),
+                (true, _) => (false, true),
+                (false, true) => (false, false),
+            };
         }
         y += bh + 4.0 * s;
-        let keep = if self.form_keep { "Keep Inventory: ON (dying costs nothing)" } else { "Keep Inventory: OFF (you drop everything)" };
-        if self.ui.button(Rect::new(x, y, bw, bh), keep, true) {
+        let keep = if self.form_hardcore {
+            "Keep Inventory: OFF (it's hardcore)"
+        } else if self.form_keep {
+            "Keep Inventory: ON (dying costs nothing)"
+        } else {
+            "Keep Inventory: OFF (you drop everything)"
+        };
+        if self.ui.button(Rect::new(x, y, bw, bh), keep, !self.form_hardcore) {
             self.form_keep = !self.form_keep;
         }
         y += bh + 2.0 * s;
-        let hint = if self.form_creative { "Fly, infinite blocks, no damage." } else { "Gather, craft, and try not to get hissed at." };
+        let hint = if self.form_creative {
+            "Fly, infinite blocks, no damage."
+        } else if self.form_hardcore {
+            "One life on Hard. Die, and you can only watch."
+        } else {
+            "Gather, craft, and try not to get hissed at."
+        };
         self.ui.text_centered(hint, w / 2.0, y + 9.0 * s, 8.0, GRAY);
         y += 18.0 * s;
         let half = (bw - 5.0 * s) / 2.0;
@@ -1604,7 +1638,7 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Help { .. } | Screen::Advancements | Screen::FishLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog);
         let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
@@ -1685,6 +1719,7 @@ impl App {
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
                     Screen::Advancements => self.advancements_screen(),
+                    Screen::Stats => self.stats_screen(),
                     Screen::FishLog => self.fish_log_screen(),
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Container => self.container_screen(),
@@ -1748,41 +1783,45 @@ impl App {
         }
         self.name_tags();
 
-        // Hotbar
-        let slot = 20.0 * s;
-        let x0 = w / 2.0 - slot * 4.5;
-        let y0 = h - slot - 4.0 * s;
-        draw_rectangle(x0 - 2.0 * s, y0 - 2.0 * s, slot * 9.0 + 4.0 * s, slot + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
-        for i in 0..9 {
-            let x = x0 + i as f32 * slot;
-            draw_rectangle_lines(x, y0, slot, slot, s, Color::new(0.6, 0.6, 0.6, 0.6));
-            self.ui.stack_worn(g.inv.slots[i], g.inv.wear[i], x, y0, slot, !g.creative);
-        }
-        let sel = x0 + g.inv.selected as f32 * slot;
-        draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
-        if !g.creative {
-            // Experience bar just above the hotbar, with the level in the middle.
-            let (level, progress) = g.level();
-            let (bw, by) = (slot * 9.0, y0 - 6.0 * s);
-            draw_rectangle(x0, by, bw, 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
-            draw_rectangle(x0, by + s, bw * progress, 2.0 * s, Color::new(0.5, 0.95, 0.2, 1.0));
-            if level > 0 {
-                let t = level.to_string();
-                self.ui.text_centered(&t, x0 + bw / 2.0 + s, by + 2.0 * s, 10.0, BLACK);
-                self.ui.text_centered(&t, x0 + bw / 2.0, by + s, 10.0, Color::new(0.55, 1.0, 0.3, 1.0));
+        // Hotbar, hearts and hunger (spectators have no hands, and nothing to lose).
+        if g.spectator {
+            self.ui.text_centered("Spectating  -  fly with Jump/Sneak, sprint to go faster", w / 2.0, h - 12.0 * s, 9.0, Color::new(0.8, 0.9, 1.0, 0.8));
+        } else {
+            let slot = 20.0 * s;
+            let x0 = w / 2.0 - slot * 4.5;
+            let y0 = h - slot - 4.0 * s;
+            draw_rectangle(x0 - 2.0 * s, y0 - 2.0 * s, slot * 9.0 + 4.0 * s, slot + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+            for i in 0..9 {
+                let x = x0 + i as f32 * slot;
+                draw_rectangle_lines(x, y0, slot, slot, s, Color::new(0.6, 0.6, 0.6, 0.6));
+                self.ui.stack_worn(g.inv.slots[i], g.inv.wear[i], x, y0, slot, !g.creative);
             }
-            self.ui.hearts(g.player.health, x0, y0 - 18.0 * s);
-            let points = g.inv.armor_points();
-            if points > 0 {
-                self.ui.armor_bar(points, x0, y0 - 29.0 * s);
+            let sel = x0 + g.inv.selected as f32 * slot;
+            draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
+            if !g.creative {
+                // Experience bar just above the hotbar, with the level in the middle.
+                let (level, progress) = g.level();
+                let (bw, by) = (slot * 9.0, y0 - 6.0 * s);
+                draw_rectangle(x0, by, bw, 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+                draw_rectangle(x0, by + s, bw * progress, 2.0 * s, Color::new(0.5, 0.95, 0.2, 1.0));
+                if level > 0 {
+                    let t = level.to_string();
+                    self.ui.text_centered(&t, x0 + bw / 2.0 + s, by + 2.0 * s, 10.0, BLACK);
+                    self.ui.text_centered(&t, x0 + bw / 2.0, by + s, 10.0, Color::new(0.55, 1.0, 0.3, 1.0));
+                }
+                self.ui.hearts(g.player.health, x0, y0 - 18.0 * s);
+                let points = g.inv.armor_points();
+                if points > 0 {
+                    self.ui.armor_bar(points, x0, y0 - 29.0 * s);
+                }
+                self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 18.0 * s);
             }
-            self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 18.0 * s);
-        }
-        if g.held_name > 0.0 {
-            let held = g.inv.held();
-            if held != AIR {
-                let a = g.held_name.min(1.0);
-                self.ui.text_centered(item_name(held), w / 2.0, y0 - if g.creative { 6.0 } else { 16.0 } * s, 10.0, Color::new(1.0, 1.0, 1.0, a));
+            if g.held_name > 0.0 {
+                let held = g.inv.held();
+                if held != AIR {
+                    let a = g.held_name.min(1.0);
+                    self.ui.text_centered(item_name(held), w / 2.0, y0 - if g.creative { 6.0 } else { 16.0 } * s, 10.0, Color::new(1.0, 1.0, 1.0, a));
+                }
             }
         }
 
@@ -1855,8 +1894,7 @@ impl App {
                 },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
-                format!("Seed: {}  Mode: {}", g.world.seed(), if g.creative { "Creative" } else { "Survival" }),
-                format!("Blocks broken: {}", g.stat_blocks_broken),
+                format!("Seed: {}  Mode: {}{}", g.world.seed(), g.mode().name(), if g.rules.hardcore { " (hardcore)" } else { "" }),
                 match &g.net {
                     None => "Network: single player".to_string(),
                     Some(multiplayer::Net::Host(srv)) => format!("Network: hosting on port {} ({} players)", srv.port, g.player_count()),
@@ -2027,12 +2065,15 @@ impl App {
             self.set_screen(Screen::WorldSettings);
         }
         y += bh + 5.0 * s;
-        let half = (bw - 5.0 * s) / 2.0;
+        let third = (bw - 10.0 * s) / 3.0;
         let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::ALL.len());
-        if self.ui.button(Rect::new(x, y, half, bh), &adv, true) {
+        if self.ui.button(Rect::new(x, y, third, bh), &self.ui.fit(&adv, 9.0, third - 6.0 * s), true) {
             self.set_screen(Screen::Advancements);
         }
-        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Fishing Log", true) {
+        if self.ui.button(Rect::new(x + third + 5.0 * s, y, third, bh), "Statistics", true) {
+            self.set_screen(Screen::Stats);
+        }
+        if self.ui.button(Rect::new(x + 2.0 * (third + 5.0 * s), y, third, bh), "Fishing Log", true) {
             self.set_screen(Screen::FishLog);
         }
         y += bh + 5.0 * s;
@@ -2085,6 +2126,37 @@ impl App {
         }
         if max_scroll > 0 {
             self.ui.text_centered("(scroll for more)", w / 2.0, y0 + max_rows as f32 * row_h + 6.0 * s, 7.0, GRAY);
+        }
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Paused);
+        }
+    }
+
+    fn stats_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+        self.ui.text_centered("Statistics", w / 2.0, h * 0.1, 16.0, WHITE);
+        let sub = format!("{} mode{}", self.game.mode().name(), if self.game.rules.hardcore { ", hardcore" } else { "" });
+        self.ui.text_centered(&sub, w / 2.0, h * 0.1 + 16.0 * s, 9.0, GOLD);
+        let lines = self.game.stats.lines();
+        let cols = if w >= 2.0 * 200.0 * s { 2 } else { 1 };
+        let col_w = ((w - 30.0 * s) / cols as f32).min(220.0 * s);
+        let row_h = 16.0 * s;
+        let per_col = lines.len().div_ceil(cols);
+        let x0 = w / 2.0 - (col_w * cols as f32 + 10.0 * s * (cols - 1) as f32) / 2.0;
+        let y0 = h * 0.1 + 30.0 * s;
+        for (i, (label, value)) in lines.iter().enumerate() {
+            let (c, r) = (i / per_col, i % per_col);
+            let (x, y) = (x0 + c as f32 * (col_w + 10.0 * s), y0 + r as f32 * row_h);
+            if y > h * 0.84 {
+                continue;
+            }
+            draw_rectangle(x, y, col_w, row_h - 2.0 * s, Color::new(0.12, 0.14, 0.2, 0.9));
+            self.ui.text(label, x + 5.0 * s, y + 10.5 * s, 9.0, WHITE);
+            let vw = self.ui.text_width(value, 9.0);
+            self.ui.text(value, x + col_w - vw - 5.0 * s, y + 10.5 * s, 9.0, GOLD);
         }
         let bw = (160.0 * s).min(w * 0.8);
         if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
@@ -2383,7 +2455,8 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.5, 0.0, 0.0, 0.45));
-        self.ui.text_centered("You died! (skill issue)", w / 2.0, h * 0.3, 20.0, WHITE);
+        let hardcore = self.game.rules.hardcore;
+        self.ui.text_centered(if hardcore { "Game over!" } else { "You died! (skill issue)" }, w / 2.0, h * 0.3, 20.0, WHITE);
         if let Some(d) = &self.game.dead {
             self.ui.text_centered(d, w / 2.0, h * 0.3 + 20.0 * s, 10.0, Color::new(1.0, 0.85, 0.85, 1.0));
         }
@@ -2398,12 +2471,21 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        if self.ui.button(Rect::new(x, h * 0.5, bw, bh), "Respawn", true) {
+        if hardcore {
+            if self.ui.button(Rect::new(x, h * 0.5, bw, bh), "Spectate World", true) {
+                self.game.spectate_after_death();
+                self.set_screen(Screen::Playing);
+            }
+        } else if self.ui.button(Rect::new(x, h * 0.5, bw, bh), "Respawn", true) {
             self.game.respawn();
             self.set_screen(Screen::Playing);
         }
         if self.ui.button(Rect::new(x, h * 0.5 + bh + 5.0 * s, bw, bh), "Rage Quit to Title", true) {
-            self.game.respawn();
+            if hardcore {
+                self.game.spectate_after_death();
+            } else {
+                self.game.respawn();
+            }
             self.back_to_title();
         }
     }
@@ -2514,12 +2596,21 @@ impl App {
         let x = w / 2.0 - bw / 2.0;
         let mut y = h * 0.3;
         let mut rules = self.game.rules;
-        let keep = if rules.keep_inventory { "Keep Inventory: ON (dying costs nothing)" } else { "Keep Inventory: OFF (you drop everything)" };
-        if self.ui.button(Rect::new(x, y, bw, bh), keep, owner) {
+        // Hardcore worlds are hard, and dying costs everything: that's the point.
+        let locked = rules.hardcore;
+        let keep = if locked {
+            "Keep Inventory: OFF (hardcore)"
+        } else if rules.keep_inventory {
+            "Keep Inventory: ON (dying costs nothing)"
+        } else {
+            "Keep Inventory: OFF (you drop everything)"
+        };
+        if self.ui.button(Rect::new(x, y, bw, bh), keep, owner && !locked) {
             rules.keep_inventory = !rules.keep_inventory;
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), &format!("Difficulty: {}", rules.difficulty.name()), owner) {
+        let diff = if locked { "Difficulty: Hard (hardcore)".to_string() } else { format!("Difficulty: {}", rules.difficulty.name()) };
+        if self.ui.button(Rect::new(x, y, bw, bh), &diff, owner && !locked) {
             rules.difficulty = rules::Difficulty::from_index((rules.difficulty.index() + 1) % 4);
         }
         y += bh + 2.0 * s;
@@ -2976,6 +3067,7 @@ impl App {
                             }
                             made += 1;
                         }
+                        self.game.stats.crafted += made as u64 * r.output.1 as u64;
                         // Joined players: the host checks the ingredients against its ledger.
                         if self.game.is_client() && !self.game.creative && made > 0 {
                             self.game.net_send_msg(net::Msg::Craft { recipe: ri as u16, times: made });
@@ -3253,6 +3345,7 @@ async fn game_main() {
         form_seed: String::new(),
         form_creative: false,
         form_keep: false,
+        form_hardcore: false,
         form_focus: 0,
         backup_list: Vec::new(),
         backup_sel: None,
@@ -3481,6 +3574,12 @@ async fn game_main() {
                 }
                 app.start_game(g);
                 app.set_screen(Screen::Advancements);
+            }
+            "stats" => {
+                let mut g = Game::new(424242, false, false);
+                g.stats = stats::Stats { mined: 1843, placed: 1207, crafted: 311, kills: 58, deaths: 3, damage_dealt: 402.0, damage_taken: 131.0, walked: 18_420.0, swum: 960.0, flown: 0.0, ridden: 2_310.0, jumps: 4_107, played: 3.0 * 3600.0 + 1260.0, fish: 12, eaten: 96 };
+                app.start_game(g);
+                app.set_screen(Screen::Stats);
             }
             "mods" => {
                 app.game = Game::new(424242, true, true);

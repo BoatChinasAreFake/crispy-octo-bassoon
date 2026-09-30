@@ -72,11 +72,13 @@ pub struct WorldRules {
     pub daylight_cycle: bool,
     /// Off: the weather stays as it is.
     pub weather_cycle: bool,
+    /// One life: after dying you can only spectate (see modes.rs).
+    pub hardcore: bool,
 }
 
 impl Default for WorldRules {
     fn default() -> Self {
-        WorldRules { keep_inventory: false, difficulty: Difficulty::Normal, daylight_cycle: true, weather_cycle: true }
+        WorldRules { keep_inventory: false, difficulty: Difficulty::Normal, daylight_cycle: true, weather_cycle: true, hardcore: false }
     }
 }
 

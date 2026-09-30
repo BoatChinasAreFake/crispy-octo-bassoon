@@ -618,7 +618,7 @@ impl Game {
             }
             _ => return false,
         }
-        if !self.creative
+        if !self.peer_free(from)
             && let Some(peer) = self.peers.get_mut(&from)
         {
             peer.ledger.bag.add(item, n as u32);

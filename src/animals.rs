@@ -205,7 +205,7 @@ impl Game {
             return;
         }
         match self.interact_mob(&who, at, mob, item) {
-            Interaction::Ate if !self.creative => self.take_peer(from, item, 1),
+            Interaction::Ate if !self.peer_free(from) => self.take_peer(from, item, 1),
             Interaction::Sheared => self.host_wear(from, SHEARS, 1),
             Interaction::Mounted(id) => self.net_send_to(from, Msg::MountMob { mob: id }),
             _ => {}

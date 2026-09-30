@@ -346,7 +346,7 @@ impl Game {
             return;
         }
         let shelves = self.bookshelves(pos);
-        let creative = self.creative;
+        let creative = self.peer_free(from);
         let Some(p) = self.peers.get_mut(&from) else { return };
         let l = &mut p.ledger;
         let count = l.enchant_count;

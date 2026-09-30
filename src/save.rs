@@ -17,9 +17,10 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// adds joined players' records and the weather; v12 adds animals worth
 /// keeping (tamed, bred, fed), Hmmers, and which portal leads to which; v13
 /// moves block edits out into region files beside the save (see regions.rs);
-/// v14 moves soil, containers, signs and frames there too.
+/// v14 moves soil, containers, signs and frames there too; v15 adds the
+/// player's own game mode, hardcore, statistics and portable boxes' contents.
 /// Older saves still load.
-pub const VERSION: u32 = 14;
+pub const VERSION: u32 = 15;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -79,6 +80,14 @@ pub struct SaveData {
     pub vehicles: Vec<u8>,
     /// Sign text and item frames, packed by `decor::encode` (save v12+).
     pub decor: Vec<u8>,
+    /// The player's own game mode (`modes::GameMode` index; `creative` is the world's) (save v15+).
+    pub mode: u8,
+    /// One life only (save v15+).
+    pub hardcore: bool,
+    /// The statistics screen's numbers, packed by `stats::Stats::encode` (save v15+).
+    pub stats: Vec<u8>,
+    /// What's inside portable boxes, packed by `boxes::encode` (save v15+).
+    pub boxes: Vec<u8>,
     /// The format version it was read from (the container and drop blobs changed in v9).
     pub version: u32,
 }
@@ -215,6 +224,12 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
     w.0.extend_from_slice(&d.vehicles);
     w.u32(d.decor.len() as u32);
     w.0.extend_from_slice(&d.decor);
+    w.u8(d.mode);
+    w.u8(d.hardcore as u8);
+    for blob in [&d.stats, &d.boxes] {
+        w.u32(blob.len() as u32);
+        w.0.extend_from_slice(blob);
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -325,9 +340,16 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     let portals = if version >= 12 { r.bytes(4 << 20)? } else { Vec::new() };
     let vehicles = if version >= 12 { r.bytes(4 << 20)? } else { Vec::new() };
     let decor = if version >= 12 { r.bytes(16 << 20)? } else { Vec::new() };
+    let (mut mode, mut hardcore, mut stats, mut boxes) = (creative as u8, false, Vec::new(), Vec::new());
+    if version >= 15 {
+        mode = r.u8()?;
+        hardcore = r.u8()? != 0;
+        stats = r.bytes(1 << 20)?;
+        boxes = r.bytes(64 << 20)?;
+    }
     let ok = |v: f32, d: f32| if v.is_finite() { v.clamp(0.0, 20.0) } else { d };
     let (food, saturation) = (ok(food, 20.0), ok(saturation, 5.0));
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, mobs, portals, vehicles, decor, version })
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, mobs, portals, vehicles, decor, mode, hardcore, stats, boxes, version })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -556,6 +578,10 @@ mod tests {
             portals: vec![4, 5],
             vehicles: vec![6],
             decor: vec![7, 8],
+            mode: 2,
+            hardcore: true,
+            stats: vec![9],
+            boxes: vec![10, 11],
             version: VERSION,
         }
     }
@@ -611,7 +637,9 @@ mod tests {
         let mut d = data(5, false);
         d.advancements = vec!["getting_wood".into(), "dimonds".into()];
         write_to(&path, &d).unwrap();
-        assert_eq!(read_from(&path).unwrap().advancements, d.advancements);
+        let back = read_from(&path).unwrap();
+        assert_eq!(back.advancements, d.advancements);
+        assert_eq!((back.mode, back.hardcore, back.stats, back.boxes), (2, true, vec![9], vec![10, 11]), "v15 fields come back");
         std::fs::remove_dir_all(&root).ok();
     }
 

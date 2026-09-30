@@ -201,7 +201,7 @@ impl Game {
             self.system_message(Some(from), "Hmm. (Out of stock until tomorrow.)");
             return;
         }
-        let affordable = self.creative || self.peers.get(&from).is_some_and(|p| can_afford(|i| p.ledger.bag.count(i), &t));
+        let affordable = self.peer_free(from) || self.peers.get(&from).is_some_and(|p| can_afford(|i| p.ledger.bag.count(i), &t));
         if !affordable {
             return;
         }
