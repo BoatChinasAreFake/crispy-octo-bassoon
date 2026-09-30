@@ -1,0 +1,84 @@
+# Build the game for Windows, Linux and macOS and publish it as a GitHub Release.
+#
+# Runs when a version tag (v0.1.0, v0.2.0, ...) is pushed, or by hand from the
+# Actions tab ("Run workflow", giving a version). Each platform's zip holds the
+# game, the README and the example mods; unzip it anywhere and run minceraft.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. v0.1.0 (the tag is made on the chosen branch if it doesn't exist)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows, os: windows-latest, exe: minceraft.exe }
+          - { name: linux, os: ubuntu-latest, exe: minceraft }
+          - { name: macos, os: macos-latest, exe: minceraft }
+    steps:
+      - uses: actions/checkout@v4
+      - name: "System libraries (Linux: ALSA for sound, udev for game controllers)"
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - name: Package
+        shell: bash
+        run: |
+          dir="minceraft-${VERSION}-${{ matrix.name }}"
+          mkdir -p "$dir"
+          cp "target/release/${{ matrix.exe }}" "$dir/"
+          cp README.md MODDING.md SCRIPTING.md "$dir/"
+          cp -r example-mods "$dir/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$dir.zip" "$dir" > /dev/null
+          else
+            zip -qr "$dir.zip" "$dir"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minceraft-${{ matrix.name }}
+          path: minceraft-*.zip
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Minceraft ${{ env.VERSION }}
+          files: dist/*.zip
+          body: |
+            Download the zip for your computer, unzip it anywhere, and run the game inside:
+
+            - **Windows:** `minceraft-${{ env.VERSION }}-windows.zip`, then double-click `minceraft.exe`. Windows may warn about an unrecognised app the first time: click **More info**, then **Run anyway**.
+            - **Linux:** `minceraft-${{ env.VERSION }}-linux.zip`, then run `./minceraft` (needs the usual X11/GL and ALSA libraries).
+            - **macOS:** `minceraft-${{ env.VERSION }}-macos.zip` (Apple silicon). The first time, right-click `minceraft` and choose **Open**.
+
+            Worlds and settings are saved next to the game, in `saves/` and `settings.txt`. See the README for controls and multiplayer.

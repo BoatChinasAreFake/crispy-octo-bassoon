@@ -6,9 +6,15 @@ The game ships with **no image or audio files**. At startup it builds the whole 
 
 Its only dependencies are macroquad (window, input, audio), [Rhai](https://rhai.rs), the sandboxed scripting language used for code mods, and [gilrs](https://gitlab.com/gilrs-project/gilrs) for game controllers.
 
+## Download and play
+
+Ready-made builds are on the [Releases page](https://github.com/BoatChinasAreFake/crispy-octo-bassoon/releases). Download the zip for your computer, unzip it anywhere, and run the game inside it: on **Windows**, double-click `minceraft.exe` (if Windows warns about an unrecognised app, click **More info**, then **Run anyway**). Worlds and settings are saved next to the game.
+
+New releases are built by GitHub Actions (`.github/workflows/release.yml`) whenever a version tag like `v0.2.0` is pushed, or from the Actions tab with **Run workflow**.
+
 ## Build and run
 
-You need a Rust toolchain ([rustup.rs](https://rustup.rs)).
+To build it yourself, you need a Rust toolchain ([rustup.rs](https://rustup.rs)).
 
 ```sh
 cargo run --release
