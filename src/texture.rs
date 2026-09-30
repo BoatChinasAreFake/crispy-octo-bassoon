@@ -303,6 +303,8 @@ pub const T_BEACON_BEAM: u16 = 387;
 /// Empty slots for the hunger and armour bars.
 pub const T_HUNGER_EMPTY: u16 = 388;
 pub const T_ARMOR_EMPTY: u16 = 389;
+pub const T_WOOF_NOSE: u16 = 390;
+pub const T_GALLOP_EYE: u16 = 391;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -1876,9 +1878,17 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         shade(if id % 3 == 0 { rgb(35, 30, 30) } else { rgb(240, 240, 235) }, r.range(0.92, 1.04))
     });
     a.copy(T_MOO_SKIN, T_MOO_FACE);
-    for (x, c) in [(3usize, rgb(20, 20, 20)), (12, rgb(20, 20, 20))] {
-        a.set(T_MOO_FACE, x, 5, c);
-        a.set(T_MOO_FACE, x, 6, c);
+    // Eyes, each on a patch of white so they don't vanish into a black spot.
+    for x0 in [1usize, 10] {
+        for y in 4..8 {
+            for x in x0..x0 + 5 {
+                a.set(T_MOO_FACE, x, y, rgb(240, 240, 235));
+            }
+        }
+    }
+    for x in [3usize, 4, 11, 12] {
+        a.set(T_MOO_FACE, x, 5, rgb(20, 20, 20));
+        a.set(T_MOO_FACE, x, 6, rgb(20, 20, 20));
     }
     for y in 9..15 {
         for x in 3..13 {
@@ -2778,8 +2788,13 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     // ---- Animals
     a.speckle(T_GALLOPER, rgb(140, 95, 55), 0.08);
     a.copy(T_GALLOPER, T_GALLOP_FACE);
-    for (x, y, c) in [(3, 5, rgb(20, 15, 10)), (12, 5, rgb(20, 15, 10)), (6, 11, rgb(60, 40, 25)), (9, 11, rgb(60, 40, 25))] {
-        a.set(T_GALLOP_FACE, x, y, c);
+    // The front of the muzzle: two nostrils. The eyes are on the head's sides.
+    for (x, y) in [(4, 7), (5, 7), (10, 7), (11, 7), (4, 8), (11, 8)] {
+        a.set(T_GALLOP_FACE, x, y, rgb(50, 32, 20));
+    }
+    a.copy(T_GALLOPER, T_GALLOP_EYE);
+    for (x, y, c) in [(7, 5, rgb(20, 15, 10)), (8, 5, rgb(20, 15, 10)), (7, 6, rgb(20, 15, 10)), (8, 6, rgb(240, 235, 225))] {
+        a.set(T_GALLOP_EYE, x, y, c);
     }
     a.speckle(T_GALLOP_MANE, rgb(45, 30, 20), 0.1);
     a.speckle(T_SADDLE_LEATHER, rgb(120, 60, 30), 0.06);
@@ -2794,9 +2809,11 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     for (x, y, c) in [(3, 5, rgb(20, 20, 20)), (4, 5, rgb(255, 255, 255)), (11, 5, rgb(255, 255, 255)), (12, 5, rgb(20, 20, 20))] {
         a.set(T_WOOF_FACE, x, y, c);
     }
-    for y in 9..12 {
-        for x in 6..10 {
-            a.set(T_WOOF_FACE, x, y, if y == 9 { rgb(40, 30, 30) } else { rgb(170, 165, 160) });
+    // The snout in front carries the nose.
+    a.copy(T_WOOF_SKIN, T_WOOF_NOSE);
+    for y in 3..13 {
+        for x in 3..13 {
+            a.set(T_WOOF_NOSE, x, y, if y < 7 && (4..12).contains(&x) { rgb(40, 30, 30) } else { rgb(170, 165, 160) });
         }
     }
     a.each(T_COLLAR, |x, _, r, _| if x % 5 == 2 { rgb(240, 210, 60) } else { shade(rgb(200, 30, 35), r.range(0.9, 1.05)) });

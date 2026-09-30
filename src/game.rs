@@ -2884,6 +2884,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn water_under_a_block_keeps_its_surface() {
+        let mut w = loaded_world(7);
+        let (x, y, z) = (5, crate::world::CH - 12, 5);
+        // Shallow water boxed in on every side, with a ceiling a little above it.
+        for (dx, dy, dz) in [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0), (0, 1, 0)] {
+            w.set(x + dx, y + dy, z + dz, crate::block::STONE);
+        }
+        w.set(x, y, z, crate::block::liquid_at(false, 3));
+        let surface = |w: &World| crate::mesher::mesh_chunk(w, 0, 0).water.verts.chunks(4).filter(|q| q.iter().all(|v| v.pos[1] > y as f32 + 0.3 && v.pos[1] < y as f32 + 1.0)).count();
+        assert_eq!(surface(&w), 1, "the surface shows below the ceiling");
+        // Water filling its cell right up to the block above has nothing to show.
+        w.set(x, y, z, crate::block::WATER);
+        w.set(x, y + 1, z, crate::block::WATER);
+        w.set(x, y + 2, z, crate::block::STONE);
+        assert_eq!(surface(&w), 0);
+    }
+
+    #[test]
     fn greedy_meshing_shrinks_real_terrain() {
         let w = loaded_world(7);
         let mesh = crate::mesher::mesh_chunk(&w, 0, 0);

@@ -351,10 +351,14 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         }
                         for (f, (n, corners, shade)) in FACES.iter().enumerate() {
                             let nb = hood.get(lx + n[0], y + n[1], lz + n[2]);
-                            if same(nb) || (is_opaque(nb) && f != 2) || (f == 2 && is_opaque(nb)) {
+                            // A block resting on the water only hides its surface
+                            // when the water reaches all the way up to it.
+                            let full = tops.iter().flatten().all(|&h| h >= 1.0);
+                            if same(nb) || (is_opaque(nb) && (f != 2 || full)) {
                                 continue;
                             }
-                            let (sky, blk) = hood.lit(lx + n[0], y + n[1].max(0), lz + n[2]);
+                            // Under a block, the surface is lit by the water's own cell.
+                            let (sky, blk) = if is_opaque(nb) { hood.lit(lx, y, lz) } else { hood.lit(lx + n[0], y + n[1].max(0), lz + n[2]) };
                             // Lava lights itself (the shader reads x above 1.5 as "glowing").
                             let light = if lava { [2.45, sky, blk] } else { [*shade, sky, blk] };
                             let mut v = [Vertex::default(); 4];

@@ -129,7 +129,7 @@ impl Game {
         m.yaw = yaw;
         m.net_pos = m.body.pos;
         m.anim += Vec3::new(m.body.vel.x, 0.0, m.body.vel.z).length() * dt * 2.5;
-        let seat = m.body.pos + Vec3::Y * 1.05;
+        let seat = m.body.pos + Vec3::Y * 1.15;
         let (pos, myaw) = (m.body.pos, m.yaw);
         self.player.body.pos = seat;
         self.player.body.vel = Vec3::ZERO;
@@ -159,7 +159,7 @@ impl Game {
             m.yaw = yaw;
         }
         if let Some(p) = self.peers.get_mut(&from) {
-            p.target = pos + Vec3::Y * 1.05;
+            p.target = pos + Vec3::Y * 1.15;
         }
     }
 
