@@ -505,6 +505,8 @@ impl Game {
                     }
                     // And only with items they really have, at the speed their tools allow
                     // (last, because a break that goes through drops its items).
+                    // A Hollow Box's contents travel in its item's wear (see boxes.rs).
+                    let packed = if id == HOLLOW_BOX { crate::boxes::box_wear(self.verified_ench(from)) } else { 0 };
                     if old != id && !self.ledger_edit(from, IVec3::new(x, y, z), old, id) {
                         corrections.push((x, y, z, old));
                         continue;
@@ -518,6 +520,9 @@ impl Game {
                     }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
+                    if packed != 0 {
+                        self.unpack_box(IVec3::new(x, y, z), packed);
+                    }
                     // Half a door takes the other half with it.
                     if is_door(old) && !is_door(id) {
                         self.remove_door_partner(IVec3::new(x, y, z), old);
@@ -1141,6 +1146,9 @@ impl Game {
             }
             if self.spectator {
                 flags |= FLAG_GHOST;
+            }
+            if p.gliding {
+                flags |= FLAG_GLIDE;
             }
             let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look() };
             self.net_send_msg(m);

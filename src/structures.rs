@@ -25,6 +25,8 @@ pub enum Kind {
     Hut,
     Well,
     Village,
+    /// A spire on one of the Hollow's outer islands (see hollow.rs).
+    Spire,
 }
 
 impl Kind {
@@ -35,6 +37,7 @@ impl Kind {
             Kind::Hut => "Hut (Definitely Not a Village)",
             Kind::Well => "Wishing Well (Doesn't Grant)",
             Kind::Village => "Village (Actually a Village)",
+            Kind::Spire => "Hollow Spire (Loot at the Top of the World)",
         }
     }
 }
@@ -118,6 +121,8 @@ impl Generator {
         };
         let door_facing = site.facing;
         match site.kind {
+            // Built by the Hollow's own generator.
+            Kind::Spire => {}
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -368,6 +373,9 @@ impl Generator {
 
     /// Chests of structures that sit in chunk (cx, cz), with what kind of place they're in.
     pub fn structure_chests(&self, cx: i32, cz: i32) -> Vec<(IVec3, Kind, u32)> {
+        if crate::hollow::in_hollow((cx * CW) as f32) {
+            return crate::hollow::spire_chests(self.seed, cx, cz).into_iter().map(|(p, s)| (p, Kind::Spire, s)).collect();
+        }
         let mut v = Vec::new();
         for (site, blocks) in self.sites_near(cx, cz) {
             for (p, id) in blocks {
@@ -440,6 +448,18 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         Kind::Hut => &[(BREAD, 4, 0.7), (WHEAT_SEEDS, 8, 0.6), (CARROT, 4, 0.4), (POTATO, 4, 0.4), (TORCH, 8, 0.6), (HOE, 1, 0.3), (COOKED_CHOP, 3, 0.3), (PLANKS, 16, 0.4), (ROD, 1, 0.2), (BOOKSHELF, 1, 0.1)],
         Kind::Well => &[(BOOT, 1, 0.8), (GOLD_INGOT, 6, 0.5), (BOTTLE, 1, 0.6), (DIAMOND, 1, 0.15)],
         Kind::Village => &[(BREAD, 6, 0.8), (APPLE, 4, 0.6), (IRON, 4, 0.5), (GOLD_INGOT, 5, 0.5), (BOOK, 2, 0.4), (SADDLE, 1, 0.2), (NAME_TAG, 1, 0.25), (WHEAT_SEEDS, 12, 0.5), (TORCH, 12, 0.5)],
+        Kind::Spire => &[
+            (GLIDER, 1, 0.45),
+            (ROCKET, 16, 0.7),
+            (HOLLOW_BOX, 1, 0.5),
+            (DIAMOND, 4, 0.5),
+            (STARING_EYE, 3, 0.4),
+            (PICK_DIAMOND, 1, 0.25),
+            (SWORD_DIAMOND, 1, 0.25),
+            (ARMOR_FIRST + 12 + CHESTPLATE as Id, 1, 0.2),
+            (GOLDEN_CHOP, 1, 0.2),
+            (OBSIDIAN, 8, 0.3),
+        ],
     };
     let mut free: Vec<usize> = (0..c.slots.len()).collect();
     for &(item, most, chance) in table {
@@ -459,6 +479,7 @@ fn loot_wear(item: Id, kind: Kind, rng: &mut Rng) -> Wear {
     let Some(max) = durability(item) else { return 0 };
     let used = rng.range(0.1, 0.7) * max as f32;
     let power = match kind {
+        Kind::Spire => 20,
         Kind::Dungeon => 15,
         Kind::Tower => 10,
         _ => 5,

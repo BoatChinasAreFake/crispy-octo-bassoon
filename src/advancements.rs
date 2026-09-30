@@ -89,6 +89,16 @@ pub const ALL: &[Advancement] = &[
     adv("freight", "Freight Train", "Load a Minecart with Chest. Choo choo, cargo."),
     adv("tattletale", "Tattletale", "Ride over a Detector Rail. It told everyone."),
     adv("beaconator", "Beaconator", "Stand in a beacon's light. The Wyrm's egg, finally useful."),
+    adv("wings", "Look Ma, No Hands", "Glide with a Glider. Landing is a separate skill."),
+    adv("rocket_man", "Rocket Man", "Boost a glide with a Boom Rocket. Burning out your fuse up here alone."),
+    adv("boxed_in", "Bigger on the Inside", "Pick up a Hollow Box with things still in it."),
+    adv("patina", "Statue Chic", "Watch copper turn fully green. Took its time."),
+    adv("waxed", "Freeze Frame", "Wax some copper with Goo. It'll stay shiny forever. Probably."),
+    adv("bamboozled", "Bamboozled", "Get some Bamboo. It grew while you read this."),
+    adv("reef_madness", "Reef Madness", "Mine a block of coral. It was so colourful."),
+    adv("soggy", "Soggy Bottom", "Defeat a Soggy Groaner. It was having a bad day anyway."),
+    adv("spear_it", "Spear It Out", "Throw a Soggy Spear. Go and get it back."),
+    adv("fishy_business", "Fishy Business", "Catch a Fishy with your bare hands (well, hit one)."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

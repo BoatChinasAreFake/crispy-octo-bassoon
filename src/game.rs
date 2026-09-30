@@ -87,6 +87,10 @@ pub struct Game {
     clouds: Perlin,
     /// What the player has done here (see stats.rs).
     pub stats: crate::stats::Stats,
+    /// Seconds of gliding not yet charged to the Glider (see glider.rs).
+    pub glide_wear: f32,
+    /// What's packed inside broken Hollow Boxes, by number (see boxes.rs).
+    pub boxes: HashMap<u16, crate::containers::Container>,
     /// Sound effects requested this frame (effect, world position if positional).
     pub sounds: Vec<(Sfx, Option<Vec3>)>,
     dig_tick: f32,
@@ -265,6 +269,8 @@ impl Game {
             stars,
             clouds: Perlin::new(seed as u64 ^ 0xC10D),
             stats: Default::default(),
+            glide_wear: 0.0,
+            boxes: HashMap::new(),
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -434,6 +440,7 @@ impl Game {
         g.enchant_count = d.enchant_count;
         g.rules.hardcore = d.hardcore;
         g.stats = crate::stats::Stats::decode(&d.stats);
+        g.boxes = crate::boxes::decode(&d.boxes);
         g.set_mode(crate::modes::GameMode::from_index(d.mode));
         g.portal_links = crate::scorch::decode_links(&d.portals);
         let (signs, frames) = crate::decor::decode(&d.decor);
@@ -510,7 +517,7 @@ impl Game {
             mode: self.mode().index(),
             hardcore: self.rules.hardcore,
             stats: self.stats.encode(),
-            boxes: Vec::new(),
+            boxes: crate::boxes::encode(&self.boxes),
             version: crate::save::VERSION,
         }
     }
@@ -570,6 +577,8 @@ impl Game {
             MOO_STEAK => "udderly",
             TABLE => "benchmarking",
             PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND => "tool_time",
+            BAMBOO => "bamboozled",
+            _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
             _ => return,
         };
         self.advance(key);
@@ -790,6 +799,7 @@ impl Game {
         // In a boat or cart, the vehicle moves us (see vehicles.rs).
         let before = self.player.body.pos;
         self.player.jumped = false;
+        self.player.glider_on = self.wearing_glider();
         let mut fall = if self.riding.is_none() && self.mounted.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
         if self.player.jumped {
             self.stats.jumps += 1;
@@ -797,6 +807,7 @@ impl Game {
         self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
         self.ride_tick(dt, c.input.forward, c.input.strafe, c.input.jump, c.input.sneak);
         self.track_travel(before, dt);
+        self.glider_tick(dt);
         // Flowing water carries you along.
         if self.player.body.in_water && !self.player.flying {
             let push = crate::liquids::current(&self.world, self.player.body.pos + Vec3::Y * 0.3);
@@ -1536,6 +1547,10 @@ impl Game {
             }
             return;
         }
+        if held == ROCKET {
+            self.use_rocket();
+            return;
+        }
         if held == BOTTLE {
             let m = crate::fishing::BOTTLE_MESSAGES[self.rng.int(0, crate::fishing::BOTTLE_MESSAGES.len() as i32 - 1) as usize];
             self.msg(format!("The message reads: {m}"));
@@ -1702,6 +1717,10 @@ impl Game {
         }
         let oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
         self.world.set_v(place, oriented);
+        if held == HOLLOW_BOX && !self.is_client() {
+            let wear = self.inv.wear[self.inv.selected];
+            self.unpack_box(place, wear);
+        }
         if held == SIGN_FIRST {
             // Something to write on it.
             self.editing_sign = Some(place);
@@ -2612,9 +2631,10 @@ impl Game {
             let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
-            let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw);
+            let gliding = p.flags & crate::net::FLAG_GLIDE != 0;
+            let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding);
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
-            crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky);
+            crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky, gliding);
         }
         // The player, in third person
         if self.third_person && !self.menu && !self.spectator {
@@ -2622,9 +2642,9 @@ impl Game {
             let sky = self.world.sky_shade(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
-            let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw);
+            let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding);
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
-            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), p.bob * 2.0, sky);
+            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), p.bob * 2.0, sky, p.gliding);
         }
         // Primed TNT
         for t in &self.tnts {
@@ -4813,4 +4833,13 @@ pub(crate) mod tests {
         assert!(!back.creative);
         std::fs::remove_dir_all(&dir).ok();
     }
+}
+
+/// Gliding players lie flat, head first (turned about the middle of the body).
+fn glide_pose(gliding: bool) -> Mat4 {
+    if !gliding {
+        return Mat4::IDENTITY;
+    }
+    let mid = Vec3::Y * 0.9;
+    Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
 }

@@ -207,6 +207,8 @@ pub const FLAG_DEAD: u8 = 4;
 pub const FLAG_HURT: u8 = 8;
 /// Spectating: not drawn, not targeted, can't be hit.
 pub const FLAG_GHOST: u8 = 16;
+/// Gliding: drawn lying flat, wings out.
+pub const FLAG_GLIDE: u8 = 32;
 
 // ------------------------------------------------------------------ encoding
 

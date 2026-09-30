@@ -305,6 +305,32 @@ pub const T_HUNGER_EMPTY: u16 = 388;
 pub const T_ARMOR_EMPTY: u16 = 389;
 pub const T_WOOF_NOSE: u16 = 390;
 pub const T_GALLOP_EYE: u16 = 391;
+pub const T_HOLLOW_BOX_TOP: u16 = 392;
+pub const T_HOLLOW_BOX_SIDE: u16 = 393;
+pub const T_COPPER_ORE: u16 = 394;
+/// Copper blocks, from new to fully oxidized.
+pub const T_COPPER: u16 = 395;
+pub const T_BAMBOO: u16 = 399;
+pub const T_BAMBOO_BLOCK_TOP: u16 = 400;
+pub const T_BAMBOO_BLOCK_SIDE: u16 = 401;
+pub const T_BAMBOO_PLANKS: u16 = 402;
+pub const T_BAMBOO_MOSAIC: u16 = 403;
+/// Coral blocks: tube (blue), brain (pink), bubble (purple), fire (red); then dead.
+pub const T_CORAL: u16 = 404;
+pub const T_DEAD_CORAL: u16 = 408;
+pub const T_GLIDER: u16 = 409;
+pub const T_ROCKET: u16 = 410;
+pub const T_SPEAR: u16 = 411;
+pub const T_COPPER_INGOT: u16 = 412;
+/// A worn Glider's membrane (on the player's back).
+pub const T_GLIDER_WING: u16 = 413;
+pub const T_FISHY: u16 = 414;
+pub const T_FISHY_FACE: u16 = 415;
+pub const T_SOGGY_SKIN: u16 = 416;
+pub const T_SOGGY_FACE: u16 = 417;
+pub const T_SOGGY_SHIRT: u16 = 418;
+pub const T_SOGGY_PANTS: u16 = 419;
+pub const T_FISHY_FIN: u16 = 420;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2852,6 +2878,8 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         if shaft || head { rgb(255, 255, 255) } else { [0, 0, 0, 0] }
     });
 
+    paint_new_things(&mut a);
+
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));
     a.each(T_CLOUD, |_, _, _, _| [255, 255, 255, 255]);
@@ -3160,4 +3188,185 @@ pub fn ui_tile_uv(tile: u16) -> (f32, f32, f32) {
     let (tx, ty) = ((tile % TILES_PER_ROW) as usize, (tile / TILES_PER_ROW) as usize);
     let n = UI_ATLAS as f32;
     ((tx * UI_CELL + 1) as f32 / n, (ty * UI_CELL + 1) as f32 / n, TILE as f32 / n)
+}
+
+const GLIDER_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "......####......",
+    ".....#bBBb#.....",
+    "....#bBBBBb#....",
+    "...#bBBmmBBb#...",
+    "..#bBBm##mBBb#..",
+    "..#bBm#..#mBb#..",
+    ".#bBm#....#mBb#.",
+    ".#bBm#....#mBb#.",
+    "#bBm#......#mBb#",
+    "#bBm#......#mBb#",
+    "#bm#........#mb#",
+    "#m#..........#m#",
+    "##............##",
+    "................",
+];
+
+const ROCKET_SPRITE: [&str; 16] = [
+    "................",
+    "..........#.....",
+    ".........#w#....",
+    "........#rrw#...",
+    ".......#rrrr#...",
+    "......#rwrr#....",
+    ".....#rrrr#.....",
+    "....#rrwr#......",
+    "...#rrrr#.......",
+    "....#rr#........",
+    "...#o##.........",
+    "..#o#...........",
+    ".#o#............",
+    ".y#.............",
+    "y.y.............",
+    "................",
+];
+
+const SPEAR_SPRITE: [&str; 16] = [
+    "...........###..",
+    "..........#hhh#.",
+    "...........#hh#.",
+    "..........#h#h#.",
+    ".........#t#.#..",
+    "........#t#.....",
+    ".......#t#......",
+    "......#t#.......",
+    ".....#t#........",
+    "....#t#.........",
+    "...#t#..........",
+    "..#t#...........",
+    ".#t#............",
+    ".##.............",
+    "................",
+    "................",
+];
+
+const INGOT_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "......######....",
+    ".....#hhhhhh#...",
+    "....#hbbbbbb#...",
+    "...#hbbbbbb#d...",
+    "..#hbbbbbb#dd...",
+    "..############..",
+    "..#bbbbbbbbb#d..",
+    "..#dddddddddd#..",
+    "...##########...",
+    "................",
+    "................",
+    "................",
+];
+
+/// Everything added for gliders, boxes, copper, bamboo and the sea.
+fn paint_new_things(a: &mut Atlas) {
+    // The Hollow Box: pale purple shell with a darker seam around its lid.
+    a.each(T_HOLLOW_BOX_SIDE, |x, y, r, _| {
+        let seam = y == 5 || y == 6;
+        let rim = x == 0 || x == 15 || y == 0 || y == 15;
+        let base = if seam { rgb(70, 45, 90) } else if rim { rgb(120, 90, 145) } else { rgb(165, 125, 190) };
+        shade(base, r.range(0.92, 1.06))
+    });
+    a.each(T_HOLLOW_BOX_TOP, |x, y, r, _| {
+        let rim = x == 0 || x == 15 || y == 0 || y == 15;
+        let d = (x as f32 - 7.5).abs().max((y as f32 - 7.5).abs());
+        let base = if rim { rgb(120, 90, 145) } else if d < 2.5 { rgb(215, 190, 235) } else { rgb(165, 125, 190) };
+        shade(base, r.range(0.92, 1.06))
+    });
+    a.ore(T_COPPER_ORE, rgb(215, 125, 80), rgb(80, 150, 120));
+    // Copper: warm orange, dulling to brown, then streaked and finally all verdigris.
+    let stages = [[200, 110, 75], [165, 120, 95], [110, 150, 115], [85, 170, 140]];
+    for (i, c) in stages.into_iter().enumerate() {
+        let tile = T_COPPER + i as u16;
+        a.each(tile, move |x, y, r, p| {
+            let plate = x % 8 == 0 || y % 8 == 0;
+            let n = p.noise3(x as f32 * 0.35, y as f32 * 0.35, i as f32 * 3.0);
+            let mut col = rgb(c[0], c[1], c[2]);
+            if (i == 1 || i == 2) && n > 0.15 {
+                col = if i == 1 { rgb(110, 150, 115) } else { rgb(85, 170, 140) };
+            }
+            shade(col, r.range(0.9, 1.07) * if plate { 0.8 } else { 1.0 })
+        });
+    }
+    a.sprite(T_COPPER_INGOT, &INGOT_SPRITE, &[('#', rgb(90, 45, 25)), ('b', rgb(210, 115, 70)), ('h', rgb(245, 170, 120)), ('d', rgb(150, 75, 45))]);
+    // Bamboo: green stalks with knots.
+    a.each(T_BAMBOO, |x, y, r, _| {
+        let stalk = (6..10).contains(&x);
+        if !stalk {
+            // A leaf or two off the side.
+            return if (y == 3 && (10..14).contains(&x)) || (y == 9 && (2..6).contains(&x)) { shade(rgb(90, 160, 50), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] };
+        }
+        let knot = y % 8 == 7;
+        shade(if knot { rgb(95, 140, 40) } else if x == 6 { rgb(150, 200, 80) } else { rgb(120, 180, 60) }, r.range(0.93, 1.05))
+    });
+    a.each(T_BAMBOO_BLOCK_SIDE, |x, y, r, _| {
+        let knot = y % 8 == 7;
+        let edge = x % 4 == 0;
+        shade(if knot { rgb(105, 140, 45) } else if edge { rgb(110, 155, 50) } else { rgb(140, 185, 70) }, r.range(0.92, 1.05))
+    });
+    a.each(T_BAMBOO_BLOCK_TOP, |x, y, r, _| {
+        let ring = ((x as f32 - 7.5).hypot(y as f32 - 7.5) as i32) % 3 == 0;
+        shade(if ring { rgb(150, 175, 90) } else { rgb(195, 205, 130) }, r.range(0.93, 1.05))
+    });
+    a.each(T_BAMBOO_PLANKS, |x, y, r, _| {
+        let seam = x % 4 == 3 || (y + (x / 4) * 5) % 16 == 0;
+        shade(if seam { rgb(160, 140, 55) } else { rgb(215, 195, 90) }, r.range(0.92, 1.06))
+    });
+    a.each(T_BAMBOO_MOSAIC, |x, y, r, _| {
+        let (bx, by) = (x / 8, y / 8);
+        let across = (bx + by) % 2 == 0;
+        let seam = if across { y % 8 == 0 || y % 2 == 1 && x % 8 == 0 } else { x % 8 == 0 || x % 2 == 1 && y % 8 == 0 };
+        let stripe = if across { y % 2 == 0 } else { x % 2 == 0 };
+        shade(if seam { rgb(150, 130, 50) } else if stripe { rgb(220, 200, 95) } else { rgb(195, 175, 80) }, r.range(0.94, 1.05))
+    });
+    // Coral: bumpy, bright, cells with darker rims.
+    let corals = [[60, 90, 220], [230, 110, 160], [170, 60, 190], [220, 60, 50], [150, 145, 140]];
+    for (i, c) in corals.into_iter().enumerate() {
+        let pts = a.random_points(9);
+        let tile = if i < 4 { T_CORAL + i as u16 } else { T_DEAD_CORAL };
+        a.each(tile, move |x, y, r, _| {
+            let (_, edge) = Atlas::cells(&pts, x, y);
+            let k = if edge < 1.0 { 0.7 } else if edge > 3.0 { 1.12 } else { 1.0 };
+            shade(rgb(c[0], c[1], c[2]), k * r.range(0.9, 1.06))
+        });
+    }
+    a.sprite(T_GLIDER, &GLIDER_SPRITE, &[('#', rgb(40, 30, 55)), ('b', rgb(120, 95, 150)), ('B', rgb(160, 130, 195)), ('m', rgb(210, 190, 230))]);
+    a.each(T_GLIDER_WING, |x, y, r, _| {
+        let rib = x % 5 == 0 || y == 0;
+        shade(if rib { rgb(90, 70, 115) } else { rgb(165, 135, 200) }, r.range(0.92, 1.05))
+    });
+    a.sprite(T_ROCKET, &ROCKET_SPRITE, &[('#', rgb(50, 20, 20)), ('r', rgb(210, 50, 45)), ('w', rgb(240, 235, 230)), ('o', rgb(150, 110, 60)), ('y', rgb(250, 210, 60))]);
+    a.sprite(T_SPEAR, &SPEAR_SPRITE, &[('#', rgb(25, 45, 50)), ('h', rgb(90, 190, 180)), ('t', rgb(60, 130, 125))]);
+    // Fishies: a speckled scaly body, a face with a big eye, and see-through fins.
+    a.each(T_FISHY, |x, y, r, _| shade(if (x + y * 2) % 5 == 0 { rgb(200, 140, 70) } else { rgb(230, 170, 90) }, r.range(0.9, 1.06)));
+    a.copy(T_FISHY, T_FISHY_FACE);
+    for (x, y, c) in [(3, 5, rgb(255, 255, 255)), (4, 5, rgb(20, 20, 20)), (3, 6, rgb(20, 20, 20)), (4, 6, rgb(20, 20, 20)), (11, 5, rgb(20, 20, 20)), (12, 5, rgb(255, 255, 255)), (11, 6, rgb(20, 20, 20)), (12, 6, rgb(20, 20, 20))] {
+        a.set(T_FISHY_FACE, x, y, c);
+    }
+    for x in 6..10 {
+        a.set(T_FISHY_FACE, x, 11, rgb(150, 90, 50));
+    }
+    a.each(T_FISHY_FIN, |x, _, r, _| shade(if x % 3 == 0 { rgb(200, 110, 60) } else { rgb(240, 150, 80) }, r.range(0.9, 1.05)));
+    // The Soggy Groaner: a drowned Groaner, teal and waterlogged.
+    a.each(T_SOGGY_SKIN, |_, _, r, p| {
+        let _ = p;
+        shade(rgb(80, 150, 140), r.range(0.85, 1.08))
+    });
+    a.copy(T_SOGGY_SKIN, T_SOGGY_FACE);
+    for (x, y, c) in [(3, 6, rgb(120, 230, 255)), (4, 6, rgb(120, 230, 255)), (11, 6, rgb(120, 230, 255)), (12, 6, rgb(120, 230, 255))] {
+        a.set(T_SOGGY_FACE, x, y, c);
+    }
+    for x in 5..11 {
+        a.set(T_SOGGY_FACE, x, 11, rgb(30, 60, 55));
+    }
+    a.each(T_SOGGY_SHIRT, |x, y, r, _| shade(if (x * 7 + y * 3) % 11 == 0 { rgb(60, 110, 60) } else { rgb(90, 120, 150) }, r.range(0.85, 1.05)));
+    a.each(T_SOGGY_PANTS, |x, y, r, _| shade(if (x + y) % 9 == 0 { rgb(60, 100, 60) } else { rgb(70, 80, 120) }, r.range(0.85, 1.05)));
 }

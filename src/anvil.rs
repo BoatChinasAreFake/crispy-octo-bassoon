@@ -30,6 +30,11 @@ pub fn repair_material(id: Id) -> Option<Id> {
     if id >= FIRST_MOD_ITEM {
         return Some(reg().items.get((id - FIRST_ITEM) as usize)?.repair).filter(|&m| m != AIR);
     }
+    match id {
+        GLIDER => return Some(FEATHER),
+        SPEAR => return Some(COPPER_INGOT),
+        _ => {}
+    }
     if let Some((_, tier)) = armor_of(id) {
         return Some([WOOL, IRON, GOLD_INGOT, DIAMOND][tier]);
     }

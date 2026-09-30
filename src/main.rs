@@ -11,6 +11,7 @@ mod anvil;
 mod backups;
 mod beacon;
 mod block;
+mod boxes;
 mod building;
 mod carpentry;
 mod cheats;
@@ -25,6 +26,7 @@ mod farming;
 mod fire;
 mod fishing;
 mod game;
+mod glider;
 mod golems;
 mod hollow;
 mod hoppers;
@@ -3228,7 +3230,11 @@ fn install_panic_hook() {
 fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     let (id, _) = stack?;
     let mut s = item_name(id).to_string();
-    if enchant::is_enchanted(wear) {
+    if id == HOLLOW_BOX {
+        if boxes::box_id(wear) != 0 {
+            s += " [packed]";
+        }
+    } else if enchant::is_enchanted(wear) {
         s += &format!(" [{}]", enchant::describe(wear));
     }
     if let Some(max) = inventory::max_uses(id, wear) {

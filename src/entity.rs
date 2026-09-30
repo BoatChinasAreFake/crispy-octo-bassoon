@@ -1257,7 +1257,7 @@ type ArmorPiece = ([f32; 3], [f32; 3], [f32; 3], Limb);
 
 /// Worn armour over the player model (`look` from `Inventory::armor_look`):
 /// slightly larger boxes that follow the same limbs.
-pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, anim: f32, sky: f32) {
+pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, anim: f32, sky: f32, gliding: bool) {
     if look == 0 {
         return;
     }
@@ -1293,6 +1293,15 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, anim: f32, sky: f32)
     );
     add(BOOTS, &[([-0.29, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(1.0)), ([-0.04, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(-1.0))]);
     draw_model(geo, root, &parts, anim, sky, true);
+    // A Glider: folded down the back, or spread wide while gliding.
+    if tier(CHESTPLATE) as usize == GLIDER_TIER + 1 {
+        let wings = [
+            part([-0.3, 0.45, 0.13], [0.28, 1.0, 0.04], [-0.05, 1.45, 0.15], Limb::Flap(-1.0), [T_GLIDER_WING; 6]),
+            part([0.02, 0.45, 0.13], [0.28, 1.0, 0.04], [0.05, 1.45, 0.15], Limb::Flap(1.0), [T_GLIDER_WING; 6]),
+        ];
+        let spread = if gliding { std::f32::consts::FRAC_PI_2 } else { 0.12 };
+        draw_posed(geo, root, &wings, 0.0, spread, sky);
+    }
 }
 
 pub struct Particle {

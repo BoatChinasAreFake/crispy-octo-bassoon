@@ -25,6 +25,11 @@ pub struct Player {
     pub flying: bool,
     /// Soaring on a Glider (see glider.rs).
     pub gliding: bool,
+    /// Wearing a Glider that works (the game sets this each frame).
+    pub glider_on: bool,
+    /// Seconds of rocket push left, and the glide's leftover step time.
+    pub boost: f32,
+    pub glide_acc: f32,
     /// Set for the frame a jump starts (for statistics).
     pub jumped: bool,
     /// Spectating: flies through blocks (see modes.rs).
@@ -60,6 +65,9 @@ impl Player {
             pitch: -0.2,
             flying: false,
             gliding: false,
+            glider_on: false,
+            boost: 0.0,
+            glide_acc: 0.0,
             jumped: false,
             ghost: false,
             health: MAX_HEALTH,
@@ -156,6 +164,25 @@ impl Player {
         }
 
         let in_water = b.in_water;
+        // Gliding: Jump in mid-fall spreads the Glider; ground or water folds it.
+        if self.gliding && (b.on_ground || in_water || b.in_lava || !self.glider_on) {
+            self.gliding = false;
+            self.boost = 0.0;
+        }
+        if !self.gliding && self.glider_on && input.jump_pressed && !b.on_ground && !in_water && b.vel.y < 0.0 {
+            self.gliding = true;
+            self.glide_acc = 0.0;
+        }
+        if self.gliding {
+            let look = Vec3::new(self.yaw.sin() * self.pitch.cos(), self.pitch.sin(), -self.yaw.cos() * self.pitch.cos());
+            crate::glider::glide(&mut b.vel, look, self.pitch, &mut self.boost, &mut self.glide_acc, dt);
+            let before = Vec3::new(b.vel.x, 0.0, b.vel.z).length();
+            move_body(world, b, dt, false);
+            let after = Vec3::new(b.vel.x, 0.0, b.vel.z).length();
+            self.fall_start = b.pos.y;
+            self.sprinting = false;
+            return if b.hit_wall { crate::glider::crash_damage(before, after) } else { 0.0 };
+        }
         let speed = if b.in_lava {
             1.2
         } else if in_water {

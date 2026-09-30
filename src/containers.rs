@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND) || crate::contraptions::is_dispenser(id) || crate::hoppers::is_hopper(id)
+    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -481,6 +481,10 @@ impl Game {
 
     /// Breaking a container spills what was inside onto the ground.
     pub fn spill_container(&mut self, pos: IVec3) {
+        // Hollow Boxes keep theirs (see boxes.rs).
+        if self.pack_box(pos) {
+            return;
+        }
         let Some(c) = self.world.containers.get_mut(&pos) else { return };
         let contents = c.contents();
         c.slots.iter_mut().for_each(|s| *s = None);
