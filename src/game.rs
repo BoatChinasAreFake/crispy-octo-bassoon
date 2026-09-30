@@ -2656,16 +2656,21 @@ impl Game {
             let (boxes, n) = block_boxes(held);
             for &(a, b) in &boxes[..n] {
                 let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
-                let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.14)) * Mat4::from_scale(Vec3::splat(0.28)) * Mat4::from_translation(a) * Mat4::from_scale(b - a);
+                let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.12)) * Mat4::from_scale(Vec3::splat(0.24)) * Mat4::from_translation(a) * Mat4::from_scale(b - a);
                 g.cube(&m, tiles, sky, [a.x, 1.0 - b.y, b.x, 1.0 - a.y]);
             }
         } else {
             let tile = if is_block_item(held) { block(held).tex[1] } else { item_tile(held) };
-            let m = basis * local * Mat4::from_rotation_y(-0.5) * Mat4::from_rotation_z(0.2);
-            let s = 0.42;
-            let c = [Vec3::new(-s / 2.0, -s / 2.0, 0.0), Vec3::new(s / 2.0, -s / 2.0, 0.0), Vec3::new(s / 2.0, s / 2.0, 0.0), Vec3::new(-s / 2.0, s / 2.0, 0.0)].map(|p| m.transform_point3(p));
-            g.quad(c, tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky]);
-            g.quad([c[1], c[0], c[3], c[2]], tile, [1.0, 0.0, 0.0, 1.0], [1.0, sky]);
+            // Tools and weapons (anything that wears out) are gripped by the handle
+            // and tilted up and in; other things are held up flat to look at.
+            let tool = crate::block::durability(held).is_some();
+            let m = if tool {
+                // Seen from behind, so the handle sits in the hand at the bottom right.
+                basis * local * Mat4::from_translation(Vec3::new(-0.02, 0.1, 0.0)) * Mat4::from_rotation_y(PI - 0.9) * Mat4::from_rotation_z(-0.1)
+            } else {
+                basis * local * Mat4::from_translation(Vec3::new(0.0, 0.08, 0.0)) * Mat4::from_rotation_y(-0.5) * Mat4::from_rotation_z(0.2)
+            };
+            extruded_sprite(g, &m, tile, if tool { 0.46 } else { 0.3 }, sky);
         }
     }
 
@@ -2693,6 +2698,44 @@ impl Game {
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
         FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock }
     }
+}
+
+/// A sprite given one pixel of thickness, like Minecraft's held items: its
+/// face front and back, and a thin side wherever a solid pixel meets a clear
+/// one. `m` places the sprite (centred, `size` across, facing +z).
+fn extruded_sprite(g: &mut DynGeo, m: &Mat4, tile: u16, size: f32, sky: f32) {
+    use crate::texture::{solid, TILE};
+    let px = size / TILE as f32;
+    let (z0, z1) = (-px / 2.0, px / 2.0);
+    let at = |x: f32, y: f32, z: f32| m.transform_point3(Vec3::new(x * px - size / 2.0, size / 2.0 - y * px, z));
+    let n = TILE as i32;
+    let filled = |x: i32, y: i32| (0..n).contains(&x) && (0..n).contains(&y) && solid(tile, x as usize, y as usize);
+    // The sides first: the overlay pass has no depth test, so the faces go on top.
+    for y in 0..n {
+        for x in 0..n {
+            if !filled(x, y) {
+                continue;
+            }
+            // Just this pixel's colour, from the middle of it.
+            let t = TILE as f32;
+            let uv = [(x as f32 + 0.25) / t, (y as f32 + 0.25) / t, (x as f32 + 0.75) / t, (y as f32 + 0.75) / t];
+            let (fx, fy) = (x as f32, y as f32);
+            for (dx, dy, a, b) in [(-1, 0, (fx, fy), (fx, fy + 1.0)), (1, 0, (fx + 1.0, fy), (fx + 1.0, fy + 1.0)), (0, -1, (fx, fy), (fx + 1.0, fy)), (0, 1, (fx, fy + 1.0), (fx + 1.0, fy + 1.0))] {
+                if filled(x + dx, y + dy) {
+                    continue;
+                }
+                let q = [at(a.0, a.1, z0), at(b.0, b.1, z0), at(b.0, b.1, z1), at(a.0, a.1, z1)];
+                // Both windings: culling keeps whichever faces the camera.
+                g.quad(q, tile, uv, [0.7, sky]);
+                g.quad([q[1], q[0], q[3], q[2]], tile, uv, [0.7, sky]);
+            }
+        }
+    }
+    let t = TILE as f32;
+    let front = [at(0.0, t, z1), at(t, t, z1), at(t, 0.0, z1), at(0.0, 0.0, z1)];
+    let back = [at(t, t, z0), at(0.0, t, z0), at(0.0, 0.0, z0), at(t, 0.0, z0)];
+    g.quad(back, tile, [1.0, 0.0, 0.0, 1.0], [0.85, sky]);
+    g.quad(front, tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky]);
 }
 
 /// Names of every mod-added block and item, so saves survive mods being added or removed.

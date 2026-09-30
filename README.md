@@ -14,7 +14,7 @@ Ready-made builds are on the [Releases page](https://github.com/BoatChinasAreFak
 - **macOS:** `~/Library/Application Support/Minceraft`
 - **Linux:** `~/.local/share/minceraft`
 
-The first time a version with this runs, it copies any `saves`, `settings.txt` and `mods` it finds beside it into that folder (so unzipping over an older version brings its worlds along; the originals stay where they were). The world list and the Mods screen show the folder. To keep everything beside the game instead (on a USB stick, say), put an empty file named `portable.txt` next to it. If the game ever crashes it writes `crash.txt` to the same folder: please include it when you report the bug.
+The first time a version with this runs, it copies any `saves`, `settings.txt` and `mods` it finds beside it into that folder (so unzipping over an older version brings its worlds along; the originals stay where they were). The world list and the Mods screen show the folder. To keep everything beside the game instead (on a USB stick, say), put an empty file named `portable.txt` next to it. If the game ever crashes it writes `crash.txt` to the same folder: please include it when you report the bug. The title screen shows which version you're running.
 
 New releases are built by GitHub Actions (`.github/workflows/release.yml`) whenever a version tag like `v0.2.0` is pushed, or from the Actions tab with **Run workflow**.
 
@@ -136,8 +136,9 @@ Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy
 - **Mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants and simple effects (bouncy or fast blocks, items that heal, launch, explode, give things or spawn mobs). Servers send their mods to players automatically. See **[MODDING.md](MODDING.md)** and `example-mods/cheese`.
 - **Code mods (scripting).** Mods can also include sandboxed [Rhai](https://rhai.rs) scripts, which react to events (chat commands, breaking and placing blocks, item use, joins, mob deaths, ticks) and call a game API (blocks, items, health, teleport, explosions, mobs, time, messages). Scripts run on the machine that owns the world, including dedicated servers. See **[SCRIPTING.md](SCRIPTING.md)** and `example-mods/commands`.
 - **Multiple worlds.** **Singleplayer** on the title screen opens a world list with each world's name, mode, seed, when it was last played, and size. You can play, create (with a name, game mode and optional seed; any text works as a seed), rename or delete worlds. Each world is its own folder, `saves/<world>/`. Only your edits are stored, and the terrain regenerates from the seed. A save from before world slots (`saves/world.mncr`) is moved in automatically as "My World".
+- **World backups.** Each time you open a world, a copy of it as it was goes into `backups/<world>/` (in the data folder), and the last 5 are kept. **Backups** on the world list shows them; **Restore as a New World** makes a separate world from one (named like "My World (backup 2026-09-30 14:05)"), so restoring never overwrites anything. Deleting a world deletes its backups too.
 - **Region files.** Everything placed in the world (block edits, what's in chests, furnaces and the like, sign text, item frames, farm soil) lives in region files (`saves/<world>/world.regions/`, 32×32 chunks each). They're read on a background thread as someone comes near and written out and forgotten when everyone leaves, so a huge, well-travelled world doesn't need to fit in memory. Saving writes the regions in memory. Worlds from before region files move everything out on the first save. Each file remembers the mods it was written with, so mod blocks and items stay right even in regions you haven't visited in a while. (Items lying on the ground stay in `world.mncr`; they vanish after five minutes anyway.)
-- First-person hand and held item, third-person view, block-breaking cracks, particles, screen shake, a panoramic title screen with splash texts, and options for render distance, FOV, sensitivity and fullscreen.
+- First-person hand and held item (items have a pixel of thickness like Minecraft's, and tools are gripped by the handle), third-person view, block-breaking cracks, particles, screen shake, a panoramic title screen with splash texts, and options for render distance, FOV, sensitivity and fullscreen.
 - **Rebindable controls.** **Options > Controls** lists every action with two slots: click one and press the key or mouse button you want (Esc leaves it empty). **Reset to Defaults** puts them back, and How to Play shows your keys.
 - **Game controllers.** Plug in a controller any time (Xbox, PlayStation and most others work):
 
@@ -298,6 +299,8 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/rules.rs` | World rules: keep inventory, difficulty, daylight and weather cycles |
 | `src/settings.rs` | `settings.txt` |
 | `src/paths.rs` | The data folder (and carrying files over into it), the crash log |
+| `src/backups.rs` | World backups: made on opening a world, listed and restored from the world list |
+| `build.rs`, `assets/minceraft.ico` | The Windows exe's icon (drawn from the game's textures by `--export-icon`) |
 | `src/keybinds.rs` | Rebindable keys and mouse buttons |
 | `src/pad.rs` | Game controllers |
 | `src/liquids.rs` | Flowing water and lava, buckets |
@@ -334,7 +337,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/noise.rs` | Perlin noise and RNG |
 | `src/ui.rs` | HUD and menu widgets |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|controls|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow|liquids|animals|zappy|trade|scorch|portal|vehicles|decor|carpentry|brewing|contraptions|hollow|machines|village|swamp|jungle|badlands|taiga|cave [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z] [--distance chunks] [--colour-blind] [--subtitles] [--flat-lighting] [--brightness 0..1]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|controls|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow|liquids|animals|zappy|trade|scorch|portal|vehicles|decor|carpentry|brewing|contraptions|hollow|machines|village|swamp|jungle|badlands|taiga|cave|backups [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z] [--distance chunks] [--colour-blind] [--subtitles] [--flat-lighting] [--brightness 0..1] [--hold ITEM]` renders a scene and saves a PNG.
 
 `minceraft --playtest [--bots N] [--seconds S] [--seed N] [--port N]` is a multiplayer check in one command: it hosts a world and connects bot players to it over real sockets (no window needed). The bots wander, build and knock down blocks, chat and fill a shared chest, then it checks that the host and every bot agree on every block, that the bots see and hear each other, that each bot's inventory matches the host's ledger, and that the chest holds what went in. It exits non-zero on any mismatch; CI runs it with six bots for a minute.
 

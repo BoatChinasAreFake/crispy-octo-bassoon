@@ -2947,3 +2947,135 @@ mod tests {
         }
     }
 }
+
+/// The game's icon: a grass block seen from above a corner, `size` pixels
+/// square (RGBA), drawn from the atlas and smoothed at the edges.
+pub fn icon_rgba(atlas: &[u8], size: usize) -> Vec<u8> {
+    let texel = |tile: u16, u: f32, v: f32| -> [f32; 4] {
+        let (tx, ty) = ((tile % TILES_PER_ROW) as usize * TILE, (tile / TILES_PER_ROW) as usize * TILE);
+        let (x, y) = (((u * TILE as f32) as usize).min(TILE - 1), ((v * TILE as f32) as usize).min(TILE - 1));
+        let i = ((ty + y) * ATLAS + tx + x) * 4;
+        [atlas[i] as f32, atlas[i + 1] as f32, atlas[i + 2] as f32, atlas[i + 3] as f32]
+    };
+    // Corners of the outline (in 0..1 across the icon), with the middle where the three faces meet.
+    let (top, ul, ur, mid, ll, bottom) = ((0.5, 0.02), (0.06, 0.26), (0.94, 0.26), (0.5, 0.5), (0.06, 0.76), (0.5, 0.98));
+    // Where (px, py) falls on the face spanned from `o` by `a` and `b`, as 0..1 coordinates.
+    let on = |p: (f32, f32), o: (f32, f32), a: (f32, f32), b: (f32, f32)| -> Option<(f32, f32)> {
+        let (dx, dy) = (p.0 - o.0, p.1 - o.1);
+        let det = a.0 * b.1 - a.1 * b.0;
+        let s = (dx * b.1 - dy * b.0) / det;
+        let t = (a.0 * dy - a.1 * dx) / det;
+        ((0.0..1.0).contains(&s) && (0.0..1.0).contains(&t)).then_some((s, t))
+    };
+    let sub = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0, a.1 - b.1);
+    let sample = |p: (f32, f32)| -> [f32; 4] {
+        let shade = |c: [f32; 4], k: f32| [c[0] * k, c[1] * k, c[2] * k, c[3]];
+        if let Some((s, t)) = on(p, ul, sub(top, ul), sub(mid, ul)) {
+            return texel(T_GRASS_TOP, s, t);
+        }
+        if let Some((s, t)) = on(p, ul, sub(mid, ul), sub(ll, ul)) {
+            return shade(texel(T_GRASS_SIDE, s, t), 0.85);
+        }
+        if let Some((s, t)) = on(p, mid, sub(ur, mid), sub(bottom, mid)) {
+            return shade(texel(T_GRASS_SIDE, s, t), 0.65);
+        }
+        [0.0; 4]
+    };
+    let mut out = vec![0u8; size * size * 4];
+    const N: usize = 4;
+    for y in 0..size {
+        for x in 0..size {
+            let mut acc = [0f32; 4];
+            for sy in 0..N {
+                for sx in 0..N {
+                    let p = ((x as f32 + (sx as f32 + 0.5) / N as f32) / size as f32, (y as f32 + (sy as f32 + 0.5) / N as f32) / size as f32);
+                    let c = sample(p);
+                    let a = c[3] / 255.0;
+                    for k in 0..3 {
+                        acc[k] += c[k] * a;
+                    }
+                    acc[3] += c[3];
+                }
+            }
+            let n = (N * N) as f32;
+            let a = acc[3] / n;
+            let i = (y * size + x) * 4;
+            for k in 0..3 {
+                out[i + k] = if a > 0.0 { (acc[k] / n * 255.0 / a).round().clamp(0.0, 255.0) as u8 } else { 0 };
+            }
+            out[i + 3] = a.round() as u8;
+        }
+    }
+    out
+}
+
+/// A Windows .ico holding the icon at the usual sizes (PNG-compressed entries
+/// aren't needed: plain 32-bit bitmaps work everywhere).
+pub fn icon_ico(atlas: &[u8]) -> Vec<u8> {
+    let sizes = [16usize, 32, 48, 64, 128, 256];
+    let images: Vec<Vec<u8>> = sizes
+        .iter()
+        .map(|&n| {
+            let px = icon_rgba(atlas, n);
+            let mut b = Vec::new();
+            // BITMAPINFOHEADER: height counts the colour rows and the (empty) mask rows.
+            for v in [40u32, n as u32, (n * 2) as u32] {
+                b.extend(v.to_le_bytes());
+            }
+            b.extend(1u16.to_le_bytes());
+            b.extend(32u16.to_le_bytes());
+            for _ in 0..6 {
+                b.extend(0u32.to_le_bytes());
+            }
+            // Rows bottom-up, BGRA.
+            for y in (0..n).rev() {
+                for x in 0..n {
+                    let i = (y * n + x) * 4;
+                    b.extend([px[i + 2], px[i + 1], px[i], px[i + 3]]);
+                }
+            }
+            // The AND mask: all zero (alpha does the work), rows padded to 4 bytes.
+            b.extend(vec![0u8; n.div_ceil(32) * 4 * n]);
+            b
+        })
+        .collect();
+    let mut ico = Vec::new();
+    ico.extend(0u16.to_le_bytes());
+    ico.extend(1u16.to_le_bytes());
+    ico.extend((sizes.len() as u16).to_le_bytes());
+    let mut offset = 6 + 16 * sizes.len();
+    for (n, img) in sizes.iter().zip(&images) {
+        let dim = if *n >= 256 { 0 } else { *n as u8 };
+        ico.extend([dim, dim, 0, 0]);
+        ico.extend(1u16.to_le_bytes());
+        ico.extend(32u16.to_le_bytes());
+        ico.extend((img.len() as u32).to_le_bytes());
+        ico.extend((offset as u32).to_le_bytes());
+        offset += img.len();
+    }
+    for img in images {
+        ico.extend(img);
+    }
+    ico
+}
+
+/// Each atlas texel's alpha, kept on the CPU for shapes built from sprites
+/// (held items get one pixel of thickness along their outline).
+static ALPHA: std::sync::RwLock<Vec<u8>> = std::sync::RwLock::new(Vec::new());
+
+/// Remember the atlas's alpha (whenever it's uploaded).
+pub fn remember_alpha(atlas: &[u8]) {
+    if let Ok(mut a) = ALPHA.write() {
+        *a = atlas.chunks_exact(4).map(|p| p[3]).collect();
+    }
+}
+
+/// Whether texel (x, y) of a tile is solid (everything is, before an atlas is known).
+pub fn solid(tile: u16, x: usize, y: usize) -> bool {
+    let Ok(a) = ALPHA.read() else { return true };
+    if a.is_empty() {
+        return true;
+    }
+    let (tx, ty) = ((tile % TILES_PER_ROW) as usize * TILE, (tile / TILES_PER_ROW) as usize * TILE);
+    a.get((ty + y) * ATLAS + tx + x).is_none_or(|&v| v >= 128)
+}

@@ -526,6 +526,7 @@ impl Renderer {
 /// levels below one texel a tile, then those are cut off where GL allows, so
 /// distant faces never sample neighbouring tiles.
 fn upload_mips(ctx: &mut dyn RenderingBackend, texture: TextureId, atlas: &[u8]) {
+    crate::texture::remember_alpha(atlas);
     ctx.texture_generate_mipmaps(texture);
     let levels = mip_levels(atlas);
     #[allow(irrefutable_let_patterns)] // Metal is another variant on Apple targets

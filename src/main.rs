@@ -1,12 +1,14 @@
 //! MINCERAFT — a native, browser-free block game parody.
 //! Rust + raw OpenGL (via miniquad/macroquad). No asset files: everything is
-//! generated at startup.
+//! generated at startup (the Windows exe's icon, assets/minceraft.ico, is
+//! generated too, by --export-icon).
 
 mod admin;
 mod access;
 mod advancements;
 mod animals;
 mod anvil;
+mod backups;
 mod beacon;
 mod block;
 mod building;
@@ -138,6 +140,8 @@ enum Screen {
     CreateWorld,
     RenameWorld,
     DeleteWorld,
+    /// The selected world's backups (see backups.rs).
+    Backups,
 }
 
 struct App {
@@ -218,6 +222,9 @@ struct App {
     form_creative: bool,
     form_keep: bool,
     form_focus: usize,
+    /// The Backups screen's list and choice.
+    backup_list: Vec<backups::Backup>,
+    backup_sel: Option<usize>,
 }
 
 /// A random splash text, including ones added by mods.
@@ -249,8 +256,18 @@ fn drain_chars() {
 }
 
 fn window_conf() -> Conf {
+    // The taskbar and title-bar icon, drawn from the game's own textures.
+    let atlas = texture::build_atlas(1337);
+    let icon = (|| {
+        Some(macroquad::miniquad::conf::Icon {
+            small: texture::icon_rgba(&atlas, 16).try_into().ok()?,
+            medium: texture::icon_rgba(&atlas, 32).try_into().ok()?,
+            big: texture::icon_rgba(&atlas, 64).try_into().ok()?,
+        })
+    })();
     Conf {
         window_title: "Minceraft".to_owned(),
+        icon,
         window_width: 1280,
         window_height: 720,
         high_dpi: false,
@@ -356,6 +373,12 @@ impl App {
     fn play_world(&mut self, i: usize) {
         let Some(w) = self.worlds.get(i) else { return };
         let id = w.id.clone();
+        // A copy as it was before this session, in case anything goes wrong.
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if let Err(e) = backups::back_up(&save::saves_dir(), &backups::backups_dir(), &id, now) {
+            eprintln!("Minceraft: couldn't back up \"{}\": {e}", w.name);
+            self.status = Some((format!("Couldn't back up this world first: {e}"), 6.0));
+        }
         match save::read_from(&save::world_file(&save::saves_dir(), &id)) {
             Ok(d) => {
                 let mut g = Game::from_save(d);
@@ -582,7 +605,7 @@ impl App {
                 }
                 return;
             }
-            Screen::DeleteWorld => {
+            Screen::DeleteWorld | Screen::Backups => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Worlds);
                 }
@@ -953,7 +976,13 @@ impl App {
             self.set_screen(Screen::DeleteWorld);
             return;
         }
-        if self.ui.button(Rect::new(x + 2.0 * (quarter + gap), y2, quarter * 2.0 + gap, bh), "Back", true) {
+        if self.ui.button(Rect::new(x + 2.0 * (quarter + gap), y2, quarter, bh), "Backups", sel.is_some()) {
+            self.backup_list = backups::list(&backups::backups_dir(), &self.worlds[sel.unwrap()].id);
+            self.backup_sel = if self.backup_list.is_empty() { None } else { Some(0) };
+            self.set_screen(Screen::Backups);
+            return;
+        }
+        if self.ui.button(Rect::new(x + 3.0 * (quarter + gap), y2, quarter, bh), "Back", true) {
             self.set_screen(Screen::Title);
             return;
         }
@@ -1041,14 +1070,14 @@ impl App {
         };
         let (id, name) = (wd.id.clone(), wd.name.clone());
         self.ui.text_centered(&format!("Delete \"{name}\"?"), w / 2.0, h * 0.3, 16.0, WHITE);
-        self.ui.text_centered("Its builds, inventory and script data will be gone for good.", w / 2.0, h * 0.3 + 20.0 * s, 10.0, Color::new(1.0, 0.6, 0.5, 1.0));
+        self.ui.text_centered("Its builds, inventory, script data and backups will be gone for good.", w / 2.0, h * 0.3 + 20.0 * s, 10.0, Color::new(1.0, 0.6, 0.5, 1.0));
         let bw = (220.0 * s).min(w * 0.85);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
         let half = (bw - 5.0 * s) / 2.0;
         let y = h * 0.45;
         if self.ui.button(Rect::new(x, y, half, bh), "Delete Forever", true) {
-            match save::delete_world(&save::saves_dir(), &id) {
+            match save::delete_world(&save::saves_dir(), &id).and_then(|()| backups::delete_all(&backups::backups_dir(), &id)) {
                 Ok(()) => self.status = Some((format!("Deleted \"{name}\"."), 4.0)),
                 Err(e) => self.status = Some((format!("Couldn't delete: {e}"), 6.0)),
             }
@@ -1059,6 +1088,65 @@ impl App {
             return;
         }
         if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Cancel", true) {
+            self.set_screen(Screen::Worlds);
+        }
+    }
+
+    /// The selected world's backups: pick one and restore it as a new world.
+    fn backups_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let Some(wd) = self.world_sel.and_then(|i| self.worlds.get(i)) else {
+            self.set_screen(Screen::Worlds);
+            return;
+        };
+        let name = wd.name.clone();
+        self.ui.text_centered(&format!("Backups of \"{name}\""), w / 2.0, h * 0.1, 16.0, WHITE);
+        let note = format!("A copy is made each time you open the world; the last {} are kept. Restoring makes a new world.", backups::KEEP);
+        self.ui.text_centered(&note, w / 2.0, h * 0.1 + 14.0 * s, 8.0, GRAY);
+        let pw = (300.0 * s).min(w * 0.92);
+        let x = w / 2.0 - pw / 2.0;
+        let row_h = 24.0 * s;
+        let top = h * 0.1 + 24.0 * s;
+        if self.backup_list.is_empty() {
+            self.ui.text_centered("No backups yet. One is made the next time you play this world.", w / 2.0, top + 30.0 * s, 10.0, WHITE);
+        }
+        let rows = (((h - 40.0 * s - top) / row_h).floor() as usize).max(1);
+        for (i, b) in self.backup_list.iter().enumerate().take(rows) {
+            let r = Rect::new(x, top + i as f32 * row_h, pw, row_h - 3.0 * s);
+            let selected = self.backup_sel == Some(i);
+            let hov = self.ui.hovered(r);
+            let bg = if selected { Color::new(0.25, 0.3, 0.45, 0.95) } else if hov { Color::new(0.18, 0.18, 0.22, 0.95) } else { Color::new(0.1, 0.1, 0.12, 0.9) };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            if selected {
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, s, WHITE);
+            }
+            let line = format!("{}  -  {} UTC  -  {} KB", save::ago(b.made), b.when, b.size.div_ceil(1024));
+            self.ui.text(&self.ui.fit(&line, 10.0, r.w - 12.0 * s), r.x + 6.0 * s, r.y + r.h * 0.65, 10.0, WHITE);
+            if hov && self.ui.clicked {
+                self.backup_sel = Some(i);
+            }
+        }
+        let bh = 20.0 * s;
+        let half = (pw - 5.0 * s) / 2.0;
+        let y = h - 30.0 * s;
+        let chosen = self.backup_sel.filter(|&i| i < self.backup_list.len());
+        if self.ui.button(Rect::new(x, y, half, bh), "Restore as a New World", chosen.is_some()) {
+            let b = &self.backup_list[chosen.unwrap()];
+            let root = save::saves_dir();
+            match backups::restore_as_copy(&root, b, &name) {
+                Ok(id) => {
+                    self.worlds = save::list_worlds(&root);
+                    self.world_sel = self.worlds.iter().position(|w| w.id == id);
+                    self.world_scroll = 0;
+                    self.status = Some((format!("Restored as \"{}\".", save::read_name(&root, &id)), 5.0));
+                }
+                Err(e) => self.status = Some((format!("Couldn't restore: {e}"), 6.0)),
+            }
+            self.set_screen(Screen::Worlds);
+            return;
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Back", true) {
             self.set_screen(Screen::Worlds);
         }
     }
@@ -1524,12 +1612,13 @@ impl App {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.mods_screen();
             }
-            Screen::Worlds | Screen::CreateWorld | Screen::RenameWorld | Screen::DeleteWorld => {
+            Screen::Worlds | Screen::CreateWorld | Screen::RenameWorld | Screen::DeleteWorld | Screen::Backups => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.65));
                 match self.screen {
                     Screen::Worlds => self.worlds_screen(),
                     Screen::CreateWorld => self.create_world_screen(),
                     Screen::RenameWorld => self.rename_world_screen(),
+                    Screen::Backups => self.backups_screen(),
                     _ => self.delete_world_screen(),
                 }
             }
@@ -1780,7 +1869,7 @@ impl App {
         if self.ui.button(Rect::new(x, y, bw, bh), "Quit to Desktop", true) {
             self.quit = true;
         }
-        self.ui.text("Minceraft 1.0 (Rust, no browser)", 4.0 * s, h - 5.0 * s, 8.0, WHITE);
+        self.ui.text(&format!("Minceraft {} (Rust, no browser)", paths::version()), 4.0 * s, h - 5.0 * s, 8.0, WHITE);
         let c = "Not affiliated with any block-game company. Please don't sue.";
         let cw = self.ui.text_width(c, 8.0);
         self.ui.text(c, w - cw - 4.0 * s, h - 5.0 * s, 8.0, WHITE);
@@ -2948,6 +3037,15 @@ fn main() {
     if args.iter().any(|a| a == "--playtest") {
         std::process::exit(playtest::run(&args));
     }
+    if let Some(i) = args.iter().position(|a| a == "--export-icon") {
+        // Writes the icon the Windows build embeds (assets/minceraft.ico).
+        let path = args.get(i + 1).map(String::as_str).unwrap_or("minceraft.ico");
+        match std::fs::write(path, texture::icon_ico(&texture::build_atlas(1337))) {
+            Ok(()) => println!("Wrote {path}"),
+            Err(e) => eprintln!("Couldn't write {path}: {e}"),
+        }
+        return;
+    }
     if let Some(i) = args.iter().position(|a| a == "--export-sounds") {
         let dir = args.get(i + 1).map(String::as_str).unwrap_or("sounds");
         match sound::export_wavs(std::path::Path::new(dir)) {
@@ -3038,6 +3136,8 @@ async fn game_main() {
         form_creative: false,
         form_keep: false,
         form_focus: 0,
+        backup_list: Vec::new(),
+        backup_sel: None,
     };
     // Screenshots always use the defaults, whatever the player last picked.
     if shot.is_none() {
@@ -3256,6 +3356,24 @@ async fn game_main() {
                 app.game = Game::new(424242, true, true);
                 app.open_worlds();
             }
+            "backups" => {
+                // A saved world with a few backups made over the last days.
+                let (root, id) = (save::saves_dir(), "castle-town");
+                let _ = save::write_name(&root, id, "Castle Town");
+                app.game = Game::new(424242, false, false);
+                app.current_world = Some(id.into());
+                let _ = app.write_current_world();
+                app.game = Game::new(424242, true, true);
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                for hours in [50, 26, 3] {
+                    let _ = backups::back_up(&root, &backups::backups_dir(), id, now - hours * 3600);
+                }
+                app.open_worlds();
+                app.world_sel = app.worlds.iter().position(|w| w.id == id);
+                app.backup_list = backups::list(&backups::backups_dir(), id);
+                app.backup_sel = Some(0);
+                app.set_screen(Screen::Backups);
+            }
             "createform" => {
                 app.game = Game::new(424242, true, true);
                 app.form_name = "Cheese Kingdom".into();
@@ -3304,6 +3422,12 @@ async fn game_main() {
         }
     }
 
+    // Something in hand for the screenshot (--hold iron_pickaxe).
+    let hold = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--hold").map(|w| w[1].clone());
+    if let Some(id) = hold.and_then(|k| block::reg().lookup(&k)) {
+        let sel = app.game.inv.selected;
+        app.game.inv.slots[sel] = Some((id, 1));
+    }
     let mut frames = 0u32;
     loop {
         if let Some(s) = &shot {
