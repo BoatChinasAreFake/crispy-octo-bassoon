@@ -154,6 +154,8 @@ pub struct Game {
     pub explore_timer: f32,
     /// Graphics options (from settings.txt; see render.rs).
     pub waving_leaves: bool,
+    /// Clouds as thick blocks (Options: Clouds: Fancy) rather than a flat layer.
+    pub fancy_clouds: bool,
     pub water_reflections: bool,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
@@ -302,6 +304,7 @@ impl Game {
             beacon_timer: 0.0,
             explore_timer: 0.0,
             waving_leaves: true,
+            fancy_clouds: true,
             water_reflections: true,
             fire_timer: 0.0,
             effects: Vec::new(),
@@ -2464,16 +2467,24 @@ impl Game {
         let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
         let reach = if scorch { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
-        g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
-        // Each row's runs of cloudy cells become one strip. Edges come from whole
-        // cells plus one shared fraction, so neighbours meet exactly, and the
-        // plain white tile is sampled at its middle so distant (mipmapped)
-        // clouds never pick up the atlas tiles around it.
+        // Each row's runs of cloudy cells become one strip (Fast) or one box
+        // (Fancy). Edges come from whole cells plus one shared fraction, so
+        // neighbours meet exactly, and the plain white tile is sampled at its
+        // middle so distant (mipmapped) clouds never pick up the tiles around it.
         let shift = (scroll / cell).floor();
         let frac = scroll - shift * cell;
         let edge = |ci: i32| (ci - shift as i32) as f32 * cell - frac;
         let cloudy = |ci: i32, cj: i32| self.clouds.noise2(ci as f32 * 0.17, cj as f32 * 0.17) + hash2(7, ci, cj) * 0.12 >= 0.12;
         let (fi, fj) = (ox.floor() as i32, oz.floor() as i32);
+        let fancy = self.fancy_clouds;
+        // Boxes cost more; they stop a little sooner (and fade into the fog anyway).
+        let reach = if fancy { reach.min(32) } else { reach };
+        let thick = 4.0;
+        if fancy {
+            g.begin(Pass::Opaque, [1.0; 4], false);
+        } else {
+            g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
+        }
         for j in -reach..=reach {
             let cj = fj + j;
             let (z0, z1) = (cj as f32 * cell, (cj + 1) as f32 * cell);
@@ -2487,9 +2498,34 @@ impl Game {
                 while i <= reach && cloudy(fi + i, cj) {
                     i += 1;
                 }
-                let (x0, x1) = (edge(start), edge(fi + i));
-                let c = [Vec3::new(x0, cloud_y, z1), Vec3::new(x1, cloud_y, z1), Vec3::new(x1, cloud_y, z0), Vec3::new(x0, cloud_y, z0)];
-                g.quad(c, T_CLOUD, [0.5, 0.5, 0.5, 0.5], [1.0, 1.0]);
+                let end = fi + i;
+                let (x0, x1) = (edge(start), edge(end));
+                if !fancy {
+                    let c = [Vec3::new(x0, cloud_y, z1), Vec3::new(x1, cloud_y, z1), Vec3::new(x1, cloud_y, z0), Vec3::new(x0, cloud_y, z0)];
+                    g.quad(c, T_CLOUD, [0.5, 0.5, 0.5, 0.5], [1.0, 1.0]);
+                    continue;
+                }
+                let (lo, hi) = (Vec3::new(x0, cloud_y, z0), Vec3::new(x1, cloud_y + thick, z1));
+                // Top, bottom and the two ends of the run always face open sky.
+                for f in [0, 1, 2, 3] {
+                    cloud_face(&mut g, f, lo, hi);
+                }
+                // The long sides only where the next row over has no cloud, in stretches.
+                for (f, dj, z) in [(4usize, 1, z1), (5, -1, z0)] {
+                    let mut k = start;
+                    while k < end {
+                        if cloudy(k, cj + dj) {
+                            k += 1;
+                            continue;
+                        }
+                        let from = k;
+                        while k < end && !cloudy(k, cj + dj) {
+                            k += 1;
+                        }
+                        let (a, b) = (Vec3::new(edge(from), cloud_y, z), Vec3::new(edge(k), cloud_y + thick, z));
+                        cloud_face(&mut g, f, a, b);
+                    }
+                }
             }
         }
 
@@ -2509,7 +2545,7 @@ impl Game {
         // The fishing line and bobber
         if let Some(b) = &self.bobber {
             let at = b.draw_pos(self.clock);
-            let sky = self.world.sky_shade(at.x.floor() as i32, at.y.floor() as i32 + 1, at.z.floor() as i32);
+            let sky = self.world.shade_near(at);
             g.begin(Pass::Opaque, [1.0; 4], false);
             let m = Mat4::from_translation(at - Vec3::new(0.08, 0.0, 0.08)) * Mat4::from_scale(Vec3::new(0.16, 0.16, 0.16));
             g.cube(&m, [T_BOBBER; 6], sky, [0.0, 0.0, 1.0, 1.0]);
@@ -2698,6 +2734,16 @@ impl Game {
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
         FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock }
     }
+}
+
+/// One face of a cloud box between `lo` and `hi` (face order as `mesher::FACES`:
+/// +x, -x, +y, -y, +z, -z), shaded like a block face so the shape reads.
+fn cloud_face(g: &mut DynGeo, f: usize, lo: Vec3, hi: Vec3) {
+    let (_, corners, shade) = crate::mesher::FACES[f];
+    let size = hi - lo;
+    // A side given as a flat slice (no depth) still spans its full height and length.
+    let c = corners.map(|p| lo + Vec3::from_array(p) * size);
+    g.quad(c, T_CLOUD, [0.5, 0.5, 0.5, 0.5], [0.72 + 0.28 * shade, 1.0]);
 }
 
 /// A sprite given one pixel of thickness, like Minecraft's held items: its

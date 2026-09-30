@@ -78,6 +78,28 @@ impl Game {
         self.weather.kind.wet() && !crate::hollow::in_hollow(x as f32) && self.world.sky_light(x, y, z) >= 1.0 && !self.world.generator.column(x, z).1.dry()
     }
 
+    /// What the world sounds like where you are: the music's mood, how loud
+    /// the rain is (muffled under a roof, silent in snow and deserts), and
+    /// whether you're down in the dark where caves rumble.
+    pub fn ambience(&self) -> crate::sound::Ambience {
+        use crate::sound::Mood;
+        let e = self.player.eye().floor().as_ivec3();
+        let sky = self.world.sky_light(e.x, e.y, e.z);
+        let biome = self.world.generator.column(e.x, e.z).1;
+        let deep = self.elsewhere() || (self.world.sky_level(e.x, e.y, e.z) == 0 && e.y < crate::world::SEA);
+        let mood = if deep {
+            Mood::Deep
+        } else if self.daylight() < 0.35 {
+            Mood::Night
+        } else {
+            Mood::Day
+        };
+        let wet = self.weather.kind.wet() && !self.elsewhere() && !biome.dry() && biome != Biome::Snowy;
+        // Out in it: full; under a roof: a muffled patter.
+        let rain = if wet { self.weather.strength * (0.25 + 0.75 * sky) } else { 0.0 };
+        crate::sound::Ambience { mood, rain, cave: deep && !self.elsewhere() }
+    }
+
     /// Every side: ease the look in and out; the owner also decides what's next.
     pub fn weather_tick(&mut self, dt: f32) {
         let target = if self.weather.kind.wet() && !self.in_hollow() { 1.0 } else { 0.0 };

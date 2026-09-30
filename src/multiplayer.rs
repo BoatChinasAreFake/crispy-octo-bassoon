@@ -319,7 +319,7 @@ impl Game {
             for c in s.clients.iter().filter(|c| c.conn.closed.is_some() && c.joined) {
                 left.push((c.id, c.name.clone(), c.conn.closed.clone().unwrap_or_default()));
             }
-            s.clients.retain(|c| c.conn.closed.is_none());
+            s.reap();
         }
         for (id, name, why) in left {
             self.remember_peer(id);

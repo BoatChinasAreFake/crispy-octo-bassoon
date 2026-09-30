@@ -1028,6 +1028,8 @@ pub struct Server {
     failures: HashMap<IpAddr, (u32, Instant)>,
     /// Addresses locked out after too many wrong passwords, until when.
     lockouts: HashMap<IpAddr, Instant>,
+    /// Connections being closed politely (see `linger`), until when.
+    closing: Vec<(Conn, Instant, bool)>,
 }
 
 /// IPv4 addresses arriving on a dual-stack socket look like ::ffff:1.2.3.4.
@@ -1068,6 +1070,7 @@ impl Server {
                     banned: HashSet::new(),
                     failures: HashMap::new(),
                     lockouts: HashMap::new(),
+                    closing: Vec::new(),
                 });
             }
         }
@@ -1085,6 +1088,7 @@ impl Server {
         }
         let now = Instant::now();
         self.lockouts.retain(|_, until| *until > now);
+        self.tend_closing();
         for stream in streams {
             // Hard cap on half-open logins so a flood can't exhaust us.
             if self.clients.len() >= self.max_players + 8 {
@@ -1104,7 +1108,7 @@ impl Server {
                     };
                     if let Some(reason) = refuse {
                         conn.send(&Msg::Kick { reason: reason.into() });
-                        conn.flush();
+                        self.linger(conn);
                         continue;
                     }
                 }
@@ -1149,6 +1153,58 @@ impl Server {
             c.conn.flush();
             c.conn.closed = Some(format!("kicked: {reason}"));
         }
+    }
+
+    /// Drop clients whose connection has closed; kicked ones are closed politely
+    /// so they get to read why.
+    pub fn reap(&mut self) {
+        let mut i = 0;
+        while i < self.clients.len() {
+            if self.clients[i].conn.closed.is_some() {
+                let c = self.clients.swap_remove(i);
+                if c.conn.closed.as_deref().is_some_and(|r| r.starts_with("kicked")) {
+                    self.linger(c.conn);
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Close a connection without losing what's still to be sent. Just dropping
+    /// a socket with the player's unread login in it makes Windows reset the
+    /// connection, and the reset can overtake the goodbye ("Wrong password.",
+    /// "You are banned"): the player would only see "connection forcibly
+    /// closed". So finish sending, close our side, and read whatever they
+    /// still send until they close too (or a few seconds pass).
+    fn linger(&mut self, mut conn: Conn) {
+        conn.closed = None;
+        conn.flush();
+        self.closing.push((conn, Instant::now() + Duration::from_secs(3), false));
+    }
+
+    fn tend_closing(&mut self) {
+        let now = Instant::now();
+        self.closing.retain_mut(|(conn, until, shut)| {
+            if !*shut {
+                conn.flush();
+                if conn.wbuf.is_empty() || conn.closed.is_some() {
+                    let _ = conn.stream.shutdown(std::net::Shutdown::Write);
+                    *shut = true;
+                }
+            }
+            let mut buf = [0u8; 4096];
+            loop {
+                match conn.stream.read(&mut buf) {
+                    Ok(0) => return false,
+                    Ok(_) => {}
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(_) => return false,
+                }
+            }
+            now < *until
+        });
     }
 
     pub fn get(&mut self, id: u32) -> Option<&mut Client> {

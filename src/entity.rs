@@ -1286,7 +1286,7 @@ impl Particle {
         }
     }
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {
-        let sky = world.sky_shade(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32);
+        let sky = world.shade_near(self.pos);
         let s = self.size;
         let m = Mat4::from_translation(self.pos - Vec3::splat(s * 0.5)) * Mat4::from_scale(Vec3::splat(s));
         let r = [self.uv[0], self.uv[1], self.uv[0] + 0.25, self.uv[1] + 0.25];
@@ -1351,7 +1351,7 @@ impl Arrow {
     }
 
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {
-        let sky = world.sky_shade(self.pos.x.floor() as i32, self.pos.y.floor() as i32, self.pos.z.floor() as i32);
+        let sky = world.shade_near(self.pos);
         let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, self.dir);
         let m = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.03, -0.03, -0.55)) * Mat4::from_scale(Vec3::new(0.06, 0.06, 0.6));
         geo.cube(&m, [T_PLANKS; 6], sky, [0.0, 0.0, 0.25, 0.25]);

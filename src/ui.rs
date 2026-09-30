@@ -23,9 +23,11 @@ impl Ui {
         Ui { tex, s: 2.0, clicked: false, rclicked: false, pressed: std::cell::Cell::new(false) }
     }
 
-    pub fn begin_frame(&mut self) {
+    /// `scale` is the UI Size option: a multiplier on the size that suits the window.
+    pub fn begin_frame(&mut self, scale: f32) {
         let h = screen_height();
-        self.s = (h / 300.0).clamp(1.5, 4.0);
+        // Never so big that the tallest menus stop fitting.
+        self.s = ((h / 300.0).clamp(1.5, 4.0) * scale).min(h / 230.0).max(1.0);
         self.clicked = is_mouse_button_pressed(MouseButton::Left);
         self.rclicked = is_mouse_button_pressed(MouseButton::Right);
     }
@@ -91,9 +93,11 @@ impl Ui {
         fired
     }
 
+    /// A tile's pixels in the atlas, a hair inside its edges: sampled right at
+    /// the border, a scaled sprite picks up a line of the tile next door.
     fn tile_src(tile: u16) -> Rect {
-        let t = TILE as f32;
-        Rect::new((tile % TILES_PER_ROW) as f32 * t, (tile / TILES_PER_ROW) as f32 * t, t, t)
+        let (t, e) = (TILE as f32, 0.05);
+        Rect::new((tile % TILES_PER_ROW) as f32 * t + e, (tile / TILES_PER_ROW) as f32 * t + e, t - 2.0 * e, t - 2.0 * e)
     }
 
     pub fn tile(&self, tile: u16, x: f32, y: f32, size: f32, color: Color) {
@@ -154,9 +158,12 @@ impl Ui {
                 for (quad, tile, shade, uvs) in faces {
                     let (u0, v0, s) = tile_uv(tile);
                     let base = verts.len() as u16;
+                    // Kept just inside the tile, like `tile_src`.
+                    let e = 0.05 / TILE as f32;
+                    let inset = |u: f32| e + u * (1.0 - 2.0 * e);
                     for (i, q) in quad.iter().enumerate() {
                         let c = Color::new(shade, shade, shade, 1.0);
-                        verts.push(Vertex::new(q.x, q.y, 0.0, u0 + uvs[i][0] * s, v0 + uvs[i][1] * s, c));
+                        verts.push(Vertex::new(q.x, q.y, 0.0, u0 + inset(uvs[i][0]) * s, v0 + inset(uvs[i][1]) * s, c));
                     }
                     idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
                 }

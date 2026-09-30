@@ -44,6 +44,7 @@ mod noise;
 mod pad;
 mod palette;
 mod paths;
+mod updates;
 mod player;
 mod playtest;
 mod potions;
@@ -223,6 +224,12 @@ struct App {
     form_keep: bool,
     form_focus: usize,
     /// The Backups screen's list and choice.
+    /// Whether a newer release is out (see updates.rs).
+    /// Recent frame times in ms, newest last (the F3 graph).
+    frame_times: std::collections::VecDeque<f32>,
+    /// The graphics card and OpenGL version, as the driver names them.
+    gpu: (String, String),
+    updates: updates::UpdateCheck,
     backup_list: Vec<backups::Backup>,
     backup_sel: Option<usize>,
 }
@@ -275,6 +282,20 @@ fn window_conf() -> Conf {
         window_resizable: true,
         ..Default::default()
     }
+}
+
+/// How many frames the F3 frame-time graph shows.
+const FRAME_GRAPH: usize = 240;
+
+/// The graphics card's name and the OpenGL version, as the driver reports them.
+fn gl_strings() -> (String, String) {
+    use macroquad::miniquad::gl;
+    let get = |name: u32| unsafe {
+        let p = gl::glGetString(name);
+        if p.is_null() { "unknown".to_string() } else { std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_string_lossy().into_owned() }
+    };
+    // 0x1F01 is GL_RENDERER (miniquad doesn't name it).
+    (get(0x1F01), get(gl::GL_VERSION))
 }
 
 fn random_seed() -> u32 {
@@ -732,7 +753,11 @@ impl App {
     fn frame(&mut self) {
         let dt = get_frame_time().min(0.05);
         self.fps = self.fps * 0.95 + (1.0 / get_frame_time().max(1e-4)) * 0.05;
-        self.ui.begin_frame();
+        if self.frame_times.len() == FRAME_GRAPH {
+            self.frame_times.pop_front();
+        }
+        self.frame_times.push_back(get_frame_time() * 1000.0);
+        self.ui.begin_frame(self.settings.ui_scale);
         self.pad_frame = self.pad.poll();
         self.handle_keys();
         self.mouse_look();
@@ -1574,6 +1599,7 @@ impl App {
         self.captions.tick(dt);
         self.game.colour_blind = self.settings.colour_blind;
         self.game.waving_leaves = self.settings.waving_leaves;
+        self.game.fancy_clouds = self.settings.fancy_clouds;
         self.game.water_reflections = self.settings.water_reflections;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
@@ -1588,7 +1614,9 @@ impl App {
             self.game.world.dirty.extend(all);
         }
         let in_game = !self.game.menu && self.screen != Screen::Dead;
-        self.audio.update_music(dt, in_game);
+        self.updates.poll();
+        let amb = if in_game { self.game.ambience() } else { sound::Ambience::default() };
+        self.audio.update_music(dt, in_game, amb);
     }
 
     fn draw_ui(&mut self) {
@@ -1770,7 +1798,7 @@ impl App {
             let facing = ["north (-Z)", "east (+X)", "south (+Z)", "west (-X)"][((g.player.yaw / std::f32::consts::FRAC_PI_2 + 0.5).floor() as i32).rem_euclid(4) as usize];
             let hours = ((g.time * 24.0 + 6.0) % 24.0) as i32;
             let lines = [
-                format!("Minceraft (native build) {:.0} fps", self.fps),
+                format!("Minceraft {} ({:.0} fps)", paths::version(), self.fps),
                 format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
                 format!("Facing: {facing}"),
                 format!("Biome: {} (surface {hgt})", biome.name()),
@@ -1815,8 +1843,51 @@ impl App {
                     Some(multiplayer::Net::Client(_)) => format!("Network: connected as {} ({} players)", g.player_name, g.player_count()),
                 },
             ];
+            // Minceraft-style: each line on its own dark strip, game on the left...
+            let backed = |ui: &Ui, text: &str, x: f32, y: f32, right: bool| {
+                let tw = ui.text_width(text, 9.0);
+                let x = if right { x - tw } else { x };
+                draw_rectangle(x - 2.0 * s, y - 8.5 * s, tw + 4.0 * s, 10.0 * s, Color::new(0.2, 0.2, 0.2, 0.55));
+                ui.text(text, x, y, 9.0, WHITE);
+            };
             for (i, l) in lines.iter().enumerate() {
-                self.ui.text(l, 4.0 * s, (12.0 + i as f32 * 10.0) * s, 9.0, WHITE);
+                backed(&self.ui, l, 4.0 * s, (12.0 + i as f32 * 10.0) * s, false);
+            }
+            // ...the machine on the right...
+            let ft: Vec<f32> = self.frame_times.iter().copied().collect();
+            let avg = ft.iter().sum::<f32>() / ft.len().max(1) as f32;
+            let worst = ft.iter().fold(0.0f32, |a, &b| a.max(b));
+            let target = g.world.raycast(g.player.eye(), g.player.look_dir(), 8.0).map(|hit| {
+                let id = g.world.get_v(hit.pos);
+                format!("Looking at: {} ({}, {}, {})", block::item_name(id), hit.pos.x, hit.pos.y, hit.pos.z)
+            });
+            let right = [
+                Some(format!("{} {}", std::env::consts::OS, std::env::consts::ARCH)),
+                Some(format!("Window: {}x{}  UI size {:.1}", w as i32, h as i32, s)),
+                Some(format!("GPU: {}", self.gpu.0)),
+                Some(format!("OpenGL {}", self.gpu.1)),
+                Some(format!("Render distance: {} chunks  Clouds: {}", self.settings.render_distance, if self.settings.fancy_clouds { "Fancy" } else { "Fast" })),
+                Some(format!("Frame time: {avg:.1} ms average, {worst:.1} ms worst")),
+                target,
+            ];
+            for (i, l) in right.iter().flatten().enumerate() {
+                backed(&self.ui, l, w - 4.0 * s, (12.0 + i as f32 * 10.0) * s, true);
+            }
+            // ...and a frame-time graph in the corner: green under 60 fps, yellow under 30, red beyond.
+            let (gw, gh) = (FRAME_GRAPH as f32 * s * 0.6, 40.0 * s);
+            let (gx, gy) = (4.0 * s, h - 60.0 * s);
+            draw_rectangle(gx, gy - gh, gw, gh, Color::new(0.0, 0.0, 0.0, 0.45));
+            let bar = gw / FRAME_GRAPH as f32;
+            let per_ms = gh / 50.0;
+            for (i, &ms) in ft.iter().enumerate() {
+                let col = if ms <= 17.0 { Color::new(0.3, 0.9, 0.3, 0.9) } else if ms <= 34.0 { Color::new(0.95, 0.85, 0.2, 0.9) } else { Color::new(0.95, 0.3, 0.25, 0.9) };
+                let bh = (ms * per_ms).min(gh);
+                draw_rectangle(gx + i as f32 * bar, gy - bh, bar.max(1.0), bh, col);
+            }
+            for (ms, label) in [(16.7, "60 fps"), (33.3, "30 fps")] {
+                let ly = gy - ms * per_ms;
+                draw_line(gx, ly, gx + gw, ly, 1.0, Color::new(1.0, 1.0, 1.0, 0.5));
+                self.ui.text(label, gx + gw + 3.0 * s, ly + 3.0 * s, 7.0, WHITE);
             }
         }
         self.fishing_hud();
@@ -1868,6 +1939,14 @@ impl App {
         y += bh + 5.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Quit to Desktop", true) {
             self.quit = true;
+        }
+        if let Some(tag) = self.updates.newer.clone() {
+            // A newer release is out: say so, and offer the download page.
+            y += bh + 10.0 * s;
+            self.ui.text_centered(&format!("Minceraft {tag} is out!"), w / 2.0, y + 6.0 * s, 10.0, GOLD);
+            if self.ui.button(Rect::new(x, y + 10.0 * s, bw, bh), "Get the New Version", true) {
+                updates::open_in_browser(&updates::releases_page());
+            }
         }
         self.ui.text(&format!("Minceraft {} (Rust, no browser)", paths::version()), 4.0 * s, h - 5.0 * s, 8.0, WHITE);
         let c = "Not affiliated with any block-game company. Please don't sue.";
@@ -2070,11 +2149,11 @@ impl App {
         let s = self.ui.s;
         let bw = (220.0 * s).min(w * 0.8);
         // Rows shrink a little on short windows so Done stays on screen.
-        let bh = (20.0 * s).min((h - 95.0 * s) / 11.0);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 12.0);
         let x = w / 2.0 - bw / 2.0;
         let small = bh * 1.3;
-        // Eleven rows (and the title above them), centred in whatever room there is.
-        let total = 11.0 * bh + 10.0 * 5.0 * s + 7.0 * s;
+        // Twelve rows (and the title above them), centred in whatever room there is.
+        let total = 12.0 * bh + 11.0 * 5.0 * s + 7.0 * s;
         let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
         self.ui.text_centered("Options", w / 2.0, y - 18.0 * s, 16.0, WHITE);
         let row = |ui: &Ui, label: String, y: f32| -> i32 {
@@ -2151,8 +2230,21 @@ impl App {
             self.settings.water_reflections = !self.settings.water_reflections;
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), lighting, true) {
+        if self.ui.button(Rect::new(left, y, half, bh), lighting, true) {
             self.settings.smooth_lighting = !self.settings.smooth_lighting;
+        }
+        let clouds = if self.settings.fancy_clouds { "Clouds: Fancy" } else { "Clouds: Fast" };
+        if self.ui.button(Rect::new(right, y, half, bh), clouds, true) {
+            self.settings.fancy_clouds = !self.settings.fancy_clouds;
+        }
+        y += bh + 5.0 * s;
+        let size_i = settings::UI_SCALES.iter().position(|(m, _)| (*m - self.settings.ui_scale).abs() < 0.01).unwrap_or(1);
+        if self.ui.button(Rect::new(left, y, half, bh), &format!("UI Size: {}", settings::UI_SCALES[size_i].1), true) {
+            self.settings.ui_scale = settings::UI_SCALES[(size_i + 1) % settings::UI_SCALES.len()].0;
+        }
+        let updates = if self.settings.check_updates { "Update Check: ON" } else { "Update Check: OFF" };
+        if self.ui.button(Rect::new(right, y, half, bh), updates, true) {
+            self.settings.check_updates = !self.settings.check_updates;
         }
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
@@ -3138,6 +3230,9 @@ async fn game_main() {
         form_focus: 0,
         backup_list: Vec::new(),
         backup_sel: None,
+        updates: updates::UpdateCheck::start(false),
+        frame_times: std::collections::VecDeque::with_capacity(FRAME_GRAPH),
+        gpu: gl_strings(),
     };
     // Screenshots always use the defaults, whatever the player last picked.
     if shot.is_none() {
@@ -3152,6 +3247,7 @@ async fn game_main() {
             set_fullscreen(true);
         }
         app.settings = saved;
+        app.updates = updates::UpdateCheck::start(app.settings.check_updates);
     }
     if let Some(d) = shot.as_ref().and_then(|s| s.distance) {
         app.settings.render_distance = d.clamp(3, settings::MAX_RENDER_DISTANCE);
@@ -3161,6 +3257,15 @@ async fn game_main() {
         app.settings.colour_blind = flag("--colour-blind");
         app.settings.smooth_lighting = !flag("--flat-lighting");
         let args: Vec<String> = std::env::args().collect();
+        let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
+        if let Some(v) = arg("--ui-scale").and_then(|v| v.parse::<f32>().ok()) {
+            app.settings.ui_scale = v;
+        }
+        app.settings.fancy_clouds = !flag("--fast-clouds");
+        // Show the "new version" button as if one were out (for screenshots).
+        if let Some(tag) = arg("--pretend-update") {
+            app.updates.newer = Some(tag);
+        }
         if let Some(b) = args.iter().position(|a| a == "--brightness").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f32>().ok()) {
             app.settings.brightness = b.clamp(0.0, 1.0);
         }
@@ -4060,6 +4165,7 @@ async fn game_main() {
             }
         }
         app.frame();
+        app.audio.poll().await;
         frames += 1;
         if let Some(s) = &shot {
             if frames == s.frames {
