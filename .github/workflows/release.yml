@@ -41,6 +41,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release --locked
+        env:
+          MINCERAFT_VERSION: ${{ env.VERSION }}
       - name: Package
         shell: bash
         run: |
@@ -81,4 +83,4 @@ jobs:
             - **Linux:** `minceraft-${{ env.VERSION }}-linux.zip`, then run `./minceraft` (needs the usual X11/GL and ALSA libraries).
             - **macOS:** `minceraft-${{ env.VERSION }}-macos.zip` (Apple silicon). The first time, right-click `minceraft` and choose **Open**.
 
-            Worlds and settings are saved next to the game, in `saves/` and `settings.txt`. See the README for controls and multiplayer.
+            Worlds and settings are kept in your data folder (`%APPDATA%\Minceraft` on Windows), and the first run copies over any `saves` and `settings.txt` found beside the game. See the README for controls and multiplayer.

@@ -41,6 +41,7 @@ mod net;
 mod noise;
 mod pad;
 mod palette;
+mod paths;
 mod player;
 mod playtest;
 mod potions;
@@ -863,10 +864,12 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         self.ui.text_centered("Select World", w / 2.0, h * 0.07, 16.0, WHITE);
+        let dir = std::fs::canonicalize(save::saves_dir()).unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join("saves"));
+        self.ui.text_centered(&format!("Folder: {}", dir.display()), w / 2.0, h * 0.07 + 12.0 * s, 7.0, GRAY);
         let pw = (300.0 * s).min(w * 0.92);
         let x = w / 2.0 - pw / 2.0;
         let row_h = 30.0 * s;
-        let top = h * 0.07 + 10.0 * s;
+        let top = h * 0.07 + 18.0 * s;
         let bottom = h - 56.0 * s;
         let rows = (((bottom - top) / row_h).floor() as usize).max(1);
 
@@ -1490,6 +1493,12 @@ impl App {
             let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
             self.game.world.dirty.extend(all);
         }
+        if light::brightness() != self.settings.brightness {
+            // Light is baked into the chunk meshes, so they all have to be redone.
+            light::set_brightness(self.settings.brightness);
+            let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
+            self.game.world.dirty.extend(all);
+        }
         let in_game = !self.game.menu && self.screen != Screen::Dead;
         self.audio.update_music(dt, in_game);
     }
@@ -1971,11 +1980,12 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let bw = (220.0 * s).min(w * 0.8);
-        let bh = 20.0 * s;
+        // Rows shrink a little on short windows so Done stays on screen.
+        let bh = (20.0 * s).min((h - 95.0 * s) / 11.0);
         let x = w / 2.0 - bw / 2.0;
         let small = bh * 1.3;
-        // Ten rows (and the title above them), centred in whatever room there is.
-        let total = 10.0 * bh + 9.0 * 5.0 * s + 7.0 * s;
+        // Eleven rows (and the title above them), centred in whatever room there is.
+        let total = 11.0 * bh + 10.0 * 5.0 * s + 7.0 * s;
         let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
         self.ui.text_centered("Options", w / 2.0, y - 18.0 * s, 16.0, WHITE);
         let row = |ui: &Ui, label: String, y: f32| -> i32 {
@@ -1997,6 +2007,14 @@ impl App {
         st.fov = (st.fov + 5.0 * row(&self.ui, format!("FOV: {:.0}", st.fov), y) as f32).clamp(50.0, 110.0);
         y += bh + 5.0 * s;
         st.sensitivity = (st.sensitivity + 0.1 * row(&self.ui, format!("Mouse Sensitivity: {:.0}%", st.sensitivity * 100.0), y) as f32).clamp(0.1, 3.0);
+        y += bh + 5.0 * s;
+        let bright = match (st.brightness * 100.0).round() as i32 {
+            0 => "Moody".to_string(),
+            100 => "Bright".to_string(),
+            p => format!("{p}%"),
+        };
+        st.brightness = (st.brightness + 0.1 * row(&self.ui, format!("Brightness: {bright}"), y) as f32).clamp(0.0, 1.0);
+        st.brightness = (st.brightness * 10.0).round() / 10.0;
         y += bh + 5.0 * s;
         let vol = &mut self.audio.volume;
         *vol = (*vol + 0.1 * row(&self.ui, format!("Sound Volume: {:.0}%", *vol * 100.0), y) as f32).clamp(0.0, 1.0);
@@ -2886,19 +2904,24 @@ fn parse_args() -> Option<ShotArgs> {
     })
 }
 
-/// The platform audio backend panics on its own thread when there's no sound device.
-/// Treat that as "no audio" instead of printing a scary backtrace and spamming errors.
-fn install_audio_panic_hook() {
+/// One hook for every panic. A missing or broken sound device panics inside
+/// the audio library, on its own thread and possibly before the game starts:
+/// that just means playing in silence. Anything else prints as usual and
+/// leaves crash.txt behind (in the data folder for the game, see paths.rs).
+fn install_panic_hook() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let name = std::thread::current().name().map(str::to_owned);
-        if name.is_none() {
+        let file = info.location().map(|l| l.file()).unwrap_or("");
+        if file.contains("quad-snd") || file.contains("quad_snd") || file.contains("alsa") {
             if !sound::AUDIO_DEAD.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 eprintln!("Minceraft: no usable audio device ({info}). Continuing in silence.");
             }
             return;
         }
-        default(info)
+        default(info);
+        if let Some(p) = paths::write_crash_report(info) {
+            eprintln!("Minceraft crashed. The details are in {}", p.display());
+        }
     }));
 }
 
@@ -2916,6 +2939,7 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
 }
 
 fn main() {
+    install_panic_hook();
     let args: Vec<String> = std::env::args().collect();
     // Headless modes run before any window (or GPU) is touched.
     if args.iter().any(|a| a == "--server") {
@@ -2932,6 +2956,14 @@ fn main() {
         }
         return;
     }
+    // Screenshot runs stay where they're started; the game proper works in the
+    // player's data folder (see paths.rs).
+    if !args.iter().any(|a| a == "--screenshot") {
+        let (_, notes) = paths::enter_data_dir();
+        for n in notes {
+            eprintln!("Minceraft: {n}");
+        }
+    }
     macroquad::Window::from_config(window_conf(), game_main());
 }
 
@@ -2947,7 +2979,6 @@ async fn game_main() {
     let tex = Texture2D::from_rgba8(texture::ATLAS as u16, texture::ATLAS as u16, &atlas);
     tex.set_filter(FilterMode::Nearest);
 
-    install_audio_panic_hook();
     let audio = Audio::load().await;
 
     let mut shot = parse_args();
@@ -3029,6 +3060,10 @@ async fn game_main() {
     if shot.is_some() {
         app.settings.colour_blind = flag("--colour-blind");
         app.settings.smooth_lighting = !flag("--flat-lighting");
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(b) = args.iter().position(|a| a == "--brightness").and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f32>().ok()) {
+            app.settings.brightness = b.clamp(0.0, 1.0);
+        }
         app.settings.subtitles = flag("--subtitles");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();

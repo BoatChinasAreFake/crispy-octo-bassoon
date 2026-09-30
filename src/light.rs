@@ -123,19 +123,38 @@ pub fn sky_brightness(level: u8) -> f32 {
 }
 
 /// How bright a light level looks on screen (sky and block light alike).
-/// Each step down dims by a steady fraction, like Minecraft's table, then a
-/// gamma lift keeps dim places readable: a cave a few blocks from a torch or
-/// an opening fades out gradually, and even an unlit one is a dim outline
-/// rather than solid black.
+/// Each step down dims by a steady fraction, like Minecraft's table, then the
+/// Brightness option (0: moody, 1: bright) lifts dim places: at the default a
+/// cave a few blocks from a torch or an opening fades out gradually, and even
+/// an unlit one is a dim outline rather than solid black.
 pub fn shade(level: u8) -> f32 {
+    let g = brightness();
     let r = level.min(MAX) as f32 / MAX as f32;
     let b = r / (4.0 - 3.0 * r);
     let lifted = 1.0 - (1.0 - b).powi(4);
-    DARKEST + (1.0 - DARKEST) * (b + (lifted - b) * 0.5)
+    let dark = darkest(g);
+    dark + (1.0 - dark) * (b + (lifted - b) * g)
 }
 
-/// The on-screen brightness of light level 0.
-pub const DARKEST: f32 = 0.08;
+/// The on-screen brightness of light level 0 at a Brightness setting.
+pub fn darkest(brightness: f32) -> f32 {
+    0.03 + 0.1 * brightness.clamp(0.0, 1.0)
+}
+
+/// The default Brightness (Options).
+pub const DEFAULT_BRIGHTNESS: f32 = 0.5;
+
+/// Brightness as f32 bits (read by the mesher threads).
+static BRIGHTNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F00_0000); // 0.5
+
+pub fn brightness() -> f32 {
+    f32::from_bits(BRIGHTNESS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Chunks meshed after this pick up the new setting; the caller re-meshes.
+pub fn set_brightness(b: f32) {
+    BRIGHTNESS.store(b.clamp(0.0, 1.0).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Channel {

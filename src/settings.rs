@@ -32,6 +32,8 @@ pub struct Settings {
     pub waving_leaves: bool,
     pub water_reflections: bool,
     pub smooth_lighting: bool,
+    /// How much dim places are lifted: 0 moody, 1 bright (see light::shade).
+    pub brightness: f32,
 }
 
 impl Default for Settings {
@@ -52,6 +54,7 @@ impl Default for Settings {
             waving_leaves: true,
             water_reflections: true,
             smooth_lighting: true,
+            brightness: crate::light::DEFAULT_BRIGHTNESS,
         }
     }
 }
@@ -69,7 +72,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -84,6 +87,7 @@ impl Settings {
             self.waving_leaves,
             self.water_reflections,
             self.smooth_lighting,
+            self.brightness,
         ) + self.binds.to_text().as_str()
     }
 
@@ -117,6 +121,7 @@ impl Settings {
                 "waving_leaves" => s.waving_leaves = flag(s.waving_leaves),
                 "water_reflections" => s.water_reflections = flag(s.water_reflections),
                 "smooth_lighting" => s.smooth_lighting = flag(s.smooth_lighting),
+                "brightness" => s.brightness = num(s.brightness),
                 k => {
                     s.binds.read(k, v);
                 }
@@ -126,6 +131,7 @@ impl Settings {
         s.fov = s.fov.clamp(50.0, 110.0);
         s.sensitivity = s.sensitivity.clamp(0.1, 3.0);
         s.volume = s.volume.clamp(0.0, 1.0);
+        s.brightness = s.brightness.clamp(0.0, 1.0);
         if s.mp_addr.is_empty() {
             s.mp_addr = Settings::default().mp_addr;
         }
@@ -170,6 +176,7 @@ mod tests {
             waving_leaves: false,
             water_reflections: false,
             smooth_lighting: false,
+            brightness: 0.8,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));
