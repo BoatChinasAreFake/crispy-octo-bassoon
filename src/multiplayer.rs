@@ -42,11 +42,13 @@ pub struct Peer {
     pub skin: u8,
     /// Their game mode (the host decides; see modes.rs).
     pub mode: crate::modes::GameMode,
+    /// Their latest statistics (see stats.rs), kept with the world.
+    pub stats: Vec<u8>,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new() }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -716,6 +718,13 @@ impl Game {
             }
             Msg::CloseContainer { x, y, z } => self.host_close(from, IVec3::new(x, y, z)),
             Msg::Pickup { id, room } => self.host_pickup(from, id, room),
+            Msg::Stats { data } => {
+                if data.len() <= crate::players::MAX_STATS
+                    && let Some(p) = self.peers.get_mut(&from)
+                {
+                    p.stats = data;
+                }
+            }
             Msg::PlayerData { slots, health, food, saturation } => {
                 if self.peer_rate_ok(from, "report", 1.0) {
                     self.host_report(from, slots, health, food, saturation);
@@ -945,6 +954,7 @@ impl Game {
             Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore } => {
                 self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle, hardcore };
             }
+            Msg::Stats { data } => self.stats = crate::stats::Stats::decode(&data),
             Msg::GameMode { mode } => {
                 let mode = crate::modes::GameMode::from_index(mode);
                 self.set_mode(mode);

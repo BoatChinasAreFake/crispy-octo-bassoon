@@ -299,7 +299,14 @@ pub const ROCKET: Id = FIRST_ITEM + 118;
 /// A Soggy Groaner's weapon: hits hard, and can be thrown.
 pub const SPEAR: Id = FIRST_ITEM + 119;
 pub const COPPER_INGOT: Id = FIRST_ITEM + 120;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 121;
+/// Axes and shovels: `+ tier` (wood, stone, copper, iron, dimond; see tools.rs).
+pub const AXE_FIRST: Id = FIRST_ITEM + 121;
+pub const SHOVEL_FIRST: Id = FIRST_ITEM + 126;
+pub const PICK_COPPER: Id = FIRST_ITEM + 131;
+pub const SWORD_COPPER: Id = FIRST_ITEM + 132;
+/// Copper armour: `+ slot` (helmet, chestplate, leggings, boots).
+pub const COPPER_ARMOR_FIRST: Id = FIRST_ITEM + 133;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 137;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -357,16 +364,22 @@ pub const LEGGINGS: usize = 2;
 pub const BOOTS: usize = 3;
 /// Armour points per tier (wool, iron, gold, dimond) and slot. 20 points is
 /// Minecraft's full dimond set; each point takes 4% off most damage.
-pub const ARMOR_POINTS: [[u8; 4]; 4] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3]];
+/// (Row 4 is the Glider's: none; row 5 copper, between gold and iron.)
+pub const ARMOR_POINTS: [[u8; 4]; 6] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3], [0, 0, 0, 0], [2, 5, 4, 2]];
 
 /// The "tier" a worn Glider counts as: no protection, drawn as wings.
 pub const GLIDER_TIER: usize = 4;
+/// Copper armour's tier (after the Glider's, so older tiers keep their numbers).
+pub const COPPER_TIER: usize = 5;
 
 /// (slot, tier) of an armour item.
 /// For mod armour, the tier is the one it looks like when worn.
 pub fn armor_of(id: Id) -> Option<(usize, usize)> {
     if id == GLIDER {
         return Some((CHESTPLATE, GLIDER_TIER));
+    }
+    if (COPPER_ARMOR_FIRST..COPPER_ARMOR_FIRST + 4).contains(&id) {
+        return Some(((id - COPPER_ARMOR_FIRST) as usize, COPPER_TIER));
     }
     if (ARMOR_FIRST..ARMOR_FIRST + 16).contains(&id) {
         return Some((((id - ARMOR_FIRST) % 4) as usize, ((id - ARMOR_FIRST) / 4) as usize));
@@ -377,11 +390,14 @@ pub fn armor_of(id: Id) -> Option<(usize, usize)> {
 /// How many uses a tool, weapon or piece of armour survives (Minecraft's numbers;
 /// wool armour takes leather's). None: it never wears out.
 pub fn durability(id: Id) -> Option<u16> {
-    const ARMOR: [[u16; 4]; 4] = [[55, 80, 75, 65], [165, 240, 225, 195], [77, 112, 105, 91], [363, 528, 495, 429]];
+    const ARMOR: [[u16; 4]; 6] = [[55, 80, 75, 65], [165, 240, 225, 195], [77, 112, 105, 91], [363, 528, 495, 429], [0; 4], [121, 176, 165, 143]];
     match id {
         GLIDER => return Some(432),
         SPEAR => return Some(250),
         _ => {}
+    }
+    if let Some(n) = crate::tools::tool_uses(id) {
+        return Some(n);
     }
     if let Some((slot, tier)) = armor_of(id) {
         return Some(ARMOR[tier][slot]);
@@ -402,7 +418,7 @@ pub fn durability(id: Id) -> Option<u16> {
 
 /// Swords (and mod weapons: things that wear out, hit hard and aren't pickaxes).
 pub fn is_sword(id: Id) -> bool {
-    matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND)
+    matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND | SWORD_COPPER)
         || (id >= FIRST_MOD_ITEM && item_def(id).is_some_and(|i| i.durability.is_some() && i.pick_tier == 0 && i.armor.is_none() && i.damage > 1.0))
 }
 
@@ -1505,6 +1521,20 @@ impl Registry {
         items.push(item("rocket", "Boom Rocket (Glide Faster)", T_ROCKET));
         items.push(ItemDef { stack: 1, damage: 9.0, ..item("spear", "Soggy Spear (Pointy, Throwable)", T_SPEAR) });
         items.push(item("copper_ingot", "Copper Ingot (Penny-Adjacent)", T_COPPER_INGOT));
+        for (t, (k, n)) in crate::tools::TIER_NAMES.iter().enumerate() {
+            let damage = [3.5, 4.5, 5.0, 5.5, 6.5][t];
+            items.push(ItemDef { stack: 1, damage, ..item(leak(&format!("{k}_axe")), leak(&format!("{n} Axe (Chop Chop)")), T_AXE0 + t as u16) });
+        }
+        for (t, (k, n)) in crate::tools::TIER_NAMES.iter().enumerate() {
+            let damage = [2.5, 3.5, 4.0, 4.5, 5.5][t];
+            items.push(ItemDef { stack: 1, damage, ..item(leak(&format!("{k}_shovel")), leak(&format!("{n} Shovel (Dig It)")), T_SHOVEL0 + t as u16) });
+        }
+        items.push(ItemDef { stack: 1, pick_tier: 2, damage: 3.5, ..item("copper_pickaxe", "Copper Pickaxe (Between Stone and Iron)", T_PICK_COPPER) });
+        items.push(ItemDef { stack: 1, damage: 5.5, ..item("copper_sword", "Copper Sword (Tarnishes Beautifully)", T_SWORD_COPPER) });
+        for (slot, name) in ["Copper Helmet (Penny Hat)", "Copper Chestplate (Very Conductive)", "Copper Leggings (Clanky)", "Copper Boots (Squeaky)"].into_iter().enumerate() {
+            let key = ["copper_helmet", "copper_chestplate", "copper_leggings", "copper_boots"][slot];
+            items.push(ItemDef { stack: 1, ..item(key, name, T_COPPER_ARMOR_ITEMS + slot as u16) });
+        }
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1628,6 +1658,16 @@ impl Registry {
         for (m, (full, _)) in MATERIALS.iter().enumerate() {
             recipes.push(r(&[(*full, 3)], (slab(m, false), 6)));
             recipes.push(r(&[(*full, 6)], (stairs(m, 0), 4)));
+        }
+        // Axes and shovels of every tier, and copper everything.
+        for (t, material) in [PLANKS, COBBLE, COPPER_INGOT, IRON, DIAMOND].into_iter().enumerate() {
+            recipes.push(r(&[(material, 3), (STICK, 2)], (AXE_FIRST + t as Id, 1)));
+            recipes.push(r(&[(material, 1), (STICK, 2)], (SHOVEL_FIRST + t as Id, 1)));
+        }
+        recipes.push(r(&[(COPPER_INGOT, 3), (STICK, 2)], (PICK_COPPER, 1)));
+        recipes.push(r(&[(COPPER_INGOT, 2), (STICK, 1)], (SWORD_COPPER, 1)));
+        for (slot, n) in [5, 8, 7, 4].into_iter().enumerate() {
+            recipes.push(r(&[(COPPER_INGOT, n)], (COPPER_ARMOR_FIRST + slot as Id, 1)));
         }
         // Gliding, boxes, copper and bamboo.
         recipes.push(r(&[(GUNPOWDER, 1), (STRING, 1)], (ROCKET, 3)));
@@ -1806,16 +1846,19 @@ pub fn break_time_with(id: Id, held: Id, efficiency: u8) -> (f32, bool) {
     if b.hardness < 0.0 {
         return (f32::INFINITY, false);
     }
+    let bonus = if efficiency > 0 { (efficiency as f32).powi(2) + 1.0 } else { 0.0 };
     if !b.pick_block {
-        return (b.hardness, true);
+        // Axes for wood, shovels for earth (see tools.rs).
+        return match crate::tools::best_tool(id).and_then(|kind| crate::tools::speed(held, kind)) {
+            Some(speed) => (b.hardness * 1.5 / (speed + bonus), true),
+            None => (b.hardness, true),
+        };
     }
     let tier = pick_tier(held);
-    if tier == 0 {
+    let Some(speed) = crate::tools::speed(held, crate::tools::Tool::Pick) else {
         return (b.hardness * 5.0, b.pick_tier == 0);
-    }
-    let bonus = if efficiency > 0 { (efficiency as f32).powi(2) + 1.0 } else { 0.0 };
-    let speed = [1.0, 2.0, 4.0, 6.0, 8.0][tier as usize] + bonus;
-    (b.hardness * 1.5 / speed, tier >= b.pick_tier)
+    };
+    (b.hardness * 1.5 / (speed + bonus), tier >= b.pick_tier)
 }
 
 /// Damage with Sharpness `sharpness`.

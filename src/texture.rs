@@ -331,6 +331,14 @@ pub const T_SOGGY_FACE: u16 = 417;
 pub const T_SOGGY_SHIRT: u16 = 418;
 pub const T_SOGGY_PANTS: u16 = 419;
 pub const T_FISHY_FIN: u16 = 420;
+/// Axes and shovels by tier (wood, stone, copper, iron, dimond).
+pub const T_AXE0: u16 = 421;
+pub const T_SHOVEL0: u16 = 426;
+pub const T_PICK_COPPER: u16 = 431;
+pub const T_SWORD_COPPER: u16 = 432;
+/// Copper armour items (helmet .. boots), and how it looks when worn.
+pub const T_COPPER_ARMOR_ITEMS: u16 = 433;
+pub const T_COPPER_ARMOR_WORN: u16 = 437;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3266,8 +3274,69 @@ const INGOT_SPRITE: [&str; 16] = [
     "................",
 ];
 
+const AXE: [&str; 16] = [
+    "................",
+    "......hhh.......",
+    ".....hHHHh##....",
+    "....hHHHHh#o#...",
+    "....hHHHHho#....",
+    ".....hHHho#.....",
+    "......hh#o#.....",
+    ".......#o#......",
+    "......#o#.......",
+    ".....#o#........",
+    "....#o#.........",
+    "...#o#..........",
+    "..#o#...........",
+    ".#o#............",
+    ".##.............",
+    "................",
+];
+
+const SHOVEL: [&str; 16] = [
+    "................",
+    "..........hhh...",
+    ".........hHHHh..",
+    "........hHHHHh..",
+    "........hHHHh...",
+    ".........hHh....",
+    "........#o#.....",
+    ".......#o#......",
+    "......#o#.......",
+    ".....#o#........",
+    "....#o#.........",
+    "...#o#..........",
+    "..#o#...........",
+    "..##............",
+    "................",
+    "................",
+];
+
 /// Everything added for gliders, boxes, copper, bamboo and the sea.
 fn paint_new_things(a: &mut Atlas) {
+    // Axes and shovels in five tiers, copper tools and armour.
+    let wood = (rgb(170, 135, 82), rgb(110, 85, 50));
+    let copper = (rgb(230, 140, 90), rgb(160, 80, 45));
+    let tiers = [wood, (rgb(150, 150, 150), rgb(90, 90, 90)), copper, (rgb(235, 235, 235), rgb(160, 160, 160)), (rgb(90, 240, 225), rgb(30, 160, 150))];
+    for (i, (light, dark)) in tiers.iter().enumerate() {
+        let pal = [('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('H', *light), ('h', *dark), ('g', rgb(73, 54, 21))];
+        a.sprite(T_AXE0 + i as u16, &AXE, &pal);
+        a.sprite(T_SHOVEL0 + i as u16, &SHOVEL, &pal);
+        if i == 2 {
+            a.sprite(T_PICK_COPPER, &PICK, &pal);
+            a.sprite(T_SWORD_COPPER, &SWORD, &pal);
+        }
+    }
+    let base = rgb(215, 125, 80);
+    let pal = [('#', shade(base, 0.3)), ('b', base), ('d', shade(base, 0.72)), ('h', shade(base, 1.2))];
+    for (slot, rows) in [&HELMET, &CHESTPLATE, &LEGGINGS, &BOOTS].into_iter().enumerate() {
+        a.sprite(T_COPPER_ARMOR_ITEMS + slot as u16, rows, &pal);
+    }
+    a.each(T_COPPER_ARMOR_WORN, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let green = (x * 7 + y * 3) % 13 == 0;
+        shade(if green { rgb(110, 160, 120) } else { base }, r.range(0.9, 1.05) * if rim { 0.7 } else { 1.0 })
+    });
     // The Hollow Box: pale purple shell with a darker seam around its lid.
     a.each(T_HOLLOW_BOX_SIDE, |x, y, r, _| {
         let seam = y == 5 || y == 6;

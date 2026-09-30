@@ -588,7 +588,7 @@ impl Game {
             FEATHER => "why_cross",
             MOO_STEAK => "udderly",
             TABLE => "benchmarking",
-            PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND => "tool_time",
+            PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND | PICK_COPPER => "tool_time",
             BAMBOO => "bamboozled",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
             _ => return,

@@ -20,6 +20,14 @@ use macroquad::math::{Mat4, Vec3};
 pub const DESPAWN_SECS: f32 = 300.0;
 /// How close (from the middle of a player) an item has to be to be picked up.
 pub const PICKUP_RANGE: f32 = 1.5;
+
+/// How far an item at `item` is from a player standing at `feet`: from the
+/// nearest point between their feet and head, so things a step below (or on
+/// a ledge by your head) are as easy to reach as things at chest height.
+pub fn reach(feet: Vec3, item: Vec3) -> f32 {
+    let y = item.y.clamp(feet.y, feet.y + 1.8);
+    item.distance(Vec3::new(feet.x, y, feet.z))
+}
 /// Items thrown with Q can't be picked up again straight away.
 pub const THROW_DELAY: f32 = 1.5;
 /// Anything else (block and mob drops) waits this long, so you see it pop out.
@@ -265,14 +273,14 @@ impl Game {
             self.drop_timer = 0.0;
             merge(&mut self.drops);
         }
-        // The local player walks into things.
-        if self.dedicated || self.menu || self.dead.is_some() {
+        // The local player walks into things (spectators just pass through).
+        if self.dedicated || self.menu || self.dead.is_some() || self.spectator {
             return;
         }
-        let me = self.player.body.pos + Vec3::Y * 0.9;
+        let me = self.player.body.pos;
         let mut got = Vec::new();
         for d in self.drops.iter_mut() {
-            if !d.can_pick_up() || d.body.pos.distance(me) > PICKUP_RANGE {
+            if !d.can_pick_up() || reach(me, d.body.pos) > PICKUP_RANGE {
                 continue;
             }
             let room = self.inv.room_for(d.item).min(d.n as u32) as u8;
@@ -300,11 +308,11 @@ impl Game {
 
     /// A joined player asks for a drop they walked into.
     pub fn host_pickup(&mut self, from: u32, id: u32, room: u8) {
-        let Some(me) = self.peers.get(&from).filter(|p| p.alive()).map(|p| p.target + Vec3::Y * 0.9) else { return };
+        let Some(me) = self.peers.get(&from).filter(|p| p.alive()).map(|p| p.target) else { return };
         let Some(i) = self.drops.iter().position(|d| d.id == id) else { return };
         let d = &mut self.drops[i];
         // A little extra reach for lag.
-        if !d.can_pick_up() || d.body.pos.distance(me) > PICKUP_RANGE + 2.0 || room == 0 {
+        if !d.can_pick_up() || reach(me, d.body.pos) > PICKUP_RANGE + 2.0 || room == 0 {
             return;
         }
         let n = room.min(d.n);
@@ -351,14 +359,14 @@ impl Game {
 
     /// Joined players: glide toward the host's positions, and ask for anything we walk into.
     pub fn client_drops(&mut self, dt: f32) {
-        let me = self.player.body.pos + Vec3::Y * 0.9;
-        let alive = self.dead.is_none();
+        let me = self.player.body.pos;
+        let alive = self.dead.is_none() && !self.spectator;
         let mut asks = Vec::new();
         for d in self.drops.iter_mut() {
             let k = (dt * 12.0).min(1.0);
             d.body.pos += (d.net_pos - d.body.pos) * k;
             d.asked = (d.asked - dt).max(0.0);
-            if alive && d.asked <= 0.0 && d.body.pos.distance(me) <= PICKUP_RANGE {
+            if alive && d.asked <= 0.0 && reach(me, d.body.pos) <= PICKUP_RANGE {
                 let room = self.inv.room_for(d.item).min(64) as u8;
                 if room > 0 {
                     d.asked = 0.5;
@@ -403,6 +411,16 @@ fn merge(drops: &mut Vec<ItemDrop>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reach_counts_from_feet_to_head() {
+        let feet = Vec3::new(0.0, 10.0, 0.0);
+        // A step down, right beside you: in reach.
+        assert!(reach(feet, Vec3::new(0.8, 9.0, 0.0)) <= PICKUP_RANGE);
+        assert!(reach(feet, Vec3::new(1.0, 11.0, 0.0)) <= PICKUP_RANGE);
+        assert!(reach(feet, Vec3::new(2.0, 10.0, 0.0)) > PICKUP_RANGE);
+        assert!(reach(feet, Vec3::new(0.0, 13.5, 0.0)) > PICKUP_RANGE);
+    }
+
     use super::*;
 
     #[test]

@@ -70,6 +70,7 @@ mod villagers;
 mod sound;
 mod stats;
 mod texture;
+mod tools;
 mod ui;
 mod weather;
 mod wiring;
@@ -4007,6 +4008,10 @@ async fn game_main() {
                 app.game.inv.slots[3] = Some((block::COPPER_INGOT, 12));
                 app.game.inv.slots[4] = Some((block::HOLLOW_BOX, 1));
                 app.game.inv.slots[5] = Some((block::BAMBOO, 32));
+                app.game.inv.slots[6] = Some((block::AXE_FIRST + 2, 1));
+                app.game.inv.slots[7] = Some((block::SHOVEL_FIRST + 4, 1));
+                app.game.inv.slots[8] = Some((block::PICK_COPPER, 1));
+                app.game.inv.selected = 6;
             }
             if s.mode == "glider" && frames == 125 {
                 // Soaring: worn Glider, seen from behind.

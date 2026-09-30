@@ -1355,11 +1355,14 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, anim: f32, sky: f32,
     let mut parts = Vec::new();
     let mut add = |slot: usize, list: &[ArmorPiece]| {
         let t = tier(slot);
-        if t == 0 || t > 4 {
-            return;
-        }
+        let tile = match t as usize {
+            1..=4 => T_ARMOR_WORN + t - 1,
+            t if t == COPPER_TIER + 1 => T_COPPER_ARMOR_WORN,
+            // Nothing, or a Glider (drawn below).
+            _ => return,
+        };
         for &(min, size, pivot, limb) in list {
-            parts.push(part(min, size, pivot, limb, [T_ARMOR_WORN + t - 1; 6]));
+            parts.push(part(min, size, pivot, limb, [tile; 6]));
         }
     };
     let arm = [0.0, 1.4, 0.0];

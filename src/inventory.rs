@@ -29,7 +29,8 @@ pub fn max_uses(item: Id, w: Wear) -> Option<u32> {
 
 /// Items that remember their wear: tools, weapons, armour, and enchanted books.
 pub fn keeps_wear(item: Id) -> bool {
-    durability(item).is_some() || item == ENCHANTED_BOOK
+    // A Hollow Box's wear says where its contents are (see boxes.rs).
+    durability(item).is_some() || item == ENCHANTED_BOOK || item == HOLLOW_BOX
 }
 
 /// Keep only what makes sense for `item` (saves and other players can't be trusted).

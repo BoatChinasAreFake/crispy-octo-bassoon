@@ -63,7 +63,7 @@ impl Enchant {
         if item == BOOK || item == ENCHANTED_BOOK {
             return true;
         }
-        let pick = pick_tier(item) > 0;
+        let pick = pick_tier(item) > 0 || crate::tools::is_digger(item);
         match self {
             Enchant::Efficiency | Enchant::Fortune => pick,
             Enchant::Sharpness => is_sword(item),
