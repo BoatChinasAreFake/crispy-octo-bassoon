@@ -192,7 +192,46 @@ pub const BAMBOO_STAIRS: Id = 331;
 /// Coral blocks: tube, brain, bubble, fire; and what they become out of water.
 pub const CORAL_FIRST: Id = 335;
 pub const DEAD_CORAL: Id = 339;
-pub const NUM_BLOCKS: Id = 340;
+/// Beekeeping (see bees.rs): wild nests, crafted hives (empty, busy, full of honey).
+pub const BEE_NEST: Id = 340;
+pub const BEE_NEST_HONEY: Id = 341;
+pub const BEEHIVE: Id = 342;
+pub const BEEHIVE_BUSY: Id = 343;
+pub const BEEHIVE_HONEY: Id = 344;
+pub const HONEY_BLOCK: Id = 345;
+/// More flowers, for the bees (each makes its own honey).
+pub const DANDELION: Id = 346;
+pub const CORNFLOWER: Id = 347;
+pub const LAVENDER: Id = 348;
+/// An ancient flower grown from seeds dug up by archaeologists.
+pub const TORCHFLOWER_SPROUT: Id = 349;
+pub const TORCHFLOWER: Id = 350;
+/// What a Ribbit leaves after eating a small Bloop: colour by climate (see critters.rs).
+pub const FROGLIGHT_FIRST: Id = 351;
+/// The Deep Dark (see deepdark.rs).
+pub const DEEPSLATE: Id = 354;
+pub const COBBLED_DEEPSLATE: Id = 355;
+pub const DEEPSLATE_BRICKS: Id = 356;
+pub const DEEPSLATE_TILES: Id = 357;
+pub const REINFORCED_DEEPSLATE: Id = 358;
+pub const SCULK: Id = 359;
+pub const SCULK_SENSOR: Id = 360;
+pub const SCULK_SENSOR_ACTIVE: Id = 361;
+pub const SCULK_SHRIEKER: Id = 362;
+pub const SCULK_CATALYST: Id = 363;
+pub const SOUL_LANTERN: Id = 364;
+/// Archaeology (see archaeology.rs).
+pub const SUSPICIOUS_SAND: Id = 365;
+pub const SUSPICIOUS_GRAVEL: Id = 366;
+pub const RESTORATION_BENCH: Id = 367;
+/// Decorated pots: plain, then one per shard design.
+pub const POT_FIRST: Id = 368;
+/// Grinding and smithing (see smithing.rs).
+pub const GRINDSTONE: Id = 381;
+pub const SMITHING_TABLE: Id = 382;
+/// Deep in the Scorchlands: where Scorchite comes from.
+pub const OLD_DEBRIS: Id = 383;
+pub const NUM_BLOCKS: Id = 384;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -306,7 +345,42 @@ pub const PICK_COPPER: Id = FIRST_ITEM + 131;
 pub const SWORD_COPPER: Id = FIRST_ITEM + 132;
 /// Copper armour: `+ slot` (helmet, chestplate, leggings, boots).
 pub const COPPER_ARMOR_FIRST: Id = FIRST_ITEM + 133;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 137;
+/// Honey bottles, one per flavour (see `bees::Flavour`).
+pub const HONEY_FIRST: Id = FIRST_ITEM + 137;
+pub const HONEYCOMB: Id = FIRST_ITEM + 142;
+pub const BEE_SMOKER: Id = FIRST_ITEM + 143;
+pub const HIVE_TOOL: Id = FIRST_ITEM + 144;
+/// A queen in a jar (her temperament rides in the wear, like a box's number).
+pub const QUEEN_BEE: Id = FIRST_ITEM + 145;
+/// Dug up at a dig site (see archaeology.rs); grows a Torchflower.
+pub const TORCHFLOWER_SEEDS: Id = FIRST_ITEM + 146;
+/// A Rollo's shed shell plate, and armour for a tame Woofer made of them.
+pub const SCUTE: Id = FIRST_ITEM + 147;
+pub const WOLF_ARMOR: Id = FIRST_ITEM + 148;
+/// Archaeology (see archaeology.rs).
+pub const BRUSH: Id = FIRST_ITEM + 149;
+pub const DIAMOND_BRUSH: Id = FIRST_ITEM + 150;
+pub const FIELD_JOURNAL: Id = FIRST_ITEM + 151;
+/// Twelve pottery shards, then twelve relics.
+pub const SHARD_FIRST: Id = FIRST_ITEM + 152;
+pub const RELIC_FIRST: Id = FIRST_ITEM + 164;
+pub const ENCRUSTED_RELIC: Id = FIRST_ITEM + 176;
+pub const MAP_FRAGMENT: Id = FIRST_ITEM + 177;
+pub const ANCIENT_COIN: Id = FIRST_ITEM + 178;
+pub const CLAY_TABLET: Id = FIRST_ITEM + 179;
+/// The Deep Dark's treasures (see deepdark.rs).
+pub const ECHO_SHARD: Id = FIRST_ITEM + 180;
+pub const RECOVERY_COMPASS: Id = FIRST_ITEM + 181;
+/// The top tier (see smithing.rs).
+pub const SCORCHITE_SCRAP: Id = FIRST_ITEM + 182;
+pub const SCORCHITE_INGOT: Id = FIRST_ITEM + 183;
+pub const UPGRADE_TEMPLATE: Id = FIRST_ITEM + 184;
+pub const PICK_SCORCHITE: Id = FIRST_ITEM + 185;
+pub const SWORD_SCORCHITE: Id = FIRST_ITEM + 186;
+pub const AXE_SCORCHITE: Id = FIRST_ITEM + 187;
+pub const SHOVEL_SCORCHITE: Id = FIRST_ITEM + 188;
+pub const SCORCHITE_ARMOR_FIRST: Id = FIRST_ITEM + 189;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 193;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -365,12 +439,14 @@ pub const BOOTS: usize = 3;
 /// Armour points per tier (wool, iron, gold, dimond) and slot. 20 points is
 /// Minecraft's full dimond set; each point takes 4% off most damage.
 /// (Row 4 is the Glider's: none; row 5 copper, between gold and iron.)
-pub const ARMOR_POINTS: [[u8; 4]; 6] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3], [0, 0, 0, 0], [2, 5, 4, 2]];
+pub const ARMOR_POINTS: [[u8; 4]; 7] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3], [0, 0, 0, 0], [2, 5, 4, 2], [3, 8, 6, 3]];
 
 /// The "tier" a worn Glider counts as: no protection, drawn as wings.
 pub const GLIDER_TIER: usize = 4;
 /// Copper armour's tier (after the Glider's, so older tiers keep their numbers).
 pub const COPPER_TIER: usize = 5;
+/// Scorchite armour's row (see smithing.rs).
+pub const SCORCHITE_TIER: usize = 6;
 
 /// (slot, tier) of an armour item.
 /// For mod armour, the tier is the one it looks like when worn.
@@ -381,6 +457,9 @@ pub fn armor_of(id: Id) -> Option<(usize, usize)> {
     if (COPPER_ARMOR_FIRST..COPPER_ARMOR_FIRST + 4).contains(&id) {
         return Some(((id - COPPER_ARMOR_FIRST) as usize, COPPER_TIER));
     }
+    if (SCORCHITE_ARMOR_FIRST..SCORCHITE_ARMOR_FIRST + 4).contains(&id) {
+        return Some(((id - SCORCHITE_ARMOR_FIRST) as usize, SCORCHITE_TIER));
+    }
     if (ARMOR_FIRST..ARMOR_FIRST + 16).contains(&id) {
         return Some((((id - ARMOR_FIRST) % 4) as usize, ((id - ARMOR_FIRST) / 4) as usize));
     }
@@ -390,10 +469,13 @@ pub fn armor_of(id: Id) -> Option<(usize, usize)> {
 /// How many uses a tool, weapon or piece of armour survives (Minecraft's numbers;
 /// wool armour takes leather's). None: it never wears out.
 pub fn durability(id: Id) -> Option<u16> {
-    const ARMOR: [[u16; 4]; 6] = [[55, 80, 75, 65], [165, 240, 225, 195], [77, 112, 105, 91], [363, 528, 495, 429], [0; 4], [121, 176, 165, 143]];
+    const ARMOR: [[u16; 4]; 7] = [[55, 80, 75, 65], [165, 240, 225, 195], [77, 112, 105, 91], [363, 528, 495, 429], [0; 4], [121, 176, 165, 143], [407, 592, 555, 481]];
     match id {
         GLIDER => return Some(432),
         SPEAR => return Some(250),
+        BRUSH => return Some(64),
+        DIAMOND_BRUSH => return Some(256),
+        BEE_SMOKER => return Some(64),
         _ => {}
     }
     if let Some(n) = crate::tools::tool_uses(id) {
@@ -418,13 +500,13 @@ pub fn durability(id: Id) -> Option<u16> {
 
 /// Swords (and mod weapons: things that wear out, hit hard and aren't pickaxes).
 pub fn is_sword(id: Id) -> bool {
-    matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND | SWORD_COPPER)
+    matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND | SWORD_COPPER | SWORD_SCORCHITE)
         || (id >= FIRST_MOD_ITEM && item_def(id).is_some_and(|i| i.durability.is_some() && i.pick_tier == 0 && i.armor.is_none() && i.damage > 1.0))
 }
 
 /// Wear from breaking a block with `held` (swords aren't meant for digging).
 pub fn dig_wear(held: Id, broken: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || held == SHIELD || block(broken).hardness <= 0.0 {
+    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, SHIELD | BRUSH | DIAMOND_BRUSH | BEE_SMOKER) || block(broken).hardness <= 0.0 {
         return 0;
     }
     if is_sword(held) { 2 } else { 1 }
@@ -432,7 +514,7 @@ pub fn dig_wear(held: Id, broken: Id) -> u16 {
 
 /// Wear from hitting a mob with `held` (anything but a sword is a clumsy weapon).
 pub fn hit_wear(held: Id) -> u16 {
-    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS | SHIELD | SPARKER) {
+    if durability(held).is_none() || armor_of(held).is_some() || matches!(held, BOW | ROD | SHEARS | SHIELD | SPARKER | BRUSH | DIAMOND_BRUSH | BEE_SMOKER) {
         return 0;
     }
     if is_sword(held) { 1 } else { 2 }
@@ -983,7 +1065,7 @@ impl Registry {
             def("snowy_grass", "Snowy Grass", Cube, true, true, [T_SNOW, T_SNOW_SIDE, T_DIRT], 0.6, 0, false, DIRT, 0.0, S_GRASS),
             def("bricks", "Bricks", Cube, true, true, [T_BRICK; 3], 2.0, 1, true, BRICK, 0.0, S_STONE),
             def("tnt", "TNT (Totally Not Trouble)", Cube, true, true, [T_TNT_TOP, T_TNT_SIDE, T_TNT_BOTTOM], 0.0, 0, false, TNT, 0.0, S_GRASS),
-            def("crafting_table", "Decorative Crafting Table", Cube, true, true, [T_TABLE_TOP, T_TABLE_SIDE, T_PLANKS], 2.5, 0, false, TABLE, 0.0, S_WOOD),
+            def("crafting_table", "Crafting Table (No Longer Decorative)", Cube, true, true, [T_TABLE_TOP, T_TABLE_SIDE, T_PLANKS], 2.5, 0, false, TABLE, 0.0, S_WOOD),
             def("glowrock", "Glowrock", Cube, true, true, [T_GLOW; 3], 0.3, 0, false, GLOWROCK, 11.0, S_STONE),
             def("torch", "Torch", Cross, false, false, [T_TORCH; 3], 0.0, 0, false, TORCH, 8.0, S_WOOD),
             def("flower", "Poppy-ish", Cross, false, false, [T_FLOWER; 3], 0.0, 0, false, FLOWER, 0.0, S_GRASS),
@@ -1379,11 +1461,82 @@ impl Registry {
             blocks.push(def(key, name, Cube, true, true, [T_CORAL + i as u16; 3], 1.5, 1, true, CORAL_FIRST + i as Id, 0.0, S_STONE));
         }
         blocks.push(def("dead_coral_block", "Dead Coral Block (Needed Water)", Cube, true, true, [T_DEAD_CORAL; 3], 1.5, 1, true, DEAD_CORAL, 0.0, S_STONE));
+        // Bees. Nests and hives drop what the colony decides (see bees.rs).
+        for (key, name, side, creative) in [("bee_nest", "Bee Nest (Occupied, Buzzing)", T_NEST_SIDE, true), ("bee_nest_honey", "Bee Nest (Dripping Honey)", T_NEST_HONEY_SIDE, false)] {
+            let mut d = def(key, name, Cube, true, true, [T_NEST_TOP, side, T_NEST_TOP], 0.3, 0, false, AIR, 0.0, S_WOOD);
+            d.creative = creative;
+            blocks.push(d);
+        }
+        for (key, name, side, creative) in [
+            ("beehive", "Beehive (Vacancies Available)", T_HIVE_SIDE, true),
+            ("beehive_busy", "Beehive (Occupied)", T_HIVE_BUSY_SIDE, false),
+            ("beehive_honey", "Beehive (Full of Honey)", T_HIVE_HONEY_SIDE, false),
+        ] {
+            let mut d = def(key, name, Cube, true, true, [T_HIVE_TOP, side, T_HIVE_TOP], 0.6, 0, false, BEEHIVE, 0.0, S_WOOD);
+            d.creative = creative;
+            blocks.push(d);
+        }
+        let mut honey = def("honey_block", "Honey Block (Sticky Situation)", Cube, true, false, [T_HONEY_BLOCK_TOP, T_HONEY_BLOCK_SIDE, T_HONEY_BLOCK_TOP], 0.2, 0, false, HONEY_BLOCK, 0.0, S_GRASS);
+        honey.speed = 0.4;
+        honey.see_through = true;
+        blocks.push(honey);
+        blocks.push(def("dandelion", "Dandelion (Sunny Disposition)", Cross, false, false, [T_DANDELION; 3], 0.0, 0, false, DANDELION, 0.0, S_GRASS));
+        blocks.push(def("cornflower", "Cornflower (Suspiciously Blue)", Cross, false, false, [T_CORNFLOWER; 3], 0.0, 0, false, CORNFLOWER, 0.0, S_GRASS));
+        blocks.push(def("lavender", "Lavender (Smells Calming)", Cross, false, false, [T_LAVENDER; 3], 0.0, 0, false, LAVENDER, 0.0, S_GRASS));
+        let mut sprout = def("torchflower_sprout", "Torchflower Sprout (Very Old Seed)", Cross, false, false, [T_TORCH_SPROUT; 3], 0.0, 0, false, TORCHFLOWER_SEEDS, 0.0, S_GRASS);
+        sprout.creative = false;
+        blocks.push(sprout);
+        blocks.push(def("torchflower", "Torchflower (Ancient, Glowing)", Cross, false, false, [T_TORCHFLOWER; 3], 0.0, 0, false, TORCHFLOWER, 9.0, S_GRASS));
+        for (i, (key, name)) in [("ochre_froglight", "Ochre Froglight (Warm Glow)"), ("verdant_froglight", "Verdant Froglight (Cool Glow)"), ("pearlescent_froglight", "Pearlescent Froglight (Fancy Glow)")].into_iter().enumerate() {
+            blocks.push(def(key, name, Cube, true, true, [T_FROGLIGHT + i as u16; 3], 0.3, 0, false, FROGLIGHT_FIRST + i as Id, 15.0, S_GRASS));
+        }
+        // The Deep Dark.
+        let mut deepslate = def("deepslate", "Deepslate (Stone, But Moody)", Cube, true, true, [T_DEEPSLATE_TOP, T_DEEPSLATE, T_DEEPSLATE_TOP], 3.0, 1, true, COBBLED_DEEPSLATE, 0.0, S_STONE);
+        deepslate.creative = true;
+        blocks.push(deepslate);
+        blocks.push(def("cobbled_deepslate", "Cobbled Deepslate (Moody Rubble)", Cube, true, true, [T_COBBLED_DEEPSLATE; 3], 3.5, 1, true, COBBLED_DEEPSLATE, 0.0, S_STONE));
+        blocks.push(def("deepslate_bricks", "Deepslate Bricks (Very Serious)", Cube, true, true, [T_DEEPSLATE_BRICKS; 3], 3.5, 1, true, DEEPSLATE_BRICKS, 0.0, S_STONE));
+        blocks.push(def("deepslate_tiles", "Deepslate Tiles (Tidy Gloom)", Cube, true, true, [T_DEEPSLATE_TILES; 3], 3.5, 1, true, DEEPSLATE_TILES, 0.0, S_STONE));
+        let mut reinforced = def("reinforced_deepslate", "Reinforced Deepslate (Absolutely Not)", Cube, true, true, [T_REINFORCED_TOP, T_REINFORCED_SIDE, T_REINFORCED_TOP], -1.0, 0, false, AIR, 0.0, S_STONE);
+        reinforced.creative = true;
+        blocks.push(reinforced);
+        blocks.push(def("sculk", "Sculk (Squishy, Listening)", Cube, true, true, [T_SCULK; 3], 0.6, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("sculk_sensor", "Sculk Sensor (Heard That)", Cube, true, true, [T_SENSOR_TOP, T_SENSOR_SIDE, T_SCULK], 1.5, 0, false, SCULK_SENSOR, 1.0, S_GRASS));
+        let mut active = def("sculk_sensor_active", "Sculk Sensor (Definitely Heard That)", Cube, true, true, [T_SENSOR_ACTIVE_TOP, T_SENSOR_SIDE, T_SCULK], 1.5, 0, false, SCULK_SENSOR, 8.0, S_GRASS);
+        active.creative = false;
+        blocks.push(active);
+        blocks.push(def("sculk_shrieker", "Sculk Shrieker (Do Not Wake)", Cube, true, true, [T_SHRIEKER_TOP, T_SHRIEKER_SIDE, T_SCULK], 3.0, 0, false, SCULK_SHRIEKER, 0.0, S_GRASS));
+        blocks.push(def("sculk_catalyst", "Sculk Catalyst (Feeds on Endings)", Cube, true, true, [T_CATALYST_TOP, T_CATALYST_SIDE, T_SCULK], 3.0, 0, false, SCULK_CATALYST, 6.0, S_GRASS));
+        let mut soul = def("soul_lantern", "Soul Lantern (Spooky Blue)", Cube, true, false, [T_SOUL_LANTERN; 3], 0.8, 0, false, SOUL_LANTERN, 10.0, S_GLASS);
+        soul.see_through = true;
+        blocks.push(soul);
+        // Archaeology.
+        blocks.push(def("suspicious_sand", "Suspicious Sand (Brush, Don't Dig)", Cube, true, true, [T_SUS_SAND; 3], 0.5, 0, false, SAND, 0.0, S_SAND));
+        blocks.push(def("suspicious_gravel", "Suspicious Gravel (Brush, Don't Dig)", Cube, true, true, [T_SUS_GRAVEL; 3], 0.6, 0, false, GRAVEL, 0.0, S_SAND));
+        blocks.push(def("restoration_bench", "Restoration Bench (Patience Required)", Cube, true, true, [T_BENCH_TOP, T_BENCH_SIDE, T_PLANKS], 2.5, 0, false, RESTORATION_BENCH, 0.0, S_WOOD));
+        for i in 0..13usize {
+            let key = if i == 0 { "decorated_pot".to_string() } else { format!("decorated_pot_{}", crate::archaeology::SHARDS[i - 1].0) };
+            let name = if i == 0 { "Decorated Pot (Plain, Tasteful)".to_string() } else { format!("Decorated Pot ({})", crate::archaeology::SHARDS[i - 1].1) };
+            let mut d = def(leak(&key), leak(&name), Shaped, true, false, [T_POT_TOP, T_POT_SIDE_FIRST + i as u16, T_POT_TOP], 0.1, 0, false, AIR, 0.0, S_STONE);
+            d.shape = Shape::Table;
+            blocks.push(d);
+        }
+        let mut grind = def("grindstone", "Grindstone (Unenchanting Since Forever)", Shaped, true, false, [T_GRINDSTONE_TOP, T_GRINDSTONE_SIDE, T_PLANKS], 2.0, 1, true, GRINDSTONE, 0.0, S_STONE);
+        grind.shape = Shape::Table;
+        blocks.push(grind);
+        blocks.push(def("smithing_table", "Smithing Table (Hammer Time)", Cube, true, true, [T_SMITHING_TOP, T_SMITHING_SIDE, T_PLANKS], 2.5, 0, false, SMITHING_TABLE, 0.0, S_WOOD));
+        blocks.push(def("old_debris", "Old Debris (Ancient, Stubborn)", Cube, true, true, [T_OLD_DEBRIS_TOP, T_OLD_DEBRIS_SIDE, T_OLD_DEBRIS_TOP], 15.0, 3, true, OLD_DEBRIS, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[HOLLOW_BOX as usize].key, "hollow_box");
+        debug_assert_eq!(blocks[FROGLIGHT_FIRST as usize].key, "ochre_froglight");
+        debug_assert_eq!(blocks[DEEPSLATE as usize].key, "deepslate");
+        debug_assert_eq!(blocks[SUSPICIOUS_SAND as usize].key, "suspicious_sand");
+        debug_assert_eq!(blocks[GRINDSTONE as usize].key, "grindstone");
         debug_assert_eq!(blocks[WAXED_COPPER_FIRST as usize].key, "waxed_copper_block");
         debug_assert_eq!(blocks[BAMBOO_STAIRS as usize].key, "bamboo_stairs");
         debug_assert_eq!(blocks[DEAD_CORAL as usize].key, "dead_coral_block");
+        debug_assert_eq!(blocks[BEE_NEST as usize].key, "bee_nest");
+        debug_assert_eq!(blocks[TORCHFLOWER as usize].key, "torchflower");
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SPRUCE_LOG as usize].key, "spruce_log");
         debug_assert_eq!(blocks[MELON as usize].key, "melon");
@@ -1535,6 +1688,44 @@ impl Registry {
             let key = ["copper_helmet", "copper_chestplate", "copper_leggings", "copper_boots"][slot];
             items.push(ItemDef { stack: 1, ..item(key, name, T_COPPER_ARMOR_ITEMS + slot as u16) });
         }
+        for (i, f) in crate::bees::Flavour::ALL.iter().enumerate() {
+            let key = leak(&format!("{}_honey_bottle", f.key()));
+            let name = leak(&format!("{} Honey (Bottled)", f.name()));
+            items.push(ItemDef { stack: 16, food: Some(6.0), ..item(key, name, T_HONEY_FIRST + i as u16) });
+        }
+        items.push(item("honeycomb", "Honeycomb (Hexagonal, Efficient)", T_HONEYCOMB));
+        items.push(ItemDef { stack: 1, ..item("bee_smoker", "Bee Smoker (Calm Down, Bees)", T_SMOKER) });
+        items.push(ItemDef { stack: 1, ..item("hive_tool", "Hive Tool (Flat Crowbar of Knowledge)", T_HIVE_TOOL) });
+        items.push(ItemDef { stack: 1, ..item("queen_bee", "Queen Bee (In a Jar, Unimpressed)", T_QUEEN) });
+        items.push(item("torchflower_seeds", "Torchflower Seeds (Older Than Dirt)", T_TORCH_SEEDS));
+        items.push(item("scute", "Rollo Scute (Shed With Dignity)", T_SCUTE));
+        items.push(ItemDef { stack: 1, ..item("wolf_armor", "Woofer Armour (Very Good Boy Protection)", T_WOLF_ARMOR_ITEM) });
+        items.push(ItemDef { stack: 1, ..item("brush", "Brush (For Dusting History)", T_BRUSH) });
+        items.push(ItemDef { stack: 1, ..item("diamond_brush", "Dimond Brush (Very Gentle, Very Expensive)", T_DIAMOND_BRUSH) });
+        items.push(ItemDef { stack: 1, ..item("field_journal", "Field Journal (Mostly Sketches)", T_JOURNAL) });
+        for (i, (key, name, _)) in crate::archaeology::SHARDS.iter().enumerate() {
+            items.push(item(leak(&format!("{key}_pottery_shard")), leak(&format!("Pottery Shard ({name})")), T_SHARD_FIRST + i as u16));
+        }
+        for (i, (key, name, _)) in crate::archaeology::RELICS.iter().enumerate() {
+            items.push(ItemDef { stack: 1, ..item(key, name, T_RELIC_FIRST + i as u16) });
+        }
+        items.push(ItemDef { stack: 1, ..item("encrusted_relic", "Encrusted Relic (Something's In There)", T_ENCRUSTED) });
+        items.push(ItemDef { stack: 1, ..item("map_fragment", "Map Fragment (Torn, Promising)", T_MAP_FRAGMENT) });
+        items.push(item("ancient_coin", "Ancient Coin (Legal Tender, Once)", T_COIN));
+        items.push(ItemDef { stack: 1, ..item("clay_tablet", "Clay Tablet (Someone's Diary)", T_TABLET) });
+        items.push(item("echo_shard", "Echo Shard (Hums Faintly)", T_ECHO_SHARD));
+        items.push(item("recovery_compass", "Recovery Compass (Points to Your Last Mistake)", T_RECOVERY_COMPASS));
+        items.push(item("scorchite_scrap", "Scorchite Scrap (Hot Off the Debris)", T_SCRAP));
+        items.push(item("scorchite_ingot", "Scorchite Ingot (Heavier Than It Looks)", T_SCORCHITE_INGOT));
+        items.push(item("upgrade_template", "Scorchite Upgrade Template (Some Assembly Required)", T_TEMPLATE));
+        items.push(ItemDef { stack: 1, pick_tier: 4, damage: 6.0, ..item("scorchite_pickaxe", "Scorchite Pickaxe (Overkill)", T_SCORCHITE_TOOLS) });
+        items.push(ItemDef { stack: 1, damage: 8.0, ..item("scorchite_sword", "Scorchite Sword (Unreasonably Sharp)", T_SCORCHITE_TOOLS + 1) });
+        items.push(ItemDef { stack: 1, damage: 7.5, ..item("scorchite_axe", "Scorchite Axe (Trees Fear It)", T_SCORCHITE_TOOLS + 2) });
+        items.push(ItemDef { stack: 1, damage: 6.5, ..item("scorchite_shovel", "Scorchite Shovel (Digs Holes in Holes)", T_SCORCHITE_TOOLS + 3) });
+        for (slot, name) in ["Scorchite Helmet (Hot Headed)", "Scorchite Chestplate (Very Chesty)", "Scorchite Leggings (Legendary Legs)", "Scorchite Boots (Lava Optional)"].into_iter().enumerate() {
+            let key = ["scorchite_helmet", "scorchite_chestplate", "scorchite_leggings", "scorchite_boots"][slot];
+            items.push(ItemDef { stack: 1, ..item(key, name, T_SCORCHITE_ARMOR_ITEMS + slot as u16) });
+        }
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1684,6 +1875,39 @@ impl Registry {
         recipes.push(r(&[(BAMBOO_PLANKS, 3)], (BAMBOO_SLAB, 6)));
         recipes.push(r(&[(BAMBOO_PLANKS, 6)], (BAMBOO_STAIRS, 4)));
         recipes.push(r(&[(BAMBOO_PLANKS, 8)], (CHEST, 1)));
+        // Beekeeping.
+        recipes.push(r(&[(PLANKS, 6), (HONEYCOMB, 3)], (BEEHIVE, 1)));
+        recipes.push(r(&[(PLANKS, 9)], (BEEHIVE, 1)));
+        recipes.push(r(&[(IRON, 2), (STICK, 1), (WOOL, 1)], (BEE_SMOKER, 1)));
+        recipes.push(r(&[(IRON, 1), (STICK, 1)], (HIVE_TOOL, 1)));
+        for f in 0..5 {
+            recipes.push(r(&[(HONEY_FIRST + f, 4)], (HONEY_BLOCK, 1)));
+        }
+        for i in 0..4 {
+            recipes.push(r(&[(COPPER_FIRST + i, 1), (HONEYCOMB, 1)], (WAXED_COPPER_FIRST + i, 1)));
+        }
+        recipes.push(r(&[(DANDELION, 1)], (DYE_FIRST + 4, 2)));
+        recipes.push(r(&[(CORNFLOWER, 1)], (DYE_FIRST + 6, 2)));
+        recipes.push(r(&[(LAVENDER, 1)], (DYE_FIRST + 7, 2)));
+        recipes.push(r(&[(SCUTE, 6)], (WOLF_ARMOR, 1)));
+        // Archaeology, the Deep Dark, grinding and smithing.
+        recipes.push(r(&[(COPPER_INGOT, 1), (FEATHER, 1), (STICK, 1)], (BRUSH, 1)));
+        recipes.push(r(&[(DIAMOND, 1), (FEATHER, 2), (STICK, 1)], (DIAMOND_BRUSH, 1)));
+        recipes.push(r(&[(BOOK, 1), (COAL, 1)], (FIELD_JOURNAL, 1)));
+        recipes.push(r(&[(PLANKS, 4), (BRUSH, 1), (STONE_BRICKS, 2)], (RESTORATION_BENCH, 1)));
+        recipes.push(r(&[(BRICK, 4)], (POT_FIRST, 1)));
+        for i in 0..12 {
+            recipes.push(r(&[(SHARD_FIRST + i, 1), (BRICK, 3)], (POT_FIRST + 1 + i, 1)));
+        }
+        recipes.push(r(&[(COBBLED_DEEPSLATE, 4)], (DEEPSLATE_BRICKS, 4)));
+        recipes.push(r(&[(DEEPSLATE_BRICKS, 4)], (DEEPSLATE_TILES, 4)));
+        recipes.push(r(&[(IRON, 1), (TORCH, 1), (ECHO_SHARD, 1)], (SOUL_LANTERN, 1)));
+        recipes.push(r(&[(ECHO_SHARD, 8), (COMPASS, 1)], (RECOVERY_COMPASS, 1)));
+        recipes.push(r(&[(STICK, 2), (STONE, 1), (PLANKS, 2)], (GRINDSTONE, 1)));
+        recipes.push(r(&[(IRON, 2), (PLANKS, 4)], (SMITHING_TABLE, 1)));
+        recipes.push(r(&[(SCORCHITE_SCRAP, 4), (GOLD_INGOT, 4)], (SCORCHITE_INGOT, 1)));
+        recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
+
         // Minecraft's amounts: 5 for a helmet, 8 chestplate, 7 leggings, 4 boots.
         for (t, material) in [WOOL, IRON, GOLD_INGOT, DIAMOND].into_iter().enumerate() {
             for (slot, n) in [5, 8, 7, 4].into_iter().enumerate() {

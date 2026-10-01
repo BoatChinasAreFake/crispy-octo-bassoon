@@ -8,6 +8,8 @@ mod access;
 mod advancements;
 mod animals;
 mod anvil;
+mod archaeology;
+mod bees;
 mod backups;
 mod beacon;
 mod block;
@@ -18,6 +20,9 @@ mod cheats;
 mod combat;
 mod containers;
 mod copper;
+mod crafting;
+mod critters;
+mod deepdark;
 mod contraptions;
 mod decor;
 mod drops;
@@ -64,6 +69,7 @@ mod server;
 mod structures;
 mod trees;
 mod settings;
+mod smithing;
 mod upnp;
 mod vehicles;
 mod villagers;
@@ -129,6 +135,11 @@ enum Screen {
     Enchant,
     /// Trading with a Hmmer (see villagers.rs).
     Trade,
+    /// A grindstone or smithing table is open (see smithing.rs).
+    Bench,
+    /// The Field Journal (see archaeology.rs) and the Beekeeping Log (bees.rs).
+    Journal,
+    BeeLog,
     /// Writing on a sign (see decor.rs).
     Sign,
     /// Writing a Name Tag for a mob (see nametags.rs).
@@ -170,6 +181,13 @@ struct App {
     last_mouse: Option<Vec2>,
     show_debug: bool,
     recipe_scroll: f32,
+    /// The recipe book: search text (and whether it's being typed in), tab, "craftable only".
+    book_search: String,
+    book_focus: bool,
+    book_tab: crafting::Tab,
+    book_craftable: bool,
+    /// Where the Field Journal goes back to (the pause menu, or the game).
+    journal_back: Screen,
     quit: bool,
     status: Option<(String, f32)>,
     fps: f32,
@@ -343,6 +361,9 @@ impl App {
         }
         if self.screen == Screen::Enchant && s != Screen::Enchant {
             self.game.close_enchanting();
+        }
+        if self.screen == Screen::Bench && s != Screen::Bench {
+            self.game.close_bench();
         }
         if self.screen == Screen::Trade && s != Screen::Trade {
             self.game.trading = None;
@@ -692,8 +713,7 @@ impl App {
                 if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause {
                     self.set_screen(Screen::Paused);
                 } else if (self.settings.binds.pressed(keybinds::Action::Inventory) || self.pad_frame.inventory) && !self.game.spectator {
-                    self.recipe_scroll = 0.0;
-                    self.set_screen(Screen::Inventory);
+                    self.open_inventory();
                 }
                 let keys = [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4, KeyCode::Key5, KeyCode::Key6, KeyCode::Key7, KeyCode::Key8, KeyCode::Key9];
                 for (i, k) in keys.iter().enumerate() {
@@ -712,7 +732,19 @@ impl App {
                     self.game.third_person = !self.game.third_person;
                 }
             }
-            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade => {
+            Screen::Inventory if self.book_focus => {
+                // Typing in the recipe book's search box.
+                if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                    self.book_focus = false;
+                } else {
+                    let before = self.book_search.clone();
+                    type_into(&mut self.book_search, 24);
+                    if self.book_search != before {
+                        self.recipe_scroll = 0.0;
+                    }
+                }
+            }
+            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench => {
                 let pad = self.pad_frame;
                 if is_key_pressed(KeyCode::Escape) || self.settings.binds.pressed(keybinds::Action::Inventory) || pad.inventory || pad.back {
                     self.set_screen(Screen::Playing);
@@ -743,9 +775,14 @@ impl App {
                     type_into(&mut self.sign_lines[self.sign_line], decor::LINE_LEN);
                 }
             }
-            Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings => {
+            Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings | Screen::BeeLog => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
+                }
+            }
+            Screen::Journal => {
+                if is_key_pressed(KeyCode::Escape) || self.settings.binds.pressed(keybinds::Action::Inventory) {
+                    self.set_screen(self.journal_back);
                 }
             }
             Screen::Video { from_title } => {
@@ -794,7 +831,7 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench | Screen::Journal | Screen::Title | Screen::Dead) || self.game.net.is_some();
         let t_tick = std::time::Instant::now();
         if simulate {
             self.game.update(dt, &controls);
@@ -806,10 +843,22 @@ impl App {
         } else if self.screen == Screen::Container && !self.game.container_still_there() {
             self.set_screen(Screen::Playing);
         }
+        if std::mem::take(&mut self.game.at_table) && self.screen == Screen::Playing {
+            self.open_inventory();
+        }
         if self.game.anvil.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Anvil);
         } else if self.screen == Screen::Anvil && !self.game.anvil_still_there() {
             self.set_screen(Screen::Playing);
+        }
+        if self.game.bench.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Bench);
+        } else if self.screen == Screen::Bench && !self.game.bench_still_there() {
+            self.set_screen(Screen::Playing);
+        }
+        if std::mem::take(&mut self.game.open_journal) && self.screen == Screen::Playing {
+            self.journal_back = Screen::Playing;
+            self.set_screen(Screen::Journal);
         }
         if self.game.enchanting.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Enchant);
@@ -1654,7 +1703,7 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::BeeLog);
         let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
@@ -1675,6 +1724,8 @@ impl App {
         self.game.view_bobbing = self.settings.view_bobbing;
         self.game.particle_level = self.settings.particles;
         self.game.water_reflections = self.settings.water_reflections;
+        self.game.shadows = self.settings.shadows;
+        self.game.fancy_water = self.settings.fancy_water;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
             mesher::set_smooth(self.settings.smooth_lighting);
@@ -1739,12 +1790,18 @@ impl App {
                     self.effects_hud();
                     self.boss_bar();
                     self.captions_hud();
+                    if self.screen == Screen::Playing && !self.game.creative {
+                        self.pinned_recipe();
+                    }
                 }
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
                     Screen::Advancements => self.advancements_screen(),
                     Screen::Stats => self.stats_screen(),
                     Screen::FishLog => self.fish_log_screen(),
+                    Screen::Journal => self.journal_screen(),
+                    Screen::BeeLog => self.bee_log_screen(),
+                    Screen::Bench => self.bench_screen(),
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Container => self.container_screen(),
                     Screen::Anvil => self.anvil_screen(),
@@ -1979,6 +2036,16 @@ impl App {
             }
         }
         self.fishing_hud();
+        self.brushing_hud();
+        // The Deep Dark's darkness: pulsing in after a shriek, and faintly whenever the Hush is near.
+        let hush = self.game.mobs.iter().filter(|m| m.kind == entity::MobKind::Hush).map(|m| m.body.pos.distance(self.game.player.body.pos)).fold(f32::MAX, f32::min);
+        let near = (1.0 - hush / 24.0).clamp(0.0, 1.0) * 0.45;
+        let dark = (self.game.darkness / 4.0).min(1.0) * 0.8;
+        let pulse = 0.85 + (get_time() as f32 * 2.2).sin() * 0.15;
+        let a = (dark.max(near) * pulse).min(0.9);
+        if a > 0.01 && !self.game.menu {
+            draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.02, a));
+        }
         self.toast();
     }
 
@@ -2102,6 +2169,15 @@ impl App {
         }
         y += bh + 5.0 * s;
         let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y, half, bh), "Field Journal", true) {
+            self.journal_back = Screen::Paused;
+            self.set_screen(Screen::Journal);
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Beekeeping Log", true) {
+            self.set_screen(Screen::BeeLog);
+        }
+        y += bh + 5.0 * s;
+        let half = (bw - 5.0 * s) / 2.0;
         if self.ui.button(Rect::new(x, y, half, bh), "Options", true) {
             self.set_screen(Screen::Options { from_title: false });
         }
@@ -2222,6 +2298,203 @@ impl App {
         if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
             self.set_screen(Screen::Paused);
         }
+    }
+
+    /// The Field Journal: every culture's collection, and how you're doing.
+    fn journal_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.08, 0.06, 0.03, 0.85));
+        let j = &self.game.journal;
+        self.ui.text_centered("Field Journal", w / 2.0, h * 0.08, 16.0, Color::new(1.0, 0.92, 0.75, 1.0));
+        let sub = format!("Archaeologist level {}  ({} xp)  -  {} digs, {} cracked, {} shattered, {} restored", j.level(), j.xp, j.digs, j.cracked, j.shattered, j.restored);
+        self.ui.text_centered(&sub, w / 2.0, h * 0.08 + 15.0 * s, 8.0, GOLD);
+        let pw = (360.0 * s).min(w - 20.0 * s);
+        let x = w / 2.0 - pw / 2.0;
+        let mut y = h * 0.08 + 26.0 * s;
+        let icon = 15.0 * s;
+        let mut tooltip = None;
+        for c in archaeology::Culture::ALL {
+            let (found, total) = j.progress(c);
+            let done = found == total;
+            let block_h = 13.0 * s + icon + 6.0 * s;
+            draw_rectangle(x, y, pw, block_h, Color::new(0.2, 0.15, 0.1, 0.9));
+            if done {
+                draw_rectangle_lines(x, y, pw, block_h, s, GOLD);
+            }
+            self.ui.text(&format!("{}  ({found}/{total})", c.title()), x + 5.0 * s, y + 10.0 * s, 9.0, if done { GOLD } else { WHITE });
+            let where_ = format!("{} - {}", c.site().name(), if done { "collection complete!" } else { "keep digging" });
+            let ww = self.ui.text_width(&where_, 7.0);
+            self.ui.text(&where_, x + pw - ww - 5.0 * s, y + 10.0 * s, 7.0, GRAY);
+            let mut ix = x + 5.0 * s;
+            let iy = y + 13.0 * s;
+            let items: Vec<Id> = c.shards().iter().map(|&i| SHARD_FIRST + i as Id).chain(c.relics().iter().map(|&i| RELIC_FIRST + i as Id)).collect();
+            for id in items {
+                let got = j.has(id);
+                let r = Rect::new(ix, iy, icon, icon);
+                draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
+                if got.is_some() {
+                    self.ui.icon(id, ix + s, iy + s, icon - 2.0 * s);
+                } else {
+                    self.ui.text_centered("?", ix + icon / 2.0, iy + icon * 0.72, 9.0, Color::new(0.5, 0.45, 0.4, 1.0));
+                }
+                if self.ui.hovered(r) {
+                    tooltip = Some(match got {
+                        Some((n, cond)) if archaeology::is_relic(id) => format!("{}\nFound {n}, best: {}", item_name(id), archaeology::CONDITIONS[cond as usize]),
+                        Some((n, _)) => format!("{}\nFound {n}", item_name(id)),
+                        None => "Not found yet".to_string(),
+                    });
+                }
+                ix += icon + 3.0 * s;
+            }
+            y += block_h + 4.0 * s;
+        }
+        let tips = "Brush, don't dig. Ease off when the find shifts. Deeper layers hide older, rarer things.";
+        self.ui.text_centered(tips, w / 2.0, h * 0.84, 8.0, Color::new(1.0, 0.9, 0.7, 1.0));
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(self.journal_back);
+        }
+        if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
+    /// The Beekeeping Log.
+    fn bee_log_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.1, 0.08, 0.0, 0.8));
+        let log = &self.game.bee_log;
+        self.ui.text_centered("Beekeeping Log", w / 2.0, h * 0.1, 16.0, Color::new(1.0, 0.85, 0.3, 1.0));
+        let sub = format!("Beekeeper level {}  ({} xp)  -  stung {} time{}", log.level(), log.xp, log.stings, if log.stings == 1 { "" } else { "s" });
+        self.ui.text_centered(&sub, w / 2.0, h * 0.1 + 16.0 * s, 9.0, GOLD);
+        let pw = (300.0 * s).min(w - 20.0 * s);
+        let x = w / 2.0 - pw / 2.0;
+        let mut y = h * 0.1 + 30.0 * s;
+        let row_h = 18.0 * s;
+        let mut rows: Vec<(Id, String, String)> = bees::Flavour::ALL.iter().map(|f| (f.item(), format!("{} Honey", f.name()), format!("{} bottle{}", log.bottles[f.index()], if log.bottles[f.index()] == 1 { "" } else { "s" }))).collect();
+        rows.push((HONEYCOMB, "Honeycomb".into(), format!("{}", log.comb)));
+        rows.push((QUEEN_BEE, "Queens caught".into(), format!("{}", log.queens)));
+        rows.push((BEEHIVE, "Colonies started".into(), format!("{}", log.colonies_started)));
+        rows.push((BEEHIVE_BUSY, "Swarms caught / lost".into(), format!("{} / {}", log.swarms_caught, log.swarms_lost)));
+        let hives = self.game.hives.values().filter(|c| c.bees > 0).count();
+        rows.push((BEE_NEST, "Colonies known nearby".into(), format!("{hives}")));
+        for (id, name, val) in rows {
+            draw_rectangle(x, y, pw, row_h - 2.0 * s, Color::new(0.2, 0.16, 0.05, 0.9));
+            self.ui.icon(id, x + 3.0 * s, y + 1.0 * s, row_h - 4.0 * s);
+            self.ui.text(&name, x + row_h + 4.0 * s, y + 12.0 * s, 9.0, WHITE);
+            let vw = self.ui.text_width(&val, 9.0);
+            self.ui.text(&val, x + pw - vw - 6.0 * s, y + 12.0 * s, 9.0, GOLD);
+            y += row_h;
+        }
+        let tips = "Tips: mixed flowers make better honey. Smoke before you harvest. Wood Ash for mites. Keep a spare hive for swarms.";
+        self.ui.text_centered(tips, w / 2.0, h * 0.84, 8.0, Color::new(1.0, 0.9, 0.5, 1.0));
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Paused);
+        }
+    }
+
+    /// A grindstone or smithing table.
+    fn bench_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let slot = 20.0 * s;
+        let panel_w = slot * 9.0 + 12.0 * s;
+        let top_h = slot * 2.2;
+        let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
+        let x0 = (w - panel_w) / 2.0;
+        let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
+        let sx = x0 + 6.0 * s;
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        let mut tooltip: Option<String> = None;
+        let Some((pos, bench, slots, wear)) = self.game.bench.as_ref().map(|b| (b.pos, b.bench, b.slots, b.wear)) else { return };
+        self.ui.text(block(self.game.world.get_v(pos)).name, sx, y0 + 12.0 * s, 10.0, WHITE);
+        let top = y0 + 20.0 * s;
+        let hints: &[&str] = match bench {
+            smithing::Bench::Grindstone => &["Something enchanted (or worn)", "Another of the same (optional)"],
+            smithing::Bench::Smithing => &["Scorchite Upgrade Template", "Dimond tool or armour", "Scorchite Ingot"],
+        };
+        for (i, hint) in hints.iter().enumerate() {
+            let x = sx + slot * (0.3 + i as f32 * 1.4);
+            let (l, r, hov) = self.ui.slot_worn(slots[i], wear[i], x, top, slot, false);
+            if hov {
+                tooltip = label(slots[i], wear[i]).or(Some(hint.to_string()));
+            }
+            if l || r {
+                self.game.bench_click(i, r);
+            }
+        }
+        let plan = self.game.bench_plan();
+        let ax = sx + slot * 4.4;
+        self.ui.tile(texture::T_ARROW_UI, ax, top, slot * 1.2, if plan.is_some() { WHITE } else { Color::new(0.3, 0.3, 0.3, 1.0) });
+        let out_x = sx + slot * 6.2;
+        let (l, _, hov) = self.ui.slot_worn(plan.map(|(i, _, _)| (i, 1)), plan.map(|p| p.1).unwrap_or(0), out_x, top, slot, false);
+        if hov {
+            tooltip = plan.and_then(|(i, w, _)| label(Some((i, 1)), w));
+        }
+        if l {
+            self.game.bench_take();
+        }
+        let note = match (bench, plan) {
+            (smithing::Bench::Grindstone, Some((_, _, xp))) if xp > 0 => format!("Grinds off the enchantments: about {xp} experience back."),
+            (smithing::Bench::Grindstone, Some(_)) => "Grinds the two into one, with a little extra life.".to_string(),
+            (smithing::Bench::Grindstone, None) => "Enchanted things lose their enchantments here (and give some experience back).".to_string(),
+            (smithing::Bench::Smithing, Some(_)) => "Upgrade to Scorchite (enchantments and wear are kept).".to_string(),
+            (smithing::Bench::Smithing, None) => "Template, Dimond gear, Scorchite Ingot: Scorchite gear.".to_string(),
+        };
+        self.ui.text(&note, sx, top + slot * 1.75, 7.0, if plan.is_some() { Color::new(0.5, 1.0, 0.4, 1.0) } else { GRAY });
+        let inv_y = top + top_h + 12.0 * s;
+        self.ui.text("Inventory", sx, inv_y - 4.0 * s, 8.0, GRAY);
+        for i in 9..36 {
+            let j = i - 9;
+            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        let hot_y = inv_y + slot * 3.0 + 6.0 * s;
+        for i in 0..9 {
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        if let Some(cur) = self.game.inv.cursor {
+            let (mx, my) = mouse_position();
+            self.ui.stack_worn(Some(cur), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
+        } else if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
+    /// While brushing: how uncovered the find is, and how hard you're pressing.
+    fn brushing_hud(&self) {
+        let Some(d) = &self.game.dig else { return };
+        if d.idle > 1.5 {
+            return;
+        }
+        let (w, h, s) = (screen_width(), screen_height(), self.ui.s);
+        let bw = (160.0 * s).min(w * 0.6);
+        let x = w / 2.0 - bw / 2.0;
+        let y = h * 0.62;
+        let bar = |y: f32, v: f32, col: Color, label: &str| {
+            draw_rectangle(x - 2.0 * s, y - 2.0 * s, bw + 4.0 * s, 10.0 * s + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+            draw_rectangle(x, y, bw * v.clamp(0.0, 1.0), 10.0 * s, col);
+            self.ui.text(label, x, y - 4.0 * s, 8.0, WHITE);
+        };
+        let p = d.pressure;
+        let pcol = if p > 0.75 { Color::new(0.95, 0.2, 0.15, 1.0) } else if p > 0.5 { Color::new(0.95, 0.7, 0.2, 1.0) } else { Color::new(0.4, 0.85, 0.4, 1.0) };
+        let cracks = if d.cracks > 0 { format!(" ({} crack{})", d.cracks, if d.cracks == 1 { "" } else { "s" }) } else { String::new() };
+        bar(y, d.progress, Color::new(0.85, 0.7, 0.4, 1.0), &format!("Uncovered{cracks}"));
+        bar(y + 26.0 * s, p, pcol, if p > 0.75 { "PRESSURE - EASE OFF!" } else { "Pressure (let go to ease off)" });
     }
 
     /// While fishing: the bite alert and, with a big one on the line, the tug-of-war bars.
@@ -2352,9 +2625,9 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let bw = (240.0 * s).min(w * 0.85);
-        let bh = (20.0 * s).min((h - 100.0 * s) / 11.0);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 12.0);
         let x = w / 2.0 - bw / 2.0;
-        let total = 9.0 * bh + 8.0 * 5.0 * s + 20.0 * s;
+        let total = 10.0 * bh + 9.0 * 5.0 * s + 20.0 * s;
         let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
         self.ui.text_centered("Video Settings", w / 2.0, y - 18.0 * s, 16.0, WHITE);
         let st = self.settings.clone();
@@ -2429,6 +2702,14 @@ impl App {
         }
         if self.ui.button(Rect::new(right, y, half, bh), &on_off("Fog", st.fog), true) {
             self.settings.fog = !st.fog;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Shadows", st.shadows), true) {
+            self.settings.shadows = !st.shadows;
+        }
+        let depth = if st.fancy_water { "Water Depth: Fancy" } else { "Water Depth: Simple" };
+        if self.ui.button(Rect::new(right, y, half, bh), depth, true) {
+            self.settings.fancy_water = !st.fancy_water;
         }
         y += bh + 4.0 * s;
         // VSync and anti-aliasing are set when the window opens.
@@ -2981,7 +3262,9 @@ impl App {
     }
 
     fn inventory_slot_click(&mut self, i: usize, l: bool, r: bool, shift: bool) {
-        if l && shift && self.game.anvil.is_some() {
+        if l && shift && self.game.bench.is_some() {
+            self.game.bench_quick_put(i);
+        } else if l && shift && self.game.anvil.is_some() {
             self.game.anvil_quick_put(i);
         } else if l && shift && self.game.enchanting.is_some() {
             self.game.enchant_quick_put(i);
@@ -2991,6 +3274,226 @@ impl App {
             self.game.inv.click(i);
         } else if r {
             self.game.inv.right_click(i);
+        }
+    }
+
+    fn open_inventory(&mut self) {
+        self.recipe_scroll = 0.0;
+        self.book_focus = false;
+        drain_chars();
+        self.set_screen(Screen::Inventory);
+    }
+
+    /// Craft recipe `ri` once, or as many times as possible with shift.
+    fn craft_recipe(&mut self, ri: usize, many: bool) {
+        let r = &recipes()[ri];
+        let times = if many { 64 } else { 1 };
+        let mut made = 0u8;
+        for _ in 0..times {
+            if !self.game.inv.craft(r) {
+                break;
+            }
+            made += 1;
+        }
+        self.game.stats.crafted += made as u64 * r.output.1 as u64;
+        // Joined players: the host checks the ingredients (and the table) against its ledger.
+        if self.game.is_client() && !self.game.creative && made > 0 {
+            self.game.net_send_msg(net::Msg::Craft { recipe: ri as u16, times: made });
+        }
+        if made > 0 {
+            let via_gold = r.inputs.iter().any(|&(i, _)| i == GOLD_INGOT) && r.output.0 == PICK_WOOD;
+            self.game.on_crafted(r.output.0, via_gold);
+            if crafting::needs_table(r) {
+                self.game.advance("benchmarking");
+            }
+        }
+    }
+
+    /// The recipe book on the right of the inventory. Returns a tooltip.
+    fn recipe_book(&mut self, rx: f32, y0: f32, right_w: f32, panel_h: f32) -> Option<String> {
+        let s = self.ui.s;
+        let mut tooltip = None;
+        draw_rectangle(rx, y0, right_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(rx, y0, right_w, panel_h, s, WHITE);
+        let table = self.game.table_nearby();
+        let title = if table { "Crafting Table" } else { "Pocket Crafting (small things)" };
+        self.ui.text(title, rx + 5.0 * s, y0 + 11.0 * s, 8.0, if table { Color::new(1.0, 0.9, 0.6, 1.0) } else { WHITE });
+
+        // Search box.
+        let sb = Rect::new(rx + 4.0 * s, y0 + 15.0 * s, right_w - 8.0 * s, 12.0 * s);
+        let hov_box = self.ui.hovered(sb);
+        draw_rectangle(sb.x, sb.y, sb.w, sb.h, Color::new(0.05, 0.05, 0.06, 0.95));
+        draw_rectangle_lines(sb.x, sb.y, sb.w, sb.h, s, if self.book_focus { Color::new(1.0, 1.0, 0.6, 1.0) } else if hov_box { WHITE } else { GRAY });
+        if self.ui.clicked {
+            self.book_focus = hov_box;
+            if hov_box {
+                drain_chars();
+            }
+        }
+        let caret = if self.book_focus && (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+        if self.book_search.is_empty() && !self.book_focus {
+            self.ui.text("Search recipes...", sb.x + 3.0 * s, sb.y + 9.0 * s, 7.0, GRAY);
+        } else {
+            self.ui.text(&format!("{}{caret}", self.book_search), sb.x + 3.0 * s, sb.y + 9.0 * s, 7.0, WHITE);
+        }
+
+        // Tabs.
+        let tabs = crafting::Tab::ALL;
+        let tab_w = (right_w - 8.0 * s) / tabs.len() as f32;
+        let ty = sb.y + sb.h + 2.0 * s;
+        for (i, t) in tabs.iter().enumerate() {
+            let r = Rect::new(rx + 4.0 * s + i as f32 * tab_w, ty, tab_w - s, 10.0 * s);
+            let on = self.book_tab == *t;
+            let hov = self.ui.hovered(r);
+            draw_rectangle(r.x, r.y, r.w, r.h, if on { Color::new(0.45, 0.4, 0.25, 0.95) } else if hov { Color::new(0.3, 0.3, 0.34, 0.95) } else { Color::new(0.18, 0.18, 0.2, 0.95) });
+            self.ui.text_centered(t.name(), r.x + r.w / 2.0, r.y + 7.5 * s, 6.5, if on { WHITE } else { GRAY });
+            if hov && self.ui.clicked {
+                self.book_tab = *t;
+                self.recipe_scroll = 0.0;
+            }
+        }
+
+        // "Craftable now" and how many have been found.
+        let cy = ty + 12.0 * s;
+        let cb = Rect::new(rx + 4.0 * s, cy, 8.0 * s, 8.0 * s);
+        draw_rectangle(cb.x, cb.y, cb.w, cb.h, Color::new(0.05, 0.05, 0.06, 0.95));
+        draw_rectangle_lines(cb.x, cb.y, cb.w, cb.h, s, GRAY);
+        if self.book_craftable {
+            draw_rectangle(cb.x + 2.0 * s, cb.y + 2.0 * s, cb.w - 4.0 * s, cb.h - 4.0 * s, Color::new(0.5, 0.9, 0.5, 1.0));
+        }
+        let cl = Rect::new(cb.x, cb.y, 70.0 * s, cb.h);
+        if self.ui.hovered(cl) && self.ui.clicked {
+            self.book_craftable = !self.book_craftable;
+            self.recipe_scroll = 0.0;
+        }
+        self.ui.text("Craftable now", cb.x + cb.w + 3.0 * s, cb.y + 7.0 * s, 6.5, WHITE);
+        let total = recipes().len();
+        let found = recipes().iter().filter(|r| crafting::discovered(r, &self.game.known)).count();
+        let count = format!("{found}/{total} found");
+        self.ui.text(&count, rx + right_w - self.ui.text_width(&count, 6.5) - 5.0 * s, cb.y + 7.0 * s, 6.5, GRAY);
+
+        // The list: craftable first, then the rest.
+        let row_h = 20.0 * s;
+        let list_top = cy + 11.0 * s;
+        let visible_rows = ((y0 + panel_h - list_top - 9.0 * s) / row_h).floor().max(1.0) as usize;
+        let craftable = |g: &Game, r: &Recipe| g.inv.can_craft(r) && (table || !crafting::needs_table(r));
+        let mut order: Vec<usize> = (0..total)
+            .filter(|&i| {
+                let r = &recipes()[i];
+                crafting::discovered(r, &self.game.known)
+                    && (self.book_tab == crafting::Tab::All || crafting::tab_of(r) == self.book_tab)
+                    && crafting::matches(r, &self.book_search)
+                    && (!self.book_craftable || craftable(&self.game, r))
+            })
+            .collect();
+        order.sort_by_key(|&i| (!craftable(&self.game, &recipes()[i]), crafting::needs_table(&recipes()[i]) && !table));
+        let max_scroll = order.len().saturating_sub(visible_rows) as f32;
+        self.recipe_scroll = self.recipe_scroll.min(max_scroll);
+        if self.ui.hovered(Rect::new(rx, y0, right_w, panel_h)) {
+            let wheel = mouse_wheel().1;
+            if wheel.abs() > 0.1 {
+                self.recipe_scroll = (self.recipe_scroll - wheel.signum()).clamp(0.0, max_scroll);
+            }
+        }
+        if order.is_empty() {
+            let why = if found == 0 { "Pick something up to discover recipes." } else { "Nothing matches." };
+            self.ui.text(why, rx + 6.0 * s, list_top + 10.0 * s, 7.0, GRAY);
+        }
+        let first = self.recipe_scroll as usize;
+        let mut craft: Option<(usize, bool)> = None;
+        for (row, &ri) in order.iter().skip(first).take(visible_rows).enumerate() {
+            let r = &recipes()[ri];
+            let big = crafting::needs_table(r);
+            let ok = craftable(&self.game, r);
+            let ry = list_top + row as f32 * row_h;
+            let rect = Rect::new(rx + 4.0 * s, ry, right_w - 8.0 * s, row_h - 2.0 * s);
+            let hov = self.ui.hovered(rect);
+            let pinned = self.game.pinned == Some(ri);
+            let bg = if ok && hov {
+                Color::new(0.3, 0.5, 0.3, 0.95)
+            } else if ok {
+                Color::new(0.2, 0.32, 0.2, 0.9)
+            } else if hov {
+                Color::new(0.28, 0.28, 0.3, 0.9)
+            } else {
+                Color::new(0.2, 0.2, 0.22, 0.9)
+            };
+            draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
+            if pinned {
+                draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, s, Color::new(1.0, 0.85, 0.3, 1.0));
+            }
+            let isz = row_h - 6.0 * s;
+            self.ui.stack(Some(r.output), rect.x + 2.0 * s, rect.y + 1.0 * s, isz, true);
+            let mut ix = rect.x + isz + 6.0 * s;
+            self.ui.text("<", ix, rect.y + rect.h * 0.65, 9.0, GRAY);
+            ix += 8.0 * s;
+            for &(item, n) in &r.inputs {
+                let have = self.game.inv.count(item) >= n as u32;
+                self.ui.icon(item, ix, rect.y + 3.0 * s, isz * 0.8);
+                self.ui.text(&format!("{n}"), ix + isz * 0.8, rect.y + rect.h * 0.8, 8.0, if have { WHITE } else { Color::new(1.0, 0.4, 0.4, 1.0) });
+                ix += isz * 0.8 + 12.0 * s;
+            }
+            if big {
+                // A little table icon: this one needs a crafting table.
+                let tsz = 8.0 * s;
+                self.ui.icon(TABLE, rect.x + rect.w - tsz - 2.0 * s, rect.y + 2.0 * s, tsz);
+                if !table {
+                    draw_line(rect.x + rect.w - tsz - 2.0 * s, rect.y + 2.0 * s + tsz, rect.x + rect.w - 2.0 * s, rect.y + 2.0 * s, s, RED);
+                }
+            }
+            if hov {
+                let ins: Vec<String> = r.inputs.iter().map(|&(i, n)| format!("{n}x {}", item_name(i))).collect();
+                let mut t = format!("{}x {}  <=  {}", r.output.1, item_name(r.output.0), ins.join(" + "));
+                if big && !table {
+                    t += "\nNeeds a Crafting Table nearby.";
+                }
+                t += if pinned { "\nRight-click to unpin." } else { "\nRight-click to pin to the screen." };
+                tooltip = Some(t);
+                if self.ui.clicked && ok {
+                    craft = Some((ri, is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift)));
+                } else if self.ui.clicked && big && !table && self.game.inv.can_craft(r) {
+                    self.game.msg("That one needs a Crafting Table. Four planks; you can make one in your pockets.");
+                }
+                if self.ui.rclicked {
+                    self.game.pinned = if pinned { None } else { Some(ri) };
+                }
+            }
+        }
+        if let Some((ri, many)) = craft {
+            self.craft_recipe(ri, many);
+        }
+        let hidden = total - found;
+        let foot = if hidden > 0 { format!("{hidden} recipes still to discover") } else { "Every recipe discovered!".to_string() };
+        self.ui.text(&foot, rx + 5.0 * s, y0 + panel_h - 3.0 * s, 6.5, GRAY);
+        if max_scroll > 0.0 {
+            self.ui.text("scroll", rx + right_w - 26.0 * s, y0 + panel_h - 3.0 * s, 6.5, GRAY);
+        }
+        tooltip
+    }
+
+    /// A pinned recipe's shopping list, top right.
+    fn pinned_recipe(&mut self) {
+        let Some(ri) = self.game.pinned else { return };
+        let Some(r) = recipes().get(ri) else {
+            self.game.pinned = None;
+            return;
+        };
+        let s = self.ui.s;
+        let row = 11.0 * s;
+        let w = 110.0 * s;
+        let h = row * (r.inputs.len() as f32 + 1.0) + 6.0 * s;
+        let (x, y) = (screen_width() - w - 6.0 * s, 70.0 * s);
+        draw_rectangle(x, y, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        self.ui.icon(r.output.0, x + 3.0 * s, y + 2.0 * s, 9.0 * s);
+        let ready = self.game.inv.can_craft(r);
+        self.ui.text(&self.ui.fit(item_name(r.output.0), 7.0, w - 16.0 * s), x + 15.0 * s, y + 9.0 * s, 7.0, if ready { Color::new(0.6, 1.0, 0.6, 1.0) } else { WHITE });
+        for (i, &(item, n)) in r.inputs.iter().enumerate() {
+            let yy = y + row * (i as f32 + 1.0) + 2.0 * s;
+            let have = self.game.inv.count(item);
+            self.ui.icon(item, x + 6.0 * s, yy, 8.0 * s);
+            let col = if have >= n as u32 { Color::new(0.6, 1.0, 0.6, 1.0) } else { WHITE };
+            let line = format!("{}/{} {}", have.min(999), n, item_name(item));
+            self.ui.text(&self.ui.fit(&line, 6.5, w - 20.0 * s), x + 17.0 * s, yy + 7.0 * s, 6.5, col);
         }
     }
 
@@ -3107,69 +3610,11 @@ impl App {
             }
         }
 
-        // Crafting list
+        // The recipe book (see crafting.rs).
         if !creative {
             let rx = x0 + left_w + 8.0 * s;
-            draw_rectangle(rx, y0, right_w, panel_h, ui::PANEL);
-            draw_rectangle_lines(rx, y0, right_w, panel_h, s, WHITE);
-            self.ui.text("Pocket Crafting (tables are decorative)", rx + 5.0 * s, y0 + 12.0 * s, 8.0, WHITE);
-            let row_h = 22.0 * s;
-            let list_top = y0 + 18.0 * s;
-            let visible_rows = ((panel_h - 22.0 * s) / row_h).floor() as usize;
-            let max_scroll = recipes().len().saturating_sub(visible_rows) as f32;
-            if self.ui.hovered(Rect::new(rx, y0, right_w, panel_h)) {
-                let wheel = mouse_wheel().1;
-                if wheel.abs() > 0.1 {
-                    self.recipe_scroll = (self.recipe_scroll - wheel.signum()).clamp(0.0, max_scroll);
-                }
-            }
-            let first = self.recipe_scroll as usize;
-            // Craftable recipes first so progress is obvious.
-            let mut order: Vec<usize> = (0..recipes().len()).collect();
-            order.sort_by_key(|&i| !self.game.inv.can_craft(&recipes()[i]));
-            for (row, &ri) in order.iter().skip(first).take(visible_rows).enumerate() {
-                let r = &recipes()[ri];
-                let ok = self.game.inv.can_craft(r);
-                let ry = list_top + row as f32 * row_h;
-                let rect = Rect::new(rx + 4.0 * s, ry, right_w - 8.0 * s, row_h - 2.0 * s);
-                let hov = self.ui.hovered(rect);
-                let bg = if ok && hov { Color::new(0.3, 0.5, 0.3, 0.95) } else if ok { Color::new(0.2, 0.32, 0.2, 0.9) } else { Color::new(0.2, 0.2, 0.22, 0.9) };
-                draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
-                let isz = row_h - 6.0 * s;
-                self.ui.stack(Some(r.output), rect.x + 2.0 * s, rect.y + 1.0 * s, isz, true);
-                let mut ix = rect.x + isz + 6.0 * s;
-                self.ui.text("<", ix, rect.y + rect.h * 0.65, 9.0, GRAY);
-                ix += 8.0 * s;
-                for &(item, n) in &r.inputs {
-                    let have = self.game.inv.count(item) >= n as u32;
-                    self.ui.icon(item, ix, rect.y + 3.0 * s, isz * 0.8);
-                    self.ui.text(&format!("{n}"), ix + isz * 0.8, rect.y + rect.h * 0.8, 8.0, if have { WHITE } else { Color::new(1.0, 0.4, 0.4, 1.0) });
-                    ix += isz * 0.8 + 12.0 * s;
-                }
-                if hov {
-                    let ins: Vec<String> = r.inputs.iter().map(|&(i, n)| format!("{n}x {}", item_name(i))).collect();
-                    tooltip = Some(format!("{}x {}  <=  {}", r.output.1, item_name(r.output.0), ins.join(" + ")));
-                    if self.ui.clicked && ok {
-                        let times = if is_key_down(KeyCode::LeftShift) { 64 } else { 1 };
-                        let mut made = 0u8;
-                        for _ in 0..times {
-                            if !self.game.inv.craft(r) {
-                                break;
-                            }
-                            made += 1;
-                        }
-                        self.game.stats.crafted += made as u64 * r.output.1 as u64;
-                        // Joined players: the host checks the ingredients against its ledger.
-                        if self.game.is_client() && !self.game.creative && made > 0 {
-                            self.game.net_send_msg(net::Msg::Craft { recipe: ri as u16, times: made });
-                        }
-                        let via_gold = r.inputs.iter().any(|&(i, _)| i == GOLD_INGOT) && r.output.0 == PICK_WOOD;
-                        self.game.on_crafted(r.output.0, via_gold);
-                    }
-                }
-            }
-            if max_scroll > 0.0 {
-                self.ui.text("scroll for more", rx + right_w - 70.0 * s, y0 + panel_h - 3.0 * s, 7.0, GRAY);
+            if let Some(t) = self.recipe_book(rx, y0, right_w, panel_h) {
+                tooltip = Some(t);
             }
         }
 
@@ -3198,6 +3643,45 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
         "village" => Kind::Village,
+        "city" => Kind::HushedCity,
+        "ruins" => Kind::DesertRuins,
+        "trailruins" => Kind::TrailRuins,
+        "oceanruins" => Kind::OceanRuins,
+        "deepdark" => {
+            // Inside a Deep Dark cavern, standing on its floor.
+            for r in 0..200 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    if !generator.deep_dark(x, z) || generator.column(x, z).0 < deepdark::DEEP_TOP + 8 {
+                        continue;
+                    }
+                    for y in 5..deepdark::DEEP_TOP - 6 {
+                        let open = (0..4).all(|k| generator.deep_cavern(x, y + k, z)) && !generator.deep_cavern(x, y - 1, z);
+                        if open {
+                            return Some((Vec3::new(x as f32 + 0.5, y as f32 + 1.6, z as f32 + 0.5), 0.7, -0.15));
+                        }
+                    }
+                }
+            }
+            return None;
+        }
+        "beenest" => {
+            // An oak with a nest on it (the same rule the generator uses).
+            for r in 0..120 {
+                for (dx, dz) in ring(r) {
+                    for k in 0..256 {
+                        let (tx, tz) = ((cx0 + dx) * 16 + k % 16, (cz0 + dz) * 16 + k / 16);
+                        let Some((h, trunk, kind)) = generator.tree_at(tx, tz) else { continue };
+                        let biome = generator.column(tx, tz).1;
+                        if kind == world::TreeKind::Oak && noise::hash2(generator.seed ^ 0xBEE, tx, tz) < 0.07 && matches!(biome, world::Biome::Plains | world::Biome::Forest) {
+                            let nest = Vec3::new(tx as f32 + 0.5, (h + (trunk - 3).max(1)) as f32 + 0.5, tz as f32 + 0.5);
+                            return Some(look(nest + Vec3::new(4.5, 0.5, 4.5), nest));
+                        }
+                    }
+                }
+            }
+            return None;
+        }
         "swamp" | "jungle" | "badlands" | "taiga" => {
             let want = match mode {
                 "swamp" => world::Biome::Swamp,
@@ -3263,6 +3747,8 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Dungeon => look(o + Vec3::new(2.6, 2.4, 2.6), o + Vec3::new(-3.0, 0.5, -1.0)),
                 Kind::Tower => look(o + Vec3::new(-11.0, 9.0, -11.0), o + Vec3::Y * 4.0),
                 Kind::Village => look(o + Vec3::new(-20.0, 18.0, -20.0), o + Vec3::Y * 2.0),
+                Kind::HushedCity => look(o + Vec3::new(-7.0, 4.5, -9.0), o + Vec3::new(0.0, 3.0, 0.0)),
+                Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -3342,6 +3828,15 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     if let Some(max) = inventory::max_uses(id, wear) {
         s += &format!(" ({}/{max} uses left)", max.saturating_sub(inventory::uses(wear) as u32));
     }
+    if let Some(d) = archaeology::describe(id, wear) {
+        s += &format!("\n{d}");
+    }
+    if id == QUEEN_BEE {
+        s += &format!("\nTemperament: {}", bees::Queen::of_wear(wear).name());
+    }
+    if let Some(f) = bees::Flavour::of_item(id) {
+        s += &format!("\n{}", f.taste());
+    }
     Some(s)
 }
 
@@ -3409,6 +3904,11 @@ async fn game_main() {
         last_mouse: None,
         show_debug: false,
         recipe_scroll: 0.0,
+        book_search: String::new(),
+        book_focus: false,
+        book_tab: crafting::Tab::All,
+        book_craftable: false,
+        journal_back: Screen::Playing,
         quit: false,
         status: None,
         fps: 60.0,
@@ -3492,6 +3992,8 @@ async fn game_main() {
             app.settings.ui_scale = v;
         }
         app.settings.fancy_clouds = !flag("--fast-clouds");
+        app.settings.shadows = !flag("--no-shadows");
+        app.settings.fancy_water = !flag("--simple-water");
         // Show the "new version" button as if one were out (for screenshots).
         if let Some(tag) = arg("--pretend-update") {
             app.updates.newer = Some(tag);
@@ -3561,7 +4063,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
@@ -3684,6 +4186,93 @@ async fn game_main() {
                 }
                 app.start_game(g);
                 app.set_screen(Screen::Advancements);
+            }
+            "shadowtest" => {
+                // A floating platform over flat ground: its shadow should land just beside it.
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.1);
+                let base = g.spawn.floor().as_ivec3();
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        g.world.load_now(base.x.div_euclid(16) + dx, base.z.div_euclid(16) + dz);
+                    }
+                }
+                let ground = g.world.surface_y(base.x, base.z);
+                for z in -12..=12 {
+                    for x in -12..=12 {
+                        for y in ground + 1..ground + 12 {
+                            g.world.set(base.x + x, y, base.z + z, AIR);
+                        }
+                        g.world.set(base.x + x, ground, base.z + z, STONE);
+                    }
+                }
+                for z in -2..=2 {
+                    for x in -2..=2 {
+                        g.world.set(base.x + x, ground + 5, base.z + z, GOLD_ORE);
+                    }
+                }
+                let o = Vec3::new(base.x as f32 + 0.5, ground as f32 + 1.0, base.z as f32 + 0.5);
+                let from = o + Vec3::new(-9.0, 10.0, -9.0);
+                let d = o - from;
+                (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                g.player.flying = true;
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "recipes" => {
+                let mut g = Game::new(424242, false, false);
+                for (item, n) in [(LOG, 12), (PLANKS, 20), (COBBLE, 20), (IRON, 4), (STICK, 6), (COAL, 5), (WHEAT, 6), (HONEYCOMB, 3), (FEATHER, 2), (COPPER_INGOT, 2)] {
+                    g.inv.add(item, n);
+                }
+                g.learn_inventory();
+                g.pinned = recipes().iter().position(|r| r.output.0 == BEEHIVE);
+                app.start_game(g);
+                app.set_screen(Screen::Inventory);
+                app.book_search = "pick".into();
+            }
+            "journal" | "beelog" => {
+                let mut g = Game::new(424242, false, false);
+                for (i, c) in [(0, 0), (1, 2), (2, 1), (5, 0), (7, 3), (8, 1), (11, 0)] {
+                    g.journal.note(SHARD_FIRST + i, c);
+                }
+                for (i, c) in [(0, 0), (2, 1), (3, 2), (9, 0), (10, 0), (11, 1)] {
+                    g.journal.note(RELIC_FIRST + i, c);
+                }
+                for i in archaeology::Culture::Hushed.shards() {
+                    g.journal.note(SHARD_FIRST + *i as Id, 0);
+                }
+                g.journal.xp = 140;
+                g.journal.digs = 31;
+                g.journal.cracked = 9;
+                g.journal.shattered = 2;
+                g.journal.restored = 3;
+                g.bee_log = bees::BeeLog { xp: 95, bottles: [14, 6, 3, 8, 1], comb: 21, stings: 4, swarms_caught: 2, swarms_lost: 1, queens: 3, colonies_started: 2 };
+                app.start_game(g);
+                app.journal_back = Screen::Paused;
+                app.set_screen(if s.mode == "journal" { Screen::Journal } else { Screen::BeeLog });
+            }
+            "bench" | "grindstone" => {
+                let mut g = Game::new(424242, false, false);
+                for (item, n) in [(UPGRADE_TEMPLATE, 2), (SCORCHITE_INGOT, 3), (PICK_DIAMOND, 1), (SWORD_DIAMOND, 1), (ARMOR_FIRST + 13, 1)] {
+                    g.inv.add(item, n);
+                }
+                let bench = if s.mode == "bench" { smithing::Bench::Smithing } else { smithing::Bench::Grindstone };
+                // A real one to stand at (the screen closes if it isn't there).
+                let at = g.spawn.floor().as_ivec3() + IVec3::new(2, 0, 0);
+                g.world.load_now(at.x.div_euclid(16), at.z.div_euclid(16));
+                g.world.set_v(at, bench.block());
+                app.start_game(g);
+                app.game.open_bench(at, bench);
+                if let Some(b) = &mut app.game.bench {
+                    if bench == smithing::Bench::Smithing {
+                        b.slots = [Some((UPGRADE_TEMPLATE, 1)), Some((PICK_DIAMOND, 1)), Some((SCORCHITE_INGOT, 1))];
+                        b.wear[1] = enchant::with_level(120, enchant::Enchant::Efficiency, 4);
+                    } else {
+                        b.slots[0] = Some((SWORD_IRON, 1));
+                        b.wear[0] = enchant::with_level(enchant::with_level(30, enchant::Enchant::Sharpness, 3), enchant::Enchant::Unbreaking, 2);
+                    }
+                }
+                app.screen = Screen::Bench;
             }
             "stats" => {
                 let mut g = Game::new(424242, false, false);

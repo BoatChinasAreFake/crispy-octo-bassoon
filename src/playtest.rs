@@ -113,7 +113,7 @@ pub struct Report {
     pub broken: u32,
     pub chats: u32,
     pub deposits: u32,
-    /// Which of the newer features were checked (glide, spear, box, spectator, stats).
+    /// Which of the newer features were checked (glide, spear, box, spectator, stats, and the latest batch).
     pub features: Vec<&'static str>,
     pub problems: Vec<String>,
 }
@@ -178,6 +178,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
         std::thread::sleep(Duration::from_micros(300));
     }
     new_features(&mut host, &mut team, &mut report, &mut touched);
+    latest_features(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -257,6 +258,16 @@ fn fetch(host: &mut Game, team: &mut [Bot], k: usize, item: Id) -> bool {
     team[k].game.inv.count(item) > 0
 }
 
+/// A bot that fell somewhere nasty while wandering gets back up (the checks need everyone alive).
+fn revive(host: &mut Game, team: &mut [Bot]) {
+    for b in team.iter_mut().filter(|b| b.game.dead.is_some()) {
+        b.game.respawn();
+        // (No renderer here to say the chunks are in.)
+        b.game.ready = true;
+    }
+    pump(host, team, 0.5, |_| idle());
+}
+
 /// Gliding, spears, Hollow Boxes, spectators and statistics, end to end.
 fn new_features(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
     use crate::net::{FLAG_GHOST, FLAG_GLIDE};
@@ -265,6 +276,7 @@ fn new_features(host: &mut Game, team: &mut [Bot], report: &mut Report, touched:
     // The host's own player stands by spawn and would pick things up first: out of the way.
     host.set_mode(crate::modes::GameMode::Spectator);
     host.player.body.pos += Vec3::Y * 40.0;
+    revive(host, team);
 
     // 1. A Glider, from high up: the host should see the bot gliding.
     let (glider_bot, gid) = (0, id(team, 0));
@@ -413,6 +425,139 @@ fn new_features(host: &mut Game, team: &mut [Bot], report: &mut Report, touched:
             report.problems.push(format!("the host has no statistics for {}", bot.name));
         }
     }
+}
+
+/// Crafting tables, beehives, brushing, smithing and death messages, checked by the host.
+fn latest_features(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    let n = team.len();
+    let ledger = |host: &Game, id: u32, item: Id| host.peers.get(&id).map(|p| p.ledger.bag.count(item)).unwrap_or(0);
+    revive(host, team);
+
+    // 6. A chest needs a crafting table nearby: refused without one, fine with one.
+    let k = 0;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    host.give_peer(id, PLANKS, 16);
+    pump(host, team, 0.5, |_| idle());
+    let chest = recipes().iter().position(|r| r.output.0 == CHEST && r.inputs == vec![(PLANKS, 8)]).expect("chest recipe") as u16;
+    team[k].game.net_send_msg(Msg::Craft { recipe: chest, times: 1 });
+    pump(host, team, 0.5, |_| idle());
+    report.features.push("table");
+    if ledger(host, id, CHEST) != 0 {
+        report.problems.push(format!("the host let {} craft a chest with no crafting table", team[k].name));
+    }
+    let table = feet + IVec3::X * 2;
+    host.world.set_v(table, TABLE);
+    touched.insert(table);
+    pump(host, team, 0.5, |_| idle());
+    team[k].game.net_send_msg(Msg::Craft { recipe: chest, times: 1 });
+    pump(host, team, 0.5, |_| idle());
+    if ledger(host, id, CHEST) != 1 {
+        report.problems.push(format!("the host refused {}'s chest at a crafting table", team[k].name));
+    }
+
+    // 7. Honey: smoke a full hive, then bottle some.
+    let k = 1 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let hive = feet + IVec3::X * 2;
+    host.world.set_v(hive, BEEHIVE_HONEY);
+    let mut colony = crate::bees::Colony::founded(crate::bees::Queen::Gentle);
+    colony.honey = 60.0;
+    colony.nectar = [0.0, 60.0, 0.0, 0.0, 0.0];
+    host.hives.insert(hive, colony);
+    touched.insert(hive);
+    host.give_peer(id, BEE_SMOKER, 1);
+    host.give_peer(id, GLASS_BOTTLE, 1);
+    pump(host, team, 0.8, |_| idle());
+    for item in [BEE_SMOKER, GLASS_BOTTLE] {
+        // In hand first: whatever's held is what gets used up.
+        let g = &mut team[k].game;
+        if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)) {
+            g.inv.selected = slot;
+            g.use_on_hive(hive, item);
+        }
+        pump(host, team, if item == BEE_SMOKER { 0.4 } else { 2.0 }, |_| idle());
+    }
+    report.features.push("honey");
+    let honey = crate::bees::Flavour::Sunny.item();
+    if host.drops.iter().any(|d| d.item == honey) {
+        fetch(host, team, k, honey);
+    }
+    if holder(team, honey).is_none() {
+        report.problems.push("nobody got the bottle of honey from the hive".into());
+    }
+    if host.hives.get(&hive).is_none_or(|c| c.honey > 45.0) {
+        report.problems.push("the hive still has all its honey after bottling".into());
+    }
+
+    // 8. Archaeology: brush a suspicious block (the host rolls the find).
+    let k = 2 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let sus = feet + IVec3::X * 2;
+    host.world.set_v(sus, SUSPICIOUS_SAND);
+    touched.insert(sus);
+    host.give_peer(id, BRUSH, 1);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.net_send_msg(Msg::Excavate { x: sus.x, y: sus.y, z: sus.z, cracks: 0 });
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("brush");
+    if host.world.get_v(sus) != SAND {
+        report.problems.push(format!("the suspicious sand {} brushed is still suspicious", team[k].name));
+    }
+
+    // 9. Smithing: a Dimond pickaxe becomes Scorchite.
+    let k = 3 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let bench = feet + IVec3::X * 2;
+    host.world.set_v(bench, SMITHING_TABLE);
+    touched.insert(bench);
+    for item in [PICK_DIAMOND, UPGRADE_TEMPLATE, SCORCHITE_INGOT] {
+        host.give_peer(id, item, 1);
+    }
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    g.open_bench(bench, crate::smithing::Bench::Smithing);
+    for (slot, item) in [(0, UPGRADE_TEMPLATE), (1, PICK_DIAMOND), (2, SCORCHITE_INGOT)] {
+        if let Some(i) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)) {
+            g.inv.cursor = g.inv.slots[i].take();
+            g.bench_click(slot, false);
+        }
+    }
+    g.bench_take();
+    g.close_bench();
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("smithing");
+    if ledger(host, id, PICK_SCORCHITE) != 1 || ledger(host, id, PICK_DIAMOND) != 0 {
+        report.problems.push(format!("the host didn't see {} upgrade a pickaxe to Scorchite", team[k].name));
+    }
+
+    // 10. A death message reaches everyone.
+    let k = n - 1;
+    let name = team[k].name.clone();
+    host.admin_command(crate::admin::Caller::Host, &format!("/kill {name}"));
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("death message");
+    let heard = |log: &std::collections::VecDeque<String>| log.iter().any(|l| l.contains(&name) && l.contains("struck down"));
+    if !heard(&host.chat_log) {
+        report.problems.push(format!("the host never heard how {name} died"));
+    }
+    for other in team.iter().filter(|b| b.name != name) {
+        if !heard(&other.game.chat_log) {
+            report.problems.push(format!("{} never heard how {name} died", other.name));
+        }
+    }
+    revive(host, team);
 }
 
 /// Remember the chat lines a bot can see now (before they scroll away).
@@ -569,7 +714,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

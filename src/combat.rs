@@ -73,7 +73,9 @@ impl Game {
 
     /// Knockback after armour's steadiness.
     pub fn steadied(&self, push: Vec3) -> Vec3 {
-        push * (1.0 - self.inv.armor_points() as f32 * 0.025).max(0.3)
+        // Each piece of Scorchite takes off another tenth (see smithing.rs).
+        let scorchite = self.inv.armor.iter().flatten().filter(|(id, _)| crate::smithing::is_scorchite(*id)).count() as f32;
+        push * (1.0 - self.inv.armor_points() as f32 * 0.025 - scorchite * 0.1).max(0.1)
     }
 
     /// A full-strength sword blow catches mobs next to the one hit (where the world lives).

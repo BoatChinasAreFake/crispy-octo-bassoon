@@ -82,7 +82,14 @@ impl Generator {
                     let edge = ((y - 64) as f32 / 58.0).powi(2);
                     let solid = n + edge * 1.1 > 0.18;
                     b[i] = if solid {
-                        if hash3(s ^ 2, x, y, z) < 0.012 { SCORCH_GOLD_ORE } else { SCORCHROCK }
+                        if hash3(s ^ 2, x, y, z) < 0.012 {
+                            SCORCH_GOLD_ORE
+                        } else if y < 22 && hash3(s ^ 0xDEB, x, y, z) < 0.0022 {
+                            // Old Debris: rare, deep down, and the only source of Scorchite (see smithing.rs).
+                            OLD_DEBRIS
+                        } else {
+                            SCORCHROCK
+                        }
                     } else if y <= LAVA_SEA {
                         LAVA
                     } else {

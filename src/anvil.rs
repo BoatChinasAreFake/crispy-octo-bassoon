@@ -33,10 +33,14 @@ pub fn repair_material(id: Id) -> Option<Id> {
     match id {
         GLIDER => return Some(FEATHER),
         SPEAR | PICK_COPPER | SWORD_COPPER => return Some(COPPER_INGOT),
+        BRUSH => return Some(COPPER_INGOT),
+        DIAMOND_BRUSH => return Some(DIAMOND),
+        BEE_SMOKER => return Some(IRON),
+        _ if crate::smithing::is_scorchite(id) => return Some(SCORCHITE_INGOT),
         _ => {}
     }
     if let Some(t) = crate::tools::axe_tier(id).or_else(|| crate::tools::shovel_tier(id)) {
-        return Some([PLANKS, COBBLE, COPPER_INGOT, IRON, DIAMOND][t]);
+        return Some([PLANKS, COBBLE, COPPER_INGOT, IRON, DIAMOND, SCORCHITE_INGOT][t]);
     }
     if armor_of(id).is_some_and(|(_, t)| t == COPPER_TIER) {
         return Some(COPPER_INGOT);

@@ -262,12 +262,13 @@ impl Game {
             d.update(dt, &self.world);
         }
         // Lava eats things.
-        let burnt: Vec<Vec3> = self.drops.iter().filter(|d| d.body.in_lava).map(|d| d.body.pos).collect();
+        let burnt: Vec<Vec3> = self.drops.iter().filter(|d| d.body.in_lava && !crate::smithing::is_scorchite(d.item)).map(|d| d.body.pos).collect();
         for p in burnt {
             self.sfx(Sfx::Hiss, Some(p));
             self.smoke(p + Vec3::Y * 0.3, 4, 0.2);
         }
-        self.drops.retain(|d| d.age < DESPAWN_SECS && d.body.pos.y > -16.0 && !d.body.in_lava);
+        // Scorchite floats in lava (see smithing.rs); everything else burns.
+        self.drops.retain(|d| d.age < DESPAWN_SECS && d.body.pos.y > -16.0 && (!d.body.in_lava || crate::smithing::is_scorchite(d.item)));
         self.drop_timer += dt;
         if self.drop_timer >= 0.5 {
             self.drop_timer = 0.0;
@@ -279,6 +280,7 @@ impl Game {
         }
         let me = self.player.body.pos;
         let mut got = Vec::new();
+        let mut found = Vec::new();
         for d in self.drops.iter_mut() {
             if !d.can_pick_up() || reach(me, d.body.pos) > PICKUP_RANGE {
                 continue;
@@ -290,12 +292,17 @@ impl Game {
             self.inv.add_worn(d.item, room, d.wear);
             d.n -= room;
             got.push(d.item);
+            found.push((d.item, d.wear));
             if d.item == HOLLOW_BOX && crate::boxes::box_id(d.wear) != 0 {
                 got.push(AIR);
             }
         }
         if got.contains(&AIR) {
             self.advance("boxed_in");
+        }
+        // Finds go in the Field Journal (see archaeology.rs).
+        for (item, wear) in found {
+            self.journal_pickup(item, wear);
         }
         if !got.is_empty() {
             self.drops.retain(|d| d.n > 0);

@@ -18,9 +18,11 @@ const MAGIC: &[u8; 4] = b"MNCR";
 /// keeping (tamed, bred, fed), Hmmers, and which portal leads to which; v13
 /// moves block edits out into region files beside the save (see regions.rs);
 /// v14 moves soil, containers, signs and frames there too; v15 adds the
-/// player's own game mode, hardcore, statistics and portable boxes' contents.
+/// player's own game mode, hardcore, statistics and portable boxes' contents;
+/// v16 adds named extra sections (the recipe book, beehives, the field
+/// journal...), so new things no longer need a new version each.
 /// Older saves still load.
-pub const VERSION: u32 = 15;
+pub const VERSION: u32 = 16;
 
 /// Before v5, ids were one byte: blocks below 100, items from 100 up.
 pub(crate) fn legacy_id(v: u8) -> Id {
@@ -88,6 +90,8 @@ pub struct SaveData {
     pub stats: Vec<u8>,
     /// What's inside portable boxes, packed by `boxes::encode` (save v15+).
     pub boxes: Vec<u8>,
+    /// Named sections, each packed by its own module (save v16+). Unknown names are kept as they are.
+    pub extras: Vec<(String, Vec<u8>)>,
     /// The format version it was read from (the container and drop blobs changed in v9).
     pub version: u32,
 }
@@ -230,6 +234,14 @@ pub fn write_to(path: &std::path::Path, d: &SaveData) -> io::Result<()> {
         w.u32(blob.len() as u32);
         w.0.extend_from_slice(blob);
     }
+    w.u32(d.extras.len() as u32);
+    for (key, blob) in &d.extras {
+        let k = &key.as_bytes()[..key.len().min(255)];
+        w.u8(k.len() as u8);
+        w.0.extend_from_slice(k);
+        w.u32(blob.len() as u32);
+        w.0.extend_from_slice(blob);
+    }
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
     }
@@ -347,9 +359,21 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
         stats = r.bytes(1 << 20)?;
         boxes = r.bytes(64 << 20)?;
     }
+    let mut extras = Vec::new();
+    if version >= 16 {
+        let n = r.u32()?.min(4096);
+        for _ in 0..n {
+            let len = r.u8()? as usize;
+            let mut key = Vec::with_capacity(len);
+            for _ in 0..len {
+                key.push(r.u8()?);
+            }
+            extras.push((String::from_utf8_lossy(&key).into_owned(), r.bytes(64 << 20)?));
+        }
+    }
     let ok = |v: f32, d: f32| if v.is_finite() { v.clamp(0.0, 20.0) } else { d };
     let (food, saturation) = (ok(food, 20.0), ok(saturation, 5.0));
-    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, mobs, portals, vehicles, decor, mode, hardcore, stats, boxes, version })
+    Ok(SaveData { seed, creative, time, pos, yaw, pitch, health, spawn, slots, mods, palette, script_vars, advancements, farm, fish_log, containers, drops, wear, food, saturation, keep_inventory, difficulty, daylight_cycle, xp, players, weather, weather_timer, weather_cycle, enchant_count, mobs, portals, vehicles, decor, mode, hardcore, stats, boxes, extras, version })
 }
 
 // ------------------------------------------------------------------ world slots
@@ -582,6 +606,7 @@ mod tests {
             hardcore: true,
             stats: vec![9],
             boxes: vec![10, 11],
+            extras: vec![("known".into(), b"stick,dirt".to_vec()), ("empty".into(), Vec::new())],
             version: VERSION,
         }
     }
@@ -640,6 +665,7 @@ mod tests {
         let back = read_from(&path).unwrap();
         assert_eq!(back.advancements, d.advancements);
         assert_eq!((back.mode, back.hardcore, back.stats, back.boxes), (2, true, vec![9], vec![10, 11]), "v15 fields come back");
+        assert_eq!(back.extras, vec![("known".to_string(), b"stick,dirt".to_vec()), ("empty".to_string(), Vec::new())], "v16 sections come back");
         std::fs::remove_dir_all(&root).ok();
     }
 

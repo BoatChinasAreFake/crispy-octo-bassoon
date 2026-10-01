@@ -29,13 +29,19 @@ pub fn max_uses(item: Id, w: Wear) -> Option<u32> {
 
 /// Items that remember their wear: tools, weapons, armour, and enchanted books.
 pub fn keeps_wear(item: Id) -> bool {
-    // A Hollow Box's wear says where its contents are (see boxes.rs).
-    durability(item).is_some() || item == ENCHANTED_BOOK || item == HOLLOW_BOX
+    durability(item).is_some() || tagged(item)
+}
+
+/// Items whose wear's high half is a label rather than damage: a Hollow Box's
+/// number (see boxes.rs), a queen's temperament (bees.rs), a find's condition
+/// (archaeology.rs), a book's enchantment.
+pub fn tagged(item: Id) -> bool {
+    item == ENCHANTED_BOOK || item == HOLLOW_BOX || item == QUEEN_BEE || crate::archaeology::is_find(item)
 }
 
 /// Keep only what makes sense for `item` (saves and other players can't be trusted).
 pub fn sanitize_wear(item: Id, w: Wear) -> Wear {
-    if item == ENCHANTED_BOOK || item == HOLLOW_BOX {
+    if tagged(item) {
         return w & 0xFFFF_0000;
     }
     match max_uses(item, w) {

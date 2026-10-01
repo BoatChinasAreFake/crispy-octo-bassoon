@@ -68,6 +68,10 @@ pub fn ore_xp(id: Id, rng: &mut Rng) -> u32 {
         IRON_ORE | GOLD_ORE => 1,
         DIAMOND_ORE => rng.int(3, 7) as u32,
         ZAP_ORE => rng.int(1, 5) as u32,
+        SCULK => 1,
+        SCULK_SENSOR | SCULK_SHRIEKER => 5,
+        SCULK_CATALYST => 5,
+        OLD_DEBRIS => 2,
         _ => 0,
     }
 }

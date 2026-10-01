@@ -91,6 +91,11 @@ pub fn roll(item: Id, power: u8, rng: &mut crate::noise::Rng) -> Wear {
     w
 }
 
+/// An enchanted book from a treasure chest: something strong.
+pub fn random_book(rng: &mut crate::noise::Rng) -> Wear {
+    roll(BOOK, rng.int(15, 30) as u8, rng)
+}
+
 /// An enchantment's level on an item (0: none).
 pub fn level(w: Wear, e: Enchant) -> u8 {
     ((w >> e.shift()) & 7) as u8

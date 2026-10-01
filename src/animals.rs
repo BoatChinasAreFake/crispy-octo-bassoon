@@ -52,6 +52,8 @@ pub enum Interaction {
     Toggled,
     /// Got on this Galloper (see horses.rs).
     Mounted(u32),
+    /// Brushed a Rollo (the brush wears once).
+    Brushed,
 }
 
 /// Would right-clicking this mob with `item` do anything? (Joined players
@@ -62,7 +64,7 @@ pub fn will_shear(m: &Mob, item: Id) -> bool {
 
 impl Game {
     /// The players' record keys and where they are (for owners and food).
-    fn player_spots(&self) -> Vec<(String, Vec3, Id)> {
+    pub(crate) fn player_spots(&self) -> Vec<(String, Vec3, Id)> {
         let mut v = Vec::new();
         if !self.dedicated && self.dead.is_none() {
             v.push((record_key(&self.player_name), self.player.body.pos, self.inv.held()));
@@ -97,6 +99,48 @@ impl Game {
                 self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| id + 1).unwrap_or(0)
             };
             return self.galloper_interact(who, i, item, rider);
+        }
+        let m = &mut self.mobs[i];
+        // Woofer armour on (or, with shears, off) your own Woofer.
+        if m.kind == MobKind::Woofer && m.owner.as_deref() == Some(who) {
+            if item == WOLF_ARMOR && !m.saddled {
+                m.saddled = true;
+                m.temper = crate::critters::WOLF_ARMOUR_HP;
+                self.sfx(Sfx::Scuttle, Some(pos));
+                self.tell(who, "Your Woofer is armoured. Very good boy protection.");
+                self.advance_for(who, "armoured_pup");
+                return Interaction::Ate;
+            }
+            if item == SHEARS && m.saddled {
+                m.saddled = false;
+                m.temper = 0;
+                self.pop_drop(pos, WOLF_ARMOR, 1);
+                self.sfx(Sfx::Snip, Some(pos));
+                return Interaction::Sheared;
+            }
+        }
+        // Brushing a Rollo: a scute, once in a while.
+        if m.kind == MobKind::Rollo && matches!(item, BRUSH | DIAMOND_BRUSH) {
+            if m.warp_cd > 0.0 {
+                self.tell(who, "This Rollo has been brushed quite enough for now.");
+                return Interaction::Nothing;
+            }
+            m.warp_cd = crate::critters::BRUSH_COOLDOWN;
+            self.pop_drop(pos, SCUTE, 1);
+            self.sfx(Sfx::Brush, Some(pos));
+            self.advance_for(who, "scute_cute");
+            return Interaction::Brushed;
+        }
+        // A wild Sneaker fed Cluckets learns to trust you.
+        if m.kind == MobKind::Sneaker && m.owner.is_none() && m.kind.breed_food().contains(&item) {
+            m.owner = Some(who.to_string());
+            m.persistent = true;
+            m.flee = 0.0;
+            self.hearts(pos, 5);
+            self.sfx(Sfx::Yip, Some(pos));
+            self.tell(who, "The Sneaker trusts you now. It'll follow you about, and bring you things.");
+            self.advance_for(who, "sly_friend");
+            return Interaction::Ate;
         }
         let m = &mut self.mobs[i];
         match m.kind {
@@ -166,7 +210,7 @@ impl Game {
         }
         if self.is_client() {
             // The host decides (and takes what was used); shears wear here and there alike.
-            if will_shear(mob, held) {
+            if will_shear(mob, held) || (mob.kind == MobKind::Rollo && matches!(held, BRUSH | DIAMOND_BRUSH)) {
                 self.use_tool(1);
             }
             self.net_send_msg(Msg::MobInteract { mob: id, item: held });
@@ -184,7 +228,7 @@ impl Game {
                 self.player.swing = 1.0;
                 true
             }
-            Interaction::Sheared => {
+            Interaction::Sheared | Interaction::Brushed => {
                 self.use_tool(1);
                 self.player.swing = 1.0;
                 true
@@ -207,6 +251,7 @@ impl Game {
         match self.interact_mob(&who, at, mob, item) {
             Interaction::Ate if !self.peer_free(from) => self.take_peer(from, item, 1),
             Interaction::Sheared => self.host_wear(from, SHEARS, 1),
+            Interaction::Brushed => self.host_wear(from, item, 1),
             Interaction::Mounted(id) => self.net_send_to(from, Msg::MountMob { mob: id }),
             _ => {}
         }

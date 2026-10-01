@@ -315,7 +315,11 @@ impl Game {
         }
         // Goo waxes copper.
         if crate::copper::waxed(old) == Some(new) {
-            return self.peer_take(from, GOO, 1);
+            return self.peer_take(from, GOO, 1) || self.peer_take(from, HONEYCOMB, 1);
+        }
+        // Torchflower seeds planted (see archaeology.rs).
+        if new == TORCHFLOWER_SPROUT {
+            return self.peer_take(from, TORCHFLOWER_SEEDS, 1);
         }
         // Fire comes from a Sparker (which wears a little).
         if new == FIRE {
@@ -419,6 +423,10 @@ impl Game {
         }
         let Some(r) = recipes().get(recipe as usize) else { return };
         let r = r.clone();
+        // Big recipes need a crafting table nearby (see crafting.rs).
+        if crate::crafting::needs_table(&r) && !self.peer_at_table(from) {
+            return;
+        }
         let Some(l) = self.ledger(from) else { return };
         for _ in 0..times.min(64) {
             if !r.inputs.iter().all(|&(id, n)| l.bag.count(id) >= n as u32) {

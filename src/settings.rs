@@ -53,6 +53,9 @@ pub struct Settings {
     pub fog: bool,
     /// Clouds at all (`fancy_clouds` says which kind).
     pub clouds: bool,
+    /// Sun shadows, and deep water with light rippling under it (see render.rs).
+    pub shadows: bool,
+    pub fancy_water: bool,
 }
 
 /// Max FPS choices (0: unlimited).
@@ -92,6 +95,8 @@ impl Default for Settings {
             view_bobbing: true,
             fog: true,
             clouds: true,
+            shadows: true,
+            fancy_water: true,
         }
     }
 }
@@ -109,7 +114,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nfancy_water={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -135,6 +140,8 @@ impl Settings {
             self.view_bobbing,
             self.fog,
             self.clouds,
+            self.shadows,
+            self.fancy_water,
         ) + self.binds.to_text().as_str()
     }
 
@@ -178,6 +185,8 @@ impl Settings {
                 "particles" => s.particles = v.parse().unwrap_or(s.particles),
                 "view_bobbing" => s.view_bobbing = flag(s.view_bobbing),
                 "fog" => s.fog = flag(s.fog),
+                "shadows" => s.shadows = flag(s.shadows),
+                "fancy_water" => s.fancy_water = flag(s.fancy_water),
                 "clouds" => s.clouds = flag(s.clouds),
                 k => {
                     s.binds.read(k, v);
@@ -264,6 +273,8 @@ mod tests {
             view_bobbing: false,
             fog: false,
             clouds: false,
+            shadows: false,
+            fancy_water: false,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

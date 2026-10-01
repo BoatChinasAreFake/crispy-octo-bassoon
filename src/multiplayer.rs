@@ -44,11 +44,13 @@ pub struct Peer {
     pub mode: crate::modes::GameMode,
     /// Their latest statistics (see stats.rs), kept with the world.
     pub stats: Vec<u8>,
+    /// Where they were at the last footstep check (see deepdark.rs).
+    pub last_step: Vec3,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new() }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -74,7 +76,7 @@ pub fn sanitize_name(name: &str) -> String {
 
 /// How far a player can reach to break, place, hit or poke things (a little
 /// more than the local limit, to allow for lag).
-const REACH: f32 = 10.0;
+pub(crate) const REACH: f32 = 10.0;
 /// Nonsense messages tolerated before a kick.
 const MAX_STRIKES: u32 = 20;
 
@@ -177,7 +179,8 @@ impl Game {
     }
 
     pub fn hurt_peer(&mut self, id: u32, dmg: f32, cause: &str, knock: Vec3) {
-        if self.creative {
+        // Their own game mode decides (not the host's): creative and spectating players can't be hurt.
+        if self.peer_free(id) {
             return;
         }
         self.net_send_to(id, Msg::HurtYou { dmg, cause: cause.into(), knock });
@@ -520,6 +523,12 @@ impl Game {
                     if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
                         self.spill_frame(IVec3::new(x, y, z));
                     }
+                    // Hives, pots and sculk notice (and the Deep Dark hears it).
+                    if old != id && crate::ledger::is_break(old, id) {
+                        self.block_gone(IVec3::new(x, y, z), old);
+                    } else if old != id {
+                        self.vibrate(center, Some(from));
+                    }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
                     if packed != 0 {
@@ -693,6 +702,28 @@ impl Game {
                     self.host_wear(from, BOW, 1);
                 }
             }
+            Msg::Interact { x, y, z, item } if crate::bees::is_hive(self.world.get(x, y, z)) || self.world.get(x, y, z) == RESTORATION_BENCH => {
+                let p = IVec3::new(x, y, z);
+                let near = self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH).unwrap_or(false);
+                if near && self.peer_has(from, item) && self.peer_rate_ok(from, "interact", 0.2) {
+                    if self.world.get_v(p) == RESTORATION_BENCH {
+                        self.host_restore(from, p, item);
+                    } else {
+                        self.host_hive_use(from, p, item);
+                    }
+                }
+            }
+            Msg::Excavate { x, y, z, cracks } => self.host_excavate(from, IVec3::new(x, y, z), cracks),
+            Msg::Died { cause } => {
+                // Told to everyone, like Minecraft's death messages.
+                if self.peer_rate_ok(from, "died", 1.0) {
+                    let cause: String = cause.chars().filter(|c| !c.is_control()).take(120).collect();
+                    let line = format!("{} {cause}", self.peer_name(from));
+                    self.msg(line.clone());
+                    self.system_message(None, &line);
+                }
+            }
+            Msg::Smith { x, y, z, grind, a, a_ench, b, b_ench } => self.host_smith(from, IVec3::new(x, y, z), grind, a, a_ench, b, b_ench),
             Msg::Interact { x, y, z, item } => {
                 let at = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
                 let near = self.peers.get(&from).map(|p| (p.target + Vec3::Y * 1.6).distance(at) <= REACH).unwrap_or(false);
@@ -1009,6 +1040,7 @@ impl Game {
                 let name = self.peer_name(from);
                 self.msg(format!("<{name}> {text}"));
             }
+            Msg::Darkness { secs } => self.darkness = self.darkness.max(secs.clamp(0.0, 30.0)),
             Msg::Effect { heal, teleport, launch, take } => {
                 if heal > 0.0 && self.dead.is_none() {
                     self.player.health = (self.player.health + heal).min(crate::player::MAX_HEALTH);
@@ -1027,7 +1059,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } => {}
         }
     }
 
@@ -1050,7 +1082,7 @@ impl Game {
             // Starers reuse the fuse field for "angry".
             m.angry = kind == MobKind::Starer && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
-            if kind == MobKind::Hmmer {
+            if matches!(kind, MobKind::Hmmer | MobKind::Sneaker) {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
@@ -1190,7 +1222,8 @@ impl Game {
                         pos: m.body.pos,
                         yaw: m.yaw,
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
-                        fuse: if m.kind == MobKind::Hmmer { m.seed as f32 } else if m.angry { 1.0 } else { m.fuse },
+                        // (Sneakers send what they're carrying.)
+                        fuse: if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && m.kind == MobKind::Starer { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,

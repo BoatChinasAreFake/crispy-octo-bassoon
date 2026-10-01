@@ -191,11 +191,21 @@ pub enum MobKind {
     Fishy,
     /// Drowned-ish: a waterlogged Groaner that swims after you, some with a Soggy Spear.
     Soggy,
+    /// A bee out of its hive because someone upset it (see bees.rs).
+    Bee,
+    /// Fox-ish: naps by day, hunts Clucksters by night, steals your stuff (see critters.rs).
+    Sneaker,
+    /// Frog-ish: hops about swamps and eats small Bloops (see critters.rs).
+    Ribbit,
+    /// Armadillo-ish: rolls into a ball when startled; brush it for scutes (see critters.rs).
+    Rollo,
+    /// Warden-ish: blind, enormous, and drawn to any sound (see deepdark.rs).
+    Hush,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 19] = [
+    pub const ALL: [MobKind; 24] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -215,6 +225,11 @@ impl MobKind {
         MobKind::Clanker,
         MobKind::Fishy,
         MobKind::Soggy,
+        MobKind::Bee,
+        MobKind::Sneaker,
+        MobKind::Ribbit,
+        MobKind::Rollo,
+        MobKind::Hush,
     ];
 
     pub fn index(self) -> u8 {
@@ -245,6 +260,11 @@ impl MobKind {
             "clanker" | "iron_golem" | "golem" => Some(MobKind::Clanker),
             "fishy" | "fish" | "cod" => Some(MobKind::Fishy),
             "soggy" | "soggy groaner" | "soggy_groaner" | "drowned" => Some(MobKind::Soggy),
+            "bee" => Some(MobKind::Bee),
+            "sneaker" | "fox" => Some(MobKind::Sneaker),
+            "ribbit" | "frog" => Some(MobKind::Ribbit),
+            "rollo" | "armadillo" => Some(MobKind::Rollo),
+            "hush" | "the hush" | "the_hush" | "warden" => Some(MobKind::Hush),
             _ => None,
         }
     }
@@ -269,6 +289,11 @@ impl MobKind {
             MobKind::Clanker => "Clanker",
             MobKind::Fishy => "Fishy",
             MobKind::Soggy => "Soggy Groaner",
+            MobKind::Bee => "Bee",
+            MobKind::Sneaker => "Sneaker",
+            MobKind::Ribbit => "Ribbit",
+            MobKind::Rollo => "Rollo",
+            MobKind::Hush => "The Hush",
         }
     }
     /// Half-width and height at size 1.
@@ -293,6 +318,11 @@ impl MobKind {
             MobKind::Clanker => (0.7, 2.7),
             MobKind::Fishy => (0.25, 0.45),
             MobKind::Soggy => (0.3, 1.95),
+            MobKind::Bee => (0.2, 0.35),
+            MobKind::Sneaker => (0.3, 0.7),
+            MobKind::Ribbit => (0.25, 0.5),
+            MobKind::Rollo => (0.32, 0.55),
+            MobKind::Hush => (0.45, 2.9),
         }
     }
     pub fn max_health(self) -> f32 {
@@ -316,6 +346,11 @@ impl MobKind {
             MobKind::Clanker => 100.0,
             MobKind::Fishy => 3.0,
             MobKind::Soggy => 20.0,
+            MobKind::Bee => 4.0,
+            MobKind::Sneaker => 10.0,
+            MobKind::Ribbit => 10.0,
+            MobKind::Rollo => 12.0,
+            MobKind::Hush => 250.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -329,11 +364,15 @@ impl MobKind {
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo)
+    }
+    /// Flies (no gravity; steers up and down itself).
+    pub fn flies(self) -> bool {
+        self == MobKind::Bee
     }
     /// What it eats to fall in love (see animals.rs); Woofers only once tamed.
     pub fn breed_food(self) -> &'static [Id] {
@@ -341,6 +380,9 @@ impl MobKind {
             MobKind::Oinker => &[CARROT, POTATO],
             MobKind::Fluffer | MobKind::Mooer => &[WHEAT],
             MobKind::Cluckster | MobKind::Squawker => &[WHEAT_SEEDS],
+            MobKind::Sneaker => &[CLUCKETS, COOKED_CLUCKETS],
+            MobKind::Ribbit => &[GOO],
+            MobKind::Rollo => &[DEAD_BUSH],
             MobKind::Galloper => &[APPLE],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             _ => &[],
@@ -426,6 +468,8 @@ pub enum MobEvent {
     Warp(Vec3, Vec3),
     /// A Rattler loosed a Pointy Stick: (from, velocity).
     Shoot(Vec3, Vec3),
+    /// The Hush's shush: a blast of sound from `from` at the player, through walls.
+    Shush(Vec3),
 }
 
 /// A spot a Starer can teleport to near `around`: standing room on solid ground.
@@ -531,6 +575,10 @@ impl Mob {
         if self.hurt > 0.25 {
             return;
         }
+        // A curled-up Rollo is mostly shell.
+        let amount = if self.kind == MobKind::Rollo && self.fuse > 0.0 { amount * 0.25 } else { amount };
+        // Woofer armour soaks up hits until it wears through (see critters.rs).
+        let amount = if self.kind == MobKind::Woofer && self.saddled { crate::critters::armour_soak(self, amount) } else { amount };
         self.health -= amount;
         self.hurt = 0.5;
         let mut dir = self.body.pos - from;
@@ -539,11 +587,22 @@ impl Mob {
         self.knock = dir * 7.0;
         self.body.vel.y = 6.0;
         match self.kind {
-            k if k.passive() => self.flee = 4.0,
             MobKind::Webber => self.angry = true,
             MobKind::Woofer if self.owner.is_none() => self.angry = true,
+            MobKind::Rollo => {
+                self.fuse = 6.0;
+                self.knock *= 0.3;
+            }
+            k if k.passive() => self.flee = 4.0,
             MobKind::Hmmer | MobKind::Fishy => self.flee = 4.0,
-            MobKind::Grumbler => self.angry = true,
+            MobKind::Grumbler | MobKind::Bee => self.angry = true,
+            MobKind::Hush => {
+                // Hard to shift; and now it knows exactly where you are.
+                self.knock *= 0.1;
+                self.body.vel.y = 0.5;
+                self.goal = Some(from);
+                self.fuse = 0.0;
+            }
             MobKind::Clanker => {
                 // Hard to shift, and it remembers who did that.
                 self.angry = true;
@@ -581,8 +640,9 @@ impl Mob {
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
 
         let mut want: Option<(f32, f32)> = None; // (yaw, speed)
-        // Swimmers choose how fast to rise or sink instead of bobbing up.
+        // Swimmers choose how fast to rise or sink instead of bobbing up (and fliers how fast to climb).
         let mut swim_vy: Option<f32> = None;
+        let mut fly_vy: Option<f32> = None;
         // Wander when there's nothing better to do (Bloops only ever hop).
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
@@ -738,6 +798,135 @@ impl Mob {
                     swim_vy = Some(-0.4);
                 }
             }
+            MobKind::Bee => {
+                // Out of the hive to sting someone, then back home (see bees.rs).
+                may_wander = false;
+                self.fuse += dt;
+                let home = self.home.unwrap_or(self.body.pos) + Vec3::new(0.0, 0.6, 0.0);
+                let chase = self.angry && player_visible && dist < 24.0 && self.fuse < 40.0;
+                let goal = if chase { player + Vec3::Y * 1.2 } else { home };
+                let d = goal - self.body.pos;
+                let fd = Vec3::new(d.x, 0.0, d.z);
+                if fd.length() > 0.2 {
+                    want = Some((fd.x.atan2(-fd.z), if chase { 4.4 } else { 2.5 }));
+                }
+                fly_vy = Some((d.y * 2.5).clamp(-4.0, 4.0) + (self.fuse * 9.0 + self.id as f32).sin() * 0.5);
+                if chase && (player + Vec3::Y * 0.9).distance(self.body.pos) < 1.1 && self.attack_cd <= 0.0 {
+                    ev.push(MobEvent::HurtPlayer(2.0, "was stung by a Bee. The smoker was right there"));
+                    // A bee only stings once.
+                    self.health = -100.0;
+                } else if (!chase && d.length() < 0.8) || self.fuse > 60.0 {
+                    self.health = -100.0;
+                }
+            }
+            MobKind::Sneaker => {
+                // Naps through the day unless something's going on (see critters.rs for the hunting).
+                let napping = daylight > 0.7 && self.flee <= 0.0 && self.goal.is_none() && self.hurt <= 0.0 && self.love <= 0.0;
+                self.sitting = napping;
+                if self.flee > 0.0 {
+                    want = Some(((-flat.x).atan2(flat.z), 4.6));
+                } else if napping {
+                    may_wander = false;
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    let fd = Vec3::new(d.x, 0.0, d.z).length();
+                    if fd > 1.0 {
+                        want = Some((d.x.atan2(-d.z), if self.prey.is_some() { 4.2 } else { 2.8 }));
+                    } else {
+                        may_wander = false;
+                    }
+                } else if self.owner.is_none() && player_visible && dist < 5.0 {
+                    // Wild ones keep their distance.
+                    want = Some(((-flat.x).atan2(flat.z), 3.0));
+                }
+            }
+            MobKind::Ribbit => {
+                // Hop, hop. Swims well, too.
+                may_wander = false;
+                self.hop_cd = (self.hop_cd - dt).max(0.0);
+                if self.body.in_water {
+                    let drift = (self.wander_t * 1.3 + self.id as f32).sin() * 0.6;
+                    swim_vy = Some(drift);
+                    may_wander = true;
+                } else if self.body.on_ground {
+                    if self.hop_cd <= 0.0 {
+                        self.yaw = match self.goal {
+                            Some(g) => {
+                                let d = g - self.body.pos;
+                                d.x.atan2(-d.z)
+                            }
+                            None if self.flee > 0.0 => (-flat.x).atan2(flat.z),
+                            None => self.yaw + rng.range(-1.2, 1.2),
+                        };
+                        self.body.vel.y = 5.5;
+                        self.body.on_ground = false;
+                        self.hop_cd = if self.goal.is_some() || self.flee > 0.0 { rng.range(0.4, 0.8) } else { rng.range(1.5, 4.0) };
+                        self.anim += 1.0;
+                    }
+                } else {
+                    want = Some((self.yaw, 2.4));
+                }
+            }
+            MobKind::Rollo => {
+                // Curled up (fuse > 0): a ball until it feels safe again.
+                if self.fuse > 0.0 {
+                    may_wander = false;
+                    if !(player_visible && dist < 3.0) {
+                        self.fuse = (self.fuse - dt).max(0.0);
+                    }
+                } else if player_visible && dist < 2.2 && self.owner.is_none() && rng.chance(dt * 2.0) {
+                    self.fuse = 4.0;
+                    ev.push(MobEvent::Smoke(self.body.pos + Vec3::Y * 0.2));
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 1.1 {
+                        want = Some((d.x.atan2(-d.z), 1.2));
+                    }
+                } else if self.flee > 0.0 {
+                    want = Some(((-flat.x).atan2(flat.z), 2.4));
+                }
+            }
+            MobKind::Hush => {
+                // Blind: it goes where it last heard something (see deepdark.rs), or
+                // straight for anyone close enough to smell.
+                self.fuse += dt;
+                self.warp_cd = (self.warp_cd - dt).max(0.0);
+                let smelled = dist < 3.5;
+                let target = if smelled { Some(player) } else { self.goal };
+                if smelled {
+                    self.fuse = 0.0;
+                    self.goal = Some(player);
+                }
+                match target {
+                    Some(g) => {
+                        let d = g - self.body.pos;
+                        let fd = Vec3::new(d.x, 0.0, d.z).length();
+                        if fd > 1.2 {
+                            want = Some((d.x.atan2(-d.z), if smelled { 3.2 } else { 2.0 }));
+                        } else {
+                            may_wander = false;
+                            if !smelled {
+                                // Nothing here after all.
+                                self.goal = None;
+                            }
+                        }
+                    }
+                    None => may_wander = true,
+                }
+                if smelled && flat.length() < 1.8 && to_player.y.abs() < 2.5 && self.attack_cd <= 0.0 {
+                    ev.push(MobEvent::HurtPlayer(15.0, "was flattened by The Hush. It heard that"));
+                    self.attack_cd = 1.6;
+                } else if self.goal.is_some_and(|g| g.distance(player) < 2.0) && (4.0..16.0).contains(&dist) && self.warp_cd <= 0.0 {
+                    // Can't reach you? It shushes you instead, through anything.
+                    ev.push(MobEvent::Shush(self.eye()));
+                    self.warp_cd = 7.0;
+                }
+                if self.fuse > 60.0 {
+                    // Bored: it digs back down where it came from.
+                    ev.push(MobEvent::Smoke(self.body.pos + Vec3::Y));
+                    self.health = -100.0;
+                }
+            }
             MobKind::Groaner => {
                 if player_visible && dist < 24.0 {
                     want = Some((flat.x.atan2(-flat.z), 2.3));
@@ -891,7 +1080,9 @@ impl Mob {
         self.body.vel.x += (target_vel.x + self.knock.x - self.body.vel.x) * k;
         self.body.vel.z += (target_vel.z + self.knock.z - self.body.vel.z) * k;
         self.knock *= (1.0 - dt * 6.0).max(0.0);
-        if let (true, Some(vy)) = (self.body.in_water, swim_vy) {
+        if self.kind.flies() {
+            self.body.vel.y += (fly_vy.unwrap_or(0.0) - self.body.vel.y) * k;
+        } else if let (true, Some(vy)) = (self.body.in_water, swim_vy) {
             self.body.vel.y += (vy - self.body.vel.y) * k;
         } else if self.body.in_water {
             self.body.vel.y = (self.body.vel.y + 14.0 * dt).min(2.5);
@@ -908,13 +1099,19 @@ impl Mob {
             match self.kind {
                 // Webbers walk straight up walls.
                 MobKind::Webber => self.body.vel.y = 3.2,
-                MobKind::Bloop => {}
+                MobKind::Bee => self.body.vel.y = 3.0,
+                MobKind::Bloop | MobKind::Ribbit => {}
                 _ if self.body.on_ground || prev_ground => self.body.vel.y = 8.8,
                 _ => {}
             }
         }
         let spd = Vec3::new(self.body.vel.x, 0.0, self.body.vel.z).length();
-        step_anim(&mut self.anim, spd, dt, 5.0);
+        if self.kind == MobKind::Bee {
+            // Wings never stop.
+            self.anim += dt * 30.0;
+        } else {
+            step_anim(&mut self.anim, spd, dt, 5.0);
+        }
         self.flutter(!self.body.on_ground && !self.body.in_water && self.body.vel.y < -0.5, dt);
         if self.body.pos.y < -20.0 {
             self.health = -100.0;
@@ -943,6 +1140,10 @@ impl Mob {
             // An armed one drops its spear now and then; otherwise it's soggy goo.
             MobKind::Soggy if self.seed == 1 && rng.chance(0.25) => Some((SPEAR, 1)),
             MobKind::Soggy if n > 0 => Some((GOO, n)),
+            // A Sneaker drops whatever it was carrying.
+            MobKind::Sneaker if self.seed != 0 => Some((self.seed as Id, 1)),
+            MobKind::Rollo if rng.chance(0.3) => Some((SCUTE, 1)),
+            MobKind::Hush => Some((SCULK_CATALYST, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -1004,6 +1205,7 @@ impl Mob {
         let root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
         let parts = match self.kind {
             MobKind::Fluffer if self.sheared => &FLUFFER_SHEARED[..],
+            MobKind::Rollo if self.fuse > 0.0 => &ROLLO_BALL[..],
             MobKind::Soggy if self.seed == 1 => &SOGGY_ARMED[..],
             k => model(k),
         };
@@ -1011,8 +1213,16 @@ impl Mob {
         if self.owner.is_some() && self.kind == MobKind::Woofer {
             draw_model(geo, &root, &WOOFER_COLLAR, 0.0, sky, false);
         }
-        if self.saddled {
+        if self.saddled && self.kind == MobKind::Woofer {
+            draw_model(geo, &root, &WOOFER_ARMOUR, 0.0, sky, false);
+        } else if self.saddled {
             draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
+        }
+        // A Sneaker with something in its mouth.
+        if self.kind == MobKind::Sneaker && self.seed != 0 {
+            let tile = item_tile(self.seed as Id);
+            let held = [part([-0.08, 0.3, -0.76], [0.16, 0.16, 0.06], [0.0; 3], Limb::Fixed, [tile; 6])];
+            draw_model(geo, &root, &held, 0.0, sky, false);
         }
     }
 }
@@ -1274,6 +1484,79 @@ static FLUFFER_SHEARED: [Part; 6] = [
     part([0.12, 0.0, 0.22], [0.18, 0.5, 0.18], [0.0, 0.5, 0.3], Limb::Swing(1.0), [FS; 6]),
 ];
 
+
+static BEE: [Part; 4] = [
+    part([-0.12, 0.08, -0.16], [0.24, 0.22, 0.32], [0.0; 3], Limb::Fixed, [T_BEE, T_BEE, T_BEE, T_BEE, T_BEE, T_BEE_FACE]),
+    part([-0.02, 0.13, 0.16], [0.04, 0.04, 0.06], [0.0; 3], Limb::Fixed, [T_HUSH; 6]),
+    part([-0.22, 0.3, -0.06], [0.2, 0.01, 0.14], [-0.02, 0.3, 0.0], Limb::Wing(1.0), [T_BEE_WING; 6]),
+    part([0.02, 0.3, -0.06], [0.2, 0.01, 0.14], [0.02, 0.3, 0.0], Limb::Wing(-1.0), [T_BEE_WING; 6]),
+];
+
+/// For drawing the bees that buzz about for show (see bees.rs).
+pub fn draw_bee(geo: &mut DynGeo, pos: Vec3, yaw: f32, phase: f32, sky: f32) {
+    let root = Mat4::from_translation(pos - Vec3::Y * 0.2) * Mat4::from_rotation_y(-yaw) * Mat4::from_scale(Vec3::splat(0.6));
+    draw_posed(geo, &root, &BEE, phase * 3.0, 0.0, sky);
+}
+
+const FX: u16 = T_FOX;
+static SNEAKER: [Part; 10] = [
+    part([-0.16, 0.24, -0.3], [0.32, 0.28, 0.6], [0.0; 3], Limb::Fixed, [FX; 6]),
+    part([-0.16, 0.36, -0.56], [0.32, 0.26, 0.26], [0.0; 3], Limb::Fixed, [FX, FX, FX, FX, FX, T_FOX_FACE]),
+    part([-0.07, 0.37, -0.68], [0.14, 0.1, 0.12], [0.0; 3], Limb::Fixed, [T_FOX_TAIL; 6]),
+    part([-0.15, 0.62, -0.5], [0.08, 0.12, 0.05], [0.0; 3], Limb::Fixed, [T_FOX_DARK; 6]),
+    part([0.07, 0.62, -0.5], [0.08, 0.12, 0.05], [0.0; 3], Limb::Fixed, [T_FOX_DARK; 6]),
+    part([-0.14, 0.0, -0.26], [0.08, 0.25, 0.08], [0.0, 0.25, -0.22], Limb::Swing(1.0), [T_FOX_DARK; 6]),
+    part([0.06, 0.0, -0.26], [0.08, 0.25, 0.08], [0.0, 0.25, -0.22], Limb::Swing(-1.0), [T_FOX_DARK; 6]),
+    part([-0.14, 0.0, 0.18], [0.08, 0.25, 0.08], [0.0, 0.25, 0.22], Limb::Swing(-1.0), [T_FOX_DARK; 6]),
+    part([0.06, 0.0, 0.18], [0.08, 0.25, 0.08], [0.0, 0.25, 0.22], Limb::Swing(1.0), [T_FOX_DARK; 6]),
+    part([-0.09, 0.26, 0.28], [0.18, 0.18, 0.42], [0.0, 0.36, 0.3], Limb::Tilt(-0.35), [T_FOX_TAIL; 6]),
+];
+
+const FR: u16 = T_FROG;
+static RIBBIT: [Part; 7] = [
+    part([-0.22, 0.08, -0.24], [0.44, 0.26, 0.46], [0.0; 3], Limb::Fixed, [FR, FR, FR, FR, FR, T_FROG_FACE]),
+    part([-0.22, 0.34, -0.24], [0.44, 0.08, 0.28], [0.0; 3], Limb::Fixed, [FR; 6]),
+    part([-0.21, 0.38, -0.22], [0.13, 0.1, 0.12], [0.0; 3], Limb::Fixed, [T_FROG_EYE; 6]),
+    part([0.08, 0.38, -0.22], [0.13, 0.1, 0.12], [0.0; 3], Limb::Fixed, [T_FROG_EYE; 6]),
+    part([-0.26, 0.0, 0.0], [0.12, 0.12, 0.26], [0.0, 0.1, 0.0], Limb::Swing(0.6), [FR; 6]),
+    part([0.14, 0.0, 0.0], [0.12, 0.12, 0.26], [0.0, 0.1, 0.0], Limb::Swing(0.6), [FR; 6]),
+    part([-0.18, 0.0, -0.22], [0.36, 0.08, 0.1], [0.0; 3], Limb::Fixed, [FR; 6]),
+];
+
+static ROLLO: [Part; 9] = [
+    part([-0.25, 0.14, -0.3], [0.5, 0.34, 0.6], [0.0; 3], Limb::Fixed, [T_SHELL; 6]),
+    part([-0.08, 0.14, -0.48], [0.16, 0.18, 0.2], [0.0; 3], Limb::Fixed, [T_ROLLO_SKIN, T_ROLLO_SKIN, T_ROLLO_SKIN, T_ROLLO_SKIN, T_ROLLO_SKIN, T_ROLLO_FACE]),
+    part([-0.09, 0.3, -0.42], [0.05, 0.12, 0.04], [0.0; 3], Limb::Fixed, [T_ROLLO_SKIN; 6]),
+    part([0.04, 0.3, -0.42], [0.05, 0.12, 0.04], [0.0; 3], Limb::Fixed, [T_ROLLO_SKIN; 6]),
+    part([-0.2, 0.0, -0.24], [0.1, 0.15, 0.1], [0.0, 0.15, -0.2], Limb::Swing(1.0), [T_ROLLO_SKIN; 6]),
+    part([0.1, 0.0, -0.24], [0.1, 0.15, 0.1], [0.0, 0.15, -0.2], Limb::Swing(-1.0), [T_ROLLO_SKIN; 6]),
+    part([-0.2, 0.0, 0.16], [0.1, 0.15, 0.1], [0.0, 0.15, 0.2], Limb::Swing(-1.0), [T_ROLLO_SKIN; 6]),
+    part([0.1, 0.0, 0.16], [0.1, 0.15, 0.1], [0.0, 0.15, 0.2], Limb::Swing(1.0), [T_ROLLO_SKIN; 6]),
+    part([-0.04, 0.14, 0.28], [0.08, 0.08, 0.22], [0.0; 3], Limb::Fixed, [T_SHELL; 6]),
+];
+/// A Rollo rolled up: all shell.
+static ROLLO_BALL: [Part; 1] = [part([-0.24, 0.0, -0.26], [0.48, 0.46, 0.52], [0.0; 3], Limb::Fixed, [T_SHELL; 6])];
+
+const HU: u16 = T_HUSH;
+static HUSH: [Part; 9] = [
+    part([-0.48, 1.15, -0.3], [0.96, 1.1, 0.6], [0.0; 3], Limb::Fixed, [HU; 6]),
+    // Souls in its chest, glowing.
+    part([-0.3, 1.45, -0.32], [0.6, 0.55, 0.04], [0.0; 3], Limb::Fixed, [T_HUSH_GLOW; 6]),
+    part([-0.4, 2.25, -0.32], [0.8, 0.62, 0.62], [0.0; 3], Limb::Fixed, [HU, HU, HU, HU, HU, T_HUSH_FACE]),
+    // Antler-ish feelers it "hears" with.
+    part([-0.62, 2.55, -0.04], [0.24, 0.34, 0.06], [-0.4, 2.55, 0.0], Limb::Wing(0.3), [T_HUSH_GLOW; 6]),
+    part([0.38, 2.55, -0.04], [0.24, 0.34, 0.06], [0.4, 2.55, 0.0], Limb::Wing(-0.3), [T_HUSH_GLOW; 6]),
+    part([-0.8, 0.95, -0.17], [0.32, 1.35, 0.34], [-0.64, 2.2, 0.0], Limb::Swing(-0.8), [HU; 6]),
+    part([0.48, 0.95, -0.17], [0.32, 1.35, 0.34], [0.64, 2.2, 0.0], Limb::Swing(0.8), [HU; 6]),
+    part([-0.42, 0.0, -0.17], [0.34, 1.15, 0.34], [0.0, 1.15, 0.0], Limb::Swing(1.0), [HU; 6]),
+    part([0.08, 0.0, -0.17], [0.34, 1.15, 0.34], [0.0, 1.15, 0.0], Limb::Swing(-1.0), [HU; 6]),
+];
+/// Plates of scute over a Woofer (see critters.rs).
+static WOOFER_ARMOUR: [Part; 2] = [
+    part([-0.24, 0.42, -0.42], [0.48, 0.3, 0.84], [0.0; 3], Limb::Fixed, [T_WOLF_ARMOR_WORN; 6]),
+    part([-0.2, 0.55, -0.62], [0.4, 0.28, 0.24], [0.0; 3], Limb::Fixed, [T_WOLF_ARMOR_WORN; 6]),
+];
+
 fn model(kind: MobKind) -> &'static [Part] {
     match kind {
         MobKind::Oinker => &OINKER,
@@ -1295,6 +1578,11 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Clanker => &CLANKER,
         MobKind::Fishy => &FISHY,
         MobKind::Soggy => &SOGGY,
+        MobKind::Bee => &BEE,
+        MobKind::Sneaker => &SNEAKER,
+        MobKind::Ribbit => &RIBBIT,
+        MobKind::Rollo => &ROLLO,
+        MobKind::Hush => &HUSH,
     }
 }
 

@@ -360,7 +360,20 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             // Under a block, the surface is lit by the water's own cell.
                             let (sky, blk) = if is_opaque(nb) { hood.lit(lx, y, lz) } else { hood.lit(lx + n[0], y + n[1].max(0), lz + n[2]) };
                             // Lava lights itself (the shader reads x above 1.5 as "glowing").
-                            let light = if lava { [2.45, sky, blk] } else { [*shade, sky, blk] };
+                            // A water surface carries how deep the water is under it
+                            // (8 + depth: deeper looks darker and bluer).
+                            let surface = !lava && f == 2 && !same(nb);
+                            let light = if lava {
+                                [2.45, sky, blk]
+                            } else if surface {
+                                let mut depth = 1;
+                                while depth < 12 && same(hood.get(lx, y - depth, lz)) {
+                                    depth += 1;
+                                }
+                                [8.0 + depth as f32, sky, blk]
+                            } else {
+                                [*shade, sky, blk]
+                            };
                             let mut v = [Vertex::default(); 4];
                             for i in 0..4 {
                                 let c = corners[i];
@@ -418,6 +431,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             }
                             let tile = face_tile(id, f);
                             let shade = if dapples_sky(id) { &FOLIAGE_SHADE[f] } else { shade };
+                            // Faces looking out into water are marked (x + 4) for the shader's caustics.
+                            let wet = if is_water(nb) { 4.0 } else { 0.0 };
                             let axis = if n[0] != 0 { 0 } else if n[1] != 0 { 1 } else { 2 };
                             let (t1, t2) = match axis {
                                 0 => (1, 2),
@@ -430,7 +445,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 let (sky, blk) = hood.lit(nx, ny, nz);
                                 for i in 0..4 {
                                     let c = corners[i];
-                                    v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [shade * 1.0, sky, blk]);
+                                    v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [shade * 1.0 + wet, sky, blk]);
                                 }
                                 flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light) };
                                 continue;
@@ -467,7 +482,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 if !sc && !(s1 && s2) {
                                     add(pc);
                                 }
-                                v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade, sky / n_s, blk / n_s]);
+                                v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade + wet, sky / n_s, blk / n_s]);
                             }
                             // Faces wait to be merged with their like (see `merge_flats`).
                             flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light) };

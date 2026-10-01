@@ -25,7 +25,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v13: liquids, animals (MobInteract, mob flags), Zappy Dust, trading
 /// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
 /// v16: game modes (GameMode, spectators in PlayerState flags) and hardcore (Rules).
-pub const PROTOCOL: u32 = 16;
+pub const PROTOCOL: u32 = 17;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -150,6 +150,15 @@ pub enum Msg {
     /// A player's statistics (`stats::Stats::encode`): players send theirs to
     /// be kept with the world; the host hands them back when they return.
     Stats { data: Vec<u8> },
+    /// client -> host: I finished brushing the suspicious block at x,y,z, cracking it `cracks` times (4: it shattered).
+    Excavate { x: i32, y: i32, z: i32, cracks: u8 },
+    /// client -> host: I used the grindstone (`grind`) or smithing table at
+    /// x,y,z on `a` (the gear) and `b`, with these enchantments.
+    Smith { x: i32, y: i32, z: i32, grind: bool, a: Id, a_ench: u16, b: Id, b_ench: u16 },
+    /// host -> client: a shrieker shrieked near you: the dark closes in for `secs`.
+    Darkness { secs: f32 },
+    /// client -> host: I died, and this is how ("was blown up by a Hisser").
+    Died { cause: String },
     /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
     /// `material` (or, `combine`, by merging two of them).
     /// `ench`, `other_ench`: the enchantments on the item and on what it was combined with.
@@ -609,6 +618,32 @@ impl Msg {
                 w.u32(data.len() as u32);
                 w.0.extend_from_slice(data);
             }
+            Msg::Excavate { x, y, z, cracks } => {
+                w.u8(65);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*cracks);
+            }
+            Msg::Smith { x, y, z, grind, a, a_ench, b, b_ench } => {
+                w.u8(66);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*grind as u8);
+                w.u16(*a);
+                w.u16(*a_ench);
+                w.u16(*b);
+                w.u16(*b_ench);
+            }
+            Msg::Darkness { secs } => {
+                w.u8(67);
+                w.f32(*secs);
+            }
+            Msg::Died { cause } => {
+                w.u8(68);
+                w.str(cause);
+            }
             Msg::Weather { kind } => {
                 w.u8(42);
                 w.u8(*kind);
@@ -876,6 +911,10 @@ impl Msg {
                 }
                 Msg::Stats { data: r.take(n)?.to_vec() }
             }
+            65 => Msg::Excavate { x: r.i32()?, y: r.i32()?, z: r.i32()?, cracks: r.u8()? },
+            66 => Msg::Smith { x: r.i32()?, y: r.i32()?, z: r.i32()?, grind: r.u8()? != 0, a: r.u16()?, a_ench: r.u16()?, b: r.u16()?, b_ench: r.u16()? },
+            67 => Msg::Darkness { secs: r.f32()? },
+            68 => Msg::Died { cause: r.str()? },
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
@@ -1417,6 +1456,10 @@ mod tests {
             Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false, weather_cycle: true, hardcore: true },
             Msg::GameMode { mode: 2 },
             Msg::Stats { data: b"mined=3\nwalked=12.5\n".to_vec() },
+            Msg::Excavate { x: 1, y: -2, z: 3, cracks: 2 },
+            Msg::Smith { x: 4, y: 5, z: -6, grind: true, a: 0x8003, a_ench: 7, b: 0x8004, b_ench: 0 },
+            Msg::Darkness { secs: 12.0 },
+            Msg::Died { cause: "was bloop'd".into() },
             Msg::Weather { kind: 2 },
             Msg::Lightning { at: Vec3::new(4.0, 70.0, -9.5) },
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },

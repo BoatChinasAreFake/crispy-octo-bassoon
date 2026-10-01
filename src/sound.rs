@@ -67,6 +67,11 @@ impl Sfx {
             crate::entity::MobKind::Woofer => Sfx::Woof,
             crate::entity::MobKind::Hmmer => Sfx::Hmm,
             crate::entity::MobKind::Grumbler => Sfx::Oink,
+            crate::entity::MobKind::Bee => Sfx::Buzz,
+            crate::entity::MobKind::Sneaker => Sfx::Yip,
+            crate::entity::MobKind::Ribbit => Sfx::Croak,
+            crate::entity::MobKind::Rollo => Sfx::Scuttle,
+            crate::entity::MobKind::Hush => Sfx::Roar,
             _ => Sfx::MobHurt,
         }
     }
@@ -121,6 +126,26 @@ pub enum Sfx {
     Hmm,
     /// A Squawker, squawking.
     Squawk,
+    /// Bees.
+    Buzz,
+    /// A brush scraping at suspicious sand (see archaeology.rs).
+    Brush,
+    /// A sculk sensor clicking (see deepdark.rs).
+    Sculk,
+    /// A sculk shrieker.
+    Shriek,
+    /// The Hush, roaring.
+    Roar,
+    /// The Hush's shush: a blast of sound through walls.
+    Shush,
+    /// A grindstone.
+    Grind,
+    /// A Sneaker (fox).
+    Yip,
+    /// A Ribbit (frog).
+    Croak,
+    /// A Rollo (armadillo) scuttling or rolling up.
+    Scuttle,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -472,6 +497,84 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             }
             finish(v, 1.0)
         }
+        Sfx::Buzz => {
+            // A wobbly drone around 220 Hz, rising and falling.
+            let mut v = vec![0.0; samples(0.9)];
+            let p = rng.range(0.9, 1.1);
+            voice(&mut v, 0.0, 0.85, 210.0 * p, 240.0 * p, 1800.0, 0.06, 0.8, rng);
+            voice(&mut v, 0.05, 0.8, 235.0 * p, 205.0 * p, 1500.0, 0.05, 0.5, rng);
+            finish(v, 0.9)
+        }
+        Sfx::Brush => {
+            // Soft bristly scratches.
+            let mut v = vec![0.0; samples(0.35)];
+            for k in 0..3 {
+                burst(&mut v, k as f32 * 0.1 + rng.range(0.0, 0.02), 0.09, 25.0, 1500.0, 6000.0, 0.5, rng);
+            }
+            finish(v, 0.8)
+        }
+        Sfx::Sculk => {
+            // A dry click and a hollow ping.
+            let mut v = vec![0.0; samples(0.6)];
+            burst(&mut v, 0.0, 0.03, 90.0, 800.0, 4000.0, 0.8, rng);
+            tone(&mut v, 0.02, 0.5, 520.0, 500.0, 6.0, 0.4, &[1.0, 0.0, 0.3]);
+            finish(v, 0.9)
+        }
+        Sfx::Shriek => {
+            // A rising, ghostly wail.
+            let mut v = vec![0.0; samples(1.4)];
+            voice(&mut v, 0.0, 1.3, 400.0, 1300.0, 3000.0, 0.03, 1.0, rng);
+            voice(&mut v, 0.1, 1.2, 600.0, 1700.0, 3500.0, 0.04, 0.6, rng);
+            finish(v, 1.0)
+        }
+        Sfx::Roar => {
+            // Deep and long.
+            let mut v = vec![0.0; samples(1.6)];
+            voice(&mut v, 0.0, 1.5, 70.0, 55.0, 500.0, 0.05, 1.0, rng);
+            burst(&mut v, 0.0, 1.4, 1.5, 60.0, 400.0, 0.5, rng);
+            finish(v, 1.1)
+        }
+        Sfx::Shush => {
+            // A charging hum, then a whoomp.
+            let mut v = vec![0.0; samples(1.2)];
+            tone(&mut v, 0.0, 0.7, 120.0, 480.0, 0.5, 0.5, &[1.0, 0.5, 0.25]);
+            burst(&mut v, 0.7, 0.5, 6.0, 40.0, 900.0, 1.2, rng);
+            tone(&mut v, 0.7, 0.45, 90.0, 40.0, 5.0, 0.9, &[1.0, 0.4]);
+            finish(v, 1.1)
+        }
+        Sfx::Grind => {
+            // Stone on metal: gritty, with a squeal.
+            let mut v = vec![0.0; samples(0.6)];
+            burst(&mut v, 0.0, 0.55, 3.0, 400.0, 3000.0, 0.7, rng);
+            tone(&mut v, 0.05, 0.4, 1900.0, 2100.0, 4.0, 0.15, &[1.0]);
+            finish(v, 0.9)
+        }
+        Sfx::Yip => {
+            // Two high, sharp yips.
+            let mut v = vec![0.0; samples(0.4)];
+            let p = rng.range(0.9, 1.15);
+            for k in 0..2 {
+                voice(&mut v, k as f32 * 0.16, 0.08, 900.0 * p, 1200.0 * p, 3000.0, 0.02, 1.0, rng);
+            }
+            finish(v, 1.0)
+        }
+        Sfx::Croak => {
+            // A rubbery "rib-bit".
+            let mut v = vec![0.0; samples(0.5)];
+            let p = rng.range(0.85, 1.15);
+            voice(&mut v, 0.0, 0.12, 160.0 * p, 140.0 * p, 700.0, 0.2, 1.0, rng);
+            voice(&mut v, 0.2, 0.16, 190.0 * p, 120.0 * p, 800.0, 0.25, 1.0, rng);
+            finish(v, 1.0)
+        }
+        Sfx::Scuttle => {
+            // Tiny claws, then a clack as the shell closes.
+            let mut v = vec![0.0; samples(0.4)];
+            for k in 0..4 {
+                burst(&mut v, k as f32 * 0.05, 0.02, 120.0, 2000.0, 7000.0, 0.4, rng);
+            }
+            burst(&mut v, 0.25, 0.05, 60.0, 300.0, 2500.0, 0.9, rng);
+            finish(v, 0.9)
+        }
         Sfx::Woof => {
             // Two short barks.
             let mut v = vec![0.0; samples(0.5)];
@@ -821,6 +924,16 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Snip,
         Sfx::Hmm,
         Sfx::Squawk,
+        Sfx::Buzz,
+        Sfx::Brush,
+        Sfx::Sculk,
+        Sfx::Shriek,
+        Sfx::Roar,
+        Sfx::Shush,
+        Sfx::Grind,
+        Sfx::Yip,
+        Sfx::Croak,
+        Sfx::Scuttle,
     ]);
     v
 }
@@ -917,7 +1030,8 @@ impl Audio {
             Sfx::Pop => 0.45,
             Sfx::Explode | Sfx::Thunder => 1.0,
             // Voices are dense; keep them level with the percussive sounds.
-            Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck | Sfx::Squawk => 0.4,
+            Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck | Sfx::Squawk | Sfx::Yip | Sfx::Croak => 0.4,
+            Sfx::Buzz => 0.3,
             Sfx::Fanfare => 0.5,
             Sfx::Hurt | Sfx::MobHurt => 0.5,
             _ => 0.8,

@@ -133,6 +133,12 @@ impl Game {
         self.msg(format!("You feel... {}.", p.name().to_lowercase()));
     }
 
+    /// An effect for `secs` (from food rather than a potion), quietly.
+    pub fn timed_effect(&mut self, p: Potion, secs: f32) {
+        self.effects.retain(|e| e.0 != p);
+        self.effects.push((p, secs));
+    }
+
     pub fn has_effect(&self, p: Potion) -> bool {
         self.effects.iter().any(|e| e.0 == p)
     }
