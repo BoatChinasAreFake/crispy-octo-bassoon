@@ -179,6 +179,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     }
     new_features(&mut host, &mut team, &mut report, &mut touched);
     latest_features(&mut host, &mut team, &mut report, &mut touched);
+    batch_two(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -560,6 +561,130 @@ fn latest_features(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
     revive(host, team);
 }
 
+/// Falling sand, note blocks, jukeboxes, fireballs, raids and totems, end to end.
+fn batch_two(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    let n = team.len();
+    let ledger = |host: &Game, id: u32, item: Id| host.peers.get(&id).map(|p| p.ledger.bag.count(item)).unwrap_or(0);
+    revive(host, team);
+
+    // 11. Sand with nothing under it falls, for everyone.
+    let k = 0;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let base = feet + IVec3::new(-3, 0, 0);
+    host.world.set_v(base, STONE);
+    host.world.set_v(base + IVec3::Y, SAND);
+    host.world.set_v(base + IVec3::Y * 2, GRAVEL);
+    for y in 0..3 {
+        touched.insert(base + IVec3::Y * y);
+    }
+    pump(host, team, 0.5, |_| idle());
+    host.world.set_v(base, AIR);
+    pump(host, team, 2.0, |_| idle());
+    report.features.push("falling");
+    if host.world.get_v(base) != SAND || host.world.get_v(base + IVec3::Y) != GRAVEL {
+        report.problems.push("the sand and gravel didn't fall when the stone under them went".into());
+    }
+
+    // 12. A note block, tuned by a bot; a jukebox it puts a disc into and takes it out of.
+    let k = 1 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let note = feet + IVec3::X * 2;
+    let juke = feet + IVec3::NEG_X * 2;
+    host.world.set_v(note, NOTE_BLOCK);
+    host.world.set_v(juke, JUKEBOX);
+    touched.insert(note);
+    touched.insert(juke);
+    host.give_peer(id, DISC_FIRST + 2, 1);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.tune_note_block(note);
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == DISC_FIRST + 2)) {
+        g.inv.selected = slot;
+        g.use_jukebox(juke, DISC_FIRST + 2);
+    }
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("music");
+    if host.world.get_v(note) != NOTE_BLOCK + 1 {
+        report.problems.push(format!("the host didn't see {} tune the note block", team[k].name));
+    }
+    if crate::music::disc_in(host.world.get_v(juke)) != Some(2) || ledger(host, id, DISC_FIRST + 2) != 0 {
+        report.problems.push(format!("the host didn't see {} put a disc in the jukebox", team[k].name));
+    }
+    team[k].game.use_jukebox(juke, AIR);
+    pump(host, team, 1.0, |_| idle());
+    if host.drops.iter().any(|d| d.item == DISC_FIRST + 2) {
+        fetch(host, team, k, DISC_FIRST + 2);
+    }
+    if host.world.get_v(juke) != JUKEBOX || holder(team, DISC_FIRST + 2).is_none() {
+        report.problems.push("the disc didn't come back out of the jukebox".into());
+    }
+
+    // 13. A fireball, swatted back by a bot.
+    let k = 2 % n;
+    ground(host, team, k);
+    let bot_id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    // Looking up at the open sky (a fireball knocked back flies off into it).
+    team[k].game.player.pitch = 1.2;
+    team[k].game.player.yaw = 0.0;
+    pump(host, team, 0.3, |_| idle());
+    let (eye, dir) = (team[k].game.player.eye(), team[k].game.player.look_dir());
+    host.spawn_fireball(eye + dir * 3.0, -dir * 1.0, false, 0);
+    pump(host, team, 0.4, |_| idle());
+    let swatted = team[k].game.deflect_fireball(eye, dir, bot_id);
+    // (Not long: knocked back, it's fast, and soon hits something.)
+    pump(host, team, 0.15, |_| idle());
+    report.features.push("fireball");
+    if !swatted || !host.fireballs.iter().any(|f| f.returned == Some(bot_id)) {
+        report.problems.push(format!("{} couldn't swat a fireball back", team[k].name));
+    }
+    host.fireballs.clear();
+
+    // 14. Bad Omen reaches a bot; a raid's bar reaches everyone near it.
+    let k = 3 % n;
+    let bot_id = team[k].game.my_id;
+    host.give_effect_to(bot_id, crate::potions::Potion::BadOmen, 60.0);
+    let centre = team[k].game.player.body.pos;
+    host.start_raid(centre);
+    pump(host, team, 2.5, |_| idle());
+    report.features.push("raid");
+    if !team[k].game.has_effect(crate::potions::Potion::BadOmen) {
+        report.problems.push(format!("{} was never told about its Bad Omen", team[k].name));
+    }
+    if team[k].game.raid_hud.is_none() {
+        report.problems.push(format!("{} never saw the raid bar", team[k].name));
+    }
+    host.raid = None;
+    host.mobs.retain(|m| !m.kind.raider());
+
+    // 15. A Totem of Not Dying, used up by a bot that should have died.
+    let k = n - 1;
+    let id = team[k].game.my_id;
+    let name = team[k].name.clone();
+    host.give_peer(id, TOTEM, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == TOTEM))
+        && slot >= 9
+    {
+        // Into the hotbar.
+        g.inv.slots.swap(slot, 0);
+    }
+    host.admin_command(crate::admin::Caller::Host, &format!("/kill {name}"));
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("totem");
+    if team[k].game.dead.is_some() || ledger(host, id, TOTEM) != 0 {
+        report.problems.push(format!("the totem didn't save {name} (or the host still thinks they have it)"));
+    }
+    revive(host, team);
+}
+
 /// Remember the chat lines a bot can see now (before they scroll away).
 fn note_chat(bot: &mut Bot) {
     for line in bot.game.chat_log.iter().rev().take(16) {
@@ -714,7 +839,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

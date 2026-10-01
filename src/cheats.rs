@@ -187,7 +187,7 @@ impl Game {
     fn cmd_locate(&mut self, me: &str, args: &[&str]) -> Vec<String> {
         let what = args.join(" ");
         if what.is_empty() {
-            return vec!["Usage: locate <structure|biome> (village, dungeon, tower, hut, well, desert ruins, trail ruins, ocean ruins, hushed city, or a biome)".into()];
+            return vec!["Usage: locate <structure|biome> (village, dungeon, tower, hut, well, outpost, desert ruins, trail ruins, ocean ruins, hushed city, fortress, snout camp, or a biome)".into()];
         }
         let (here, _) = self.caller_spot(me);
         let g = self.world.generator.clone();

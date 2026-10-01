@@ -904,6 +904,10 @@ impl Game {
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
             return true;
         }
+        // Note blocks retune; jukeboxes take a disc and give it back (the ledger checks the disc).
+        if (crate::music::is_note_block(old) && crate::music::is_note_block(new)) || (crate::music::is_jukebox(old) && crate::music::is_jukebox(new)) {
+            return true;
+        }
         // Comparators switch mode (the host works out whether they're on).
         if crate::contraptions::is_comparator(old) && crate::contraptions::is_comparator(new) {
             return crate::contraptions::comparator_state(old).0 == crate::contraptions::comparator_state(new).0;
