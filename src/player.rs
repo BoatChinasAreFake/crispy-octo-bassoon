@@ -8,7 +8,7 @@ use macroquad::math::Vec3;
 pub const EYE: f32 = 1.62;
 pub const MAX_HEALTH: f32 = 20.0;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Input {
     pub forward: f32,
     pub strafe: f32,
@@ -23,6 +23,17 @@ pub struct Player {
     pub yaw: f32,
     pub pitch: f32,
     pub flying: bool,
+    /// Soaring on a Glider (see glider.rs).
+    pub gliding: bool,
+    /// Wearing a Glider that works (the game sets this each frame).
+    pub glider_on: bool,
+    /// Seconds of rocket push left, and the glide's leftover step time.
+    pub boost: f32,
+    pub glide_acc: f32,
+    /// Set for the frame a jump starts (for statistics).
+    pub jumped: bool,
+    /// Spectating: flies through blocks (see modes.rs).
+    pub ghost: bool,
     pub health: f32,
     pub hurt: f32,
     pub fall_start: f32,
@@ -53,6 +64,12 @@ impl Player {
             yaw: 0.0,
             pitch: -0.2,
             flying: false,
+            gliding: false,
+            glider_on: false,
+            boost: 0.0,
+            glide_acc: 0.0,
+            jumped: false,
+            ghost: false,
             health: MAX_HEALTH,
             hurt: 0.0,
             fall_start: pos.y,
@@ -111,6 +128,25 @@ impl Player {
         }
 
         let b = &mut self.body;
+        if self.ghost {
+            // Straight through walls, a little faster than flying.
+            let speed = if self.sprinting { 30.0 } else { 14.0 };
+            let target = wish * speed;
+            let k = (dt * 10.0).min(1.0);
+            b.vel.x += (target.x - b.vel.x) * k;
+            b.vel.z += (target.z - b.vel.z) * k;
+            let vy = if input.jump { 11.0 } else if input.sneak { -11.0 } else { 0.0 };
+            b.vel.y += (vy - b.vel.y) * k;
+            b.pos += b.vel * dt;
+            b.pos.y = b.pos.y.clamp(-32.0, crate::world::CH as f32 + 64.0);
+            b.on_ground = false;
+            b.in_water = false;
+            b.in_lava = false;
+            self.flying = true;
+            self.sneaking = false;
+            self.fall_start = b.pos.y;
+            return 0.0;
+        }
         if self.flying {
             let speed = if self.sprinting { 22.0 } else { 11.0 };
             let target = wish * speed;
@@ -128,6 +164,25 @@ impl Player {
         }
 
         let in_water = b.in_water;
+        // Gliding: Jump in mid-fall spreads the Glider; ground or water folds it.
+        if self.gliding && (b.on_ground || in_water || b.in_lava || !self.glider_on) {
+            self.gliding = false;
+            self.boost = 0.0;
+        }
+        if !self.gliding && self.glider_on && input.jump_pressed && !b.on_ground && !in_water && b.vel.y < 0.0 {
+            self.gliding = true;
+            self.glide_acc = 0.0;
+        }
+        if self.gliding {
+            let look = Vec3::new(self.yaw.sin() * self.pitch.cos(), self.pitch.sin(), -self.yaw.cos() * self.pitch.cos());
+            crate::glider::glide(&mut b.vel, look, self.pitch, &mut self.boost, &mut self.glide_acc, dt);
+            let before = Vec3::new(b.vel.x, 0.0, b.vel.z).length();
+            move_body(world, b, dt, false);
+            let after = Vec3::new(b.vel.x, 0.0, b.vel.z).length();
+            self.fall_start = b.pos.y;
+            self.sprinting = false;
+            return if b.hit_wall { crate::glider::crash_damage(before, after) } else { 0.0 };
+        }
         let speed = if b.in_lava {
             1.2
         } else if in_water {
@@ -168,6 +223,7 @@ impl Player {
             b.vel.y = (b.vel.y - GRAVITY * dt).max(-60.0);
             if input.jump && b.on_ground {
                 b.vel.y = if self.leaping { 11.0 } else { 8.7 };
+                self.jumped = true;
                 if self.sprinting {
                     b.vel.x += fwd.x * 1.5;
                     b.vel.z += fwd.z * 1.5;

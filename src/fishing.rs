@@ -490,6 +490,9 @@ impl Game {
         let level = self.fish_log.level();
         let c = roll_catch(&self.world, p, self.time, level, bait, &mut self.rng);
         let best = self.fish_log.record(c.item, c.cm, c.category);
+        if c.category == Category::Fish {
+            self.stats.fish += 1;
+        }
         let line = catch_line(&c, best);
         self.msg(line);
         // The catch flies out of the water toward you, like it should.

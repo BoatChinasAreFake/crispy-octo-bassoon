@@ -147,19 +147,34 @@ impl Game {
         let known = [
             "help", "list", "players", "info", "say", "kick", "ban", "unban", "bans", "time", "op", "deop", "ops", "allowlist", "whitelist", "forget", "password",
         ];
-        if !known.contains(&word.as_str()) {
+        let cheat = crate::cheats::WORDS.contains(&word.as_str());
+        if !known.contains(&word.as_str()) && !cheat {
             return None;
         }
-        let open = matches!(word.as_str(), "help" | "list");
+        let open = matches!(word.as_str(), "help" | "list" | "seed");
         if !open && !self.caller_is_op(who) {
             return Some(vec![format!("Only operators can use /{word}.")]);
         }
         let by = self.caller_name(who);
+        if cheat {
+            let out = self.cheat_command(who, &word, rest);
+            if who != Caller::Console && !open && self.dedicated {
+                println!("[{}] {by} ran /{line}", crate::server::timestamp());
+            }
+            return Some(out);
+        }
         let mut out = Vec::new();
         let mut save = false;
         let mut save_bans = false;
         match (word.as_str(), rest) {
-            ("help", _) => out.push(if self.caller_is_op(who) { HELP.into() } else { "Commands: list, help. Operators can do more.".into() }),
+            ("help", _) => {
+                if self.caller_is_op(who) {
+                    out.push(HELP.into());
+                    out.push(format!("Cheats: {}", crate::cheats::HELP));
+                } else {
+                    out.push("Commands: list, seed, help. Operators can do more.".into());
+                }
+            }
             ("list", _) => {
                 let mut names: Vec<String> = self.peers.values().map(|p| p.name.clone()).collect();
                 if !self.dedicated && self.net.is_some() {

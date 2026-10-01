@@ -176,7 +176,7 @@ impl Game {
     /// The item a player is holding, if they really own one (else bare hands).
     pub fn verified_held(&self, from: u32) -> Id {
         match self.peers.get(&from) {
-            Some(p) if self.creative || p.ledger.bag.has(p.ledger.held) => p.ledger.held,
+            Some(p) if p.mode != crate::modes::GameMode::Survival || p.ledger.bag.has(p.ledger.held) => p.ledger.held,
             _ => AIR,
         }
     }
@@ -184,7 +184,7 @@ impl Game {
     /// The enchantments on what a player is holding, if the host knows they really have them.
     pub fn verified_ench(&self, from: u32) -> u16 {
         match self.peers.get(&from) {
-            Some(p) if self.creative || p.ledger.owns_enchanted(self.verified_held(from), p.ledger.held_ench) => p.ledger.held_ench,
+            Some(p) if p.mode != crate::modes::GameMode::Survival || p.ledger.owns_enchanted(self.verified_held(from), p.ledger.held_ench) => p.ledger.held_ench,
             _ => 0,
         }
     }
@@ -193,7 +193,7 @@ impl Game {
     /// enchantments go with it only if the host knew about them.
     pub fn launder(&mut self, from: u32, item: Id, wear: crate::inventory::Wear) -> crate::inventory::Wear {
         let ench = (wear >> 16) as u16;
-        if ench == 0 || self.creative {
+        if ench == 0 || self.peer_free(from) {
             return wear;
         }
         match self.ledger(from) {
@@ -207,12 +207,12 @@ impl Game {
 
     /// Does this player own at least one? (Always yes in creative.)
     pub fn peer_has(&self, from: u32, id: Id) -> bool {
-        self.creative || self.peers.get(&from).map(|p| p.ledger.bag.has(id)).unwrap_or(false)
+        self.peer_free(from) || self.peers.get(&from).map(|p| p.ledger.bag.has(id)).unwrap_or(false)
     }
 
     /// Use up one of the player's items; false if they don't have it. (Free in creative.)
     pub fn peer_take(&mut self, from: u32, id: Id, n: u32) -> bool {
-        if self.creative {
+        if self.peer_free(from) {
             return true;
         }
         self.ledger(from).map(|l| l.bag.take(id, n)).unwrap_or(false)
@@ -254,7 +254,10 @@ impl Game {
     /// for it: breaking pays out drops (at no more than mining speed), placing
     /// and planting cost the item, tilling needs a hoe. False: refuse the edit.
     pub fn ledger_edit(&mut self, from: u32, at: macroquad::math::IVec3, old: Id, new: Id) -> bool {
-        if self.creative {
+        if self.peer_mode(from) == crate::modes::GameMode::Spectator {
+            return false;
+        }
+        if self.peer_free(from) {
             return true;
         }
         let held = self.verified_held(from);
@@ -309,6 +312,10 @@ impl Game {
         }
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
             return true;
+        }
+        // Goo waxes copper.
+        if crate::copper::waxed(old) == Some(new) {
+            return self.peer_take(from, GOO, 1);
         }
         // Fire comes from a Sparker (which wears a little).
         if new == FIRE {
@@ -389,7 +396,7 @@ impl Game {
     pub fn host_wear(&mut self, from: u32, item: Id, amount: u16) {
         let ench = if self.verified_held(from) == item { self.verified_ench(from) } else { 0 };
         let Some(max) = crate::inventory::max_uses(item, (ench as u32) << 16) else { return };
-        if amount == 0 || self.creative {
+        if amount == 0 || self.peer_free(from) {
             return;
         }
         let Some(l) = self.ledger(from) else { return };
@@ -407,7 +414,7 @@ impl Game {
 
     /// A joined player crafted: apply it to the ledger, as far as their items allow.
     pub fn host_craft(&mut self, from: u32, recipe: u16, times: u8) {
-        if self.creative {
+        if self.peer_free(from) {
             return;
         }
         let Some(r) = recipes().get(recipe as usize) else { return };
@@ -438,7 +445,7 @@ impl Game {
 
     /// A joined player's periodic "here's what I have": correct them if they're wrong.
     pub fn host_inventory_check(&mut self, from: u32, items: Vec<(Id, u32)>) {
-        if self.creative {
+        if self.peer_free(from) {
             return;
         }
         let Some(l) = self.ledger(from) else { return };

@@ -24,7 +24,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// Restore), weather (Weather, Lightning) and enchanting (Enchant).
 /// v13: liquids, animals (MobInteract, mob flags), Zappy Dust, trading
 /// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
-pub const PROTOCOL: u32 = 15;
+/// v16: game modes (GameMode, spectators in PlayerState flags) and hardcore (Rules).
+pub const PROTOCOL: u32 = 16;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -67,6 +68,8 @@ pub const MOB_TAMED: u8 = 4;
 pub const MOB_SITTING: u8 = 8;
 pub const MOB_LOVE: u8 = 16;
 pub const MOB_SADDLED: u8 = 32;
+/// A Soggy Groaner carrying a spear.
+pub const MOB_ARMED: u8 = 64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
@@ -141,7 +144,12 @@ pub enum Msg {
     /// host -> client: experience orbs floating around: (id, position, value).
     Orbs(Vec<(u32, Vec3, u16)>),
     /// host -> client: the world's rules (on joining, and whenever they change).
-    Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool, weather_cycle: bool },
+    Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool, weather_cycle: bool, hardcore: bool },
+    /// Host -> player: you are now in this game mode (`modes::GameMode` index).
+    GameMode { mode: u8 },
+    /// A player's statistics (`stats::Stats::encode`): players send theirs to
+    /// be kept with the world; the host hands them back when they return.
+    Stats { data: Vec<u8> },
     /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
     /// `material` (or, `combine`, by merging two of them).
     /// `ench`, `other_ench`: the enchantments on the item and on what it was combined with.
@@ -202,6 +210,10 @@ pub const FLAG_SNEAK: u8 = 1;
 pub const FLAG_SWING: u8 = 2;
 pub const FLAG_DEAD: u8 = 4;
 pub const FLAG_HURT: u8 = 8;
+/// Spectating: not drawn, not targeted, can't be hit.
+pub const FLAG_GHOST: u8 = 16;
+/// Gliding: drawn lying flat, wings out.
+pub const FLAG_GLIDE: u8 = 32;
 
 // ------------------------------------------------------------------ encoding
 
@@ -580,12 +592,22 @@ impl Msg {
                     w.u16(value);
                 }
             }
-            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle } => {
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore } => {
                 w.u8(38);
                 w.u8(*keep_inventory as u8);
                 w.u8(*difficulty);
                 w.u8(*daylight_cycle as u8);
                 w.u8(*weather_cycle as u8);
+                w.u8(*hardcore as u8);
+            }
+            Msg::GameMode { mode } => {
+                w.u8(63);
+                w.u8(*mode);
+            }
+            Msg::Stats { data } => {
+                w.u8(64);
+                w.u32(data.len() as u32);
+                w.0.extend_from_slice(data);
             }
             Msg::Weather { kind } => {
                 w.u8(42);
@@ -845,7 +867,15 @@ impl Msg {
                 }
                 Msg::Orbs(list)
             }
-            38 => Msg::Rules { keep_inventory: r.u8()? != 0, difficulty: r.u8()?, daylight_cycle: r.u8()? != 0, weather_cycle: r.u8()? != 0 },
+            38 => Msg::Rules { keep_inventory: r.u8()? != 0, difficulty: r.u8()?, daylight_cycle: r.u8()? != 0, weather_cycle: r.u8()? != 0, hardcore: r.u8()? != 0 },
+            63 => Msg::GameMode { mode: r.u8()? },
+            64 => {
+                let n = r.u32()? as usize;
+                if n > 4096 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "statistics too long"));
+                }
+                Msg::Stats { data: r.take(n)?.to_vec() }
+            }
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
@@ -1384,7 +1414,9 @@ mod tests {
             Msg::PlayerData { slots: vec![(3, 64, 0), (0x800c, 1, 0x0001_0005)], health: 12.5, food: 7.0, saturation: 0.5 },
             Msg::Restore { pos: Vec3::new(1.0, 64.0, 2.0), xp: 30, slots: vec![(0, 0, 0)], health: 20.0, food: 20.0, saturation: 5.0 },
             Msg::Orbs(vec![(3, Vec3::new(1.0, 2.0, 3.0), 17)]),
-            Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false, weather_cycle: true },
+            Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false, weather_cycle: true, hardcore: true },
+            Msg::GameMode { mode: 2 },
+            Msg::Stats { data: b"mined=3\nwalked=12.5\n".to_vec() },
             Msg::Weather { kind: 2 },
             Msg::Lightning { at: Vec3::new(4.0, 70.0, -9.5) },
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },

@@ -22,7 +22,10 @@ use macroquad::math::Vec3;
 pub fn attack_speed(held: Id) -> f32 {
     if is_sword(held) {
         0.6
-    } else if pick_tier(held) > 0 {
+    } else if crate::tools::axe_tier(held).is_some() {
+        // Axes hit hard but slowly.
+        1.0
+    } else if pick_tier(held) > 0 || crate::tools::shovel_tier(held).is_some() {
         0.8
     } else if held == HOE {
         0.5

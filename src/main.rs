@@ -11,10 +11,13 @@ mod anvil;
 mod backups;
 mod beacon;
 mod block;
+mod boxes;
 mod building;
 mod carpentry;
+mod cheats;
 mod combat;
 mod containers;
+mod copper;
 mod contraptions;
 mod decor;
 mod drops;
@@ -24,6 +27,7 @@ mod farming;
 mod fire;
 mod fishing;
 mod game;
+mod glider;
 mod golems;
 mod hollow;
 mod hoppers;
@@ -35,6 +39,7 @@ mod ledger;
 mod light;
 mod liquids;
 mod mesher;
+mod modes;
 mod mods;
 mod multiplayer;
 mod nametags;
@@ -63,7 +68,9 @@ mod upnp;
 mod vehicles;
 mod villagers;
 mod sound;
+mod stats;
 mod texture;
+mod tools;
 mod ui;
 mod weather;
 mod wiring;
@@ -132,8 +139,12 @@ enum Screen {
     Options { from_title: bool },
     /// Rebinding keys and buttons (reached from Options).
     Controls { from_title: bool },
+    /// Graphics and frame rate (reached from Options).
+    Video { from_title: bool },
     Help { from_title: bool },
     Advancements,
+    /// What you've done in this world (see stats.rs).
+    Stats,
     FishLog,
     Multiplayer,
     Mods,
@@ -151,6 +162,8 @@ struct App {
     renderer: Renderer,
     ui: Ui,
     settings: Settings,
+    /// VSync and anti-aliasing as the window was opened with (they need a restart).
+    video_at_start: (bool, u8),
     /// Screenshot runs neither read nor write settings.txt.
     no_settings_file: bool,
     splash: &'static str,
@@ -222,6 +235,7 @@ struct App {
     form_seed: String,
     form_creative: bool,
     form_keep: bool,
+    form_hardcore: bool,
     form_focus: usize,
     /// The Backups screen's list and choice.
     /// Whether a newer release is out (see updates.rs).
@@ -274,14 +288,17 @@ fn window_conf() -> Conf {
             big: texture::icon_rgba(&atlas, 64).try_into().ok()?,
         })
     })();
+    // Anti-aliasing and vsync have to be chosen before the window opens.
+    let video = settings::Settings::load(&settings::Settings::early_path());
     Conf {
         window_title: "Minceraft".to_owned(),
         icon,
         window_width: 1280,
         window_height: 720,
         high_dpi: false,
-        sample_count: 4,
+        sample_count: video.msaa.max(1) as i32,
         window_resizable: true,
+        platform: macroquad::miniquad::conf::Platform { swap_interval: Some(if video.vsync { 1 } else { 0 }), ..Default::default() },
         ..Default::default()
     }
 }
@@ -344,7 +361,7 @@ impl App {
             drain_chars();
         }
         // Leaving a screen where settings change: keep them for next time.
-        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Multiplayer) && self.screen != s {
+        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Multiplayer) && self.screen != s {
             self.save_settings();
         }
         self.screen = s;
@@ -424,6 +441,12 @@ impl App {
         let seed = save::parse_seed(&self.form_seed, random_seed());
         self.current_world = Some(id);
         self.new_world(self.form_creative, self.form_keep, seed);
+        if self.form_hardcore {
+            self.game.rules.hardcore = true;
+            self.game.rules.keep_inventory = false;
+            self.game.rules.difficulty = rules::Difficulty::Hard;
+            self.game.msg("Hardcore: one life, hard mode. Good luck.");
+        }
         // Save straight away so it's in the list even if the game is closed abruptly.
         self.save_quietly();
     }
@@ -668,7 +691,7 @@ impl App {
                 }
                 if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause {
                     self.set_screen(Screen::Paused);
-                } else if self.settings.binds.pressed(keybinds::Action::Inventory) || self.pad_frame.inventory {
+                } else if (self.settings.binds.pressed(keybinds::Action::Inventory) || self.pad_frame.inventory) && !self.game.spectator {
                     self.recipe_scroll = 0.0;
                     self.set_screen(Screen::Inventory);
                 }
@@ -720,9 +743,14 @@ impl App {
                     type_into(&mut self.sign_lines[self.sign_line], decor::LINE_LEN);
                 }
             }
-            Screen::Advancements | Screen::FishLog | Screen::WorldSettings => {
+            Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
+                }
+            }
+            Screen::Video { from_title } => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Options { from_title });
                 }
             }
             Screen::Controls { from_title } => {
@@ -1006,6 +1034,7 @@ impl App {
             self.form_seed.clear();
             self.form_creative = false;
             self.form_keep = false;
+            self.form_hardcore = false;
             self.form_focus = 0;
             drain_chars();
             self.set_screen(Screen::CreateWorld);
@@ -1054,17 +1083,38 @@ impl App {
             self.form_focus = 1;
         }
         y += bh + 8.0 * s;
-        let mode = if self.form_creative { "Game Mode: Creative" } else { "Game Mode: Survival" };
+        let mode = match (self.form_creative, self.form_hardcore) {
+            (true, _) => "Game Mode: Creative",
+            (false, true) => "Game Mode: Hardcore",
+            (false, false) => "Game Mode: Survival",
+        };
         if self.ui.button(Rect::new(x, y, bw, bh), mode, true) {
-            self.form_creative = !self.form_creative;
+            // Survival -> Creative -> Hardcore -> Survival.
+            (self.form_creative, self.form_hardcore) = match (self.form_creative, self.form_hardcore) {
+                (false, false) => (true, false),
+                (true, _) => (false, true),
+                (false, true) => (false, false),
+            };
         }
         y += bh + 4.0 * s;
-        let keep = if self.form_keep { "Keep Inventory: ON (dying costs nothing)" } else { "Keep Inventory: OFF (you drop everything)" };
-        if self.ui.button(Rect::new(x, y, bw, bh), keep, true) {
+        let keep = if self.form_hardcore {
+            "Keep Inventory: OFF (it's hardcore)"
+        } else if self.form_keep {
+            "Keep Inventory: ON (dying costs nothing)"
+        } else {
+            "Keep Inventory: OFF (you drop everything)"
+        };
+        if self.ui.button(Rect::new(x, y, bw, bh), keep, !self.form_hardcore) {
             self.form_keep = !self.form_keep;
         }
         y += bh + 2.0 * s;
-        let hint = if self.form_creative { "Fly, infinite blocks, no damage." } else { "Gather, craft, and try not to get hissed at." };
+        let hint = if self.form_creative {
+            "Fly, infinite blocks, no damage."
+        } else if self.form_hardcore {
+            "One life on Hard. Die, and you can only watch."
+        } else {
+            "Gather, craft, and try not to get hissed at."
+        };
         self.ui.text_centered(hint, w / 2.0, y + 9.0 * s, 8.0, GRAY);
         y += 18.0 * s;
         let half = (bw - 5.0 * s) / 2.0;
@@ -1604,7 +1654,7 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Help { .. } | Screen::Advancements | Screen::FishLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog);
         let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
@@ -1620,6 +1670,10 @@ impl App {
         self.game.colour_blind = self.settings.colour_blind;
         self.game.waving_leaves = self.settings.waving_leaves;
         self.game.fancy_clouds = self.settings.fancy_clouds;
+        self.game.clouds_on = self.settings.clouds;
+        self.game.fog_on = self.settings.fog;
+        self.game.view_bobbing = self.settings.view_bobbing;
+        self.game.particle_level = self.settings.particles;
         self.game.water_reflections = self.settings.water_reflections;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
@@ -1651,6 +1705,10 @@ impl App {
             Screen::Help { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
                 self.help_screen(from_title);
+            }
+            Screen::Video { from_title } => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+                self.video_screen(from_title);
             }
             Screen::Controls { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
@@ -1685,6 +1743,7 @@ impl App {
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
                     Screen::Advancements => self.advancements_screen(),
+                    Screen::Stats => self.stats_screen(),
                     Screen::FishLog => self.fish_log_screen(),
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Container => self.container_screen(),
@@ -1748,41 +1807,45 @@ impl App {
         }
         self.name_tags();
 
-        // Hotbar
-        let slot = 20.0 * s;
-        let x0 = w / 2.0 - slot * 4.5;
-        let y0 = h - slot - 4.0 * s;
-        draw_rectangle(x0 - 2.0 * s, y0 - 2.0 * s, slot * 9.0 + 4.0 * s, slot + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
-        for i in 0..9 {
-            let x = x0 + i as f32 * slot;
-            draw_rectangle_lines(x, y0, slot, slot, s, Color::new(0.6, 0.6, 0.6, 0.6));
-            self.ui.stack_worn(g.inv.slots[i], g.inv.wear[i], x, y0, slot, !g.creative);
-        }
-        let sel = x0 + g.inv.selected as f32 * slot;
-        draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
-        if !g.creative {
-            // Experience bar just above the hotbar, with the level in the middle.
-            let (level, progress) = g.level();
-            let (bw, by) = (slot * 9.0, y0 - 6.0 * s);
-            draw_rectangle(x0, by, bw, 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
-            draw_rectangle(x0, by + s, bw * progress, 2.0 * s, Color::new(0.5, 0.95, 0.2, 1.0));
-            if level > 0 {
-                let t = level.to_string();
-                self.ui.text_centered(&t, x0 + bw / 2.0 + s, by + 2.0 * s, 10.0, BLACK);
-                self.ui.text_centered(&t, x0 + bw / 2.0, by + s, 10.0, Color::new(0.55, 1.0, 0.3, 1.0));
+        // Hotbar, hearts and hunger (spectators have no hands, and nothing to lose).
+        if g.spectator {
+            self.ui.text_centered("Spectating  -  fly with Jump/Sneak, sprint to go faster", w / 2.0, h - 12.0 * s, 9.0, Color::new(0.8, 0.9, 1.0, 0.8));
+        } else {
+            let slot = 20.0 * s;
+            let x0 = w / 2.0 - slot * 4.5;
+            let y0 = h - slot - 4.0 * s;
+            draw_rectangle(x0 - 2.0 * s, y0 - 2.0 * s, slot * 9.0 + 4.0 * s, slot + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+            for i in 0..9 {
+                let x = x0 + i as f32 * slot;
+                draw_rectangle_lines(x, y0, slot, slot, s, Color::new(0.6, 0.6, 0.6, 0.6));
+                self.ui.stack_worn(g.inv.slots[i], g.inv.wear[i], x, y0, slot, !g.creative);
             }
-            self.ui.hearts(g.player.health, x0, y0 - 18.0 * s);
-            let points = g.inv.armor_points();
-            if points > 0 {
-                self.ui.armor_bar(points, x0, y0 - 29.0 * s);
+            let sel = x0 + g.inv.selected as f32 * slot;
+            draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
+            if !g.creative {
+                // Experience bar just above the hotbar, with the level in the middle.
+                let (level, progress) = g.level();
+                let (bw, by) = (slot * 9.0, y0 - 6.0 * s);
+                draw_rectangle(x0, by, bw, 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+                draw_rectangle(x0, by + s, bw * progress, 2.0 * s, Color::new(0.5, 0.95, 0.2, 1.0));
+                if level > 0 {
+                    let t = level.to_string();
+                    self.ui.text_centered(&t, x0 + bw / 2.0 + s, by + 2.0 * s, 10.0, BLACK);
+                    self.ui.text_centered(&t, x0 + bw / 2.0, by + s, 10.0, Color::new(0.55, 1.0, 0.3, 1.0));
+                }
+                self.ui.hearts(g.player.health, x0, y0 - 18.0 * s);
+                let points = g.inv.armor_points();
+                if points > 0 {
+                    self.ui.armor_bar(points, x0, y0 - 29.0 * s);
+                }
+                self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 18.0 * s);
             }
-            self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 18.0 * s);
-        }
-        if g.held_name > 0.0 {
-            let held = g.inv.held();
-            if held != AIR {
-                let a = g.held_name.min(1.0);
-                self.ui.text_centered(item_name(held), w / 2.0, y0 - if g.creative { 6.0 } else { 16.0 } * s, 10.0, Color::new(1.0, 1.0, 1.0, a));
+            if g.held_name > 0.0 {
+                let held = g.inv.held();
+                if held != AIR {
+                    let a = g.held_name.min(1.0);
+                    self.ui.text_centered(item_name(held), w / 2.0, y0 - if g.creative { 6.0 } else { 16.0 } * s, 10.0, Color::new(1.0, 1.0, 1.0, a));
+                }
             }
         }
 
@@ -1855,8 +1918,7 @@ impl App {
                 },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
                 format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
-                format!("Seed: {}  Mode: {}", g.world.seed(), if g.creative { "Creative" } else { "Survival" }),
-                format!("Blocks broken: {}", g.stat_blocks_broken),
+                format!("Seed: {}  Mode: {}{}", g.world.seed(), g.mode().name(), if g.rules.hardcore { " (hardcore)" } else { "" }),
                 match &g.net {
                     None => "Network: single player".to_string(),
                     Some(multiplayer::Net::Host(srv)) => format!("Network: hosting on port {} ({} players)", srv.port, g.player_count()),
@@ -2027,12 +2089,15 @@ impl App {
             self.set_screen(Screen::WorldSettings);
         }
         y += bh + 5.0 * s;
-        let half = (bw - 5.0 * s) / 2.0;
+        let third = (bw - 10.0 * s) / 3.0;
         let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::ALL.len());
-        if self.ui.button(Rect::new(x, y, half, bh), &adv, true) {
+        if self.ui.button(Rect::new(x, y, third, bh), &self.ui.fit(&adv, 9.0, third - 6.0 * s), true) {
             self.set_screen(Screen::Advancements);
         }
-        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Fishing Log", true) {
+        if self.ui.button(Rect::new(x + third + 5.0 * s, y, third, bh), "Statistics", true) {
+            self.set_screen(Screen::Stats);
+        }
+        if self.ui.button(Rect::new(x + 2.0 * (third + 5.0 * s), y, third, bh), "Fishing Log", true) {
             self.set_screen(Screen::FishLog);
         }
         y += bh + 5.0 * s;
@@ -2085,6 +2150,37 @@ impl App {
         }
         if max_scroll > 0 {
             self.ui.text_centered("(scroll for more)", w / 2.0, y0 + max_rows as f32 * row_h + 6.0 * s, 7.0, GRAY);
+        }
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Paused);
+        }
+    }
+
+    fn stats_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+        self.ui.text_centered("Statistics", w / 2.0, h * 0.1, 16.0, WHITE);
+        let sub = format!("{} mode{}", self.game.mode().name(), if self.game.rules.hardcore { ", hardcore" } else { "" });
+        self.ui.text_centered(&sub, w / 2.0, h * 0.1 + 16.0 * s, 9.0, GOLD);
+        let lines = self.game.stats.lines();
+        let cols = if w >= 2.0 * 200.0 * s { 2 } else { 1 };
+        let col_w = ((w - 30.0 * s) / cols as f32).min(220.0 * s);
+        let row_h = 16.0 * s;
+        let per_col = lines.len().div_ceil(cols);
+        let x0 = w / 2.0 - (col_w * cols as f32 + 10.0 * s * (cols - 1) as f32) / 2.0;
+        let y0 = h * 0.1 + 30.0 * s;
+        for (i, (label, value)) in lines.iter().enumerate() {
+            let (c, r) = (i / per_col, i % per_col);
+            let (x, y) = (x0 + c as f32 * (col_w + 10.0 * s), y0 + r as f32 * row_h);
+            if y > h * 0.84 {
+                continue;
+            }
+            draw_rectangle(x, y, col_w, row_h - 2.0 * s, Color::new(0.12, 0.14, 0.2, 0.9));
+            self.ui.text(label, x + 5.0 * s, y + 10.5 * s, 9.0, WHITE);
+            let vw = self.ui.text_width(value, 9.0);
+            self.ui.text(value, x + col_w - vw - 5.0 * s, y + 10.5 * s, 9.0, GOLD);
         }
         let bw = (160.0 * s).min(w * 0.8);
         if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
@@ -2170,49 +2266,42 @@ impl App {
         self.ui.text(&self.ui.fit(a.title, 9.0, tw - th - 6.0 * s), tx, y + 24.0 * s, 9.0, WHITE);
     }
 
+    /// A "- label +" row for the Options screens; returns -1, 0 or 1.
+    fn stepper(&self, label: &str, x: f32, y: f32, bw: f32, bh: f32) -> i32 {
+        let s = self.ui.s;
+        let small = bh * 1.3;
+        let mut d = 0;
+        if self.ui.button(Rect::new(x, y, small, bh), "-", true) {
+            d = -1;
+        }
+        let r = Rect::new(x + small + 4.0 * s, y, bw - 2.0 * small - 8.0 * s, bh);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.15, 0.15, 0.18, 0.9));
+        self.ui.text_centered(label, r.x + r.w / 2.0, r.y + r.h * 0.68, 10.0, WHITE);
+        if self.ui.button(Rect::new(x + bw - small, y, small, bh), "+", true) {
+            d = 1;
+        }
+        d
+    }
+
     fn options_screen(&mut self, from_title: bool) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let bw = (220.0 * s).min(w * 0.8);
         // Rows shrink a little on short windows so Done stays on screen.
-        let bh = (20.0 * s).min((h - 100.0 * s) / 12.0);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 10.0);
         let x = w / 2.0 - bw / 2.0;
-        let small = bh * 1.3;
-        // Twelve rows (and the title above them), centred in whatever room there is.
-        let total = 12.0 * bh + 11.0 * 5.0 * s + 7.0 * s;
+        let total = 8.0 * bh + 7.0 * 5.0 * s + 7.0 * s;
         let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
         self.ui.text_centered("Options", w / 2.0, y - 18.0 * s, 16.0, WHITE);
-        let row = |ui: &Ui, label: String, y: f32| -> i32 {
-            let mut d = 0;
-            if ui.button(Rect::new(x, y, small, bh), "-", true) {
-                d = -1;
-            }
-            let r = Rect::new(x + small + 4.0 * s, y, bw - 2.0 * small - 8.0 * s, bh);
-            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.15, 0.15, 0.18, 0.9));
-            ui.text_centered(&label, r.x + r.w / 2.0, r.y + r.h * 0.68, 10.0, WHITE);
-            if ui.button(Rect::new(x + bw - small, y, small, bh), "+", true) {
-                d = 1;
-            }
-            d
-        };
-        let st = &mut self.settings;
-        st.render_distance = (st.render_distance + row(&self.ui, format!("Render Distance: {} chunks", st.render_distance), y)).clamp(3, settings::MAX_RENDER_DISTANCE);
+        let d = self.stepper(&format!("FOV: {:.0}", self.settings.fov), x, y, bw, bh);
+        self.settings.fov = (self.settings.fov + 5.0 * d as f32).clamp(50.0, 110.0);
         y += bh + 5.0 * s;
-        st.fov = (st.fov + 5.0 * row(&self.ui, format!("FOV: {:.0}", st.fov), y) as f32).clamp(50.0, 110.0);
+        let d = self.stepper(&format!("Mouse Sensitivity: {:.0}%", self.settings.sensitivity * 100.0), x, y, bw, bh);
+        self.settings.sensitivity = (self.settings.sensitivity + 0.1 * d as f32).clamp(0.1, 3.0);
         y += bh + 5.0 * s;
-        st.sensitivity = (st.sensitivity + 0.1 * row(&self.ui, format!("Mouse Sensitivity: {:.0}%", st.sensitivity * 100.0), y) as f32).clamp(0.1, 3.0);
-        y += bh + 5.0 * s;
-        let bright = match (st.brightness * 100.0).round() as i32 {
-            0 => "Moody".to_string(),
-            100 => "Bright".to_string(),
-            p => format!("{p}%"),
-        };
-        st.brightness = (st.brightness + 0.1 * row(&self.ui, format!("Brightness: {bright}"), y) as f32).clamp(0.0, 1.0);
-        st.brightness = (st.brightness * 10.0).round() / 10.0;
-        y += bh + 5.0 * s;
+        let d = self.stepper(&format!("Sound Volume: {:.0}%", self.audio.volume * 100.0), x, y, bw, bh);
         let vol = &mut self.audio.volume;
-        *vol = (*vol + 0.1 * row(&self.ui, format!("Sound Volume: {:.0}%", *vol * 100.0), y) as f32).clamp(0.0, 1.0);
-        *vol = (*vol * 10.0).round() / 10.0;
+        *vol = ((*vol + 0.1 * d as f32).clamp(0.0, 1.0) * 10.0).round() / 10.0;
         y += bh + 5.0 * s;
         // Two to a row from here on.
         let half = (bw - 4.0 * s) / 2.0;
@@ -2221,15 +2310,6 @@ impl App {
         if self.ui.button(Rect::new(left, y, half, bh), music, true) {
             self.audio.music_on = !self.audio.music_on;
         }
-        let fs = if self.settings.fullscreen { "Fullscreen: ON" } else { "Fullscreen: OFF" };
-        if self.ui.button(Rect::new(right, y, half, bh), fs, true) {
-            self.settings.fullscreen = !self.settings.fullscreen;
-            set_fullscreen(self.settings.fullscreen);
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), "Controls...", true) {
-            self.set_screen(Screen::Controls { from_title });
-        }
         let skin = format!("Skin: {}", nametags::skin_name(self.settings.skin));
         if self.ui.button(Rect::new(right, y, half, bh), &skin, true) {
             self.settings.skin = (self.settings.skin + 1) % nametags::SKINS.len() as u8;
@@ -2237,31 +2317,20 @@ impl App {
             self.game.set_skin(k);
         }
         y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), "Video Settings...", true) {
+            self.set_screen(Screen::Video { from_title });
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), "Controls...", true) {
+            self.set_screen(Screen::Controls { from_title });
+        }
+        y += bh + 5.0 * s;
         let subs = if self.settings.subtitles { "Subtitles: ON" } else { "Subtitles: OFF" };
         if self.ui.button(Rect::new(left, y, half, bh), subs, true) {
             self.settings.subtitles = !self.settings.subtitles;
         }
         let cb = if self.settings.colour_blind { "Colour-blind: ON" } else { "Colour-blind: OFF" };
-        let waving = if self.settings.waving_leaves { "Leaves: Waving" } else { "Leaves: Still" };
-        let shiny = if self.settings.water_reflections { "Water: Shiny" } else { "Water: Plain" };
-        let lighting = if self.settings.smooth_lighting { "Lighting: Smooth" } else { "Lighting: Flat" };
         if self.ui.button(Rect::new(right, y, half, bh), cb, true) {
             self.settings.colour_blind = !self.settings.colour_blind;
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), waving, true) {
-            self.settings.waving_leaves = !self.settings.waving_leaves;
-        }
-        if self.ui.button(Rect::new(right, y, half, bh), shiny, true) {
-            self.settings.water_reflections = !self.settings.water_reflections;
-        }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), lighting, true) {
-            self.settings.smooth_lighting = !self.settings.smooth_lighting;
-        }
-        let clouds = if self.settings.fancy_clouds { "Clouds: Fancy" } else { "Clouds: Fast" };
-        if self.ui.button(Rect::new(right, y, half, bh), clouds, true) {
-            self.settings.fancy_clouds = !self.settings.fancy_clouds;
         }
         y += bh + 5.0 * s;
         let size_i = settings::UI_SCALES.iter().position(|(m, _)| (*m - self.settings.ui_scale).abs() < 0.01).unwrap_or(1);
@@ -2275,6 +2344,100 @@ impl App {
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
+        }
+    }
+
+    /// Everything about how the game looks and how fast it draws.
+    fn video_screen(&mut self, from_title: bool) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let bw = (240.0 * s).min(w * 0.85);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 11.0);
+        let x = w / 2.0 - bw / 2.0;
+        let total = 9.0 * bh + 8.0 * 5.0 * s + 20.0 * s;
+        let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
+        self.ui.text_centered("Video Settings", w / 2.0, y - 18.0 * s, 16.0, WHITE);
+        let st = self.settings.clone();
+        let d = self.stepper(&format!("Render Distance: {} chunks", st.render_distance), x, y, bw, bh);
+        self.settings.render_distance = (st.render_distance + d).clamp(3, settings::MAX_RENDER_DISTANCE);
+        y += bh + 5.0 * s;
+        let bright = match (st.brightness * 100.0).round() as i32 {
+            0 => "Moody".to_string(),
+            100 => "Bright".to_string(),
+            p => format!("{p}%"),
+        };
+        let d = self.stepper(&format!("Brightness: {bright}"), x, y, bw, bh);
+        self.settings.brightness = (((st.brightness + 0.1 * d as f32).clamp(0.0, 1.0)) * 10.0).round() / 10.0;
+        y += bh + 5.0 * s;
+        let caps = settings::FPS_CAPS;
+        let ci = caps.iter().position(|&c| c == st.max_fps).unwrap_or(caps.len() - 1);
+        let label = if st.max_fps == 0 { "Max FPS: Unlimited".to_string() } else { format!("Max FPS: {}", st.max_fps) };
+        let d = self.stepper(&label, x, y, bw, bh);
+        self.settings.max_fps = caps[(ci as i32 + d).clamp(0, caps.len() as i32 - 1) as usize];
+        y += bh + 5.0 * s;
+        let half = (bw - 4.0 * s) / 2.0;
+        let (left, right) = (x, x + half + 4.0 * s);
+        let on_off = |name: &str, on: bool| format!("{name}: {}", if on { "ON" } else { "OFF" });
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Fullscreen", st.fullscreen), true) {
+            self.settings.fullscreen = !st.fullscreen;
+            set_fullscreen(self.settings.fullscreen);
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), &on_off("VSync", st.vsync), true) {
+            self.settings.vsync = !st.vsync;
+        }
+        y += bh + 5.0 * s;
+        let aa = if st.msaa == 0 { "Anti-aliasing: OFF".to_string() } else { format!("Anti-aliasing: {}x", st.msaa) };
+        if self.ui.button(Rect::new(left, y, half, bh), &aa, true) {
+            let levels = settings::MSAA_LEVELS;
+            let i = levels.iter().position(|&l| l == st.msaa).unwrap_or(2);
+            self.settings.msaa = levels[(i + 1) % levels.len()];
+        }
+        let parts = ["Particles: All", "Particles: Fewer", "Particles: Minimal"][st.particles.min(2) as usize];
+        if self.ui.button(Rect::new(right, y, half, bh), parts, true) {
+            self.settings.particles = (st.particles + 1) % 3;
+        }
+        y += bh + 5.0 * s;
+        let waving = if st.waving_leaves { "Leaves: Waving" } else { "Leaves: Still" };
+        if self.ui.button(Rect::new(left, y, half, bh), waving, true) {
+            self.settings.waving_leaves = !st.waving_leaves;
+        }
+        let shiny = if st.water_reflections { "Water: Shiny" } else { "Water: Plain" };
+        if self.ui.button(Rect::new(right, y, half, bh), shiny, true) {
+            self.settings.water_reflections = !st.water_reflections;
+        }
+        y += bh + 5.0 * s;
+        let lighting = if st.smooth_lighting { "Lighting: Smooth" } else { "Lighting: Flat" };
+        if self.ui.button(Rect::new(left, y, half, bh), lighting, true) {
+            self.settings.smooth_lighting = !st.smooth_lighting;
+        }
+        let clouds = match (st.clouds, st.fancy_clouds) {
+            (false, _) => "Clouds: OFF",
+            (true, true) => "Clouds: Fancy",
+            (true, false) => "Clouds: Fast",
+        };
+        if self.ui.button(Rect::new(right, y, half, bh), clouds, true) {
+            // Fancy -> Fast -> Off -> Fancy.
+            (self.settings.clouds, self.settings.fancy_clouds) = match (st.clouds, st.fancy_clouds) {
+                (true, true) => (true, false),
+                (true, false) => (false, false),
+                (false, _) => (true, true),
+            };
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("View Bobbing", st.view_bobbing), true) {
+            self.settings.view_bobbing = !st.view_bobbing;
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), &on_off("Fog", st.fog), true) {
+            self.settings.fog = !st.fog;
+        }
+        y += bh + 4.0 * s;
+        // VSync and anti-aliasing are set when the window opens.
+        if (self.settings.vsync, self.settings.msaa) != self.video_at_start {
+            self.ui.text_centered("VSync and anti-aliasing change next time the game starts.", w / 2.0, y + 9.0 * s, 8.0, GOLD);
+        }
+        y += 16.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
+            self.set_screen(Screen::Options { from_title });
         }
     }
 
@@ -2383,7 +2546,8 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.5, 0.0, 0.0, 0.45));
-        self.ui.text_centered("You died! (skill issue)", w / 2.0, h * 0.3, 20.0, WHITE);
+        let hardcore = self.game.rules.hardcore;
+        self.ui.text_centered(if hardcore { "Game over!" } else { "You died! (skill issue)" }, w / 2.0, h * 0.3, 20.0, WHITE);
         if let Some(d) = &self.game.dead {
             self.ui.text_centered(d, w / 2.0, h * 0.3 + 20.0 * s, 10.0, Color::new(1.0, 0.85, 0.85, 1.0));
         }
@@ -2398,12 +2562,21 @@ impl App {
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        if self.ui.button(Rect::new(x, h * 0.5, bw, bh), "Respawn", true) {
+        if hardcore {
+            if self.ui.button(Rect::new(x, h * 0.5, bw, bh), "Spectate World", true) {
+                self.game.spectate_after_death();
+                self.set_screen(Screen::Playing);
+            }
+        } else if self.ui.button(Rect::new(x, h * 0.5, bw, bh), "Respawn", true) {
             self.game.respawn();
             self.set_screen(Screen::Playing);
         }
         if self.ui.button(Rect::new(x, h * 0.5 + bh + 5.0 * s, bw, bh), "Rage Quit to Title", true) {
-            self.game.respawn();
+            if hardcore {
+                self.game.spectate_after_death();
+            } else {
+                self.game.respawn();
+            }
             self.back_to_title();
         }
     }
@@ -2514,12 +2687,21 @@ impl App {
         let x = w / 2.0 - bw / 2.0;
         let mut y = h * 0.3;
         let mut rules = self.game.rules;
-        let keep = if rules.keep_inventory { "Keep Inventory: ON (dying costs nothing)" } else { "Keep Inventory: OFF (you drop everything)" };
-        if self.ui.button(Rect::new(x, y, bw, bh), keep, owner) {
+        // Hardcore worlds are hard, and dying costs everything: that's the point.
+        let locked = rules.hardcore;
+        let keep = if locked {
+            "Keep Inventory: OFF (hardcore)"
+        } else if rules.keep_inventory {
+            "Keep Inventory: ON (dying costs nothing)"
+        } else {
+            "Keep Inventory: OFF (you drop everything)"
+        };
+        if self.ui.button(Rect::new(x, y, bw, bh), keep, owner && !locked) {
             rules.keep_inventory = !rules.keep_inventory;
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), &format!("Difficulty: {}", rules.difficulty.name()), owner) {
+        let diff = if locked { "Difficulty: Hard (hardcore)".to_string() } else { format!("Difficulty: {}", rules.difficulty.name()) };
+        if self.ui.button(Rect::new(x, y, bw, bh), &diff, owner && !locked) {
             rules.difficulty = rules::Difficulty::from_index((rules.difficulty.index() + 1) % 4);
         }
         y += bh + 2.0 * s;
@@ -2976,6 +3158,7 @@ impl App {
                             }
                             made += 1;
                         }
+                        self.game.stats.crafted += made as u64 * r.output.1 as u64;
                         // Joined players: the host checks the ingredients against its ledger.
                         if self.game.is_client() && !self.game.creative && made > 0 {
                             self.game.net_send_msg(net::Msg::Craft { recipe: ri as u16, times: made });
@@ -3030,6 +3213,19 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                     if inside {
                         let h = generator.column(x, z).0.max(world::SEA);
                         return Some((Vec3::new(x as f32 + 0.5, h as f32 + 12.0, z as f32 + 0.5), 0.8, -0.35));
+                    }
+                }
+            }
+            return None;
+        }
+        "ocean" => {
+            // Above deep-ish open sea.
+            for r in 0..160 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let (h, biome) = generator.column(x, z);
+                    if biome == world::Biome::Ocean && h < world::SEA - 6 && !generator.cold(x, z) {
+                        return Some((Vec3::new(x as f32 + 0.5, world::SEA as f32 - 3.0, z as f32 + 0.5), 0.8, -0.4));
                     }
                 }
             }
@@ -3136,7 +3332,11 @@ fn install_panic_hook() {
 fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     let (id, _) = stack?;
     let mut s = item_name(id).to_string();
-    if enchant::is_enchanted(wear) {
+    if id == HOLLOW_BOX {
+        if boxes::box_id(wear) != 0 {
+            s += " [packed]";
+        }
+    } else if enchant::is_enchanted(wear) {
         s += &format!(" [{}]", enchant::describe(wear));
     }
     if let Some(max) = inventory::max_uses(id, wear) {
@@ -3253,6 +3453,7 @@ async fn game_main() {
         form_seed: String::new(),
         form_creative: false,
         form_keep: false,
+        form_hardcore: false,
         form_focus: 0,
         backup_list: Vec::new(),
         backup_sel: None,
@@ -3260,6 +3461,7 @@ async fn game_main() {
         frame_times: std::collections::VecDeque::with_capacity(FRAME_GRAPH),
         gpu: gl_strings(),
         stage_ms: [0.0; 5],
+        video_at_start: (true, 4),
     };
     // Screenshots always use the defaults, whatever the player last picked.
     if shot.is_none() {
@@ -3273,6 +3475,7 @@ async fn game_main() {
         if saved.fullscreen {
             set_fullscreen(true);
         }
+        app.video_at_start = (saved.vsync, saved.msaa);
         app.settings = saved;
         app.updates = updates::UpdateCheck::start(app.settings.check_updates);
     }
@@ -3349,8 +3552,8 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" => {
-                let mut g = Game::new(424242, s.mode == "farm", false);
+            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks" | "glider" => {
+                let mut g = Game::new(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
                     g.inv.slots[0] = Some((block::ROD, 1));
@@ -3482,6 +3685,12 @@ async fn game_main() {
                 app.start_game(g);
                 app.set_screen(Screen::Advancements);
             }
+            "stats" => {
+                let mut g = Game::new(424242, false, false);
+                g.stats = stats::Stats { mined: 1843, placed: 1207, crafted: 311, kills: 58, deaths: 3, damage_dealt: 402.0, damage_taken: 131.0, walked: 18_420.0, swum: 960.0, flown: 0.0, ridden: 2_310.0, jumps: 4_107, played: 3.0 * 3600.0 + 1260.0, fish: 12, eaten: 96 };
+                app.start_game(g);
+                app.set_screen(Screen::Stats);
+            }
             "mods" => {
                 app.game = Game::new(424242, true, true);
                 app.set_screen(Screen::Mods);
@@ -3543,6 +3752,37 @@ async fn game_main() {
                 app.game = Game::new(424242, true, true);
                 app.set_screen(Screen::Options { from_title: true });
             }
+            "video" => {
+                app.game = Game::new(424242, true, true);
+                app.settings.max_fps = 144;
+                app.settings.particles = 1;
+                app.set_screen(Screen::Video { from_title: true });
+            }
+            "reef" => {
+                // Under a warm sea, somewhere with coral (found once the chunks are in).
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.25);
+                if let Some((pos, yaw, pitch)) = scenic_view(&g, "ocean") {
+                    (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "spire" => {
+                // One of the Hollow's outer islands, from a little way off.
+                let mut g = Game::new(424242, true, false);
+                g.time = 0.25;
+                let seed = g.world.seed();
+                let spire = (1..12).flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)])).find_map(|(gx, gz)| hollow::outer_island(seed, gx, gz).filter(|i| i.2));
+                if let Some((c, _, _)) = spire {
+                    let from = c.as_vec3() + Vec3::new(14.0, 9.0, 14.0);
+                    let d = c.as_vec3() + Vec3::new(0.5, 4.0, 0.5) - from;
+                    (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                }
+                g.player.flying = true;
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "controls" => {
                 app.game = Game::new(424242, true, true);
                 // Show a changed binding and one waiting for a key.
@@ -3563,6 +3803,7 @@ async fn game_main() {
         app.game.inv.slots[sel] = Some((id, 1));
     }
     let mut frames = 0u32;
+    let mut last_frame = std::time::Instant::now();
     loop {
         if let Some(s) = &shot {
             if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette" | "worlds" | "newworld" | "createform") || (s.mode == "join" && app.game.is_client()) {
@@ -3598,7 +3839,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -3732,6 +3973,73 @@ async fn game_main() {
                     "furnace" => app.game.open_container(busy),
                     _ => {}
                 }
+            }
+            if s.mode == "newblocks" && frames == 125 {
+                // Copper as it ages (and waxed), bamboo things, coral, a Hollow Box.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y = p.y.floor() as i32;
+                let at = |f: f32, r: f32, up: i32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y + up, v.z.floor() as i32)
+                };
+                let w = &mut app.game.world;
+                for i in 0..4 {
+                    w.set_v(at(6.0, i as f32 - 5.0, 0), block::COPPER_FIRST + i);
+                    w.set_v(at(6.0, i as f32 - 5.0, 1), block::WAXED_COPPER_FIRST + i);
+                    w.set_v(at(8.0, i as f32 - 5.0, 0), block::CORAL_FIRST + i);
+                }
+                w.set_v(at(8.0, -1.0, 0), block::DEAD_CORAL);
+                w.set_v(at(6.0, 0.0, 0), block::COPPER_ORE);
+                w.set_v(at(6.0, 1.0, 0), block::BAMBOO_BLOCK);
+                w.set_v(at(6.0, 2.0, 0), block::BAMBOO_PLANKS);
+                w.set_v(at(6.0, 3.0, 0), block::BAMBOO_MOSAIC);
+                w.set_v(at(5.0, 1.0, 0), block::BAMBOO_SLAB);
+                w.set_v(at(5.0, 2.0, 0), block::BAMBOO_STAIRS);
+                w.set_v(at(5.0, 3.0, 0), block::HOLLOW_BOX);
+                for up in 0..6 {
+                    w.set_v(at(8.0, 3.0, up), block::BAMBOO);
+                    w.set_v(at(9.0, 2.0, up.min(3)), block::BAMBOO);
+                }
+                app.game.inv.slots[0] = Some((block::GLIDER, 1));
+                app.game.inv.slots[1] = Some((block::ROCKET, 16));
+                app.game.inv.slots[2] = Some((block::SPEAR, 1));
+                app.game.inv.slots[3] = Some((block::COPPER_INGOT, 12));
+                app.game.inv.slots[4] = Some((block::HOLLOW_BOX, 1));
+                app.game.inv.slots[5] = Some((block::BAMBOO, 32));
+                app.game.inv.slots[6] = Some((block::AXE_FIRST + 2, 1));
+                app.game.inv.slots[7] = Some((block::SHOVEL_FIRST + 4, 1));
+                app.game.inv.slots[8] = Some((block::PICK_COPPER, 1));
+                app.game.inv.selected = 6;
+            }
+            if s.mode == "glider" && frames == 125 {
+                // Soaring: worn Glider, seen from behind.
+                app.game.inv.armor[block::CHESTPLATE] = Some((block::GLIDER, 1));
+                app.game.player.body.pos += Vec3::Y * 40.0;
+                app.game.player.body.vel = Vec3::new(s.yaw.sin(), -0.2, -s.yaw.cos()) * 18.0;
+                app.game.player.body.on_ground = false;
+                app.game.player.gliding = true;
+                app.game.third_person = true;
+            }
+            if s.mode == "reef" && frames == 150 {
+                // Some sea life in front of the camera.
+                let eye = app.game.player.eye();
+                let fwd = Vec3::new(s.yaw.sin() * s.pitch.cos(), s.pitch.sin(), -s.yaw.cos() * s.pitch.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(3);
+                for i in 0..5 {
+                    let at = eye + fwd * (4.0 + (i % 2) as f32) + right * (i as f32 * 0.7 - 1.4) + Vec3::Y * ((i % 3) as f32 * 0.4 - 0.4);
+                    let mut m = entity::Mob::new(entity::MobKind::Fishy, at, &mut rng);
+                    m.id = 5000 + i;
+                    m.yaw = s.yaw + 1.2;
+                    app.game.mobs.push(m);
+                }
+                let mut m = entity::Mob::new(entity::MobKind::Soggy, eye + fwd * 8.0 - right * 3.0 - Vec3::Y * 1.0, &mut rng);
+                m.seed = 1;
+                m.id = 5100;
+                m.yaw = s.yaw + std::f32::consts::PI;
+                app.game.mobs.push(m);
             }
             if matches!(s.mode.as_str(), "building" | "armour") && frames == 125 {
                 // A little staircase, slabs, a pair of doors and some things on the floor.
@@ -4209,6 +4517,18 @@ async fn game_main() {
             app.save_settings();
             app.game.disconnect();
             break;
+        }
+        // Max FPS: wait out the rest of this frame's share of a second.
+        if shot.is_none() && app.settings.max_fps > 0 {
+            let share = std::time::Duration::from_secs_f64(1.0 / app.settings.max_fps as f64);
+            let due = last_frame + share;
+            let now = std::time::Instant::now();
+            if due > now {
+                std::thread::sleep(due - now);
+            }
+            last_frame = due.max(now - share);
+        } else {
+            last_frame = std::time::Instant::now();
         }
         next_frame().await;
     }

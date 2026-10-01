@@ -175,7 +175,24 @@ pub const DETECTOR_RAIL: Id = 290;
 pub const COMPARATOR_FIRST: Id = 294;
 /// Beacons: `BEACON_FIRST + ` the effect it gives (`potions::ALL` order; see beacon.rs).
 pub const BEACON_FIRST: Id = 310;
-pub const NUM_BLOCKS: Id = 315;
+/// A chest that keeps what's inside when you break it (see boxes.rs).
+pub const HOLLOW_BOX: Id = 315;
+pub const COPPER_ORE: Id = 316;
+/// Copper blocks, weathering over time: new, exposed, weathered, oxidized (see copper.rs).
+pub const COPPER_FIRST: Id = 317;
+/// The same, waxed with Goo so they stay as they are.
+pub const WAXED_COPPER_FIRST: Id = 321;
+pub const BAMBOO: Id = 325;
+pub const BAMBOO_BLOCK: Id = 326;
+pub const BAMBOO_PLANKS: Id = 327;
+pub const BAMBOO_MOSAIC: Id = 328;
+/// Bamboo slabs (bottom, top) and stairs (four facings).
+pub const BAMBOO_SLAB: Id = 329;
+pub const BAMBOO_STAIRS: Id = 331;
+/// Coral blocks: tube, brain, bubble, fire; and what they become out of water.
+pub const CORAL_FIRST: Id = 335;
+pub const DEAD_CORAL: Id = 339;
+pub const NUM_BLOCKS: Id = 340;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -275,7 +292,21 @@ pub const MELON_SLICE: Id = FIRST_ITEM + 114;
 pub const CHEST_MINECART: Id = FIRST_ITEM + 115;
 pub const HOPPER_MINECART: Id = FIRST_ITEM + 116;
 /// Mod items start here.
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 117;
+/// Worn in the chest slot: glide from heights (see glider.rs).
+pub const GLIDER: Id = FIRST_ITEM + 117;
+/// Speeds up a glide (or just goes bang).
+pub const ROCKET: Id = FIRST_ITEM + 118;
+/// A Soggy Groaner's weapon: hits hard, and can be thrown.
+pub const SPEAR: Id = FIRST_ITEM + 119;
+pub const COPPER_INGOT: Id = FIRST_ITEM + 120;
+/// Axes and shovels: `+ tier` (wood, stone, copper, iron, dimond; see tools.rs).
+pub const AXE_FIRST: Id = FIRST_ITEM + 121;
+pub const SHOVEL_FIRST: Id = FIRST_ITEM + 126;
+pub const PICK_COPPER: Id = FIRST_ITEM + 131;
+pub const SWORD_COPPER: Id = FIRST_ITEM + 132;
+/// Copper armour: `+ slot` (helmet, chestplate, leggings, boots).
+pub const COPPER_ARMOR_FIRST: Id = FIRST_ITEM + 133;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 137;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -333,11 +364,23 @@ pub const LEGGINGS: usize = 2;
 pub const BOOTS: usize = 3;
 /// Armour points per tier (wool, iron, gold, dimond) and slot. 20 points is
 /// Minecraft's full dimond set; each point takes 4% off most damage.
-pub const ARMOR_POINTS: [[u8; 4]; 4] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3]];
+/// (Row 4 is the Glider's: none; row 5 copper, between gold and iron.)
+pub const ARMOR_POINTS: [[u8; 4]; 6] = [[1, 3, 2, 1], [2, 6, 5, 2], [2, 5, 3, 1], [3, 8, 6, 3], [0, 0, 0, 0], [2, 5, 4, 2]];
+
+/// The "tier" a worn Glider counts as: no protection, drawn as wings.
+pub const GLIDER_TIER: usize = 4;
+/// Copper armour's tier (after the Glider's, so older tiers keep their numbers).
+pub const COPPER_TIER: usize = 5;
 
 /// (slot, tier) of an armour item.
 /// For mod armour, the tier is the one it looks like when worn.
 pub fn armor_of(id: Id) -> Option<(usize, usize)> {
+    if id == GLIDER {
+        return Some((CHESTPLATE, GLIDER_TIER));
+    }
+    if (COPPER_ARMOR_FIRST..COPPER_ARMOR_FIRST + 4).contains(&id) {
+        return Some(((id - COPPER_ARMOR_FIRST) as usize, COPPER_TIER));
+    }
     if (ARMOR_FIRST..ARMOR_FIRST + 16).contains(&id) {
         return Some((((id - ARMOR_FIRST) % 4) as usize, ((id - ARMOR_FIRST) / 4) as usize));
     }
@@ -347,7 +390,15 @@ pub fn armor_of(id: Id) -> Option<(usize, usize)> {
 /// How many uses a tool, weapon or piece of armour survives (Minecraft's numbers;
 /// wool armour takes leather's). None: it never wears out.
 pub fn durability(id: Id) -> Option<u16> {
-    const ARMOR: [[u16; 4]; 4] = [[55, 80, 75, 65], [165, 240, 225, 195], [77, 112, 105, 91], [363, 528, 495, 429]];
+    const ARMOR: [[u16; 4]; 6] = [[55, 80, 75, 65], [165, 240, 225, 195], [77, 112, 105, 91], [363, 528, 495, 429], [0; 4], [121, 176, 165, 143]];
+    match id {
+        GLIDER => return Some(432),
+        SPEAR => return Some(250),
+        _ => {}
+    }
+    if let Some(n) = crate::tools::tool_uses(id) {
+        return Some(n);
+    }
     if let Some((slot, tier)) = armor_of(id) {
         return Some(ARMOR[tier][slot]);
     }
@@ -367,7 +418,7 @@ pub fn durability(id: Id) -> Option<u16> {
 
 /// Swords (and mod weapons: things that wear out, hit hard and aren't pickaxes).
 pub fn is_sword(id: Id) -> bool {
-    matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND)
+    matches!(id, SWORD_WOOD | SWORD_STONE | SWORD_IRON | SWORD_DIAMOND | SWORD_COPPER)
         || (id >= FIRST_MOD_ITEM && item_def(id).is_some_and(|i| i.durability.is_some() && i.pick_tier == 0 && i.armor.is_none() && i.damage > 1.0))
 }
 
@@ -391,7 +442,7 @@ pub fn armor_points(id: Id) -> u8 {
     if let Some(a) = item_def(id).and_then(|i| i.armor) {
         return a.points;
     }
-    armor_of(id).map(|(slot, tier)| ARMOR_POINTS[tier][slot]).unwrap_or(0)
+    armor_of(id).and_then(|(slot, tier)| ARMOR_POINTS.get(tier).map(|t| t[slot])).unwrap_or(0)
 }
 
 /// Facings: 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).
@@ -1288,7 +1339,51 @@ impl Registry {
             d.creative = k == 0;
             blocks.push(d);
         }
+        blocks.push(def("hollow_box", "Hollow Box (Bigger on the Inside)", Cube, true, true, [T_HOLLOW_BOX_TOP, T_HOLLOW_BOX_SIDE, T_HOLLOW_BOX_TOP], 2.0, 0, true, AIR, 0.0, S_STONE));
+        blocks.push(def("copper_ore", "Copper Ore (Future Statue)", Cube, true, true, [T_COPPER_ORE; 3], 3.0, 1, true, COPPER_INGOT, 0.0, S_STONE));
+        let copper_names = ["Copper Block (Shiny, For Now)", "Exposed Copper (Ageing Gracefully)", "Weathered Copper (Mostly Green)", "Oxidized Copper (Statue Chic)"];
+        let copper_keys = ["copper_block", "exposed_copper", "weathered_copper", "oxidized_copper"];
+        for waxed in [false, true] {
+            for (i, (key, name)) in copper_keys.iter().zip(copper_names).enumerate() {
+                let id = if waxed { WAXED_COPPER_FIRST } else { COPPER_FIRST } + i as Id;
+                let key = if waxed { leak(&format!("waxed_{key}")) } else { key };
+                let name = if waxed { leak(&format!("Waxed {}", name.split(" (").next().unwrap_or(name))) } else { name };
+                blocks.push(def(key, name, Cube, true, true, [T_COPPER + i as u16; 3], 3.0, 1, true, id, 0.0, S_STONE));
+            }
+        }
+        let mut bamboo = def("bamboo", "Bamboo (Grows While You Watch)", Cross, false, false, [T_BAMBOO; 3], 0.2, 0, false, BAMBOO, 0.0, S_WOOD);
+        bamboo.speed = 1.0;
+        blocks.push(bamboo);
+        blocks.push(def("bamboo_block", "Block of Bamboo (Bundled)", Cube, true, true, [T_BAMBOO_BLOCK_TOP, T_BAMBOO_BLOCK_SIDE, T_BAMBOO_BLOCK_TOP], 2.0, 0, false, BAMBOO_BLOCK, 0.0, S_WOOD));
+        blocks.push(def("bamboo_planks", "Bamboo Planks (Stripey)", Cube, true, true, [T_BAMBOO_PLANKS; 3], 2.0, 0, false, BAMBOO_PLANKS, 0.0, S_WOOD));
+        blocks.push(def("bamboo_mosaic", "Bamboo Mosaic (Fancy Stripes)", Cube, true, true, [T_BAMBOO_MOSAIC; 3], 2.0, 0, false, BAMBOO_MOSAIC, 0.0, S_WOOD));
+        for top in [false, true] {
+            let mut d = def(if top { "bamboo_slab_top" } else { "bamboo_slab" }, if top { "Bamboo Slab (Upside Down)" } else { "Bamboo Slab (Half the Commitment)" }, Shaped, true, false, [T_BAMBOO_PLANKS; 3], 2.0, 0, false, BAMBOO_SLAB, 0.0, S_WOOD);
+            d.shape = Shape::Slab { top };
+            d.creative = !top;
+            d.family = BAMBOO_SLAB;
+            d.full = BAMBOO_PLANKS;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            let key = leak(&format!("bamboo_stairs{}", ["", "_east", "_south", "_west"][facing as usize]));
+            let mut d = def(key, "Bamboo Stairs (Up, Mostly)", Shaped, true, false, [T_BAMBOO_PLANKS; 3], 2.0, 0, false, BAMBOO_STAIRS, 0.0, S_WOOD);
+            d.shape = Shape::Stairs { facing };
+            d.creative = facing == 0;
+            d.family = BAMBOO_STAIRS;
+            d.full = BAMBOO_PLANKS;
+            blocks.push(d);
+        }
+        let corals = [("tube_coral_block", "Tube Coral Block (Blue, Busy)"), ("brain_coral_block", "Brain Coral Block (Thinks Pink)"), ("bubble_coral_block", "Bubble Coral Block (Pops Purple)"), ("fire_coral_block", "Fire Coral Block (Not Actually Hot)")];
+        for (i, (key, name)) in corals.into_iter().enumerate() {
+            blocks.push(def(key, name, Cube, true, true, [T_CORAL + i as u16; 3], 1.5, 1, true, CORAL_FIRST + i as Id, 0.0, S_STONE));
+        }
+        blocks.push(def("dead_coral_block", "Dead Coral Block (Needed Water)", Cube, true, true, [T_DEAD_CORAL; 3], 1.5, 1, true, DEAD_CORAL, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
+        debug_assert_eq!(blocks[HOLLOW_BOX as usize].key, "hollow_box");
+        debug_assert_eq!(blocks[WAXED_COPPER_FIRST as usize].key, "waxed_copper_block");
+        debug_assert_eq!(blocks[BAMBOO_STAIRS as usize].key, "bamboo_stairs");
+        debug_assert_eq!(blocks[DEAD_CORAL as usize].key, "dead_coral_block");
         debug_assert_eq!(blocks[POWERED_RAIL as usize].key, "powered_rail");
         debug_assert_eq!(blocks[SPRUCE_LOG as usize].key, "spruce_log");
         debug_assert_eq!(blocks[MELON as usize].key, "melon");
@@ -1422,6 +1517,24 @@ impl Registry {
         items.push(ItemDef { food: Some(2.0), ..item("melon_slice", "Melon Slice (Mostly Water)", T_MELON_SLICE) });
         items.push(ItemDef { stack: 1, ..item("chest_minecart", "Minecart with Chest (Freight)", T_CHEST_CART_ITEM) });
         items.push(ItemDef { stack: 1, ..item("hopper_minecart", "Minecart with Hopper (Vacuum)", T_HOPPER_CART_ITEM) });
+        items.push(ItemDef { stack: 1, ..item("glider", "Glider (Wings, Basically)", T_GLIDER) });
+        items.push(item("rocket", "Boom Rocket (Glide Faster)", T_ROCKET));
+        items.push(ItemDef { stack: 1, damage: 9.0, ..item("spear", "Soggy Spear (Pointy, Throwable)", T_SPEAR) });
+        items.push(item("copper_ingot", "Copper Ingot (Penny-Adjacent)", T_COPPER_INGOT));
+        for (t, (k, n)) in crate::tools::TIER_NAMES.iter().enumerate() {
+            let damage = [3.5, 4.5, 5.0, 5.5, 6.5][t];
+            items.push(ItemDef { stack: 1, damage, ..item(leak(&format!("{k}_axe")), leak(&format!("{n} Axe (Chop Chop)")), T_AXE0 + t as u16) });
+        }
+        for (t, (k, n)) in crate::tools::TIER_NAMES.iter().enumerate() {
+            let damage = [2.5, 3.5, 4.0, 4.5, 5.5][t];
+            items.push(ItemDef { stack: 1, damage, ..item(leak(&format!("{k}_shovel")), leak(&format!("{n} Shovel (Dig It)")), T_SHOVEL0 + t as u16) });
+        }
+        items.push(ItemDef { stack: 1, pick_tier: 2, damage: 3.5, ..item("copper_pickaxe", "Copper Pickaxe (Between Stone and Iron)", T_PICK_COPPER) });
+        items.push(ItemDef { stack: 1, damage: 5.5, ..item("copper_sword", "Copper Sword (Tarnishes Beautifully)", T_SWORD_COPPER) });
+        for (slot, name) in ["Copper Helmet (Penny Hat)", "Copper Chestplate (Very Conductive)", "Copper Leggings (Clanky)", "Copper Boots (Squeaky)"].into_iter().enumerate() {
+            let key = ["copper_helmet", "copper_chestplate", "copper_leggings", "copper_boots"][slot];
+            items.push(ItemDef { stack: 1, ..item(key, name, T_COPPER_ARMOR_ITEMS + slot as u16) });
+        }
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1546,6 +1659,31 @@ impl Registry {
             recipes.push(r(&[(*full, 3)], (slab(m, false), 6)));
             recipes.push(r(&[(*full, 6)], (stairs(m, 0), 4)));
         }
+        // Axes and shovels of every tier, and copper everything.
+        for (t, material) in [PLANKS, COBBLE, COPPER_INGOT, IRON, DIAMOND].into_iter().enumerate() {
+            recipes.push(r(&[(material, 3), (STICK, 2)], (AXE_FIRST + t as Id, 1)));
+            recipes.push(r(&[(material, 1), (STICK, 2)], (SHOVEL_FIRST + t as Id, 1)));
+        }
+        recipes.push(r(&[(COPPER_INGOT, 3), (STICK, 2)], (PICK_COPPER, 1)));
+        recipes.push(r(&[(COPPER_INGOT, 2), (STICK, 1)], (SWORD_COPPER, 1)));
+        for (slot, n) in [5, 8, 7, 4].into_iter().enumerate() {
+            recipes.push(r(&[(COPPER_INGOT, n)], (COPPER_ARMOR_FIRST + slot as Id, 1)));
+        }
+        // Gliding, boxes, copper and bamboo.
+        recipes.push(r(&[(GUNPOWDER, 1), (STRING, 1)], (ROCKET, 3)));
+        recipes.push(r(&[(CHEST, 1), (HOLLOW_STONE, 4)], (HOLLOW_BOX, 1)));
+        recipes.push(r(&[(COPPER_INGOT, 9)], (COPPER_FIRST, 1)));
+        recipes.push(r(&[(COPPER_FIRST, 1)], (COPPER_INGOT, 9)));
+        for i in 0..4 {
+            recipes.push(r(&[(COPPER_FIRST + i, 1), (GOO, 1)], (WAXED_COPPER_FIRST + i, 1)));
+        }
+        recipes.push(r(&[(BAMBOO, 9)], (BAMBOO_BLOCK, 1)));
+        recipes.push(r(&[(BAMBOO_BLOCK, 1)], (BAMBOO_PLANKS, 2)));
+        recipes.push(r(&[(BAMBOO, 2)], (STICK, 1)));
+        recipes.push(r(&[(BAMBOO_PLANKS, 2)], (BAMBOO_MOSAIC, 1)));
+        recipes.push(r(&[(BAMBOO_PLANKS, 3)], (BAMBOO_SLAB, 6)));
+        recipes.push(r(&[(BAMBOO_PLANKS, 6)], (BAMBOO_STAIRS, 4)));
+        recipes.push(r(&[(BAMBOO_PLANKS, 8)], (CHEST, 1)));
         // Minecraft's amounts: 5 for a helmet, 8 chestplate, 7 leggings, 4 boots.
         for (t, material) in [WOOL, IRON, GOLD_INGOT, DIAMOND].into_iter().enumerate() {
             for (slot, n) in [5, 8, 7, 4].into_iter().enumerate() {
@@ -1659,6 +1797,10 @@ pub fn item_tile(id: Id) -> u16 {
 }
 
 pub fn max_stack(id: Id) -> u8 {
+    // Each Hollow Box carries its own contents.
+    if id == HOLLOW_BOX {
+        return 1;
+    }
     item_def(id).map(|i| i.stack.clamp(1, 64)).unwrap_or(64)
 }
 
@@ -1704,16 +1846,19 @@ pub fn break_time_with(id: Id, held: Id, efficiency: u8) -> (f32, bool) {
     if b.hardness < 0.0 {
         return (f32::INFINITY, false);
     }
+    let bonus = if efficiency > 0 { (efficiency as f32).powi(2) + 1.0 } else { 0.0 };
     if !b.pick_block {
-        return (b.hardness, true);
+        // Axes for wood, shovels for earth (see tools.rs).
+        return match crate::tools::best_tool(id).and_then(|kind| crate::tools::speed(held, kind)) {
+            Some(speed) => (b.hardness * 1.5 / (speed + bonus), true),
+            None => (b.hardness, true),
+        };
     }
     let tier = pick_tier(held);
-    if tier == 0 {
+    let Some(speed) = crate::tools::speed(held, crate::tools::Tool::Pick) else {
         return (b.hardness * 5.0, b.pick_tier == 0);
-    }
-    let bonus = if efficiency > 0 { (efficiency as f32).powi(2) + 1.0 } else { 0.0 };
-    let speed = [1.0, 2.0, 4.0, 6.0, 8.0][tier as usize] + bonus;
-    (b.hardness * 1.5 / speed, tier >= b.pick_tier)
+    };
+    (b.hardness * 1.5 / (speed + bonus), tier >= b.pick_tier)
 }
 
 /// Damage with Sharpness `sharpness`.

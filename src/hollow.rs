@@ -66,6 +66,74 @@ pub fn pillars(seed: u32) -> Vec<(i32, i32, i32)> {
         .collect()
 }
 
+/// Outer islands: at most one per cell this big, beyond the main island.
+const OUTER_CELL: i32 = 80;
+const OUTER_NEAR: f32 = 110.0;
+const OUTER_FAR: f32 = 700.0;
+
+/// The outer island in cell (gx, gz) (cells counted from `ORIGIN`), if any:
+/// its middle (the surface), radius, and whether a spire with loot stands on it.
+pub fn outer_island(seed: u32, gx: i32, gz: i32) -> Option<(IVec3, i32, bool)> {
+    if hash2(seed ^ 0x0A7E, gx, gz) > 0.55 {
+        return None;
+    }
+    let x = ORIGIN.x + gx * OUTER_CELL + 16 + (hash2(seed ^ 0x0A7F, gx, gz) * (OUTER_CELL - 32) as f32) as i32;
+    let z = ORIGIN.z + gz * OUTER_CELL + 16 + (hash2(seed ^ 0x0A80, gx, gz) * (OUTER_CELL - 32) as f32) as i32;
+    let d = ((x - ORIGIN.x) as f32).hypot((z - ORIGIN.z) as f32);
+    if !(OUTER_NEAR..OUTER_FAR).contains(&d) {
+        return None;
+    }
+    let y = ORIGIN.y - 6 + (hash2(seed ^ 0x0A81, gx, gz) * 14.0) as i32;
+    let r = 9 + (hash2(seed ^ 0x0A82, gx, gz) * 8.0) as i32;
+    Some((ivec3(x, y, z), r, hash2(seed ^ 0x0A83, gx, gz) < 0.6))
+}
+
+/// Outer islands that might reach (x, z).
+fn outer_islands_near(seed: u32, x: i32, z: i32) -> Vec<(IVec3, i32, bool)> {
+    let (gx, gz) = ((x - ORIGIN.x).div_euclid(OUTER_CELL), (z - ORIGIN.z).div_euclid(OUTER_CELL));
+    let mut v = Vec::new();
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            v.extend(outer_island(seed, gx + dx, gz + dz));
+        }
+    }
+    v
+}
+
+/// A spire's blocks relative to its island's middle: a hollow obsidian tower
+/// with a Hollow Stone floor, a glowing top, and the chest inside.
+pub fn spire_block(dx: i32, dy: i32, dz: i32) -> Option<Id> {
+    let (ax, az) = (dx.abs(), dz.abs());
+    if ax > 2 || az > 2 || !(1..=9).contains(&dy) {
+        return None;
+    }
+    let wall = ax == 2 || az == 2;
+    let door = dz == 2 && dx == 0 && (1..=2).contains(&dy);
+    Some(match dy {
+        9 => {
+            if ax <= 1 && az <= 1 { GLOWROCK } else { OBSIDIAN }
+        }
+        1 if dx == 0 && dz == 0 => HOLLOW_STONE,
+        2 if dx == 0 && dz == 0 => CHEST,
+        _ if door => AIR,
+        _ if wall && !(ax == 2 && az == 2 && dy % 3 == 0) => OBSIDIAN,
+        _ if wall => GLOWROCK,
+        _ => AIR,
+    })
+}
+
+/// The chest in each outer spire in chunk (cx, cz), with a seed for its loot.
+pub fn spire_chests(seed: u32, cx: i32, cz: i32) -> Vec<(IVec3, u32)> {
+    let mid = ivec3(cx * CW + CW / 2, 0, cz * CW + CW / 2);
+    outer_islands_near(seed, mid.x, mid.z)
+        .into_iter()
+        .filter(|(_, _, spire)| *spire)
+        .map(|(c, _, _)| c + ivec3(0, 2, 0))
+        .filter(|p| p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz)
+        .map(|p| (p, seed ^ (p.x as u32).wrapping_mul(2_654_435_761) ^ p.z as u32))
+        .collect()
+}
+
 /// Where you arrive on the island.
 pub fn arrival() -> Vec3 {
     Vec3::new(ORIGIN.x as f32 + ISLAND - 8.5, (ORIGIN.y + 1) as f32, ORIGIN.z as f32 + 0.5)
@@ -184,6 +252,26 @@ impl Generator {
                     }
                     if x == px && z == pz {
                         b[i(h)] = WYRM_CRYSTAL;
+                    }
+                }
+                // Outer islands, some with a spire.
+                for (c, r, spire) in outer_islands_near(s, x, z) {
+                    let d = ((x - c.x) as f32).hypot((z - c.z) as f32);
+                    let edge = r as f32 + self.scorch.noise3(x as f32 / 9.0, c.y as f32, z as f32 / 9.0) * 3.0;
+                    if d < edge {
+                        let depth = ((1.0 - d / edge).sqrt() * 10.0) as i32 + 1;
+                        for y in (c.y - depth).max(1)..=c.y {
+                            b[i(y)] = HOLLOW_STONE;
+                        }
+                    }
+                    if spire {
+                        for dy in 1..=9 {
+                            if let Some(id) = spire_block(x - c.x, dy, z - c.z)
+                                && id != AIR
+                            {
+                                b[i(c.y + dy)] = id;
+                            }
+                        }
                     }
                 }
                 // A little obsidian landing where you arrive.

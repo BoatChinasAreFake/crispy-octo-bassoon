@@ -30,6 +30,17 @@ pub fn repair_material(id: Id) -> Option<Id> {
     if id >= FIRST_MOD_ITEM {
         return Some(reg().items.get((id - FIRST_ITEM) as usize)?.repair).filter(|&m| m != AIR);
     }
+    match id {
+        GLIDER => return Some(FEATHER),
+        SPEAR | PICK_COPPER | SWORD_COPPER => return Some(COPPER_INGOT),
+        _ => {}
+    }
+    if let Some(t) = crate::tools::axe_tier(id).or_else(|| crate::tools::shovel_tier(id)) {
+        return Some([PLANKS, COBBLE, COPPER_INGOT, IRON, DIAMOND][t]);
+    }
+    if armor_of(id).is_some_and(|(_, t)| t == COPPER_TIER) {
+        return Some(COPPER_INGOT);
+    }
     if let Some((_, tier)) = armor_of(id) {
         return Some([WOOL, IRON, GOLD_INGOT, DIAMOND][tier]);
     }
@@ -211,7 +222,7 @@ impl Game {
         }
         // Enchantments only move if the host knows they have them.
         let (ench, other_ench) = match self.peers.get(&from).map(|p| &p.ledger) {
-            Some(l) if self.creative || (l.owns_enchanted(item, ench) && l.owns_enchanted(material, other_ench)) => (ench, other_ench),
+            Some(l) if self.peer_free(from) || (l.owns_enchanted(item, ench) && l.owns_enchanted(material, other_ench)) => (ench, other_ench),
             _ => (0, 0),
         };
         if material == ENCHANTED_BOOK && item != BOOK {
@@ -230,7 +241,7 @@ impl Game {
             }
             (used as u32, used as u32 * max.div_ceil(4) as u32, (material, used as u32))
         };
-        if !self.creative {
+        if !self.peer_free(from) {
             let Some(l) = self.peers.get(&from).map(|p| &p.ledger) else { return };
             let enough_items = l.bag.has(item) && l.bag.count(take.0) >= take.1 + (take.0 == item) as u32;
             if level_of(l.xp).0 < cost || !enough_items {
@@ -259,7 +270,7 @@ impl Game {
     /// A joined player put an enchanted book's enchantments on something.
     fn host_book_onto(&mut self, from: u32, pos: IVec3, item: Id, ench: u16, book: u16) {
         let Some(r) = plan(item, (ench as u32) << 16, Some((ENCHANTED_BOOK, 1)), (book as u32) << 16) else { return };
-        if !self.creative {
+        if !self.peer_free(from) {
             let Some(l) = self.peers.get_mut(&from).map(|p| &mut p.ledger) else { return };
             let books = if item == ENCHANTED_BOOK { 2 } else { 1 };
             if level_of(l.xp).0 < r.cost || !l.bag.has(item) || l.bag.count(ENCHANTED_BOOK) < books {

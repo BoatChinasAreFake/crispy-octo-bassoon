@@ -29,12 +29,13 @@ pub fn max_uses(item: Id, w: Wear) -> Option<u32> {
 
 /// Items that remember their wear: tools, weapons, armour, and enchanted books.
 pub fn keeps_wear(item: Id) -> bool {
-    durability(item).is_some() || item == ENCHANTED_BOOK
+    // A Hollow Box's wear says where its contents are (see boxes.rs).
+    durability(item).is_some() || item == ENCHANTED_BOOK || item == HOLLOW_BOX
 }
 
 /// Keep only what makes sense for `item` (saves and other players can't be trusted).
 pub fn sanitize_wear(item: Id, w: Wear) -> Wear {
-    if item == ENCHANTED_BOOK {
+    if item == ENCHANTED_BOOK || item == HOLLOW_BOX {
         return w & 0xFFFF_0000;
     }
     match max_uses(item, w) {
@@ -126,6 +127,10 @@ impl Inventory {
         let mut broke = Vec::new();
         for (s, w) in self.armor.iter_mut().zip(self.armor_wear.iter_mut()) {
             let Some((id, _)) = *s else { continue };
+            // A Glider only wears out by gliding (see glider.rs).
+            if id == GLIDER {
+                continue;
+            }
             let Some(max) = max_uses(id, *w) else { continue };
             let used = uses(*w) as u32 + amount as u32;
             if used >= max {

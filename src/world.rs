@@ -323,7 +323,7 @@ impl Generator {
     }
 
     /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
-    fn cold(&self, x: i32, z: i32) -> bool {
+    pub fn cold(&self, x: i32, z: i32) -> bool {
         self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
     }
 
@@ -479,6 +479,8 @@ impl Generator {
                             b[i] = GOLD_ORE;
                         } else if y < 16 && (0.0245..0.029).contains(&r) && r2 < 0.55 {
                             b[i] = ZAP_ORE;
+                        } else if (16..72).contains(&y) && (0.029..0.037).contains(&r) && r2 < 0.6 {
+                            b[i] = COPPER_ORE;
                         }
                     }
                     for (oi, ore) in self.ores.iter().enumerate() {
@@ -524,6 +526,24 @@ impl Generator {
                         b[idx(lx, top, lz)] = TALL_GRASS;
                     } else if r < 0.206 && biome == Biome::Jungle {
                         b[idx(lx, top, lz)] = MELON;
+                    } else if biome == Biome::Jungle && hash2(s ^ 0xBA3B, x >> 3, z >> 3) < 0.35 && r < 0.32 {
+                        // Bamboo grows in groves.
+                        let tall = 4 + (hash2(s ^ 0xBA3C, x, z) * 9.0) as i32;
+                        for y in top..(top + tall).min(CH - 1) {
+                            b[idx(lx, y, lz)] = BAMBOO;
+                        }
+                    }
+                }
+                // Coral reefs on warm, shallow sea floors.
+                if biome == Biome::Ocean && (SEA - 18..SEA - 3).contains(&h) && !self.cold(x, z) && hash2(s ^ 0xC0A1, x >> 3, z >> 3) < 0.3 && hash2(s ^ 0xC0A2, x, z) < 0.75 {
+                    let kind = CORAL_FIRST + (hash2(s ^ 0xC0A3, x >> 1, z >> 1) * 4.0) as Id;
+                    b[idx(lx, h, lz)] = kind;
+                    // Knobbly: some reach up a block or two.
+                    let up = (hash2(s ^ 0xC0A4, x, z) * 3.0) as i32;
+                    for y in h + 1..=h + up {
+                        if b[idx(lx, y, lz)] == WATER {
+                            b[idx(lx, y, lz)] = kind;
+                        }
                     }
                 }
                 // Dead bushes on red sand; lily pads on swamp water.

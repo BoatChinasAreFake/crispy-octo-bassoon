@@ -40,14 +40,18 @@ pub struct Peer {
     pub report: Option<crate::players::Report>,
     /// How they look (see nametags.rs).
     pub skin: u8,
+    /// Their game mode (the host decides; see modes.rs).
+    pub mode: crate::modes::GameMode,
+    /// Their latest statistics (see stats.rs), kept with the world.
+    pub stats: Vec<u8>,
 }
 
 impl Peer {
     fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0 }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new() }
     }
     pub fn alive(&self) -> bool {
-        self.flags & FLAG_DEAD == 0
+        self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
     }
     pub fn intersects_block(&self, b: IVec3) -> bool {
         let (min, max) = (self.target - Vec3::new(0.3, 0.0, 0.3), self.target + Vec3::new(0.3, 1.8, 0.3));
@@ -404,7 +408,7 @@ impl Game {
             if taken(&name) {
                 name = format!("{}{}", name.chars().take(13).collect::<String>(), from);
             }
-            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.creative, spawn: self.spawn, keep_inventory: self.rules.keep_inventory };
+            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.default_creative, spawn: self.spawn, keep_inventory: self.rules.keep_inventory };
             let mods: Vec<Msg> = self
                 .world
                 .mods
@@ -440,6 +444,9 @@ impl Game {
             }
             server.broadcast(&Msg::PlayerJoin { id: from, name: name.clone() }, Some(from));
             self.peers.insert(from, Peer::new(name.clone(), self.spawn));
+            if let Some(p) = self.peers.get_mut(&from) {
+                p.mode = if self.default_creative { crate::modes::GameMode::Creative } else { crate::modes::GameMode::Survival };
+            }
             self.msg(format!("{name} joined the game"));
             self.welcome_back(from, &name);
             self.fire("on_player_join", vec![name.clone().into()]);
@@ -448,7 +455,7 @@ impl Game {
 
     fn rules_msg(&self) -> Msg {
         let r = self.rules;
-        Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle, weather_cycle: r.weather_cycle }
+        Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle, weather_cycle: r.weather_cycle, hardcore: r.hardcore }
     }
 
     /// Change the world's rules (the owner's World Settings) and tell everyone.
@@ -500,6 +507,8 @@ impl Game {
                     }
                     // And only with items they really have, at the speed their tools allow
                     // (last, because a break that goes through drops its items).
+                    // A Hollow Box's contents travel in its item's wear (see boxes.rs).
+                    let packed = if id == HOLLOW_BOX { crate::boxes::box_wear(self.verified_ench(from)) } else { 0 };
                     if old != id && !self.ledger_edit(from, IVec3::new(x, y, z), old, id) {
                         corrections.push((x, y, z, old));
                         continue;
@@ -513,6 +522,9 @@ impl Game {
                     }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
+                    if packed != 0 {
+                        self.unpack_box(IVec3::new(x, y, z), packed);
+                    }
                     // Half a door takes the other half with it.
                     if is_door(old) && !is_door(id) {
                         self.remove_door_partner(IVec3::new(x, y, z), old);
@@ -534,7 +546,7 @@ impl Game {
                 self.set_peer_held(from, held, held_ench);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // Just died: their experience spills (items come separately, see `drop_everything`).
-                if p.alive() && flags & FLAG_DEAD != 0 {
+                if p.flags & FLAG_DEAD == 0 && flags & FLAG_DEAD != 0 {
                     p.flags = flags;
                     self.peer_died(from);
                 }
@@ -646,6 +658,18 @@ impl Game {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
                 }
+                // A thrown spear leaves their hands and flies from where they look.
+                if item == SPEAR && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, SPEAR) {
+                    let ench = if self.verified_held(from) == SPEAR { self.verified_ench(from) } else { 0 };
+                    if let Some(p) = self.peers.get(&from) {
+                        let dir = Vec3::new(p.yaw.sin() * p.pitch.cos(), p.pitch.sin(), -p.yaw.cos() * p.pitch.cos());
+                        let eye = p.target + Vec3::Y * 1.6;
+                        if self.peer_take(from, SPEAR, 1) {
+                            self.throw_spear_from(eye + dir * 0.5, dir, from, (ench as u32) << 16);
+                        }
+                    }
+                    return;
+                }
                 if valid_item(item) && self.peer_rate_ok(from, "use", 0.1) && self.peer_has(from, item) {
                     let who = self.peer_name(from);
                     self.fire("on_use_item", vec![who.into(), reg().key_of(item).into()]);
@@ -694,6 +718,13 @@ impl Game {
             }
             Msg::CloseContainer { x, y, z } => self.host_close(from, IVec3::new(x, y, z)),
             Msg::Pickup { id, room } => self.host_pickup(from, id, room),
+            Msg::Stats { data } => {
+                if data.len() <= crate::players::MAX_STATS
+                    && let Some(p) = self.peers.get_mut(&from)
+                {
+                    p.stats = data;
+                }
+            }
             Msg::PlayerData { slots, health, food, saturation } => {
                 if self.peer_rate_ok(from, "report", 1.0) {
                     self.host_report(from, slots, health, food, saturation);
@@ -920,8 +951,14 @@ impl Game {
             Msg::Orbs(list) => self.apply_orbs(list),
             Msg::Xp { points } => self.xp = points.min(1 << 24),
             Msg::Restore { pos, xp, slots, health, food, saturation } => self.apply_restore(pos, xp, slots, health, food, saturation),
-            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle } => {
-                self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle };
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore } => {
+                self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle, hardcore };
+            }
+            Msg::Stats { data } => self.stats = crate::stats::Stats::decode(&data),
+            Msg::GameMode { mode } => {
+                let mode = crate::modes::GameMode::from_index(mode);
+                self.set_mode(mode);
+                self.msg(format!("Your game mode is now {}.", mode.name()));
             }
             Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
             Msg::Vehicles(list) => self.apply_vehicles(list),
@@ -1028,6 +1065,9 @@ impl Game {
             m.sitting = s.flags & MOB_SITTING != 0;
             m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
             m.saddled = s.flags & MOB_SADDLED != 0;
+            if m.kind == crate::entity::MobKind::Soggy {
+                m.seed = (s.flags & MOB_ARMED != 0) as u32;
+            }
             next.push(m);
         }
         self.mobs = next;
@@ -1129,6 +1169,12 @@ impl Game {
             if p.hurt > 0.2 {
                 flags |= FLAG_HURT;
             }
+            if self.spectator {
+                flags |= FLAG_GHOST;
+            }
+            if p.gliding {
+                flags |= FLAG_GLIDE;
+            }
             let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look() };
             self.net_send_msg(m);
         }
@@ -1148,7 +1194,7 @@ impl Game {
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
-                        flags: (m.baby > 0.0) as u8 * MOB_BABY | m.sheared as u8 * MOB_SHEARED | m.owner.is_some() as u8 * MOB_TAMED | m.sitting as u8 * MOB_SITTING | (m.love > 0.0) as u8 * MOB_LOVE | m.saddled as u8 * MOB_SADDLED,
+                        flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((m.kind == crate::entity::MobKind::Soggy && m.seed == 1) as u8 * MOB_ARMED),
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();

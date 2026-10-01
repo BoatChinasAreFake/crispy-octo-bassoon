@@ -40,7 +40,25 @@ pub struct Settings {
     pub ui_scale: f32,
     /// Ask GitHub whether there's a newer version (release builds only).
     pub check_updates: bool,
+    /// Video: wait for the screen's refresh (applies after a restart).
+    pub vsync: bool,
+    /// Frames a second at most (0: no limit).
+    pub max_fps: u32,
+    /// Anti-aliasing samples (0 off, 2, 4, 8; applies after a restart).
+    pub msaa: u8,
+    /// Particles: 0 all, 1 fewer, 2 minimal.
+    pub particles: u8,
+    pub view_bobbing: bool,
+    /// Distance fog (off shows everything to the edge of the loaded world).
+    pub fog: bool,
+    /// Clouds at all (`fancy_clouds` says which kind).
+    pub clouds: bool,
 }
+
+/// Max FPS choices (0: unlimited).
+pub const FPS_CAPS: [u32; 7] = [30, 60, 90, 120, 144, 240, 0];
+/// Anti-aliasing choices.
+pub const MSAA_LEVELS: [u8; 4] = [0, 2, 4, 8];
 
 /// The UI Size choices (Options), as multipliers of the automatic size.
 pub const UI_SCALES: [(f32, &str); 4] = [(0.8, "Small"), (1.0, "Normal"), (1.2, "Large"), (1.4, "Huge")];
@@ -67,6 +85,13 @@ impl Default for Settings {
             fancy_clouds: true,
             ui_scale: 1.0,
             check_updates: true,
+            vsync: true,
+            max_fps: 0,
+            msaa: 4,
+            particles: 0,
+            view_bobbing: true,
+            fog: true,
+            clouds: true,
         }
     }
 }
@@ -84,7 +109,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -103,6 +128,13 @@ impl Settings {
             self.fancy_clouds,
             self.ui_scale,
             self.check_updates,
+            self.vsync,
+            self.max_fps,
+            self.msaa,
+            self.particles,
+            self.view_bobbing,
+            self.fog,
+            self.clouds,
         ) + self.binds.to_text().as_str()
     }
 
@@ -140,6 +172,13 @@ impl Settings {
                 "fancy_clouds" => s.fancy_clouds = flag(s.fancy_clouds),
                 "ui_scale" => s.ui_scale = num(s.ui_scale),
                 "check_updates" => s.check_updates = flag(s.check_updates),
+                "vsync" => s.vsync = flag(s.vsync),
+                "max_fps" => s.max_fps = v.parse().unwrap_or(s.max_fps),
+                "msaa" => s.msaa = v.parse().unwrap_or(s.msaa),
+                "particles" => s.particles = v.parse().unwrap_or(s.particles),
+                "view_bobbing" => s.view_bobbing = flag(s.view_bobbing),
+                "fog" => s.fog = flag(s.fog),
+                "clouds" => s.clouds = flag(s.clouds),
                 k => {
                     s.binds.read(k, v);
                 }
@@ -151,10 +190,29 @@ impl Settings {
         s.volume = s.volume.clamp(0.0, 1.0);
         s.brightness = s.brightness.clamp(0.0, 1.0);
         s.ui_scale = s.ui_scale.clamp(UI_SCALES[0].0, UI_SCALES[UI_SCALES.len() - 1].0);
+        if !FPS_CAPS.contains(&s.max_fps) {
+            s.max_fps = FPS_CAPS.iter().copied().filter(|&c| c != 0).min_by_key(|&c| c.abs_diff(s.max_fps)).unwrap_or(0);
+        }
+        if !MSAA_LEVELS.contains(&s.msaa) {
+            s.msaa = 4;
+        }
+        s.particles = s.particles.min(2);
         if s.mp_addr.is_empty() {
             s.mp_addr = Settings::default().mp_addr;
         }
         s
+    }
+
+    /// Where the settings will be, before the game has moved into its data
+    /// folder (the window's options are needed that early; see paths.rs).
+    pub fn early_path() -> PathBuf {
+        let here = std::env::current_dir().unwrap_or_default();
+        let exe = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+        let portable = here.join(crate::paths::PORTABLE_FILE).is_file() || exe.as_ref().is_some_and(|d| d.join(crate::paths::PORTABLE_FILE).is_file());
+        match crate::paths::user_data_dir() {
+            Some(d) if !portable && d.join(FILE).is_file() => d.join(FILE),
+            _ => here.join(FILE),
+        }
     }
 
     /// Missing or unreadable: the defaults.
@@ -199,6 +257,13 @@ mod tests {
             fancy_clouds: false,
             ui_scale: 1.2,
             check_updates: false,
+            vsync: false,
+            max_fps: 144,
+            msaa: 2,
+            particles: 1,
+            view_bobbing: false,
+            fog: false,
+            clouds: false,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

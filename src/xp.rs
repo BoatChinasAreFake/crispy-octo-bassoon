@@ -267,6 +267,12 @@ impl Game {
     /// Where the world lives: a joined player died. Their points fall out
     /// (some of them), unless the world keeps inventories.
     pub fn peer_died(&mut self, from: u32) {
+        // Hardcore: they only get to watch now (their own game switches when they choose to).
+        if self.rules.hardcore
+            && let Some(p) = self.peers.get_mut(&from)
+        {
+            p.mode = crate::modes::GameMode::Spectator;
+        }
         if self.rules.keep_inventory {
             return;
         }

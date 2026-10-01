@@ -63,7 +63,7 @@ impl Enchant {
         if item == BOOK || item == ENCHANTED_BOOK {
             return true;
         }
-        let pick = pick_tier(item) > 0;
+        let pick = pick_tier(item) > 0 || crate::tools::is_digger(item);
         match self {
             Enchant::Efficiency | Enchant::Fortune => pick,
             Enchant::Sharpness => is_sword(item),
@@ -346,7 +346,7 @@ impl Game {
             return;
         }
         let shelves = self.bookshelves(pos);
-        let creative = self.creative;
+        let creative = self.peer_free(from);
         let Some(p) = self.peers.get_mut(&from) else { return };
         let l = &mut p.ledger;
         let count = l.enchant_count;
