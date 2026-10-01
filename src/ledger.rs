@@ -419,6 +419,10 @@ impl Game {
         }
         let Some(r) = recipes().get(recipe as usize) else { return };
         let r = r.clone();
+        // Big recipes need a crafting table nearby (see crafting.rs).
+        if crate::crafting::needs_table(&r) && !self.peer_at_table(from) {
+            return;
+        }
         let Some(l) = self.ledger(from) else { return };
         for _ in 0..times.min(64) {
             if !r.inputs.iter().all(|&(id, n)| l.bag.count(id) >= n as u32) {

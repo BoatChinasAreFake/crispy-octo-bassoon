@@ -18,6 +18,7 @@ mod cheats;
 mod combat;
 mod containers;
 mod copper;
+mod crafting;
 mod contraptions;
 mod decor;
 mod drops;
@@ -170,6 +171,11 @@ struct App {
     last_mouse: Option<Vec2>,
     show_debug: bool,
     recipe_scroll: f32,
+    /// The recipe book: search text (and whether it's being typed in), tab, "craftable only".
+    book_search: String,
+    book_focus: bool,
+    book_tab: crafting::Tab,
+    book_craftable: bool,
     quit: bool,
     status: Option<(String, f32)>,
     fps: f32,
@@ -692,8 +698,7 @@ impl App {
                 if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause {
                     self.set_screen(Screen::Paused);
                 } else if (self.settings.binds.pressed(keybinds::Action::Inventory) || self.pad_frame.inventory) && !self.game.spectator {
-                    self.recipe_scroll = 0.0;
-                    self.set_screen(Screen::Inventory);
+                    self.open_inventory();
                 }
                 let keys = [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4, KeyCode::Key5, KeyCode::Key6, KeyCode::Key7, KeyCode::Key8, KeyCode::Key9];
                 for (i, k) in keys.iter().enumerate() {
@@ -710,6 +715,18 @@ impl App {
                 }
                 if self.settings.binds.pressed(keybinds::Action::Perspective) || self.pad_frame.perspective {
                     self.game.third_person = !self.game.third_person;
+                }
+            }
+            Screen::Inventory if self.book_focus => {
+                // Typing in the recipe book's search box.
+                if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                    self.book_focus = false;
+                } else {
+                    let before = self.book_search.clone();
+                    type_into(&mut self.book_search, 24);
+                    if self.book_search != before {
+                        self.recipe_scroll = 0.0;
+                    }
                 }
             }
             Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade => {
@@ -805,6 +822,9 @@ impl App {
             self.set_screen(Screen::Container);
         } else if self.screen == Screen::Container && !self.game.container_still_there() {
             self.set_screen(Screen::Playing);
+        }
+        if std::mem::take(&mut self.game.at_table) && self.screen == Screen::Playing {
+            self.open_inventory();
         }
         if self.game.anvil.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Anvil);
@@ -1739,6 +1759,9 @@ impl App {
                     self.effects_hud();
                     self.boss_bar();
                     self.captions_hud();
+                    if self.screen == Screen::Playing && !self.game.creative {
+                        self.pinned_recipe();
+                    }
                 }
                 match self.screen {
                     Screen::Paused => self.pause_screen(),
@@ -2994,6 +3017,226 @@ impl App {
         }
     }
 
+    fn open_inventory(&mut self) {
+        self.recipe_scroll = 0.0;
+        self.book_focus = false;
+        drain_chars();
+        self.set_screen(Screen::Inventory);
+    }
+
+    /// Craft recipe `ri` once, or as many times as possible with shift.
+    fn craft_recipe(&mut self, ri: usize, many: bool) {
+        let r = &recipes()[ri];
+        let times = if many { 64 } else { 1 };
+        let mut made = 0u8;
+        for _ in 0..times {
+            if !self.game.inv.craft(r) {
+                break;
+            }
+            made += 1;
+        }
+        self.game.stats.crafted += made as u64 * r.output.1 as u64;
+        // Joined players: the host checks the ingredients (and the table) against its ledger.
+        if self.game.is_client() && !self.game.creative && made > 0 {
+            self.game.net_send_msg(net::Msg::Craft { recipe: ri as u16, times: made });
+        }
+        if made > 0 {
+            let via_gold = r.inputs.iter().any(|&(i, _)| i == GOLD_INGOT) && r.output.0 == PICK_WOOD;
+            self.game.on_crafted(r.output.0, via_gold);
+            if crafting::needs_table(r) {
+                self.game.advance("benchmarking");
+            }
+        }
+    }
+
+    /// The recipe book on the right of the inventory. Returns a tooltip.
+    fn recipe_book(&mut self, rx: f32, y0: f32, right_w: f32, panel_h: f32) -> Option<String> {
+        let s = self.ui.s;
+        let mut tooltip = None;
+        draw_rectangle(rx, y0, right_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(rx, y0, right_w, panel_h, s, WHITE);
+        let table = self.game.table_nearby();
+        let title = if table { "Crafting Table" } else { "Pocket Crafting (small things)" };
+        self.ui.text(title, rx + 5.0 * s, y0 + 11.0 * s, 8.0, if table { Color::new(1.0, 0.9, 0.6, 1.0) } else { WHITE });
+
+        // Search box.
+        let sb = Rect::new(rx + 4.0 * s, y0 + 15.0 * s, right_w - 8.0 * s, 12.0 * s);
+        let hov_box = self.ui.hovered(sb);
+        draw_rectangle(sb.x, sb.y, sb.w, sb.h, Color::new(0.05, 0.05, 0.06, 0.95));
+        draw_rectangle_lines(sb.x, sb.y, sb.w, sb.h, s, if self.book_focus { Color::new(1.0, 1.0, 0.6, 1.0) } else if hov_box { WHITE } else { GRAY });
+        if self.ui.clicked {
+            self.book_focus = hov_box;
+            if hov_box {
+                drain_chars();
+            }
+        }
+        let caret = if self.book_focus && (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+        if self.book_search.is_empty() && !self.book_focus {
+            self.ui.text("Search recipes...", sb.x + 3.0 * s, sb.y + 9.0 * s, 7.0, GRAY);
+        } else {
+            self.ui.text(&format!("{}{caret}", self.book_search), sb.x + 3.0 * s, sb.y + 9.0 * s, 7.0, WHITE);
+        }
+
+        // Tabs.
+        let tabs = crafting::Tab::ALL;
+        let tab_w = (right_w - 8.0 * s) / tabs.len() as f32;
+        let ty = sb.y + sb.h + 2.0 * s;
+        for (i, t) in tabs.iter().enumerate() {
+            let r = Rect::new(rx + 4.0 * s + i as f32 * tab_w, ty, tab_w - s, 10.0 * s);
+            let on = self.book_tab == *t;
+            let hov = self.ui.hovered(r);
+            draw_rectangle(r.x, r.y, r.w, r.h, if on { Color::new(0.45, 0.4, 0.25, 0.95) } else if hov { Color::new(0.3, 0.3, 0.34, 0.95) } else { Color::new(0.18, 0.18, 0.2, 0.95) });
+            self.ui.text_centered(t.name(), r.x + r.w / 2.0, r.y + 7.5 * s, 6.5, if on { WHITE } else { GRAY });
+            if hov && self.ui.clicked {
+                self.book_tab = *t;
+                self.recipe_scroll = 0.0;
+            }
+        }
+
+        // "Craftable now" and how many have been found.
+        let cy = ty + 12.0 * s;
+        let cb = Rect::new(rx + 4.0 * s, cy, 8.0 * s, 8.0 * s);
+        draw_rectangle(cb.x, cb.y, cb.w, cb.h, Color::new(0.05, 0.05, 0.06, 0.95));
+        draw_rectangle_lines(cb.x, cb.y, cb.w, cb.h, s, GRAY);
+        if self.book_craftable {
+            draw_rectangle(cb.x + 2.0 * s, cb.y + 2.0 * s, cb.w - 4.0 * s, cb.h - 4.0 * s, Color::new(0.5, 0.9, 0.5, 1.0));
+        }
+        let cl = Rect::new(cb.x, cb.y, 70.0 * s, cb.h);
+        if self.ui.hovered(cl) && self.ui.clicked {
+            self.book_craftable = !self.book_craftable;
+            self.recipe_scroll = 0.0;
+        }
+        self.ui.text("Craftable now", cb.x + cb.w + 3.0 * s, cb.y + 7.0 * s, 6.5, WHITE);
+        let total = recipes().len();
+        let found = recipes().iter().filter(|r| crafting::discovered(r, &self.game.known)).count();
+        let count = format!("{found}/{total} found");
+        self.ui.text(&count, rx + right_w - self.ui.text_width(&count, 6.5) - 5.0 * s, cb.y + 7.0 * s, 6.5, GRAY);
+
+        // The list: craftable first, then the rest.
+        let row_h = 20.0 * s;
+        let list_top = cy + 11.0 * s;
+        let visible_rows = ((y0 + panel_h - list_top - 9.0 * s) / row_h).floor().max(1.0) as usize;
+        let craftable = |g: &Game, r: &Recipe| g.inv.can_craft(r) && (table || !crafting::needs_table(r));
+        let mut order: Vec<usize> = (0..total)
+            .filter(|&i| {
+                let r = &recipes()[i];
+                crafting::discovered(r, &self.game.known)
+                    && (self.book_tab == crafting::Tab::All || crafting::tab_of(r) == self.book_tab)
+                    && crafting::matches(r, &self.book_search)
+                    && (!self.book_craftable || craftable(&self.game, r))
+            })
+            .collect();
+        order.sort_by_key(|&i| (!craftable(&self.game, &recipes()[i]), crafting::needs_table(&recipes()[i]) && !table));
+        let max_scroll = order.len().saturating_sub(visible_rows) as f32;
+        self.recipe_scroll = self.recipe_scroll.min(max_scroll);
+        if self.ui.hovered(Rect::new(rx, y0, right_w, panel_h)) {
+            let wheel = mouse_wheel().1;
+            if wheel.abs() > 0.1 {
+                self.recipe_scroll = (self.recipe_scroll - wheel.signum()).clamp(0.0, max_scroll);
+            }
+        }
+        if order.is_empty() {
+            let why = if found == 0 { "Pick something up to discover recipes." } else { "Nothing matches." };
+            self.ui.text(why, rx + 6.0 * s, list_top + 10.0 * s, 7.0, GRAY);
+        }
+        let first = self.recipe_scroll as usize;
+        let mut craft: Option<(usize, bool)> = None;
+        for (row, &ri) in order.iter().skip(first).take(visible_rows).enumerate() {
+            let r = &recipes()[ri];
+            let big = crafting::needs_table(r);
+            let ok = craftable(&self.game, r);
+            let ry = list_top + row as f32 * row_h;
+            let rect = Rect::new(rx + 4.0 * s, ry, right_w - 8.0 * s, row_h - 2.0 * s);
+            let hov = self.ui.hovered(rect);
+            let pinned = self.game.pinned == Some(ri);
+            let bg = if ok && hov {
+                Color::new(0.3, 0.5, 0.3, 0.95)
+            } else if ok {
+                Color::new(0.2, 0.32, 0.2, 0.9)
+            } else if hov {
+                Color::new(0.28, 0.28, 0.3, 0.9)
+            } else {
+                Color::new(0.2, 0.2, 0.22, 0.9)
+            };
+            draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
+            if pinned {
+                draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, s, Color::new(1.0, 0.85, 0.3, 1.0));
+            }
+            let isz = row_h - 6.0 * s;
+            self.ui.stack(Some(r.output), rect.x + 2.0 * s, rect.y + 1.0 * s, isz, true);
+            let mut ix = rect.x + isz + 6.0 * s;
+            self.ui.text("<", ix, rect.y + rect.h * 0.65, 9.0, GRAY);
+            ix += 8.0 * s;
+            for &(item, n) in &r.inputs {
+                let have = self.game.inv.count(item) >= n as u32;
+                self.ui.icon(item, ix, rect.y + 3.0 * s, isz * 0.8);
+                self.ui.text(&format!("{n}"), ix + isz * 0.8, rect.y + rect.h * 0.8, 8.0, if have { WHITE } else { Color::new(1.0, 0.4, 0.4, 1.0) });
+                ix += isz * 0.8 + 12.0 * s;
+            }
+            if big {
+                // A little table icon: this one needs a crafting table.
+                let tsz = 8.0 * s;
+                self.ui.icon(TABLE, rect.x + rect.w - tsz - 2.0 * s, rect.y + 2.0 * s, tsz);
+                if !table {
+                    draw_line(rect.x + rect.w - tsz - 2.0 * s, rect.y + 2.0 * s + tsz, rect.x + rect.w - 2.0 * s, rect.y + 2.0 * s, s, RED);
+                }
+            }
+            if hov {
+                let ins: Vec<String> = r.inputs.iter().map(|&(i, n)| format!("{n}x {}", item_name(i))).collect();
+                let mut t = format!("{}x {}  <=  {}", r.output.1, item_name(r.output.0), ins.join(" + "));
+                if big && !table {
+                    t += "\nNeeds a Crafting Table nearby.";
+                }
+                t += if pinned { "\nRight-click to unpin." } else { "\nRight-click to pin to the screen." };
+                tooltip = Some(t);
+                if self.ui.clicked && ok {
+                    craft = Some((ri, is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift)));
+                } else if self.ui.clicked && big && !table && self.game.inv.can_craft(r) {
+                    self.game.msg("That one needs a Crafting Table. Four planks; you can make one in your pockets.");
+                }
+                if self.ui.rclicked {
+                    self.game.pinned = if pinned { None } else { Some(ri) };
+                }
+            }
+        }
+        if let Some((ri, many)) = craft {
+            self.craft_recipe(ri, many);
+        }
+        let hidden = total - found;
+        let foot = if hidden > 0 { format!("{hidden} recipes still to discover") } else { "Every recipe discovered!".to_string() };
+        self.ui.text(&foot, rx + 5.0 * s, y0 + panel_h - 3.0 * s, 6.5, GRAY);
+        if max_scroll > 0.0 {
+            self.ui.text("scroll", rx + right_w - 26.0 * s, y0 + panel_h - 3.0 * s, 6.5, GRAY);
+        }
+        tooltip
+    }
+
+    /// A pinned recipe's shopping list, top right.
+    fn pinned_recipe(&mut self) {
+        let Some(ri) = self.game.pinned else { return };
+        let Some(r) = recipes().get(ri) else {
+            self.game.pinned = None;
+            return;
+        };
+        let s = self.ui.s;
+        let row = 11.0 * s;
+        let w = 110.0 * s;
+        let h = row * (r.inputs.len() as f32 + 1.0) + 6.0 * s;
+        let (x, y) = (screen_width() - w - 6.0 * s, 70.0 * s);
+        draw_rectangle(x, y, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        self.ui.icon(r.output.0, x + 3.0 * s, y + 2.0 * s, 9.0 * s);
+        let ready = self.game.inv.can_craft(r);
+        self.ui.text(&self.ui.fit(item_name(r.output.0), 7.0, w - 16.0 * s), x + 15.0 * s, y + 9.0 * s, 7.0, if ready { Color::new(0.6, 1.0, 0.6, 1.0) } else { WHITE });
+        for (i, &(item, n)) in r.inputs.iter().enumerate() {
+            let yy = y + row * (i as f32 + 1.0) + 2.0 * s;
+            let have = self.game.inv.count(item);
+            self.ui.icon(item, x + 6.0 * s, yy, 8.0 * s);
+            let col = if have >= n as u32 { Color::new(0.6, 1.0, 0.6, 1.0) } else { WHITE };
+            let line = format!("{}/{} {}", have.min(999), n, item_name(item));
+            self.ui.text(&self.ui.fit(&line, 6.5, w - 20.0 * s), x + 17.0 * s, yy + 7.0 * s, 6.5, col);
+        }
+    }
+
     fn inventory_screen(&mut self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
@@ -3107,69 +3350,11 @@ impl App {
             }
         }
 
-        // Crafting list
+        // The recipe book (see crafting.rs).
         if !creative {
             let rx = x0 + left_w + 8.0 * s;
-            draw_rectangle(rx, y0, right_w, panel_h, ui::PANEL);
-            draw_rectangle_lines(rx, y0, right_w, panel_h, s, WHITE);
-            self.ui.text("Pocket Crafting (tables are decorative)", rx + 5.0 * s, y0 + 12.0 * s, 8.0, WHITE);
-            let row_h = 22.0 * s;
-            let list_top = y0 + 18.0 * s;
-            let visible_rows = ((panel_h - 22.0 * s) / row_h).floor() as usize;
-            let max_scroll = recipes().len().saturating_sub(visible_rows) as f32;
-            if self.ui.hovered(Rect::new(rx, y0, right_w, panel_h)) {
-                let wheel = mouse_wheel().1;
-                if wheel.abs() > 0.1 {
-                    self.recipe_scroll = (self.recipe_scroll - wheel.signum()).clamp(0.0, max_scroll);
-                }
-            }
-            let first = self.recipe_scroll as usize;
-            // Craftable recipes first so progress is obvious.
-            let mut order: Vec<usize> = (0..recipes().len()).collect();
-            order.sort_by_key(|&i| !self.game.inv.can_craft(&recipes()[i]));
-            for (row, &ri) in order.iter().skip(first).take(visible_rows).enumerate() {
-                let r = &recipes()[ri];
-                let ok = self.game.inv.can_craft(r);
-                let ry = list_top + row as f32 * row_h;
-                let rect = Rect::new(rx + 4.0 * s, ry, right_w - 8.0 * s, row_h - 2.0 * s);
-                let hov = self.ui.hovered(rect);
-                let bg = if ok && hov { Color::new(0.3, 0.5, 0.3, 0.95) } else if ok { Color::new(0.2, 0.32, 0.2, 0.9) } else { Color::new(0.2, 0.2, 0.22, 0.9) };
-                draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
-                let isz = row_h - 6.0 * s;
-                self.ui.stack(Some(r.output), rect.x + 2.0 * s, rect.y + 1.0 * s, isz, true);
-                let mut ix = rect.x + isz + 6.0 * s;
-                self.ui.text("<", ix, rect.y + rect.h * 0.65, 9.0, GRAY);
-                ix += 8.0 * s;
-                for &(item, n) in &r.inputs {
-                    let have = self.game.inv.count(item) >= n as u32;
-                    self.ui.icon(item, ix, rect.y + 3.0 * s, isz * 0.8);
-                    self.ui.text(&format!("{n}"), ix + isz * 0.8, rect.y + rect.h * 0.8, 8.0, if have { WHITE } else { Color::new(1.0, 0.4, 0.4, 1.0) });
-                    ix += isz * 0.8 + 12.0 * s;
-                }
-                if hov {
-                    let ins: Vec<String> = r.inputs.iter().map(|&(i, n)| format!("{n}x {}", item_name(i))).collect();
-                    tooltip = Some(format!("{}x {}  <=  {}", r.output.1, item_name(r.output.0), ins.join(" + ")));
-                    if self.ui.clicked && ok {
-                        let times = if is_key_down(KeyCode::LeftShift) { 64 } else { 1 };
-                        let mut made = 0u8;
-                        for _ in 0..times {
-                            if !self.game.inv.craft(r) {
-                                break;
-                            }
-                            made += 1;
-                        }
-                        self.game.stats.crafted += made as u64 * r.output.1 as u64;
-                        // Joined players: the host checks the ingredients against its ledger.
-                        if self.game.is_client() && !self.game.creative && made > 0 {
-                            self.game.net_send_msg(net::Msg::Craft { recipe: ri as u16, times: made });
-                        }
-                        let via_gold = r.inputs.iter().any(|&(i, _)| i == GOLD_INGOT) && r.output.0 == PICK_WOOD;
-                        self.game.on_crafted(r.output.0, via_gold);
-                    }
-                }
-            }
-            if max_scroll > 0.0 {
-                self.ui.text("scroll for more", rx + right_w - 70.0 * s, y0 + panel_h - 3.0 * s, 7.0, GRAY);
+            if let Some(t) = self.recipe_book(rx, y0, right_w, panel_h) {
+                tooltip = Some(t);
             }
         }
 
@@ -3409,6 +3594,10 @@ async fn game_main() {
         last_mouse: None,
         show_debug: false,
         recipe_scroll: 0.0,
+        book_search: String::new(),
+        book_focus: false,
+        book_tab: crafting::Tab::All,
+        book_craftable: false,
         quit: false,
         status: None,
         fps: 60.0,

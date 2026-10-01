@@ -228,6 +228,16 @@ pub struct Game {
     pub next_vehicle_id: u32,
     pub riding: Option<u32>,
     pub vehicle_sync: f32,
+    /// Everything the player has held, for the recipe book (see crafting.rs),
+    /// how many recipes that adds up to, and the "new recipes" note's time left.
+    pub known: std::collections::BTreeSet<Id>,
+    pub recipes_seen: usize,
+    pub recipe_news: f32,
+    /// The recipe pinned to the screen (index into `recipes()`).
+    pub pinned: Option<usize>,
+    learn_timer: f32,
+    /// Right-clicked a crafting table: the app opens the inventory.
+    pub at_table: bool,
 }
 
 impl Game {
@@ -364,10 +374,17 @@ impl Game {
             next_vehicle_id: 0,
             riding: None,
             vehicle_sync: 0.0,
+            known: Default::default(),
+            recipes_seen: 0,
+            recipe_news: 0.0,
+            pinned: None,
+            learn_timer: 0.0,
+            at_table: false,
         }
     }
 
     pub fn from_save(d: SaveData) -> Self {
+        let extras = d.extras.clone();
         let mut g = Game::new(d.seed, d.creative, false);
         g.saved_script_vars = d.script_vars.clone();
         g.advancements = Progress::from_keys(&d.advancements);
@@ -453,6 +470,7 @@ impl Game {
         g.rules.hardcore = d.hardcore;
         g.stats = crate::stats::Stats::decode(&d.stats);
         g.boxes = crate::boxes::decode(&d.boxes);
+        g.load_extras(&extras);
         g.set_mode(crate::modes::GameMode::from_index(d.mode));
         g.portal_links = crate::scorch::decode_links(&d.portals);
         let (signs, frames) = crate::decor::decode(&d.decor);
@@ -530,7 +548,29 @@ impl Game {
             hardcore: self.rules.hardcore,
             stats: self.stats.encode(),
             boxes: crate::boxes::encode(&self.boxes),
+            extras: self.save_extras(),
             version: crate::save::VERSION,
+        }
+    }
+
+    /// The save's named sections (see save.rs): each module packs its own.
+    fn save_extras(&self) -> Vec<(String, Vec<u8>)> {
+        let mut v = vec![("known".to_string(), crate::crafting::encode_known(&self.known).into_bytes())];
+        if let Some(p) = self.pinned {
+            v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
+        }
+        v
+    }
+
+    fn load_extras(&mut self, extras: &[(String, Vec<u8>)]) {
+        let extra = |key: &str| extras.iter().find(|(k, _)| k == key).map(|(_, b)| b.as_slice());
+        if let Some(b) = extra("known") {
+            self.known = crate::crafting::decode_known(&String::from_utf8_lossy(b));
+            self.recipes_seen = recipes().iter().filter(|r| crate::crafting::discovered(r, &self.known)).count();
+        }
+        if let Some(b) = extra("pinned").and_then(|b| b.get(..4)) {
+            let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
+            self.pinned = (p < recipes().len()).then_some(p);
         }
     }
 
@@ -587,7 +627,6 @@ impl Game {
             WOOL => "fluffed",
             FEATHER => "why_cross",
             MOO_STEAK => "udderly",
-            TABLE => "benchmarking",
             PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND | PICK_COPPER => "tool_time",
             BAMBOO => "bamboozled",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
@@ -863,6 +902,12 @@ impl Game {
         self.handle_actions(dt, c);
         self.update_fishing(dt, c.use_held);
         self.inventory_sync_tick(dt);
+        self.learn_timer -= dt;
+        if self.learn_timer <= 0.0 {
+            self.learn_timer = 0.5;
+            self.learn_inventory();
+        }
+        self.recipe_news = (self.recipe_news - dt).max(0.0);
         self.report_tick(dt);
         self.update_entities(dt);
         self.script_tick(dt);
@@ -1742,8 +1787,8 @@ impl Game {
             self.msg("Hisss... wait, that's the TNT. RUN.");
             return;
         }
-        if hit_id == TABLE && !is_block_item(held) {
-            self.msg("It's decorative! Press E to craft anywhere. Revolutionary.");
+        if hit_id == TABLE && !self.player.sneaking {
+            self.at_table = true;
             return;
         }
         if held == DOOR {

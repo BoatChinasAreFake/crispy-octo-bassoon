@@ -14,7 +14,7 @@ const fn adv(key: &'static str, title: &'static str, desc: &'static str) -> Adva
 
 pub const ALL: &[Advancement] = &[
     adv("getting_wood", "Getting Wood", "Punch a tree. It had it coming."),
-    adv("benchmarking", "Benchmarking", "Craft a Decorative Crafting Table. You know it's decorative, right?"),
+    adv("benchmarking", "Benchmarking", "Craft something big at a Crafting Table. It has a job now."),
     adv("stone_age", "Stone Age", "Get Cobblestun. Civilisation begins."),
     adv("tool_time", "Tool Time", "Craft a pickaxe. Hitting rocks with rocks, but fancier."),
     adv("iron_will", "Iron Will", "Mine Iron Ore. Heavy metal!"),

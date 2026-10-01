@@ -236,12 +236,17 @@ impl Ui {
 
     pub fn tooltip(&self, text: &str) {
         let (mx, my) = mouse_position();
-        let w = self.text_width(text, 9.0) + 8.0 * self.s;
-        let h = 14.0 * self.s;
+        let lines: Vec<&str> = text.lines().collect();
+        let w = lines.iter().map(|l| self.text_width(l, 9.0)).fold(0.0, f32::max) + 8.0 * self.s;
+        let line_h = 11.0 * self.s;
+        let h = 3.0 * self.s + line_h * lines.len().max(1) as f32;
         let x = (mx + 10.0 * self.s).min(screen_width() - w);
-        draw_rectangle(x, my - h, w, h, Color::new(0.1, 0.0, 0.2, 0.95));
-        draw_rectangle_lines(x, my - h, w, h, self.s, Color::new(0.4, 0.1, 0.9, 1.0));
-        self.text(text, x + 4.0 * self.s, my - 4.0 * self.s, 9.0, WHITE);
+        let y = (my - h).max(0.0);
+        draw_rectangle(x, y, w, h, Color::new(0.1, 0.0, 0.2, 0.95));
+        draw_rectangle_lines(x, y, w, h, self.s, Color::new(0.4, 0.1, 0.9, 1.0));
+        for (i, l) in lines.iter().enumerate() {
+            self.text(l, x + 4.0 * self.s, y + line_h * (i as f32 + 1.0) - 1.0 * self.s, 9.0, if i == 0 { WHITE } else { Color::new(0.8, 0.8, 0.85, 1.0) });
+        }
     }
 
     pub fn hearts(&self, health: f32, x: f32, y: f32) {

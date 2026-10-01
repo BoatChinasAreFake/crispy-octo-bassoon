@@ -377,7 +377,7 @@ impl FishLog {
 /// A few hundred years of maritime correspondence.
 pub const BOTTLE_MESSAGES: &[&str] = &[
     "\"Help, I'm stuck in a block game.\" - Stove",
-    "\"If you're reading this, the crafting table was decorative all along.\"",
+    "\"If you're reading this, the crafting table finally got a job.\"",
     "\"Day 47. The Clucksters have unionised.\"",
     "\"Dear finder: the Dimond is spelled wrong on purpose. Please stop emailing.\"",
     "\"I dropped my Big Bob. He was right there. He's gone.\"",
