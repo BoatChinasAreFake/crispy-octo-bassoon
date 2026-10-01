@@ -23,9 +23,10 @@ pub enum Action {
     Chat,
     Command,
     Perspective,
+    Screenshot,
 }
 
-pub const ACTIONS: [Action; 15] = [
+pub const ACTIONS: [Action; 16] = [
     Action::Forward,
     Action::Back,
     Action::Left,
@@ -41,6 +42,7 @@ pub const ACTIONS: [Action; 15] = [
     Action::Chat,
     Action::Command,
     Action::Perspective,
+    Action::Screenshot,
 ];
 
 impl Action {
@@ -62,6 +64,7 @@ impl Action {
             Action::Chat => "chat",
             Action::Command => "command",
             Action::Perspective => "perspective",
+            Action::Screenshot => "screenshot",
         }
     }
 
@@ -82,6 +85,7 @@ impl Action {
             Action::Chat => "Chat",
             Action::Command => "Command",
             Action::Perspective => "Third Person",
+            Action::Screenshot => "Screenshot",
         }
     }
 
@@ -104,6 +108,7 @@ impl Action {
             Action::Chat => [k(KeyCode::T), k(KeyCode::Enter)],
             Action::Command => [k(KeyCode::Slash), None],
             Action::Perspective => [k(KeyCode::F5), None],
+            Action::Screenshot => [k(KeyCode::F2), None],
         }
     }
 }

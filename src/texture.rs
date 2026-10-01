@@ -480,6 +480,7 @@ pub const T_FEE: u16 = 619;
 pub const T_RAMPAGER: u16 = 620;
 pub const T_RAMPAGER_FACE: u16 = 621;
 pub const T_BANNER_WORN: u16 = 622;
+pub const T_SPAWNER: u16 = 623;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3154,6 +3155,29 @@ mod tests {
     }
 
     #[test]
+    fn solid_blocks_have_no_see_through_pixels() {
+        // An opaque cube with clear texels shows the world through its sides.
+        let atlas = build_atlas(1);
+        let size = TILES_PER_ROW as usize * 16;
+        let mut bad = Vec::new();
+        for id in 0..crate::block::NUM_BLOCKS {
+            let b = crate::block::block(id);
+            if !b.opaque || b.model != crate::block::Model::Cube {
+                continue;
+            }
+            for &t in &b.tex {
+                let (tx, ty) = ((t % TILES_PER_ROW) as usize, (t / TILES_PER_ROW) as usize);
+                let clear = (0..16).any(|y| (0..16).any(|x| atlas[((ty * 16 + y) * size + tx * 16 + x) * 4 + 3] < 255));
+                if clear {
+                    bad.push(b.key);
+                }
+            }
+        }
+        bad.dedup();
+        assert!(bad.is_empty(), "solid blocks with see-through pixels: {bad:?}");
+    }
+
+    #[test]
     fn plant_mipmaps_keep_their_shape_and_colour() {
         let atlas = build_atlas(1);
         let levels = mip_levels(&atlas);
@@ -4158,10 +4182,11 @@ fn paint_ancient(a: &mut Atlas) {
     a.each(T_SENSOR_SIDE, |x, y, r, _| {
         let top = y < 8;
         let tendril = top && (x == 4 || x == 11) && y >= 2;
+        // (Solid all over: a full block with holes in its sides shows the world through it.)
         if tendril {
             rgb(60, 190, 200)
         } else if top {
-            [0, 0, 0, 0]
+            shade(rgb(10, 32, 40), r.range(0.85, 1.1))
         } else {
             shade(rgb(15, 50, 60), r.range(0.85, 1.1))
         }
@@ -4554,6 +4579,10 @@ fn paint_scorch_and_raids(a: &mut Atlas) {
     a.each(T_CAGE, |x, y, r, _| {
         let bar = x % 4 == 0 || y % 4 == 0 || x == 15 || y == 15;
         if bar { shade(rgb(40, 40, 46), r.range(0.85, 1.1)) } else if (5..11).contains(&x) && (5..11).contains(&y) { shade(rgb(255, 150, 40), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SPAWNER, |x, y, r, _| {
+        let bar = x % 4 == 0 || y % 4 == 0 || x == 15 || y == 15;
+        if bar { shade(rgb(30, 34, 44), r.range(0.85, 1.1)) } else if (6..10).contains(&x) && (6..10).contains(&y) { shade(rgb(90, 140, 230), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
     });
     a.each(T_GOLD_BLOCK, |x, y, r, _| {
         let rim = x == 0 || y == 0 || x == 15 || y == 15;

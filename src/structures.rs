@@ -103,7 +103,13 @@ impl Generator {
         }
         let s = self.seed ^ 0x57_C0DE;
         let r = hash2(s, cx, cz);
-        if r >= 0.10 {
+        // Villages: at most one per 6x6-chunk region, at a spot away from its
+        // edges (so neighbours never overlap), in most regions.
+        let (rx, rz) = (cx.div_euclid(6), cz.div_euclid(6));
+        let village_spot = cx == rx * 6 + 2 + (hash2(s ^ 0xA11, rx, rz) * 2.0) as i32 % 2 && cz == rz * 6 + 2 + (hash2(s ^ 0xA12, rx, rz) * 2.0) as i32 % 2 && hash2(s ^ 0x7111, rx, rz) < 0.85;
+        // (Villages and the rarer sites roll on their own, below; the rest only here.)
+        let common = r < 0.10;
+        if !common && !village_spot && hash2(s ^ 0x0B0, cx, cz) >= 0.01 && hash2(s ^ 0xC17, cx, cz) >= 0.035 {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -118,9 +124,9 @@ impl Generator {
             let a = k as f32 * std::f32::consts::FRAC_PI_4;
             let (dx, dz) = ((a.cos() * 15.0) as i32, (a.sin() * 15.0) as i32);
             let (hh, b) = self.column(ox + dx, oz + dz);
-            (hh - h).abs() <= 3 && b != Biome::Ocean
+            (hh - h).abs() <= 4 && b != Biome::Ocean
         });
-        if hash2(s ^ 0x7111, cx, cz) < 0.02 && biome == Biome::Plains && h > SEA + 1 && h < CH - 30 && wide_flat() {
+        if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
         // Pilferers build lookouts on open, flat ground.
@@ -131,12 +137,16 @@ impl Generator {
         if hash2(s ^ 0xC17, cx, cz) < 0.035 && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
             return Some(Site { kind: Kind::HushedCity, origin: ivec3(ox, crate::deepdark::CITY_Y, oz), facing, seed });
         }
+        if !common {
+            return None;
+        }
         let kind = if r < 0.055 {
             if h < 30 || biome == Biome::Ocean {
                 return None;
             }
             Kind::Dungeon
-        } else if r < 0.072 && matches!(biome, Biome::Plains | Biome::Forest) && h > SEA + 1 && flat() {
+        } else if r < 0.057 && matches!(biome, Biome::Plains | Biome::Forest) && h > SEA + 1 && flat() {
+            // A lone hut now and then (villages are where the houses are).
             Kind::Hut
         } else if r < 0.085 && matches!(biome, Biome::Plains | Biome::Forest | Biome::Snowy) && h > SEA + 1 && h < CH - 20 && flat() {
             Kind::Tower
@@ -205,7 +215,9 @@ impl Generator {
                 if hash2(s, 1, 2) < 0.5 {
                     put(3, 1, 1, CHEST);
                 }
-                put(0, 1, 0, GLOWSHROOM); // something to see by
+                // Whatever lives here keeps coming out of the cage in the middle.
+                put(0, 1, 0, SPAWNER);
+                put(3, 1, -3, GLOWSHROOM); // something to see by
             }
             Kind::Tower => {
                 let height = 7 + (hash2(s, 7, 7) * 4.0) as i32;
@@ -454,14 +466,11 @@ impl Generator {
         v
     }
 
-    /// Sizzler Cages built into chunk (cx, cz) (see fortress.rs).
+    /// Monster and Sizzler Cages built into chunk (cx, cz) (see fortress.rs).
     pub fn structure_cages(&self, cx: i32, cz: i32) -> Vec<IVec3> {
-        if cx * CW < crate::scorch::SCORCH_X {
-            return Vec::new();
-        }
         let mut v = Vec::new();
         for (_, blocks) in self.sites_near(cx, cz) {
-            v.extend(blocks.into_iter().filter(|(p, id)| *id == SIZZLER_CAGE && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
+            v.extend(blocks.into_iter().filter(|(p, id)| crate::fortress::is_cage(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
         }
         v
     }
@@ -671,7 +680,7 @@ impl World {
     /// A chunk just arrived: fill any structure chests in it that have never been filled.
     pub fn fill_structure_chests(&mut self, cx: i32, cz: i32) {
         for p in self.generator.structure_cages(cx, cz) {
-            if self.get_v(p) == SIZZLER_CAGE {
+            if crate::fortress::is_cage(self.get_v(p)) {
                 self.cages.insert(p);
             }
         }
@@ -706,6 +715,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_world_has_villages_and_few_lone_huts() {
+        for seed in 1..=12u32 {
+            let g = Generator::new(seed);
+            let near = g.nearest_site(Kind::Village, macroquad::math::Vec3::new(0.0, 70.0, 0.0), 30);
+            assert!(near.is_some_and(|p| p.as_vec3().length() < 400.0), "seed {seed}: no village within 400 blocks");
+            let huts = (-20..20).flat_map(|z| (-20..20).map(move |x| (x, z))).filter(|&(x, z)| g.site(x, z).is_some_and(|s| s.kind == Kind::Hut)).count();
+            assert!(huts <= 6, "seed {seed}: {huts} lone huts in 40x40 chunks");
+        }
+    }
+
+    #[test]
     fn villages_have_houses_farms_and_a_square() {
         let g = Generator::new(4242);
         let village = (-150..150).flat_map(|cz| (-150..150).map(move |cx| (cx, cz))).find_map(|(cx, cz)| g.site(cx, cz).filter(|s| s.kind == Kind::Village));
@@ -735,7 +755,9 @@ mod tests {
             }
         }
         assert!(found.get(&Kind::Dungeon).copied().unwrap_or(0) > 50, "{found:?}");
-        assert!(found.get(&Kind::Hut).copied().unwrap_or(0) > 3, "{found:?}");
+        // Lone huts are rare now (villages are where the houses are).
+        assert!(found.get(&Kind::Hut).copied().unwrap_or(0) > 0, "{found:?}");
+        assert!(found.get(&Kind::Village).copied().unwrap_or(0) < 100, "villages don't crowd each other: {found:?}");
         // A chunk with a structure shows it, and its chests know their loot.
         let (cx, cz, site) = (-40..40).flat_map(|z| (-40..40).map(move |x| (x, z))).find_map(|(x, z)| g.site(x, z).filter(|s| s.kind == Kind::Hut).map(|s| (x, z, s))).unwrap();
         let mut blocks = g.generate(cx, cz);

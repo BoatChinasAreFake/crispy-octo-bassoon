@@ -186,6 +186,26 @@ pub fn camp_blocks(site: &Site) -> Vec<(IVec3, Id)> {
     out
 }
 
+/// A cage that spawns things: a fortress's Sizzler Cage or a dungeon's Monster Cage.
+pub fn is_cage(id: Id) -> bool {
+    id == SIZZLER_CAGE || id == SPAWNER
+}
+
+/// What comes out of the cage at `p`: Sizzlers, or (in a dungeon) one kind of monster, the same each time.
+pub fn cage_kind(id: Id, p: IVec3) -> MobKind {
+    if id == SIZZLER_CAGE {
+        return MobKind::Sizzler;
+    }
+    let r = crate::noise::hash3(0xCA6E, p.x, p.y, p.z);
+    if r < 0.5 {
+        MobKind::Groaner
+    } else if r < 0.75 {
+        MobKind::Rattler
+    } else {
+        MobKind::Webber
+    }
+}
+
 /// What a Snout hands over for a gold ingot.
 pub fn barter(rng: &mut Rng) -> (Id, u8) {
     // (item, fewest, most, weight)
@@ -363,21 +383,22 @@ impl Game {
         }
         self.cage_timer = 1.0;
         let players = self.player_spots();
-        let cages: Vec<IVec3> = self.world.cages.iter().copied().filter(|p| self.world.get_v(*p) == SIZZLER_CAGE && players.iter().any(|(_, at, _)| at.distance(p.as_vec3()) < 16.0)).collect();
+        let cages: Vec<IVec3> = self.world.cages.iter().copied().filter(|p| is_cage(self.world.get_v(*p)) && players.iter().any(|(_, at, _)| at.distance(p.as_vec3()) < 16.0)).collect();
         for c in cages {
+            let kind = cage_kind(self.world.get_v(c), c);
             let centre = c.as_vec3() + Vec3::splat(0.5);
             self.smoke(centre, 2, 0.3);
             if !self.rng.chance(0.12) {
                 continue;
             }
-            let near = self.mobs.iter().filter(|m| m.kind == MobKind::Sizzler && m.body.pos.distance(centre) < 12.0).count();
+            let near = self.mobs.iter().filter(|m| m.kind == kind && m.body.pos.distance(centre) < 12.0).count();
             if near >= CAGE_CAP {
                 continue;
             }
             for _ in 0..self.rng.int(1, 3) {
                 let p = centre + Vec3::new(self.rng.range(-2.5, 2.5), self.rng.range(0.0, 1.5), self.rng.range(-2.5, 2.5));
                 if (0..2).all(|h| self.world.get_v((p + Vec3::Y * h as f32).floor().as_ivec3()) == AIR) {
-                    self.alloc_mob(MobKind::Sizzler, p);
+                    self.alloc_mob(kind, p);
                     self.smoke(p + Vec3::Y, 8, 0.4);
                 }
             }
