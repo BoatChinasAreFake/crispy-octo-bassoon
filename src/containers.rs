@@ -94,7 +94,7 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
 pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if kind == BREWING_STAND {
         return match slot {
-            INPUT => item == GUNPOWDER || crate::potions::ALL.iter().any(|p| p.ingredient() == item),
+            INPUT => item == GUNPOWDER || crate::potions::BREWABLE.iter().any(|p| p.ingredient() == item),
             FUEL => crate::potions::is_bottle(item),
             _ => false,
         };
@@ -342,11 +342,25 @@ pub fn store_centre(vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Vec3 {
 impl Game {
     /// Right-clicked a chest or furnace: open it.
     pub fn open_container(&mut self, pos: IVec3) {
+        if !self.is_client() {
+            self.ensure_container(pos);
+        }
         self.open = Some(pos);
         self.sfx(Sfx::Place(Mat::Wood), Some(store_centre(&self.vehicles, pos)));
         if self.is_client() {
             // The host has the contents; it sends them (and any changes) while it's open.
             self.net_send_msg(Msg::OpenContainer { x: pos.x, y: pos.y, z: pos.z });
+        }
+    }
+
+    /// Containers the generator built (a hut's furnace) have no contents
+    /// record until someone opens one: start it empty.
+    pub fn ensure_container(&mut self, pos: IVec3) {
+        if crate::vehicles::cart_of_key(pos).is_none() {
+            let id = self.world.get_v(pos);
+            if is_container(id) && !self.world.containers.contains_key(&pos) {
+                self.world.containers.insert(pos, Container::for_block(id));
+            }
         }
     }
 
@@ -553,6 +567,7 @@ impl Game {
         if !self.peer_near(from, p) || !is_container(store_kind(&self.world, &self.vehicles, p)) {
             return;
         }
+        self.ensure_container(p);
         self.viewers.entry(p).or_default().insert(from);
         self.send_container(p, Some(from));
     }
@@ -659,6 +674,18 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_furnaces_open_empty() {
+        // A hut's furnace comes from the generator with no contents record.
+        let mut g = crate::game::tests::arena(43);
+        let p = IVec3::new(2, 50, 2);
+        g.world.set_v(p, FURNACE);
+        g.world.containers.remove(&p);
+        g.open_container(p);
+        assert!(g.container_still_there());
+        assert!(store_ref(&g.world, &g.vehicles, p).is_some_and(|c| c.slots.len() == 3));
+    }
 
     #[test]
     fn furnaces_cook_with_fuel() {

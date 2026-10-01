@@ -707,6 +707,12 @@ pub struct World {
     /// Every sapling in loaded or edited chunks, and leaves that should check
     /// whether they still hang on to a tree (see trees.rs).
     pub saplings: HashSet<IVec3>,
+    /// Cells to check for sand and gravel with nothing under them (see falling.rs).
+    pub fall_dirty: HashSet<IVec3>,
+    /// Jukeboxes (to find the nearest one playing; see music.rs).
+    pub jukeboxes: HashSet<IVec3>,
+    /// Sizzler Cages (see fortress.rs).
+    pub cages: HashSet<IVec3>,
     /// Every fire burning (see fire.rs).
     pub fires: HashSet<IVec3>,
     /// Every comparator (they watch containers; see contraptions.rs).
@@ -754,6 +760,9 @@ impl World {
             containers: HashMap::new(),
             structure_loot: true,
             liquid_dirty: HashSet::new(),
+            fall_dirty: HashSet::new(),
+            jukeboxes: HashSet::new(),
+            cages: HashSet::new(),
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
             new_clankers: Vec::new(),
@@ -832,7 +841,7 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) {
+                    if id == SAPLING || id == FIRE || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
@@ -840,6 +849,7 @@ impl World {
                             SAPLING => self.saplings.insert(p),
                             FIRE => self.fires.insert(p),
                             b if crate::beacon::is_beacon(b) => self.beacons.insert(p),
+                            b if crate::music::is_jukebox(b) => self.jukeboxes.insert(p),
                             _ => self.comparators.insert(p),
                         };
                     }
@@ -1064,6 +1074,16 @@ impl World {
         } else if crate::beacon::is_beacon(old) {
             self.beacons.remove(&p);
         }
+        if id == SIZZLER_CAGE {
+            self.cages.insert(p);
+        } else if old == SIZZLER_CAGE {
+            self.cages.remove(&p);
+        }
+        if crate::music::is_jukebox(id) {
+            self.jukeboxes.insert(p);
+        } else if crate::music::is_jukebox(old) {
+            self.jukeboxes.remove(&p);
+        }
         let treeish = |b: Id| is_log(b) || is_leaves(b);
         if self.simulate_liquids && treeish(old) && !treeish(id) {
             self.wake_leaves(p);
@@ -1074,6 +1094,14 @@ impl World {
             self.reshape_joins(p);
         }
         if self.simulate_liquids {
+            // Sand and gravel: one put here may have nothing under it, and one above may have lost its footing.
+            if crate::falling::is_gravity(id) {
+                self.fall_dirty.insert(p);
+            }
+            let above = p + IVec3::Y;
+            if crate::falling::is_gravity(self.get_v(above)) {
+                self.fall_dirty.insert(above);
+            }
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
             self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));
         }

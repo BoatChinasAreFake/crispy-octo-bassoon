@@ -114,6 +114,8 @@ impl Generator {
                 }
             }
         }
+        // Fortresses and Snout camps (see fortress.rs).
+        self.place_structures(cx, cz, &mut b);
         b
     }
 }

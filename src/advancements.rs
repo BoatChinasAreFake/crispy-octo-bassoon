@@ -118,6 +118,17 @@ pub const ALL: &[Advancement] = &[
     adv("tongue_tied", "Tongue Tied", "Watch a Ribbit eat a Bloop."),
     adv("scute_cute", "Scute Cute", "Brush a Rollo for a scute."),
     adv("armoured_pup", "Very Good Boy", "Put Woofer Armour on your Woofer."),
+    adv("plinky", "Plinky Plonky", "Tune a Note Block. Perfect pitch not required."),
+    adv("now_playing", "Now Playing", "Put a Music Disc in a Jukebox. Turn it up."),
+    adv("too_hot", "Too Hot to Handle", "Defeat a Sizzler. It was getting heated."),
+    adv("dry_your_eyes", "Dry Your Eyes", "Defeat a Weeper. It's in a better place."),
+    adv("return_to_sender", "Return to Sender", "Defeat a Weeper with its own fireball."),
+    adv("fair_trade", "Fair Trade", "Barter with a Snout. Gold for... whatever that is."),
+    adv("oinkstep", "Oinkstep", "Get the Oinkstep disc from a Snout. Bangers only."),
+    adv("bad_omen", "Bad Omen", "Defeat a patrol captain. Villages are going to love you."),
+    adv("hero_village", "Hero of the Village", "See off a raid. The Hmmers are very grateful (and give discounts)."),
+    adv("rampage_over", "Rampage Over", "Defeat a Rampager. Large and in charge, until now."),
+    adv("totem_saved", "Postponed", "Cheat death with a Totem of Not Dying."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

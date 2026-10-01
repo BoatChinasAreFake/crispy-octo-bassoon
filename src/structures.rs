@@ -34,6 +34,11 @@ pub enum Kind {
     OceanRuins,
     /// The Hushed Ones' city, deep in the Deep Dark (see deepdark.rs).
     HushedCity,
+    /// The Scorchlands' bridges and halls, and the Snouts' camps (see fortress.rs).
+    Fortress,
+    SnoutCamp,
+    /// A Pilferer lookout tower (see raids.rs).
+    Outpost,
 }
 
 impl Kind {
@@ -49,6 +54,9 @@ impl Kind {
             Kind::TrailRuins => "Trail Ruins (Muddy, Historic)",
             Kind::OceanRuins => "Ocean Ruins (Damp History)",
             Kind::HushedCity => "Hushed City (Tiptoe)",
+            Kind::Fortress => "Scorch Fortress (Bring Fire Resistance)",
+            Kind::SnoutCamp => "Snout Camp (Gold Accepted)",
+            Kind::Outpost => "Pilferer Outpost (Keep Out)",
         }
     }
 
@@ -64,13 +72,16 @@ impl Kind {
             "trail_ruins" | "trail_ruin" => Kind::TrailRuins,
             "ocean_ruins" | "ocean_ruin" => Kind::OceanRuins,
             "hushed_city" | "city" | "ancient_city" => Kind::HushedCity,
+            "fortress" | "scorch_fortress" | "nether_fortress" => Kind::Fortress,
+            "snout_camp" | "camp" | "bastion" | "bastion_remnant" => Kind::SnoutCamp,
+            "outpost" | "pilferer_outpost" | "pillager_outpost" => Kind::Outpost,
             _ => return None,
         })
     }
 
     /// Wide enough that it reaches two chunks out.
     fn wide(self) -> bool {
-        matches!(self, Kind::Village | Kind::HushedCity)
+        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress)
     }
 }
 
@@ -88,7 +99,7 @@ impl Generator {
     /// The structure (if any) that starts in chunk (cx, cz).
     pub fn site(&self, cx: i32, cz: i32) -> Option<Site> {
         if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL - 2 * CW {
-            return None;
+            return self.scorch_site(cx, cz);
         }
         let s = self.seed ^ 0x57_C0DE;
         let r = hash2(s, cx, cz);
@@ -111,6 +122,10 @@ impl Generator {
         });
         if hash2(s ^ 0x7111, cx, cz) < 0.02 && biome == Biome::Plains && h > SEA + 1 && h < CH - 30 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
+        }
+        // Pilferers build lookouts on open, flat ground.
+        if hash2(s ^ 0x0B0, cx, cz) < 0.01 && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() {
+            return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
         }
         // The Hushed Ones built rarely, and only in the Deep Dark.
         if hash2(s ^ 0xC17, cx, cz) < 0.035 && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
@@ -167,6 +182,9 @@ impl Generator {
             Kind::Spire => {}
             Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => return ruin_blocks(site),
             Kind::HushedCity => return crate::deepdark::city_blocks(site),
+            Kind::Fortress => return crate::fortress::fortress_blocks(site),
+            Kind::SnoutCamp => return crate::fortress::camp_blocks(site),
+            Kind::Outpost => return crate::raids::outpost_blocks(site),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -343,6 +361,9 @@ impl Generator {
             out.push((ivec3(o.x + x, o.y + 3, o.z + z), TORCH));
         }
         out.push((village_chest(site), CHEST));
+        // The bell, on a post by the well (see raids.rs).
+        out.push((ivec3(o.x - 2, o.y + 1, o.z + 2), FENCE_FIRST));
+        out.push((ivec3(o.x - 2, o.y + 2, o.z + 2), BELL));
         // Houses beside the paths, doors to the path (facing: 0 north .. 3 west).
         for (i, &(x, z, facing)) in [(9, -6, 2u8), (-9, -6, 2), (9, 6, 0), (6, 13, 3), (-6, -13, 1), (6, -14, 3)].iter().enumerate() {
             if i >= 3 && hash2(s ^ 0x4053, i as i32, 0) < 0.35 {
@@ -429,6 +450,18 @@ impl Generator {
                     v.push((p, kind, site.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
                 }
             }
+        }
+        v
+    }
+
+    /// Sizzler Cages built into chunk (cx, cz) (see fortress.rs).
+    pub fn structure_cages(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        if cx * CW < crate::scorch::SCORCH_X {
+            return Vec::new();
+        }
+        let mut v = Vec::new();
+        for (_, blocks) in self.sites_near(cx, cz) {
+            v.extend(blocks.into_iter().filter(|(p, id)| *id == SIZZLER_CAGE && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
         }
         v
     }
@@ -545,6 +578,40 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (RECOVERY_COMPASS, 1, 0.08),
             (DIAMOND_BRUSH, 1, 0.1),
         ],
+        Kind::Fortress => &[
+            (GOLD_INGOT, 6, 0.6),
+            (IRON, 5, 0.5),
+            (DIAMOND, 3, 0.25),
+            (SADDLE, 1, 0.3),
+            (OBSIDIAN, 4, 0.3),
+            (EMBER_SHROOM, 6, 0.5),
+            (SPARKER, 1, 0.3),
+            (SIZZLE_ROD, 2, 0.3),
+            (ARMOR_FIRST + 8 + CHESTPLATE as Id, 1, 0.15),
+            (SCORCHITE_SCRAP, 1, 0.08),
+        ],
+        Kind::Outpost => &[
+            (CROSSBOW, 1, 0.5),
+            (ARROW, 12, 0.7),
+            (IRON, 4, 0.5),
+            (WHEAT, 6, 0.5),
+            (CARROT, 4, 0.4),
+            (POTATO, 4, 0.4),
+            (ENCHANTED_BOOK, 1, 0.25),
+            (SPRUCE_LOG, 8, 0.4),
+            (BOTTLE, 2, 0.3),
+        ],
+        Kind::SnoutCamp => &[
+            (GOLD_INGOT, 9, 0.8),
+            (GOLD_BLOCK, 2, 0.3),
+            (CROSSBOW, 1, 0.25),
+            (SHROOM_STICK, 1, 0.2),
+            (PEARL, 3, 0.25),
+            (DISC_FIRST + 7, 1, 0.3),
+            (SCORCHITE_SCRAP, 2, 0.15),
+            (UPGRADE_TEMPLATE, 1, 0.1),
+            (GOLDEN_CHOP, 2, 0.3),
+        ],
     };
     let mut free: Vec<usize> = (0..c.slots.len()).collect();
     for &(item, most, chance) in table {
@@ -555,6 +622,17 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         let slot = free.remove(rng.int(0, free.len() as i32 - 1) as usize);
         c.slots[slot] = Some((item, n));
         c.wear[slot] = loot_wear(item, kind, &mut rng);
+    }
+    // Now and then, a music disc (Oinkstep is the Snouts'; see fortress.rs).
+    let disc = match kind {
+        Kind::Dungeon => 0.3,
+        Kind::HushedCity => 0.3,
+        Kind::Tower | Kind::Spire => 0.12,
+        _ => 0.0,
+    };
+    if rng.chance(disc) && !free.is_empty() {
+        let slot = free.remove(rng.int(0, free.len() as i32 - 1) as usize);
+        c.slots[slot] = Some((DISC_FIRST + rng.int(0, 6) as Id, 1));
     }
     c
 }
@@ -592,6 +670,11 @@ impl World {
 
     /// A chunk just arrived: fill any structure chests in it that have never been filled.
     pub fn fill_structure_chests(&mut self, cx: i32, cz: i32) {
+        for p in self.generator.structure_cages(cx, cz) {
+            if self.get_v(p) == SIZZLER_CAGE {
+                self.cages.insert(p);
+            }
+        }
         for (p, kind, seed) in self.generator.structure_chests(cx, cz) {
             if self.get_v(p) == CHEST && !self.containers.contains_key(&p) {
                 self.containers.insert(p, loot(kind, seed));

@@ -64,7 +64,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk)
+    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -584,7 +584,9 @@ impl Game {
                 }
                 // No harder than the weapon they really own (x1.5 for a falling crit).
                 let sharpness = crate::enchant::level((self.verified_ench(from) as u32) << 16, crate::enchant::Enchant::Sharpness);
-                let dmg = dmg.clamp(0.0, attack_damage_with(self.verified_held(from), sharpness) * 1.5);
+                // (Strength is drunk on their own machine; the host saw the bottle go.)
+                let strength = if self.strong.contains_key(&from) { crate::potions::STRENGTH_BONUS } else { 0.0 };
+                let dmg = dmg.clamp(0.0, (attack_damage_with(self.verified_held(from), sharpness) + strength) * 1.5);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
                     m.damage(dmg, eye);
                     m.last_attacker = from;
@@ -702,6 +704,13 @@ impl Game {
                     self.host_wear(from, BOW, 1);
                 }
             }
+            Msg::Interact { x, y, z, .. } if self.world.get(x, y, z) == BELL => {
+                let p = IVec3::new(x, y, z);
+                let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
+                if near && self.peer_rate_ok(from, "bell", 0.5) {
+                    self.ring_bell_at(p.as_vec3() + Vec3::splat(0.5));
+                }
+            }
             Msg::Interact { x, y, z, item } if crate::bees::is_hive(self.world.get(x, y, z)) || self.world.get(x, y, z) == RESTORATION_BENCH => {
                 let p = IVec3::new(x, y, z);
                 let near = self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH).unwrap_or(false);
@@ -724,6 +733,11 @@ impl Game {
                 }
             }
             Msg::Smith { x, y, z, grind, a, a_ench, b, b_ench } => self.host_smith(from, IVec3::new(x, y, z), grind, a, a_ench, b, b_ench),
+            Msg::Deflect { at, dir } => {
+                if self.peer_rate_ok(from, "deflect", 0.2) {
+                    self.host_deflect(from, at, dir);
+                }
+            }
             Msg::Interact { x, y, z, item } => {
                 let at = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
                 let near = self.peers.get(&from).map(|p| (p.target + Vec3::Y * 1.6).distance(at) <= REACH).unwrap_or(false);
@@ -890,6 +904,10 @@ impl Game {
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
             return true;
         }
+        // Note blocks retune; jukeboxes take a disc and give it back (the ledger checks the disc).
+        if (crate::music::is_note_block(old) && crate::music::is_note_block(new)) || (crate::music::is_jukebox(old) && crate::music::is_jukebox(new)) {
+            return true;
+        }
         // Comparators switch mode (the host works out whether they're on).
         if crate::contraptions::is_comparator(old) && crate::contraptions::is_comparator(new) {
             return crate::contraptions::comparator_state(old).0 == crate::contraptions::comparator_state(new).0;
@@ -961,7 +979,11 @@ impl Game {
                     p.armor = armor;
                 }
             }
-            Msg::Mobs { mobs, tnts, arrows } => self.sync_mobs(mobs, tnts, arrows),
+            Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
+                self.fireballs = fireballs.into_iter().map(|(pos, vel, big)| crate::fortress::Fireball { pos, vel, big, life: 1.0, shooter: 0, returned: None }).collect();
+                self.falling = falling.into_iter().map(|(pos, vel, id)| crate::falling::FallingBlock { pos, vel, id, from: pos.y }).filter(|f| valid_block(f.id)).collect();
+                self.sync_mobs(mobs, tnts, arrows)
+            }
             Msg::HurtYou { dmg, cause, knock } => {
                 self.player.hurt = 0.0;
                 // Whatever hit us came from the opposite way to the knock.
@@ -1008,7 +1030,7 @@ impl Game {
                 self.explosion_effects(at, r);
             }
             Msg::Sound { sfx, at } => {
-                if let Some(s) = Sfx::from_u8(sfx) {
+                if let Some(s) = Sfx::from_wire(sfx) {
                     self.sfx(s, Some(at));
                 }
             }
@@ -1041,6 +1063,18 @@ impl Game {
                 self.msg(format!("<{name}> {text}"));
             }
             Msg::Darkness { secs } => self.darkness = self.darkness.max(secs.clamp(0.0, 30.0)),
+            Msg::Raid { state, wave, waves, left } => {
+                self.raid_hud = (state != 0).then_some((state, wave, waves, left, if state == 1 { 3.0 } else { 6.0 }));
+            }
+            Msg::TimedEffect { effect, secs } => {
+                if let Some(&p) = crate::potions::EFFECTS.get(effect as usize) {
+                    if secs > 0.0 {
+                        self.timed_effect(p, secs.min(3600.0));
+                    } else {
+                        self.effects.retain(|e| e.0 != p);
+                    }
+                }
+            }
             Msg::Effect { heal, teleport, launch, take } => {
                 if heal > 0.0 && self.dead.is_none() {
                     self.player.health = (self.player.health + heal).min(crate::player::MAX_HEALTH);
@@ -1059,7 +1093,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } => {}
         }
     }
 
@@ -1079,8 +1113,8 @@ impl Game {
             };
             m.net_pos = s.pos;
             m.yaw = s.yaw;
-            // Starers reuse the fuse field for "angry".
-            m.angry = kind == MobKind::Starer && s.fuse > 0.0;
+            // Starers (and Weepers) reuse the fuse field for "angry".
+            m.angry = matches!(kind, MobKind::Starer | MobKind::Weeper) && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
             if matches!(kind, MobKind::Hmmer | MobKind::Sneaker) {
                 m.seed = s.fuse as u32;
@@ -1097,7 +1131,7 @@ impl Game {
             m.sitting = s.flags & MOB_SITTING != 0;
             m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
             m.saddled = s.flags & MOB_SADDLED != 0;
-            if m.kind == crate::entity::MobKind::Soggy {
+            if matches!(m.kind, MobKind::Soggy | MobKind::Pilferer | MobKind::Snout) {
                 m.seed = (s.flags & MOB_ARMED != 0) as u32;
             }
             next.push(m);
@@ -1144,6 +1178,10 @@ impl Game {
         for t in self.tnts.iter_mut() {
             t.fuse -= dt;
         }
+        self.falling_tick(dt);
+        self.fireballs_tick(dt);
+        // (Just the raid bar and the Bell's glow, on this side.)
+        self.raids_tick(dt);
         for p in self.particles.iter_mut() {
             p.update(dt, &self.world);
         }
@@ -1223,16 +1261,18 @@ impl Game {
                         yaw: m.yaw,
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
-                        fuse: if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && m.kind == MobKind::Starer { 1.0 } else { m.fuse },
+                        fuse: if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
-                        flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((m.kind == crate::entity::MobKind::Soggy && m.seed == 1) as u8 * MOB_ARMED),
+                        flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((matches!(m.kind, MobKind::Soggy | MobKind::Pilferer | MobKind::Snout) && m.seed == 1) as u8 * MOB_ARMED),
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
                 let arrows = self.arrows.iter().map(|a| (a.pos, a.wire_vel())).collect();
-                self.net_broadcast(Msg::Mobs { mobs, tnts, arrows });
+                let falling = self.falling.iter().map(|f| (f.pos, f.vel, f.id)).collect();
+                let fireballs = self.fireballs.iter().map(|f| (f.pos, f.vel, f.big)).collect();
+                self.net_broadcast(Msg::Mobs { mobs, tnts, arrows, falling, fireballs });
             }
             self.send_drops(dt);
             self.send_orbs(dt);
@@ -1243,7 +1283,7 @@ impl Game {
             let fwd: Vec<Msg> = self
                 .sounds
                 .iter()
-                .filter_map(|&(s, at)| at.filter(|_| forwarded(s)).map(|at| Msg::Sound { sfx: s.to_u8(), at }))
+                .filter_map(|&(s, at)| at.filter(|_| forwarded(s)).map(|at| Msg::Sound { sfx: s.to_wire(), at }))
                 .collect();
             for m in fwd {
                 self.net_broadcast(m);

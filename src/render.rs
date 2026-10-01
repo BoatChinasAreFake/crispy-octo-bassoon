@@ -66,6 +66,8 @@ varying vec4 v_spos;
 uniform sampler2D tex;
 uniform sampler2D shadow_map;
 uniform vec4 shadow;   // x: on, y: one texel, z: depth bias, w: how dark shadows are
+uniform vec4 sun;      // xyz: toward the sun; w: one shadow texel in blocks
+uniform mat4 light_mvp;
 uniform vec4 cam_pos;
 uniform vec4 fog_color;
 uniform vec4 params;   // x: daylight, y: fog start, z: fog end, w: alpha multiplier
@@ -112,12 +114,26 @@ float shadow_tap(vec2 uv, float z) {
 }
 
 // 0 in full sun, 1 in shadow (softened over four taps, faded out at the map's edge).
-float shadowing() {
+// `n` is the surface's normal (zero if unknown). Faces turned away from the sun
+// aren't sunlit to begin with; the rest look the map up from a point nudged off
+// the surface (further the lower the sun skims it), so a face never shades
+// itself into stripes.
+float shadowing(vec3 n) {
     if (shadow.x < 0.5) return 0.0;
-    vec3 s = v_spos.xyz / v_spos.w * 0.5 + 0.5;
+    vec4 sp = v_spos;
+    float bias = shadow.z;
+    if (dot(n, n) > 0.5) {
+        float ndl = dot(n, sun.xyz);
+        if (ndl <= 0.0) return 0.0;
+        float slope = sqrt(max(1.0 - ndl * ndl, 0.0)) / max(ndl, 0.08);
+        sp = light_mvp * vec4(v_wpos + n * sun.w * (1.0 + min(slope, 6.0) * 0.5), 1.0);
+        bias = shadow.z * (0.4 + min(slope, 6.0) * 0.25);
+    }
+    vec3 s = sp.xyz / sp.w * 0.5 + 0.5;
     if (s.x <= 0.0 || s.x >= 1.0 || s.y <= 0.0 || s.y >= 1.0 || s.z >= 1.0) return 0.0;
     float t = shadow.y * 0.75;
-    float sum = shadow_tap(s.xy + vec2(-t, -t), s.z) + shadow_tap(s.xy + vec2(t, -t), s.z) + shadow_tap(s.xy + vec2(-t, t), s.z) + shadow_tap(s.xy + vec2(t, t), s.z);
+    float z = s.z - bias + shadow.z;
+    float sum = shadow_tap(s.xy + vec2(-t, -t), z) + shadow_tap(s.xy + vec2(t, -t), z) + shadow_tap(s.xy + vec2(-t, t), z) + shadow_tap(s.xy + vec2(t, t), z);
     vec2 e = abs(s.xy - 0.5) * 2.0;
     float fade = 1.0 - smoothstep(0.8, 1.0, max(e.x, e.y));
     return sum * 0.25 * fade;
@@ -155,7 +171,15 @@ void main() {
         // Glowing (lava): its own light, whatever the time of day.
         col = c.rgb * (lx - 1.5);
     } else {
-        float sky = v_light.y * params.x * (1.0 - shadow.w * shadowing());
+        vec3 n = vec3(0.0);
+#ifdef GL_OES_standard_derivatives
+        // The surface faces the camera (derivatives give either winding).
+        if (dot(surface, surface) > 0.0) {
+            n = normalize(surface);
+            if (dot(n, cam_pos.xyz - v_wpos) < 0.0) n = -n;
+        }
+#endif
+        float sky = v_light.y * params.x * (1.0 - shadow.w * shadowing(n));
         // The world carries its own block light (z); things that move use the
         // nearby point lights. Lights marked moving (negative radius, like a
         // held torch) shine on everything.
@@ -284,6 +308,7 @@ pub struct Uniforms {
     pub wave2: Vec4,
     pub light_mvp: Mat4,
     pub shadow: Vec4,
+    pub sun: Vec4,
 }
 
 fn shader_meta() -> ShaderMeta {
@@ -303,6 +328,7 @@ fn shader_meta() -> ShaderMeta {
                 UniformDesc::new("wave2", UniformType::Float4),
                 UniformDesc::new("light_mvp", UniformType::Mat4),
                 UniformDesc::new("shadow", UniformType::Float4),
+                UniformDesc::new("sun", UniformType::Float4),
             ],
         },
     }
@@ -640,6 +666,7 @@ impl Renderer {
             light_mvp,
             // Shadows deepen as the sun climbs (and fade out toward sunset).
             shadow: Vec4::new(shadows_on as u8 as f32, 1.0 / SHADOW_SIZE as f32, 0.0012, 0.55 * ((fp.sun_dir.y - 0.12) * 4.0).clamp(0.0, 1.0)),
+            sun: fp.sun_dir.normalize_or_zero().extend(2.0 * SHADOW_REACH / SHADOW_SIZE as f32),
         };
         let images = vec![self.texture, self.shadow_tex];
 

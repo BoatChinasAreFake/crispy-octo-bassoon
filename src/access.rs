@@ -58,6 +58,7 @@ pub fn caption(s: Sfx) -> Option<&'static str> {
         Sfx::Yip => "Sneaker yips",
         Sfx::Croak => "Ribbit croaks",
         Sfx::Scuttle => "Rollo scuttles",
+        Sfx::Note(..) => "Note block plays",
     })
 }
 

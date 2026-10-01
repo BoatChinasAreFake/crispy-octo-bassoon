@@ -218,6 +218,10 @@ impl Game {
                     }
                 }
             }
+            _ if crate::music::is_note_block(id) => {
+                let on = powered(&self.world, p);
+                self.note_power(p, on);
+            }
             TNT if powered(&self.world, p) => {
                 self.world.set_v(p, AIR);
                 self.tnts.push(PrimedTnt { pos: p.as_vec3(), fuse: 3.0 });

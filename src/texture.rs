@@ -434,6 +434,52 @@ pub const T_TEMPLATE: u16 = 559;
 pub const T_SCORCHITE_TOOLS: u16 = 560;
 pub const T_SCORCHITE_ARMOR_ITEMS: u16 = 564;
 pub const T_SCORCHITE_ARMOR_WORN: u16 = 568;
+// Music (see music.rs).
+pub const T_NOTE_BLOCK: u16 = 572;
+pub const T_JUKEBOX_TOP: u16 = 573;
+pub const T_JUKEBOX_SIDE: u16 = 574;
+pub const T_DISC_FIRST: u16 = 575;
+pub const T_NOTE_PARTICLE: u16 = 583;
+// The Scorchlands (see fortress.rs).
+pub const T_SCORCH_BRICKS: u16 = 584;
+pub const T_CAGE: u16 = 585;
+pub const T_GOLD_BLOCK: u16 = 586;
+pub const T_GILDED: u16 = 587;
+pub const T_BELL: u16 = 588;
+pub const T_SIZZLE_ROD: u16 = 589;
+pub const T_SIZZLE_POWDER: u16 = 590;
+pub const T_WEEPER_TEAR: u16 = 591;
+pub const T_SHROOM_STICK: u16 = 592;
+pub const T_POTION_EXTRA: u16 = 593;
+pub const T_SPLASH_EXTRA: u16 = 595;
+// Raids (see raids.rs).
+pub const T_CROSSBOW: u16 = 597;
+pub const T_CROSSBOW_LOADED: u16 = 598;
+pub const T_TOTEM: u16 = 599;
+pub const T_BANNER: u16 = 600;
+pub const T_FIREBALL: u16 = 601;
+// The new mobs' skins.
+pub const T_SIZZLER: u16 = 602;
+pub const T_SIZZLER_FACE: u16 = 603;
+pub const T_SIZZLER_ROD: u16 = 604;
+pub const T_WEEPER: u16 = 605;
+pub const T_WEEPER_FACE: u16 = 606;
+pub const T_WEEPER_ANGRY: u16 = 607;
+pub const T_STRUTTER: u16 = 608;
+pub const T_STRUTTER_FACE: u16 = 609;
+pub const T_STRUTTER_COLD: u16 = 610;
+pub const T_SNOUT: u16 = 611;
+pub const T_SNOUT_FACE: u16 = 612;
+pub const T_SNOUT_TUNIC: u16 = 613;
+pub const T_ILLAGER: u16 = 614;
+pub const T_ILLAGER_FACE: u16 = 615;
+pub const T_PILFERER_COAT: u16 = 616;
+pub const T_HACKLER_COAT: u16 = 617;
+pub const T_INVOICER_ROBE: u16 = 618;
+pub const T_FEE: u16 = 619;
+pub const T_RAMPAGER: u16 = 620;
+pub const T_RAMPAGER_FACE: u16 = 621;
+pub const T_BANNER_WORN: u16 = 622;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2710,6 +2756,10 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         bottle(&mut a, T_POTION_FIRST + i as u16, Some(p.colour()), false);
         bottle(&mut a, T_SPLASH_FIRST + i as u16, Some(p.colour()), true);
     }
+    for (i, p) in crate::potions::BREWABLE[5..].iter().enumerate() {
+        bottle(&mut a, T_POTION_EXTRA + i as u16, Some(p.colour()), false);
+        bottle(&mut a, T_SPLASH_EXTRA + i as u16, Some(p.colour()), true);
+    }
     a.each(T_TUSK, |x, y, r, _| {
         let (fx, fy) = (x as f32, y as f32);
         let curve = (fy - 3.0 - (fx - 3.0).powi(2) * 0.12).abs();
@@ -2985,6 +3035,8 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     paint_bees(&mut a);
     paint_critters(&mut a);
     paint_ancient(&mut a);
+    paint_music(&mut a);
+    paint_scorch_and_raids(&mut a);
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));
@@ -4311,5 +4363,290 @@ fn paint_ancient(a: &mut Atlas) {
         let rim = x == 0 || y == 0 || x == 15 || y == 15;
         let vein = (x * 5 + y * 3) % 17 == 0;
         shade(if vein { rgb(200, 90, 40) } else { base }, r.range(0.9, 1.05) * if rim { 0.7 } else { 1.0 })
+    });
+}
+
+const DISC_SPRITE: [&str; 16] = [
+    "................",
+    ".....######.....",
+    "...##dddddd##...",
+    "..#ddhdddddd#d..",
+    "..#dhddddddddd#.",
+    ".#ddddllllddddd#",
+    ".#dddllllllddd#.",
+    ".#dddlll.lllddd#",
+    ".#dddllllllddd#.",
+    ".#ddddllllddddd#",
+    "..#ddddddddddd#.",
+    "..#dddddddddd#..",
+    "...##dddddd##...",
+    ".....######.....",
+    "................",
+    "................",
+];
+
+/// Note blocks, jukeboxes, discs, and the notes that float up.
+fn paint_music(a: &mut Atlas) {
+    // Note block: dark planks with a speaker grille in the middle.
+    a.each(T_NOTE_BLOCK, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let grille = (4..12).contains(&x) && (4..12).contains(&y) && (x + y) % 2 == 0;
+        let base = if rim { rgb(70, 45, 28) } else if grille { rgb(35, 22, 14) } else { rgb(110, 72, 45) };
+        shade(base, r.range(0.9, 1.06) * if y % 4 == 3 { 0.9 } else { 1.0 })
+    });
+    a.each(T_JUKEBOX_SIDE, |x, y, r, _| {
+        let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+        let inset = (3..13).contains(&x) && (3..13).contains(&y) && (x == 3 || x == 12 || y == 3 || y == 12);
+        shade(if frame { rgb(75, 48, 30) } else if inset { rgb(90, 60, 38) } else { rgb(128, 86, 56) }, r.range(0.9, 1.06))
+    });
+    a.each(T_JUKEBOX_TOP, |x, y, r, _| {
+        let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+        let slot = (3..13).contains(&x) && (7..9).contains(&y);
+        shade(if slot { rgb(20, 14, 10) } else if frame { rgb(75, 48, 30) } else { rgb(100, 66, 42) }, r.range(0.9, 1.06))
+    });
+    let labels = [rgb(90, 200, 90), rgb(230, 120, 40), rgb(220, 60, 60), rgb(110, 150, 230), rgb(240, 240, 240), rgb(240, 210, 60), rgb(70, 220, 210), rgb(230, 120, 170)];
+    for (i, l) in labels.into_iter().enumerate() {
+        a.sprite(T_DISC_FIRST + i as u16, &DISC_SPRITE, &[('#', rgb(10, 10, 12)), ('d', rgb(30, 30, 34)), ('h', rgb(90, 90, 100)), ('l', l)]);
+    }
+    // Sixteen note colours, green (low) round through blue to red (high), four by four.
+    a.each(T_NOTE_PARTICLE, |x, y, _, _| {
+        let cell = (y / 4) * 4 + x / 4;
+        let hue = 0.33 - cell as f32 / 15.0 * 1.0;
+        let (lx, ly) = (x % 4, y % 4);
+        if (lx == 0 && ly == 3) || (lx == 3 && ly == 0) {
+            return [0, 0, 0, 0];
+        }
+        hsv(hue.rem_euclid(1.0), 0.85, 1.0)
+    });
+}
+
+fn hsv(h: f32, s: f32, v: f32) -> Rgba {
+    let i = (h * 6.0).floor();
+    let f = h * 6.0 - i;
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - f * s), v * (1.0 - (1.0 - f) * s));
+    let (r, g, b) = match i as i32 % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+}
+
+const ROD_SPRITE: [&str; 16] = [
+    "................",
+    "............##..",
+    "...........#hh#.",
+    "..........#hb#..",
+    ".........#hb#...",
+    "........#hb#....",
+    ".......#hb#.....",
+    "......#hb#......",
+    ".....#hb#.......",
+    "....#hb#........",
+    "...#hb#.........",
+    "..#hb#..........",
+    ".#bb#...........",
+    ".##.............",
+    "................",
+    "................",
+];
+const POWDER_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "........h.......",
+    "......h.bh......",
+    ".....hbbbh.h....",
+    "....bbhbbbb.....",
+    "...hbbbbbhbb....",
+    "..bbbhbbbbbbh...",
+    "..bbbbbbhbbbbb..",
+    ".bbbbbbbbbbbbbd.",
+    ".ddbbbbbbbbbddd.",
+    "..ddddddddddd...",
+    "................",
+    "................",
+    "................",
+];
+const TEAR_SPRITE: [&str; 16] = [
+    "................",
+    ".......#........",
+    "......#h#.......",
+    "......#h#.......",
+    ".....#hbb#......",
+    ".....#hbb#......",
+    "....#hbbbb#.....",
+    "....#hbbbb#.....",
+    "...#hbbbbbb#....",
+    "...#hbbbbbb#....",
+    "...#bbbbbbd#....",
+    "...#bbbbbdd#....",
+    "....#bbddd#.....",
+    ".....#####......",
+    "................",
+    "................",
+];
+const CROSSBOW_SPRITE: [&str; 16] = [
+    "................",
+    ".s..............",
+    "..s......####...",
+    "...s....#ww#....",
+    "....s..#ww#.....",
+    ".....s#ww#......",
+    "......#w#.......",
+    ".....#w#s.......",
+    "....#w#..s......",
+    "...#ww#...s.....",
+    "..#ww#.....s....",
+    ".#ww#.......s...",
+    "#ww#.........s..",
+    "##............s.",
+    "................",
+    "................",
+];
+const TOTEM_SPRITE: [&str; 16] = [
+    "................",
+    ".....######.....",
+    "....#gggggg#....",
+    "....#gEggEg#....",
+    "....#gggggg#....",
+    "...##gggggg##...",
+    "..#gg#gggg#gg#..",
+    "..#g#.#gg#.#g#..",
+    "......#gg#......",
+    ".....#gGGg#.....",
+    ".....#gGGg#.....",
+    "......#gg#......",
+    ".....#g##g#.....",
+    ".....##..##.....",
+    "................",
+    "................",
+];
+const BANNER_SPRITE: [&str; 16] = [
+    "................",
+    ".##############.",
+    "...#wwwwwwww#...",
+    "...#wwwwwwww#...",
+    "...#wwkkkkww#...",
+    "...#wkkddkkw#...",
+    "...#wkdkkdkw#...",
+    "...#wwkkkkww#...",
+    "...#wwwkkwww#...",
+    "...#wwwkkwww#...",
+    "...#wwkkkkww#...",
+    "...#wwwwwwww#...",
+    "...#wwwwwwww#...",
+    "....#wwwwww#....",
+    ".....######.....",
+    "................",
+];
+
+/// The Scorchlands' fortresses, camps and residents; raiders and their things.
+fn paint_scorch_and_raids(a: &mut Atlas) {
+    a.each(T_SCORCH_BRICKS, |x, y, r, _| {
+        let row = y / 4;
+        let mortar = y % 4 == 3 || (x + if row % 2 == 1 { 4 } else { 0 }) % 8 == 7;
+        shade(if mortar { rgb(28, 12, 14) } else { rgb(70, 30, 34) }, r.range(0.88, 1.08))
+    });
+    a.each(T_CAGE, |x, y, r, _| {
+        let bar = x % 4 == 0 || y % 4 == 0 || x == 15 || y == 15;
+        if bar { shade(rgb(40, 40, 46), r.range(0.85, 1.1)) } else if (5..11).contains(&x) && (5..11).contains(&y) { shade(rgb(255, 150, 40), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_GOLD_BLOCK, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let shine = (x + y) % 9 == 0 && !rim;
+        shade(if rim { rgb(200, 150, 30) } else if shine { rgb(255, 250, 190) } else { rgb(250, 215, 60) }, r.range(0.92, 1.05))
+    });
+    a.each(T_GILDED, |x, y, r, p| {
+        let n = p.noise3(x as f32 * 0.6, y as f32 * 0.6, 21.0);
+        if n > 0.35 { shade(rgb(240, 200, 60), r.range(0.85, 1.1)) } else { shade(rgb(52, 40, 44), r.range(0.85, 1.12)) }
+    });
+    a.each(T_BELL, |x, y, r, _| {
+        let band = y % 5 == 2;
+        shade(if band { rgb(200, 150, 30) } else { rgb(245, 205, 70) }, r.range(0.88, 1.06) * (1.0 - x as f32 * 0.012))
+    });
+    a.each(T_FIREBALL, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 3.5 { rgb(255, 250, 200) } else if d < 6.0 { shade(rgb(255, 170, 40), r.range(0.85, 1.1)) } else { shade(rgb(200, 60, 20), r.range(0.8, 1.1)) }
+    });
+    a.sprite(T_SIZZLE_ROD, &ROD_SPRITE, &[('#', rgb(120, 60, 10)), ('h', rgb(255, 240, 140)), ('b', rgb(250, 180, 40))]);
+    a.sprite(T_SIZZLE_POWDER, &POWDER_SPRITE, &[('h', rgb(255, 240, 150)), ('b', rgb(245, 170, 40)), ('d', rgb(190, 110, 20))]);
+    a.sprite(T_WEEPER_TEAR, &TEAR_SPRITE, &[('#', rgb(120, 150, 170)), ('h', rgb(255, 255, 255)), ('b', rgb(210, 235, 245)), ('d', rgb(160, 200, 220))]);
+    a.sprite(T_SHROOM_STICK, &ROD, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(230, 230, 230)), ('k', rgb(230, 90, 40))]);
+    let bow = [('#', rgb(60, 40, 20)), ('w', rgb(130, 95, 55)), ('s', rgb(220, 220, 220))];
+    a.sprite(T_CROSSBOW, &CROSSBOW_SPRITE, &bow);
+    a.sprite(T_CROSSBOW_LOADED, &CROSSBOW_SPRITE, &bow);
+    a.sprite(T_CROSSBOW_LOADED, &["................", "................", "................", "................", "................", "................", "................", "........k.......", ".......k........", "......k.........", ".....k..........", "....k..........."], &[('k', rgb(180, 180, 190))]);
+    a.sprite(T_TOTEM, &TOTEM_SPRITE, &[('#', rgb(120, 90, 20)), ('g', rgb(240, 200, 60)), ('G', rgb(120, 200, 90)), ('E', rgb(20, 120, 40))]);
+    a.sprite(T_BANNER, &BANNER_SPRITE, &[('#', rgb(90, 60, 30)), ('w', rgb(235, 235, 230)), ('k', rgb(40, 40, 45)), ('d', rgb(140, 30, 30))]);
+    // Mob skins.
+    let flat = |a: &mut Atlas, t: u16, c: Rgba, var: f32| a.each(t, move |_, _, r, _| shade(c, r.range(1.0 - var, 1.0 + var)));
+    flat(a, T_SIZZLER, rgb(250, 200, 60), 0.1);
+    flat(a, T_SIZZLER_ROD, rgb(255, 170, 30), 0.12);
+    a.each(T_SIZZLER_FACE, |x, y, r, _| {
+        let eye = (y == 6 || y == 7) && (x == 4 || x == 5 || x == 10 || x == 11);
+        let mouth = y == 11 && (5..11).contains(&x);
+        if eye || mouth { rgb(40, 20, 10) } else { shade(rgb(250, 200, 60), r.range(0.9, 1.1)) }
+    });
+    flat(a, T_WEEPER, rgb(235, 235, 235), 0.05);
+    for (tile, open) in [(T_WEEPER_FACE, false), (T_WEEPER_ANGRY, true)] {
+        a.each(tile, move |x, y, r, _| {
+            let eyes = (x == 3 || x == 4 || x == 11 || x == 12) && if open { (5..8).contains(&y) } else { y == 6 };
+            let tear = !open && (x == 4 || x == 11) && (7..14).contains(&y) && y % 2 == 1;
+            let mouth = (6..10).contains(&x) && if open { (10..13).contains(&y) } else { y == 11 };
+            if eyes {
+                if open { rgb(220, 30, 30) } else { rgb(60, 60, 60) }
+            } else if tear {
+                rgb(140, 200, 240)
+            } else if mouth {
+                rgb(40, 40, 40)
+            } else {
+                shade(rgb(235, 235, 235), r.range(0.95, 1.05))
+            }
+        });
+    }
+    flat(a, T_STRUTTER, rgb(170, 50, 45), 0.1);
+    flat(a, T_STRUTTER_COLD, rgb(120, 90, 160), 0.1);
+    a.each(T_STRUTTER_FACE, |x, y, r, _| {
+        let eye = y == 5 && (x == 4 || x == 11);
+        let mouth = y == 10 && (4..12).contains(&x);
+        if eye || mouth { rgb(30, 10, 10) } else { shade(rgb(170, 50, 45), r.range(0.9, 1.1)) }
+    });
+    flat(a, T_SNOUT, rgb(225, 150, 140), 0.06);
+    a.each(T_SNOUT_TUNIC, |x, y, r, _| {
+        let trim = y == 0 || y == 15 || x == 7 || x == 8;
+        shade(if trim { rgb(230, 190, 50) } else { rgb(100, 70, 40) }, r.range(0.9, 1.08))
+    });
+    a.each(T_SNOUT_FACE, |x, y, r, _| {
+        let eye = y == 6 && (x == 4 || x == 11);
+        let tusk = y == 12 && (x == 3 || x == 12);
+        if eye { rgb(30, 20, 20) } else if tusk { rgb(240, 240, 220) } else { shade(rgb(225, 150, 140), r.range(0.94, 1.06)) }
+    });
+    flat(a, T_ILLAGER, rgb(150, 155, 150), 0.06);
+    a.each(T_ILLAGER_FACE, |x, y, r, _| {
+        let brow = y == 5 && (3..13).contains(&x);
+        let eye = y == 7 && (x == 4 || x == 5 || x == 10 || x == 11);
+        let mouth = y == 12 && (5..11).contains(&x);
+        if brow { rgb(40, 40, 40) } else if eye { rgb(40, 110, 60) } else if mouth { rgb(70, 60, 60) } else { shade(rgb(150, 155, 150), r.range(0.94, 1.06)) }
+    });
+    flat(a, T_PILFERER_COAT, rgb(85, 70, 60), 0.1);
+    flat(a, T_HACKLER_COAT, rgb(55, 60, 65), 0.1);
+    a.each(T_INVOICER_ROBE, |x, y, r, _| {
+        let trim = x == 7 || x == 8 || y == 15;
+        shade(if trim { rgb(220, 180, 50) } else { rgb(30, 30, 36) }, r.range(0.9, 1.08))
+    });
+    flat(a, T_FEE, rgb(190, 215, 235), 0.08);
+    flat(a, T_RAMPAGER, rgb(80, 80, 78), 0.12);
+    a.each(T_RAMPAGER_FACE, |x, y, r, _| {
+        let eye = y == 5 && (x == 3 || x == 4 || x == 11 || x == 12);
+        let mouth = (10..14).contains(&y) && (4..12).contains(&x);
+        if eye { rgb(220, 40, 30) } else if mouth { rgb(30, 25, 25) } else { shade(rgb(80, 80, 78), r.range(0.88, 1.1)) }
+    });
+    a.each(T_BANNER_WORN, |x, y, r, _| {
+        let mark = (5..11).contains(&x) && (4..12).contains(&y) && ((x as i32 - 7).abs() + (y as i32 - 8).abs()) < 4;
+        shade(if mark { rgb(40, 40, 45) } else { rgb(235, 235, 230) }, r.range(0.94, 1.04))
     });
 }

@@ -56,6 +56,27 @@ pub struct Game {
     pub mobs: Vec<Mob>,
     pub particles: Vec<Particle>,
     pub tnts: Vec<PrimedTnt>,
+    /// Sand, gravel and anvils on their way down (see falling.rs).
+    pub falling: Vec<crate::falling::FallingBlock>,
+    /// Note blocks with Zappy power on them (they play once per pulse).
+    pub powered_notes: HashSet<IVec3>,
+    /// Fireballs in flight (see fortress.rs), and how often cages look around.
+    pub fireballs: Vec<crate::fortress::Fireball>,
+    pub cage_timer: f32,
+    /// Regeneration's heartbeat.
+    pub regen_clock: f32,
+    /// Raids (see raids.rs): the one on now, who has Bad Omen or is a Hero (by player id, seconds left),
+    /// the raid bar as shown (state, wave, waves, left, seconds to keep showing it), and timers.
+    pub raid: Option<crate::raids::Raid>,
+    pub omens: HashMap<u32, f32>,
+    pub heroes: HashMap<u32, f32>,
+    /// Joined players the host knows have Strength on (seconds left).
+    pub strong: HashMap<u32, f32>,
+    pub raid_hud: Option<(u8, u8, u8, u16, f32)>,
+    pub raid_clock: f32,
+    pub patrol_timer: f32,
+    /// Seconds raiders still glow after a Bell rang.
+    pub bell_glow: f32,
     /// Pointy Sticks in flight or stuck in things (owned by the host; clients mirror them).
     pub arrows: Vec<Arrow>,
     pub inv: Inventory,
@@ -289,6 +310,19 @@ impl Game {
             mobs: Vec::new(),
             particles: Vec::new(),
             tnts: Vec::new(),
+            falling: Vec::new(),
+            powered_notes: HashSet::new(),
+            fireballs: Vec::new(),
+            cage_timer: 0.0,
+            regen_clock: 0.0,
+            raid: None,
+            omens: HashMap::new(),
+            heroes: HashMap::new(),
+            strong: HashMap::new(),
+            raid_hud: None,
+            raid_clock: 0.0,
+            patrol_timer: 900.0,
+            bell_glow: 0.0,
             arrows: Vec::new(),
             inv,
             creative,
@@ -1144,7 +1178,7 @@ impl Game {
                 }
                 Cmd::Sound(s, at) => {
                     self.sfx(s, Some(at));
-                    self.net_broadcast(Msg::Sound { sfx: s.to_u8(), at });
+                    self.net_broadcast(Msg::Sound { sfx: s.to_wire(), at });
                 }
             }
         }
@@ -1481,6 +1515,15 @@ impl Game {
             self.player.swing = 1.0;
         }
 
+        // A fireball in the way gets swatted back first (see fortress.rs).
+        if c.attack_pressed && self.attack_cd <= 0.0 && !self.fireballs.is_empty() {
+            let (eye, dir, me) = (self.player.eye(), self.player.look_dir(), self.my_id);
+            if self.deflect_fireball(eye, dir, me) {
+                self.attack_cd = 0.3;
+                self.player.swing = 1.0;
+                return;
+            }
+        }
         match &self.target {
             Some(Target::Vehicle(i)) => {
                 let i = *i;
@@ -1504,7 +1547,8 @@ impl Game {
                     // Early swings are weak; only a full one can crit (see combat.rs).
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
-                    let dmg = attack_damage_with(held, self.held_level(Enchant::Sharpness)) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    let strength = if self.has_effect(crate::potions::Potion::Strength) { crate::potions::STRENGTH_BONUS } else { 0.0 };
+                    let dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
                     self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
@@ -1547,6 +1591,11 @@ impl Game {
                     self.attack_cd = 0.25;
                     self.breaking = None;
                     return;
+                }
+                if c.attack_pressed && crate::music::is_note_block(self.world.get_v(pos)) {
+                    // A tap plays it (as well as starting to break it).
+                    let pitch = crate::music::pitch_of(self.world.get_v(pos));
+                    self.sound_note(pos, pitch);
                 }
                 if c.attack_held {
                     let id = self.world.get_v(pos);
@@ -1656,6 +1705,17 @@ impl Game {
             }
             if let Some(b) = crate::smithing::Bench::of_block(id) {
                 self.open_bench(pos, b);
+                return;
+            }
+            if crate::music::is_note_block(id) {
+                self.tune_note_block(pos);
+                return;
+            }
+            if id == BELL {
+                self.ring_bell(pos);
+                return;
+            }
+            if crate::music::is_jukebox(id) && self.use_jukebox(pos, held) {
                 return;
             }
             if crate::bees::is_hive(id) && matches!(held, GLASS_BOTTLE | SHEARS | BEE_SMOKER | WOOD_ASH | HIVE_TOOL | QUEEN_BEE) {
@@ -2064,6 +2124,8 @@ impl Game {
 
     /// A block broke where the world lives (by anyone): hives, pots and sculk react, and it's heard.
     pub fn block_gone(&mut self, pos: IVec3, old: Id) {
+        self.jukebox_broken(pos, old);
+        self.gold_taken(pos, old);
         if crate::bees::is_hive(old) {
             self.hive_broken(pos, old);
         }
@@ -2141,7 +2203,7 @@ impl Game {
         self.block_particles_tile(pos, block(id).tex[1], n);
     }
 
-    fn block_particles_tile(&mut self, pos: IVec3, tile: u16, n: usize) {
+    pub(crate) fn block_particles_tile(&mut self, pos: IVec3, tile: u16, n: usize) {
         if self.dedicated {
             return;
         }
@@ -2235,6 +2297,9 @@ impl Game {
         self.player.health -= amount;
         self.player.hurt = 0.5;
         self.sfx(Sfx::Hurt, None);
+        if self.player.health <= 0.0 && self.use_totem() {
+            return;
+        }
         if self.player.health <= 0.0 {
             self.player.health = 0.0;
             self.stats.deaths += 1;
@@ -2409,6 +2474,9 @@ impl Game {
         self.beacons_tick(dt);
         self.animals_tick(dt);
         self.critters_tick(dt);
+        self.cages_tick(dt);
+        self.snouts_tick(dt);
+        self.raids_tick(dt);
         self.hmmers_tick(dt);
         self.free_riderless();
         self.tidy_mob_names();
@@ -2451,6 +2519,11 @@ impl Game {
                     MobKind::Sneaker if !m.sitting => noises.push((Sfx::Yip, m.body.pos)),
                     MobKind::Ribbit => noises.push((Sfx::Croak, m.body.pos)),
                     MobKind::Hush => noises.push((Sfx::Roar, m.body.pos)),
+                    MobKind::Weeper => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::Snout | MobKind::Strutter => noises.push((Sfx::Oink, m.body.pos)),
+                    MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => noises.push((Sfx::Hmm, m.body.pos)),
+                    MobKind::Rampager => noises.push((Sfx::Roar, m.body.pos)),
+                    MobKind::Sizzler | MobKind::Fee => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                 }
             }
@@ -2511,6 +2584,9 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(to));
                 }
                 MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
+                MobEvent::Fireball(from, vel, big) => self.spawn_fireball(from, vel, big, mob_id),
+                MobEvent::Fangs(from, to) => self.late_fees(from, to),
+                MobEvent::Summon(at) => self.summon_fees(at),
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
             }
         }
@@ -2521,6 +2597,9 @@ impl Game {
             let far = !m.persistent && (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
+                if m.health <= 0.0 && m.kind.raider() {
+                    self.raider_died(&m);
+                }
                 if m.health <= 0.0 && m.health > -50.0 {
                     let at = m.body.pos + Vec3::Y * 0.5;
                     self.smoke(at, 10, 0.3);
@@ -2546,6 +2625,10 @@ impl Game {
                             MobKind::Soggy => self.advance("soggy"),
                             MobKind::Fishy => self.advance("fishy_business"),
                             MobKind::Hush => self.advance("silence"),
+                            MobKind::Sizzler => self.advance("too_hot"),
+                            MobKind::Weeper => self.advance("dry_your_eyes"),
+                            MobKind::Rampager => self.advance("rampage_over"),
+                            MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                         }
                     }
@@ -2592,6 +2675,8 @@ impl Game {
         for t in self.tnts.iter_mut() {
             t.fuse -= dt;
         }
+        self.falling_tick(dt);
+        self.fireballs_tick(dt);
         let boom: Vec<Vec3> = self.tnts.iter().filter(|t| t.fuse <= 0.0).map(|t| t.pos + Vec3::splat(0.5)).collect();
         self.tnts.retain(|t| t.fuse > 0.0);
         for at in boom {
@@ -2621,15 +2706,17 @@ impl Game {
         }
     }
 
-    pub(crate) fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) {
-        self.alloc_mob_sized(kind, pos, 1);
+    /// A new mob; returns its id.
+    pub(crate) fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) -> u32 {
+        self.alloc_mob_sized(kind, pos, 1)
     }
 
-    fn alloc_mob_sized(&mut self, kind: MobKind, pos: Vec3, size: u8) {
+    fn alloc_mob_sized(&mut self, kind: MobKind, pos: Vec3, size: u8) -> u32 {
         let mut m = Mob::new(kind, pos, &mut self.rng).with_size(size);
         m.id = self.next_mob_id;
         self.next_mob_id += 1;
         self.mobs.push(m);
+        self.next_mob_id - 1
     }
 
     fn try_spawn(&mut self) {
@@ -2766,21 +2853,49 @@ impl Game {
         if !self.world.is_loaded(x, z) || crate::scorch::in_wall(x) || x < crate::scorch::SCORCH_X + 16 {
             return;
         }
-        let y0 = self.rng.int(crate::scorch::LAVA_SEA + 1, CH - 10);
+        let sea = crate::scorch::LAVA_SEA;
+        let kind_count = |g: &Game, k: MobKind| g.mobs.iter().filter(|m| m.kind == k).count();
+        // Strutters stroll on the lava sea.
+        if self.rng.chance(0.2) && is_lava(self.world.get(x, sea, z)) && self.world.get(x, sea + 1, z) == AIR && kind_count(self, MobKind::Strutter) < 6 {
+            for i in 0..self.rng.int(1, 2) {
+                self.alloc_mob(MobKind::Strutter, Vec3::new(x as f32 + 0.5 + i as f32, (sea + 1) as f32, z as f32 + 0.5));
+            }
+            return;
+        }
+        // Weepers drift in the big open spaces.
+        if self.rng.chance(0.15) && kind_count(self, MobKind::Weeper) < 3 {
+            let y = self.rng.int(sea + 8, sea + 24);
+            let open = [(-3, -3), (3, -3), (-3, 3), (3, 3), (0, 0)].iter().all(|&(dx, dz)| (-1..5).all(|dy| self.world.get(x + dx, y + dy, z + dz) == AIR));
+            if open {
+                self.alloc_mob(MobKind::Weeper, Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5));
+                return;
+            }
+        }
+        let y0 = self.rng.int(sea + 1, CH - 10);
         for y in y0..y0 + 12 {
             let floor = self.world.get(x, y - 1, z);
             let clear = (0..3).all(|h| self.world.get(x, y + h, z) == AIR);
-            if matches!(floor, SCORCHROCK | EMBERSAND) && clear {
+            if matches!(floor, SCORCHROCK | EMBERSAND | GILDED_SCORCHROCK | SCORCH_BRICKS) && clear {
                 let at = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
+                // Snouts keep near their camps.
+                let camp = self.world.generator.nearest_site(crate::structures::Kind::SnoutCamp, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0);
                 let roll = self.rng.f32();
-                if roll < 0.6 {
+                if camp && roll < 0.7 {
+                    for i in 0..self.rng.int(1, 3) {
+                        self.alloc_mob(MobKind::Snout, at + Vec3::new(i as f32 * 0.7, 0.0, 0.0));
+                    }
+                } else if roll < 0.45 {
                     for i in 0..self.rng.int(1, 3) {
                         self.alloc_mob(MobKind::Grumbler, at + Vec3::new(i as f32 * 0.7, 0.0, 0.0));
                     }
-                } else if roll < 0.8 {
+                } else if roll < 0.65 {
+                    self.alloc_mob(MobKind::Snout, at);
+                } else if roll < 0.78 {
                     self.alloc_mob_sized(MobKind::Bloop, at, 2);
-                } else {
+                } else if roll < 0.92 {
                     self.alloc_mob(MobKind::Rattler, at);
+                } else {
+                    self.alloc_mob(MobKind::Sizzler, at + Vec3::Y);
                 }
                 return;
             }
@@ -2907,6 +3022,10 @@ impl Game {
         for m in &self.mobs {
             if m.body.pos.distance(eye) < (render_distance * 16) as f32 {
                 m.draw(&mut g, &self.world);
+                // A Bell's ring makes raiders glow (see raids.rs).
+                if self.bell_glow > 0.0 && m.kind.raider() {
+                    m.draw_glow(&mut g, &self.world);
+                }
             }
         }
         // Bees about their business (see bees.rs).
@@ -2978,6 +3097,8 @@ impl Game {
             let sky = self.world.sky_shade(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
+        self.draw_falling(&mut g);
+        self.draw_fireballs(&mut g);
         // Rain, snow and lightning
         if !scorch {
             self.draw_weather(&mut g, eye);
@@ -3612,7 +3733,7 @@ pub(crate) mod tests {
         assert_eq!(g.world.containers[&furnace].slots[INPUT], None);
     }
 
-    fn aim(g: &mut Game, pos: IVec3, normal: IVec3) {
+    pub(crate) fn aim(g: &mut Game, pos: IVec3, normal: IVec3) {
         let dist = (pos.as_vec3() + Vec3::splat(0.5)).distance(g.player.eye());
         g.target = Some(Target::Block(crate::world::Hit { pos, normal, dist }));
     }
@@ -5168,3 +5289,4 @@ fn glide_pose(gliding: bool) -> Mat4 {
     let mid = Vec3::Y * 0.9;
     Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
 }
+

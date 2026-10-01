@@ -39,13 +39,32 @@ pub enum Potion {
     FireResistance,
     NightVision,
     Leaping,
+    /// Sizzle Powder (see fortress.rs): hit harder.
+    Strength,
+    /// A Weeper's Tear: health creeps back.
+    Regeneration,
+    /// Not a potion: what a patrol captain leaves you with (see raids.rs).
+    BadOmen,
+    /// Not a potion: a village's thanks for seeing off a raid (better prices).
+    Hero,
 }
 
+/// The first five, which beacons give (and whose items come first).
 pub const ALL: [Potion; 5] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping];
+/// Everything a brewing stand makes.
+pub const BREWABLE: [Potion; 7] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping, Potion::Strength, Potion::Regeneration];
+/// Every effect, in wire order.
+pub const EFFECTS: [Potion; 9] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping, Potion::Strength, Potion::Regeneration, Potion::BadOmen, Potion::Hero];
+/// Extra melee damage with Strength, and seconds per heart-half with Regeneration.
+pub const STRENGTH_BONUS: f32 = 3.0;
+pub const REGEN_EVERY: f32 = 2.5;
 
 impl Potion {
     pub fn index(self) -> usize {
-        ALL.iter().position(|&p| p == self).unwrap_or(0)
+        BREWABLE.iter().position(|&p| p == self).unwrap_or(0)
+    }
+    pub fn effect_index(self) -> u8 {
+        EFFECTS.iter().position(|&p| p == self).unwrap_or(0) as u8
     }
     pub fn name(self) -> &'static str {
         match self {
@@ -54,6 +73,10 @@ impl Potion {
             Potion::FireResistance => "Fire Resistance",
             Potion::NightVision => "Night Vision",
             Potion::Leaping => "Leaping",
+            Potion::Strength => "Strength",
+            Potion::Regeneration => "Regeneration",
+            Potion::BadOmen => "Bad Omen",
+            Potion::Hero => "Hero of the Village",
         }
     }
     pub fn key(self) -> &'static str {
@@ -63,6 +86,10 @@ impl Potion {
             Potion::FireResistance => "fire_resistance",
             Potion::NightVision => "night_vision",
             Potion::Leaping => "leaping",
+            Potion::Strength => "strength",
+            Potion::Regeneration => "regeneration",
+            Potion::BadOmen => "bad_omen",
+            Potion::Hero => "hero_of_the_village",
         }
     }
     pub fn colour(self) -> [u8; 3] {
@@ -72,6 +99,10 @@ impl Potion {
             Potion::FireResistance => [240, 150, 40],
             Potion::NightVision => [40, 60, 200],
             Potion::Leaping => [120, 230, 90],
+            Potion::Strength => [150, 40, 30],
+            Potion::Regeneration => [230, 120, 200],
+            Potion::BadOmen => [40, 70, 50],
+            Potion::Hero => [90, 220, 90],
         }
     }
     /// What goes in to make it.
@@ -82,6 +113,9 @@ impl Potion {
             Potion::FireResistance => EMBER_SHROOM,
             Potion::NightVision => CARROT,
             Potion::Leaping => FEATHER,
+            Potion::Strength => SIZZLE_POWDER,
+            Potion::Regeneration => WEEPER_TEAR,
+            Potion::BadOmen | Potion::Hero => AIR,
         }
     }
     /// Over at once (healing) rather than lasting.
@@ -92,23 +126,34 @@ impl Potion {
 
 /// A potion item: which, and whether it's a splash one.
 pub fn potion_of(id: Id) -> Option<(Potion, bool)> {
+    let extra = BREWABLE.len() as Id - 5;
     if (POTION_FIRST..POTION_FIRST + 5).contains(&id) {
         Some((ALL[(id - POTION_FIRST) as usize], false))
     } else if (SPLASH_FIRST..SPLASH_FIRST + 5).contains(&id) {
         Some((ALL[(id - SPLASH_FIRST) as usize], true))
+    } else if (POTION_EXTRA_FIRST..POTION_EXTRA_FIRST + extra).contains(&id) {
+        Some((BREWABLE[5 + (id - POTION_EXTRA_FIRST) as usize], false))
+    } else if (SPLASH_EXTRA_FIRST..SPLASH_EXTRA_FIRST + extra).contains(&id) {
+        Some((BREWABLE[5 + (id - SPLASH_EXTRA_FIRST) as usize], true))
     } else {
         None
     }
 }
 
 pub fn potion_item(p: Potion, splash: bool) -> Id {
-    (if splash { SPLASH_FIRST } else { POTION_FIRST }) + p.index() as Id
+    let i = p.index() as Id;
+    match (i < 5, splash) {
+        (true, false) => POTION_FIRST + i,
+        (true, true) => SPLASH_FIRST + i,
+        (false, false) => POTION_EXTRA_FIRST + i - 5,
+        (false, true) => SPLASH_EXTRA_FIRST + i - 5,
+    }
 }
 
 /// What brewing `ingredient` into `bottle` makes.
 pub fn brew(bottle: Id, ingredient: Id) -> Option<Id> {
     if bottle == WATER_BOTTLE {
-        return ALL.iter().find(|p| p.ingredient() == ingredient).map(|&p| potion_item(p, false));
+        return BREWABLE.iter().find(|p| p.ingredient() == ingredient).map(|&p| potion_item(p, false));
     }
     match potion_of(bottle) {
         Some((p, false)) if ingredient == GUNPOWDER => Some(potion_item(p, true)),
@@ -156,6 +201,13 @@ impl Game {
         // What the effects do to the player's body.
         self.player.speed_boost = if self.has_effect(Potion::Speed) { 1.35 } else { 1.0 };
         self.player.leaping = self.has_effect(Potion::Leaping);
+        if self.has_effect(Potion::Regeneration) && self.dead.is_none() {
+            self.regen_clock += dt;
+            if self.regen_clock >= REGEN_EVERY {
+                self.regen_clock = 0.0;
+                self.player.health = (self.player.health + 1.0).min(20.0);
+            }
+        }
     }
 
     /// Right-click with a potion: drink it, or throw it if it's a splash one.
@@ -220,6 +272,9 @@ impl Game {
         let hit: Vec<u32> = self.peers.iter().filter(|(_, q)| q.target.distance(at) < SPLASH_RADIUS).map(|(&id, _)| id).collect();
         for id in hit {
             self.net_send_to(id, Msg::PotionEffect { item: potion_item(p, false) });
+            if p == Potion::Strength {
+                self.strong.insert(id, EFFECT_SECS);
+            }
         }
         if p == Potion::Healing {
             for m in self.mobs.iter_mut().filter(|m| m.body.pos.distance(at) < SPLASH_RADIUS) {

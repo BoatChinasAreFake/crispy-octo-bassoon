@@ -148,7 +148,8 @@ impl Game {
         if m.body.pos.distance(self.player.body.pos) > 8.0 {
             return None;
         }
-        Some((Job::of(m.seed), trades(m.seed)))
+        let hero = self.has_effect(crate::potions::Potion::Hero);
+        Some((Job::of(m.seed), trades(m.seed).into_iter().map(|t| if hero { crate::raids::hero_price(t) } else { t }).collect()))
     }
 
     /// The local player makes trade `index` with the Hmmer they're talking to.
@@ -197,6 +198,7 @@ impl Game {
         let Some(me) = self.peers.get(&from).map(|p| p.target) else { return };
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && m.kind == MobKind::Hmmer && m.body.pos.distance(me) < 8.0) else { return };
         let Some(&t) = trades(m.seed).get(index as usize) else { return };
+        let t = if self.heroes.contains_key(&from) { crate::raids::hero_price(t) } else { t };
         if m.trades_used[(index as usize).min(7)] >= STOCK {
             self.system_message(Some(from), "Hmm. (Out of stock until tomorrow.)");
             return;

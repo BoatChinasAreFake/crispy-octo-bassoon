@@ -231,7 +231,19 @@ pub const GRINDSTONE: Id = 381;
 pub const SMITHING_TABLE: Id = 382;
 /// Deep in the Scorchlands: where Scorchite comes from.
 pub const OLD_DEBRIS: Id = 383;
-pub const NUM_BLOCKS: Id = 384;
+/// Note blocks: `NOTE_BLOCK + pitch` (25 pitches; see music.rs).
+pub const NOTE_BLOCK: Id = 384;
+/// An empty jukebox, then one per disc playing (`JUKEBOX_DISC_FIRST + disc`).
+pub const JUKEBOX: Id = 409;
+pub const JUKEBOX_DISC_FIRST: Id = 410;
+/// The Scorchlands' fortresses and Snout camps (see fortress.rs).
+pub const SCORCH_BRICKS: Id = 418;
+pub const SIZZLER_CAGE: Id = 419;
+pub const GOLD_BLOCK: Id = 420;
+pub const GILDED_SCORCHROCK: Id = 421;
+/// Every village square has one: ring it when the raiders come (see raids.rs).
+pub const BELL: Id = 422;
+pub const NUM_BLOCKS: Id = 423;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -380,7 +392,21 @@ pub const SWORD_SCORCHITE: Id = FIRST_ITEM + 186;
 pub const AXE_SCORCHITE: Id = FIRST_ITEM + 187;
 pub const SHOVEL_SCORCHITE: Id = FIRST_ITEM + 188;
 pub const SCORCHITE_ARMOR_FIRST: Id = FIRST_ITEM + 189;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 193;
+/// Music discs (see songs.rs for what's on them).
+pub const DISC_FIRST: Id = FIRST_ITEM + 193;
+/// The Scorchlands' spoils (see fortress.rs).
+pub const SIZZLE_ROD: Id = FIRST_ITEM + 201;
+pub const SIZZLE_POWDER: Id = FIRST_ITEM + 202;
+pub const WEEPER_TEAR: Id = FIRST_ITEM + 203;
+pub const SHROOM_STICK: Id = FIRST_ITEM + 204;
+/// Potions past the first five: Strength, Regeneration (and their splash versions).
+pub const POTION_EXTRA_FIRST: Id = FIRST_ITEM + 205;
+pub const SPLASH_EXTRA_FIRST: Id = FIRST_ITEM + 207;
+/// Raids (see raids.rs).
+pub const CROSSBOW: Id = FIRST_ITEM + 209;
+pub const TOTEM: Id = FIRST_ITEM + 210;
+pub const OMINOUS_BANNER: Id = FIRST_ITEM + 211;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 212;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -573,6 +599,8 @@ pub enum Shape {
     Hopper { spout: u8 },
     /// A thin sheet three quarters of the way up (the Hollow's portal).
     Sheet,
+    /// A bell hanging from a beam.
+    Bell,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -728,6 +756,7 @@ impl Shape {
                 ([bowl, funnel, tip], 3)
             }
             Shape::Sheet => ([([0.0, 0.7, 0.0], [1.0, 0.75, 1.0]), full, full], 1),
+            Shape::Bell => ([([0.0, 0.8125, 0.4375], [1.0, 0.9375, 0.5625]), ([0.3125, 0.375, 0.3125], [0.6875, 0.8125, 0.6875]), ([0.25, 0.25, 0.25], [0.75, 0.375, 0.75])], 3),
             Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
             Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
             Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
@@ -1526,7 +1555,34 @@ impl Registry {
         blocks.push(grind);
         blocks.push(def("smithing_table", "Smithing Table (Hammer Time)", Cube, true, true, [T_SMITHING_TOP, T_SMITHING_SIDE, T_PLANKS], 2.5, 0, false, SMITHING_TABLE, 0.0, S_WOOD));
         blocks.push(def("old_debris", "Old Debris (Ancient, Stubborn)", Cube, true, true, [T_OLD_DEBRIS_TOP, T_OLD_DEBRIS_SIDE, T_OLD_DEBRIS_TOP], 15.0, 3, true, OLD_DEBRIS, 0.0, S_STONE));
+        // Music (see music.rs): a note block per pitch, a jukebox per disc.
+        for p in 0..crate::songs::PITCHES as u16 {
+            let key = if p == 0 { "note_block".to_string() } else { format!("note_block_{p}") };
+            let name = if p == 0 { "Note Block (Plinky)".to_string() } else { format!("Note Block (Plinky, Note {p})") };
+            let mut d = def(leak(&key), leak(&name), Cube, true, true, [T_NOTE_BLOCK; 3], 0.8, 0, false, NOTE_BLOCK, 0.0, S_WOOD);
+            d.creative = p == 0;
+            blocks.push(d);
+        }
+        blocks.push(def("jukebox", "Jukebox (Plays Your Jams)", Cube, true, true, [T_JUKEBOX_TOP, T_JUKEBOX_SIDE, T_JUKEBOX_SIDE], 2.0, 0, false, JUKEBOX, 0.0, S_WOOD));
+        for (key, title) in crate::songs::DISCS {
+            let mut d = def(leak(&format!("jukebox_{}", &key[11..])), leak(&format!("Jukebox (Playing {title})")), Cube, true, true, [T_JUKEBOX_TOP, T_JUKEBOX_SIDE, T_JUKEBOX_SIDE], 2.0, 0, false, JUKEBOX, 0.0, S_WOOD);
+            d.creative = false;
+            blocks.push(d);
+        }
+        // The Scorchlands' fortresses and camps.
+        blocks.push(def("scorch_bricks", "Scorch Bricks (Grim Masonry)", Cube, true, true, [T_SCORCH_BRICKS; 3], 2.0, 1, true, SCORCH_BRICKS, 0.0, S_STONE));
+        let mut cage = def("sizzler_cage", "Sizzler Cage (Spawns Trouble)", Cube, true, false, [T_CAGE; 3], 5.0, 1, true, AIR, 3.0, S_STONE);
+        cage.see_through = true;
+        blocks.push(cage);
+        blocks.push(def("gold_block", "Gold Block (Shiny, Still Useless)", Cube, true, true, [T_GOLD_BLOCK; 3], 3.0, 2, true, GOLD_BLOCK, 0.0, S_STONE));
+        blocks.push(def("gilded_scorchrock", "Gilded Scorchrock (Snout Chic)", Cube, true, true, [T_GILDED; 3], 1.5, 1, true, GILDED_SCORCHROCK, 0.0, S_STONE));
+        let mut bell = def("bell", "Bell (Ding Dong)", Shaped, true, false, [T_BELL; 3], 5.0, 1, true, BELL, 0.0, S_STONE);
+        bell.shape = Shape::Bell;
+        blocks.push(bell);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
+        debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
+        debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
+        debug_assert_eq!(blocks[BELL as usize].key, "bell");
         debug_assert_eq!(blocks[HOLLOW_BOX as usize].key, "hollow_box");
         debug_assert_eq!(blocks[FROGLIGHT_FIRST as usize].key, "ochre_froglight");
         debug_assert_eq!(blocks[DEEPSLATE as usize].key, "deepslate");
@@ -1726,6 +1782,22 @@ impl Registry {
             let key = ["scorchite_helmet", "scorchite_chestplate", "scorchite_leggings", "scorchite_boots"][slot];
             items.push(ItemDef { stack: 1, ..item(key, name, T_SCORCHITE_ARMOR_ITEMS + slot as u16) });
         }
+        for (i, (key, title)) in crate::songs::DISCS.into_iter().enumerate() {
+            items.push(ItemDef { stack: 1, ..item(key, leak(&format!("Music Disc ({title})")), T_DISC_FIRST + i as u16) });
+        }
+        items.push(item("sizzle_rod", "Sizzle Rod (Still Warm)", T_SIZZLE_ROD));
+        items.push(item("sizzle_powder", "Sizzle Powder (Do Not Sniff)", T_SIZZLE_POWDER));
+        items.push(item("weeper_tear", "Weeper Tear (It Was Sad)", T_WEEPER_TEAR));
+        items.push(ItemDef { stack: 1, ..item("shroom_on_a_stick", "Ember Shroom on a Stick (Steering Snack)", T_SHROOM_STICK) });
+        for (i, (key, name)) in [("potion_strength", "Potion of Strength (Flex)"), ("potion_regeneration", "Potion of Regeneration (Get Well Soon)")].into_iter().enumerate() {
+            items.push(ItemDef { stack: 1, ..item(key, name, T_POTION_EXTRA + i as u16) });
+        }
+        for (i, (key, name)) in [("splash_potion_strength", "Splash Potion of Strength (Flex for Everyone)"), ("splash_potion_regeneration", "Splash Potion of Regeneration (Group Hug)")].into_iter().enumerate() {
+            items.push(ItemDef { stack: 1, ..item(key, name, T_SPLASH_EXTRA + i as u16) });
+        }
+        items.push(ItemDef { stack: 1, damage: 3.0, ..item("crossbow", "Crossbow (Pre-Loaded Opinions)", T_CROSSBOW) });
+        items.push(ItemDef { stack: 1, ..item("totem_of_undying", "Totem of Not Dying (Once)", T_TOTEM) });
+        items.push(item("ominous_banner", "Ominous Banner (Looks Important)", T_BANNER));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -1905,6 +1977,17 @@ impl Registry {
         recipes.push(r(&[(ECHO_SHARD, 8), (COMPASS, 1)], (RECOVERY_COMPASS, 1)));
         recipes.push(r(&[(STICK, 2), (STONE, 1), (PLANKS, 2)], (GRINDSTONE, 1)));
         recipes.push(r(&[(IRON, 2), (PLANKS, 4)], (SMITHING_TABLE, 1)));
+        // Music, the Scorchlands, raids.
+        recipes.push(r(&[(PLANKS, 8), (ZAP_DUST, 1)], (NOTE_BLOCK, 1)));
+        recipes.push(r(&[(PLANKS, 8), (DIAMOND, 1)], (JUKEBOX, 1)));
+        recipes.push(r(&[(SIZZLE_ROD, 1)], (SIZZLE_POWDER, 2)));
+        recipes.push(r(&[(PEARL, 1), (SIZZLE_POWDER, 1)], (STARING_EYE, 2)));
+        recipes.push(r(&[(ROD, 1), (EMBER_SHROOM, 1)], (SHROOM_STICK, 1)));
+        recipes.push(r(&[(GOLD_INGOT, 9)], (GOLD_BLOCK, 1)));
+        recipes.push(r(&[(GOLD_BLOCK, 1)], (GOLD_INGOT, 9)));
+        recipes.push(r(&[(SCORCHROCK, 4)], (SCORCH_BRICKS, 2)));
+        recipes.push(r(&[(GOLD_BLOCK, 1), (STICK, 2)], (BELL, 1)));
+        recipes.push(r(&[(STICK, 3), (STRING, 2), (IRON, 1)], (CROSSBOW, 1)));
         recipes.push(r(&[(SCORCHITE_SCRAP, 4), (GOLD_INGOT, 4)], (SCORCHITE_INGOT, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
 
