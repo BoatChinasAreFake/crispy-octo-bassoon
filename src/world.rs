@@ -62,7 +62,7 @@ impl Chunk {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Biome {
     Plains,
     Forest,
@@ -254,7 +254,7 @@ pub struct Generator {
     moist: Perlin,
     cave_a: Perlin,
     cave_b: Perlin,
-    cavern: Perlin,
+    pub(crate) cavern: Perlin,
     /// The Scorchlands' caverns (see scorch.rs).
     pub(crate) scorch: Perlin,
     /// Mod world generation, copied from the registry when the world is created.
@@ -494,6 +494,31 @@ impl Generator {
                         }
                     }
                 }
+                // The Deep Dark (see deepdark.rs): deepslate, wide caverns, sculk that listens.
+                if h > crate::deepdark::DEEP_TOP + 6 && self.deep_dark(x, z) {
+                    let top = crate::deepdark::DEEP_TOP;
+                    for y in 1..top {
+                        let i = idx(lx, y, lz);
+                        match b[i] {
+                            BEDROCK => continue,
+                            STONE => b[i] = DEEPSLATE,
+                            LAVA => b[i] = AIR,
+                            _ => {}
+                        }
+                        if self.deep_cavern(x, y, z) {
+                            b[i] = AIR;
+                        }
+                    }
+                    for y in 2..top {
+                        let (i, below) = (idx(lx, y, lz), idx(lx, y - 1, lz));
+                        if b[i] == AIR && matches!(b[below], DEEPSLATE | STONE) && self.sculk_patch(x, y, z) {
+                            b[below] = SCULK;
+                            if let Some(f) = crate::deepdark::sculk_feature(hash3(s ^ 0x5C, x, y, z)) {
+                                b[i] = f;
+                            }
+                        }
+                    }
+                }
                 // Cave decorations: glowing mushrooms and pointy rocks on floors, pointy rocks on ceilings.
                 for y in 3..(h - 4).max(3) {
                     if b[idx(lx, y, lz)] != AIR {
@@ -513,8 +538,10 @@ impl Generator {
                 let top = h + 1;
                 if top < CH && b[idx(lx, h, lz)] == GRASS && b[idx(lx, top, lz)] == AIR {
                     let r = hash2(s ^ 0xF10, x, z);
-                    if r < 0.012 {
-                        b[idx(lx, top, lz)] = FLOWER;
+                    // Meadows: patches of plains and forest thick with flowers (bees love them).
+                    let meadow = matches!(biome, Biome::Plains | Biome::Forest) && hash2(s ^ 0xF12, x >> 4, z >> 4) < 0.15;
+                    if r < 0.012 || (meadow && r < 0.07) {
+                        b[idx(lx, top, lz)] = flower_for(biome, hash2(s ^ 0xF11, x >> 1, z >> 1));
                     } else if r < 0.11 {
                         b[idx(lx, top, lz)] = TALL_GRASS;
                     } else if r < 0.1125 && biome == Biome::Plains {
@@ -591,6 +618,15 @@ impl Generator {
                         b[i] = id;
                     }
                 }
+                // Some oaks in flowery places have a bee nest hanging off the trunk.
+                if kind == TreeKind::Oak && hash2(s ^ 0xBEE, tx, tz) < 0.07 && matches!(self.column(tx, tz).1, Biome::Plains | Biome::Forest) {
+                    let side = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z][(hash2(s ^ 0xBEF, tx, tz) * 4.0) as usize % 4];
+                    let p = base + side + IVec3::Y * (trunk - 2).max(2);
+                    let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
+                    if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (0..CH).contains(&p.y) && matches!(b[idx(lx, p.y, lz)], AIR | LEAVES) {
+                        b[idx(lx, p.y, lz)] = BEE_NEST;
+                    }
+                }
                 // Roots: dirt under the trunk (swamp trees stand in water on it).
                 let (lx, lz) = (tx - cx * CW, tz - cz * CW);
                 if (0..CW).contains(&lx) && (0..CW).contains(&lz) {
@@ -602,6 +638,18 @@ impl Generator {
         self.place_crypts(cx, cz, &mut b);
         b
     }
+}
+
+/// Which flower grows here, from a 0..1 roll (patchy, so flowers come in clumps).
+pub fn flower_for(biome: Biome, r: f32) -> Id {
+    let list: &[Id] = match biome {
+        Biome::Plains => &[FLOWER, DANDELION, DANDELION, CORNFLOWER, LAVENDER],
+        Biome::Forest => &[FLOWER, DANDELION, LAVENDER],
+        Biome::Taiga => &[CORNFLOWER, LAVENDER],
+        Biome::Swamp => &[CORNFLOWER, FLOWER],
+        _ => &[FLOWER, DANDELION],
+    };
+    list[(r * list.len() as f32) as usize % list.len()]
 }
 
 pub struct Hit {

@@ -279,6 +279,7 @@ impl Game {
         }
         let me = self.player.body.pos;
         let mut got = Vec::new();
+        let mut found = Vec::new();
         for d in self.drops.iter_mut() {
             if !d.can_pick_up() || reach(me, d.body.pos) > PICKUP_RANGE {
                 continue;
@@ -290,12 +291,17 @@ impl Game {
             self.inv.add_worn(d.item, room, d.wear);
             d.n -= room;
             got.push(d.item);
+            found.push((d.item, d.wear));
             if d.item == HOLLOW_BOX && crate::boxes::box_id(d.wear) != 0 {
                 got.push(AIR);
             }
         }
         if got.contains(&AIR) {
             self.advance("boxed_in");
+        }
+        // Finds go in the Field Journal (see archaeology.rs).
+        for (item, wear) in found {
+            self.journal_pickup(item, wear);
         }
         if !got.is_empty() {
             self.drops.retain(|d| d.n > 0);

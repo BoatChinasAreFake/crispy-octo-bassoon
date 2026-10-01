@@ -8,10 +8,10 @@
 
 use crate::block::*;
 
-/// Speeds by tier: wood, stone, copper, iron, dimond.
-pub const SPEEDS: [f32; 5] = [2.0, 4.0, 5.0, 6.0, 8.0];
+/// Speeds by tier: wood, stone, copper, iron, dimond, and Scorchite (see smithing.rs).
+pub const SPEEDS: [f32; 6] = [2.0, 4.0, 5.0, 6.0, 8.0, 9.0];
 /// Uses by tier (copper's is between stone and iron).
-pub const USES: [u16; 5] = [59, 131, 190, 250, 1561];
+pub const USES: [u16; 6] = [59, 131, 190, 250, 1561, 2031];
 pub const TIER_NAMES: [(&str, &str); 5] = [("wooden", "Wooden"), ("stone", "Stone"), ("copper", "Copper"), ("iron", "Iron"), ("diamond", "Dimond")];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -23,10 +23,16 @@ pub enum Tool {
 
 /// Tier index (0 wood .. 4 dimond) of an axe.
 pub fn axe_tier(id: Id) -> Option<usize> {
+    if id == AXE_SCORCHITE {
+        return Some(5);
+    }
     (AXE_FIRST..AXE_FIRST + 5).contains(&id).then(|| (id - AXE_FIRST) as usize)
 }
 
 pub fn shovel_tier(id: Id) -> Option<usize> {
+    if id == SHOVEL_SCORCHITE {
+        return Some(5);
+    }
     (SHOVEL_FIRST..SHOVEL_FIRST + 5).contains(&id).then(|| (id - SHOVEL_FIRST) as usize)
 }
 
@@ -56,6 +62,8 @@ pub fn speed(held: Id, kind: Tool) -> Option<f32> {
         Tool::Pick => {
             if held == PICK_COPPER {
                 2
+            } else if held == PICK_SCORCHITE {
+                5
             } else {
                 // Base and mod pickaxes: tier 1..4 is wood..dimond.
                 let t = pick_tier(held) as usize;
@@ -73,6 +81,9 @@ pub fn speed(held: Id, kind: Tool) -> Option<f32> {
 pub fn tool_uses(id: Id) -> Option<u16> {
     if let Some(t) = axe_tier(id).or_else(|| shovel_tier(id)) {
         return Some(USES[t]);
+    }
+    if matches!(id, PICK_SCORCHITE | SWORD_SCORCHITE) {
+        return Some(USES[5]);
     }
     matches!(id, PICK_COPPER | SWORD_COPPER).then_some(USES[2])
 }

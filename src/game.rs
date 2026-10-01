@@ -238,6 +238,30 @@ pub struct Game {
     learn_timer: f32,
     /// Right-clicked a crafting table: the app opens the inventory.
     pub at_table: bool,
+    /// Beekeeping (see bees.rs): every colony by its nest or hive, the log,
+    /// the hive clock, and the bees buzzing about for show.
+    pub hives: HashMap<IVec3, crate::bees::Colony>,
+    pub bee_log: crate::bees::BeeLog,
+    pub hive_timer: f32,
+    pub buzz: Vec<crate::bees::Buzz>,
+    pub buzz_scan: f32,
+    /// Archaeology (see archaeology.rs): the brushing in progress, the Field
+    /// Journal, and a request to show it.
+    pub dig: Option<crate::archaeology::Dig>,
+    pub journal: crate::archaeology::Journal,
+    pub open_journal: bool,
+    /// The Deep Dark (see deepdark.rs): seconds of darkness on screen, sensors
+    /// switched on (seconds left), the shriekers' cooldown, each player's
+    /// warnings (count, seconds until forgotten), and the footstep clock.
+    pub darkness: f32,
+    pub sensors_on: HashMap<IVec3, f32>,
+    pub shriek_cd: f32,
+    pub warnings: HashMap<u32, (u8, f32)>,
+    pub step_timer: f32,
+    /// The grindstone or smithing table screen's inputs while it's open (see smithing.rs).
+    pub bench: Option<crate::smithing::BenchUi>,
+    /// Where the local player last died (for the Recovery Compass).
+    pub last_death: Option<Vec3>,
 }
 
 impl Game {
@@ -380,6 +404,21 @@ impl Game {
             pinned: None,
             learn_timer: 0.0,
             at_table: false,
+            hives: HashMap::new(),
+            bee_log: Default::default(),
+            hive_timer: 0.0,
+            buzz: Vec::new(),
+            buzz_scan: 0.0,
+            dig: None,
+            journal: Default::default(),
+            open_journal: false,
+            darkness: 0.0,
+            sensors_on: HashMap::new(),
+            shriek_cd: 0.0,
+            warnings: HashMap::new(),
+            step_timer: 0.0,
+            bench: None,
+            last_death: None,
         }
     }
 
@@ -555,9 +594,17 @@ impl Game {
 
     /// The save's named sections (see save.rs): each module packs its own.
     fn save_extras(&self) -> Vec<(String, Vec<u8>)> {
-        let mut v = vec![("known".to_string(), crate::crafting::encode_known(&self.known).into_bytes())];
+        let mut v = vec![
+            ("known".to_string(), crate::crafting::encode_known(&self.known).into_bytes()),
+            ("hives".to_string(), crate::bees::encode(&self.hives)),
+            ("bee_log".to_string(), self.bee_log.encode()),
+            ("journal".to_string(), self.journal.encode()),
+        ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
+        }
+        if let Some(d) = self.last_death {
+            v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).collect()));
         }
         v
     }
@@ -571,6 +618,20 @@ impl Game {
         if let Some(b) = extra("pinned").and_then(|b| b.get(..4)) {
             let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
             self.pinned = (p < recipes().len()).then_some(p);
+        }
+        if let Some(b) = extra("hives") {
+            self.hives = crate::bees::decode(b);
+        }
+        if let Some(b) = extra("bee_log") {
+            self.bee_log = crate::bees::BeeLog::decode(b);
+        }
+        if let Some(b) = extra("journal") {
+            self.journal = crate::archaeology::Journal::decode(b);
+        }
+        if let Some(b) = extra("last_death").filter(|b| b.len() >= 12) {
+            let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+            let p = Vec3::new(f(0), f(4), f(8));
+            self.last_death = p.is_finite().then_some(p);
         }
     }
 
@@ -820,6 +881,8 @@ impl Game {
         self.weather_tick(dt);
         self.liquid_tick(dt);
         self.zap_tick(dt);
+        self.deep_dark_tick(dt);
+        self.buzz_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
         self.effects_tick(dt);
         self.explore_advancements(dt);
@@ -901,6 +964,7 @@ impl Game {
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
         self.update_fishing(dt, c.use_held);
+        self.update_brushing(dt, c.use_held);
         self.inventory_sync_tick(dt);
         self.learn_timer -= dt;
         if self.learn_timer <= 0.0 {
@@ -1545,8 +1609,8 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
-        // Goo waxes copper so it stops ageing.
-        if held == GOO
+        // Goo (or honeycomb) waxes copper so it stops ageing.
+        if matches!(held, GOO | HONEYCOMB)
             && let Some(Target::Block(h)) = &self.target
         {
             let pos = h.pos;
@@ -1583,6 +1647,27 @@ impl Game {
             }
             if id == ENCHANTING_TABLE {
                 self.open_enchanting(pos);
+                return;
+            }
+            if let Some(b) = crate::smithing::Bench::of_block(id) {
+                self.open_bench(pos, b);
+                return;
+            }
+            if crate::bees::is_hive(id) && matches!(held, GLASS_BOTTLE | SHEARS | BEE_SMOKER | WOOD_ASH | HIVE_TOOL | QUEEN_BEE) {
+                self.use_on_hive(pos, held);
+                return;
+            }
+            if id == RESTORATION_BENCH && held == ENCRUSTED_RELIC {
+                self.use_restoration(pos);
+                return;
+            }
+            if held == TORCHFLOWER_SEEDS && matches!(id, GRASS | DIRT | FARMLAND | FARMLAND_WET | MUD) && self.world.get_v(pos + IVec3::Y) == AIR {
+                self.world.set_v(pos + IVec3::Y, TORCHFLOWER_SPROUT);
+                self.sfx(Sfx::Place(crate::sound::Mat::Grass), Some(pos.as_vec3() + Vec3::splat(0.5)));
+                self.player.swing = 1.0;
+                if !self.creative {
+                    self.inv.consume_held();
+                }
                 return;
             }
         }
@@ -1656,6 +1741,23 @@ impl Game {
         }
         if held == ROCKET {
             self.use_rocket();
+            return;
+        }
+        if self.use_find(held) {
+            return;
+        }
+        if held == RECOVERY_COMPASS {
+            match self.last_death {
+                Some(d) => {
+                    let v = d - self.player.body.pos;
+                    let dist = Vec3::new(v.x, 0.0, v.z).length();
+                    self.msg(format!("The needle points {} : your last mistake is {:.0} blocks away.", crate::archaeology::compass_word(v), dist));
+                }
+                None => self.msg("The needle spins. You haven't died here yet. Congratulations?"),
+            }
+            return;
+        }
+        if self.eat_honey(held) {
             return;
         }
         if held == SPEAR {
@@ -1872,6 +1974,7 @@ impl Game {
         if !self.is_client() {
             self.spill_container(pos);
             self.spill_frame(pos);
+            self.block_gone(pos, id);
         }
         self.world.set_v(pos, AIR);
         self.sfx(Sfx::Break(material(id)), Some(pos.as_vec3() + Vec3::splat(0.5)));
@@ -1889,6 +1992,9 @@ impl Game {
         if id == ICE && !self.creative {
             self.world.set_v(pos, WATER);
             self.msg("The ice melted. Science!");
+        }
+        if crate::archaeology::is_suspicious(id) {
+            self.msg("You dug it up instead of brushing it. Whatever was inside crumbled. Archaeologists everywhere wince.");
         }
         if drops && !self.creative {
             // Drops land where the world lives; joined players' come from the host
@@ -1935,6 +2041,31 @@ impl Game {
             }
             q += IVec3::Y;
         }
+    }
+
+    /// Tell everyone how the local player died.
+    fn announce_death(&mut self, cause: &str) {
+        let line = format!("{} {cause}", self.player_name);
+        if self.is_client() {
+            self.net_send_msg(Msg::Died { cause: cause.to_string() });
+        } else {
+            self.system_message(None, &line);
+            self.chat_log.push_back(line);
+            while self.chat_log.len() > 100 {
+                self.chat_log.pop_front();
+            }
+        }
+    }
+
+    /// A block broke where the world lives (by anyone): hives, pots and sculk react, and it's heard.
+    pub fn block_gone(&mut self, pos: IVec3, old: Id) {
+        if crate::bees::is_hive(old) {
+            self.hive_broken(pos, old);
+        }
+        if crate::archaeology::is_pot(old) {
+            self.pot_broken(pos, old);
+        }
+        self.vibrate(pos.as_vec3() + Vec3::splat(0.5), None);
     }
 
     /// Carry out mod-defined behaviour (see MODDING.md).
@@ -2102,7 +2233,9 @@ impl Game {
         if self.player.health <= 0.0 {
             self.player.health = 0.0;
             self.stats.deaths += 1;
-            self.dead = Some(format!("Stove {cause}"));
+            self.last_death = Some(self.player.body.pos);
+            self.dead = Some(format!("{} {cause}", self.player_name));
+            self.announce_death(cause);
             // Everything falls out of your pockets, unless the world says otherwise.
             // (Joined players' experience is spilled by the host when it sees them die.)
             if !self.rules.keep_inventory {
@@ -2270,6 +2403,7 @@ impl Game {
         self.clankers_tick(dt);
         self.beacons_tick(dt);
         self.animals_tick(dt);
+        self.critters_tick(dt);
         self.hmmers_tick(dt);
         self.free_riderless();
         self.tidy_mob_names();
@@ -2308,7 +2442,11 @@ impl Game {
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Soggy => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Squawker => noises.push((Sfx::Squawk, m.body.pos)),
-                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy => {}
+                    MobKind::Bee => noises.push((Sfx::Buzz, m.body.pos)),
+                    MobKind::Sneaker if !m.sitting => noises.push((Sfx::Yip, m.body.pos)),
+                    MobKind::Ribbit => noises.push((Sfx::Croak, m.body.pos)),
+                    MobKind::Hush => noises.push((Sfx::Roar, m.body.pos)),
+                    MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                 }
             }
         }
@@ -2347,6 +2485,10 @@ impl Game {
                     }
                 }
                 MobEvent::HurtPlayer(d, cause) => {
+                    if cause.starts_with("was stung") {
+                        self.bee_log.stings += 1;
+                        self.advance("bee_careful");
+                    }
                     let me = crate::players::record_key(&self.player_name);
                     self.sic_pets(&me, mob_id);
                     let d = self.rules.difficulty.mob_damage(d);
@@ -2364,6 +2506,7 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(to));
                 }
                 MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
+                MobEvent::Shush(from) => self.shush(from, target_id, target),
             }
         }
         self.update_arrows(dt);
@@ -2397,7 +2540,8 @@ impl Game {
                             MobKind::Bloop => self.advance("split_decision"),
                             MobKind::Soggy => self.advance("soggy"),
                             MobKind::Fishy => self.advance("fishy_business"),
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker => {}
+                            MobKind::Hush => self.advance("silence"),
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -2411,6 +2555,8 @@ impl Game {
                     }
                     let points = m.kind.xp_value(m.size, &mut self.rng);
                     self.spawn_orbs(m.body.pos + Vec3::Y * 0.5, points);
+                    self.sculk_spread(at, points);
+                    self.vibrate(at, None);
                     let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
                     for (item, n) in drops.into_iter().flatten() {
                         if !self.creative {
@@ -2456,6 +2602,7 @@ impl Game {
             self.try_spawn();
         }
         self.farm_tick(dt);
+        self.hive_tick(dt);
         self.trees_tick(dt);
         self.random_ticks(dt);
         self.hollow_tick(dt);

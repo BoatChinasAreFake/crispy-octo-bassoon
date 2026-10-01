@@ -27,6 +27,13 @@ pub enum Kind {
     Village,
     /// A spire on one of the Hollow's outer islands (see hollow.rs).
     Spire,
+    /// Dig sites (see archaeology.rs): buried under desert sand, forest
+    /// floors and warm sea beds.
+    DesertRuins,
+    TrailRuins,
+    OceanRuins,
+    /// The Hushed Ones' city, deep in the Deep Dark (see deepdark.rs).
+    HushedCity,
 }
 
 impl Kind {
@@ -38,7 +45,32 @@ impl Kind {
             Kind::Well => "Wishing Well (Doesn't Grant)",
             Kind::Village => "Village (Actually a Village)",
             Kind::Spire => "Hollow Spire (Loot at the Top of the World)",
+            Kind::DesertRuins => "Desert Ruins (Bring a Brush)",
+            Kind::TrailRuins => "Trail Ruins (Muddy, Historic)",
+            Kind::OceanRuins => "Ocean Ruins (Damp History)",
+            Kind::HushedCity => "Hushed City (Tiptoe)",
         }
+    }
+
+    /// Names /locate understands.
+    pub fn from_name(s: &str) -> Option<Kind> {
+        Some(match s.to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
+            "dungeon" => Kind::Dungeon,
+            "tower" | "ruined_tower" => Kind::Tower,
+            "hut" => Kind::Hut,
+            "well" => Kind::Well,
+            "village" => Kind::Village,
+            "desert_ruins" | "desert_ruin" => Kind::DesertRuins,
+            "trail_ruins" | "trail_ruin" => Kind::TrailRuins,
+            "ocean_ruins" | "ocean_ruin" => Kind::OceanRuins,
+            "hushed_city" | "city" | "ancient_city" => Kind::HushedCity,
+            _ => return None,
+        })
+    }
+
+    /// Wide enough that it reaches two chunks out.
+    fn wide(self) -> bool {
+        matches!(self, Kind::Village | Kind::HushedCity)
     }
 }
 
@@ -80,6 +112,10 @@ impl Generator {
         if hash2(s ^ 0x7111, cx, cz) < 0.02 && biome == Biome::Plains && h > SEA + 1 && h < CH - 30 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
+        // The Hushed Ones built rarely, and only in the Deep Dark.
+        if hash2(s ^ 0xC17, cx, cz) < 0.035 && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
+            return Some(Site { kind: Kind::HushedCity, origin: ivec3(ox, crate::deepdark::CITY_Y, oz), facing, seed });
+        }
         let kind = if r < 0.055 {
             if h < 30 || biome == Biome::Ocean {
                 return None;
@@ -89,8 +125,14 @@ impl Generator {
             Kind::Hut
         } else if r < 0.085 && matches!(biome, Biome::Plains | Biome::Forest | Biome::Snowy) && h > SEA + 1 && h < CH - 20 && flat() {
             Kind::Tower
+        } else if biome == Biome::Desert && h > SEA + 1 && r < 0.075 {
+            Kind::DesertRuins
         } else if biome == Biome::Desert && h > SEA + 1 && flat() {
             Kind::Well
+        } else if matches!(biome, Biome::Forest | Biome::Taiga | Biome::Jungle | Biome::Plains) && h > SEA + 1 && r >= 0.085 && flat() {
+            Kind::TrailRuins
+        } else if biome == Biome::Ocean && h < SEA - 4 && h > 8 && r < 0.09 {
+            Kind::OceanRuins
         } else {
             return None;
         };
@@ -123,6 +165,8 @@ impl Generator {
         match site.kind {
             // Built by the Hollow's own generator.
             Kind::Spire => {}
+            Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => return ruin_blocks(site),
+            Kind::HushedCity => return crate::deepdark::city_blocks(site),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -358,7 +402,7 @@ impl Generator {
         for dz in -2..=2 {
             for dx in -2..=2 {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };
-                if (dx.abs() == 2 || dz.abs() == 2) && site.kind != Kind::Village {
+                if (dx.abs() == 2 || dz.abs() == 2) && !site.kind.wide() {
                     continue;
                 }
                 for (p, id) in self.site_blocks(&site) {
@@ -395,13 +439,38 @@ impl Generator {
         for dz in -2..=2 {
             for dx in -2..=2 {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };
-                if (dx.abs() == 2 || dz.abs() == 2) && site.kind != Kind::Village {
+                if (dx.abs() == 2 || dz.abs() == 2) && !site.kind.wide() {
                     continue;
                 }
                 v.push((site, self.site_blocks(&site)));
             }
         }
         v
+    }
+
+    /// The nearest `kind` of site to `from`, searching rings of chunks out to `radius`.
+    pub fn nearest_site(&self, kind: Kind, from: macroquad::math::Vec3, radius: i32) -> Option<IVec3> {
+        let (cx, cz) = ((from.x as i32).div_euclid(CW), (from.z as i32).div_euclid(CW));
+        for r in 0..=radius {
+            let mut best: Option<(f32, IVec3)> = None;
+            for dz in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dz.abs()) != r {
+                        continue;
+                    }
+                    if let Some(site) = self.site(cx + dx, cz + dz).filter(|s| s.kind == kind) {
+                        let d = site.origin.as_vec3().distance(from);
+                        if best.is_none_or(|(b, _)| d < b) {
+                            best = Some((d, site.origin));
+                        }
+                    }
+                }
+            }
+            if let Some((_, p)) = best {
+                return Some(p);
+            }
+        }
+        None
     }
 
     /// Villages that reach into chunk (cx, cz).
@@ -460,6 +529,22 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (GOLDEN_CHOP, 1, 0.2),
             (OBSIDIAN, 8, 0.3),
         ],
+        // Ruins have no chests: their treasure is in the ground.
+        Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => &[(ANCIENT_COIN, 4, 0.8)],
+        Kind::HushedCity => &[
+            (ECHO_SHARD, 3, 0.6),
+            (UPGRADE_TEMPLATE, 1, 0.3),
+            (ENCHANTED_BOOK, 1, 0.35),
+            (DIAMOND, 2, 0.3),
+            (SCULK_SENSOR, 2, 0.3),
+            (SOUL_LANTERN, 3, 0.4),
+            (BONE, 6, 0.5),
+            (COAL, 8, 0.5),
+            (GOLDEN_CHOP, 1, 0.2),
+            (ARMOR_FIRST + 8 + LEGGINGS as Id, 1, 0.2),
+            (RECOVERY_COMPASS, 1, 0.08),
+            (DIAMOND_BRUSH, 1, 0.1),
+        ],
     };
     let mut free: Vec<usize> = (0..c.slots.len()).collect();
     for &(item, most, chance) in table {
@@ -476,10 +561,13 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
 
 /// Tools and armour in chests are used, and sometimes enchanted.
 fn loot_wear(item: Id, kind: Kind, rng: &mut Rng) -> Wear {
+    if item == ENCHANTED_BOOK {
+        return crate::enchant::random_book(rng);
+    }
     let Some(max) = durability(item) else { return 0 };
     let used = rng.range(0.1, 0.7) * max as f32;
     let power = match kind {
-        Kind::Spire => 20,
+        Kind::Spire | Kind::HushedCity => 20,
         Kind::Dungeon => 15,
         Kind::Tower => 10,
         _ => 5,
@@ -578,4 +666,56 @@ mod tests {
         let (lx, lz) = (o.x - cx * CW, o.z - cz * CW);
         assert_eq!(blocks[crate::world::idx(lx, o.y, lz)], PLANKS, "the hut floor");
     }
+}
+
+/// A buried ruin: walls sunk into the ground (a few stones poking up give it
+/// away) and fill hiding suspicious blocks, more of them the deeper you go.
+fn ruin_blocks(site: &Site) -> Vec<(IVec3, Id)> {
+    let o = site.origin;
+    let s = site.seed;
+    let mut out = Vec::new();
+    let (wall, fill, sus, floor): (&[Id], Id, Id, Id) = match site.kind {
+        Kind::DesertRuins => (&[SANDSTONE, SANDSTONE, TERRACOTTA + 1], SAND, SUSPICIOUS_SAND, SANDSTONE),
+        Kind::TrailRuins => (&[TERRACOTTA, TERRACOTTA + 2, BRICK, MUD, TERRACOTTA + 3], GRAVEL, SUSPICIOUS_GRAVEL, BRICK),
+        _ => (&[STONE_BRICKS, MOSSY_COBBLE, STONE_BRICKS], SAND, SUSPICIOUS_SAND, STONE_BRICKS),
+    };
+    let ocean = site.kind == Kind::OceanRuins;
+    // Two overlapping rooms, so the footprint isn't just a square.
+    let rooms = [(0, 0, 4 + (s % 2) as i32), (3 + (s % 3) as i32, -2 - (s % 2) as i32, 3)];
+    let inside = |x: i32, z: i32| rooms.iter().any(|&(rx, rz, r)| (x - rx).abs() < r && (z - rz).abs() < r);
+    let on_wall = |x: i32, z: i32| !inside(x, z) && rooms.iter().any(|&(rx, rz, r)| (x - rx).abs() <= r && (z - rz).abs() <= r);
+    let depth = if ocean { 4 } else { 8 };
+    for x in -8..=10 {
+        for z in -8..=8 {
+            let (wall_here, in_here) = (on_wall(x, z), inside(x, z));
+            if !wall_here && !in_here {
+                continue;
+            }
+            for y in -depth..=2 {
+                let p = ivec3(o.x + x, o.y + y, o.z + z);
+                let r = hash3(s, x, y, z);
+                if y == -depth {
+                    out.push((p, floor));
+                } else if wall_here {
+                    // Ruined: underground it's whole, above ground just a stub here and there.
+                    let keep = if ocean { y <= 1 && r < 0.75 } else { y < 0 || (y == 0 && r < 0.35) || (y == 1 && r < 0.12) };
+                    if keep {
+                        out.push((p, wall[(hash3(s ^ 9, x, y, z) * wall.len() as f32) as usize % wall.len()]));
+                    }
+                } else if y < 0 {
+                    // Fill, with finds; deeper fill hides more.
+                    let chance = 0.05 + (-y) as f32 * 0.012;
+                    out.push((p, if r < chance { sus } else { fill }));
+                } else if ocean && y == 0 && r < 0.08 {
+                    out.push((p, sus));
+                }
+            }
+            // The odd pot left standing at the bottom of a room.
+            if in_here && hash3(s ^ 0x907, x, 0, z) < 0.04 {
+                let shard = 1 + (hash3(s ^ 0x908, x, 0, z) * 12.0) as Id % 12;
+                out.push((ivec3(o.x + x, o.y - depth + 1, o.z + z), POT_FIRST + shard));
+            }
+        }
+    }
+    out
 }

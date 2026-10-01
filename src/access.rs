@@ -48,6 +48,16 @@ pub fn caption(s: Sfx) -> Option<&'static str> {
         Sfx::Snip => "Shears snip",
         Sfx::Hmm => "Hmmer hmms",
         Sfx::Squawk => "Squawker squawks",
+        Sfx::Buzz => "Bees buzz",
+        Sfx::Brush => "Brushing",
+        Sfx::Sculk => "Sculk clicks",
+        Sfx::Shriek => "Shrieker shrieks",
+        Sfx::Roar => "The Hush roars",
+        Sfx::Shush => "The Hush SHUSHES",
+        Sfx::Grind => "Grindstone grinds",
+        Sfx::Yip => "Sneaker yips",
+        Sfx::Croak => "Ribbit croaks",
+        Sfx::Scuttle => "Rollo scuttles",
     })
 }
 

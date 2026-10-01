@@ -339,11 +339,106 @@ pub const T_SWORD_COPPER: u16 = 432;
 /// Copper armour items (helmet .. boots), and how it looks when worn.
 pub const T_COPPER_ARMOR_ITEMS: u16 = 433;
 pub const T_COPPER_ARMOR_WORN: u16 = 437;
+// Beekeeping.
+pub const T_NEST_TOP: u16 = 438;
+pub const T_NEST_SIDE: u16 = 439;
+pub const T_NEST_HONEY_SIDE: u16 = 440;
+pub const T_HIVE_TOP: u16 = 441;
+pub const T_HIVE_SIDE: u16 = 442;
+pub const T_HIVE_BUSY_SIDE: u16 = 443;
+pub const T_HIVE_HONEY_SIDE: u16 = 444;
+pub const T_HONEY_BLOCK_TOP: u16 = 445;
+pub const T_HONEY_BLOCK_SIDE: u16 = 446;
+pub const T_DANDELION: u16 = 447;
+pub const T_CORNFLOWER: u16 = 448;
+pub const T_LAVENDER: u16 = 449;
+pub const T_TORCH_SPROUT: u16 = 450;
+pub const T_TORCHFLOWER: u16 = 451;
+/// Five honey bottles in a row.
+pub const T_HONEY_FIRST: u16 = 452;
+pub const T_HONEYCOMB: u16 = 457;
+pub const T_SMOKER: u16 = 458;
+pub const T_HIVE_TOOL: u16 = 459;
+pub const T_QUEEN: u16 = 460;
+pub const T_BEE: u16 = 461;
+pub const T_BEE_FACE: u16 = 462;
+pub const T_BEE_WING: u16 = 463;
+pub const T_TORCH_SEEDS: u16 = 464;
+// New animals (see critters.rs) and the Hush (deepdark.rs).
+pub const T_FOX: u16 = 465;
+pub const T_FOX_FACE: u16 = 466;
+pub const T_FOX_TAIL: u16 = 467;
+pub const T_FOX_DARK: u16 = 468;
+pub const T_FROG: u16 = 469;
+pub const T_FROG_FACE: u16 = 470;
+pub const T_FROG_EYE: u16 = 471;
+pub const T_SHELL: u16 = 472;
+pub const T_ROLLO_SKIN: u16 = 473;
+pub const T_ROLLO_FACE: u16 = 474;
+pub const T_HUSH: u16 = 475;
+pub const T_HUSH_FACE: u16 = 476;
+pub const T_HUSH_GLOW: u16 = 477;
+/// Three froglights in a row.
+pub const T_FROGLIGHT: u16 = 478;
+pub const T_SCUTE: u16 = 481;
+pub const T_WOLF_ARMOR_ITEM: u16 = 482;
+pub const T_WOLF_ARMOR_WORN: u16 = 483;
+// The Deep Dark (see deepdark.rs).
+pub const T_DEEPSLATE: u16 = 484;
+pub const T_DEEPSLATE_TOP: u16 = 485;
+pub const T_COBBLED_DEEPSLATE: u16 = 486;
+pub const T_DEEPSLATE_BRICKS: u16 = 487;
+pub const T_DEEPSLATE_TILES: u16 = 488;
+pub const T_REINFORCED_SIDE: u16 = 489;
+pub const T_REINFORCED_TOP: u16 = 490;
+pub const T_SCULK: u16 = 491;
+pub const T_SENSOR_TOP: u16 = 492;
+pub const T_SENSOR_SIDE: u16 = 493;
+pub const T_SENSOR_ACTIVE_TOP: u16 = 494;
+pub const T_SHRIEKER_TOP: u16 = 495;
+pub const T_SHRIEKER_SIDE: u16 = 496;
+pub const T_CATALYST_TOP: u16 = 497;
+pub const T_CATALYST_SIDE: u16 = 498;
+pub const T_SOUL_LANTERN: u16 = 499;
+// Archaeology (see archaeology.rs).
+pub const T_SUS_SAND: u16 = 500;
+pub const T_SUS_GRAVEL: u16 = 501;
+pub const T_BENCH_TOP: u16 = 502;
+pub const T_BENCH_SIDE: u16 = 503;
+pub const T_POT_TOP: u16 = 504;
+/// Thirteen pot sides: plain, then one per shard.
+pub const T_POT_SIDE_FIRST: u16 = 505;
+// Grinding and smithing (see smithing.rs).
+pub const T_GRINDSTONE_SIDE: u16 = 518;
+pub const T_GRINDSTONE_TOP: u16 = 519;
+pub const T_SMITHING_TOP: u16 = 520;
+pub const T_SMITHING_SIDE: u16 = 521;
+pub const T_OLD_DEBRIS_SIDE: u16 = 522;
+pub const T_OLD_DEBRIS_TOP: u16 = 523;
+pub const T_BRUSH: u16 = 524;
+pub const T_DIAMOND_BRUSH: u16 = 525;
+pub const T_JOURNAL: u16 = 526;
+/// Twelve shards, then twelve relics.
+pub const T_SHARD_FIRST: u16 = 527;
+pub const T_RELIC_FIRST: u16 = 539;
+pub const T_ENCRUSTED: u16 = 551;
+pub const T_MAP_FRAGMENT: u16 = 552;
+pub const T_COIN: u16 = 553;
+pub const T_TABLET: u16 = 554;
+pub const T_ECHO_SHARD: u16 = 555;
+pub const T_RECOVERY_COMPASS: u16 = 556;
+pub const T_SCRAP: u16 = 557;
+pub const T_SCORCHITE_INGOT: u16 = 558;
+pub const T_TEMPLATE: u16 = 559;
+/// Pickaxe, sword, axe, shovel.
+pub const T_SCORCHITE_TOOLS: u16 = 560;
+pub const T_SCORCHITE_ARMOR_ITEMS: u16 = 564;
+pub const T_SCORCHITE_ARMOR_WORN: u16 = 568;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
-/// keeps the first 512 tiles; mods look textures up by name, so this can move).
-pub const FIRST_MOD_TILE: u16 = 512;
+/// keeps the first 1024 tiles; mods look textures up by name, so this can move).
+pub const FIRST_MOD_TILE: u16 = 1024;
 
 /// Names mods can use to refer to built-in textures.
 pub const BASE_TEXTURES: &[(&str, u16)] = &[
@@ -2887,6 +2982,9 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     });
 
     paint_new_things(&mut a);
+    paint_bees(&mut a);
+    paint_critters(&mut a);
+    paint_ancient(&mut a);
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));
@@ -3438,4 +3536,780 @@ fn paint_new_things(a: &mut Atlas) {
     }
     a.each(T_SOGGY_SHIRT, |x, y, r, _| shade(if (x * 7 + y * 3) % 11 == 0 { rgb(60, 110, 60) } else { rgb(90, 120, 150) }, r.range(0.85, 1.05)));
     a.each(T_SOGGY_PANTS, |x, y, r, _| shade(if (x + y) % 9 == 0 { rgb(60, 100, 60) } else { rgb(70, 80, 120) }, r.range(0.85, 1.05)));
+}
+
+const BOTTLE_SPRITE: [&str; 16] = [
+    "................",
+    "......####......",
+    "......#cc#......",
+    ".......##.......",
+    "......#..#......",
+    ".....#hhhh#.....",
+    "....#hhhhhh#....",
+    "....#hbbbbb#....",
+    "....#bbbbbb#....",
+    "....#bbbbbd#....",
+    "....#bbbbdd#....",
+    "....#bbbddd#....",
+    ".....#dddd#.....",
+    "......####......",
+    "................",
+    "................",
+];
+
+const SMOKER_SPRITE: [&str; 16] = [
+    "........ss.s....",
+    ".......s..s.....",
+    "........ss......",
+    "......#nn#......",
+    ".....#nnnn#.....",
+    ".....#iiii#.....",
+    "....#iiiiii#....",
+    "....#ihiiii#....",
+    "....#ihiiii#....",
+    "....#iiiiii#..##",
+    "....#iiiiii#.#ww",
+    "....#iiiiii##www",
+    "....#iiiiii#wwww",
+    ".....######.#ww.",
+    "..............#.",
+    "................",
+];
+
+const HIVE_TOOL_SPRITE: [&str; 16] = [
+    "................",
+    "............##..",
+    "...........#hh#.",
+    "..........#hhh#.",
+    ".........#hhh#..",
+    "........#hhh#...",
+    ".......#hhh#....",
+    "......#hhh#.....",
+    ".....#hhh#......",
+    "....#hhh#.......",
+    "...#rrr#........",
+    "..#rrr#.........",
+    ".#rrr#..........",
+    ".#rr#...........",
+    "..##............",
+    "................",
+];
+
+const QUEEN_SPRITE: [&str; 16] = [
+    "......####......",
+    ".....#cccc#.....",
+    "......####......",
+    ".....#....#.....",
+    "....#......#....",
+    "....#.k.k..#....",
+    "....#.kkk..#....",
+    "....#wyyyw.#....",
+    "....#.kkk..#....",
+    "....#.yyy..#....",
+    "....#.kkk..#....",
+    "....#..y...#....",
+    "....#......#....",
+    ".....######.....",
+    "................",
+    "................",
+];
+
+const SEEDS_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    "......o.........",
+    "....o....o......",
+    "........o.......",
+    "...o..o.....o...",
+    ".......o..o.....",
+    "....o......o....",
+    "......o.o.......",
+    "..o.........o...",
+    ".....o...o......",
+    "........o.......",
+    "................",
+    "................",
+    "................",
+];
+
+/// Nests, hives, honey, flowers and the bees themselves.
+fn paint_bees(a: &mut Atlas) {
+    // A wild nest: a papery, stripy cylinder in tree colours.
+    a.each(T_NEST_TOP, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        let ring = (d as usize).is_multiple_of(3);
+        shade(if ring { rgb(170, 125, 60) } else { rgb(205, 165, 85) }, r.range(0.9, 1.05))
+    });
+    for (tile, drip) in [(T_NEST_SIDE, false), (T_NEST_HONEY_SIDE, true)] {
+        a.each(tile, move |x, y, r, _| {
+            let band = y % 4 == 0;
+            let hole = (6..10).contains(&x) && (7..10).contains(&y);
+            let honey = drip && ((x == 7 && y >= 10 && y <= 13) || (x == 8 && y >= 10 && y <= 11) || hole);
+            if honey {
+                return shade(rgb(245, 175, 30), r.range(0.95, 1.08));
+            }
+            if hole {
+                return rgb(40, 25, 10);
+            }
+            shade(if band { rgb(160, 115, 55) } else { rgb(210, 170, 90) }, r.range(0.9, 1.05))
+        });
+    }
+    // A crafted hive: planks with a landing board and an entrance.
+    a.each(T_HIVE_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let grain = (y * 5 + x / 4) % 7 == 0;
+        shade(if rim { rgb(120, 85, 45) } else if grain { rgb(170, 125, 70) } else { rgb(195, 150, 90) }, r.range(0.92, 1.05))
+    });
+    for (tile, state) in [(T_HIVE_SIDE, 0), (T_HIVE_BUSY_SIDE, 1), (T_HIVE_HONEY_SIDE, 2)] {
+        a.each(tile, move |x, y, r, _| {
+            let rim = x == 0 || x == 15;
+            let slat = y % 5 == 0;
+            let door = (5..11).contains(&x) && (9..11).contains(&y);
+            let board = (3..13).contains(&x) && y == 11;
+            if door {
+                // Busy: a bee or two in the doorway.
+                let bee = state >= 1 && (x == 6 || x == 9);
+                return if bee { rgb(240, 200, 40) } else { rgb(35, 22, 10) };
+            }
+            if board {
+                return shade(rgb(140, 100, 55), r.range(0.95, 1.05));
+            }
+            if state == 2 && (y >= 12 && (x == 4 || x == 11) && y <= 14) {
+                return shade(rgb(245, 170, 25), r.range(0.95, 1.08));
+            }
+            shade(if rim || slat { rgb(150, 105, 55) } else { rgb(200, 155, 95) }, r.range(0.92, 1.05))
+        });
+    }
+    // Honey block: amber, see-through-ish, with a lighter middle.
+    a.each(T_HONEY_BLOCK_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let inner = (3..13).contains(&x) && (3..13).contains(&y);
+        let mut c = shade(if rim { rgb(215, 130, 15) } else if inner { rgb(250, 190, 50) } else { rgb(240, 160, 30) }, r.range(0.95, 1.05));
+        c[3] = 215;
+        c
+    });
+    a.copy(T_HONEY_BLOCK_TOP, T_HONEY_BLOCK_SIDE);
+    // Flowers: a yellow puff, a blue star, a purple spike.
+    let stem = rgb(55, 130, 35);
+    a.each(T_DANDELION, move |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 5.0).powi(2)).sqrt();
+        if d < 3.2 {
+            shade(rgb(250, 215, 40), r.range(0.88, 1.08))
+        } else if (x == 7 || x == 8) && y > 7 || (x == 9 && y == 11) || (x == 10 && y == 10) {
+            stem
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_CORNFLOWER, move |x, y, r, _| {
+        let (dx, dy) = (x as i32 - 7, y as i32 - 5);
+        let petal = (dx.abs() <= 3 && dy == 0) || (dy.abs() <= 3 && dx == 0) || (dx.abs() == dy.abs() && dx.abs() <= 2);
+        if dx == 0 && dy == 0 {
+            rgb(30, 30, 90)
+        } else if petal {
+            shade(rgb(70, 110, 230), r.range(0.85, 1.1))
+        } else if x == 7 && y > 8 || (x == 6 && y == 12) {
+            stem
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_LAVENDER, move |x, y, r, _| {
+        let spike = |cx: usize, top: usize| x.abs_diff(cx) <= 1 && y >= top && y < top + 7 && (y + x) % 2 == 0;
+        if spike(5, 2) || spike(10, 3) || spike(8, 1) {
+            shade(rgb(165, 110, 215), r.range(0.85, 1.1))
+        } else if (x == 5 && y >= 9) || (x == 10 && y >= 10) || (x == 8 && y >= 8) {
+            stem
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_TORCH_SPROUT, move |x, y, _, _| {
+        if (x == 7 || x == 8) && y >= 10 {
+            stem
+        } else if (y == 9 && (5..11).contains(&x)) || (y == 8 && (x == 5 || x == 10)) {
+            rgb(80, 160, 50)
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_TORCHFLOWER, move |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 4.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        if d < 1.6 {
+            rgb(255, 245, 160)
+        } else if d < 3.6 && dy < 1.5 {
+            shade(if d < 2.6 { rgb(255, 170, 40) } else { rgb(230, 80, 30) }, r.range(0.9, 1.1))
+        } else if (x == 7 || x == 8) && y > 7 || (y == 11 && (5..11).contains(&x)) {
+            stem
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    // Honey bottles: a glass bottle filled with each flavour's colour.
+    for (i, f) in crate::bees::Flavour::ALL.iter().enumerate() {
+        let c = f.colour();
+        let col = rgb(c[0], c[1], c[2]);
+        a.sprite(T_HONEY_FIRST + i as u16, &BOTTLE_SPRITE, &[('#', rgb(70, 60, 50)), ('c', rgb(150, 110, 70)), ('h', shade(col, 1.2)), ('b', col), ('d', shade(col, 0.75))]);
+    }
+    // Honeycomb: hexagons.
+    a.each(T_HONEYCOMB, |x, y, r, _| {
+        let (cx, cy) = (x as f32 - 7.5, y as f32 - 7.5);
+        if cx.abs() > 6.5 || cy.abs() > 6.0 || (cx.abs() + cy.abs() * 0.6) > 8.0 {
+            return [0, 0, 0, 0];
+        }
+        let row = y / 4;
+        let col = (x + if row % 2 == 1 { 2 } else { 0 }) / 4;
+        let edge = y % 4 == 0 || (x + if row % 2 == 1 { 2 } else { 0 }) % 4 == 0;
+        let _ = col;
+        shade(if edge { rgb(200, 130, 20) } else { rgb(250, 195, 60) }, r.range(0.92, 1.06))
+    });
+    a.sprite(T_SMOKER, &SMOKER_SPRITE, &[('#', rgb(50, 40, 30)), ('n', rgb(120, 120, 125)), ('i', rgb(170, 170, 175)), ('h', rgb(220, 220, 225)), ('w', rgb(160, 110, 60)), ('s', rgb(200, 200, 200))]);
+    a.sprite(T_HIVE_TOOL, &HIVE_TOOL_SPRITE, &[('#', rgb(40, 40, 45)), ('h', rgb(200, 200, 205)), ('r', rgb(190, 40, 40))]);
+    a.sprite(T_QUEEN, &QUEEN_SPRITE, &[('#', rgb(150, 180, 190)), ('c', rgb(160, 110, 60)), ('k', rgb(30, 25, 20)), ('y', rgb(245, 200, 40)), ('w', rgb(220, 235, 245))]);
+    a.sprite(T_TORCH_SEEDS, &SEEDS_SPRITE, &[('o', rgb(170, 90, 40))]);
+    // The bee: yellow with black stripes, a face, and see-through wings.
+    a.each(T_BEE, |x, _, r, _| shade(if (x / 3) % 2 == 1 { rgb(40, 30, 20) } else { rgb(240, 195, 40) }, r.range(0.92, 1.05)));
+    a.each(T_BEE_FACE, |x, y, r, _| {
+        if (y == 6 || y == 7) && (x == 4 || x == 5 || x == 10 || x == 11) {
+            rgb(20, 15, 30)
+        } else if y >= 12 && (6..10).contains(&x) {
+            rgb(60, 40, 20)
+        } else {
+            shade(rgb(240, 195, 40), r.range(0.92, 1.05))
+        }
+    });
+    a.each(T_BEE_WING, |x, y, _, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        if rim { [200, 230, 255, 230] } else { [215, 240, 255, 150] }
+    });
+}
+
+const SCUTE_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "................",
+    ".....######.....",
+    "....#hhhhhh#....",
+    "...#hbbbbbbh#...",
+    "...#bbdbbdbb#...",
+    "...#bbbbbbbb#...",
+    "...#bdbbdbbd#...",
+    "...#bbbbbbbb#...",
+    "....#bbdbbb#....",
+    ".....#dddd#.....",
+    "......####......",
+    "................",
+    "................",
+    "................",
+];
+
+const WOLF_ARMOR_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "..##............",
+    ".#hh#...........",
+    ".#bb############",
+    ".#bbhhhhhhhhhhb#",
+    "..#bbbdbbdbbdbb#",
+    "..#bbbbbbbbbbbb#",
+    "..#bdbbdbbdbbdb#",
+    "..#bbbbbbbbbbbb#",
+    "..##bb#####bb###",
+    "...#bb#...#bb#..",
+    "...#bb#...#bb#..",
+    "...####...####..",
+    "................",
+    "................",
+];
+
+/// Sneakers, Ribbits, Rollos, the Hush and their bits.
+fn paint_critters(a: &mut Atlas) {
+    let orange = rgb(220, 110, 40);
+    a.each(T_FOX, move |_, _, r, _| shade(orange, r.range(0.9, 1.06)));
+    a.each(T_FOX_FACE, move |x, y, r, _| {
+        if (y == 5 || y == 6) && (x == 3 || x == 4 || x == 11 || x == 12) {
+            rgb(25, 20, 15)
+        } else if y >= 9 && (3..13).contains(&x) {
+            shade(rgb(245, 240, 230), r.range(0.95, 1.03))
+        } else {
+            shade(orange, r.range(0.9, 1.06))
+        }
+    });
+    a.each(T_FOX_TAIL, move |_, y, r, _| shade(if y < 5 { rgb(245, 240, 230) } else { orange }, r.range(0.9, 1.06)));
+    a.each(T_FOX_DARK, |_, _, r, _| shade(rgb(60, 35, 25), r.range(0.9, 1.08)));
+    let green = rgb(110, 150, 60);
+    a.each(T_FROG, move |x, y, r, _| shade(if (x * 3 + y * 5) % 11 == 0 { rgb(85, 120, 45) } else { green }, r.range(0.9, 1.06)));
+    a.each(T_FROG_FACE, move |x, y, r, _| {
+        if y == 11 && (2..14).contains(&x) {
+            rgb(60, 40, 30)
+        } else if y > 11 {
+            shade(rgb(215, 200, 140), r.range(0.95, 1.03))
+        } else {
+            shade(green, r.range(0.9, 1.06))
+        }
+    });
+    a.each(T_FROG_EYE, |x, y, _, _| if (5..11).contains(&x) && (5..11).contains(&y) { rgb(20, 20, 20) } else { rgb(230, 200, 60) });
+    a.each(T_SHELL, |x, y, r, _| {
+        let band = y % 4 == 0;
+        let plate = (x + (y / 4) * 2) % 4 == 0;
+        shade(if band || plate { rgb(140, 85, 70) } else { rgb(200, 130, 110) }, r.range(0.92, 1.05))
+    });
+    a.each(T_ROLLO_SKIN, |_, _, r, _| shade(rgb(215, 160, 140), r.range(0.92, 1.05)));
+    a.each(T_ROLLO_FACE, |x, y, r, _| {
+        if y == 6 && (x == 4 || x == 11) {
+            rgb(20, 15, 15)
+        } else if y >= 11 && (6..10).contains(&x) {
+            rgb(120, 70, 60)
+        } else {
+            shade(rgb(215, 160, 140), r.range(0.92, 1.05))
+        }
+    });
+    a.each(T_HUSH, |x, y, r, p| {
+        let n = p.noise3(x as f32 * 0.4, y as f32 * 0.4, 7.0);
+        shade(if n > 0.25 { rgb(25, 70, 80) } else { rgb(15, 40, 50) }, r.range(0.9, 1.06))
+    });
+    a.each(T_HUSH_FACE, |x, y, r, _| {
+        // No eyes at all: a gaping jaw.
+        if y >= 9 && y <= 12 && (3..13).contains(&x) {
+            if y == 9 || y == 12 { rgb(200, 230, 225) } else { rgb(5, 15, 20) }
+        } else {
+            shade(rgb(15, 40, 50), r.range(0.9, 1.06))
+        }
+    });
+    a.each(T_HUSH_GLOW, |_, _, r, _| shade(rgb(70, 220, 230), r.range(0.85, 1.1)));
+    // Froglights: pale, glowing, with soft panels.
+    for (i, c) in [[245, 225, 150], [200, 240, 180], [235, 200, 235]].into_iter().enumerate() {
+        a.each(T_FROGLIGHT + i as u16, move |x, y, r, _| {
+            let rim = x == 0 || y == 0 || x == 15 || y == 15 || x == 8 || y == 8;
+            shade(rgb(c[0], c[1], c[2]), r.range(0.95, 1.04) * if rim { 0.82 } else { 1.0 })
+        });
+    }
+    let shell = [('#', rgb(80, 50, 40)), ('h', rgb(230, 160, 140)), ('b', rgb(200, 130, 110)), ('d', rgb(140, 85, 70))];
+    a.sprite(T_SCUTE, &SCUTE_SPRITE, &shell);
+    a.sprite(T_WOLF_ARMOR_ITEM, &WOLF_ARMOR_SPRITE, &shell);
+    a.each(T_WOLF_ARMOR_WORN, |x, y, r, _| {
+        let plate = (x % 5 == 0) || (y % 4 == 0);
+        shade(if plate { rgb(140, 85, 70) } else { rgb(200, 130, 110) }, r.range(0.92, 1.05))
+    });
+}
+
+const BRUSH_SPRITE: [&str; 16] = [
+    "................",
+    "............###.",
+    "...........#ttt#",
+    "..........#ttt#.",
+    ".........#hhh#..",
+    "........#hhh#...",
+    ".......#sss#....",
+    "......#sss#.....",
+    ".....#sss#......",
+    "....#sss#.......",
+    "...#sss#........",
+    "..#ss#..........",
+    ".#ss#...........",
+    ".##.............",
+    "................",
+    "................",
+];
+
+const JOURNAL_SPRITE: [&str; 16] = [
+    "................",
+    "..###########...",
+    "..#ccccccccc#...",
+    "..#cpppppppc##..",
+    "..#cplllllpc#w..",
+    "..#cpppppppc#w..",
+    "..#cplllllpc#w..",
+    "..#cpppppppc#w..",
+    "..#cplllpppc#w..",
+    "..#cpppppppc#w..",
+    "..#cplllllpc#w..",
+    "..#cpppppppc#w..",
+    "..#ccccccccc#...",
+    "..###########...",
+    "................",
+    "................",
+];
+
+const SHARD_SPRITE: [&str; 16] = [
+    "................",
+    "....#######.....",
+    "...#bbbbbbb##...",
+    "..#bbbbbbbbbb#..",
+    "..#bbbbbbbbbbb#.",
+    "..#bbbbbbbbbbb#.",
+    "..#bbbbbbbbbbb#.",
+    "..#bbbbbbbbbbb#.",
+    "..#bbbbbbbbbbb#.",
+    "..#bbbbbbbbbb#..",
+    "...#bbbbbbbbb#..",
+    "...#bbbbbbbb#...",
+    "....#bbbbbb#....",
+    ".....######.....",
+    "................",
+    "................",
+];
+
+const COIN_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    ".....######.....",
+    "....#hhhhhh#....",
+    "...#hbbbbbbh#...",
+    "..#hbbddddbbd#..",
+    "..#hbdbbbbdbd#..",
+    "..#hbdbbbbdbd#..",
+    "..#hbdbbbbdbd#..",
+    "..#hbbddddbbd#..",
+    "...#bbbbbbbd#...",
+    "....#dddddd#....",
+    ".....######.....",
+    "................",
+    "................",
+    "................",
+];
+
+const TABLET_SPRITE: [&str; 16] = [
+    "................",
+    "....########....",
+    "...#bbbbbbbb#...",
+    "...#bddbdbdb#...",
+    "...#bbbbbbbb#...",
+    "...#bdbddbdb#...",
+    "...#bbbbbbbb#...",
+    "...#bddbbdbb#...",
+    "...#bbbbbbbb#...",
+    "...#bdbdbddb#...",
+    "...#bbbbbbbb#...",
+    "...#bddbdbbb#...",
+    "...#bbbbbbbb#...",
+    "....########....",
+    "................",
+    "................",
+];
+
+const FRAGMENT_SPRITE: [&str; 16] = [
+    "................",
+    "...######.......",
+    "..#pppppp##.....",
+    "..#ppprpppp##...",
+    "..#pppprppppp#..",
+    "..#ppppprpppp#..",
+    "..#ppppppxpp#...",
+    "..#pppppppp#....",
+    "..#ppgggppp#....",
+    "..#pggpgggpp#...",
+    "..#ppppppppp#...",
+    "...#pppppp##....",
+    "....######......",
+    "................",
+    "................",
+    "................",
+];
+
+const ECHO_SPRITE: [&str; 16] = [
+    "................",
+    "........#.......",
+    ".......#h#......",
+    "......#hbh#.....",
+    ".....#hbbbd#....",
+    "....#hbbbbbd#...",
+    "....#bbbbbbd#...",
+    "....#bbbbbdd#...",
+    ".....#bbbdd#....",
+    "......#bdd#.....",
+    ".......#d#......",
+    "........#.......",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
+const TEMPLATE_SPRITE: [&str; 16] = [
+    "................",
+    "..############..",
+    "..#dddddddddd#..",
+    "..#dbbbbbbbbd#..",
+    "..#dbhhhhhhbd#..",
+    "..#dbhrrrrhbd#..",
+    "..#dbhrbbrhbd#..",
+    "..#dbhrbbrhbd#..",
+    "..#dbhrrrrhbd#..",
+    "..#dbhhhhhhbd#..",
+    "..#dbbbbbbbbd#..",
+    "..#dddddddddd#..",
+    "..############..",
+    "................",
+    "................",
+    "................",
+];
+
+/// Deepslate and sculk, dig sites and their finds, Scorchite.
+fn paint_ancient(a: &mut Atlas) {
+    // Deepslate: dark grey with vertical streaks.
+    a.each(T_DEEPSLATE, |x, y, r, p| {
+        let n = p.noise3(x as f32 * 0.9, y as f32 * 0.15, 3.0);
+        shade(rgb(78, 78, 84), r.range(0.9, 1.05) * if n > 0.2 { 0.82 } else { 1.0 })
+    });
+    a.each(T_DEEPSLATE_TOP, |x, y, r, _| {
+        let ring = ((x as i32 - 7).abs().max((y as i32 - 7).abs())) % 4 == 0;
+        shade(rgb(78, 78, 84), r.range(0.9, 1.05) * if ring { 0.85 } else { 1.0 })
+    });
+    let pts = a.random_points(9);
+    a.each(T_COBBLED_DEEPSLATE, move |x, y, r, _| {
+        let (_, edge) = Atlas::cells(&pts, x, y);
+        shade(rgb(70, 70, 76), r.range(0.9, 1.08) * if edge < 1.0 { 0.65 } else { 1.0 })
+    });
+    a.each(T_DEEPSLATE_BRICKS, |x, y, r, _| {
+        let row = y / 4;
+        let mortar = y % 4 == 3 || (x + if row % 2 == 1 { 4 } else { 0 }) % 8 == 7;
+        shade(if mortar { rgb(45, 45, 50) } else { rgb(85, 85, 92) }, r.range(0.92, 1.05))
+    });
+    a.each(T_DEEPSLATE_TILES, |x, y, r, _| {
+        let mortar = y % 4 == 3 || x % 4 == 3;
+        shade(if mortar { rgb(40, 40, 45) } else { rgb(70, 70, 78) }, r.range(0.92, 1.05))
+    });
+    a.each(T_REINFORCED_SIDE, |x, y, r, _| {
+        let band = y <= 2 || y >= 13;
+        let rivet = band && x % 5 == 2 && (y == 1 || y == 14);
+        shade(if rivet { rgb(200, 200, 190) } else if band { rgb(110, 105, 95) } else { rgb(60, 62, 70) }, r.range(0.92, 1.05))
+    });
+    a.each(T_REINFORCED_TOP, |x, y, r, _| {
+        let rim = x <= 1 || y <= 1 || x >= 14 || y >= 14;
+        shade(if rim { rgb(110, 105, 95) } else { rgb(60, 62, 70) }, r.range(0.92, 1.05))
+    });
+    // Sculk: deep teal-black with glowing cyan flecks.
+    a.each(T_SCULK, |x, y, r, p| {
+        let n = p.noise3(x as f32 * 0.5, y as f32 * 0.5, 11.0);
+        if n > 0.42 {
+            shade(rgb(60, 200, 210), r.range(0.85, 1.1))
+        } else {
+            shade(rgb(12, 30, 40), r.range(0.85, 1.15))
+        }
+    });
+    for (tile, lit) in [(T_SENSOR_TOP, false), (T_SENSOR_ACTIVE_TOP, true)] {
+        a.each(tile, move |x, y, r, _| {
+            let tendril = (x == 4 || x == 11) && (3..13).contains(&y);
+            let rim = x == 0 || y == 0 || x == 15 || y == 15;
+            if tendril {
+                if lit { rgb(140, 255, 250) } else { rgb(60, 190, 200) }
+            } else if rim {
+                rgb(20, 45, 55)
+            } else {
+                shade(rgb(15, 50, 60), r.range(0.85, 1.1))
+            }
+        });
+    }
+    a.each(T_SENSOR_SIDE, |x, y, r, _| {
+        let top = y < 8;
+        let tendril = top && (x == 4 || x == 11) && y >= 2;
+        if tendril {
+            rgb(60, 190, 200)
+        } else if top {
+            [0, 0, 0, 0]
+        } else {
+            shade(rgb(15, 50, 60), r.range(0.85, 1.1))
+        }
+    });
+    a.each(T_SHRIEKER_TOP, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 3.0 {
+            rgb(10, 15, 20)
+        } else if d < 5.0 {
+            shade(rgb(220, 215, 190), r.range(0.9, 1.05))
+        } else {
+            shade(rgb(15, 45, 55), r.range(0.85, 1.1))
+        }
+    });
+    a.each(T_SHRIEKER_SIDE, |x, y, r, _| {
+        let jaw = (2..14).contains(&x) && (y == 3 || y == 6) && x % 2 == 0;
+        shade(if jaw { rgb(220, 215, 190) } else { rgb(15, 45, 55) }, r.range(0.85, 1.1))
+    });
+    a.each(T_CATALYST_TOP, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        shade(if d < 3.5 { rgb(120, 240, 230) } else { rgb(30, 35, 40) }, r.range(0.85, 1.1))
+    });
+    a.each(T_CATALYST_SIDE, |x, y, r, _| {
+        let bone = (x == 3 || x == 12) && y < 12 || y == 12;
+        shade(if bone { rgb(215, 210, 195) } else { rgb(30, 35, 40) }, r.range(0.88, 1.06))
+    });
+    a.each(T_SOUL_LANTERN, |x, y, r, _| {
+        let cage = x == 3 || x == 12 || y == 3 || y == 13;
+        let glow = (4..12).contains(&x) && (4..13).contains(&y);
+        if cage && (3..=12).contains(&x) && (3..=13).contains(&y) {
+            rgb(50, 50, 55)
+        } else if glow {
+            shade(rgb(110, 220, 240), r.range(0.9, 1.1))
+        } else if (7..9).contains(&x) && y < 3 {
+            rgb(50, 50, 55)
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    // Suspicious blocks: sand and gravel with something glinting in them.
+    a.copy(T_SAND, T_SUS_SAND);
+    a.copy(T_GRAVEL, T_SUS_GRAVEL);
+    for (tile, c) in [(T_SUS_SAND, rgb(150, 120, 70)), (T_SUS_GRAVEL, rgb(90, 80, 70))] {
+        for (x, y) in [(3, 4), (4, 4), (11, 9), (12, 10), (6, 12), (9, 3), (10, 3)] {
+            a.set(tile, x, y, c);
+        }
+        a.set(tile, 7, 7, rgb(230, 200, 120));
+    }
+    a.each(T_BENCH_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let cloth = (3..13).contains(&x) && (3..13).contains(&y);
+        shade(if rim { rgb(110, 80, 45) } else if cloth { rgb(70, 110, 85) } else { rgb(170, 130, 80) }, r.range(0.92, 1.05))
+    });
+    a.each(T_BENCH_SIDE, |x, y, r, _| {
+        let top = y < 3;
+        let leg = (x < 3 || x > 12) && y >= 3;
+        let tool = y == 6 && (5..11).contains(&x);
+        if tool {
+            rgb(200, 200, 205)
+        } else if top || leg {
+            shade(rgb(150, 110, 65), r.range(0.92, 1.05))
+        } else {
+            shade(rgb(95, 70, 40), r.range(0.92, 1.05))
+        }
+    });
+    // Pots: terracotta, with a motif.
+    let clay = rgb(175, 95, 60);
+    a.each(T_POT_TOP, move |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 3.0 {
+            rgb(40, 20, 12)
+        } else {
+            shade(clay, r.range(0.9, 1.05))
+        }
+    });
+    for i in 0..13u16 {
+        a.each(T_POT_SIDE_FIRST + i, move |x, y, r, _| {
+            let rim = y <= 1 || y >= 14;
+            shade(clay, r.range(0.9, 1.05) * if rim { 0.8 } else { 1.0 })
+        });
+        if i > 0 {
+            let motif = crate::archaeology::SHARDS[i as usize - 1].2;
+            for (y, row) in motif.iter().enumerate() {
+                for (x, ch) in row.chars().enumerate() {
+                    if ch == '#' {
+                        a.set(T_POT_SIDE_FIRST + i, x + 4, y + 4, rgb(60, 30, 20));
+                    }
+                }
+            }
+        }
+    }
+    a.each(T_GRINDSTONE_SIDE, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 1.5 {
+            rgb(110, 80, 45)
+        } else if d < 6.5 {
+            shade(rgb(150, 150, 150), r.range(0.85, 1.08))
+        } else if y > 11 {
+            shade(rgb(130, 95, 55), r.range(0.92, 1.05))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_GRINDSTONE_TOP, |x, _, r, _| shade(if (5..11).contains(&x) { rgb(150, 150, 150) } else { rgb(130, 95, 55) }, r.range(0.88, 1.05)));
+    a.each(T_SMITHING_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if rim { rgb(40, 40, 45) } else { rgb(60, 60, 68) }, r.range(0.9, 1.06))
+    });
+    a.each(T_SMITHING_SIDE, |x, y, r, _| {
+        let top = y < 4;
+        let hammer = y == 7 && (4..12).contains(&x) || (x == 7 && (7..12).contains(&y));
+        if hammer {
+            rgb(190, 190, 195)
+        } else if top {
+            shade(rgb(55, 55, 62), r.range(0.9, 1.05))
+        } else {
+            shade(rgb(140, 100, 60), r.range(0.92, 1.05))
+        }
+    });
+    a.each(T_OLD_DEBRIS_SIDE, |x, y, r, _| {
+        let swirl = ((x as f32 * 0.8).sin() + (y as f32 * 0.6).cos()) > 0.8;
+        shade(if swirl { rgb(120, 85, 70) } else { rgb(85, 60, 55) }, r.range(0.88, 1.07))
+    });
+    a.each(T_OLD_DEBRIS_TOP, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        shade(if (d as i32) % 3 == 0 { rgb(120, 85, 70) } else { rgb(85, 60, 55) }, r.range(0.88, 1.07))
+    });
+    // Tools and finds.
+    let handle = [('#', rgb(40, 30, 20)), ('s', rgb(140, 100, 55))];
+    a.sprite(T_BRUSH, &BRUSH_SPRITE, &[handle[0], handle[1], ('h', rgb(215, 125, 80)), ('t', rgb(235, 225, 200))]);
+    a.sprite(T_DIAMOND_BRUSH, &BRUSH_SPRITE, &[handle[0], handle[1], ('h', rgb(90, 240, 225)), ('t', rgb(250, 250, 255))]);
+    a.sprite(T_JOURNAL, &JOURNAL_SPRITE, &[('#', rgb(40, 25, 15)), ('c', rgb(120, 75, 40)), ('p', rgb(235, 225, 195)), ('l', rgb(120, 110, 100)), ('w', rgb(200, 30, 30))]);
+    for (i, (_, _, motif)) in crate::archaeology::SHARDS.iter().enumerate() {
+        let tile = T_SHARD_FIRST + i as u16;
+        a.sprite(tile, &SHARD_SPRITE, &[('#', rgb(90, 45, 25)), ('b', clay)]);
+        for (y, row) in motif.iter().enumerate() {
+            for (x, ch) in row.chars().enumerate() {
+                if ch == '#' {
+                    a.set(tile, x + 4, y + 4, rgb(60, 30, 20));
+                }
+            }
+        }
+    }
+    // Relics: a shape per kind (charm, mask, disc...), coloured by culture.
+    let shapes: [[&str; 10]; 3] = [
+        ["...####...", "..#hhhh#..", ".#hbbbbh#.", "#hbbddbbh#", "#hbdbbdbh#", "#hbdbbdbh#", "#hbbddbbh#", ".#hbbbbh#.", "..#hhhh#..", "...####..."],
+        ["..######..", ".#hhhhhh#.", "#hbbbbbbh#", "#b##bb##b#", "#bbbbbbbb#", "#bbb##bbb#", ".#bbbbbb#.", ".#b#bb#b#.", "..#bbbb#..", "...####..."],
+        ["....##....", "...#hh#...", "..#hbbh#..", "..#bbbb#..", ".#bbbbbb#.", ".#bbbbbb#.", "#bbbbbbbb#", "#dddddddd#", "##########", "....##...."],
+    ];
+    let palettes = [[[240, 200, 80], [200, 150, 40]], [[180, 120, 70], [120, 80, 45]], [[120, 200, 210], [60, 130, 150]], [[40, 120, 130], [20, 60, 70]]];
+    for (i, (_, _, culture)) in crate::archaeology::RELICS.iter().enumerate() {
+        let tile = T_RELIC_FIRST + i as u16;
+        let [b, d] = palettes[culture.index()];
+        let shape = shapes[i % 3];
+        for (y, row) in shape.iter().enumerate() {
+            for (x, ch) in row.chars().enumerate() {
+                let c = match ch {
+                    '#' => rgb(35, 25, 20),
+                    'h' => shade(rgb(b[0], b[1], b[2]), 1.25),
+                    'b' => rgb(b[0], b[1], b[2]),
+                    'd' => rgb(d[0], d[1], d[2]),
+                    _ => continue,
+                };
+                a.set(tile, x + 3, y + 3, c);
+            }
+        }
+    }
+    a.each(T_ENCRUSTED, |x, y, r, p| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d > 6.0 + p.noise3(x as f32 * 0.6, y as f32 * 0.6, 2.0) {
+            return [0, 0, 0, 0];
+        }
+        let glint = (x == 6 && y == 6) || (x == 9 && y == 8);
+        if glint { rgb(240, 210, 120) } else { shade(rgb(120, 100, 75), r.range(0.8, 1.1)) }
+    });
+    a.sprite(T_MAP_FRAGMENT, &FRAGMENT_SPRITE, &[('#', rgb(90, 70, 45)), ('p', rgb(225, 205, 160)), ('r', rgb(170, 60, 40)), ('x', rgb(200, 30, 30)), ('g', rgb(90, 140, 70))]);
+    a.sprite(T_COIN, &COIN_SPRITE, &[('#', rgb(90, 65, 20)), ('h', rgb(250, 225, 120)), ('b', rgb(215, 175, 60)), ('d', rgb(160, 120, 35))]);
+    a.sprite(T_TABLET, &TABLET_SPRITE, &[('#', rgb(90, 55, 35)), ('b', rgb(185, 120, 80)), ('d', rgb(110, 65, 40))]);
+    a.sprite(T_ECHO_SHARD, &ECHO_SPRITE, &[('#', rgb(10, 40, 50)), ('h', rgb(150, 250, 250)), ('b', rgb(40, 150, 160)), ('d', rgb(20, 90, 100))]);
+    a.copy(T_COMPASS, T_RECOVERY_COMPASS);
+    for (x, y) in [(6, 6), (9, 9), (6, 9), (9, 6)] {
+        a.set(T_RECOVERY_COMPASS, x, y, rgb(60, 200, 210));
+    }
+    let dark = [('#', rgb(25, 18, 20)), ('b', rgb(80, 60, 70)), ('h', rgb(130, 105, 115)), ('d', rgb(55, 40, 48))];
+    a.sprite(T_SCRAP, &COIN_SPRITE, &dark);
+    a.sprite(T_SCORCHITE_INGOT, &INGOT_SPRITE, &dark);
+    a.sprite(T_TEMPLATE, &TEMPLATE_SPRITE, &[('#', rgb(25, 18, 20)), ('d', rgb(70, 60, 50)), ('b', rgb(110, 95, 80)), ('h', rgb(150, 135, 115)), ('r', rgb(200, 90, 40))]);
+    let pal = [('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('H', rgb(110, 90, 100)), ('h', rgb(60, 45, 55)), ('g', rgb(73, 54, 21))];
+    a.sprite(T_SCORCHITE_TOOLS, &PICK, &pal);
+    a.sprite(T_SCORCHITE_TOOLS + 1, &SWORD, &pal);
+    a.sprite(T_SCORCHITE_TOOLS + 2, &AXE, &pal);
+    a.sprite(T_SCORCHITE_TOOLS + 3, &SHOVEL, &pal);
+    let base = rgb(85, 65, 75);
+    let pal = [('#', shade(base, 0.3)), ('b', base), ('d', shade(base, 0.72)), ('h', shade(base, 1.3))];
+    for (slot, rows) in [&HELMET, &CHESTPLATE, &LEGGINGS, &BOOTS].into_iter().enumerate() {
+        a.sprite(T_SCORCHITE_ARMOR_ITEMS + slot as u16, rows, &pal);
+    }
+    a.each(T_SCORCHITE_ARMOR_WORN, move |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let vein = (x * 5 + y * 3) % 17 == 0;
+        shade(if vein { rgb(200, 90, 40) } else { base }, r.range(0.9, 1.05) * if rim { 0.7 } else { 1.0 })
+    });
 }
