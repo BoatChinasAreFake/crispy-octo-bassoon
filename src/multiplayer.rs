@@ -961,7 +961,10 @@ impl Game {
                     p.armor = armor;
                 }
             }
-            Msg::Mobs { mobs, tnts, arrows } => self.sync_mobs(mobs, tnts, arrows),
+            Msg::Mobs { mobs, tnts, arrows, falling } => {
+                self.falling = falling.into_iter().map(|(pos, vel, id)| crate::falling::FallingBlock { pos, vel, id, from: pos.y }).filter(|f| valid_block(f.id)).collect();
+                self.sync_mobs(mobs, tnts, arrows)
+            }
             Msg::HurtYou { dmg, cause, knock } => {
                 self.player.hurt = 0.0;
                 // Whatever hit us came from the opposite way to the knock.
@@ -1144,6 +1147,7 @@ impl Game {
         for t in self.tnts.iter_mut() {
             t.fuse -= dt;
         }
+        self.falling_tick(dt);
         for p in self.particles.iter_mut() {
             p.update(dt, &self.world);
         }
@@ -1232,7 +1236,8 @@ impl Game {
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
                 let arrows = self.arrows.iter().map(|a| (a.pos, a.wire_vel())).collect();
-                self.net_broadcast(Msg::Mobs { mobs, tnts, arrows });
+                let falling = self.falling.iter().map(|f| (f.pos, f.vel, f.id)).collect();
+                self.net_broadcast(Msg::Mobs { mobs, tnts, arrows, falling });
             }
             self.send_drops(dt);
             self.send_orbs(dt);

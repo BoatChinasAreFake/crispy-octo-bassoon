@@ -25,7 +25,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v13: liquids, animals (MobInteract, mob flags), Zappy Dust, trading
 /// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
 /// v16: game modes (GameMode, spectators in PlayerState flags) and hardcore (Rules).
-pub const PROTOCOL: u32 = 17;
+pub const PROTOCOL: u32 = 18;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -89,7 +89,7 @@ pub enum Msg {
     /// `held_ench`: its enchantments (believed only if the host knows they have them).
     PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16 },
     /// Mobs, primed TNT (position, fuse) and arrows in flight (position, velocity).
-    Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)> },
+    Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)>, falling: Vec<(Vec3, f32, Id)> },
     /// client -> host
     Attack { mob: u32, dmg: f32, from: Vec3 },
     /// client -> host
@@ -386,7 +386,7 @@ impl Msg {
                 w.u16(*held_ench);
                 w.u16(*armor);
             }
-            Msg::Mobs { mobs, tnts, arrows } => {
+            Msg::Mobs { mobs, tnts, arrows, falling } => {
                 w.u8(8);
                 w.u32(mobs.len() as u32);
                 for m in mobs {
@@ -409,6 +409,12 @@ impl Msg {
                 for &(p, v) in arrows {
                     w.v3(p);
                     w.v3(v);
+                }
+                w.u32(falling.len() as u32);
+                for &(p, v, id) in falling {
+                    w.v3(p);
+                    w.f32(v);
+                    w.u16(id);
                 }
             }
             Msg::Attack { mob, dmg, from } => {
@@ -829,7 +835,12 @@ impl Msg {
                 for _ in 0..n {
                     arrows.push((r.v3()?, r.v3()?));
                 }
-                Msg::Mobs { mobs, tnts, arrows }
+                let n = r.count(18)?;
+                let mut falling = Vec::with_capacity(n);
+                for _ in 0..n {
+                    falling.push((r.v3()?, r.f32()?, r.u16()?));
+                }
+                Msg::Mobs { mobs, tnts, arrows, falling }
             }
             9 => Msg::Attack { mob: r.u32()?, dmg: r.f32()?, from: r.v3()? },
             10 => Msg::Ignite { x: r.i32()?, y: r.i32()?, z: r.i32()? },
@@ -1489,6 +1500,7 @@ mod tests {
                 mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4, flags: MOB_BABY | MOB_TAMED }],
                 tnts: vec![(Vec3::Z, 2.0)],
                 arrows: vec![(Vec3::Y, Vec3::new(20.0, 3.0, -1.0))],
+                falling: vec![(Vec3::new(1.0, 60.5, 2.0), -7.5, 5)],
             },
             Msg::HurtYou { dmg: 3.0, cause: "was groaned".into(), knock: Vec3::Y },
             Msg::Chat { from: 0, text: "hello 🧱".into() },

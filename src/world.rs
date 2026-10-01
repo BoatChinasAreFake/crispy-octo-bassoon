@@ -707,6 +707,8 @@ pub struct World {
     /// Every sapling in loaded or edited chunks, and leaves that should check
     /// whether they still hang on to a tree (see trees.rs).
     pub saplings: HashSet<IVec3>,
+    /// Cells to check for sand and gravel with nothing under them (see falling.rs).
+    pub fall_dirty: HashSet<IVec3>,
     /// Every fire burning (see fire.rs).
     pub fires: HashSet<IVec3>,
     /// Every comparator (they watch containers; see contraptions.rs).
@@ -754,6 +756,7 @@ impl World {
             containers: HashMap::new(),
             structure_loot: true,
             liquid_dirty: HashSet::new(),
+            fall_dirty: HashSet::new(),
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
             new_clankers: Vec::new(),
@@ -1074,6 +1077,14 @@ impl World {
             self.reshape_joins(p);
         }
         if self.simulate_liquids {
+            // Sand and gravel: one put here may have nothing under it, and one above may have lost its footing.
+            if crate::falling::is_gravity(id) {
+                self.fall_dirty.insert(p);
+            }
+            let above = p + IVec3::Y;
+            if crate::falling::is_gravity(self.get_v(above)) {
+                self.fall_dirty.insert(above);
+            }
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
             self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));
         }

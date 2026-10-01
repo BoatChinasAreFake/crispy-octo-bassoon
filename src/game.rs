@@ -56,6 +56,8 @@ pub struct Game {
     pub mobs: Vec<Mob>,
     pub particles: Vec<Particle>,
     pub tnts: Vec<PrimedTnt>,
+    /// Sand, gravel and anvils on their way down (see falling.rs).
+    pub falling: Vec<crate::falling::FallingBlock>,
     /// Pointy Sticks in flight or stuck in things (owned by the host; clients mirror them).
     pub arrows: Vec<Arrow>,
     pub inv: Inventory,
@@ -289,6 +291,7 @@ impl Game {
             mobs: Vec::new(),
             particles: Vec::new(),
             tnts: Vec::new(),
+            falling: Vec::new(),
             arrows: Vec::new(),
             inv,
             creative,
@@ -2592,6 +2595,7 @@ impl Game {
         for t in self.tnts.iter_mut() {
             t.fuse -= dt;
         }
+        self.falling_tick(dt);
         let boom: Vec<Vec3> = self.tnts.iter().filter(|t| t.fuse <= 0.0).map(|t| t.pos + Vec3::splat(0.5)).collect();
         self.tnts.retain(|t| t.fuse > 0.0);
         for at in boom {
@@ -2978,6 +2982,7 @@ impl Game {
             let sky = self.world.sky_shade(t.pos.x as i32, t.pos.y as i32 + 1, t.pos.z as i32);
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
+        self.draw_falling(&mut g);
         // Rain, snow and lightning
         if !scorch {
             self.draw_weather(&mut g, eye);
@@ -3612,7 +3617,7 @@ pub(crate) mod tests {
         assert_eq!(g.world.containers[&furnace].slots[INPUT], None);
     }
 
-    fn aim(g: &mut Game, pos: IVec3, normal: IVec3) {
+    pub(crate) fn aim(g: &mut Game, pos: IVec3, normal: IVec3) {
         let dist = (pos.as_vec3() + Vec3::splat(0.5)).distance(g.player.eye());
         g.target = Some(Target::Block(crate::world::Hit { pos, normal, dist }));
     }
@@ -5168,3 +5173,4 @@ fn glide_pose(gliding: bool) -> Mat4 {
     let mid = Vec3::Y * 0.9;
     Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
 }
+

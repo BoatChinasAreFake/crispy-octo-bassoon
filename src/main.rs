@@ -28,6 +28,7 @@ mod decor;
 mod drops;
 mod enchant;
 mod entity;
+mod falling;
 mod farming;
 mod fire;
 mod fishing;
