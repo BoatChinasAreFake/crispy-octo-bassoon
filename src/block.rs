@@ -243,7 +243,9 @@ pub const GOLD_BLOCK: Id = 420;
 pub const GILDED_SCORCHROCK: Id = 421;
 /// Every village square has one: ring it when the raiders come (see raids.rs).
 pub const BELL: Id = 422;
-pub const NUM_BLOCKS: Id = 423;
+/// A dungeon's monster cage (see fortress.rs, where the Sizzler Cages live too).
+pub const SPAWNER: Id = 423;
+pub const NUM_BLOCKS: Id = 424;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -1579,6 +1581,9 @@ impl Registry {
         let mut bell = def("bell", "Bell (Ding Dong)", Shaped, true, false, [T_BELL; 3], 5.0, 1, true, BELL, 0.0, S_STONE);
         bell.shape = Shape::Bell;
         blocks.push(bell);
+        let mut spawner = def("monster_cage", "Monster Cage (Still Occupied)", Cube, true, false, [T_SPAWNER; 3], 5.0, 1, true, AIR, 2.0, S_STONE);
+        spawner.see_through = true;
+        blocks.push(spawner);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");

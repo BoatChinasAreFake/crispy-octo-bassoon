@@ -95,8 +95,9 @@ impl Game {
             Mood::Day
         };
         let wet = self.weather.kind.wet() && !self.elsewhere() && !biome.dry() && biome != Biome::Snowy;
-        // Out in it: full; under a roof: a muffled patter.
-        let rain = if wet { self.weather.strength * (0.25 + 0.75 * sky) } else { 0.0 };
+        // Out in it: full; under a roof: a muffled patter, fainter the deeper you are.
+        let open = e.y >= self.world.rain_top(e.x, e.z);
+        let rain = if wet && (open || sky > 0.0) { self.weather.strength * if open { 0.25 + 0.75 * sky } else { 0.3 * sky } } else { 0.0 };
         crate::sound::Ambience { mood, rain, cave: deep && !self.elsewhere() }
     }
 
@@ -238,7 +239,8 @@ impl Game {
                 let span = 18.0;
                 let phase = hash2(17, x, z) * span;
                 let y = eye.y + 9.0 - ((t * speed + phase) % span);
-                if self.world.sky_light(x, y.floor() as i32, z) < 1.0 {
+                // Only where the sky is open above (not in caves, under roofs or trees).
+                if (y.floor() as i32) < self.world.rain_top(x, z) {
                     continue;
                 }
                 let fx = x as f32 + 0.2 + hash2(3, x, z) * 0.6 + if snow { (t + phase).sin() * 0.3 } else { 0.0 };

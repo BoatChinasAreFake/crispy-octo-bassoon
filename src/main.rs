@@ -186,6 +186,8 @@ struct App {
     last_mouse: Option<Vec2>,
     show_debug: bool,
     recipe_scroll: f32,
+    /// Rows scrolled down the creative palette.
+    palette_scroll: usize,
     /// The recipe book: search text (and whether it's being typed in), tab, "craftable only".
     book_search: String,
     book_focus: bool,
@@ -194,6 +196,8 @@ struct App {
     /// Where the Field Journal goes back to (the pause menu, or the game).
     journal_back: Screen,
     quit: bool,
+    /// The Screenshot key was pressed: save this frame once it's drawn.
+    shot_pending: bool,
     status: Option<(String, f32)>,
     fps: f32,
     audio: Audio,
@@ -822,7 +826,30 @@ impl App {
         }
     }
 
+    /// Save what's on screen to `screenshots/` (in the data folder) and say where.
+    fn save_screenshot(&mut self) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let stamp = paths::utc_date_time(secs).replace([' ', ':'], "-");
+        let dir = std::path::Path::new("screenshots");
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            self.game.msg(format!("Couldn't save a screenshot: {e}"));
+            return;
+        }
+        let mut path = dir.join(format!("minceraft-{stamp}.png"));
+        let mut n = 2;
+        while path.exists() {
+            path = dir.join(format!("minceraft-{stamp}-{n}.png"));
+            n += 1;
+        }
+        get_screen_data().export_png(&path.to_string_lossy());
+        let shown = std::fs::canonicalize(&path).unwrap_or(path);
+        self.game.msg(format!("Saved screenshot: {}", shown.display()));
+    }
+
     fn frame(&mut self) {
+        if self.settings.binds.pressed(keybinds::Action::Screenshot) && self.chat.is_none() && self.rebinding.is_none() {
+            self.shot_pending = true;
+        }
         let dt = get_frame_time().min(0.05);
         self.fps = self.fps * 0.95 + (1.0 / get_frame_time().max(1e-4)) * 0.05;
         if self.frame_times.len() == FRAME_GRAPH {
@@ -3576,9 +3603,34 @@ impl App {
         let sx = x0 + 6.0 * s;
         let inv_top = y0 + 18.0 * s;
         if creative {
-            self.ui.text("Creative Palette (click to grab 64)", sx, y0 + 12.0 * s, 9.0, WHITE);
+            self.ui.text("Creative Palette (click to grab 64, scroll for more)", sx, y0 + 12.0 * s, 9.0, WHITE);
             let items = creative_items();
-            for (i, &item) in items.iter().enumerate() {
+            // Only the rows that fit above the hotbar; the wheel scrolls through the rest.
+            let hot_top = y0 + panel_h - slot - 6.0 * s - 12.0 * s;
+            let visible = (((hot_top - inv_top) / slot).floor() as usize).max(1);
+            let rows = items.len().div_ceil(9);
+            let most = rows.saturating_sub(visible);
+            let (mx, my) = mouse_position();
+            if mx >= sx && mx < sx + slot * 9.0 && my >= inv_top && my < inv_top + visible as f32 * slot {
+                let wheel = mouse_wheel().1;
+                if wheel < 0.0 {
+                    self.palette_scroll += 1;
+                } else if wheel > 0.0 {
+                    self.palette_scroll = self.palette_scroll.saturating_sub(1);
+                }
+            }
+            self.palette_scroll = self.palette_scroll.min(most);
+            if most > 0 {
+                // Where in the list we are.
+                let bar_h = visible as f32 * slot;
+                let knob = bar_h * visible as f32 / rows as f32;
+                let at = (bar_h - knob) * self.palette_scroll as f32 / most as f32;
+                draw_rectangle(sx + slot * 9.0 + 1.0 * s, inv_top, 3.0 * s, bar_h, Color::new(0.0, 0.0, 0.0, 0.4));
+                draw_rectangle(sx + slot * 9.0 + 1.0 * s, inv_top + at, 3.0 * s, knob, GRAY);
+            }
+            let first = self.palette_scroll * 9;
+            for (i, &item) in items.iter().enumerate().skip(first).take(visible * 9) {
+                let i = i - first;
                 let (cx, cy) = (sx + (i % 9) as f32 * slot, inv_top + (i / 9) as f32 * slot);
                 let (l, r, hov) = self.ui.slot(Some((item, 1)), cx, cy, slot, false);
                 if hov {
@@ -3941,12 +3993,14 @@ async fn game_main() {
         last_mouse: None,
         show_debug: false,
         recipe_scroll: 0.0,
+        palette_scroll: 0,
         book_search: String::new(),
         book_focus: false,
         book_tab: crafting::Tab::All,
         book_craftable: false,
         journal_back: Screen::Playing,
         quit: false,
+        shot_pending: false,
         status: None,
         fps: 60.0,
         audio,
@@ -4120,10 +4174,16 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "cave" => {
+            "cave" | "caverain" => {
                 // Standing in a roomy cave pocket near spawn, well below the surface.
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
+                if s.mode == "caverain" {
+                    // A storm overhead must stay overhead.
+                    g.weather.kind = weather::Weather::Rain;
+                    g.weather.strength = 1.0;
+                    g.rules.weather_cycle = false;
+                }
                 let (cx0, cz0) = ((g.spawn.x / 16.0).floor() as i32, (g.spawn.z / 16.0).floor() as i32);
                 for cz in cz0 - 4..=cz0 + 4 {
                     for cx in cx0 - 4..=cx0 + 4 {
@@ -5198,6 +5258,9 @@ async fn game_main() {
             }
         }
         app.frame();
+        if std::mem::take(&mut app.shot_pending) {
+            app.save_screenshot();
+        }
         app.audio.poll().await;
         frames += 1;
         if let Some(s) = &shot {

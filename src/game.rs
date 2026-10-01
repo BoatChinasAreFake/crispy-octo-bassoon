@@ -22,7 +22,7 @@ use macroquad::miniquad::RenderingBackend;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f32::consts::{PI, TAU};
 
-pub const DAY_SECONDS: f32 = 600.0;
+pub const DAY_SECONDS: f32 = 1200.0;
 
 #[derive(Default, Clone)]
 pub struct Controls {

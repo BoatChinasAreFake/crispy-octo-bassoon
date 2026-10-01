@@ -1074,9 +1074,9 @@ impl World {
         } else if crate::beacon::is_beacon(old) {
             self.beacons.remove(&p);
         }
-        if id == SIZZLER_CAGE {
+        if crate::fortress::is_cage(id) {
             self.cages.insert(p);
-        } else if old == SIZZLER_CAGE {
+        } else if crate::fortress::is_cage(old) {
             self.cages.remove(&p);
         }
         if crate::music::is_jukebox(id) {
@@ -1235,6 +1235,16 @@ impl World {
             }
         }
         Vec3::new(0.5, (CH - 10) as f32, 0.5)
+    }
+
+    /// The lowest height rain and snow reach in a column (above any roof,
+    /// overhang or canopy). Unloaded columns: the top of the world.
+    pub fn rain_top(&self, x: i32, z: i32) -> i32 {
+        let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
+        match self.chunks.get(&(cx, cz)) {
+            Some(c) => c.canopy[(z.rem_euclid(CW) * CW + x.rem_euclid(CW)) as usize] as i32,
+            None => CH,
+        }
     }
 
     /// Topmost solid block at a column (for respawn and mob spawning).
