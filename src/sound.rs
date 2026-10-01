@@ -1149,10 +1149,6 @@ impl Audio {
         }
     }
 
-    /// Is a record playing (the background music waits)?
-    pub fn jukebox_playing(&self) -> bool {
-        self.juke.is_some()
-    }
 
     fn alive(&self) -> bool {
         !AUDIO_DEAD.load(Ordering::Relaxed) && self.volume > 0.0

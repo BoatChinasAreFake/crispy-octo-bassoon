@@ -468,6 +468,9 @@ impl Game {
             if matches!(crate::potions::potion_of(item), Some((_, false))) {
                 l.bag.add(GLASS_BOTTLE, had.min(n as u32));
             }
+            if had > 0 && crate::potions::potion_of(item) == Some((crate::potions::Potion::Strength, false)) {
+                self.strong.insert(from, crate::potions::EFFECT_SECS);
+            }
         }
     }
 

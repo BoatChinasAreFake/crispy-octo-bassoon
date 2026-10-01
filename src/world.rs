@@ -711,6 +711,8 @@ pub struct World {
     pub fall_dirty: HashSet<IVec3>,
     /// Jukeboxes (to find the nearest one playing; see music.rs).
     pub jukeboxes: HashSet<IVec3>,
+    /// Sizzler Cages (see fortress.rs).
+    pub cages: HashSet<IVec3>,
     /// Every fire burning (see fire.rs).
     pub fires: HashSet<IVec3>,
     /// Every comparator (they watch containers; see contraptions.rs).
@@ -760,6 +762,7 @@ impl World {
             liquid_dirty: HashSet::new(),
             fall_dirty: HashSet::new(),
             jukeboxes: HashSet::new(),
+            cages: HashSet::new(),
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
             new_clankers: Vec::new(),
@@ -1070,6 +1073,11 @@ impl World {
             self.beacons.insert(p);
         } else if crate::beacon::is_beacon(old) {
             self.beacons.remove(&p);
+        }
+        if id == SIZZLER_CAGE {
+            self.cages.insert(p);
+        } else if old == SIZZLER_CAGE {
+            self.cages.remove(&p);
         }
         if crate::music::is_jukebox(id) {
             self.jukeboxes.insert(p);

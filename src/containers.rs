@@ -94,7 +94,7 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
 pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if kind == BREWING_STAND {
         return match slot {
-            INPUT => item == GUNPOWDER || crate::potions::ALL.iter().any(|p| p.ingredient() == item),
+            INPUT => item == GUNPOWDER || crate::potions::BREWABLE.iter().any(|p| p.ingredient() == item),
             FUEL => crate::potions::is_bottle(item),
             _ => false,
         };

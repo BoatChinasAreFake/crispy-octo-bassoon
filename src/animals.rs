@@ -92,12 +92,15 @@ impl Game {
             self.sfx(Sfx::Snip, Some(pos));
             return Interaction::Sheared;
         }
-        if self.mobs[i].kind == MobKind::Galloper {
+        if matches!(self.mobs[i].kind, MobKind::Galloper | MobKind::Strutter) {
             let rider = if record_key(&self.player_name) == who && !self.dedicated {
                 self.my_id + 1
             } else {
                 self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| id + 1).unwrap_or(0)
             };
+            if self.mobs[i].kind == MobKind::Strutter {
+                return self.strutter_interact(i, item, rider);
+            }
             return self.galloper_interact(who, i, item, rider);
         }
         let m = &mut self.mobs[i];

@@ -201,11 +201,29 @@ pub enum MobKind {
     Rollo,
     /// Warden-ish: blind, enormous, and drawn to any sound (see deepdark.rs).
     Hush,
+    /// Blaze-ish: hovers about Scorchlands fortresses throwing fireballs (see fortress.rs).
+    Sizzler,
+    /// Ghast-ish: a huge, sad, floating thing that cries fireballs (see fortress.rs).
+    Weeper,
+    /// Strider-ish: walks on lava, shivers off it; saddle it and steer with a shroom (see fortress.rs).
+    Strutter,
+    /// Piglin-ish: trades for gold, and doesn't like you touching its stuff (see fortress.rs).
+    Snout,
+    /// Pillager-ish: a crossbow and a bad attitude (see raids.rs).
+    Pilferer,
+    /// Vindicator-ish: an axe and a worse attitude (see raids.rs).
+    Hackler,
+    /// Evoker-ish: summons Fees and sends Late Fees up out of the ground (see raids.rs).
+    Invoicer,
+    /// Vex-ish: a little flying charge that goes through walls (see raids.rs).
+    Fee,
+    /// Ravager-ish: a big angry beast the raiders bring along (see raids.rs).
+    Rampager,
 }
 
 impl MobKind {
     /// Every kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 24] = [
+    pub const ALL: [MobKind; 33] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -230,6 +248,15 @@ impl MobKind {
         MobKind::Ribbit,
         MobKind::Rollo,
         MobKind::Hush,
+        MobKind::Sizzler,
+        MobKind::Weeper,
+        MobKind::Strutter,
+        MobKind::Snout,
+        MobKind::Pilferer,
+        MobKind::Hackler,
+        MobKind::Invoicer,
+        MobKind::Fee,
+        MobKind::Rampager,
     ];
 
     pub fn index(self) -> u8 {
@@ -265,6 +292,15 @@ impl MobKind {
             "ribbit" | "frog" => Some(MobKind::Ribbit),
             "rollo" | "armadillo" => Some(MobKind::Rollo),
             "hush" | "the hush" | "the_hush" | "warden" => Some(MobKind::Hush),
+            "sizzler" | "blaze" => Some(MobKind::Sizzler),
+            "weeper" | "ghast" => Some(MobKind::Weeper),
+            "strutter" | "strider" => Some(MobKind::Strutter),
+            "snout" | "piglin" => Some(MobKind::Snout),
+            "pilferer" | "pillager" => Some(MobKind::Pilferer),
+            "hackler" | "vindicator" => Some(MobKind::Hackler),
+            "invoicer" | "evoker" => Some(MobKind::Invoicer),
+            "fee" | "vex" => Some(MobKind::Fee),
+            "rampager" | "ravager" => Some(MobKind::Rampager),
             _ => None,
         }
     }
@@ -294,6 +330,15 @@ impl MobKind {
             MobKind::Ribbit => "Ribbit",
             MobKind::Rollo => "Rollo",
             MobKind::Hush => "The Hush",
+            MobKind::Sizzler => "Sizzler",
+            MobKind::Weeper => "Weeper",
+            MobKind::Strutter => "Strutter",
+            MobKind::Snout => "Snout",
+            MobKind::Pilferer => "Pilferer",
+            MobKind::Hackler => "Hackler",
+            MobKind::Invoicer => "Invoicer",
+            MobKind::Fee => "Fee",
+            MobKind::Rampager => "Rampager",
         }
     }
     /// Half-width and height at size 1.
@@ -323,6 +368,13 @@ impl MobKind {
             MobKind::Ribbit => (0.25, 0.5),
             MobKind::Rollo => (0.32, 0.55),
             MobKind::Hush => (0.45, 2.9),
+            MobKind::Sizzler => (0.3, 1.8),
+            MobKind::Weeper => (2.0, 4.0),
+            MobKind::Strutter => (0.45, 1.7),
+            MobKind::Snout => (0.3, 1.95),
+            MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => (0.3, 1.95),
+            MobKind::Fee => (0.2, 0.8),
+            MobKind::Rampager => (0.95, 2.2),
         }
     }
     pub fn max_health(self) -> f32 {
@@ -351,6 +403,15 @@ impl MobKind {
             MobKind::Ribbit => 10.0,
             MobKind::Rollo => 12.0,
             MobKind::Hush => 250.0,
+            MobKind::Sizzler => 20.0,
+            MobKind::Weeper => 10.0,
+            MobKind::Strutter => 20.0,
+            MobKind::Snout => 16.0,
+            MobKind::Pilferer => 24.0,
+            MobKind::Hackler => 24.0,
+            MobKind::Invoicer => 24.0,
+            MobKind::Fee => 14.0,
+            MobKind::Rampager => 100.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -364,15 +425,23 @@ impl MobKind {
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter)
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
-        self == MobKind::Bee
+        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee)
+    }
+    /// Lava and fire don't bother it.
+    pub fn fireproof(self) -> bool {
+        matches!(self, MobKind::Grumbler | MobKind::Sizzler | MobKind::Weeper | MobKind::Strutter | MobKind::Wyrm)
+    }
+    /// Part of a raid (see raids.rs).
+    pub fn raider(self) -> bool {
+        matches!(self, MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Rampager)
     }
     /// What it eats to fall in love (see animals.rs); Woofers only once tamed.
     pub fn breed_food(self) -> &'static [Id] {
@@ -383,6 +452,7 @@ impl MobKind {
             MobKind::Sneaker => &[CLUCKETS, COOKED_CLUCKETS],
             MobKind::Ribbit => &[GOO],
             MobKind::Rollo => &[DEAD_BUSH],
+            MobKind::Strutter => &[EMBER_SHROOM],
             MobKind::Galloper => &[APPLE],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             _ => &[],
@@ -468,6 +538,11 @@ pub enum MobEvent {
     Warp(Vec3, Vec3),
     /// A Rattler loosed a Pointy Stick: (from, velocity).
     Shoot(Vec3, Vec3),
+    /// A fireball thrown: (from, velocity, big (a Weeper's, which explodes)).
+    Fireball(Vec3, Vec3, bool),
+    /// An Invoicer's spell: Late Fees up out of the ground from here toward there, or Fees summoned.
+    Fangs(Vec3, Vec3),
+    Summon(Vec3),
     /// The Hush's shush: a blast of sound from `from` at the player, through walls.
     Shush(Vec3),
 }
@@ -648,7 +723,7 @@ impl Mob {
         let face = flat.x.atan2(-flat.z);
         match self.kind {
             // (The Wyrm flies on its own, see hollow.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -927,6 +1002,168 @@ impl Mob {
                     self.health = -100.0;
                 }
             }
+            MobKind::Sizzler => {
+                // Hovers a little above whoever it's after, throwing fireballs three at a time.
+                let after = player_visible && dist < 32.0;
+                may_wander = !after;
+                let bob = (self.wander_t * 2.0 + self.id as f32).sin() * 0.4;
+                let hover = if after { player.y + 2.5 + bob } else { self.body.pos.y + bob };
+                fly_vy = Some(((hover - self.body.pos.y) * 1.5).clamp(-2.0, 2.0));
+                if after {
+                    let fd = flat.length();
+                    if fd > 10.0 {
+                        want = Some((face, 2.6));
+                    } else if fd < 4.0 {
+                        want = Some((face + std::f32::consts::PI, 2.0));
+                    } else {
+                        self.yaw += angle_diff(face, self.yaw).clamp(-8.0 * dt, 8.0 * dt);
+                    }
+                    let eye = self.eye();
+                    let aim = player + Vec3::Y * 0.9 - eye;
+                    let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                    if self.attack_cd <= 0.0 && clear && dist < 24.0 {
+                        let wobble = Vec3::new(rng.range(-0.08, 0.08), rng.range(-0.05, 0.05), rng.range(-0.08, 0.08));
+                        ev.push(MobEvent::Fireball(eye + aim.normalize_or_zero() * 0.6, (aim.normalize_or_zero() + wobble).normalize_or_zero() * 14.0, false));
+                        self.seed += 1;
+                        if self.seed >= 3 {
+                            self.seed = 0;
+                            self.attack_cd = rng.range(3.5, 5.0);
+                        } else {
+                            self.attack_cd = 0.35;
+                        }
+                    }
+                }
+                self.wander_t += dt;
+                if rng.chance(dt * 5.0) {
+                    ev.push(MobEvent::Smoke(self.eye()));
+                }
+            }
+            MobKind::Weeper => {
+                // Drifts about high and slow; opens its eyes, and cries a fireball.
+                may_wander = false;
+                self.fuse += dt;
+                let eye = self.eye();
+                let aim = player + Vec3::Y * 0.9 - eye;
+                let sees = player_visible && dist < 48.0 && world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                self.angry = sees && self.attack_cd < 1.0;
+                if self.goal.is_none() || self.fuse > 9.0 || self.body.hit_wall || self.goal.is_some_and(|g| g.distance(self.body.pos) < 2.0) {
+                    self.fuse = 0.0;
+                    self.goal = Some(self.body.pos + Vec3::new(rng.range(-16.0, 16.0), rng.range(-3.0, 3.0), rng.range(-16.0, 16.0)));
+                }
+                if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    want = Some((d.x.atan2(-d.z), 1.4));
+                    fly_vy = Some((d.y * 0.5).clamp(-1.0, 1.0));
+                }
+                if sees {
+                    want = want.map(|(_, s)| (face, s * 0.5));
+                    if self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::Fireball(eye + aim.normalize_or_zero() * 2.4, aim.normalize_or_zero() * 10.0, true));
+                        self.attack_cd = rng.range(3.0, 5.0);
+                    }
+                }
+            }
+            MobKind::Snout => {
+                // Minds its own business (and its gold) unless provoked (see fortress.rs).
+                if !player_visible || dist > 32.0 {
+                    self.angry = false;
+                }
+                if self.seed == 1 {
+                    // Admiring some gold: busy.
+                    may_wander = false;
+                } else if self.angry && player_visible {
+                    want = Some((face, 3.4));
+                    if flat.length() < 1.3 && to_player.y.abs() < 1.6 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(6.0, "was clobbered by a Snout. Should've brought gold"));
+                        self.attack_cd = 1.0;
+                    }
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 0.8 {
+                        want = Some((d.x.atan2(-d.z), 2.4));
+                    } else {
+                        may_wander = false;
+                    }
+                }
+            }
+            MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Rampager => {
+                // Raiders: after anyone they can see, else on to the village (`home`; see raids.rs).
+                let fd = flat.length();
+                let after = player_visible && dist < if self.kind == MobKind::Pilferer { 28.0 } else { 24.0 };
+                if after {
+                    match self.kind {
+                        MobKind::Pilferer => {
+                            if fd > 12.0 {
+                                want = Some((face, 2.6));
+                            } else if fd < 5.0 {
+                                want = Some((face + std::f32::consts::PI, 2.2));
+                            } else {
+                                self.yaw += angle_diff(face, self.yaw).clamp(-8.0 * dt, 8.0 * dt);
+                                may_wander = false;
+                            }
+                            let eye = self.eye();
+                            let aim = player + Vec3::Y * 0.9 - eye;
+                            let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                            self.fuse = if self.attack_cd < 0.8 { 1.0 } else { 0.0 };
+                            if self.attack_cd <= 0.0 && fd < 20.0 && clear {
+                                let vel = aim.normalize_or_zero() * Arrow::SPEED * 1.25 + Vec3::Y * aim.length() * 0.3;
+                                ev.push(MobEvent::Shoot(eye + aim.normalize_or_zero() * 0.5, vel));
+                                self.attack_cd = rng.range(2.0, 3.0);
+                            }
+                        }
+                        MobKind::Invoicer => {
+                            // Keeps its distance and casts.
+                            if fd < 6.0 {
+                                want = Some((face + std::f32::consts::PI, 2.6));
+                            } else if fd > 12.0 {
+                                want = Some((face, 2.2));
+                            } else {
+                                self.yaw += angle_diff(face, self.yaw).clamp(-8.0 * dt, 8.0 * dt);
+                                may_wander = false;
+                            }
+                            self.fuse = if self.attack_cd < 1.0 { 1.0 } else { 0.0 };
+                            if self.attack_cd <= 0.0 {
+                                if rng.chance(0.4) {
+                                    ev.push(MobEvent::Summon(self.body.pos + Vec3::Y * 1.5));
+                                } else {
+                                    ev.push(MobEvent::Fangs(self.body.pos, player));
+                                }
+                                self.attack_cd = rng.range(5.0, 7.0);
+                            }
+                        }
+                        _ => {
+                            let (speed, reach, dmg, cause, cd) = if self.kind == MobKind::Rampager { (2.9, 2.2, 12.0, "was trampled by a Rampager", 1.6) } else { (3.5, 1.3, 8.0, "was hackled. Rude", 1.0) };
+                            want = Some((face, speed));
+                            if fd < reach && to_player.y.abs() < 2.0 && self.attack_cd <= 0.0 {
+                                ev.push(MobEvent::HurtPlayer(dmg, cause));
+                                self.attack_cd = cd;
+                            }
+                        }
+                    }
+                } else if let Some(h) = self.home {
+                    let d = h - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 5.0 {
+                        want = Some((d.x.atan2(-d.z), 2.4));
+                    }
+                }
+            }
+            MobKind::Fee => {
+                // Straight at you, through whatever's in the way; it fades after a while.
+                may_wander = false;
+                self.fuse += dt;
+                let d = player + Vec3::Y * 1.0 - self.body.pos;
+                if player_visible {
+                    want = Some((d.x.atan2(-d.z), 4.5));
+                    fly_vy = Some((d.y * 2.5).clamp(-4.0, 4.0));
+                }
+                if player_visible && d.length() < 1.0 && self.attack_cd <= 0.0 {
+                    ev.push(MobEvent::HurtPlayer(3.0, "was charged a Fee. Non-refundable"));
+                    self.attack_cd = 1.0;
+                }
+                if self.fuse > 30.0 {
+                    self.health -= dt;
+                }
+            }
             MobKind::Groaner => {
                 if player_visible && dist < 24.0 {
                     want = Some((flat.x.atan2(-flat.z), 2.3));
@@ -1042,7 +1279,9 @@ impl Mob {
             }
         }
         // Lava hurts and sets things alight; water puts them out.
-        if self.body.in_lava {
+        if self.kind.fireproof() {
+            self.on_fire = 0.0;
+        } else if self.body.in_lava {
             self.on_fire = 6.0;
             self.health -= dt * 6.0;
             self.hurt = self.hurt.max(0.2);
@@ -1094,7 +1333,16 @@ impl Mob {
             }
         }
         let prev_ground = self.body.on_ground;
-        move_body(world, &mut self.body, dt, false);
+        if self.kind == MobKind::Fee {
+            // Through anything.
+            self.body.pos += self.body.vel * dt;
+        } else {
+            move_body(world, &mut self.body, dt, false);
+        }
+        if self.kind == MobKind::Strutter && self.body.in_lava {
+            // Lava is a floor to a Strutter.
+            self.body.vel.y = self.body.vel.y.max(3.5);
+        }
         if moving && self.body.hit_wall {
             match self.kind {
                 // Webbers walk straight up walls.
@@ -1144,6 +1392,15 @@ impl Mob {
             MobKind::Sneaker if self.seed != 0 => Some((self.seed as Id, 1)),
             MobKind::Rollo if rng.chance(0.3) => Some((SCUTE, 1)),
             MobKind::Hush => Some((SCULK_CATALYST, 1)),
+            MobKind::Sizzler if rng.chance(0.5) => Some((SIZZLE_ROD, 1)),
+            MobKind::Weeper if rng.chance(0.6) => Some((WEEPER_TEAR, 1)),
+            MobKind::Strutter => Some((STRING, rng.int(2, 5) as u8)),
+            MobKind::Snout if rng.chance(0.25) => Some((GOLD_INGOT, 1)),
+            MobKind::Pilferer if rng.chance(0.08) => Some((CROSSBOW, 1)),
+            MobKind::Pilferer if n > 0 => Some((ARROW, n)),
+            MobKind::Hackler if rng.chance(0.085) => Some((AXE_FIRST + 3, 1)),
+            MobKind::Invoicer => Some((TOTEM, 1)),
+            MobKind::Rampager => Some((SADDLE, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -1158,6 +1415,10 @@ impl Mob {
             MobKind::Grumbler if rng.chance(0.4) => Some((GOLD_INGOT, 1)),
             MobKind::Grumbler if rng.chance(0.5) => Some((GRUMBLER_TUSK, 1)),
             MobKind::Soggy if rng.chance(0.11) => Some((COPPER_INGOT, 1)),
+            MobKind::Weeper => Some((GUNPOWDER, rng.int(0, 2) as u8)).filter(|l| l.1 > 0),
+            // A patrol's captain carries the banner (see raids.rs).
+            MobKind::Pilferer if self.seed == 1 => Some((OMINOUS_BANNER, 1)),
+            MobKind::Invoicer if rng.chance(0.5) => Some((GOLD_INGOT, rng.int(1, 3) as u8)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -1170,6 +1431,14 @@ impl Mob {
         let d = to.length();
         // Within about a head's width of the crosshair.
         d > 0.5 && d < 48.0 && to.dot(dir) / d > 1.0 - 0.5 * (0.4 / d).powi(2)
+    }
+
+    /// Drawn again a little bigger and glowing (a Bell rang; see raids.rs).
+    pub fn draw_glow(&self, geo: &mut DynGeo, world: &World) {
+        let _ = world;
+        geo.begin(Pass::Opaque, [3.0, 2.6, 1.2, 1.0], false);
+        let root = Mat4::from_translation(self.body.pos - Vec3::Y * 0.05) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(Vec3::splat(self.size * 1.07));
+        draw_posed(geo, &root, model(self.kind), self.anim, self.flap, 1.0);
     }
 
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {
@@ -1207,6 +1476,9 @@ impl Mob {
             MobKind::Fluffer if self.sheared => &FLUFFER_SHEARED[..],
             MobKind::Rollo if self.fuse > 0.0 => &ROLLO_BALL[..],
             MobKind::Soggy if self.seed == 1 => &SOGGY_ARMED[..],
+            MobKind::Weeper if self.angry => &WEEPER_ANGRY[..],
+            MobKind::Invoicer if self.fuse > 0.0 => &INVOICER_CASTING[..],
+            MobKind::Strutter if !is_lava(world.get(p.x.floor() as i32, (p.y - 0.3).floor() as i32, p.z.floor() as i32)) && !self.body.in_lava => &STRUTTER_COLD[..],
             k => model(k),
         };
         draw_posed(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, self.flap, sky);
@@ -1217,6 +1489,20 @@ impl Mob {
             draw_model(geo, &root, &WOOFER_ARMOUR, 0.0, sky, false);
         } else if self.saddled {
             draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
+        }
+        if self.kind == MobKind::Pilferer && self.seed == 1 {
+            draw_model(geo, &root, &BANNER_BACK, 0.0, sky, false);
+        }
+        // What raiders and Snouts carry: a crossbow, an axe, some gold being admired.
+        let carried = match self.kind {
+            MobKind::Pilferer => Some(if self.fuse > 0.0 { T_CROSSBOW_LOADED } else { T_CROSSBOW }),
+            MobKind::Hackler => Some(item_tile(AXE_FIRST + 3)),
+            MobKind::Snout if self.seed == 1 => Some(item_tile(GOLD_INGOT)),
+            _ => None,
+        };
+        if let Some(tile) = carried {
+            let held = [part([-0.55, 0.55, -0.55], [0.06, 0.45, 0.45], [0.0; 3], Limb::Fixed, [tile; 6])];
+            draw_model(geo, &root, &held, 0.0, sky, false);
         }
         // A Sneaker with something in its mouth.
         if self.kind == MobKind::Sneaker && self.seed != 0 {
@@ -1551,6 +1837,86 @@ static HUSH: [Part; 9] = [
     part([-0.42, 0.0, -0.17], [0.34, 1.15, 0.34], [0.0, 1.15, 0.0], Limb::Swing(1.0), [HU; 6]),
     part([0.08, 0.0, -0.17], [0.34, 1.15, 0.34], [0.0, 1.15, 0.0], Limb::Swing(-1.0), [HU; 6]),
 ];
+static SIZZLER: [Part; 9] = [
+    part([-0.25, 1.3, -0.25], [0.5, 0.5, 0.5], [0.0; 3], Limb::Fixed, [T_SIZZLER, T_SIZZLER, T_SIZZLER, T_SIZZLER, T_SIZZLER, T_SIZZLER_FACE]),
+    part([-0.5, 0.75, -0.06], [0.12, 0.5, 0.12], [0.0, 1.0, 0.0], Limb::SwingY(0.6), [T_SIZZLER_ROD; 6]),
+    part([0.38, 0.75, -0.06], [0.12, 0.5, 0.12], [0.0, 1.0, 0.0], Limb::SwingY(0.6), [T_SIZZLER_ROD; 6]),
+    part([-0.06, 0.75, -0.5], [0.12, 0.5, 0.12], [0.0, 1.0, 0.0], Limb::SwingY(0.6), [T_SIZZLER_ROD; 6]),
+    part([-0.06, 0.75, 0.38], [0.12, 0.5, 0.12], [0.0, 1.0, 0.0], Limb::SwingY(0.6), [T_SIZZLER_ROD; 6]),
+    part([-0.32, 0.2, -0.32], [0.12, 0.5, 0.12], [0.0, 0.45, 0.0], Limb::SwingY(-0.6), [T_SIZZLER_ROD; 6]),
+    part([0.2, 0.2, -0.32], [0.12, 0.5, 0.12], [0.0, 0.45, 0.0], Limb::SwingY(-0.6), [T_SIZZLER_ROD; 6]),
+    part([-0.32, 0.2, 0.2], [0.12, 0.5, 0.12], [0.0, 0.45, 0.0], Limb::SwingY(-0.6), [T_SIZZLER_ROD; 6]),
+    part([0.2, 0.2, 0.2], [0.12, 0.5, 0.12], [0.0, 0.45, 0.0], Limb::SwingY(-0.6), [T_SIZZLER_ROD; 6]),
+];
+
+const WP: u16 = T_WEEPER;
+const fn weeper(face: u16) -> [Part; 10] {
+    [
+        part([-2.0, 0.0, -2.0], [4.0, 4.0, 4.0], [0.0; 3], Limb::Fixed, [WP, WP, WP, WP, WP, face]),
+        part([-1.6, -1.8, -1.2], [0.3, 1.8, 0.3], [0.0, 0.0, 0.0], Limb::Swing(0.25), [WP; 6]),
+        part([-0.6, -2.4, -1.4], [0.3, 2.4, 0.3], [0.0, 0.0, 0.0], Limb::Swing(-0.25), [WP; 6]),
+        part([0.4, -1.6, -1.3], [0.3, 1.6, 0.3], [0.0, 0.0, 0.0], Limb::Swing(0.25), [WP; 6]),
+        part([1.3, -2.2, -1.2], [0.3, 2.2, 0.3], [0.0, 0.0, 0.0], Limb::Swing(-0.25), [WP; 6]),
+        part([-1.2, -2.0, 0.0], [0.3, 2.0, 0.3], [0.0, 0.0, 0.0], Limb::Swing(-0.25), [WP; 6]),
+        part([0.0, -2.6, 0.2], [0.3, 2.6, 0.3], [0.0, 0.0, 0.0], Limb::Swing(0.25), [WP; 6]),
+        part([1.1, -1.8, 0.4], [0.3, 1.8, 0.3], [0.0, 0.0, 0.0], Limb::Swing(-0.25), [WP; 6]),
+        part([-0.8, -1.6, 1.3], [0.3, 1.6, 0.3], [0.0, 0.0, 0.0], Limb::Swing(0.25), [WP; 6]),
+        part([0.6, -2.2, 1.3], [0.3, 2.2, 0.3], [0.0, 0.0, 0.0], Limb::Swing(-0.25), [WP; 6]),
+    ]
+}
+static WEEPER: [Part; 10] = weeper(T_WEEPER_FACE);
+static WEEPER_ANGRY: [Part; 10] = weeper(T_WEEPER_ANGRY);
+
+const fn strutter(skin: u16) -> [Part; 6] {
+    [
+        part([-0.42, 0.85, -0.42], [0.84, 0.75, 0.84], [0.0; 3], Limb::Fixed, [skin, skin, skin, skin, skin, T_STRUTTER_FACE]),
+        part([-0.35, 1.6, -0.1], [0.08, 0.3, 0.08], [0.0, 1.6, 0.0], Limb::Wing(0.4), [skin; 6]),
+        part([-0.05, 1.6, 0.05], [0.08, 0.38, 0.08], [0.0, 1.6, 0.0], Limb::Wing(-0.4), [skin; 6]),
+        part([0.25, 1.6, -0.2], [0.08, 0.26, 0.08], [0.0, 1.6, 0.0], Limb::Wing(0.4), [skin; 6]),
+        part([-0.3, 0.0, -0.09], [0.18, 0.9, 0.18], [0.0, 0.9, 0.0], Limb::Swing(1.0), [skin; 6]),
+        part([0.12, 0.0, -0.09], [0.18, 0.9, 0.18], [0.0, 0.9, 0.0], Limb::Swing(-1.0), [skin; 6]),
+    ]
+}
+static STRUTTER: [Part; 6] = strutter(T_STRUTTER);
+static STRUTTER_COLD: [Part; 6] = strutter(T_STRUTTER_COLD);
+
+/// A snout of its own, and gold-trimmed clothes.
+static SNOUT: [Part; 7] = {
+    let h = humanoid(T_SNOUT, T_SNOUT_FACE, T_SNOUT_TUNIC, T_SNOUT_TUNIC, Limb::Swing(-0.8), Limb::Swing(0.8));
+    [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.12, 1.55, -0.34], [0.24, 0.16, 0.1], [0.0; 3], Limb::Fixed, [T_SNOUT; 6])]
+};
+
+/// Illagers: grey skin, a long nose and a scowl, in a coat to suit the job.
+const fn illager(coat: u16, arms: Limb) -> [Part; 7] {
+    let h = humanoid(T_ILLAGER, T_ILLAGER_FACE, coat, coat, arms, arms);
+    [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.06, 1.55, -0.38], [0.12, 0.22, 0.14], [0.0; 3], Limb::Fixed, [T_ILLAGER; 6])]
+}
+static PILFERER: [Part; 7] = illager(T_PILFERER_COAT, Limb::Forward);
+static HACKLER: [Part; 7] = illager(T_HACKLER_COAT, Limb::Swing(-1.0));
+static INVOICER: [Part; 7] = illager(T_INVOICER_ROBE, Limb::Fixed);
+/// The Invoicer casting: arms up.
+static INVOICER_CASTING: [Part; 7] = illager(T_INVOICER_ROBE, Limb::Tilt(-2.8));
+static FEE: [Part; 4] = [
+    part([-0.12, 0.3, -0.1], [0.24, 0.3, 0.2], [0.0; 3], Limb::Fixed, [T_FEE; 6]),
+    part([-0.14, 0.58, -0.14], [0.28, 0.24, 0.28], [0.0; 3], Limb::Fixed, [T_FEE; 6]),
+    part([-0.45, 0.4, 0.05], [0.33, 0.25, 0.03], [-0.12, 0.5, 0.06], Limb::Wing(0.8), [T_FEE; 6]),
+    part([0.12, 0.4, 0.05], [0.33, 0.25, 0.03], [0.12, 0.5, 0.06], Limb::Wing(-0.8), [T_FEE; 6]),
+];
+const RG: u16 = T_RAMPAGER;
+static RAMPAGER: [Part; 7] = [
+    part([-0.7, 0.9, -0.9], [1.4, 1.1, 1.9], [0.0; 3], Limb::Fixed, [RG; 6]),
+    part([-0.45, 1.1, -1.5], [0.9, 0.9, 0.7], [0.0; 3], Limb::Fixed, [RG, RG, RG, RG, RG, T_RAMPAGER_FACE]),
+    part([-0.6, 1.8, -1.35], [0.15, 0.4, 0.15], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
+    part([0.45, 1.8, -1.35], [0.15, 0.4, 0.15], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
+    part([-0.6, 0.0, -0.75], [0.4, 0.95, 0.4], [0.0, 0.95, -0.6], Limb::Swing(1.0), [RG; 6]),
+    part([0.2, 0.0, -0.75], [0.4, 0.95, 0.4], [0.0, 0.95, -0.6], Limb::Swing(-1.0), [RG; 6]),
+    part([-0.2, 0.0, 0.4], [0.4, 0.95, 0.4], [0.0, 0.95, 0.6], Limb::Swing(-1.0), [RG; 6]),
+];
+/// A captain's banner, up on its back.
+static BANNER_BACK: [Part; 2] = [
+    part([-0.03, 1.2, 0.15], [0.06, 1.4, 0.06], [0.0; 3], Limb::Fixed, [T_PLANKS; 6]),
+    part([-0.3, 1.6, 0.2], [0.6, 0.9, 0.03], [0.0; 3], Limb::Fixed, [T_BANNER_WORN; 6]),
+];
 /// Plates of scute over a Woofer (see critters.rs).
 static WOOFER_ARMOUR: [Part; 2] = [
     part([-0.24, 0.42, -0.42], [0.48, 0.3, 0.84], [0.0; 3], Limb::Fixed, [T_WOLF_ARMOR_WORN; 6]),
@@ -1583,6 +1949,15 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Ribbit => &RIBBIT,
         MobKind::Rollo => &ROLLO,
         MobKind::Hush => &HUSH,
+        MobKind::Sizzler => &SIZZLER,
+        MobKind::Weeper => &WEEPER,
+        MobKind::Strutter => &STRUTTER,
+        MobKind::Snout => &SNOUT,
+        MobKind::Pilferer => &PILFERER,
+        MobKind::Hackler => &HACKLER,
+        MobKind::Invoicer => &INVOICER,
+        MobKind::Fee => &FEE,
+        MobKind::Rampager => &RAMPAGER,
     }
 }
 

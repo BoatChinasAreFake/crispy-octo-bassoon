@@ -109,6 +109,7 @@ fn t_of(i: usize) -> f32 {
 // ---------------------------------------------------------------- voices
 
 /// A plucked string (Karplus-Strong): a burst of noise round a delay line.
+#[allow(clippy::too_many_arguments)]
 fn pluck(out: &mut [f32], start: f32, len: f32, f: f32, gain: f32, bright: f32, rng: &mut Rng) {
     let s0 = samples(start);
     let period = ((SR as f32 / f.max(20.0)) as usize).max(2);
@@ -230,6 +231,7 @@ fn kick(out: &mut [f32], start: f32, f: f32, gain: f32) {
 }
 
 /// Filtered noise with a sharp decay: snares, hats, shakers.
+#[allow(clippy::too_many_arguments)]
 fn noise_hit(out: &mut [f32], start: f32, len: f32, decay: f32, lo: f32, hi: f32, gain: f32, rng: &mut Rng) {
     let s0 = samples(start);
     let (mut lp, mut hp) = (0.0f32, 0.0f32);

@@ -89,7 +89,7 @@ pub enum Msg {
     /// `held_ench`: its enchantments (believed only if the host knows they have them).
     PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16 },
     /// Mobs, primed TNT (position, fuse) and arrows in flight (position, velocity).
-    Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)>, falling: Vec<(Vec3, f32, Id)> },
+    Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)>, falling: Vec<(Vec3, f32, Id)>, fireballs: Vec<(Vec3, Vec3, bool)> },
     /// client -> host
     Attack { mob: u32, dmg: f32, from: Vec3 },
     /// client -> host
@@ -159,6 +159,13 @@ pub enum Msg {
     Darkness { secs: f32 },
     /// client -> host: I died, and this is how ("was blown up by a Hisser").
     Died { cause: String },
+    /// client -> host: I swatted the fireball at `at` back toward `dir`.
+    Deflect { at: Vec3, dir: Vec3 },
+    /// host -> client: how the raid you're in is going (state 0 none, 1 on,
+    /// 2 won, 3 lost; see raids.rs).
+    Raid { state: u8, wave: u8, waves: u8, left: u16 },
+    /// host -> client: an effect for `secs` (`potions::EFFECTS` index): Bad Omen, Hero of the Village.
+    TimedEffect { effect: u8, secs: f32 },
     /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
     /// `material` (or, `combine`, by merging two of them).
     /// `ench`, `other_ench`: the enchantments on the item and on what it was combined with.
@@ -386,7 +393,7 @@ impl Msg {
                 w.u16(*held_ench);
                 w.u16(*armor);
             }
-            Msg::Mobs { mobs, tnts, arrows, falling } => {
+            Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
                 w.u8(8);
                 w.u32(mobs.len() as u32);
                 for m in mobs {
@@ -415,6 +422,12 @@ impl Msg {
                     w.v3(p);
                     w.f32(v);
                     w.u16(id);
+                }
+                w.u32(fireballs.len() as u32);
+                for &(p, v, big) in fireballs {
+                    w.v3(p);
+                    w.v3(v);
+                    w.u8(big as u8);
                 }
             }
             Msg::Attack { mob, dmg, from } => {
@@ -650,6 +663,23 @@ impl Msg {
                 w.u8(68);
                 w.str(cause);
             }
+            Msg::Deflect { at, dir } => {
+                w.u8(69);
+                w.v3(*at);
+                w.v3(*dir);
+            }
+            Msg::Raid { state, wave, waves, left } => {
+                w.u8(70);
+                w.u8(*state);
+                w.u8(*wave);
+                w.u8(*waves);
+                w.u16(*left);
+            }
+            Msg::TimedEffect { effect, secs } => {
+                w.u8(71);
+                w.u8(*effect);
+                w.f32(*secs);
+            }
             Msg::Weather { kind } => {
                 w.u8(42);
                 w.u8(*kind);
@@ -840,7 +870,12 @@ impl Msg {
                 for _ in 0..n {
                     falling.push((r.v3()?, r.f32()?, r.u16()?));
                 }
-                Msg::Mobs { mobs, tnts, arrows, falling }
+                let n = r.count(25)?;
+                let mut fireballs = Vec::with_capacity(n);
+                for _ in 0..n {
+                    fireballs.push((r.v3()?, r.v3()?, r.u8()? != 0));
+                }
+                Msg::Mobs { mobs, tnts, arrows, falling, fireballs }
             }
             9 => Msg::Attack { mob: r.u32()?, dmg: r.f32()?, from: r.v3()? },
             10 => Msg::Ignite { x: r.i32()?, y: r.i32()?, z: r.i32()? },
@@ -926,6 +961,9 @@ impl Msg {
             66 => Msg::Smith { x: r.i32()?, y: r.i32()?, z: r.i32()?, grind: r.u8()? != 0, a: r.u16()?, a_ench: r.u16()?, b: r.u16()?, b_ench: r.u16()? },
             67 => Msg::Darkness { secs: r.f32()? },
             68 => Msg::Died { cause: r.str()? },
+            69 => Msg::Deflect { at: r.v3()?, dir: r.v3()? },
+            70 => Msg::Raid { state: r.u8()?, wave: r.u8()?, waves: r.u8()?, left: r.u16()? },
+            71 => Msg::TimedEffect { effect: r.u8()?, secs: r.f32()? },
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
@@ -1471,6 +1509,9 @@ mod tests {
             Msg::Smith { x: 4, y: 5, z: -6, grind: true, a: 0x8003, a_ench: 7, b: 0x8004, b_ench: 0 },
             Msg::Darkness { secs: 12.0 },
             Msg::Died { cause: "was bloop'd".into() },
+            Msg::Deflect { at: Vec3::new(1.0, 40.0, -2.0), dir: Vec3::Z },
+            Msg::Raid { state: 1, wave: 2, waves: 5, left: 7 },
+            Msg::TimedEffect { effect: 7, secs: 600.0 },
             Msg::Weather { kind: 2 },
             Msg::Lightning { at: Vec3::new(4.0, 70.0, -9.5) },
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },
@@ -1501,6 +1542,7 @@ mod tests {
                 tnts: vec![(Vec3::Z, 2.0)],
                 arrows: vec![(Vec3::Y, Vec3::new(20.0, 3.0, -1.0))],
                 falling: vec![(Vec3::new(1.0, 60.5, 2.0), -7.5, 5)],
+                fireballs: vec![(Vec3::ONE, Vec3::X * 10.0, true)],
             },
             Msg::HurtYou { dmg: 3.0, cause: "was groaned".into(), knock: Vec3::Y },
             Msg::Chat { from: 0, text: "hello 🧱".into() },

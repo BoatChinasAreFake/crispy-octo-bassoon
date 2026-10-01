@@ -116,7 +116,16 @@ impl Game {
         let yaw = self.player.yaw;
         let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
         let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
-        let wish = (fwd * forward + right * strafe * 0.6).clamp_length_max(1.0) * RIDE_SPEED;
+        // A Strutter only goes where its shroom on a stick says (see fortress.rs), and not as fast.
+        let strutter = self.mobs[i].kind == crate::entity::MobKind::Strutter;
+        let speed = if !strutter {
+            RIDE_SPEED
+        } else if self.inv.held() == SHROOM_STICK {
+            5.5
+        } else {
+            0.0
+        };
+        let wish = (fwd * forward + right * strafe * 0.6).clamp_length_max(1.0) * speed;
         let m = &mut self.mobs[i];
         let k = (dt * 4.0).min(1.0);
         m.body.vel.x += (wish.x - m.body.vel.x) * k;
@@ -126,7 +135,13 @@ impl Game {
             m.body.vel.y = RIDE_JUMP;
         }
         move_body(&self.world, &mut m.body, dt, false);
-        m.yaw = yaw;
+        if strutter && m.body.in_lava {
+            // Lava's a floor to it.
+            m.body.vel.y = m.body.vel.y.max(3.5);
+        }
+        if speed > 0.0 {
+            m.yaw = yaw;
+        }
         m.net_pos = m.body.pos;
         m.anim += Vec3::new(m.body.vel.x, 0.0, m.body.vel.z).length() * dt * 2.5;
         let seat = m.body.pos + Vec3::Y * 1.15;

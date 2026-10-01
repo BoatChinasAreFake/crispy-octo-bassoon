@@ -30,6 +30,7 @@ mod enchant;
 mod entity;
 mod falling;
 mod farming;
+mod fortress;
 mod music;
 mod fire;
 mod fishing;
@@ -64,6 +65,7 @@ mod players;
 mod regions;
 mod render;
 mod rules;
+mod raids;
 mod save;
 mod scorch;
 mod scripting;
@@ -2042,6 +2044,7 @@ impl App {
         }
         self.fishing_hud();
         self.brushing_hud();
+        self.raid_hud();
         // The Deep Dark's darkness: pulsing in after a shriek, and faintly whenever the Hush is near.
         let hush = self.game.mobs.iter().filter(|m| m.kind == entity::MobKind::Hush).map(|m| m.body.pos.distance(self.game.player.body.pos)).fold(f32::MAX, f32::min);
         let near = (1.0 - hush / 24.0).clamp(0.0, 1.0) * 0.45;
@@ -2481,6 +2484,26 @@ impl App {
     }
 
     /// While brushing: how uncovered the find is, and how hard you're pressing.
+    /// The raid bar across the top (see raids.rs).
+    fn raid_hud(&self) {
+        let Some((state, wave, waves, left, _)) = self.game.raid_hud else { return };
+        let (w, s) = (screen_width(), self.ui.s);
+        let bw = (220.0 * s).min(w * 0.7);
+        let (x, y) = (w / 2.0 - bw / 2.0, 22.0 * s);
+        let (label, fill, col) = match state {
+            2 => ("Raid - Victory!".to_string(), 1.0, Color::new(0.35, 0.85, 0.35, 1.0)),
+            3 => ("Raid - Defeat".to_string(), 0.0, Color::new(0.6, 0.15, 0.15, 1.0)),
+            _ => (
+                format!("Raid - wave {wave} of {waves} - {left} raider{} left", if left == 1 { "" } else { "s" }),
+                1.0 - (wave.saturating_sub(1) as f32 + if left == 0 { 1.0 } else { 0.0 }) / waves.max(1) as f32,
+                Color::new(0.85, 0.15, 0.15, 1.0),
+            ),
+        };
+        self.ui.text_centered(&label, w / 2.0, y - 4.0 * s, 9.0, WHITE);
+        draw_rectangle(x - 2.0 * s, y - 2.0 * s + 2.0 * s, bw + 4.0 * s, 6.0 * s + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+        draw_rectangle(x, y + 2.0 * s, bw * fill.clamp(0.0, 1.0), 6.0 * s, col);
+    }
+
     fn brushing_hud(&self) {
         let Some(d) = &self.game.dig else { return };
         if d.idle > 1.5 {
@@ -3642,7 +3665,13 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         let d = to - from;
         (from, d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()))
     };
+    // The Scorchlands' structures are a long way east.
+    let (cx0, cz0) = if matches!(mode, "fortress" | "camp") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
     let kind = match mode {
+        "outpost" => Kind::Outpost,
+        "fortress" => Kind::Fortress,
+        "camp" => Kind::SnoutCamp,
+        "raid" => Kind::Village,
         "hut" => Kind::Hut,
         "tower" => Kind::Tower,
         "well" => Kind::Well,
@@ -3753,6 +3782,9 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Tower => look(o + Vec3::new(-11.0, 9.0, -11.0), o + Vec3::Y * 4.0),
                 Kind::Village => look(o + Vec3::new(-20.0, 18.0, -20.0), o + Vec3::Y * 2.0),
                 Kind::HushedCity => look(o + Vec3::new(-7.0, 4.5, -9.0), o + Vec3::new(0.0, 3.0, 0.0)),
+                Kind::Fortress => look(o + Vec3::new(-22.0, 22.0, -26.0), o + Vec3::new(0.0, 0.0, -4.0)),
+                Kind::SnoutCamp => look(o + Vec3::new(-9.0, 6.0, -10.0), o + Vec3::Y * 1.5),
+                Kind::Outpost => look(o + Vec3::new(-14.0, 10.0, -14.0), o + Vec3::Y * 7.0),
                 Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
@@ -4068,7 +4100,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
@@ -4177,7 +4209,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "zoo" | "animals" => {
+            "zoo" | "animals" | "newmobs" | "music" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
@@ -4433,7 +4465,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "music" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -5076,7 +5108,77 @@ async fn game_main() {
                     m.body.vel.z = 0.0;
                 }
             }
-            if s.mode == "zoo" && frames > 150 {
+            if s.mode == "newmobs" && frames == 150 {
+                // This batch's mobs: the Scorchlands' up front, raiders behind, a Weeper over it all.
+                use entity::MobKind as K;
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(9);
+                let line = [(K::Sizzler, 6.0, -3.0), (K::Strutter, 6.0, -1.0), (K::Snout, 6.0, 1.0), (K::Fee, 6.0, 3.0), (K::Pilferer, 10.0, -4.5), (K::Hackler, 10.0, -2.5), (K::Invoicer, 10.0, -0.5), (K::Rampager, 10.5, 2.5), (K::Weeper, 19.0, 0.0)];
+                for (i, (kind, f, r)) in line.into_iter().enumerate() {
+                    let up = if kind == K::Weeper { 4.0 } else if kind == K::Sizzler || kind == K::Fee { 1.2 } else { 0.0 };
+                    let mut m = entity::Mob::new(kind, p + fwd * f + right * r + Vec3::Y * (2.0 + up), &mut rng);
+                    m.yaw = s.yaw + std::f32::consts::PI;
+                    m.id = 2000 + i as u32;
+                    // A captain with its banner, a Snout admiring gold, an Invoicer casting.
+                    m.seed = matches!(kind, K::Pilferer | K::Snout) as u32;
+                    m.angry = kind == K::Weeper;
+                    if kind == K::Invoicer {
+                        m.fuse = 1.0;
+                    }
+                    app.game.mobs.push(m);
+                }
+            }
+            if s.mode == "music" && frames == 125 {
+                // Note blocks on each kind of block, a jukebox playing, a bell, gold.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y = p.y.floor() as i32;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y, v.z.floor() as i32)
+                };
+                let under = [block::PLANKS, block::STONE, block::SAND, block::GLASS, block::GOLD_BLOCK, block::ICE, block::TERRACOTTA, block::WOOL, block::GRASS];
+                for (i, &b) in under.iter().enumerate() {
+                    let c = at(5.0, i as f32 * 1.0 - 4.0);
+                    app.game.world.set_v(c, b);
+                    app.game.world.set_v(c + IVec3::Y, block::NOTE_BLOCK + (i as u16 * 3) % 25);
+                }
+                app.game.world.set_v(at(3.0, -2.0), block::JUKEBOX_DISC_FIRST + 4);
+                app.game.world.set_v(at(3.0, 0.0), block::JUKEBOX);
+                app.game.world.set_v(at(3.0, 2.0) + IVec3::Y, block::BELL);
+                app.game.world.set_v(at(3.0, 2.0), block::GOLD_BLOCK);
+                for i in 0..6 {
+                    app.game.give(block::DISC_FIRST + i, 1);
+                }
+                let note = at(5.0, 0.0) + IVec3::Y * 2;
+                for k in 0..6 {
+                    app.game.note_particle(note.as_vec3() + Vec3::new(0.5 + k as f32 * 0.2 - 0.5, 0.2 + k as f32 * 0.25, 0.5), (k * 4) as u8);
+                }
+            }
+            if s.mode == "raid" && frames == 150 {
+                // Wave two marching on the square.
+                use entity::MobKind as K;
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(5);
+                for (i, kind) in [K::Pilferer, K::Pilferer, K::Hackler, K::Pilferer, K::Invoicer, K::Rampager, K::Hackler].into_iter().enumerate() {
+                    let v = p + fwd * (16.0 + (i % 3) as f32 * 2.0) + right * ((i as f32 - 3.0) * 2.2);
+                    let (x, z) = (v.x.floor() as i32, v.z.floor() as i32);
+                    let ground = app.game.world.surface_y(x, z) + 1;
+                    let mut m = entity::Mob::new(kind, Vec3::new(x as f32 + 0.5, ground as f32, z as f32 + 0.5), &mut rng);
+                    m.yaw = s.yaw + std::f32::consts::PI;
+                    m.id = 3000 + i as u32;
+                    m.seed = (i == 0) as u32;
+                    app.game.mobs.push(m);
+                }
+                app.game.raid_hud = Some((1, 2, 5, 7, 999.0));
+                app.game.bell_glow = 999.0;
+            }
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "raid") && frames > 150 {
                 // Hold still for the photo.
                 for m in app.game.mobs.iter_mut() {
                     m.yaw = s.yaw + std::f32::consts::PI;
