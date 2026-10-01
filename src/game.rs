@@ -174,6 +174,9 @@ pub struct Game {
     pub view_bobbing: bool,
     pub particle_level: u8,
     pub water_reflections: bool,
+    /// Sun shadows, and deep water with caustics (Video Settings; see render.rs).
+    pub shadows: bool,
+    pub fancy_water: bool,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
     /// Potion effects on the local player, with seconds left (see potions.rs).
@@ -366,6 +369,8 @@ impl Game {
             view_bobbing: true,
             particle_level: 0,
             water_reflections: true,
+            shadows: true,
+            fancy_water: true,
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
@@ -2686,10 +2691,19 @@ impl Game {
             }
             return;
         }
-        if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS) && clear(&self.world, y + 1) {
+        // Rollos in the dry lands.
+        if !self.is_night() && passive < 8 && matches!(top, SAND | RED_SAND) && matches!(biome, Biome::Desert | Biome::Badlands) && clear(&self.world, y + 1) && self.rng.chance(0.3) {
+            self.alloc_mob(MobKind::Rollo, Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5));
+            return;
+        }
+        if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS | MUD) && clear(&self.world, y + 1) {
             let kind = if woofy && self.rng.chance(if biome == Biome::Taiga { 0.4 } else { 0.25 }) {
                 MobKind::Woofer
-            } else if top == SNOW_GRASS {
+            } else if matches!(biome, Biome::Taiga | Biome::Snowy) && self.rng.chance(0.35) {
+                MobKind::Sneaker
+            } else if biome == Biome::Swamp && self.rng.chance(0.5) {
+                MobKind::Ribbit
+            } else if top == SNOW_GRASS || top == MUD {
                 return;
             } else if biome == Biome::Plains && self.rng.chance(0.15) {
                 MobKind::Galloper
@@ -2841,6 +2855,7 @@ impl Game {
         let thick = 4.0;
         if fancy {
             g.begin(Pass::Opaque, [1.0; 4], false);
+            g.no_shadow();
         } else {
             g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
         }
@@ -3102,7 +3117,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = self.sun_angle(); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
     }
 }
 

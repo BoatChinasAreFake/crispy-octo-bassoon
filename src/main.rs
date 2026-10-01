@@ -1724,6 +1724,8 @@ impl App {
         self.game.view_bobbing = self.settings.view_bobbing;
         self.game.particle_level = self.settings.particles;
         self.game.water_reflections = self.settings.water_reflections;
+        self.game.shadows = self.settings.shadows;
+        self.game.fancy_water = self.settings.fancy_water;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
             mesher::set_smooth(self.settings.smooth_lighting);
@@ -2371,7 +2373,7 @@ impl App {
         let x = w / 2.0 - pw / 2.0;
         let mut y = h * 0.1 + 30.0 * s;
         let row_h = 18.0 * s;
-        let mut rows: Vec<(Id, String, String)> = bees::Flavour::ALL.iter().map(|f| (f.item(), format!("{} Honey", f.name()), format!("{} bottles", log.bottles[f.index()]))).collect();
+        let mut rows: Vec<(Id, String, String)> = bees::Flavour::ALL.iter().map(|f| (f.item(), format!("{} Honey", f.name()), format!("{} bottle{}", log.bottles[f.index()], if log.bottles[f.index()] == 1 { "" } else { "s" }))).collect();
         rows.push((HONEYCOMB, "Honeycomb".into(), format!("{}", log.comb)));
         rows.push((QUEEN_BEE, "Queens caught".into(), format!("{}", log.queens)));
         rows.push((BEEHIVE, "Colonies started".into(), format!("{}", log.colonies_started)));
@@ -2623,9 +2625,9 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let bw = (240.0 * s).min(w * 0.85);
-        let bh = (20.0 * s).min((h - 100.0 * s) / 11.0);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 12.0);
         let x = w / 2.0 - bw / 2.0;
-        let total = 9.0 * bh + 8.0 * 5.0 * s + 20.0 * s;
+        let total = 10.0 * bh + 9.0 * 5.0 * s + 20.0 * s;
         let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
         self.ui.text_centered("Video Settings", w / 2.0, y - 18.0 * s, 16.0, WHITE);
         let st = self.settings.clone();
@@ -2700,6 +2702,14 @@ impl App {
         }
         if self.ui.button(Rect::new(right, y, half, bh), &on_off("Fog", st.fog), true) {
             self.settings.fog = !st.fog;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Shadows", st.shadows), true) {
+            self.settings.shadows = !st.shadows;
+        }
+        let depth = if st.fancy_water { "Water Depth: Fancy" } else { "Water Depth: Simple" };
+        if self.ui.button(Rect::new(right, y, half, bh), depth, true) {
+            self.settings.fancy_water = !st.fancy_water;
         }
         y += bh + 4.0 * s;
         // VSync and anti-aliasing are set when the window opens.
@@ -3633,6 +3643,45 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
         "village" => Kind::Village,
+        "city" => Kind::HushedCity,
+        "ruins" => Kind::DesertRuins,
+        "trailruins" => Kind::TrailRuins,
+        "oceanruins" => Kind::OceanRuins,
+        "deepdark" => {
+            // Inside a Deep Dark cavern, standing on its floor.
+            for r in 0..200 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    if !generator.deep_dark(x, z) || generator.column(x, z).0 < deepdark::DEEP_TOP + 8 {
+                        continue;
+                    }
+                    for y in 5..deepdark::DEEP_TOP - 6 {
+                        let open = (0..4).all(|k| generator.deep_cavern(x, y + k, z)) && !generator.deep_cavern(x, y - 1, z);
+                        if open {
+                            return Some((Vec3::new(x as f32 + 0.5, y as f32 + 1.6, z as f32 + 0.5), 0.7, -0.15));
+                        }
+                    }
+                }
+            }
+            return None;
+        }
+        "beenest" => {
+            // An oak with a nest on it (the same rule the generator uses).
+            for r in 0..120 {
+                for (dx, dz) in ring(r) {
+                    for k in 0..256 {
+                        let (tx, tz) = ((cx0 + dx) * 16 + k % 16, (cz0 + dz) * 16 + k / 16);
+                        let Some((h, trunk, kind)) = generator.tree_at(tx, tz) else { continue };
+                        let biome = generator.column(tx, tz).1;
+                        if kind == world::TreeKind::Oak && noise::hash2(generator.seed ^ 0xBEE, tx, tz) < 0.07 && matches!(biome, world::Biome::Plains | world::Biome::Forest) {
+                            let nest = Vec3::new(tx as f32 + 0.5, (h + (trunk - 3).max(1)) as f32 + 0.5, tz as f32 + 0.5);
+                            return Some(look(nest + Vec3::new(4.5, 0.5, 4.5), nest));
+                        }
+                    }
+                }
+            }
+            return None;
+        }
         "swamp" | "jungle" | "badlands" | "taiga" => {
             let want = match mode {
                 "swamp" => world::Biome::Swamp,
@@ -3698,6 +3747,8 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Dungeon => look(o + Vec3::new(2.6, 2.4, 2.6), o + Vec3::new(-3.0, 0.5, -1.0)),
                 Kind::Tower => look(o + Vec3::new(-11.0, 9.0, -11.0), o + Vec3::Y * 4.0),
                 Kind::Village => look(o + Vec3::new(-20.0, 18.0, -20.0), o + Vec3::Y * 2.0),
+                Kind::HushedCity => look(o + Vec3::new(-7.0, 4.5, -9.0), o + Vec3::new(0.0, 3.0, 0.0)),
+                Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -3941,6 +3992,8 @@ async fn game_main() {
             app.settings.ui_scale = v;
         }
         app.settings.fancy_clouds = !flag("--fast-clouds");
+        app.settings.shadows = !flag("--no-shadows");
+        app.settings.fancy_water = !flag("--simple-water");
         // Show the "new version" button as if one were out (for screenshots).
         if let Some(tag) = arg("--pretend-update") {
             app.updates.newer = Some(tag);
@@ -4010,7 +4063,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
@@ -4133,6 +4186,93 @@ async fn game_main() {
                 }
                 app.start_game(g);
                 app.set_screen(Screen::Advancements);
+            }
+            "shadowtest" => {
+                // A floating platform over flat ground: its shadow should land just beside it.
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.1);
+                let base = g.spawn.floor().as_ivec3();
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        g.world.load_now(base.x.div_euclid(16) + dx, base.z.div_euclid(16) + dz);
+                    }
+                }
+                let ground = g.world.surface_y(base.x, base.z);
+                for z in -12..=12 {
+                    for x in -12..=12 {
+                        for y in ground + 1..ground + 12 {
+                            g.world.set(base.x + x, y, base.z + z, AIR);
+                        }
+                        g.world.set(base.x + x, ground, base.z + z, STONE);
+                    }
+                }
+                for z in -2..=2 {
+                    for x in -2..=2 {
+                        g.world.set(base.x + x, ground + 5, base.z + z, GOLD_ORE);
+                    }
+                }
+                let o = Vec3::new(base.x as f32 + 0.5, ground as f32 + 1.0, base.z as f32 + 0.5);
+                let from = o + Vec3::new(-9.0, 10.0, -9.0);
+                let d = o - from;
+                (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                g.player.flying = true;
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "recipes" => {
+                let mut g = Game::new(424242, false, false);
+                for (item, n) in [(LOG, 12), (PLANKS, 20), (COBBLE, 20), (IRON, 4), (STICK, 6), (COAL, 5), (WHEAT, 6), (HONEYCOMB, 3), (FEATHER, 2), (COPPER_INGOT, 2)] {
+                    g.inv.add(item, n);
+                }
+                g.learn_inventory();
+                g.pinned = recipes().iter().position(|r| r.output.0 == BEEHIVE);
+                app.start_game(g);
+                app.set_screen(Screen::Inventory);
+                app.book_search = "pick".into();
+            }
+            "journal" | "beelog" => {
+                let mut g = Game::new(424242, false, false);
+                for (i, c) in [(0, 0), (1, 2), (2, 1), (5, 0), (7, 3), (8, 1), (11, 0)] {
+                    g.journal.note(SHARD_FIRST + i, c);
+                }
+                for (i, c) in [(0, 0), (2, 1), (3, 2), (9, 0), (10, 0), (11, 1)] {
+                    g.journal.note(RELIC_FIRST + i, c);
+                }
+                for i in archaeology::Culture::Hushed.shards() {
+                    g.journal.note(SHARD_FIRST + *i as Id, 0);
+                }
+                g.journal.xp = 140;
+                g.journal.digs = 31;
+                g.journal.cracked = 9;
+                g.journal.shattered = 2;
+                g.journal.restored = 3;
+                g.bee_log = bees::BeeLog { xp: 95, bottles: [14, 6, 3, 8, 1], comb: 21, stings: 4, swarms_caught: 2, swarms_lost: 1, queens: 3, colonies_started: 2 };
+                app.start_game(g);
+                app.journal_back = Screen::Paused;
+                app.set_screen(if s.mode == "journal" { Screen::Journal } else { Screen::BeeLog });
+            }
+            "bench" | "grindstone" => {
+                let mut g = Game::new(424242, false, false);
+                for (item, n) in [(UPGRADE_TEMPLATE, 2), (SCORCHITE_INGOT, 3), (PICK_DIAMOND, 1), (SWORD_DIAMOND, 1), (ARMOR_FIRST + 13, 1)] {
+                    g.inv.add(item, n);
+                }
+                let bench = if s.mode == "bench" { smithing::Bench::Smithing } else { smithing::Bench::Grindstone };
+                // A real one to stand at (the screen closes if it isn't there).
+                let at = g.spawn.floor().as_ivec3() + IVec3::new(2, 0, 0);
+                g.world.load_now(at.x.div_euclid(16), at.z.div_euclid(16));
+                g.world.set_v(at, bench.block());
+                app.start_game(g);
+                app.game.open_bench(at, bench);
+                if let Some(b) = &mut app.game.bench {
+                    if bench == smithing::Bench::Smithing {
+                        b.slots = [Some((UPGRADE_TEMPLATE, 1)), Some((PICK_DIAMOND, 1)), Some((SCORCHITE_INGOT, 1))];
+                        b.wear[1] = enchant::with_level(120, enchant::Enchant::Efficiency, 4);
+                    } else {
+                        b.slots[0] = Some((SWORD_IRON, 1));
+                        b.wear[0] = enchant::with_level(enchant::with_level(30, enchant::Enchant::Sharpness, 3), enchant::Enchant::Unbreaking, 2);
+                    }
+                }
+                app.screen = Screen::Bench;
             }
             "stats" => {
                 let mut g = Game::new(424242, false, false);

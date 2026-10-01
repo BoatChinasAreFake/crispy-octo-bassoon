@@ -262,12 +262,13 @@ impl Game {
             d.update(dt, &self.world);
         }
         // Lava eats things.
-        let burnt: Vec<Vec3> = self.drops.iter().filter(|d| d.body.in_lava).map(|d| d.body.pos).collect();
+        let burnt: Vec<Vec3> = self.drops.iter().filter(|d| d.body.in_lava && !crate::smithing::is_scorchite(d.item)).map(|d| d.body.pos).collect();
         for p in burnt {
             self.sfx(Sfx::Hiss, Some(p));
             self.smoke(p + Vec3::Y * 0.3, 4, 0.2);
         }
-        self.drops.retain(|d| d.age < DESPAWN_SECS && d.body.pos.y > -16.0 && !d.body.in_lava);
+        // Scorchite floats in lava (see smithing.rs); everything else burns.
+        self.drops.retain(|d| d.age < DESPAWN_SECS && d.body.pos.y > -16.0 && (!d.body.in_lava || crate::smithing::is_scorchite(d.item)));
         self.drop_timer += dt;
         if self.drop_timer >= 0.5 {
             self.drop_timer = 0.0;

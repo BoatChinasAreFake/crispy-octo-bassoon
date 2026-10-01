@@ -7,6 +7,7 @@
 //!   (waxed copper never changes).
 //! - **Bamboo** grow, a block at a time, up to sixteen tall.
 //! - **Coral** die (turn grey) when no water touches it.
+//! - **Torchflower** sprouts bloom (see archaeology.rs).
 //!
 //! Everything happens where the world lives; joined players see the edits.
 
@@ -95,6 +96,11 @@ impl Game {
                 if height < BAMBOO_MAX {
                     self.world.set_v(up, BAMBOO);
                 }
+            }
+        } else if id == TORCHFLOWER_SPROUT {
+            // Ancient seeds take their time (and want a bit of light).
+            if self.rng.chance(0.08) && self.world.sky_light(p.x, p.y, p.z) > 0.3 {
+                self.world.set_v(p, TORCHFLOWER);
             }
         } else if is_coral(id) {
             let wet = [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z].iter().any(|&d| is_water(self.world.get_v(p + d)));

@@ -15,14 +15,16 @@ attribute vec3 in_light;
 attribute vec2 in_tile;
 
 uniform mat4 mvp;
-uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections
+uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections, w: fancy water
 uniform vec4 wave;     // where leaf tiles start in the atlas: oak (xy), spruce (zw)
 uniform vec4 wave2;    // jungle leaves (xy), water (zw)
+uniform mat4 light_mvp;
 
 varying vec2 v_uv;
 varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
+varying vec4 v_spos;
 
 bool starts_at(vec2 t, vec2 o) {
     return abs(t.x - o.x) < 0.0001 && abs(t.y - o.y) < 0.0001;
@@ -42,6 +44,7 @@ void main() {
     v_light = in_light;
     v_wpos = p;
     v_tile = in_tile;
+    v_spos = light_mvp * vec4(p, 1.0);
 }
 "#;
 
@@ -58,13 +61,16 @@ varying vec2 v_uv;
 varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
+varying vec4 v_spos;
 
 uniform sampler2D tex;
+uniform sampler2D shadow_map;
+uniform vec4 shadow;   // x: on, y: one texel, z: depth bias, w: how dark shadows are
 uniform vec4 cam_pos;
 uniform vec4 fog_color;
 uniform vec4 params;   // x: daylight, y: fog start, z: fog end, w: alpha multiplier
 uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow), z: colour-blind view
-uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections
+uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections, w: fancy water
 uniform vec4 wave2;    // zw: where the water tile starts in the atlas
 DALTONIZE
 uniform vec4 tint;
@@ -96,6 +102,34 @@ vec4 sample_tile() {
 #endif
 }
 
+// Shadow map depth, packed into a colour (see SHADOW_FRAGMENT).
+float unpack_depth(vec4 c) {
+    return dot(c, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
+}
+
+float shadow_tap(vec2 uv, float z) {
+    return z - shadow.z > unpack_depth(texture2D(shadow_map, uv)) ? 1.0 : 0.0;
+}
+
+// 0 in full sun, 1 in shadow (softened over four taps, faded out at the map's edge).
+float shadowing() {
+    if (shadow.x < 0.5) return 0.0;
+    vec3 s = v_spos.xyz / v_spos.w * 0.5 + 0.5;
+    if (s.x <= 0.0 || s.x >= 1.0 || s.y <= 0.0 || s.y >= 1.0 || s.z >= 1.0) return 0.0;
+    float t = shadow.y * 0.75;
+    float sum = shadow_tap(s.xy + vec2(-t, -t), s.z) + shadow_tap(s.xy + vec2(t, -t), s.z) + shadow_tap(s.xy + vec2(-t, t), s.z) + shadow_tap(s.xy + vec2(t, t), s.z);
+    vec2 e = abs(s.xy - 0.5) * 2.0;
+    float fade = 1.0 - smoothstep(0.8, 1.0, max(e.x, e.y));
+    return sum * 0.25 * fade;
+}
+
+// Light rippling across the bottom of shallow water.
+float caustic(vec2 p, float t) {
+    float a = sin(p.x * 2.1 + t * 1.3 + sin(p.y * 1.7 + t * 0.9));
+    float b = sin(p.y * 2.3 - t * 1.1 + sin(p.x * 1.5 - t * 0.7));
+    return pow(max(a * b, 0.0), 2.0) * 1.2 + pow(1.0 - abs(a + b) * 0.5, 8.0) * 0.5;
+}
+
 void main() {
 #ifdef GL_OES_standard_derivatives
     // Which way the surface faces, worked out before any pixel is discarded.
@@ -103,14 +137,25 @@ void main() {
 #endif
     vec4 c = sample_tile() * tint;
     if (c.a < 0.08) discard;
+    // The mesher marks faces under water (x + 4) and water surfaces with their depth (8 + depth).
+    float lx = v_light.x;
+    float depth = -1.0;
+    bool under = false;
+    if (lx > 7.5) {
+        depth = lx - 8.0;
+        lx = 1.0;
+    } else if (lx > 3.5) {
+        under = true;
+        lx -= 4.0;
+    }
     vec3 col;
     if (params2.x > 0.5) {
         col = c.rgb;
-    } else if (v_light.x > 1.5) {
+    } else if (lx > 1.5) {
         // Glowing (lava): its own light, whatever the time of day.
-        col = c.rgb * (v_light.x - 1.5);
+        col = c.rgb * (lx - 1.5);
     } else {
-        float sky = v_light.y * params.x;
+        float sky = v_light.y * params.x * (1.0 - shadow.w * shadowing());
         // The world carries its own block light (z); things that move use the
         // nearby point lights. Lights marked moving (negative radius, like a
         // held torch) shine on everything.
@@ -125,7 +170,18 @@ void main() {
         float lvl = max(max(sky, bl), max(0.02, params2.y));
         // Torchlight is warm, daylight is neutral.
         vec3 warm = mix(vec3(1.0), vec3(1.0, 0.85, 0.6), clamp(bl - sky, 0.0, 1.0));
-        col = c.rgb * v_light.x * lvl * warm;
+        col = c.rgb * lx * lvl * warm;
+        if (under && params3.w > 0.5) {
+            // Under water: a little blue-green, and dancing light where the sun gets down.
+            col *= vec3(0.82, 0.93, 1.0);
+            col += c.rgb * caustic(v_wpos.xz * 0.9 + v_wpos.y * 0.3, params3.x) * 0.35 * sky;
+        }
+    }
+    if (depth >= 0.0 && params3.w > 0.5 && params2.x < 0.5) {
+        // Deep water is darker, bluer and harder to see through.
+        float k = clamp(depth / 10.0, 0.0, 1.0);
+        col *= mix(vec3(1.0), vec3(0.42, 0.58, 0.78), k);
+        c.a = c.a + (1.0 - c.a) * k * 0.8;
     }
 #ifdef GL_OES_standard_derivatives
     // Water reflects the sky: more of it at a glancing angle, and the sun glints off ripples.
@@ -154,6 +210,48 @@ void main() {
     gl_FragColor = vec4(col, c.a * params.w);
 }
 "#;
+
+/// Drawing the world from the sun into the shadow map: just depth (packed
+/// into a colour, so it works without depth textures), with cut-out leaves.
+const SHADOW_VERTEX: &str = r#"#version 100
+attribute vec3 in_pos;
+attribute vec2 in_uv;
+attribute vec3 in_light;
+attribute vec2 in_tile;
+uniform mat4 mvp;
+varying vec2 v_uv;
+varying vec2 v_tile;
+void main() {
+    gl_Position = mvp * vec4(in_pos, 1.0);
+    v_uv = in_uv;
+    v_tile = in_tile;
+}
+"#;
+
+const SHADOW_FRAGMENT: &str = r#"#version 100
+precision highp float;
+varying vec2 v_uv;
+varying vec2 v_tile;
+uniform sampler2D tex;
+const float TILE = TILE_SIZE;
+void main() {
+    vec2 uv = v_tile.x < 0.0 ? v_uv : v_tile + fract(v_uv) * TILE;
+    if (texture2D(tex, uv).a < 0.5) discard;
+    vec4 e = fract(gl_FragCoord.z * vec4(1.0, 255.0, 65025.0, 16581375.0));
+    e -= e.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+    gl_FragColor = e;
+}
+"#;
+
+/// Shadow map size (texels a side) and how far it reaches from the camera (blocks).
+pub const SHADOW_SIZE: u32 = 2048;
+pub const SHADOW_REACH: f32 = 72.0;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ShadowUniforms {
+    mvp: Mat4,
+}
 
 /// The world shaders rewritten for GLSL 1.50 (OpenGL 3.2 and later), with
 /// every varying sampled at the centroid of the covered samples.
@@ -184,11 +282,13 @@ pub struct Uniforms {
     pub params3: Vec4,
     pub wave: Vec4,
     pub wave2: Vec4,
+    pub light_mvp: Mat4,
+    pub shadow: Vec4,
 }
 
 fn shader_meta() -> ShaderMeta {
     ShaderMeta {
-        images: vec!["tex".to_string()],
+        images: vec!["tex".to_string(), "shadow_map".to_string()],
         uniforms: UniformBlockLayout {
             uniforms: vec![
                 UniformDesc::new("mvp", UniformType::Mat4),
@@ -201,9 +301,15 @@ fn shader_meta() -> ShaderMeta {
                 UniformDesc::new("params3", UniformType::Float4),
                 UniformDesc::new("wave", UniformType::Float4),
                 UniformDesc::new("wave2", UniformType::Float4),
+                UniformDesc::new("light_mvp", UniformType::Mat4),
+                UniformDesc::new("shadow", UniformType::Float4),
             ],
         },
     }
+}
+
+fn shadow_meta() -> ShaderMeta {
+    ShaderMeta { images: vec!["tex".to_string()], uniforms: UniformBlockLayout { uniforms: vec![UniformDesc::new("mvp", UniformType::Mat4)] } }
 }
 
 struct GpuMesh {
@@ -234,6 +340,8 @@ pub struct Batch {
     pub count: usize,
     pub tint: [f32; 4],
     pub fullbright: bool,
+    /// Casts sun shadows (clouds don't: they'd shade the whole world).
+    pub casts: bool,
 }
 
 /// Per-frame immediate-mode geometry.
@@ -246,7 +354,13 @@ pub struct DynGeo {
 impl DynGeo {
     pub fn begin(&mut self, pass: Pass, tint: [f32; 4], fullbright: bool) {
         let start = self.mesh.idx.len();
-        self.batches.push(Batch { pass, start, count: 0, tint, fullbright });
+        self.batches.push(Batch { pass, start, count: 0, tint, fullbright, casts: true });
+    }
+    /// The batch just begun casts no shadow.
+    pub fn no_shadow(&mut self) {
+        if let Some(b) = self.batches.last_mut() {
+            b.casts = false;
+        }
     }
     fn end_batch(&mut self) {
         let n = self.mesh.idx.len();
@@ -292,6 +406,10 @@ pub struct FrameParams {
     pub waving_leaves: bool,
     pub water_reflections: bool,
     pub time: f32,
+    /// Sun shadows (Video Settings), toward `sun_dir`; deep water and caustics.
+    pub shadows: bool,
+    pub sun_dir: Vec3,
+    pub fancy_water: bool,
 }
 
 pub struct Renderer {
@@ -300,6 +418,10 @@ pub struct Renderer {
     overlay: Pipeline,
     sky: Pipeline,
     pub texture: TextureId,
+    /// The sun's view of the world (see `draw`): packed depth, its depth buffer, and how to draw it.
+    shadow_tex: TextureId,
+    shadow_pass: RenderPass,
+    shadow_pipe: Pipeline,
     dyn_vb: BufferId,
     dyn_ib: BufferId,
     dyn_cap_v: usize,
@@ -400,10 +522,29 @@ impl Renderer {
             ..Default::default()
         });
 
+        let shadow_src = SHADOW_FRAGMENT.replace("TILE_SIZE", &format!("{tile:.8}"));
+        let shadow_shader = ctx.new_shader(ShaderSource::Glsl { vertex: SHADOW_VERTEX, fragment: &shadow_src }, shadow_meta()).unwrap_or_else(|e| panic!("shadow shader failed to compile: {e:?}"));
+        let shadow_pipe = ctx.new_pipeline(&layout, &attrs, shadow_shader, PipelineParams { cull_face: CullFace::Nothing, depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() });
+        let shadow_params = |format| TextureParams {
+            kind: TextureKind::Texture2D,
+            format,
+            wrap: TextureWrap::Clamp,
+            min_filter: FilterMode::Nearest,
+            mag_filter: FilterMode::Nearest,
+            mipmap_filter: MipmapFilterMode::None,
+            width: SHADOW_SIZE,
+            height: SHADOW_SIZE,
+            allocate_mipmaps: false,
+            sample_count: 1,
+        };
+        let shadow_tex = ctx.new_render_texture(shadow_params(TextureFormat::RGBA8));
+        let shadow_depth = ctx.new_render_texture(shadow_params(TextureFormat::Depth));
+        let shadow_pass = ctx.new_render_pass(shadow_tex, Some(shadow_depth));
+
         let (dyn_cap_v, dyn_cap_i) = (1 << 16, 3 << 15);
         let dyn_vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<Vertex>(dyn_cap_v));
         let dyn_ib = ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Stream, BufferSource::empty::<u32>(dyn_cap_i));
-        Renderer { opaque, blend, overlay, sky, texture, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new() }
+        Renderer { opaque, blend, overlay, sky, texture, shadow_tex, shadow_pass, shadow_pipe, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new() }
     }
 
     pub fn set_chunk(&mut self, ctx: &mut dyn RenderingBackend, key: (i32, i32), mesh: ChunkMesh) {
@@ -460,8 +601,25 @@ impl Renderer {
         out
     }
 
+    /// The sun's camera: an orthographic box round the player, nudged to whole
+    /// texels so shadow edges don't crawl as you walk.
+    fn light_matrix(fp: &FrameParams) -> Mat4 {
+        let dir = fp.sun_dir.normalize_or_zero();
+        let up = if dir.y.abs() > 0.95 { Vec3::Z } else { Vec3::Y };
+        let view = Mat4::look_at_rh(dir * 200.0, Vec3::ZERO, up);
+        let c = view.transform_point3(fp.cam_pos);
+        let texel = 2.0 * SHADOW_REACH / SHADOW_SIZE as f32;
+        let (x, y) = ((c.x / texel).round() * texel, (c.y / texel).round() * texel);
+        // Depth: well past the camera both ways (tall things far off still cast).
+        let proj = Mat4::orthographic_rh_gl(x - SHADOW_REACH, x + SHADOW_REACH, y - SHADOW_REACH, y + SHADOW_REACH, -c.z - 160.0, -c.z + 160.0);
+        proj * view
+    }
+
     pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, fp: &FrameParams, geo: &DynGeo) {
         let planes = frustum_planes(&fp.view_proj);
+        // Sun shadows only while the sun is properly up.
+        let shadows_on = fp.shadows && fp.sun_dir.y > 0.12;
+        let light_mvp = Self::light_matrix(fp);
         let base = Uniforms {
             mvp: fp.view_proj,
             cam_pos: fp.cam_pos.extend(1.0),
@@ -470,7 +628,7 @@ impl Renderer {
             params2: Vec4::new(0.0, fp.ambient, fp.colour_blind as u8 as f32, 0.0),
             tint: Vec4::ONE,
             lights: fp.lights,
-            params3: Vec4::new(fp.time, fp.waving_leaves as u8 as f32, fp.water_reflections as u8 as f32, 0.0),
+            params3: Vec4::new(fp.time, fp.waving_leaves as u8 as f32, fp.water_reflections as u8 as f32, fp.fancy_water as u8 as f32),
             wave: {
                 let (a, b) = (tile_uv(crate::texture::T_LEAVES), tile_uv(crate::texture::T_SPRUCE_LEAVES));
                 Vec4::new(a.0, a.1, b.0, b.1)
@@ -479,7 +637,11 @@ impl Renderer {
                 let (a, b) = (tile_uv(crate::texture::T_JUNGLE_LEAVES), tile_uv(crate::texture::T_WATER));
                 Vec4::new(a.0, a.1, b.0, b.1)
             },
+            light_mvp,
+            // Shadows deepen as the sun climbs (and fade out toward sunset).
+            shadow: Vec4::new(shadows_on as u8 as f32, 1.0 / SHADOW_SIZE as f32, 0.0012, 0.55 * ((fp.sun_dir.y - 0.12) * 4.0).clamp(0.0, 1.0)),
         };
+        let images = vec![self.texture, self.shadow_tex];
 
         // Upload streaming geometry (clamped to capacity).
         let nv = geo.mesh.verts.len().min(self.dyn_cap_v);
@@ -488,7 +650,38 @@ impl Renderer {
             ctx.buffer_update(self.dyn_vb, BufferSource::slice(&geo.mesh.verts[..nv]));
             ctx.buffer_update(self.dyn_ib, BufferSource::slice(&geo.mesh.idx[..ni]));
         }
-        let dyn_bind = Bindings { vertex_buffers: vec![self.dyn_vb], index_buffer: self.dyn_ib, images: vec![self.texture] };
+        let dyn_bind = Bindings { vertex_buffers: vec![self.dyn_vb], index_buffer: self.dyn_ib, images: images.clone() };
+
+        // The sun's view first: what's nearest it in each texel.
+        if shadows_on {
+            ctx.begin_pass(Some(self.shadow_pass), PassAction::clear_color(1.0, 1.0, 1.0, 1.0));
+            // The whole map, whatever size the window is.
+            ctx.apply_viewport(0, 0, SHADOW_SIZE as i32, SHADOW_SIZE as i32);
+            ctx.apply_scissor_rect(0, 0, SHADOW_SIZE as i32, SHADOW_SIZE as i32);
+            ctx.apply_pipeline(&self.shadow_pipe);
+            ctx.apply_uniforms(UniformsSource::table(&ShadowUniforms { mvp: light_mvp }));
+            let reach = SHADOW_REACH + 24.0;
+            for (&(cx, cz), c) in &self.chunks {
+                let center = Vec3::new(cx as f32 * 16.0 + 8.0, 0.0, cz as f32 * 16.0 + 8.0);
+                if Vec3::new(center.x - fp.cam_pos.x, 0.0, center.z - fp.cam_pos.z).length() > reach {
+                    continue;
+                }
+                if let Some(m) = &c.opaque {
+                    ctx.apply_bindings(&Bindings { vertex_buffers: vec![m.vb], index_buffer: m.ib, images: vec![self.texture] });
+                    ctx.draw(0, m.count, 1);
+                }
+            }
+            // Mobs and players cast shadows too.
+            let mut bound = false;
+            for b in geo.batches.iter().filter(|b| b.pass == Pass::Opaque && b.casts && b.count > 0 && b.start + b.count <= ni && !b.fullbright) {
+                if !bound {
+                    ctx.apply_bindings(&Bindings { vertex_buffers: vec![self.dyn_vb], index_buffer: self.dyn_ib, images: vec![self.texture] });
+                    bound = true;
+                }
+                ctx.draw(b.start as i32, b.count as i32, 1);
+            }
+            ctx.end_render_pass();
+        }
         let draw_batches = |ctx: &mut dyn RenderingBackend, pass: Pass, pipe: &Pipeline| {
             let mut applied = false;
             for b in geo.batches.iter().filter(|b| b.pass == pass && b.count > 0 && b.start + b.count <= ni) {
@@ -511,6 +704,11 @@ impl Renderer {
         };
 
         ctx.begin_default_pass(PassAction::Nothing);
+        if shadows_on {
+            let (w, h) = window::screen_size();
+            ctx.apply_viewport(0, 0, w as i32, h as i32);
+            ctx.apply_scissor_rect(0, 0, w as i32, h as i32);
+        }
 
         draw_batches(ctx, Pass::Sky, &self.sky);
 
@@ -528,7 +726,7 @@ impl Renderer {
             let d = Vec3::new(center.x - fp.cam_pos.x, 0.0, center.z - fp.cam_pos.z).length_squared();
             visible.push(((cx, cz), d));
             if let Some(m) = &c.opaque {
-                ctx.apply_bindings(&Bindings { vertex_buffers: vec![m.vb], index_buffer: m.ib, images: vec![self.texture] });
+                ctx.apply_bindings(&Bindings { vertex_buffers: vec![m.vb], index_buffer: m.ib, images: images.clone() });
                 ctx.draw(0, m.count, 1);
             }
         }
@@ -542,7 +740,7 @@ impl Renderer {
         ctx.apply_uniforms(UniformsSource::table(&base));
         for (k, _) in &visible {
             if let Some(m) = self.chunks.get(k).and_then(|c| c.water.as_ref()) {
-                ctx.apply_bindings(&Bindings { vertex_buffers: vec![m.vb], index_buffer: m.ib, images: vec![self.texture] });
+                ctx.apply_bindings(&Bindings { vertex_buffers: vec![m.vb], index_buffer: m.ib, images: images.clone() });
                 ctx.draw(0, m.count, 1);
             }
         }

@@ -35,7 +35,7 @@ pub fn is_wire(id: Id) -> bool {
 
 /// A switch that's on (or the block that always is).
 pub fn source_on(id: Id) -> bool {
-    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK) || crate::vehicles::detector_on(id)
+    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK | SCULK_SENSOR_ACTIVE) || crate::vehicles::detector_on(id)
 }
 
 /// Things that sit on the floor and fall off when it goes.

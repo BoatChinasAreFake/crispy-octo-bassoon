@@ -629,7 +629,8 @@ impl Generator {
                 // Some oaks in flowery places have a bee nest hanging off the trunk.
                 if kind == TreeKind::Oak && hash2(s ^ 0xBEE, tx, tz) < 0.07 && matches!(self.column(tx, tz).1, Biome::Plains | Biome::Forest) {
                     let side = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z][(hash2(s ^ 0xBEF, tx, tz) * 4.0) as usize % 4];
-                    let p = base + side + IVec3::Y * (trunk - 2).max(2);
+                    // Just under the canopy, where you can see it.
+                    let p = base + side + IVec3::Y * (trunk - 3).max(1);
                     let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
                     if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (0..CH).contains(&p.y) && matches!(b[idx(lx, p.y, lz)], AIR | LEAVES) {
                         b[idx(lx, p.y, lz)] = BEE_NEST;

@@ -1081,7 +1081,7 @@ impl Game {
             // Starers reuse the fuse field for "angry".
             m.angry = kind == MobKind::Starer && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
-            if kind == MobKind::Hmmer {
+            if matches!(kind, MobKind::Hmmer | MobKind::Sneaker) {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
@@ -1221,7 +1221,8 @@ impl Game {
                         pos: m.body.pos,
                         yaw: m.yaw,
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
-                        fuse: if m.kind == MobKind::Hmmer { m.seed as f32 } else if m.angry { 1.0 } else { m.fuse },
+                        // (Sneakers send what they're carrying.)
+                        fuse: if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && m.kind == MobKind::Starer { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
