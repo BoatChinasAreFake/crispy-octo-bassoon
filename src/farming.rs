@@ -11,7 +11,8 @@
 //!   Starved crops crawl along (x0.1); well-fed ones get up to x1.0;
 //! - **crop rotation**: a different crop from the last harvest here is x1.5,
 //!   the same crop three times running is "soil fatigue" (x0.6);
-//! - **company**: crops grow 20% faster with a player nearby (quantum farming).
+//! - **company**: crops grow 20% faster with a player nearby (quantum farming);
+//! - **bees**: a working beehive within ten blocks pollinates them (x1.25; see bees.rs).
 //!
 //! Meanwhile weeds sprout on bare farmland and steal nutrients from their
 //! neighbours, Clucksters peck at seedlings unless a Scarecrow is nearby,
@@ -122,11 +123,13 @@ pub struct Soil {
     pub streak: u8,
     /// Seconds spent dry and bare (it reverts to dirt eventually).
     pub idle: f32,
+    /// Bees from a working hive nearby are visiting (see bees.rs). Not saved.
+    pub pollinated: bool,
 }
 
 impl Default for Soil {
     fn default() -> Soil {
-        Soil { nutrients: [60.0; 3], wet: false, progress: 0.0, crop: None, stage: 0, last: None, streak: 0, idle: 0.0 }
+        Soil { nutrients: [60.0; 3], wet: false, progress: 0.0, crop: None, stage: 0, last: None, streak: 0, idle: 0.0, pollinated: false }
     }
 }
 
@@ -138,11 +141,13 @@ pub struct Factors {
     pub nutrient: f32,
     pub rotation: f32,
     pub company: f32,
+    /// Bees from a hive nearby (see bees.rs).
+    pub bees: f32,
 }
 
 impl Factors {
     pub fn total(&self) -> f32 {
-        self.moisture * self.light * self.nutrient * self.rotation * self.company
+        self.moisture * self.light * self.nutrient * self.rotation * self.company * self.bees
     }
 }
 
@@ -172,6 +177,7 @@ impl Soil {
                 1.0
             },
             company: if watched { 1.2 } else { 1.0 },
+            bees: if self.pollinated { 1.25 } else { 1.0 },
         }
     }
 
@@ -266,6 +272,9 @@ impl Soil {
                 if f.company > 1.0 {
                     why.push("enjoying the company");
                 }
+                if f.bees > 1.0 {
+                    why.push("buzzing with bees");
+                }
                 s += &format!(" | {} stage {}/3, {:.0}% there, growing x{:.2}", c.name(), self.stage, self.progress * 100.0, f.total());
                 if !why.is_empty() {
                     s += &format!(" ({})", why.join(", "));
@@ -314,6 +323,7 @@ pub fn decode(b: &[u8]) -> std::collections::HashMap<IVec3, Soil> {
             stage: e[34].min(3),
             last: e[35].checked_sub(1).and_then(Crop::from_index),
             streak: e[36],
+            pollinated: false,
         };
         farm.insert(ivec3(i(0), i(4), i(8)), soil);
     }
@@ -462,8 +472,10 @@ impl Game {
             let light = sky.max(self.lamp_light(above));
             let watched = players.iter().any(|q| q.distance(above.as_vec3()) < 10.0);
             let weed_roll = self.rng.chance(step / 150.0);
+            let pollinated = self.pollinated(above);
             let Some(soil) = self.world.farm.get_mut(&p) else { continue };
             soil.wet = wet;
+            soil.pollinated = pollinated;
             soil.observe(top);
             match top {
                 Some((crop, _)) => {
@@ -553,7 +565,9 @@ impl Game {
         let light = sky.max(self.lamp_light(above));
         let watched = true; // somebody is holding the probe
         let top = Crop::of_block(self.world.get_v(above));
+        let pollinated = self.pollinated(above);
         let soil = self.world.farm.get_mut(&soil_pos)?;
+        soil.pollinated = pollinated;
         soil.observe(top);
         if item == SOIL_PROBE {
             return Some(soil.report(light, watched));

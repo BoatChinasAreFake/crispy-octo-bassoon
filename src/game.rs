@@ -2894,6 +2894,14 @@ impl Game {
                 m.draw(&mut g, &self.world);
             }
         }
+        // Bees about their business (see bees.rs).
+        if !self.buzz.is_empty() {
+            g.begin(Pass::Opaque, [1.0; 4], false);
+            for b in self.buzz.iter().filter(|b| b.pos.distance(eye) < 40.0) {
+                let sky = self.world.shade_near(b.pos);
+                crate::entity::draw_bee(&mut g, b.pos, b.yaw, b.phase, sky);
+            }
+        }
         // Pointy Sticks
         if !self.arrows.is_empty() {
             g.begin(Pass::Opaque, [1.0; 4], false);

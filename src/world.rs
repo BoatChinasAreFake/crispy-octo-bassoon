@@ -80,6 +80,14 @@ pub enum Biome {
 }
 
 impl Biome {
+    pub const ALL: [Biome; 9] = [Biome::Plains, Biome::Forest, Biome::Desert, Biome::Snowy, Biome::Ocean, Biome::Swamp, Biome::Jungle, Biome::Badlands, Biome::Taiga];
+
+    /// For /locate: "plains", "snowy", "badlands"...
+    pub fn from_name(s: &str) -> Option<Biome> {
+        let s = s.trim().to_ascii_lowercase();
+        Biome::ALL.into_iter().find(|b| format!("{b:?}").to_ascii_lowercase() == s || b.name().to_ascii_lowercase().starts_with(&s))
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Biome::Plains => "Plains (Flat-ish)",

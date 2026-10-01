@@ -330,11 +330,6 @@ impl Colony {
         }
     }
 
-    /// Is the colony out working (for pollination and the buzzing around it)?
-    pub fn working(&self, c: &Conditions) -> bool {
-        self.bees > 0 && self.forage(c).total() > 0.0
-    }
-
     /// A second (or `dt`) of colony life.
     pub fn tick(&mut self, c: &Conditions, dt: f32, rng: &mut Rng) -> Vec<HiveEvent> {
         let mut ev = Vec::new();
@@ -1067,7 +1062,7 @@ impl Game {
         if self.weather.kind.wet() || self.is_night() {
             return false;
         }
-        self.hives.iter().any(|(q, c)| c.bees > 0 && q.as_vec3().distance(p.as_vec3()) <= POLLINATE_RADIUS)
+        self.hives.iter().any(|(q, c)| c.bees > 0 && c.honey < 100.0 && q.as_vec3().distance(p.as_vec3()) <= POLLINATE_RADIUS)
     }
 
     /// Eat a bottle of honey: food, a flavour, and the bottle back.
@@ -1275,8 +1270,9 @@ mod tests {
         let before = c.temper;
         c.tick(&sunny(), 5.0, &mut rng);
         assert!(c.temper < before - 20.0, "smoke calms them fast");
+        let calmed = c.temper;
         c.provoke(80.0);
-        assert!(c.temper < 50.0, "and they don't mind being robbed while smoked");
+        assert_eq!(c.temper, calmed, "and they don't mind being robbed while smoked");
     }
 
     #[test]

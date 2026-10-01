@@ -135,6 +135,11 @@ enum Screen {
     Enchant,
     /// Trading with a Hmmer (see villagers.rs).
     Trade,
+    /// A grindstone or smithing table is open (see smithing.rs).
+    Bench,
+    /// The Field Journal (see archaeology.rs) and the Beekeeping Log (bees.rs).
+    Journal,
+    BeeLog,
     /// Writing on a sign (see decor.rs).
     Sign,
     /// Writing a Name Tag for a mob (see nametags.rs).
@@ -181,6 +186,8 @@ struct App {
     book_focus: bool,
     book_tab: crafting::Tab,
     book_craftable: bool,
+    /// Where the Field Journal goes back to (the pause menu, or the game).
+    journal_back: Screen,
     quit: bool,
     status: Option<(String, f32)>,
     fps: f32,
@@ -354,6 +361,9 @@ impl App {
         }
         if self.screen == Screen::Enchant && s != Screen::Enchant {
             self.game.close_enchanting();
+        }
+        if self.screen == Screen::Bench && s != Screen::Bench {
+            self.game.close_bench();
         }
         if self.screen == Screen::Trade && s != Screen::Trade {
             self.game.trading = None;
@@ -734,7 +744,7 @@ impl App {
                     }
                 }
             }
-            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade => {
+            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench => {
                 let pad = self.pad_frame;
                 if is_key_pressed(KeyCode::Escape) || self.settings.binds.pressed(keybinds::Action::Inventory) || pad.inventory || pad.back {
                     self.set_screen(Screen::Playing);
@@ -765,9 +775,14 @@ impl App {
                     type_into(&mut self.sign_lines[self.sign_line], decor::LINE_LEN);
                 }
             }
-            Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings => {
+            Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings | Screen::BeeLog => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
+                }
+            }
+            Screen::Journal => {
+                if is_key_pressed(KeyCode::Escape) || self.settings.binds.pressed(keybinds::Action::Inventory) {
+                    self.set_screen(self.journal_back);
                 }
             }
             Screen::Video { from_title } => {
@@ -816,7 +831,7 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench | Screen::Journal | Screen::Title | Screen::Dead) || self.game.net.is_some();
         let t_tick = std::time::Instant::now();
         if simulate {
             self.game.update(dt, &controls);
@@ -835,6 +850,15 @@ impl App {
             self.set_screen(Screen::Anvil);
         } else if self.screen == Screen::Anvil && !self.game.anvil_still_there() {
             self.set_screen(Screen::Playing);
+        }
+        if self.game.bench.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Bench);
+        } else if self.screen == Screen::Bench && !self.game.bench_still_there() {
+            self.set_screen(Screen::Playing);
+        }
+        if std::mem::take(&mut self.game.open_journal) && self.screen == Screen::Playing {
+            self.journal_back = Screen::Playing;
+            self.set_screen(Screen::Journal);
         }
         if self.game.enchanting.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Enchant);
@@ -1679,7 +1703,7 @@ impl App {
             self.audio.play(Sfx::Click, None, listener);
         }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::BeeLog);
         let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
@@ -1773,6 +1797,9 @@ impl App {
                     Screen::Advancements => self.advancements_screen(),
                     Screen::Stats => self.stats_screen(),
                     Screen::FishLog => self.fish_log_screen(),
+                    Screen::Journal => self.journal_screen(),
+                    Screen::BeeLog => self.bee_log_screen(),
+                    Screen::Bench => self.bench_screen(),
                     Screen::Inventory => self.inventory_screen(),
                     Screen::Container => self.container_screen(),
                     Screen::Anvil => self.anvil_screen(),
@@ -2007,6 +2034,16 @@ impl App {
             }
         }
         self.fishing_hud();
+        self.brushing_hud();
+        // The Deep Dark's darkness: pulsing in after a shriek, and faintly whenever the Hush is near.
+        let hush = self.game.mobs.iter().filter(|m| m.kind == entity::MobKind::Hush).map(|m| m.body.pos.distance(self.game.player.body.pos)).fold(f32::MAX, f32::min);
+        let near = (1.0 - hush / 24.0).clamp(0.0, 1.0) * 0.45;
+        let dark = (self.game.darkness / 4.0).min(1.0) * 0.8;
+        let pulse = 0.85 + (get_time() as f32 * 2.2).sin() * 0.15;
+        let a = (dark.max(near) * pulse).min(0.9);
+        if a > 0.01 && !self.game.menu {
+            draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.02, a));
+        }
         self.toast();
     }
 
@@ -2130,6 +2167,15 @@ impl App {
         }
         y += bh + 5.0 * s;
         let half = (bw - 5.0 * s) / 2.0;
+        if self.ui.button(Rect::new(x, y, half, bh), "Field Journal", true) {
+            self.journal_back = Screen::Paused;
+            self.set_screen(Screen::Journal);
+        }
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Beekeeping Log", true) {
+            self.set_screen(Screen::BeeLog);
+        }
+        y += bh + 5.0 * s;
+        let half = (bw - 5.0 * s) / 2.0;
         if self.ui.button(Rect::new(x, y, half, bh), "Options", true) {
             self.set_screen(Screen::Options { from_title: false });
         }
@@ -2250,6 +2296,203 @@ impl App {
         if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
             self.set_screen(Screen::Paused);
         }
+    }
+
+    /// The Field Journal: every culture's collection, and how you're doing.
+    fn journal_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.08, 0.06, 0.03, 0.85));
+        let j = &self.game.journal;
+        self.ui.text_centered("Field Journal", w / 2.0, h * 0.08, 16.0, Color::new(1.0, 0.92, 0.75, 1.0));
+        let sub = format!("Archaeologist level {}  ({} xp)  -  {} digs, {} cracked, {} shattered, {} restored", j.level(), j.xp, j.digs, j.cracked, j.shattered, j.restored);
+        self.ui.text_centered(&sub, w / 2.0, h * 0.08 + 15.0 * s, 8.0, GOLD);
+        let pw = (360.0 * s).min(w - 20.0 * s);
+        let x = w / 2.0 - pw / 2.0;
+        let mut y = h * 0.08 + 26.0 * s;
+        let icon = 15.0 * s;
+        let mut tooltip = None;
+        for c in archaeology::Culture::ALL {
+            let (found, total) = j.progress(c);
+            let done = found == total;
+            let block_h = 13.0 * s + icon + 6.0 * s;
+            draw_rectangle(x, y, pw, block_h, Color::new(0.2, 0.15, 0.1, 0.9));
+            if done {
+                draw_rectangle_lines(x, y, pw, block_h, s, GOLD);
+            }
+            self.ui.text(&format!("{}  ({found}/{total})", c.title()), x + 5.0 * s, y + 10.0 * s, 9.0, if done { GOLD } else { WHITE });
+            let where_ = format!("{} - {}", c.site().name(), if done { "collection complete!" } else { "keep digging" });
+            let ww = self.ui.text_width(&where_, 7.0);
+            self.ui.text(&where_, x + pw - ww - 5.0 * s, y + 10.0 * s, 7.0, GRAY);
+            let mut ix = x + 5.0 * s;
+            let iy = y + 13.0 * s;
+            let items: Vec<Id> = c.shards().iter().map(|&i| SHARD_FIRST + i as Id).chain(c.relics().iter().map(|&i| RELIC_FIRST + i as Id)).collect();
+            for id in items {
+                let got = j.has(id);
+                let r = Rect::new(ix, iy, icon, icon);
+                draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
+                if got.is_some() {
+                    self.ui.icon(id, ix + s, iy + s, icon - 2.0 * s);
+                } else {
+                    self.ui.text_centered("?", ix + icon / 2.0, iy + icon * 0.72, 9.0, Color::new(0.5, 0.45, 0.4, 1.0));
+                }
+                if self.ui.hovered(r) {
+                    tooltip = Some(match got {
+                        Some((n, cond)) if archaeology::is_relic(id) => format!("{}\nFound {n}, best: {}", item_name(id), archaeology::CONDITIONS[cond as usize]),
+                        Some((n, _)) => format!("{}\nFound {n}", item_name(id)),
+                        None => "Not found yet".to_string(),
+                    });
+                }
+                ix += icon + 3.0 * s;
+            }
+            y += block_h + 4.0 * s;
+        }
+        let tips = "Brush, don't dig. Ease off when the find shifts. Deeper layers hide older, rarer things.";
+        self.ui.text_centered(tips, w / 2.0, h * 0.84, 8.0, Color::new(1.0, 0.9, 0.7, 1.0));
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(self.journal_back);
+        }
+        if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
+    /// The Beekeeping Log.
+    fn bee_log_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.1, 0.08, 0.0, 0.8));
+        let log = &self.game.bee_log;
+        self.ui.text_centered("Beekeeping Log", w / 2.0, h * 0.1, 16.0, Color::new(1.0, 0.85, 0.3, 1.0));
+        let sub = format!("Beekeeper level {}  ({} xp)  -  stung {} time{}", log.level(), log.xp, log.stings, if log.stings == 1 { "" } else { "s" });
+        self.ui.text_centered(&sub, w / 2.0, h * 0.1 + 16.0 * s, 9.0, GOLD);
+        let pw = (300.0 * s).min(w - 20.0 * s);
+        let x = w / 2.0 - pw / 2.0;
+        let mut y = h * 0.1 + 30.0 * s;
+        let row_h = 18.0 * s;
+        let mut rows: Vec<(Id, String, String)> = bees::Flavour::ALL.iter().map(|f| (f.item(), format!("{} Honey", f.name()), format!("{} bottles", log.bottles[f.index()]))).collect();
+        rows.push((HONEYCOMB, "Honeycomb".into(), format!("{}", log.comb)));
+        rows.push((QUEEN_BEE, "Queens caught".into(), format!("{}", log.queens)));
+        rows.push((BEEHIVE, "Colonies started".into(), format!("{}", log.colonies_started)));
+        rows.push((BEEHIVE_BUSY, "Swarms caught / lost".into(), format!("{} / {}", log.swarms_caught, log.swarms_lost)));
+        let hives = self.game.hives.values().filter(|c| c.bees > 0).count();
+        rows.push((BEE_NEST, "Colonies known nearby".into(), format!("{hives}")));
+        for (id, name, val) in rows {
+            draw_rectangle(x, y, pw, row_h - 2.0 * s, Color::new(0.2, 0.16, 0.05, 0.9));
+            self.ui.icon(id, x + 3.0 * s, y + 1.0 * s, row_h - 4.0 * s);
+            self.ui.text(&name, x + row_h + 4.0 * s, y + 12.0 * s, 9.0, WHITE);
+            let vw = self.ui.text_width(&val, 9.0);
+            self.ui.text(&val, x + pw - vw - 6.0 * s, y + 12.0 * s, 9.0, GOLD);
+            y += row_h;
+        }
+        let tips = "Tips: mixed flowers make better honey. Smoke before you harvest. Wood Ash for mites. Keep a spare hive for swarms.";
+        self.ui.text_centered(tips, w / 2.0, h * 0.84, 8.0, Color::new(1.0, 0.9, 0.5, 1.0));
+        let bw = (160.0 * s).min(w * 0.8);
+        if self.ui.button(Rect::new(w / 2.0 - bw / 2.0, h * 0.88, bw, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Paused);
+        }
+    }
+
+    /// A grindstone or smithing table.
+    fn bench_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let slot = 20.0 * s;
+        let panel_w = slot * 9.0 + 12.0 * s;
+        let top_h = slot * 2.2;
+        let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
+        let x0 = (w - panel_w) / 2.0;
+        let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
+        let sx = x0 + 6.0 * s;
+        let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+        let mut tooltip: Option<String> = None;
+        let Some((pos, bench, slots, wear)) = self.game.bench.as_ref().map(|b| (b.pos, b.bench, b.slots, b.wear)) else { return };
+        self.ui.text(block(self.game.world.get_v(pos)).name, sx, y0 + 12.0 * s, 10.0, WHITE);
+        let top = y0 + 20.0 * s;
+        let hints: &[&str] = match bench {
+            smithing::Bench::Grindstone => &["Something enchanted (or worn)", "Another of the same (optional)"],
+            smithing::Bench::Smithing => &["Scorchite Upgrade Template", "Dimond tool or armour", "Scorchite Ingot"],
+        };
+        for (i, hint) in hints.iter().enumerate() {
+            let x = sx + slot * (0.3 + i as f32 * 1.4);
+            let (l, r, hov) = self.ui.slot_worn(slots[i], wear[i], x, top, slot, false);
+            if hov {
+                tooltip = label(slots[i], wear[i]).or(Some(hint.to_string()));
+            }
+            if l || r {
+                self.game.bench_click(i, r);
+            }
+        }
+        let plan = self.game.bench_plan();
+        let ax = sx + slot * 4.4;
+        self.ui.tile(texture::T_ARROW_UI, ax, top, slot * 1.2, if plan.is_some() { WHITE } else { Color::new(0.3, 0.3, 0.3, 1.0) });
+        let out_x = sx + slot * 6.2;
+        let (l, _, hov) = self.ui.slot_worn(plan.map(|(i, _, _)| (i, 1)), plan.map(|p| p.1).unwrap_or(0), out_x, top, slot, false);
+        if hov {
+            tooltip = plan.and_then(|(i, w, _)| label(Some((i, 1)), w));
+        }
+        if l {
+            self.game.bench_take();
+        }
+        let note = match (bench, plan) {
+            (smithing::Bench::Grindstone, Some((_, _, xp))) if xp > 0 => format!("Grinds off the enchantments: about {xp} experience back."),
+            (smithing::Bench::Grindstone, Some(_)) => "Grinds the two into one, with a little extra life.".to_string(),
+            (smithing::Bench::Grindstone, None) => "Enchanted things lose their enchantments here (and give some experience back).".to_string(),
+            (smithing::Bench::Smithing, Some(_)) => "Upgrade to Scorchite (enchantments and wear are kept).".to_string(),
+            (smithing::Bench::Smithing, None) => "Template, Dimond gear, Scorchite Ingot: Scorchite gear.".to_string(),
+        };
+        self.ui.text(&note, sx, top + slot * 1.75, 7.0, if plan.is_some() { Color::new(0.5, 1.0, 0.4, 1.0) } else { GRAY });
+        let inv_y = top + top_h + 12.0 * s;
+        self.ui.text("Inventory", sx, inv_y - 4.0 * s, 8.0, GRAY);
+        for i in 9..36 {
+            let j = i - 9;
+            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        let hot_y = inv_y + slot * 3.0 + 6.0 * s;
+        for i in 0..9 {
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            if hov {
+                tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            self.inventory_slot_click(i, l, r, shift);
+        }
+        if let Some(cur) = self.game.inv.cursor {
+            let (mx, my) = mouse_position();
+            self.ui.stack_worn(Some(cur), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
+        } else if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
+    /// While brushing: how uncovered the find is, and how hard you're pressing.
+    fn brushing_hud(&self) {
+        let Some(d) = &self.game.dig else { return };
+        if d.idle > 1.5 {
+            return;
+        }
+        let (w, h, s) = (screen_width(), screen_height(), self.ui.s);
+        let bw = (160.0 * s).min(w * 0.6);
+        let x = w / 2.0 - bw / 2.0;
+        let y = h * 0.62;
+        let bar = |y: f32, v: f32, col: Color, label: &str| {
+            draw_rectangle(x - 2.0 * s, y - 2.0 * s, bw + 4.0 * s, 10.0 * s + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+            draw_rectangle(x, y, bw * v.clamp(0.0, 1.0), 10.0 * s, col);
+            self.ui.text(label, x, y - 4.0 * s, 8.0, WHITE);
+        };
+        let p = d.pressure;
+        let pcol = if p > 0.75 { Color::new(0.95, 0.2, 0.15, 1.0) } else if p > 0.5 { Color::new(0.95, 0.7, 0.2, 1.0) } else { Color::new(0.4, 0.85, 0.4, 1.0) };
+        let cracks = if d.cracks > 0 { format!(" ({} crack{})", d.cracks, if d.cracks == 1 { "" } else { "s" }) } else { String::new() };
+        bar(y, d.progress, Color::new(0.85, 0.7, 0.4, 1.0), &format!("Uncovered{cracks}"));
+        bar(y + 26.0 * s, p, pcol, if p > 0.75 { "PRESSURE - EASE OFF!" } else { "Pressure (let go to ease off)" });
     }
 
     /// While fishing: the bite alert and, with a big one on the line, the tug-of-war bars.
@@ -3009,7 +3252,9 @@ impl App {
     }
 
     fn inventory_slot_click(&mut self, i: usize, l: bool, r: bool, shift: bool) {
-        if l && shift && self.game.anvil.is_some() {
+        if l && shift && self.game.bench.is_some() {
+            self.game.bench_quick_put(i);
+        } else if l && shift && self.game.anvil.is_some() {
             self.game.anvil_quick_put(i);
         } else if l && shift && self.game.enchanting.is_some() {
             self.game.enchant_quick_put(i);
@@ -3532,6 +3777,15 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     if let Some(max) = inventory::max_uses(id, wear) {
         s += &format!(" ({}/{max} uses left)", max.saturating_sub(inventory::uses(wear) as u32));
     }
+    if let Some(d) = archaeology::describe(id, wear) {
+        s += &format!("\n{d}");
+    }
+    if id == QUEEN_BEE {
+        s += &format!("\nTemperament: {}", bees::Queen::of_wear(wear).name());
+    }
+    if let Some(f) = bees::Flavour::of_item(id) {
+        s += &format!("\n{}", f.taste());
+    }
     Some(s)
 }
 
@@ -3603,6 +3857,7 @@ async fn game_main() {
         book_focus: false,
         book_tab: crafting::Tab::All,
         book_craftable: false,
+        journal_back: Screen::Playing,
         quit: false,
         status: None,
         fps: 60.0,

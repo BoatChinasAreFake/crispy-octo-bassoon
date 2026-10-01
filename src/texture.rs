@@ -4186,7 +4186,7 @@ fn paint_ancient(a: &mut Atlas) {
         }
     });
     for i in 0..13u16 {
-        a.each(T_POT_SIDE_FIRST + i, move |x, y, r, _| {
+        a.each(T_POT_SIDE_FIRST + i, move |_, y, r, _| {
             let rim = y <= 1 || y >= 14;
             shade(clay, r.range(0.9, 1.05) * if rim { 0.8 } else { 1.0 })
         });
