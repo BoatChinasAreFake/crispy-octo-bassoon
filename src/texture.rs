@@ -3645,7 +3645,7 @@ fn paint_bees(a: &mut Atlas) {
         a.each(tile, move |x, y, r, _| {
             let band = y % 4 == 0;
             let hole = (6..10).contains(&x) && (7..10).contains(&y);
-            let honey = drip && ((x == 7 && y >= 10 && y <= 13) || (x == 8 && y >= 10 && y <= 11) || hole);
+            let honey = drip && ((x == 7 && (10..=13).contains(&y)) || (x == 8 && (10..=11).contains(&y)) || hole);
             if honey {
                 return shade(rgb(245, 175, 30), r.range(0.95, 1.08));
             }
@@ -3675,7 +3675,7 @@ fn paint_bees(a: &mut Atlas) {
             if board {
                 return shade(rgb(140, 100, 55), r.range(0.95, 1.05));
             }
-            if state == 2 && (y >= 12 && (x == 4 || x == 11) && y <= 14) {
+            if state == 2 && (12..=14).contains(&y) && (x == 4 || x == 11) {
                 return shade(rgb(245, 170, 25), r.range(0.95, 1.08));
             }
             shade(if rim || slat { rgb(150, 105, 55) } else { rgb(200, 155, 95) }, r.range(0.92, 1.05))
@@ -3872,7 +3872,7 @@ fn paint_critters(a: &mut Atlas) {
     });
     a.each(T_HUSH_FACE, |x, y, r, _| {
         // No eyes at all: a gaping jaw.
-        if y >= 9 && y <= 12 && (3..13).contains(&x) {
+        if (9..=12).contains(&y) && (3..13).contains(&x) {
             if y == 9 || y == 12 { rgb(200, 230, 225) } else { rgb(5, 15, 20) }
         } else {
             shade(rgb(15, 40, 50), r.range(0.9, 1.06))
@@ -4165,7 +4165,7 @@ fn paint_ancient(a: &mut Atlas) {
     });
     a.each(T_BENCH_SIDE, |x, y, r, _| {
         let top = y < 3;
-        let leg = (x < 3 || x > 12) && y >= 3;
+        let leg = !(3..=12).contains(&x) && y >= 3;
         let tool = y == 6 && (5..11).contains(&x);
         if tool {
             rgb(200, 200, 205)

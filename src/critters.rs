@@ -79,16 +79,17 @@ impl Game {
                         continue;
                     }
                     // Anything on the ground nearby is fair game (when its mouth is free).
-                    if m.seed == 0 && m.goal.is_none() {
-                        if let Some((d, _)) = self.drops.iter().enumerate().filter(|(_, d)| d.age > d.delay + 2.0 && d.body.pos.distance(pos) < 8.0).min_by(|a, b| a.1.body.pos.distance(pos).total_cmp(&b.1.body.pos.distance(pos))) {
-                            let at = self.drops[d].body.pos;
-                            if at.distance(pos) < 1.3 {
-                                grabs.push((i, d));
-                            } else {
-                                self.mobs[i].goal = Some(at);
-                            }
-                            continue;
+                    if m.seed == 0
+                        && m.goal.is_none()
+                        && let Some((d, _)) = self.drops.iter().enumerate().filter(|(_, d)| d.age > d.delay + 2.0 && d.body.pos.distance(pos) < 8.0).min_by(|a, b| a.1.body.pos.distance(pos).total_cmp(&b.1.body.pos.distance(pos)))
+                    {
+                        let at = self.drops[d].body.pos;
+                        if at.distance(pos) < 1.3 {
+                            grabs.push((i, d));
+                        } else {
+                            self.mobs[i].goal = Some(at);
                         }
+                        continue;
                     }
                     // At night: Cluckster hunting.
                     if night && self.mobs[i].goal.is_none() {

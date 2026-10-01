@@ -178,7 +178,7 @@ impl Game {
         }
         let Some(ui) = &mut self.bench else { return };
         let (pos, bench) = (ui.pos, ui.bench);
-        let used: Vec<(Id, u16)> = ui.slots.iter().zip(ui.wear).filter_map(|(s, w)| s.map(|(id, _)| (id, enchants(w)))).collect();
+        let used: Vec<(Id, u16)> = ui.slots.iter().zip(ui.wear).map(|(s, w)| s.map(|(id, _)| (id, enchants(w))).unwrap_or((AIR, 0))).collect();
         for i in 0..bench.slots() {
             ui.slots[i] = match ui.slots[i] {
                 Some((id, n)) if n > 1 => Some((id, n - 1)),
@@ -205,7 +205,9 @@ impl Game {
             }
         }
         if self.is_client() {
-            let (a, b) = (used.first().copied().unwrap_or((AIR, 0)), used.get(1).copied().unwrap_or((AIR, 0)));
+            // Grinding: the two things ground; smithing: the gear (the template and ingot are implied).
+            let pick = |i: usize| used.get(i).copied().unwrap_or((AIR, 0));
+            let (a, b) = if bench == Bench::Grindstone { (pick(0), pick(1)) } else { (pick(1), (AIR, 0)) };
             self.net_send_msg(Msg::Smith { x: pos.x, y: pos.y, z: pos.z, grind: bench == Bench::Grindstone, a: a.0, a_ench: a.1, b: b.0, b_ench: b.1 });
         }
     }

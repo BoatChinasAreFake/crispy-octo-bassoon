@@ -179,7 +179,8 @@ impl Game {
     }
 
     pub fn hurt_peer(&mut self, id: u32, dmg: f32, cause: &str, knock: Vec3) {
-        if self.creative {
+        // Their own game mode decides (not the host's): creative and spectating players can't be hurt.
+        if self.peer_free(id) {
             return;
         }
         self.net_send_to(id, Msg::HurtYou { dmg, cause: cause.into(), knock });
