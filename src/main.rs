@@ -30,6 +30,7 @@ mod enchant;
 mod entity;
 mod falling;
 mod farming;
+mod music;
 mod fire;
 mod fishing;
 mod game;
@@ -74,6 +75,7 @@ mod smithing;
 mod upnp;
 mod vehicles;
 mod villagers;
+mod songs;
 mod sound;
 mod stats;
 mod texture;
@@ -1743,6 +1745,8 @@ impl App {
         self.updates.poll();
         let amb = if in_game { self.game.ambience() } else { sound::Ambience::default() };
         self.audio.update_music(dt, in_game, amb);
+        let juke = if in_game { self.game.nearest_jukebox() } else { None };
+        self.audio.update_jukebox(dt, juke, self.game.player.eye());
     }
 
     fn draw_ui(&mut self) {

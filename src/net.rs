@@ -100,7 +100,7 @@ pub enum Msg {
     /// `wear`: how used it is, for tools and armour.
     Give { item: Id, n: u8, wear: u32 },
     Explosion { at: Vec3, r: f32 },
-    Sound { sfx: u8, at: Vec3 },
+    Sound { sfx: u16, at: Vec3 },
     Time(f32),
     Chat { from: u32, text: String },
     /// host -> client, after Hello: prove you know the password (if any).
@@ -448,7 +448,7 @@ impl Msg {
             }
             Msg::Sound { sfx, at } => {
                 w.u8(14);
-                w.u8(*sfx);
+                w.u16(*sfx);
                 w.v3(*at);
             }
             Msg::Time(t) => {
@@ -847,7 +847,7 @@ impl Msg {
             11 => Msg::HurtYou { dmg: r.f32()?, cause: r.str()?, knock: r.v3()? },
             12 => Msg::Give { item: r.u16()?, n: r.u8()?, wear: r.u32()? },
             13 => Msg::Explosion { at: r.v3()?, r: r.f32()? },
-            14 => Msg::Sound { sfx: r.u8()?, at: r.v3()? },
+            14 => Msg::Sound { sfx: r.u16()?, at: r.v3()? },
             15 => Msg::Time(r.f32()?),
             16 => Msg::Chat { from: r.u32()?, text: r.str()? },
             17 => Msg::Challenge { nonce: r.arr()?, password: r.u8()? != 0 },

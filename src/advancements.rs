@@ -118,6 +118,8 @@ pub const ALL: &[Advancement] = &[
     adv("tongue_tied", "Tongue Tied", "Watch a Ribbit eat a Bloop."),
     adv("scute_cute", "Scute Cute", "Brush a Rollo for a scute."),
     adv("armoured_pup", "Very Good Boy", "Put Woofer Armour on your Woofer."),
+    adv("plinky", "Plinky Plonky", "Tune a Note Block. Perfect pitch not required."),
+    adv("now_playing", "Now Playing", "Put a Music Disc in a Jukebox. Turn it up."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

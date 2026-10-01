@@ -302,6 +302,26 @@ impl Game {
         if is_door(old) && is_door(new) {
             return true;
         }
+        // Note blocks retune for free, and the host plays the new note for everyone.
+        if crate::music::is_note_block(old) && crate::music::is_note_block(new) {
+            self.sound_note(at, crate::music::pitch_of(new));
+            return true;
+        }
+        // A disc goes into a jukebox from their bag, or comes out onto the ground.
+        if old == JUKEBOX
+            && let Some(d) = crate::music::disc_in(new)
+        {
+            return self.peer_take(from, DISC_FIRST + d as Id, 1);
+        }
+        if new == JUKEBOX
+            && let Some(d) = crate::music::disc_in(old)
+        {
+            self.pop_drop(at.as_vec3() + macroquad::math::Vec3::new(0.5, 1.1, 0.5), DISC_FIRST + d as Id, 1);
+            return true;
+        }
+        if crate::music::disc_in(new).is_some() {
+            return false;
+        }
         if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new))
             && a == b
         {

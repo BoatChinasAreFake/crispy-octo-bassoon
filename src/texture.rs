@@ -434,6 +434,30 @@ pub const T_TEMPLATE: u16 = 559;
 pub const T_SCORCHITE_TOOLS: u16 = 560;
 pub const T_SCORCHITE_ARMOR_ITEMS: u16 = 564;
 pub const T_SCORCHITE_ARMOR_WORN: u16 = 568;
+// Music (see music.rs).
+pub const T_NOTE_BLOCK: u16 = 572;
+pub const T_JUKEBOX_TOP: u16 = 573;
+pub const T_JUKEBOX_SIDE: u16 = 574;
+pub const T_DISC_FIRST: u16 = 575;
+pub const T_NOTE_PARTICLE: u16 = 583;
+// The Scorchlands (see fortress.rs).
+pub const T_SCORCH_BRICKS: u16 = 584;
+pub const T_CAGE: u16 = 585;
+pub const T_GOLD_BLOCK: u16 = 586;
+pub const T_GILDED: u16 = 587;
+pub const T_BELL: u16 = 588;
+pub const T_SIZZLE_ROD: u16 = 589;
+pub const T_SIZZLE_POWDER: u16 = 590;
+pub const T_WEEPER_TEAR: u16 = 591;
+pub const T_SHROOM_STICK: u16 = 592;
+pub const T_POTION_EXTRA: u16 = 593;
+pub const T_SPLASH_EXTRA: u16 = 595;
+// Raids (see raids.rs).
+pub const T_CROSSBOW: u16 = 597;
+pub const T_CROSSBOW_LOADED: u16 = 598;
+pub const T_TOTEM: u16 = 599;
+pub const T_BANNER: u16 = 600;
+pub const T_FIREBALL: u16 = 601;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2985,6 +3009,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     paint_bees(&mut a);
     paint_critters(&mut a);
     paint_ancient(&mut a);
+    paint_music(&mut a);
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));
@@ -4312,4 +4337,73 @@ fn paint_ancient(a: &mut Atlas) {
         let vein = (x * 5 + y * 3) % 17 == 0;
         shade(if vein { rgb(200, 90, 40) } else { base }, r.range(0.9, 1.05) * if rim { 0.7 } else { 1.0 })
     });
+}
+
+const DISC_SPRITE: [&str; 16] = [
+    "................",
+    ".....######.....",
+    "...##dddddd##...",
+    "..#ddhdddddd#d..",
+    "..#dhddddddddd#.",
+    ".#ddddllllddddd#",
+    ".#dddllllllddd#.",
+    ".#dddlll.lllddd#",
+    ".#dddllllllddd#.",
+    ".#ddddllllddddd#",
+    "..#ddddddddddd#.",
+    "..#dddddddddd#..",
+    "...##dddddd##...",
+    ".....######.....",
+    "................",
+    "................",
+];
+
+/// Note blocks, jukeboxes, discs, and the notes that float up.
+fn paint_music(a: &mut Atlas) {
+    // Note block: dark planks with a speaker grille in the middle.
+    a.each(T_NOTE_BLOCK, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let grille = (4..12).contains(&x) && (4..12).contains(&y) && (x + y) % 2 == 0;
+        let base = if rim { rgb(70, 45, 28) } else if grille { rgb(35, 22, 14) } else { rgb(110, 72, 45) };
+        shade(base, r.range(0.9, 1.06) * if y % 4 == 3 { 0.9 } else { 1.0 })
+    });
+    a.each(T_JUKEBOX_SIDE, |x, y, r, _| {
+        let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+        let inset = (3..13).contains(&x) && (3..13).contains(&y) && (x == 3 || x == 12 || y == 3 || y == 12);
+        shade(if frame { rgb(75, 48, 30) } else if inset { rgb(90, 60, 38) } else { rgb(128, 86, 56) }, r.range(0.9, 1.06))
+    });
+    a.each(T_JUKEBOX_TOP, |x, y, r, _| {
+        let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+        let slot = (3..13).contains(&x) && (7..9).contains(&y);
+        shade(if slot { rgb(20, 14, 10) } else if frame { rgb(75, 48, 30) } else { rgb(100, 66, 42) }, r.range(0.9, 1.06))
+    });
+    let labels = [rgb(90, 200, 90), rgb(230, 120, 40), rgb(220, 60, 60), rgb(110, 150, 230), rgb(240, 240, 240), rgb(240, 210, 60), rgb(70, 220, 210), rgb(230, 120, 170)];
+    for (i, l) in labels.into_iter().enumerate() {
+        a.sprite(T_DISC_FIRST + i as u16, &DISC_SPRITE, &[('#', rgb(10, 10, 12)), ('d', rgb(30, 30, 34)), ('h', rgb(90, 90, 100)), ('l', l)]);
+    }
+    // Sixteen note colours, green (low) round through blue to red (high), four by four.
+    a.each(T_NOTE_PARTICLE, |x, y, _, _| {
+        let cell = (y / 4) * 4 + x / 4;
+        let hue = 0.33 - cell as f32 / 15.0 * 1.0;
+        let (lx, ly) = (x % 4, y % 4);
+        if (lx == 0 && ly == 3) || (lx == 3 && ly == 0) {
+            return [0, 0, 0, 0];
+        }
+        hsv(hue.rem_euclid(1.0), 0.85, 1.0)
+    });
+}
+
+fn hsv(h: f32, s: f32, v: f32) -> Rgba {
+    let i = (h * 6.0).floor();
+    let f = h * 6.0 - i;
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - f * s), v * (1.0 - (1.0 - f) * s));
+    let (r, g, b) = match i as i32 % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }

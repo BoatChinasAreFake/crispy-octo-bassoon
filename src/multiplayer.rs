@@ -64,7 +64,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk)
+    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -1011,7 +1011,7 @@ impl Game {
                 self.explosion_effects(at, r);
             }
             Msg::Sound { sfx, at } => {
-                if let Some(s) = Sfx::from_u8(sfx) {
+                if let Some(s) = Sfx::from_wire(sfx) {
                     self.sfx(s, Some(at));
                 }
             }
@@ -1248,7 +1248,7 @@ impl Game {
             let fwd: Vec<Msg> = self
                 .sounds
                 .iter()
-                .filter_map(|&(s, at)| at.filter(|_| forwarded(s)).map(|at| Msg::Sound { sfx: s.to_u8(), at }))
+                .filter_map(|&(s, at)| at.filter(|_| forwarded(s)).map(|at| Msg::Sound { sfx: s.to_wire(), at }))
                 .collect();
             for m in fwd {
                 self.net_broadcast(m);

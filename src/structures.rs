@@ -556,6 +556,17 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         c.slots[slot] = Some((item, n));
         c.wear[slot] = loot_wear(item, kind, &mut rng);
     }
+    // Now and then, a music disc (Oinkstep is the Snouts'; see fortress.rs).
+    let disc = match kind {
+        Kind::Dungeon => 0.3,
+        Kind::HushedCity => 0.3,
+        Kind::Tower | Kind::Spire => 0.12,
+        _ => 0.0,
+    };
+    if rng.chance(disc) && !free.is_empty() {
+        let slot = free.remove(rng.int(0, free.len() as i32 - 1) as usize);
+        c.slots[slot] = Some((DISC_FIRST + rng.int(0, 6) as Id, 1));
+    }
     c
 }
 

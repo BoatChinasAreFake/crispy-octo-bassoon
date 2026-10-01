@@ -58,6 +58,8 @@ pub struct Game {
     pub tnts: Vec<PrimedTnt>,
     /// Sand, gravel and anvils on their way down (see falling.rs).
     pub falling: Vec<crate::falling::FallingBlock>,
+    /// Note blocks with Zappy power on them (they play once per pulse).
+    pub powered_notes: HashSet<IVec3>,
     /// Pointy Sticks in flight or stuck in things (owned by the host; clients mirror them).
     pub arrows: Vec<Arrow>,
     pub inv: Inventory,
@@ -292,6 +294,7 @@ impl Game {
             particles: Vec::new(),
             tnts: Vec::new(),
             falling: Vec::new(),
+            powered_notes: HashSet::new(),
             arrows: Vec::new(),
             inv,
             creative,
@@ -1147,7 +1150,7 @@ impl Game {
                 }
                 Cmd::Sound(s, at) => {
                     self.sfx(s, Some(at));
-                    self.net_broadcast(Msg::Sound { sfx: s.to_u8(), at });
+                    self.net_broadcast(Msg::Sound { sfx: s.to_wire(), at });
                 }
             }
         }
@@ -1551,6 +1554,11 @@ impl Game {
                     self.breaking = None;
                     return;
                 }
+                if c.attack_pressed && crate::music::is_note_block(self.world.get_v(pos)) {
+                    // A tap plays it (as well as starting to break it).
+                    let pitch = crate::music::pitch_of(self.world.get_v(pos));
+                    self.sound_note(pos, pitch);
+                }
                 if c.attack_held {
                     let id = self.world.get_v(pos);
                     if self.creative {
@@ -1659,6 +1667,13 @@ impl Game {
             }
             if let Some(b) = crate::smithing::Bench::of_block(id) {
                 self.open_bench(pos, b);
+                return;
+            }
+            if crate::music::is_note_block(id) {
+                self.tune_note_block(pos);
+                return;
+            }
+            if crate::music::is_jukebox(id) && self.use_jukebox(pos, held) {
                 return;
             }
             if crate::bees::is_hive(id) && matches!(held, GLASS_BOTTLE | SHEARS | BEE_SMOKER | WOOD_ASH | HIVE_TOOL | QUEEN_BEE) {
@@ -2067,6 +2082,7 @@ impl Game {
 
     /// A block broke where the world lives (by anyone): hives, pots and sculk react, and it's heard.
     pub fn block_gone(&mut self, pos: IVec3, old: Id) {
+        self.jukebox_broken(pos, old);
         if crate::bees::is_hive(old) {
             self.hive_broken(pos, old);
         }
