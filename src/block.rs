@@ -2215,6 +2215,9 @@ mod id_order_tests {
 
     #[test]
     fn named_ids_match_their_registrations() {
+        // This test reads the installed registry's exact shape, so it must not
+        // run while a gear/furnace test has a mod registry installed.
+        let _guard = crate::mods::registry_test_lock();
         for (id, key) in [
             (OBSIDIAN, "obsidian"),
             (ZAP_ORE, "zap_ore"),

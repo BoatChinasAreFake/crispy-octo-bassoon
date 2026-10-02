@@ -3986,6 +3986,98 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn mod_tools_wear_out_and_an_anvil_mends_them() {
+        // A mod tool with its own durability and repair material. Mining wears
+        // it through the normal path, and an anvil mends it with that material.
+        let mod_txt = "\
+[item ruby]
+
+[item ruby_pick]
+durability = 20
+repair = ruby
+
+[item ruby_blade]
+damage = 7
+durability = 900
+repair = ruby
+";
+        crate::mods::with_mods(&[("gems", mod_txt)], |reg| {
+            let ruby = reg.lookup("gems:ruby").unwrap();
+            let pick = reg.lookup("gems:ruby_pick").unwrap();
+            let blade = reg.lookup("gems:ruby_blade").unwrap();
+            // The documented rules: durability is honoured, and a damaging,
+            // non-pickaxe, non-armour mod tool counts as a weapon ("sword").
+            assert_eq!(durability(pick), Some(20));
+            assert_eq!(durability(blade), Some(900));
+            assert!(is_sword(blade) && !is_sword(pick));
+            assert_eq!(crate::anvil::repair_material(pick), Some(ruby));
+
+            let mut g = arena(61);
+            // Mining with the mod tool wears it one use per block, like any tool.
+            g.inv.slots[g.inv.selected] = Some((pick, 1));
+            g.inv.wear[g.inv.selected] = 10;
+            g.world.set(2, 50, 2, STONE);
+            g.break_block(IVec3::new(2, 50, 2), true);
+            assert_eq!(g.inv.wear[g.inv.selected], 11, "the mod tool wore a use");
+
+            // Mend it at an anvil with its repair material (ruby). Each unit
+            // restores a quarter of the max (20 / 4 = 5 uses).
+            let worn = g.inv.wear[g.inv.selected];
+            g.give(ruby, 4);
+            g.xp = crate::xp::points_for_level(30);
+            let anvil_pos = IVec3::new(-2, 50, 0);
+            g.world.set_v(anvil_pos, ANVIL);
+            g.open_anvil(anvil_pos);
+            let ui = g.anvil.as_mut().unwrap();
+            ui.slots[0] = Some((pick, 1));
+            ui.wear[0] = worn;
+            ui.slots[1] = Some((ruby, 4));
+            let (item, plan) = g.anvil_plan().expect("the anvil knows how to mend it");
+            assert_eq!(item, pick);
+            assert_eq!(plan.wear, worn.saturating_sub(5 * plan.used as u32), "a quarter per ruby");
+            assert!(plan.wear < worn && plan.used >= 1);
+            g.anvil_take();
+            assert_eq!(g.inv.cursor, Some((pick, 1)));
+            assert_eq!(g.inv.cursor_wear, plan.wear, "the mended tool is less worn");
+        });
+    }
+
+    #[test]
+    fn mod_armour_is_worn_and_softens_blows() {
+        // A mod chestplate with its own armour points. It equips into the
+        // right slot, counts towards protection, and cuts incoming damage by
+        // the documented 4% per point.
+        let mod_txt = "\
+[item ruby_chestplate]
+armor = chestplate
+armor_points = 5
+looks_like = diamond
+";
+        crate::mods::with_mods(&[("gems", mod_txt)], |reg| {
+            let chest = reg.lookup("gems:ruby_chestplate").unwrap();
+            // armor_of yields (slot, looks_like); armor_points yields K.
+            assert_eq!(armor_of(chest), Some((CHESTPLATE, 3))); // diamond tier = 3
+            assert_eq!(armor_points(chest), 5);
+
+            let mut g = arena(62);
+            // Only the chest slot accepts it: a helmet slot rejects it.
+            g.inv.cursor = Some((chest, 1));
+            g.inv.click_armor(HELMET);
+            assert_eq!(g.inv.armor[HELMET], None, "wrong slot refuses it");
+            g.inv.click_armor(CHESTPLATE);
+            assert_eq!(g.inv.armor[CHESTPLATE], Some((chest, 1)));
+            g.inv.cursor = None;
+            assert_eq!(g.inv.armor_points(), 5);
+
+            // 5 points cut 20% off a hit (4% each): a 10-damage blow does 8.
+            g.player.health = MAX_HEALTH;
+            g.player.hurt = 0.0;
+            g.hurt_player_armored(10.0, "tested mod armour");
+            assert!((g.player.health - (MAX_HEALTH - 8.0)).abs() < 1e-3, "{}", g.player.health);
+        });
+    }
+
+    #[test]
     fn hunger_and_food() {
         let mut g = arena(53);
         // Eating fills the bar, not your health.

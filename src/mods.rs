@@ -831,6 +831,45 @@ fn parse_recipe(ctx: &Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) -
     Some(Recipe { inputs: ins, output: out })
 }
 
+/// A process-wide lock shared by every test that cares about which registry is
+/// globally installed. The gear/furnace end-to-end tests install a mod
+/// registry for a moment (see `with_mods`); any test that asserts the *base*
+/// registry's exact shape takes the same lock so the two never overlap.
+#[cfg(test)]
+pub(crate) fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Test helper: build a registry from inline `mod.txt` sources, install it
+/// globally, run `body`, then put the base registry back. Serialised across
+/// the whole test binary (via `registry_test_lock`) so the brief window where
+/// `reg()` holds mod content never overlaps a test that reads the registry.
+/// Returns whatever `body` returns.
+#[cfg(test)]
+pub(crate) fn with_mods<T>(sources: &[(&str, &str)], body: impl FnOnce(&Registry) -> T) -> T {
+    let srcs: Vec<ModSource> = sources
+        .iter()
+        .map(|(id, text)| {
+            let mut files = BTreeMap::new();
+            files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+            ModSource { id: (*id).to_string(), files }
+        })
+        .collect();
+    let reg = build(&srcs, &[]);
+    // Hold the lock for the whole installed window, and always restore the base
+    // registry afterwards (even if `body` panics).
+    let _guard = registry_test_lock();
+    install(reg);
+    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(crate::block::reg())));
+    install(Registry::base());
+    match out {
+        Ok(v) => v,
+        Err(e) => std::panic::resume_unwind(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
