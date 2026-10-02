@@ -1379,7 +1379,9 @@ impl Game {
     /// `spawn_arrow`'s mob-shot path (shooter = None) but takes the damage from
     /// the mod's `ranged_damage` field instead of the hardcoded base value.
     pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32) {
-        self.arrows.push(Arrow::new(pos, vel, None, damage));
+        let mut a = Arrow::new(pos, vel, None, damage);
+        a.modded = true;
+        self.arrows.push(a);
         self.sfx(Sfx::Twang, Some(pos));
         if self.arrows.len() > 200 {
             self.arrows.remove(0);
@@ -1429,12 +1431,15 @@ impl Game {
                     false
                 }
                 None => {
-                    // Rattlers' arrows hit players.
+                    // Rattlers' (and modded mobs') arrows hit players. A modded
+                    // mob's shot gets a generic cause so its kill isn't blamed
+                    // on a Rattler.
+                    let cause = if a.modded { "was shot down by a monster" } else { "was shot by a Rattler (with a Pointy Stick)" };
                     let me = self.player.body.clone();
                     if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         self.player.hurt = 0.0;
                         let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_player_from(d, "was shot by a Rattler (with a Pointy Stick)", Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
+                        self.hurt_player_from(d, cause, Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
                         let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
                         self.player.body.vel += knock;
                         return false;
@@ -1442,7 +1447,7 @@ impl Game {
                     let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
                     if let Some(id) = hit {
                         let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_peer(id, d, "was shot by a Rattler (with a Pointy Stick)", a.vel.normalize_or_zero() * 4.0);
+                        self.hurt_peer(id, d, cause, a.vel.normalize_or_zero() * 4.0);
                         return false;
                     }
                     true
@@ -5108,6 +5113,20 @@ looks_like = diamond
             }
             assert!(g.player.health < health, "the Slinger shot the player ({} left)", g.player.health);
             assert!(first_hit > 0, "an arrow actually travelled before landing");
+
+            // The kill is attributed to a generic monster, not misblamed on a
+            // Rattler: a modded slinger's arrow carries a generic death cause.
+            g.player.health = 1.0;
+            for _ in 0..400 {
+                g.update_entities(0.02);
+                if g.dead.is_some() {
+                    break;
+                }
+                g.player.hurt = 0.0; // keep taking hits until one is lethal
+            }
+            let death = g.dead.as_deref().expect("the Slinger eventually killed the player");
+            assert!(!death.contains("Rattler"), "a modded shot must not be blamed on a Rattler: {death:?}");
+            assert!(death.contains("was shot down by a monster"), "modded shot uses the generic cause: {death:?}");
         });
     }
 

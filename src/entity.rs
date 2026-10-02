@@ -2262,6 +2262,10 @@ pub struct Arrow {
     /// A thrown Soggy Spear (with its wear) instead of a Pointy Stick: it
     /// drops where it lands, to be picked up again.
     pub spear: Option<u32>,
+    /// Fired by a modded mob rather than a base Rattler. Host-side only (never
+    /// sent over the wire); only changes the death-message attribution so a
+    /// modded slinger's kill isn't blamed on a Rattler.
+    pub modded: bool,
 }
 
 impl Arrow {
@@ -2269,7 +2273,7 @@ impl Arrow {
     const GRAVITY: f32 = 20.0;
 
     pub fn new(pos: Vec3, vel: Vec3, shooter: Option<u32>, damage: f32) -> Arrow {
-        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z), spear: None }
+        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z), spear: None, modded: false }
     }
 
     /// Fly for `dt`. Returns true if it just hit a block (and stuck there).
@@ -2303,7 +2307,7 @@ impl Arrow {
     /// A client's copy, from the host's snapshot.
     pub fn from_wire(pos: Vec3, v: Vec3) -> Arrow {
         let stuck = v.length() < 0.01;
-        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z), spear: None }
+        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z), spear: None, modded: false }
     }
 
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {
