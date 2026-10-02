@@ -192,6 +192,47 @@ chance = 0.01       // per surface column (max 0.2)
 
 Terrain that was already generated doesn't change. Explore new areas, or start a new world.
 
+### `[mob <name>]`
+
+Defines a new mob *type*. It's a passive wanderer that borrows one of a few base-game body shapes and wears your texture. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items.
+
+| Key | Meaning | Default |
+| --- | --- | --- |
+| `name` | Display name | the section name |
+| `texture` | Painted over the whole body | white |
+| `template` / `model` | Body shape: `quadruped`, `biped`, `blob` or `bird` | `quadruped` |
+| `size` | Body width and height, in blocks | `0.9` |
+| `width`, `height` | Override `size` for one dimension (width 0.2–8, height 0.2–8) | from `size` |
+| `health` | Hit points (1–1000) | `10` |
+| `speed` | Walking-speed multiplier (0.1–4) | `1` |
+| `hostile` | Counts toward the night-time monster cap (it still doesn't attack in this version) | `false` |
+| `drops` | One item it may drop on death: `item [count]` (1–64) | nothing |
+
+```text
+[mob mouse]
+name = Tiny Mouse
+texture = mouse        // a [texture] in this mod, or a base-game name
+template = quadruped
+size = 0.4
+health = 6
+speed = 1.5
+drops = cheese_slice 2
+```
+
+Then, from a `.rhai` script in the same mod folder:
+
+```rust
+fn on_chat(player, text) {
+    if text == "/mouse" {
+        let p = player_pos(player);
+        spawn_mob("mouse", p.x, p.y, p.z);   // resolves "mouse" or "mymod:mouse"
+        return false;
+    }
+}
+```
+
+This first version covers mob *types* with their own stats, drop and a templated look. Behaviours that need code (bosses, taming, trading, flying, custom attacks) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
+
 ### `[splashes]`
 
 Each line is an extra title-screen splash text.
@@ -207,12 +248,12 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 
 ## Limits
 
-- Up to **32,000 mod blocks**, **32,000 mod items** and about **3,800 mod textures**, across all mods together.
+- Up to **32,000 mod blocks**, **32,000 mod items**, **222 mod mobs** and about **3,800 mod textures**, across all mods together.
 - 1 MB per file, and 4 MB for all of a server's mods together.
 
 ## Worlds and multiplayer
 
-- **Saves and changing mods:** saves (and each region file, which holds block edits, containers, signs and frames) store mod blocks and items by name. Adding, removing or reordering mods doesn't scramble a world. Blocks from a mod you removed turn into air, and its items disappear.
+- **Saves and changing mods:** saves (and each region file, which holds block edits, containers, signs and frames) store mod blocks and items by name. Adding, removing or reordering mods doesn't scramble a world. Blocks from a mod you removed turn into air, and its items disappear. Saved mod mobs (ones you've tamed, bred, fed or named) are stored by name too; one from a mod you removed is dropped on load rather than turning into some other creature.
 - **Joining a server:** the server's mods replace yours while you're connected, and yours come back when you leave. Servers only send `.txt` and `.png` files.
 - **Dedicated servers:** they load mods from the `mods/` folder where the server runs, and list them in the console at startup.
 - **Turning mods off:** the On/Off buttons on the Mods screen write `mods/disabled.txt`. You can edit that file yourself: one mod folder name per line.

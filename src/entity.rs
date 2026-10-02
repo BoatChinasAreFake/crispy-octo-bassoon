@@ -219,10 +219,21 @@ pub enum MobKind {
     Fee,
     /// Ravager-ish: a big angry beast the raiders bring along (see raids.rs).
     Rampager,
+    /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
+    /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
+    Modded(u16),
 }
 
+/// How many base-game mob kinds there are (the length of `MobKind::ALL`).
+/// Modded kinds take the indices after these, in registry order.
+pub const BASE_MOBS: u8 = MobKind::ALL.len() as u8;
+
+/// At most this many mod mobs, so a kind index always fits the one-byte wire
+/// and save encoding alongside the base kinds.
+pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
+
 impl MobKind {
-    /// Every kind, in wire/script index order (append only).
+    /// Every base-game kind, in wire/script index order (append only).
     pub const ALL: [MobKind; 33] = [
         MobKind::Oinker,
         MobKind::Hisser,
@@ -260,14 +271,47 @@ impl MobKind {
     ];
 
     pub fn index(self) -> u8 {
-        MobKind::ALL.iter().position(|k| *k == self).unwrap_or(0) as u8
+        match self {
+            MobKind::Modded(i) => BASE_MOBS.saturating_add(i.min(u8::MAX as u16) as u8),
+            k => MobKind::ALL.iter().position(|x| *x == k).unwrap_or(0) as u8,
+        }
     }
+    /// The kind for a wire/save index, or `None` if it names no loaded mob
+    /// (an unknown or removed modded kind degrades gracefully to `None`).
     pub fn from_index(i: u8) -> Option<MobKind> {
-        MobKind::ALL.get(i as usize).copied()
+        if i < BASE_MOBS {
+            MobKind::ALL.get(i as usize).copied()
+        } else {
+            let m = (i - BASE_MOBS) as usize;
+            (m < crate::block::reg().mobs.len()).then_some(MobKind::Modded(m as u16))
+        }
+    }
+    /// The mod-defined mob definition for a `Modded` kind, if it is still loaded.
+    pub fn mod_def(self) -> Option<&'static crate::block::ModMob> {
+        match self {
+            MobKind::Modded(i) => crate::block::reg().mobs.get(i as usize),
+            _ => None,
+        }
     }
     /// Names accepted by mods and scripts (the parody name or the one it parodies).
     pub fn from_name(s: &str) -> Option<MobKind> {
-        match s.to_ascii_lowercase().as_str() {
+        let lower = s.to_ascii_lowercase();
+        if let Some(k) = MobKind::from_base_name(&lower) {
+            return Some(k);
+        }
+        // Fall back to a mod-defined mob, by its "modid:name" key or bare name.
+        let mobs = &crate::block::reg().mobs;
+        mobs.iter()
+            .position(|m| m.key == lower || m.key.rsplit(':').next() == Some(lower.as_str()))
+            .map(|i| MobKind::Modded(i as u16))
+    }
+    /// Resolve only the built-in kinds by name (no mod lookup). Used while a
+    /// mod registry is still being built, before it's installed.
+    pub(crate) fn from_base_name_public(s: &str) -> Option<MobKind> {
+        Self::from_base_name(s)
+    }
+    fn from_base_name(s: &str) -> Option<MobKind> {
+        match s {
             "oinker" | "pig" => Some(MobKind::Oinker),
             "hisser" | "creeper" => Some(MobKind::Hisser),
             "groaner" | "zombie" => Some(MobKind::Groaner),
@@ -305,6 +349,9 @@ impl MobKind {
         }
     }
     pub fn name(self) -> &'static str {
+        if let MobKind::Modded(_) = self {
+            return self.mod_def().map(|d| d.name.as_str()).unwrap_or("Creature");
+        }
         match self {
             MobKind::Oinker => "Oinker",
             MobKind::Hisser => "Hisser",
@@ -339,10 +386,14 @@ impl MobKind {
             MobKind::Invoicer => "Invoicer",
             MobKind::Fee => "Fee",
             MobKind::Rampager => "Rampager",
+            MobKind::Modded(_) => "Creature",
         }
     }
     /// Half-width and height at size 1.
     fn dims(self) -> (f32, f32) {
+        if let MobKind::Modded(_) = self {
+            return self.mod_def().map(|d| (d.half_width, d.height)).unwrap_or((0.4, 0.9));
+        }
         match self {
             MobKind::Oinker => (0.45, 0.9),
             MobKind::Hisser => (0.3, 1.65),
@@ -375,9 +426,13 @@ impl MobKind {
             MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => (0.3, 1.95),
             MobKind::Fee => (0.2, 0.8),
             MobKind::Rampager => (0.95, 2.2),
+            MobKind::Modded(_) => (0.4, 0.9),
         }
     }
     pub fn max_health(self) -> f32 {
+        if let MobKind::Modded(_) = self {
+            return self.mod_def().map(|d| d.max_health).unwrap_or(10.0);
+        }
         match self {
             MobKind::Oinker => 10.0,
             MobKind::Hisser => 20.0,
@@ -412,6 +467,7 @@ impl MobKind {
             MobKind::Invoicer => 24.0,
             MobKind::Fee => 14.0,
             MobKind::Rampager => 100.0,
+            MobKind::Modded(_) => 10.0,
         }
     }
     /// Experience for defeating one (`size`: a Bloop's size).
@@ -425,6 +481,11 @@ impl MobKind {
     /// Spawns at night / in caves and counts toward the hostile cap.
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
+        if let MobKind::Modded(_) = self {
+            // Modded mobs never actually attack in v1; `hostile` only decides
+            // whether they spawn at night and count toward the monster cap.
+            return self.mod_def().is_some_and(|d| d.hostile);
+        }
         !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
@@ -461,6 +522,15 @@ impl MobKind {
     /// Undead: burn in sunlight.
     fn burns(self) -> bool {
         matches!(self, MobKind::Groaner | MobKind::Rattler)
+    }
+    /// The lowercase name scripts see (e.g. in `on_mob_death`). For a modded
+    /// mob this is the bare section name from its key, so `spawn_mob` and
+    /// `from_name` round-trip; for base kinds it's the lowercase display name.
+    pub fn script_name(self) -> String {
+        match self.mod_def() {
+            Some(d) => d.key.rsplit(':').next().unwrap_or(&d.key).to_string(),
+            None => self.name().to_ascii_lowercase(),
+        }
     }
 }
 
@@ -669,6 +739,7 @@ impl Mob {
                 self.knock *= 0.3;
             }
             k if k.passive() => self.flee = 4.0,
+            MobKind::Modded(_) => self.flee = 4.0,
             MobKind::Hmmer | MobKind::Fishy => self.flee = 4.0,
             MobKind::Grumbler | MobKind::Bee => self.angry = true,
             MobKind::Hush => {
@@ -1267,6 +1338,12 @@ impl Mob {
                     self.warp_cd = rng.range(2.5, 4.5);
                 }
             }
+            MobKind::Modded(_) => {
+                // v1 modded mobs are passive wanderers: flee when hit, else amble.
+                if self.flee > 0.0 {
+                    want = Some(((-flat.x).atan2(flat.z), 3.5));
+                }
+            }
         }
         if self.kind.burns() {
             let head = self.eye();
@@ -1401,6 +1478,7 @@ impl Mob {
             MobKind::Hackler if rng.chance(0.085) => Some((AXE_FIRST + 3, 1)),
             MobKind::Invoicer => Some((TOTEM, 1)),
             MobKind::Rampager => Some((SADDLE, 1)),
+            MobKind::Modded(_) => self.kind.mod_def().and_then(|d| d.drop).map(|(id, max)| (id, rng.int(1, max.max(1) as i32) as u8)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -1472,6 +1550,14 @@ impl Mob {
             p.y -= 0.15 * scale.y;
         }
         let root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
+        // Modded mobs carry their own texture, so their parts are built fresh.
+        if let MobKind::Modded(_) = self.kind {
+            if let Some(def) = self.kind.mod_def() {
+                let parts = modded_parts(def);
+                draw_posed(geo, &root, &parts, self.anim, self.flap, sky);
+            }
+            return;
+        }
         let parts = match self.kind {
             MobKind::Fluffer if self.sheared => &FLUFFER_SHEARED[..],
             MobKind::Rollo if self.fuse > 0.0 => &ROLLO_BALL[..],
@@ -1958,6 +2044,26 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Invoicer => &INVOICER,
         MobKind::Fee => &FEE,
         MobKind::Rampager => &RAMPAGER,
+        // Modded mobs are drawn from a runtime-built, textured copy of a base
+        // template (see `modded_parts`); this static fallback keeps `model`
+        // total and is used only where the texture doesn't matter (e.g. the
+        // Bell-glow pass), falling back to the plain quadruped shape.
+        MobKind::Modded(_) => &OINKER,
+    }
+}
+
+/// The body boxes for a modded mob: a base template re-textured with the mod's
+/// own tile. Built fresh each frame (modded mobs are rare), so it needs no
+/// `'static` storage and can carry a per-mob texture.
+pub fn modded_parts(def: &crate::block::ModMob) -> Vec<Part> {
+    use crate::block::MobTemplate::*;
+    let t = def.tile;
+    let faces = [t; 6];
+    match def.template {
+        Quadruped => OINKER.iter().map(|p| Part { tiles: faces, ..*p }).collect(),
+        Biped => GROANER.iter().map(|p| Part { tiles: faces, ..*p }).collect(),
+        Blob => BLOOP.iter().map(|p| Part { tiles: faces, ..*p }).collect(),
+        Bird => CLUCKSTER.iter().map(|p| Part { tiles: faces, ..*p }).collect(),
     }
 }
 
@@ -2162,4 +2268,55 @@ impl Arrow {
 pub struct PrimedTnt {
     pub pos: Vec3,
     pub fuse: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::noise::Rng;
+
+    #[test]
+    fn base_mob_indices_round_trip() {
+        // Hold the registry lock so no concurrent `with_mods` test has mod mobs
+        // installed in the global registry while we assert its base shape.
+        let _guard = crate::mods::registry_test_lock();
+        // Every base kind keeps its stable index, and resolves back.
+        for (i, k) in MobKind::ALL.iter().enumerate() {
+            assert_eq!(k.index() as usize, i);
+            assert_eq!(MobKind::from_index(i as u8), Some(*k));
+        }
+        // Just past the base set is unknown when no mods are loaded.
+        assert_eq!(MobKind::from_index(BASE_MOBS), None);
+        assert_eq!(MobKind::from_index(u8::MAX), None);
+    }
+
+    #[test]
+    fn modded_mob_dispatch_is_total_and_wanders_without_panicking() {
+        let src = "[mob critter]\nname = Little Critter\ntexture = stone\ntemplate = quadruped\nsize = 0.5\nhealth = 7\ndrops = stick 3\n";
+        crate::mods::with_mods(&[("zoo", src)], |reg| {
+            let k = MobKind::from_name("zoo:critter").expect("resolves");
+            // The def's data flows through the dispatch.
+            assert_eq!(k.name(), "Little Critter");
+            assert_eq!(k.max_health(), 7.0);
+            // A passive wanderer: not hostile, not flying, doesn't burn in the sun.
+            assert!(!k.hostile() && !k.flies() && !k.fireproof());
+            // The render template exists and has boxes.
+            assert!(!modded_parts(&reg.mobs[0]).is_empty());
+
+            let mut rng = Rng::new(1);
+            let world = World::new(1);
+            let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            assert_eq!(m.health, 7.0);
+            assert_eq!((m.body.half, m.body.height), k.dims());
+            // Many ticks of AI must never panic for a modded mob.
+            for _ in 0..200 {
+                m.update(0.05, &world, Vec3::new(2.0, 80.0, 0.0), true, 1.0, &mut rng);
+            }
+            // Hitting it makes it flee, and it drops its defined item.
+            m.damage(2.0, Vec3::ZERO);
+            assert!(m.flee > 0.0);
+            let drop = m.loot(&mut Rng::new(2));
+            assert!(matches!(drop, Some((crate::block::STICK, n)) if (1..=3).contains(&n)));
+        });
+    }
 }

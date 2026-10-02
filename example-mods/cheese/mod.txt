@@ -166,7 +166,21 @@ on_use = launch 18; message Wheeeeee!
 [item summoning_brie]
 name = Summoning Brie
 texture = slice
-on_use = spawn oinker; message An Oinker smelled the brie.
+// Spawns the cheese mouse defined below (any mob name works here).
+on_use = spawn cheese_mouse; message A mouse smelled the brie.
+
+// ---------------------------------------------------------------- mobs
+// A new mob type: a passive wanderer wearing our slice texture. It never
+// spawns on its own; the Summoning Brie above spawns one, and a script could
+// too with spawn_mob("cheese_mouse", x, y, z). See MODDING.md for every key.
+[mob cheese_mouse]
+name = Cheese Mouse
+texture = slice
+template = quadruped
+size = 0.4
+health = 6
+speed = 1.4
+drops = slice 1
 
 // ---------------------------------------------------------------- recipes
 // Inputs: up to 6 "item count" pairs. Base-game items use their plain names.

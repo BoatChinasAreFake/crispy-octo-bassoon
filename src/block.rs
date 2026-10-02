@@ -947,6 +947,63 @@ pub struct ModArmor {
     pub looks_like: u8,
 }
 
+/// A new mob type defined by a mod (a `[mob <name>]` section in `mod.txt`).
+///
+/// This is the first, data-driven version: a modded mob is a passive wanderer
+/// that borrows one of a handful of base-game body shapes (`template`) and
+/// paints it with the mod's own texture tile. It has its own size, health,
+/// walking speed and (optionally) a single drop. Behaviours that need code
+/// (bosses, taming, raids, trading, flying) are deliberately out of scope so
+/// no modded mob can wedge the AI or the renderer. See MODDING.md.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModMob {
+    /// Stable identifier, e.g. "cheese:mouse" (used by saves and `from_name`).
+    pub key: String,
+    /// Display name shown in-game.
+    pub name: String,
+    /// Texture tile painted over every face of the body.
+    pub tile: u16,
+    /// Half-width and height of the body box, in blocks.
+    pub half_width: f32,
+    pub height: f32,
+    pub max_health: f32,
+    /// Walking speed multiplier over the base wander speed.
+    pub speed: f32,
+    /// Counts toward the night-time monster cap and chases the player.
+    /// (v1 modded mobs never actually attack; `hostile` only affects spawning.)
+    pub hostile: bool,
+    /// One item it may drop on death: (item id, up to this many).
+    pub drop: Option<(Id, u8)>,
+    /// Which base-game body shape to render with.
+    pub template: MobTemplate,
+}
+
+/// The curated base-game body shapes a modded mob may borrow for v1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MobTemplate {
+    /// Four-legged, pig-ish (the default).
+    Quadruped,
+    /// Two-legged, humanoid.
+    Biped,
+    /// A squishy cube, slime-ish.
+    Blob,
+    /// A little two-legged bird.
+    Bird,
+}
+
+impl MobTemplate {
+    /// Accepts the parody shape name or a plain description.
+    pub fn from_name(s: &str) -> Option<MobTemplate> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "quadruped" | "oinker" | "pig" | "cow" | "mooer" | "animal" => Some(MobTemplate::Quadruped),
+            "biped" | "humanoid" | "groaner" | "zombie" | "villager" => Some(MobTemplate::Biped),
+            "blob" | "bloop" | "slime" | "cube" => Some(MobTemplate::Blob),
+            "bird" | "cluckster" | "chicken" => Some(MobTemplate::Bird),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Recipe {
     pub inputs: Vec<(Id, u8)>,
@@ -1000,6 +1057,8 @@ pub struct Registry {
     /// Mod furnace recipes (input, output) and fuels (item, seconds).
     pub smelting: Vec<(Id, Id)>,
     pub fuels: Vec<(Id, f32)>,
+    /// Mod-defined mob types, in deterministic id order (see entity.rs).
+    pub mobs: Vec<ModMob>,
 }
 
 static REGISTRY: AtomicPtr<Registry> = AtomicPtr::new(std::ptr::null_mut());
@@ -2002,7 +2061,7 @@ impl Registry {
                 recipes.push(r(&[(material, n)], (ARMOR_FIRST + (t * 4 + slot) as Id, 1)));
             }
         }
-        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new() }
+        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new() }
     }
 
     /// Look up a block or item id by key ("stone", "cheese:wheel", ...).

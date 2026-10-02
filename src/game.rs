@@ -2525,6 +2525,7 @@ impl Game {
                     MobKind::Rampager => noises.push((Sfx::Roar, m.body.pos)),
                     MobKind::Sizzler | MobKind::Fee => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
+                    MobKind::Modded(_) => {}
                 }
             }
         }
@@ -2604,7 +2605,7 @@ impl Game {
                     let at = m.body.pos + Vec3::Y * 0.5;
                     self.smoke(at, 10, 0.3);
                     let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
-                    let args = vec![m.kind.name().to_ascii_lowercase().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
+                    let args = vec![m.kind.script_name().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
                     self.fire("on_mob_death", args);
                     if m.kind == MobKind::Wyrm {
                         self.wyrm_defeated(at);
@@ -2630,6 +2631,7 @@ impl Game {
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
+                            MobKind::Modded(_) => {}
                         }
                     }
                     // Big Bloops split into smaller ones.

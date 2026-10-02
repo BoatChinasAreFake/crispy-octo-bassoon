@@ -1564,6 +1564,23 @@ mod tests {
     }
 
     #[test]
+    fn a_modded_mob_kind_survives_the_wire() {
+        use crate::entity::{MobKind, BASE_MOBS};
+        // The host and clients share mods, so the registry index is a stable
+        // wire key: a modded kind encodes and decodes to the same mob.
+        let src = "[mob mouse]\ntexture = stone\nhealth = 6\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let k = MobKind::from_name("zoo:mouse").expect("resolves");
+            assert_eq!(k.index(), BASE_MOBS);
+            let snap = MobSnap { id: 7, kind: k.index(), pos: Vec3::X, yaw: 0.0, fuse: 0.0, hurt: 0.0, burning: false, size: 1, flags: 0 };
+            let msg = Msg::Mobs { mobs: vec![snap.clone()], tnts: vec![], arrows: vec![], falling: vec![], fireballs: vec![] };
+            let Msg::Mobs { mobs, .. } = Msg::decode(&msg.encode()).unwrap() else { panic!("not mobs") };
+            assert_eq!(mobs, vec![snap]);
+            assert_eq!(MobKind::from_index(mobs[0].kind), Some(k));
+        });
+    }
+
+    #[test]
     fn sha256_matches_known_vectors() {
         let hex = |b: [u8; 32]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
         assert_eq!(hex(sha256(b"")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
