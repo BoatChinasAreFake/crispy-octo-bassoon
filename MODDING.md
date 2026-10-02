@@ -200,7 +200,8 @@ Defines a new mob *type*. It borrows one of a few base-game body shapes and wear
 | --- | --- | --- |
 | `name` | Display name | the section name |
 | `texture` | Painted over the whole body | white |
-| `template` / `model` | Body shape: `quadruped`, `biped`, `blob` or `bird` | `quadruped` |
+| `template` / `model` | Body shape: `quadruped`, `biped`, `blob` or `bird` (ignored when it has `part` lines) | `quadruped` |
+| `part` | One box of a custom body (repeat for each, up to 16); see **Custom shapes** below | the template |
 | `size` | Body width and height, in blocks | `0.9` |
 | `width`, `height` | Override `size` for one dimension (width 0.2–8, height 0.2–8) | from `size` |
 | `health` | Hit points (1–1000) | `10` |
@@ -285,6 +286,43 @@ attack_reach = 1.5
 aggro_range = 24
 ```
 
+**Custom shapes.** Instead of a template, build the body from your own boxes, one `part` line each (up to 16):
+
+```text
+part = <name> <x> <y> <z> <width> <height> <depth> [options]
+```
+
+Positions and sizes are in blocks, measured from the mob's feet: x is to its right, y is up, and **-z is the way it faces**. Each number can be -4 to 4 (sizes 0.01 to 4). The options, all `key=value` with no spaces:
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `pivot=x,y,z` | The point it turns about (a leg's hip, a wing's shoulder) | the middle of its top face |
+| `anim=` | `still`, `walk` (swings forward and back as it walks), `sway` (side to side as it walks: tails, spider legs), `wing` (beats up and down as it moves), `flap` (a bird's wing: beats while flying or falling), `tilt` (a fixed lean), `bob` (bobs up and down as it walks) or `spin` (turns round as it moves) | `still` |
+| `amount=` | How much it moves (-3 to 3). A minus sign swings the other way, so give opposite legs opposite signs. For `flap`, use `-1` for a left wing and `1` for a right one. For `tilt`, it's the lean in degrees (-180 to 180) | `1` (`0` for tilt) |
+| `texture=` | This part's texture (otherwise the mob's `texture`) | the mob's texture |
+| `face=` | A texture just for its front (-z) face: eyes, a mouth | |
+| `top=` | A texture just for its top | |
+
+The hitbox still comes from `size`, `width` and `height`, so keep the parts roughly inside it. Mistakes are reported on the Mods screen with their line number, and a broken option is skipped rather than spoiling the whole mob.
+
+```text
+[mob cheese_crab]
+name = Cheddar Crab
+texture = butter
+size = 0.6
+width = 1.0
+part = shell -0.4 0.25 -0.3 0.8 0.3 0.6 anim=bob amount=0.5 top=wheel_top
+part = eyes -0.25 0.55 -0.3 0.5 0.12 0.1 face=wheel_top
+part = claw_l -0.75 0.3 -0.55 0.3 0.2 0.35 pivot=-0.45,0.4,-0.3 anim=sway amount=1.2
+part = claw_r 0.45 0.3 -0.55 0.3 0.2 0.35 pivot=0.45,0.4,-0.3 anim=sway amount=-1.2
+part = leg_l1 -0.6 0 -0.15 0.25 0.3 0.08 pivot=-0.4,0.3,-0.1 anim=walk amount=1
+part = leg_l2 -0.6 0 0.1 0.25 0.3 0.08 pivot=-0.4,0.3,0.14 anim=walk amount=-1
+part = leg_r1 0.35 0 -0.15 0.25 0.3 0.08 pivot=0.4,0.3,-0.1 anim=walk amount=-1
+part = leg_r2 0.35 0 0.1 0.25 0.3 0.08 pivot=0.4,0.3,0.14 anim=walk amount=1
+```
+
+Run `minceraft --screenshot zoo.png --mode modzoo` to see every loaded mod's mobs lined up.
+
 **Homing and blasts.** `projectile_homing` and `projectile_blast` work with all the other projectile keys (count, spread, effects, looks). A homing shot steers toward the nearest player ahead of it, at most `projectile_homing` degrees a second, so you can still dodge a slow-turning one. A blast shot goes off when it hits a player, a block, or runs out of time, and hurts every player within the radius (the full `ranged_damage` at the centre, half at the edge) and gives them its effect. Blasts never break blocks or hurt mobs, so a mod can't use them to grief a world.
 
 **Flying.** A `flying` mob cruises `fly_height` above whatever is under it, rising over hills and trees. A hostile flier with `attack_damage` swoops down to the player's height to bite; one with only ranged attacks keeps its height and shoots from above. Set `perches = true` and a wild one lands for a rest every so often (a tamed one lands when told to sit).
@@ -333,7 +371,7 @@ fn on_chat(player, text) {
 
 If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
 
-Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, hostile ranged combat with bounded appearance, timed effects, deterministic multishot, homing and blast projectiles, flying, and taming and breeding. Arbitrary projectile geometry/rendering, bosses, trading, bespoke per-mob geometry, and custom UI screens still require a Rust change.
+Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, hostile ranged combat with bounded appearance, timed effects, deterministic multishot, homing and blast projectiles, flying, taming and breeding, and custom box-built bodies with simple animations. Arbitrary projectile geometry/rendering, bosses, trading, and custom UI screens still require a Rust change.
 
 ### `[splashes]`
 

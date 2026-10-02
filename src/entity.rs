@@ -657,7 +657,9 @@ impl Mob {
     /// Birds beat their wings while `falling`, and fold them once down.
     pub fn flutter(&mut self, falling: bool, dt: f32) {
         let bird = matches!(self.kind, MobKind::Cluckster | MobKind::Squawker);
-        step_anim(&mut self.flap, if bird && falling { 5.0 } else { 0.0 }, dt, 5.0);
+        // A modded flier's wings beat all the time it's in the air.
+        let flier = matches!(self.kind, MobKind::Modded(_)) && self.kind.flies() && !self.sitting && !self.body.on_ground;
+        step_anim(&mut self.flap, if (bird && falling) || flier { 5.0 } else { 0.0 }, dt, 5.0);
     }
 
     pub fn new(kind: MobKind, pos: Vec3, rng: &mut Rng) -> Self {
@@ -1761,6 +1763,10 @@ pub enum Limb {
     /// A bird's wing: out and back while it falls, a little sway as it walks.
     /// The sign says which side (-1 left, 1 right).
     Flap(f32),
+    /// Bobs up and down with the walk (custom modded parts).
+    Bob(f32),
+    /// Turns round about the vertical axis as it moves (custom modded parts).
+    Spin(f32),
 }
 
 #[derive(Clone, Copy)]
@@ -2200,6 +2206,29 @@ pub fn ground_below(world: &World, at: Vec3, max: i32) -> f32 {
 /// `'static` storage and can carry a per-mob texture.
 pub fn modded_parts(def: &crate::block::ModMob) -> Vec<Part> {
     use crate::block::MobTemplate::*;
+    if !def.parts.is_empty() {
+        use crate::block::PartAnim;
+        return def
+            .parts
+            .iter()
+            .map(|p| Part {
+                min: p.min,
+                size: p.size,
+                pivot: p.pivot,
+                tiles: p.tiles,
+                limb: match p.anim {
+                    PartAnim::Still => Limb::Fixed,
+                    PartAnim::Walk => Limb::Swing(p.amount),
+                    PartAnim::Sway => Limb::SwingY(p.amount),
+                    PartAnim::Wing => Limb::Wing(p.amount),
+                    PartAnim::Flap => Limb::Flap(p.amount),
+                    PartAnim::Tilt => Limb::Tilt(p.amount.to_radians()),
+                    PartAnim::Bob => Limb::Bob(p.amount),
+                    PartAnim::Spin => Limb::Spin(p.amount),
+                },
+            })
+            .collect();
+    }
     let t = def.tile;
     let faces = [t; 6];
     match def.template {
@@ -2242,6 +2271,8 @@ fn draw_posed(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, flap: f3
             Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
             Limb::Tilt(t) => Mat4::from_rotation_x(t),
             Limb::Flap(s) => Mat4::from_rotation_z(flap.sin().abs() * 1.3 * s) * Mat4::from_rotation_x(swing * 0.3 * s),
+            Limb::Bob(s) => Mat4::from_translation(Vec3::Y * (anim * 2.0).sin() * 0.06 * s),
+            Limb::Spin(s) => Mat4::from_rotation_y(anim * s),
         };
         let pivot = Vec3::from_array(p.pivot);
         let m = *root
