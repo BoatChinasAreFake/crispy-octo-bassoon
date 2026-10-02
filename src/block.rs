@@ -956,10 +956,14 @@ pub struct ModArmor {
 /// hostile mob (host-authoritative and deterministic); a `hostile` mob with
 /// `attack_damage == 0` only counts toward the night-time monster cap and
 /// otherwise behaves like a passive wanderer (the backward-compatible default,
-/// so existing mod.txt files are unchanged). Behaviours that need code (bosses,
-/// taming, raids, trading, flying, ranged/projectile attacks, bespoke
-/// geometry/UI) are deliberately out of scope so no modded mob can wedge the
-/// AI or the renderer. See MODDING.md.
+/// so existing mod.txt files are unchanged). A `hostile` mob with
+/// `ranged_damage > 0` additionally fires base-game arrows at players, exactly
+/// like a base ranged attacker (host-authoritative and deterministic);
+/// `ranged_damage == 0` (the default) keeps the ranged attack off, so existing
+/// mod.txt files are unchanged. Behaviours that need code (bosses, taming,
+/// raids, trading, flying, homing/AoE/status projectiles, bespoke geometry/UI)
+/// are deliberately out of scope so no modded mob can wedge the AI or the
+/// renderer. See MODDING.md.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModMob {
     /// Stable identifier, e.g. "cheese:mouse" (used by saves and `from_name`).
@@ -990,6 +994,22 @@ pub struct ModMob {
     /// Seconds between hits. The non-zero minimum prevents a zero-cooldown DPS
     /// exploit. Clamped to `0.25..=10.0` at parse time (default `1.0`).
     pub attack_cooldown: f32,
+    /// Ranged (arrow) damage dealt to a player per shot. `0.0` (the default)
+    /// means the mob never fires a projectile, even when `hostile` is true
+    /// (backward compatible). Clamped to `0.0..=30.0` at parse time.
+    pub ranged_damage: f32,
+    /// Maximum horizontal distance at which the mob opens fire, mirroring
+    /// `aggro_range`'s bounds. Clamped to `1.0..=48.0` at parse time
+    /// (default `16.0`).
+    pub ranged_range: f32,
+    /// Launch speed of the fired arrow, in blocks per second (base
+    /// `Arrow::SPEED` is `24.0`). Clamped to `8.0..=48.0` at parse time
+    /// (default `24.0`).
+    pub projectile_speed: f32,
+    /// Seconds between shots. The `0.5` floor prevents a zero-cooldown
+    /// projectile-spam exploit. Clamped to `0.5..=10.0` at parse time
+    /// (default `2.0`).
+    pub ranged_cooldown: f32,
     /// One item it may drop on death: (item id, up to this many).
     pub drop: Option<(Id, u8)>,
     /// Which base-game body shape to render with.
