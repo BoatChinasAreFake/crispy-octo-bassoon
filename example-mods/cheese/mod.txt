@@ -175,7 +175,7 @@ on_use = spawn cheese_mouse; message A mouse smelled the brie.
 // too with spawn_mob("cheese_mouse", x, y, z). See MODDING.md for every key.
 [mob cheese_mouse]
 name = Cheese Mouse
-texture = slice
+texture = butter
 template = quadruped
 size = 0.4
 health = 6
@@ -208,7 +208,7 @@ drops = slice 2
 // attack_reach); melee and the whole ranged volley share one cooldown.
 [mob cheese_slinger]
 name = Cheese Slinger
-texture = slice
+texture = butter
 template = biped
 size = 1.0
 health = 20
@@ -238,7 +238,7 @@ drops = slice 2
 // and two tamed bats fed slices have a baby bat, born tame.
 [mob cheese_bat]
 name = Cheese Bat
-texture = slice
+texture = butter
 template = bird
 size = 0.5
 health = 8
@@ -268,6 +268,29 @@ projectile_blast = 2.5
 ranged_cooldown = 3
 aggro_range = 24
 drops = slice 1
+
+// A body built from its own boxes instead of a template. Each part is
+// name x y z width height depth (blocks, from its feet; -z is the front),
+// then options: pivot=x,y,z (where it turns; default its top middle),
+// anim=still|walk|sway|wing|flap|tilt|bob|spin, amount=N (how much; minus
+// swings the other way; degrees for tilt), texture=, face= (front), top=.
+// Up to 16 parts. Its hitbox still comes from size/width/height.
+[mob cheese_crab]
+name = Cheddar Crab
+texture = butter
+size = 0.6
+width = 1.0
+health = 10
+speed = 0.8
+breed_item = slice
+part = shell -0.4 0.25 -0.3 0.8 0.3 0.6 anim=bob amount=0.5 top=wheel_top
+part = eyes -0.25 0.55 -0.3 0.5 0.12 0.1 face=wheel_top
+part = claw_l -0.75 0.3 -0.55 0.3 0.2 0.35 pivot=-0.45,0.4,-0.3 anim=sway amount=1.2
+part = claw_r 0.45 0.3 -0.55 0.3 0.2 0.35 pivot=0.45,0.4,-0.3 anim=sway amount=-1.2
+part = leg_l1 -0.6 0 -0.15 0.25 0.3 0.08 pivot=-0.4,0.3,-0.1 anim=walk amount=1
+part = leg_l2 -0.6 0 0.1 0.25 0.3 0.08 pivot=-0.4,0.3,0.14 anim=walk amount=-1
+part = leg_r1 0.35 0 -0.15 0.25 0.3 0.08 pivot=0.4,0.3,-0.1 anim=walk amount=-1
+part = leg_r2 0.35 0 0.1 0.25 0.3 0.08 pivot=0.4,0.3,0.14 anim=walk amount=1
 
 // ---------------------------------------------------------------- recipes
 // Inputs: up to 6 "item count" pairs. Base-game items use their plain names.

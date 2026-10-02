@@ -473,7 +473,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None, parts: Vec::new() });
                     }
                 }
                 _ => {}
@@ -1006,6 +1006,71 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.tame_item = tame_item;
     mob.tame_chance = tame_chance;
     mob.breed_item = breed_item;
+    let parts = parse_parts(ctx, m, s, tile, errs);
+    ctx.reg.mobs[i].parts = parts;
+}
+
+/// The `part = ...` lines of a `[mob]`: a custom body of up to
+/// `MAX_MOD_PARTS` boxes. Each is
+/// `part = <name> <x> <y> <z> <width> <height> <depth> [pivot=x,y,z] [anim=walk] [amount=1] [texture=t] [face=t]`.
+fn parse_parts(ctx: &mut Ctx, m: &ModSource, s: &Section, tile: u16, errs: &mut Vec<String>) -> Vec<crate::block::ModPart> {
+    use crate::block::{ModPart, PartAnim, MAX_MOD_PARTS};
+    let mut out = Vec::new();
+    for (_, v, line) in s.kv.iter().filter(|(k, _, _)| k == "part") {
+        let line = *line;
+        if out.len() >= MAX_MOD_PARTS {
+            errs.push(format!("line {line}: a mob can have at most {MAX_MOD_PARTS} parts; the rest are ignored"));
+            break;
+        }
+        let mut words = v.split_whitespace();
+        let name = words.next().unwrap_or("?").to_string();
+        let nums: Vec<f32> = words.by_ref().take(6).map_while(|w| w.parse::<f32>().ok().filter(|f| f.is_finite())).collect();
+        if nums.len() < 6 {
+            errs.push(format!("line {line}: part {name} needs x y z width height depth (numbers)"));
+            continue;
+        }
+        let min = [nums[0].clamp(-4.0, 4.0), nums[1].clamp(-4.0, 4.0), nums[2].clamp(-4.0, 4.0)];
+        let size = [nums[3].clamp(0.01, 4.0), nums[4].clamp(0.01, 4.0), nums[5].clamp(0.01, 4.0)];
+        // Turns about its top middle unless told otherwise (right for legs and arms).
+        let mut pivot = [min[0] + size[0] * 0.5, min[1] + size[1], min[2] + size[2] * 0.5];
+        let mut anim = PartAnim::Still;
+        let mut amount: Option<f32> = None;
+        let mut tiles = [tile; 6];
+        for opt in words {
+            let Some((key, val)) = opt.split_once('=') else {
+                errs.push(format!("line {line}: part {name}: don't understand \"{opt}\" (expected key=value)"));
+                continue;
+            };
+            match key.to_ascii_lowercase().as_str() {
+                "pivot" => {
+                    let p: Vec<f32> = val.split(',').filter_map(|x| x.trim().parse::<f32>().ok().filter(|f| f.is_finite())).collect();
+                    if p.len() == 3 {
+                        pivot = [p[0].clamp(-4.0, 4.0), p[1].clamp(-4.0, 4.0), p[2].clamp(-4.0, 4.0)];
+                    } else {
+                        errs.push(format!("line {line}: part {name}: pivot should be x,y,z"));
+                    }
+                }
+                "anim" => match PartAnim::from_name(val) {
+                    Some(a) => anim = a,
+                    None => errs.push(format!("line {line}: part {name}: anim should be still, walk, sway, wing, flap, tilt, bob or spin, not \"{val}\"")),
+                },
+                "amount" => match val.parse::<f32>().ok().filter(|f| f.is_finite()) {
+                    Some(a) => amount = Some(a),
+                    None => errs.push(format!("line {line}: part {name}: amount should be a number")),
+                },
+                "texture" => tiles = [ctx.texture(m, val, errs, line); 6],
+                "face" => tiles[5] = ctx.texture(m, val, errs, line),
+                "top" => tiles[2] = ctx.texture(m, val, errs, line),
+                other => errs.push(format!("line {line}: part {name}: unknown option \"{other}\"")),
+            }
+        }
+        let amount = match anim {
+            PartAnim::Tilt => amount.unwrap_or(0.0).clamp(-180.0, 180.0),
+            _ => amount.unwrap_or(1.0).clamp(-3.0, 3.0),
+        };
+        out.push(ModPart { min, size, pivot, anim, amount, tiles });
+    }
+    out
 }
 
 fn parse_stack(ctx: &Ctx, modid: &str, v: &str, errs: &mut Vec<String>, line: usize) -> Option<(Id, u8)> {
@@ -1536,6 +1601,60 @@ breed_item = none
     }
 
     #[test]
+    fn custom_mob_parts_parse_with_defaults_options_and_limits() {
+        let mut many = String::from("[mob hydra]\n");
+        for i in 0..20 {
+            many.push_str(&format!("part = p{i} 0 {i} 0 0.1 0.1 0.1\n"));
+        }
+        let text = format!(
+            r#"
+[mob crab]
+texture = stone
+part = body -0.4 0.2 -0.3 0.8 0.3 0.6
+part = claw 0.4 0.3 -0.5 0.3 0.2 0.3 pivot=0.4,0.4,-0.3 anim=walk amount=-1.5 texture=dirt face=sand
+part = antenna 0 0.5 0 0.05 9 0.05 anim=tilt amount=400
+part = shell -0.3 0.5 -0.2 0.6 0.2 0.4 anim=bob top=grass
+
+[mob broken]
+part = leg 1 2 3
+part = arm 0 0 0 1 1 1 anim=dance wobble pivot=1,2 colour=red
+
+{many}"#
+        );
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "sea".into(), files }], &[]);
+        use crate::block::{ModPart, PartAnim};
+        let crab = &reg.mobs[0];
+        assert_eq!(crab.parts.len(), 4);
+        let stone = crate::texture::T_STONE;
+        assert_eq!(crab.parts[0], ModPart { min: [-0.4, 0.2, -0.3], size: [0.8, 0.3, 0.6], pivot: [0.0, 0.5, 0.0], anim: PartAnim::Still, amount: 1.0, tiles: [stone; 6] });
+        let claw = crab.parts[1];
+        assert_eq!((claw.pivot, claw.anim, claw.amount), ([0.4, 0.4, -0.3], PartAnim::Walk, -1.5));
+        assert_ne!(claw.tiles[0], stone, "texture= repaints the part");
+        assert_ne!(claw.tiles[5], claw.tiles[0], "face= paints the front");
+        let antenna = crab.parts[2];
+        assert_eq!((antenna.size[1], antenna.anim, antenna.amount), (4.0, PartAnim::Tilt, 180.0), "sizes and tilts are clamped");
+        assert_eq!(crab.parts[3].anim, PartAnim::Bob);
+        assert_ne!(crab.parts[3].tiles[2], stone, "top= paints the top");
+        // Bad lines are reported, not fatal; a mob with no good parts uses its template.
+        let broken = &reg.mobs[1];
+        assert_eq!(broken.parts.len(), 1, "the arm is kept with its bad options ignored");
+        assert_eq!(broken.parts[0].anim, PartAnim::Still);
+        let errors = &reg.mods[0].errors;
+        for needle in ["needs x y z width height depth", "anim should be", "expected key=value", "pivot should be x,y,z", "unknown option \"colour\"", "at most 16 parts"] {
+            assert!(errors.iter().any(|e| e.contains(needle)), "missing {needle:?} in {errors:#?}");
+        }
+        assert_eq!(reg.mobs[2].parts.len(), crate::block::MAX_MOD_PARTS);
+        // Drawing uses the custom boxes (with their animations) instead of the template.
+        let built = crate::entity::modded_parts(crab);
+        assert_eq!(built.len(), 4);
+        assert!(matches!(built[1].limb, crate::entity::Limb::Swing(a) if a == -1.5));
+        assert!(matches!(built[3].limb, crate::entity::Limb::Bob(_)));
+        assert_eq!(crate::entity::modded_parts(broken).len(), 1);
+    }
+
+    #[test]
     fn projectile_effect_parser_accepts_only_safe_bounded_effects() {
         let text = r#"
 [mob speed]
@@ -1686,6 +1805,9 @@ projectile_effect_duration = NaN
         assert!(bat.flying && bat.perches && bat.tame_item == Some(slice) && bat.breed_item == Some(slice));
         let seeker = reg.mobs.iter().find(|mob| mob.key == "cheese:cheese_seeker").expect("shipped seeker");
         assert_eq!((seeker.projectile_homing, seeker.projectile_blast), (60.0, 2.5));
+        let crab = reg.mobs.iter().find(|mob| mob.key == "cheese:cheese_crab").expect("shipped crab");
+        assert_eq!(crab.parts.len(), 8);
+        assert_eq!(crate::entity::modded_parts(crab).len(), 8);
     }
 
     #[test]

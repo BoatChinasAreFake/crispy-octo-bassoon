@@ -1116,6 +1116,63 @@ pub struct ModMob {
     pub tame_chance: f32,
     /// Feed it this to breed it (and it follows anyone holding it). None: doesn't breed.
     pub breed_item: Option<Id>,
+    /// A body built from the mod's own boxes (`part = ...` lines), used
+    /// instead of `template` when there are any. At most `MAX_MOD_PARTS`.
+    pub parts: Vec<ModPart>,
+}
+
+/// Most boxes a modded mob's body may have (keeps drawing cheap).
+pub const MAX_MOD_PARTS: usize = 16;
+
+/// How one box of a custom modded mob moves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PartAnim {
+    /// Doesn't move.
+    Still,
+    /// Swings forward and back as it walks (legs, arms). Negative amounts swing the other way.
+    Walk,
+    /// Sweeps side to side as it walks (a tail, spider legs).
+    Sway,
+    /// Beats up and down as it moves (big wings).
+    Wing,
+    /// A bird's wing: flaps while flying or falling. Use -1 / 1 for left / right.
+    Flap,
+    /// Held at a fixed lean of `amount` degrees.
+    Tilt,
+    /// Bobs up and down as it walks (a head, a jelly).
+    Bob,
+    /// Spins round as it moves (a propeller, a wheel on its side).
+    Spin,
+}
+
+impl PartAnim {
+    pub fn from_name(s: &str) -> Option<PartAnim> {
+        Some(match s.trim().to_ascii_lowercase().as_str() {
+            "still" | "none" | "fixed" => PartAnim::Still,
+            "walk" | "swing" | "leg" => PartAnim::Walk,
+            "sway" | "tail" => PartAnim::Sway,
+            "wing" => PartAnim::Wing,
+            "flap" => PartAnim::Flap,
+            "tilt" => PartAnim::Tilt,
+            "bob" => PartAnim::Bob,
+            "spin" => PartAnim::Spin,
+            _ => return None,
+        })
+    }
+}
+
+/// One box of a custom modded mob, in blocks relative to its feet (x right,
+/// y up, -z forward), turning about `pivot`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModPart {
+    pub min: [f32; 3],
+    pub size: [f32; 3],
+    pub pivot: [f32; 3],
+    pub anim: PartAnim,
+    /// How much it moves (-3..=3; degrees for `Tilt`, -180..=180).
+    pub amount: f32,
+    /// +x, -x, +y, -y, +z, -z
+    pub tiles: [u16; 6],
 }
 
 /// The curated base-game body shapes a modded mob may borrow for v1.

@@ -4269,7 +4269,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "zoo" | "animals" | "newmobs" | "music" => {
+            "zoo" | "animals" | "newmobs" | "music" | "modzoo" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
@@ -4525,7 +4525,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "music" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -5187,6 +5187,24 @@ async fn game_main() {
                     if kind == K::Invoicer {
                         m.fuse = 1.0;
                     }
+                    app.game.mobs.push(m);
+                }
+            }
+            if s.mode == "modzoo" && frames == 150 {
+                // Every mob the loaded mods define, in a row (fliers up in the air).
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(9);
+                let n = block::reg().mobs.len();
+                for i in 0..n {
+                    let kind = entity::MobKind::Modded(i as u16);
+                    let r = (i as f32 - (n as f32 - 1.0) * 0.5) * 1.8;
+                    let up = if kind.flies() { 2.5 } else { 0.0 };
+                    let mut m = entity::Mob::new(kind, p + fwd * 4.5 + right * r + Vec3::Y * (2.0 + up), &mut rng);
+                    m.yaw = s.yaw + std::f32::consts::PI - 0.5;
+                    m.id = 3000 + i as u32;
+                    m.anim = 0.8;
                     app.game.mobs.push(m);
                 }
             }
