@@ -1448,7 +1448,7 @@ impl Game {
                     // on a Rattler.
                     let cause = if a.modded { "was shot down by a monster" } else { "was shot by a Rattler (with a Pointy Stick)" };
                     let me = self.player.body.clone();
-                    if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
+                    if !self.dedicated && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         if a.damage > 0.0 {
                             self.player.hurt = 0.0;
                             let d = self.rules.difficulty.mob_damage(a.damage);
@@ -5157,6 +5157,26 @@ looks_like = diamond
         assert!(default.effects.is_empty(), "ordinary arrows carry no effect");
         let mirrored = Arrow::from_wire(Vec3::ZERO, Vec3::X, ProjectileAppearance::default());
         assert_eq!(mirrored.effect, None, "client snapshots cannot carry effects");
+    }
+
+    #[test]
+    fn projectile_effect_ignores_local_spectator() {
+        let mut spectator = arena(81);
+        spectator.spectator = true;
+        let health = spectator.player.health;
+        let pos = spectator.player.body.pos + Vec3::new(-0.1, 0.9, 0.0);
+
+        let effect = ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 };
+        let mut effect_only = Arrow::new(pos, Vec3::X, None, 0.0);
+        effect_only.effect = Some(effect);
+        spectator.arrows.push(effect_only);
+        spectator.arrows.push(Arrow::new(pos, Vec3::X, None, 6.0));
+
+        spectator.update_arrows(0.01);
+
+        assert_eq!(spectator.player.health, health, "spectators cannot be damaged by projectiles");
+        assert!(!spectator.has_effect(crate::potions::Potion::Speed), "spectators cannot receive projectile effects");
+        assert_eq!(spectator.arrows.len(), 2, "overlapping projectiles pass through spectators without being consumed");
     }
 
     #[test]
