@@ -364,85 +364,6 @@ pub fn in_peck_range(cluckster: Vec3, crop: IVec3) -> bool {
     Vec3::new(c.x - cluckster.x, 0.0, c.z - cluckster.z).length() < 1.6 && (c.y - cluckster.y).abs() < 1.5
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn crops_map_to_blocks_and_back() {
-        for c in Crop::ALL {
-            for s in 0..4 {
-                assert_eq!(Crop::of_block(c.block(s)), Some((c, s)));
-            }
-        }
-        assert_eq!(Crop::of_block(STONE), None);
-        assert_eq!(Crop::from_item(WHEAT_SEEDS), Some(Crop::Wheat));
-        assert_eq!(block(Crop::Potato.block(3)).key, "potatoes_3");
-    }
-
-    #[test]
-    fn growth_depends_on_everything() {
-        let mut s = Soil { wet: true, ..Soil::default() };
-        s.observe(Some((Crop::Wheat, 0)));
-        let sunny = s.factors(Crop::Wheat, 1.0, false);
-        assert_eq!(s.factors(Crop::Wheat, 0.0, false).total(), 0.0, "no growth in the dark");
-        let dry = Soil { wet: false, ..s.clone() }.factors(Crop::Wheat, 1.0, false);
-        assert!(dry.total() < sunny.total());
-        let starved = Soil { nutrients: [2.0, 60.0, 60.0], ..s.clone() }.factors(Crop::Wheat, 1.0, false);
-        assert!(starved.total() < sunny.total() * 0.2);
-        assert!(s.factors(Crop::Wheat, 1.0, true).total() > sunny.total(), "company helps");
-
-        // One stage takes STAGE_SECONDS / rate seconds and costs nitrogen.
-        let secs = STAGE_SECONDS / sunny.total();
-        let n0 = s.nutrients[0];
-        assert_eq!(s.grow(Crop::Wheat, &sunny, secs * 0.9), None);
-        assert_eq!(s.grow(Crop::Wheat, &sunny, secs * 0.2), Some(1));
-        assert!(s.nutrients[0] < n0);
-    }
-
-    #[test]
-    fn rotation_and_fatigue() {
-        let mut s = Soil { wet: true, ..Soil::default() };
-        let harvest = |s: &mut Soil, c: Crop| {
-            s.observe(Some((c, 0)));
-            s.observe(Some((c, 3)));
-            s.observe(None)
-        };
-        assert_eq!(harvest(&mut s, Crop::Wheat), Some(Crop::Wheat));
-        assert_eq!(harvest(&mut s, Crop::Wheat), Some(Crop::Wheat));
-        s.observe(Some((Crop::Wheat, 0)));
-        assert_eq!(s.factors(Crop::Wheat, 1.0, false).rotation, 0.6, "wheat after wheat after wheat");
-        s.observe(None);
-        s.observe(Some((Crop::Potato, 0)));
-        assert!(s.rotated());
-        assert_eq!(s.factors(Crop::Potato, 1.0, false).rotation, 1.5);
-        // Breaking an unripe crop isn't a harvest.
-        assert_eq!(s.observe(None), None);
-        assert_eq!(s.last, Some(Crop::Wheat));
-    }
-
-    #[test]
-    fn fertilisers_and_saving() {
-        let mut s = Soil { nutrients: [0.0, 0.0, 0.0], ..Soil::default() };
-        assert!(s.fertilize(BONE_DUST).is_some());
-        assert!(s.fertilize(DIRT).is_none());
-        assert_eq!(s.nutrients, [5.0, 25.0, 0.0]);
-        for _ in 0..10 {
-            s.fertilize(WOOD_ASH);
-        }
-        assert_eq!(s.nutrients[2], 100.0, "capped");
-        s.crop = Some(Crop::Carrot);
-        s.stage = 2;
-        s.last = Some(Crop::Wheat);
-        s.streak = 3;
-        let mut farm = std::collections::HashMap::new();
-        farm.insert(ivec3(-5, 44, 1000), s.clone());
-        farm.insert(ivec3(0, 1, 2), Soil::default());
-        assert_eq!(decode(&encode(&farm)), farm);
-        assert!(s.report(1.0, false).contains("carrots stage 2/3"));
-    }
-}
-
 // ------------------------------------------------------------------ in the game
 
 use crate::entity::MobKind;
@@ -652,5 +573,84 @@ impl Game {
             self.world.set_v(under, DIRT);
             self.msg("You trampled the farmland. The crops will remember this.");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crops_map_to_blocks_and_back() {
+        for c in Crop::ALL {
+            for s in 0..4 {
+                assert_eq!(Crop::of_block(c.block(s)), Some((c, s)));
+            }
+        }
+        assert_eq!(Crop::of_block(STONE), None);
+        assert_eq!(Crop::from_item(WHEAT_SEEDS), Some(Crop::Wheat));
+        assert_eq!(block(Crop::Potato.block(3)).key, "potatoes_3");
+    }
+
+    #[test]
+    fn growth_depends_on_everything() {
+        let mut s = Soil { wet: true, ..Soil::default() };
+        s.observe(Some((Crop::Wheat, 0)));
+        let sunny = s.factors(Crop::Wheat, 1.0, false);
+        assert_eq!(s.factors(Crop::Wheat, 0.0, false).total(), 0.0, "no growth in the dark");
+        let dry = Soil { wet: false, ..s.clone() }.factors(Crop::Wheat, 1.0, false);
+        assert!(dry.total() < sunny.total());
+        let starved = Soil { nutrients: [2.0, 60.0, 60.0], ..s.clone() }.factors(Crop::Wheat, 1.0, false);
+        assert!(starved.total() < sunny.total() * 0.2);
+        assert!(s.factors(Crop::Wheat, 1.0, true).total() > sunny.total(), "company helps");
+
+        // One stage takes STAGE_SECONDS / rate seconds and costs nitrogen.
+        let secs = STAGE_SECONDS / sunny.total();
+        let n0 = s.nutrients[0];
+        assert_eq!(s.grow(Crop::Wheat, &sunny, secs * 0.9), None);
+        assert_eq!(s.grow(Crop::Wheat, &sunny, secs * 0.2), Some(1));
+        assert!(s.nutrients[0] < n0);
+    }
+
+    #[test]
+    fn rotation_and_fatigue() {
+        let mut s = Soil { wet: true, ..Soil::default() };
+        let harvest = |s: &mut Soil, c: Crop| {
+            s.observe(Some((c, 0)));
+            s.observe(Some((c, 3)));
+            s.observe(None)
+        };
+        assert_eq!(harvest(&mut s, Crop::Wheat), Some(Crop::Wheat));
+        assert_eq!(harvest(&mut s, Crop::Wheat), Some(Crop::Wheat));
+        s.observe(Some((Crop::Wheat, 0)));
+        assert_eq!(s.factors(Crop::Wheat, 1.0, false).rotation, 0.6, "wheat after wheat after wheat");
+        s.observe(None);
+        s.observe(Some((Crop::Potato, 0)));
+        assert!(s.rotated());
+        assert_eq!(s.factors(Crop::Potato, 1.0, false).rotation, 1.5);
+        // Breaking an unripe crop isn't a harvest.
+        assert_eq!(s.observe(None), None);
+        assert_eq!(s.last, Some(Crop::Wheat));
+    }
+
+    #[test]
+    fn fertilisers_and_saving() {
+        let mut s = Soil { nutrients: [0.0, 0.0, 0.0], ..Soil::default() };
+        assert!(s.fertilize(BONE_DUST).is_some());
+        assert!(s.fertilize(DIRT).is_none());
+        assert_eq!(s.nutrients, [5.0, 25.0, 0.0]);
+        for _ in 0..10 {
+            s.fertilize(WOOD_ASH);
+        }
+        assert_eq!(s.nutrients[2], 100.0, "capped");
+        s.crop = Some(Crop::Carrot);
+        s.stage = 2;
+        s.last = Some(Crop::Wheat);
+        s.streak = 3;
+        let mut farm = std::collections::HashMap::new();
+        farm.insert(ivec3(-5, 44, 1000), s.clone());
+        farm.insert(ivec3(0, 1, 2), Soil::default());
+        assert_eq!(decode(&encode(&farm)), farm);
+        assert!(s.report(1.0, false).contains("carrots stage 2/3"));
     }
 }

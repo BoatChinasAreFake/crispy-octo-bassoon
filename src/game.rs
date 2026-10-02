@@ -584,6 +584,8 @@ impl Game {
         g
     }
 
+    // Takes &mut self because it must return the held cursor item to the inventory before snapshotting.
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_save(&mut self) -> SaveData {
         self.inv.return_cursor();
         SaveData {
@@ -1477,11 +1479,10 @@ impl Game {
         let block_dist = hit.as_ref().map(|h| h.dist).unwrap_or(f32::MAX);
         let mut best: Option<(usize, f32)> = None;
         for (i, m) in self.mobs.iter().enumerate() {
-            if let Some(t) = ray_aabb(eye, dir, m.body.min(), m.body.max()) {
-                if t < reach.min(block_dist) && best.map(|b| t < b.1).unwrap_or(true) {
+            if let Some(t) = ray_aabb(eye, dir, m.body.min(), m.body.max())
+                && t < reach.min(block_dist) && best.map(|b| t < b.1).unwrap_or(true) {
                     best = Some((i, t));
                 }
-            }
         }
         let mut ride: Option<(usize, f32)> = None;
         for (i, v) in self.vehicles.iter().enumerate() {
@@ -1639,7 +1640,7 @@ impl Game {
             self.breaking = None;
         }
 
-        if (c.use_pressed || (c.use_held && self.use_cd <= 0.0)) && self.use_cd <= 0.0 {
+        if (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
             self.use_cd = 0.25;
             self.use_item();
         }
@@ -1647,15 +1648,14 @@ impl Game {
             self.use_cd = 0.0;
         }
 
-        if c.pick {
-            if let Some(Target::Block(h)) = &self.target {
+        if c.pick
+            && let Some(Target::Block(h)) = &self.target {
                 let id = self.world.get_v(h.pos);
                 if self.creative && is_block_item(id) {
                     self.inv.slots[self.inv.selected] = Some((id, 64));
                     self.held_name = 2.0;
                 }
             }
-        }
         if c.drop {
             self.throw_held(c.drop_all);
         }
@@ -3136,14 +3136,13 @@ impl Game {
             g.begin(Pass::Blend, [0.0, 0.0, 0.0, 0.55], true);
             // Edges sit entirely outside the block so the (now depth-tested) outline never z-fights.
             outline(&mut g, min - Vec3::splat(0.014), max + Vec3::splat(0.014), 0.012);
-            if let Some((bp, prog)) = self.breaking {
-                if bp == h.pos {
+            if let Some((bp, prog)) = self.breaking
+                && bp == h.pos {
                     let stage = ((prog * 5.0) as u16).min(4);
                     g.begin(Pass::Blend, [1.0; 4], false);
                     let m = Mat4::from_translation(min - Vec3::splat(0.006)) * Mat4::from_scale(max - min + Vec3::splat(0.012));
                     g.cube(&m, [T_CRACK0 + stage; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
                 }
-            }
         }
 
         if !self.third_person && !self.spectator {
@@ -3371,6 +3370,15 @@ fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
     Some(t0)
 }
 
+/// Gliding players lie flat, head first (turned about the middle of the body).
+fn glide_pose(gliding: bool) -> Mat4 {
+    if !gliding {
+        return Mat4::IDENTITY;
+    }
+    let mid = Vec3::Y * 0.9;
+    Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -3423,7 +3431,7 @@ pub(crate) mod tests {
                         continue;
                     }
                     for (n, _, _) in crate::mesher::FACES {
-                        if !is_opaque(w.get(x + n[0], y + n[1], z + n[2])) && !(w.get(x + n[0], y + n[1], z + n[2]) == id && block(id).see_through) {
+                        if !(is_opaque(w.get(x + n[0], y + n[1], z + n[2])) || w.get(x + n[0], y + n[1], z + n[2]) == id && block(id).see_through) {
                             faces += 1;
                         }
                     }
@@ -5279,14 +5287,5 @@ pub(crate) mod tests {
         assert!(!back.creative);
         std::fs::remove_dir_all(&dir).ok();
     }
-}
-
-/// Gliding players lie flat, head first (turned about the middle of the body).
-fn glide_pose(gliding: bool) -> Mat4 {
-    if !gliding {
-        return Mat4::IDENTITY;
-    }
-    let mid = Vec3::Y * 0.9;
-    Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
 }
 

@@ -100,11 +100,10 @@ fn discover(wait: Duration) -> Result<Vec<String>, String> {
     while start.elapsed() < wait {
         if let Ok((n, _)) = sock.recv_from(&mut buf) {
             let text = String::from_utf8_lossy(&buf[..n]);
-            if let Some(loc) = header(&text, "location") {
-                if !found.contains(&loc) {
+            if let Some(loc) = header(&text, "location")
+                && !found.contains(&loc) {
                     found.push(loc);
                 }
-            }
         }
     }
     if found.is_empty() {
@@ -163,11 +162,10 @@ fn find_service(desc: &str) -> Option<(String, String)> {
     while let Some(i) = rest.find("<service>") {
         let block_end = rest[i..].find("</service>").map(|j| i + j).unwrap_or(rest.len());
         let block = &rest[i..block_end];
-        if let (Some(t), Some(c)) = (xml_text(block, "serviceType"), xml_text(block, "controlURL")) {
-            if t.contains("WANIPConnection") || t.contains("WANPPPConnection") {
+        if let (Some(t), Some(c)) = (xml_text(block, "serviceType"), xml_text(block, "controlURL"))
+            && (t.contains("WANIPConnection") || t.contains("WANPPPConnection")) {
                 return Some((t, c));
             }
-        }
         rest = &rest[block_end..];
         if rest.len() <= "</service>".len() {
             break;

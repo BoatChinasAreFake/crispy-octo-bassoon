@@ -47,13 +47,11 @@ pub fn read_disk(dir: &Path) -> Vec<ModSource> {
                 for f in inner.flatten() {
                     let fname = f.file_name().to_string_lossy().to_string();
                     let lower = fname.to_ascii_lowercase();
-                    if (lower.ends_with(".txt") || lower.ends_with(".png") || lower.ends_with(".rhai")) && f.path().is_file() {
-                        if let Ok(bytes) = std::fs::read(f.path()) {
-                            if bytes.len() <= MAX_FILE {
+                    if (lower.ends_with(".txt") || lower.ends_with(".png") || lower.ends_with(".rhai")) && f.path().is_file()
+                        && let Ok(bytes) = std::fs::read(f.path())
+                            && bytes.len() <= MAX_FILE {
                                 files.insert(fname, bytes);
                             }
-                        }
-                    }
                 }
             }
             if files.contains_key("mod.txt") && !id.is_empty() {
@@ -472,11 +470,10 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                 errs.push(format!("line {}: [texture] needs a name", s.line));
                 continue;
             }
-            if let Some(px) = build_texture(&mut ctx, m, s, errs) {
-                if let Some(t) = ctx.alloc_tile(px, errs, s.line) {
+            if let Some(px) = build_texture(&mut ctx, m, s, errs)
+                && let Some(t) = ctx.alloc_tile(px, errs, s.line) {
                     ctx.textures.insert(format!("{}:{}", m.id, s.name.to_ascii_lowercase()), t);
                 }
-            }
         }
     }
     for (mi, sections, errs) in parsed.iter_mut() {
@@ -485,14 +482,11 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
             match s.kind.as_str() {
                 "block" => fill_block(&mut ctx, m, s, errs),
                 "item" => fill_item(&mut ctx, m, s, errs),
-                "recipe" => match parse_recipe(&ctx, m, s, errs) {
-                    Some(r) => {
-                        ctx.reg.recipes.push(r);
-                        if let Some(info) = ctx.reg.mods.iter_mut().find(|i| i.id == m.id) {
-                            info.added.2 += 1;
-                        }
+                "recipe" => if let Some(r) = parse_recipe(&ctx, m, s, errs) {
+                    ctx.reg.recipes.push(r);
+                    if let Some(info) = ctx.reg.mods.iter_mut().find(|i| i.id == m.id) {
+                        info.added.2 += 1;
                     }
-                    None => {}
                 },
                 "ore" => {
                     let b = s.str("block").and_then(|v| ctx.resolve(&m.id, v)).filter(|&b| b < FIRST_ITEM);

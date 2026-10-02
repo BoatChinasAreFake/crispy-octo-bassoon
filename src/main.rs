@@ -577,8 +577,8 @@ impl App {
 
     fn mouse_look(&mut self) {
         let m: Vec2 = mouse_position().into();
-        if self.screen == Screen::Playing {
-            if let Some(last) = self.last_mouse {
+        if self.screen == Screen::Playing
+            && let Some(last) = self.last_mouse {
                 let d = m - last;
                 if d.length() < 400.0 {
                     let s = 0.0026 * self.settings.sensitivity;
@@ -587,7 +587,6 @@ impl App {
                     p.pitch = (p.pitch - d.y * s).clamp(-1.55, 1.55);
                 }
             }
-        }
         self.last_mouse = Some(m);
         // The right stick looks around, faster the further it's pushed.
         let look = self.pad_frame.look;
@@ -1462,11 +1461,10 @@ impl App {
 
     /// Start hosting (if not already). Returns the port.
     fn host_now(&mut self) -> Option<u16> {
-        if self.game.is_host() {
-            if let Some(multiplayer::Net::Host(srv)) = &self.game.net {
+        if self.game.is_host()
+            && let Some(multiplayer::Net::Host(srv)) = &self.game.net {
                 return Some(srv.port);
             }
-        }
         let pw = Some(self.mp_password.clone()).filter(|p| !p.is_empty());
         match self.game.open_lan(&self.mp_name, pw) {
             Ok(port) => {
@@ -4918,7 +4916,7 @@ async fn game_main() {
                     }
                 }
                 // Frames hang on the wall's near face: their facing is the far side of their cell.
-                let frame_facing = (facing + 0) as block::Id;
+                let frame_facing = facing as block::Id;
                 for (k, item) in [(0, block::SWORD_DIAMOND), (1, block::DIAMOND)] {
                     let at = base + f * 5 + r * k + IVec3::Y;
                     app.game.world.set_v(at, block::FRAME_FIRST + frame_facing);
@@ -5263,12 +5261,11 @@ async fn game_main() {
         }
         app.audio.poll().await;
         frames += 1;
-        if let Some(s) = &shot {
-            if frames == s.frames {
+        if let Some(s) = &shot
+            && frames == s.frames {
                 get_screen_data().export_png(&s.path);
                 break;
             }
-        }
         if app.quit || is_quit_requested() {
             if !app.game.menu && !app.game.is_client() {
                 app.save();

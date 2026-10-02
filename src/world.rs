@@ -534,6 +534,8 @@ impl Generator {
                     }
                     let (below, above) = (b[idx(lx, y - 1, lz)], b[idx(lx, y + 1, lz)]);
                     let r = hash3(s ^ 0xCA7E, x, y, z);
+                    // Pointy rocks hang from cave floors (below==STONE) and ceilings (above==STONE); both intentionally place POINTY_ROCK.
+                    #[allow(clippy::if_same_then_else)]
                     if below == STONE && r < 0.012 {
                         b[idx(lx, y, lz)] = GLOWSHROOM;
                     } else if below == STONE && r < 0.03 {

@@ -738,7 +738,7 @@ mod tests {
     fn variables_of_missing_mods_are_kept() {
         let (mut host, _) = ScriptHost::new(&[src("present", "fn on_load() { set_var(\"a\", 1); }")]);
         let orphan = ("gone".to_string(), encode_vars(&HashMap::from([("x".to_string(), Dynamic::from(5 as INT))])).0);
-        assert!(host.import_vars(&[orphan.clone()]).is_empty());
+        assert!(host.import_vars(std::slice::from_ref(&orphan)).is_empty());
         let g = Game::new(3, false, false);
         host.call(&g, "on_load", vec![]);
         let (saved, _) = host.export_vars();

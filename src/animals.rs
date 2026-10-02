@@ -334,18 +334,16 @@ impl Game {
                         _ => self.mobs[i].prey = None,
                     }
                 }
-                if goal.is_none() && !self.mobs[i].sitting {
-                    if let Some(o) = owner_at {
+                if goal.is_none() && !self.mobs[i].sitting
+                    && let Some(o) = owner_at {
                         goal = Some(o);
                         // Left behind: catch up.
-                        if o.distance(pos) > LEASH && self.world.is_loaded(o.x.floor() as i32, o.z.floor() as i32) {
-                            if let Some(spot) = crate::entity::warp_spot(&self.world, o, 2.5, &mut self.rng) {
+                        if o.distance(pos) > LEASH && self.world.is_loaded(o.x.floor() as i32, o.z.floor() as i32)
+                            && let Some(spot) = crate::entity::warp_spot(&self.world, o, 2.5, &mut self.rng) {
                                 self.mobs[i].body.pos = spot;
                                 self.mobs[i].body.vel = Vec3::ZERO;
                             }
-                        }
                     }
-                }
             }
             // In love: find a partner.
             if goal.is_none() && self.mobs[i].love > 0.0 {

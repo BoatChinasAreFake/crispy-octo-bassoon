@@ -692,8 +692,8 @@ impl Atlas {
     fn ore(&mut self, tile: u16, color: Rgba, dark: Rgba) {
         self.copy(T_STONE, tile);
         for _ in 0..5 {
-            let cx = self.rng.int(2, 13) as i32;
-            let cy = self.rng.int(2, 13) as i32;
+            let cx = self.rng.int(2, 13);
+            let cy = self.rng.int(2, 13);
             for _ in 0..4 {
                 let x = (cx + self.rng.int(-1, 1)).clamp(0, 15) as usize;
                 let y = (cy + self.rng.int(-1, 1)).clamp(0, 15) as usize;
@@ -2367,7 +2367,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     // ---- Caves and enchanting
     a.each(T_GLOWSHROOM, |x, y, _, _| {
-        let cap = (4..9).contains(&y) && (2..14).contains(&x) && !(y == 4 && (x < 4 || x > 11));
+        let cap = (4..9).contains(&y) && (2..14).contains(&x) && (y != 4 || (4..=11).contains(&x));
         let stalk = (9..16).contains(&y) && (7..9).contains(&x);
         if cap {
             if (x * 3 + y) % 4 == 0 { rgb(220, 255, 250) } else { rgb(70, 220, 200) }
@@ -2449,7 +2449,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             // The handle leans left when off, right when on.
             let t = (12 - y as i32).max(0) as f32 / 10.0;
             let hx = 7.5 + if on { t * 4.0 } else { -t * 4.0 };
-            let handle = y < 12 && y >= 2 && (x as f32 - hx).abs() < 1.0;
+            let handle = (2..12).contains(&y) && (x as f32 - hx).abs() < 1.0;
             let knob = y < 4 && (x as f32 - hx).abs() < 1.5;
             if base {
                 shade(rgb(120, 120, 120), r.range(0.85, 1.1))
@@ -2735,7 +2735,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             if !(neck || body) {
                 return [0, 0, 0, 0];
             }
-            let rim = !((x - 8).pow(2) * 3 / 2 + (y - 10).pow(2) < 16) && body || (neck && (x == 6 || x == 9));
+            let rim = ((x - 8).pow(2) * 3 / 2 + (y - 10).pow(2) >= 16) && body || (neck && (x == 6 || x == 9));
             if rim {
                 return [210, 230, 240, 255];
             }
@@ -2896,7 +2896,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         }
     }
     a.each(T_LADDER, |x, y, r, _| {
-        let rail = x < 2 || x > 13;
+        let rail = !(2..=13).contains(&x);
         let rung = y % 4 == 1 && (2..14).contains(&x);
         if rail || rung { shade(rgb(125, 90, 50), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
     });
@@ -2981,7 +2981,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.each(T_SADDLE, |x, y, r, _| {
         let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
         let seat = dx * dx * 0.5 + dy * dy * 1.6 < 22.0 && y > 3;
-        let strap = (x == 4 || x == 11) && y >= 8 && y < 14;
+        let strap = (x == 4 || x == 11) && (8..14).contains(&y);
         if strap { rgb(70, 40, 20) } else if seat { shade(rgb(130, 65, 30), r.range(0.85, 1.1) * if dy < -1.0 { 1.15 } else { 1.0 }) } else { [0, 0, 0, 0] }
     });
     a.speckle(T_WOOF_SKIN, rgb(200, 196, 190), 0.07);
@@ -3126,83 +3126,6 @@ pub fn mip_levels(atlas: &[u8]) -> Vec<Vec<u8>> {
         tile = th;
     }
     levels
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ui_tiles_have_a_border_of_their_own_edge() {
-        let atlas = build_atlas(1);
-        let ui = ui_atlas(&atlas);
-        assert_eq!(ui.len(), UI_ATLAS * UI_ATLAS * 4);
-        let px = |buf: &[u8], w: usize, x: usize, y: usize| buf[(y * w + x) * 4..(y * w + x) * 4 + 4].to_vec();
-        for tile in [T_HUNGER_ICON, T_HEART, T_WATER, T_GRASS_SIDE] {
-            let (tx, ty) = ((tile % TILES_PER_ROW) as usize, (tile / TILES_PER_ROW) as usize);
-            let (ax, ay, ux, uy) = (tx * TILE, ty * TILE, tx * UI_CELL + 1, ty * UI_CELL + 1);
-            for i in 0..TILE {
-                // The tile itself, unchanged...
-                assert_eq!(px(&ui, UI_ATLAS, ux + i, uy + 3), px(&atlas, ATLAS, ax + i, ay + 3));
-                // ...and each border pixel repeats the edge next to it, not the neighbouring tile.
-                assert_eq!(px(&ui, UI_ATLAS, ux + TILE, uy + i), px(&atlas, ATLAS, ax + TILE - 1, ay + i), "{tile} right");
-                assert_eq!(px(&ui, UI_ATLAS, ux - 1, uy + i), px(&atlas, ATLAS, ax, ay + i), "{tile} left");
-                assert_eq!(px(&ui, UI_ATLAS, ux + i, uy + TILE), px(&atlas, ATLAS, ax + i, ay + TILE - 1), "{tile} bottom");
-            }
-            let (u, v, s) = ui_tile_uv(tile);
-            assert_eq!(((u * UI_ATLAS as f32).round() as usize, (v * UI_ATLAS as f32).round() as usize, (s * UI_ATLAS as f32).round() as usize), (ux, uy, TILE));
-        }
-    }
-
-    #[test]
-    fn solid_blocks_have_no_see_through_pixels() {
-        // An opaque cube with clear texels shows the world through its sides.
-        let atlas = build_atlas(1);
-        let size = TILES_PER_ROW as usize * 16;
-        let mut bad = Vec::new();
-        for id in 0..crate::block::NUM_BLOCKS {
-            let b = crate::block::block(id);
-            if !b.opaque || b.model != crate::block::Model::Cube {
-                continue;
-            }
-            for &t in &b.tex {
-                let (tx, ty) = ((t % TILES_PER_ROW) as usize, (t / TILES_PER_ROW) as usize);
-                let clear = (0..16).any(|y| (0..16).any(|x| atlas[((ty * 16 + y) * size + tx * 16 + x) * 4 + 3] < 255));
-                if clear {
-                    bad.push(b.key);
-                }
-            }
-        }
-        bad.dedup();
-        assert!(bad.is_empty(), "solid blocks with see-through pixels: {bad:?}");
-    }
-
-    #[test]
-    fn plant_mipmaps_keep_their_shape_and_colour() {
-        let atlas = build_atlas(1);
-        let levels = mip_levels(&atlas);
-        assert_eq!(levels.len(), 4, "down to one texel a tile");
-        let solid = |px: &[u8], size: usize, tile: usize| {
-            let (tx, ty) = ((T_TALLGRASS % TILES_PER_ROW) as usize, (T_TALLGRASS / TILES_PER_ROW) as usize);
-            let mut n = 0;
-            for y in 0..tile {
-                for x in 0..tile {
-                    let i = ((ty * tile + y) * size + tx * tile + x) * 4;
-                    assert!(px[i + 3] == 0 || px[i + 3] == 255, "cut-out stays clear or solid");
-                    if px[i + 3] == 255 {
-                        n += 1;
-                        assert!(px[i + 1] > 60, "visible grass stays green, not darkened by clear texels");
-                    }
-                }
-            }
-            n as f32 / (tile * tile) as f32
-        };
-        let full = solid(&atlas, ATLAS, TILE);
-        for (l, px) in levels.iter().enumerate().take(2) {
-            let share = solid(px, ATLAS >> (l + 1), TILE >> (l + 1));
-            assert!((share - full).abs() < 0.1, "level {}: {share} solid vs {full}", l + 1);
-        }
-    }
 }
 
 /// The game's icon: a grass block seen from above a corner, `size` pixels
@@ -4678,4 +4601,81 @@ fn paint_scorch_and_raids(a: &mut Atlas) {
         let mark = (5..11).contains(&x) && (4..12).contains(&y) && ((x as i32 - 7).abs() + (y as i32 - 8).abs()) < 4;
         shade(if mark { rgb(40, 40, 45) } else { rgb(235, 235, 230) }, r.range(0.94, 1.04))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_tiles_have_a_border_of_their_own_edge() {
+        let atlas = build_atlas(1);
+        let ui = ui_atlas(&atlas);
+        assert_eq!(ui.len(), UI_ATLAS * UI_ATLAS * 4);
+        let px = |buf: &[u8], w: usize, x: usize, y: usize| buf[(y * w + x) * 4..(y * w + x) * 4 + 4].to_vec();
+        for tile in [T_HUNGER_ICON, T_HEART, T_WATER, T_GRASS_SIDE] {
+            let (tx, ty) = ((tile % TILES_PER_ROW) as usize, (tile / TILES_PER_ROW) as usize);
+            let (ax, ay, ux, uy) = (tx * TILE, ty * TILE, tx * UI_CELL + 1, ty * UI_CELL + 1);
+            for i in 0..TILE {
+                // The tile itself, unchanged...
+                assert_eq!(px(&ui, UI_ATLAS, ux + i, uy + 3), px(&atlas, ATLAS, ax + i, ay + 3));
+                // ...and each border pixel repeats the edge next to it, not the neighbouring tile.
+                assert_eq!(px(&ui, UI_ATLAS, ux + TILE, uy + i), px(&atlas, ATLAS, ax + TILE - 1, ay + i), "{tile} right");
+                assert_eq!(px(&ui, UI_ATLAS, ux - 1, uy + i), px(&atlas, ATLAS, ax, ay + i), "{tile} left");
+                assert_eq!(px(&ui, UI_ATLAS, ux + i, uy + TILE), px(&atlas, ATLAS, ax + i, ay + TILE - 1), "{tile} bottom");
+            }
+            let (u, v, s) = ui_tile_uv(tile);
+            assert_eq!(((u * UI_ATLAS as f32).round() as usize, (v * UI_ATLAS as f32).round() as usize, (s * UI_ATLAS as f32).round() as usize), (ux, uy, TILE));
+        }
+    }
+
+    #[test]
+    fn solid_blocks_have_no_see_through_pixels() {
+        // An opaque cube with clear texels shows the world through its sides.
+        let atlas = build_atlas(1);
+        let size = TILES_PER_ROW as usize * 16;
+        let mut bad = Vec::new();
+        for id in 0..crate::block::NUM_BLOCKS {
+            let b = crate::block::block(id);
+            if !b.opaque || b.model != crate::block::Model::Cube {
+                continue;
+            }
+            for &t in &b.tex {
+                let (tx, ty) = ((t % TILES_PER_ROW) as usize, (t / TILES_PER_ROW) as usize);
+                let clear = (0..16).any(|y| (0..16).any(|x| atlas[((ty * 16 + y) * size + tx * 16 + x) * 4 + 3] < 255));
+                if clear {
+                    bad.push(b.key);
+                }
+            }
+        }
+        bad.dedup();
+        assert!(bad.is_empty(), "solid blocks with see-through pixels: {bad:?}");
+    }
+
+    #[test]
+    fn plant_mipmaps_keep_their_shape_and_colour() {
+        let atlas = build_atlas(1);
+        let levels = mip_levels(&atlas);
+        assert_eq!(levels.len(), 4, "down to one texel a tile");
+        let solid = |px: &[u8], size: usize, tile: usize| {
+            let (tx, ty) = ((T_TALLGRASS % TILES_PER_ROW) as usize, (T_TALLGRASS / TILES_PER_ROW) as usize);
+            let mut n = 0;
+            for y in 0..tile {
+                for x in 0..tile {
+                    let i = ((ty * tile + y) * size + tx * tile + x) * 4;
+                    assert!(px[i + 3] == 0 || px[i + 3] == 255, "cut-out stays clear or solid");
+                    if px[i + 3] == 255 {
+                        n += 1;
+                        assert!(px[i + 1] > 60, "visible grass stays green, not darkened by clear texels");
+                    }
+                }
+            }
+            n as f32 / (tile * tile) as f32
+        };
+        let full = solid(&atlas, ATLAS, TILE);
+        for (l, px) in levels.iter().enumerate().take(2) {
+            let share = solid(px, ATLAS >> (l + 1), TILE >> (l + 1));
+            assert!((share - full).abs() < 0.1, "level {}: {share} solid vs {full}", l + 1);
+        }
+    }
 }

@@ -77,8 +77,8 @@ impl Inventory {
     pub fn add(&mut self, item: Id, mut count: u8) -> u8 {
         let max = max_stack(item);
         for s in self.slots.iter_mut() {
-            if let Some((id, n)) = s {
-                if *id == item && *n < max {
+            if let Some((id, n)) = s
+                && *id == item && *n < max {
                     let put = count.min(max - *n);
                     *n += put;
                     count -= put;
@@ -86,7 +86,6 @@ impl Inventory {
                         return 0;
                     }
                 }
-            }
         }
         for (i, s) in self.slots.iter_mut().enumerate() {
             if s.is_none() {
@@ -172,8 +171,8 @@ impl Inventory {
     pub fn remove(&mut self, item: Id, mut count: u32) {
         let wear = self.wear.iter_mut().rev().chain(self.armor_wear.iter_mut());
         for (s, w) in self.slots.iter_mut().rev().chain(self.armor.iter_mut()).zip(wear) {
-            if let Some((id, n)) = s {
-                if *id == item {
+            if let Some((id, n)) = s
+                && *id == item {
                     let take = (count.min(*n as u32)) as u8;
                     *n -= take;
                     count -= take as u32;
@@ -185,7 +184,6 @@ impl Inventory {
                         return;
                     }
                 }
-            }
         }
     }
 

@@ -185,6 +185,8 @@ fn t_of(i: usize) -> f32 {
 }
 
 /// Noise burst through a band of low/high-pass filters with exponential decay.
+// Low-level DSP primitive: many independent scalar params and many call sites; a struct would be invasive.
+#[allow(clippy::too_many_arguments)]
 fn burst(out: &mut [f32], start: f32, len: f32, decay: f32, lo: f32, hi: f32, gain: f32, rng: &mut Rng) {
     let s0 = samples(start);
     let (mut lp, mut hp) = (Lp::new(), Lp::new());
@@ -201,6 +203,8 @@ fn burst(out: &mut [f32], start: f32, len: f32, decay: f32, lo: f32, hi: f32, ga
     }
 }
 
+// Low-level DSP primitive: many independent scalar params and many call sites; a struct would be invasive.
+#[allow(clippy::too_many_arguments)]
 fn tone(out: &mut [f32], start: f32, len: f32, f0: f32, f1: f32, decay: f32, gain: f32, harmonics: &[f32]) {
     let s0 = samples(start);
     let mut phase = 0.0f32;
@@ -222,6 +226,8 @@ fn tone(out: &mut [f32], start: f32, len: f32, f0: f32, f1: f32, decay: f32, gai
 }
 
 /// Bandlimited-ish "voice": a saw run through a formant lowpass.
+// Low-level DSP primitive: many independent scalar params and many call sites; a struct would be invasive.
+#[allow(clippy::too_many_arguments)]
 fn voice(out: &mut [f32], start: f32, len: f32, f0: f32, f1: f32, formant: f32, vibrato: f32, gain: f32, rng: &mut Rng) {
     let s0 = samples(start);
     let n = samples(len);
