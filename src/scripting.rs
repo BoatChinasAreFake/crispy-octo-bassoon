@@ -423,7 +423,8 @@ impl ScriptHost {
 //
 // A tiny self-describing binary format for script values. Supported: (),
 // bool, int, float, string, char, blob, array and object map, nested up to
-// 32 levels. Functions, closures and other exotic values can't be saved; the
+// 32 levels, plus named function pointers (`Fn("name")`). Closures and curried
+// function pointers capture runtime state that can't be reconstructed, so the
 // variables holding them are skipped (and reported) rather than failing the save.
 
 const MAX_DEPTH: usize = 32;
@@ -475,6 +476,21 @@ fn enc(d: &Dynamic, out: &mut Vec<u8>, depth: usize) -> Result<(), String> {
             out.extend_from_slice(k.as_bytes());
             enc(v, out, depth + 1)?;
         }
+    } else if let Some(f) = d.read_lock::<rhai::FnPtr>() {
+        // A named function pointer (`Fn("name")`) is just a name, so it rebinds
+        // cleanly on load. A closure (anonymous function) or a curried pointer
+        // carries captured runtime state that can't be reconstructed, so it's
+        // skipped-and-reported rather than saved wrong.
+        if f.is_curried() {
+            return Err("a curried function pointer can't be saved (its captured arguments can't be reconstructed)".into());
+        }
+        if f.is_anonymous() {
+            return Err("a closure can't be saved (its captured state can't be reconstructed)".into());
+        }
+        let name = f.fn_name();
+        out.push(9);
+        put_len(out, name.len());
+        out.extend_from_slice(name.as_bytes());
     } else {
         return Err(format!("a {} can't be saved", d.type_name()));
     }
@@ -535,6 +551,10 @@ impl Dec<'_> {
             8 => {
                 let n = self.len()?;
                 Dynamic::from_blob(self.take(n)?.to_vec())
+            }
+            9 => {
+                let name = self.string()?;
+                Dynamic::from(rhai::FnPtr::new(name).map_err(|e| e.to_string())?)
             }
             t => return Err(format!("unknown value type {t}")),
         })
@@ -697,6 +717,7 @@ mod tests {
                 set_var("stats", #{ kills: 7, best: #{ day: 3, list: [1, "two", [3]] } });
                 set_var("bytes", blob(3, 9));
                 set_var("callback", Fn("on_load"));
+                set_var("closure", |x| x + 1);
             }
             fn on_chat(p, t) {
                 message(p, `${get_var("n")} ${get_var("pi")} ${get_var("name")} ${get_var("flag")} ${get_var("nothing")} ${get_var("letter")}`);
@@ -709,8 +730,11 @@ mod tests {
         let g = Game::new(3, false, false);
         assert!(host.call(&g, "on_load", vec![]).errors.is_empty());
         let (saved, skipped) = host.export_vars();
+        // The closure can't be reconstructed, so it is skipped and reported.
+        // The named function pointer `callback` is now saved, not skipped.
         assert_eq!(skipped.len(), 1, "{skipped:?}");
-        assert!(skipped[0].contains("callback"));
+        assert!(skipped[0].contains("closure"), "{skipped:?}");
+        assert!(skipped[0].contains("captured state"), "{skipped:?}");
 
         // A fresh host (the world reopened) gets everything back.
         let (mut fresh, _) = ScriptHost::new(&[src("keep", "fn on_chat(p, t) { message(p, `${get_var(\"n\")} ${get_var(\"stats\").best.list} ${get_var(\"home\")[2]}`); false }")]);
@@ -719,19 +743,88 @@ mod tests {
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         assert_eq!(r.cmds, vec![Cmd::Message("S".into(), "42 [1, \"two\", [3]] -3.0".into())]);
 
-        // Everything that's supported survives exactly.
+        // Everything that's supported survives exactly (only the closure is dropped).
         let original = &host.mods[0].vars;
         let back = decode_vars(&saved[0].1).unwrap();
         assert_eq!(back.len(), original.len() - 1);
         for k in ["n", "pi", "name", "flag", "nothing", "letter", "home", "stats", "bytes"] {
             assert_eq!(format!("{:?}", back[k]), format!("{:?}", original[k]), "{k}");
         }
+        // The named function pointer came back as a function pointer with the same name.
+        let cb = back["callback"].read_lock::<rhai::FnPtr>().expect("callback should be a function pointer");
+        assert_eq!(cb.fn_name(), "on_load");
 
         // Damaged data is reported, not trusted.
         let (mut h3, _) = ScriptHost::new(&[src("keep", "fn on_load() {}")]);
         let problems = h3.import_vars(&[("keep".into(), vec![1, 0, 0, 0, 200])]);
         assert_eq!(problems.len(), 1);
         assert!(decode_vars(&[255, 255, 255, 255]).is_err());
+    }
+
+    #[test]
+    fn named_function_pointers_round_trip() {
+        // A bare named function pointer round-trips through the byte format.
+        let fp = rhai::FnPtr::new("on_tick").unwrap();
+        let vars = HashMap::from([("cb".to_string(), Dynamic::from(fp))]);
+        let (bytes, skipped) = encode_vars(&vars);
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let back = decode_vars(&bytes).unwrap();
+        let fp = back["cb"].read_lock::<rhai::FnPtr>().expect("should be a function pointer");
+        assert_eq!(fp.fn_name(), "on_tick");
+
+        // Removing the tag-9 decode case would make this fail: tag 9 must be known.
+        assert_eq!(bytes.last().copied(), Some(b'k'), "name bytes end the blob");
+    }
+
+    #[test]
+    fn named_function_pointers_round_trip_nested() {
+        // Function pointers nested inside an array and a map exercise the
+        // recursive enc/decode path.
+        let fp = Dynamic::from(rhai::FnPtr::new("on_load").unwrap());
+        let arr: Array = vec![Dynamic::from(1 as INT), fp.clone()];
+        let mut map = rhai::Map::new();
+        map.insert("handler".into(), fp.clone());
+        map.insert("list".into(), Dynamic::from(arr.clone()));
+        let vars = HashMap::from([
+            ("arr".to_string(), Dynamic::from(arr)),
+            ("map".to_string(), Dynamic::from(map)),
+        ]);
+        let (bytes, skipped) = encode_vars(&vars);
+        assert!(skipped.is_empty(), "{skipped:?}");
+        let back = decode_vars(&bytes).unwrap();
+
+        let a = back["arr"].read_lock::<Array>().unwrap();
+        let nested = a[1].read_lock::<rhai::FnPtr>().expect("array element should be a function pointer");
+        assert_eq!(nested.fn_name(), "on_load");
+
+        let m = back["map"].read_lock::<rhai::Map>().unwrap();
+        let h = m["handler"].read_lock::<rhai::FnPtr>().expect("map value should be a function pointer");
+        assert_eq!(h.fn_name(), "on_load");
+        let inner = m["list"].read_lock::<Array>().unwrap();
+        assert_eq!(inner[1].read_lock::<rhai::FnPtr>().unwrap().fn_name(), "on_load");
+    }
+
+    #[test]
+    fn closures_and_curried_pointers_are_skipped() {
+        // A closure (anonymous function) captures state and can't be saved.
+        let (mut host, problems) = ScriptHost::new(&[src(
+            "fp",
+            r#"
+            fn add(a, b) { a + b }
+            fn on_load() {
+                set_var("closure", |x| x + 1);
+                set_var("curried", Fn("add").curry(10));
+            }
+            "#,
+        )]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let g = Game::new(3, false, false);
+        assert!(host.call(&g, "on_load", vec![]).errors.is_empty());
+        let (_, skipped) = host.export_vars();
+        assert_eq!(skipped.len(), 2, "{skipped:?}");
+        let joined = skipped.join("\n");
+        assert!(joined.contains("closure") && joined.contains("captured state"), "{skipped:?}");
+        assert!(joined.contains("curried") && joined.contains("curried function pointer"), "{skipped:?}");
     }
 
     #[test]

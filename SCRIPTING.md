@@ -82,8 +82,8 @@ Define any of these functions and the game calls them. Returning `false` from th
   - in single player: **Save World**, or quitting;
   - on a multiplayer host: the host saving;
   - on a dedicated server: every 5 minutes, and on `stop`.
-- **What can be saved:** `()`, true/false, whole numbers, decimals, text, single characters, blobs, arrays and maps, nested inside each other up to 32 levels, and up to 8 MB per mod.
-- **What can't:** function pointers and closures (`Fn("name")`, `|x| ...`). Variables holding them are skipped with a chat message rather than failing the save.
+- **What can be saved:** `()`, true/false, whole numbers, decimals, text, single characters, blobs, arrays and maps, nested inside each other up to 32 levels, and up to 8 MB per mod. Named function pointers (`Fn("on_tick")`) are also saved: only the name is stored, and it is rebound to the matching function when the world loads.
+- **What can't:** closures and curried function pointers (`|x| x + 1`, `Fn("add").curry(10)`). They capture live runtime state that can't be reconstructed on load, so variables holding them are skipped with a chat message rather than failing the save.
 - **Mods switched off:** variables belong to the mod's folder name. If a mod is switched off or missing when a world loads, its saved variables are kept and written back untouched, so turning a mod off for a while doesn't lose its data. Renaming a mod's folder does start it fresh.
 - **Starting over:** to reset a mod's data, overwrite each variable, for example with `set_var("key", ())`.
 
