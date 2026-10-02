@@ -202,7 +202,7 @@ Defines a new mob *type*. It borrows one of a few base-game body shapes and wear
 | `texture` | Painted over the whole body | white |
 | `template` / `model` | Body shape: `quadruped`, `biped`, `blob` or `bird` (ignored when it has `part` lines) | `quadruped` |
 | `part` | One box of a custom body (repeat for each, up to 16); see **Custom shapes** below | the template |
-| `size` | Body width and height, in blocks | `0.9` |
+| `size` | Body width and height, in blocks. A template body is drawn at this height (keeping its shape) | `0.9` |
 | `width`, `height` | Override `size` for one dimension (width 0.2–8, height 0.2–8) | from `size` |
 | `health` | Hit points (1–1000) | `10` |
 | `speed` | Walking-speed multiplier (0.1–4) | `1` |
@@ -232,6 +232,15 @@ Defines a new mob *type*. It borrows one of a few base-game body shapes and wear
 | `perches` | A wild flier lands to rest now and then, then takes off again | `false` |
 | `tame_item` | Right-click it with this to (maybe) tame it. `none`: can't be tamed | `none` |
 | `tame_chance` | Chance each `tame_item` works (0.01–1) | `0.33` |
+| `trade` | One trade (repeat for each, up to 8): `item [n] [+ item [n]] -> item [n]`; see **Trading** below | none |
+| `boss` | A boss: a health bar across the top of the screen, never tamed or despawned, announced when beaten | `false` |
+| `enrage_at` | A boss enrages below this fraction of its health (0–1; `0` never) | `0.5` |
+| `enrage_speed` | Enraged, it moves this many times faster (1–3) | `1.5` |
+| `enrage_cooldown` | Enraged, its cooldowns are multiplied by this (0.25–1) | `0.6` |
+| `summon` | What an enraged boss calls for help: `mob [count]` (count 1–4; at most 8 of them within 64 blocks) | nothing |
+| `summon_every` | Seconds between calls for help (5–120) | `20` |
+| `knockback_resist` | How much it shrugs off knockback (0–1; 1 is immovable) | `0.7` for bosses, else `0` |
+| `xp` | Experience it drops (0–1000) | the usual few points |
 | `breed_item` | Feed two of them this to breed them; wild ones follow anyone holding it (or the `tame_item`). `none`: doesn't breed | `none` |
 
 A mob melee-attacks only when it is `hostile` **and** `attack_damage > 0`. It fires projectiles when it is `hostile` and either `ranged_damage > 0` or `projectile_effect` is set, so an effect-only volley with zero damage is supported. A ranged mob fires only while the player is within `ranged_range` and has a clear line of sight. If it has both melee and ranged attacks, melee takes priority inside `attack_reach`; both attacks and the entire volley share one cooldown, so a multishot volley consumes only one `ranged_cooldown`.
@@ -357,6 +366,36 @@ projectile_blast = 2.5       // and splashes everyone nearby
 ranged_cooldown = 3
 ```
 
+**Trading.** Give a mob `trade` lines and right-clicking it opens the same trading screen as a Hmmer, with its name as the title:
+
+```text
+trade = slice 8 -> gold 1                  // give 8 slices, get a gold ingot
+trade = gold 3 + slice 4 -> cheese_pickaxe // two things in, one out
+trade = bone for diamond                   // "for" works instead of "->"
+```
+
+Items are named as anywhere else in a mod (a bare name means this mod's, then the base game's; the gold ingot is `gold`). Each trade can be made six times, then it restocks the next day. Joined players' trades go through the host, which checks they really have what they're giving. A hostile mob only trades once it's tamed, and holding its `tame_item` or `breed_item` feeds it instead of opening the trades.
+
+**Bosses.** `boss = true` puts the mob's name and health bar across the top of the screen for everyone within 64 blocks, makes it shrug off most knockback, stops it from being tamed or despawning, and tells everyone when it's beaten. Below `enrage_at` of its health it enrages: it moves `enrage_speed` times faster, its attacks come `enrage_cooldown` times as often apart, and every `summon_every` seconds it calls `summon` mobs to its side (never more than eight of them within 64 blocks). Give it a big `xp` and `drops` for a proper reward. Like any modded mob it never spawns by itself: put it somewhere with a script (`spawn_mob`) or a block's `spawn` action.
+
+```text
+[mob big_cheese]
+name = The Big Cheese
+texture = wheel_top
+template = biped
+width = 1.4
+height = 2.8
+health = 200
+hostile = true
+attack_damage = 7
+attack_reach = 2.2
+aggro_range = 28
+boss = true
+summon = angry_cheese 2
+xp = 200
+drops = slice 32
+```
+
 Then, from a `.rhai` script in the same mod folder:
 
 ```rust
@@ -371,7 +410,7 @@ fn on_chat(player, text) {
 
 If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
 
-Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, hostile ranged combat with bounded appearance, timed effects, deterministic multishot, homing and blast projectiles, flying, taming and breeding, and custom box-built bodies with simple animations. Arbitrary projectile geometry/rendering, bosses, trading, and custom UI screens still require a Rust change.
+Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, hostile ranged combat with bounded appearance, timed effects, deterministic multishot, homing and blast projectiles, flying, taming and breeding, custom box-built bodies with simple animations, trading, and bosses. Arbitrary projectile geometry/rendering and custom UI screens still require a Rust change.
 
 ### `[splashes]`
 

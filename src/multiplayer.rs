@@ -1117,6 +1117,10 @@ impl Game {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
+            if kind.mod_def().is_some_and(|d| d.boss) {
+                m.health = s.fuse;
+                m.fuse = 0.0;
+            }
             m.hurt = m.hurt.max(s.hurt);
             m.burning = s.burning;
             // Animals: just what's needed to draw them (and guess at shearing).
@@ -1258,7 +1262,8 @@ impl Game {
                         yaw: m.yaw,
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
-                        fuse: if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
+                        // (Modded bosses send their health, for the boss bar.)
+                        fuse: if m.kind.mod_def().is_some_and(|d| d.boss) { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
@@ -2134,6 +2139,36 @@ mod tests {
         let l = &host.peers[&id].ledger;
         assert_eq!(l.enchanted.get(&(SWORD_IRON, (sharp >> 16) as u16)), Some(&1));
         assert_eq!(crate::xp::level_of(l.xp).0, 3);
+    }
+
+    #[test]
+    fn modded_traders_and_boss_health_reach_joined_players() {
+        let src = "[mob merchant]\nname = Merchant\ntexture = stone\ntrade = wheat 4 -> bread 2\n\n[mob king]\nname = King\ntexture = stone\nhealth = 50\nhostile = true\nboss = true\n";
+        crate::mods::with_mods(&[("shop", src)], |_reg| {
+            let mut host = Game::new(792, false, false);
+            let spawn = host.spawn;
+            load_around(&mut host, spawn);
+            let port = host.open_lan("Hosty", None).unwrap();
+            let mut client = join(&mut host, port, "Tradey", "").unwrap();
+            let id = client.my_id;
+            host.mobs.clear();
+            let merchant = host.alloc_mob(MobKind::from_name("shop:merchant").unwrap(), spawn + Vec3::new(2.0, 0.5, 0.0));
+            let king = host.alloc_mob(MobKind::from_name("shop:king").unwrap(), spawn + Vec3::new(-6.0, 0.5, 0.0));
+            if let Some(k) = host.mobs.iter_mut().find(|m| m.id == king) {
+                k.health = 20.0;
+            }
+            host.give_peer(id, WHEAT, 8);
+            assert!(pump(&mut host, &mut client, |_, c| c.inv.count(WHEAT) == 8 && c.mobs.iter().any(|m| m.id == merchant)));
+            // The boss bar on a joined player's screen shows the host's health.
+            assert!(pump(&mut host, &mut client, |_, c| c.mobs.iter().any(|m| m.id == king && (m.health - 20.0).abs() < 0.5)));
+            client.open_trade(merchant);
+            let (title, list) = client.trade_list().expect("talking");
+            assert_eq!(title, "Merchant");
+            client.make_trade(0);
+            assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BREAD) == 2 && c.inv.count(WHEAT) == 4));
+            assert_eq!(host.peers[&id].ledger.bag.count(BREAD), 2);
+            assert_eq!(list[0].give[0], (WHEAT, 4));
+        });
     }
 
     #[test]

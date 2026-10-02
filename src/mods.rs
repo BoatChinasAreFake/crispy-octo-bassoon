@@ -473,7 +473,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None, parts: Vec::new() });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None, parts: Vec::new(), trades: Vec::new(), boss: false, enrage_at: 0.5, enrage_speed: 1.5, enrage_cooldown: 0.6, summon: None, summon_every: 20.0, knockback_resist: 0.0, xp: None });
                     }
                 }
                 _ => {}
@@ -1008,6 +1008,74 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.breed_item = breed_item;
     let parts = parse_parts(ctx, m, s, tile, errs);
     ctx.reg.mobs[i].parts = parts;
+    let trades = parse_trades(ctx, m, s, errs);
+    // Bosses (all off by default).
+    let boss = flag(s, "boss", false, errs);
+    let mut bounded = |key: &str, default: f32, lo: f32, hi: f32| {
+        let v = num(s, key, default, errs);
+        if v.is_finite() { v.clamp(lo, hi) } else { default }
+    };
+    let enrage_at = bounded("enrage_at", 0.5, 0.0, 1.0);
+    let enrage_speed = bounded("enrage_speed", 1.5, 1.0, 3.0);
+    let enrage_cooldown = bounded("enrage_cooldown", 0.6, 0.25, 1.0);
+    let summon_every = bounded("summon_every", 20.0, 5.0, 120.0);
+    let knockback_resist = bounded("knockback_resist", if boss { 0.7 } else { 0.0 }, 0.0, 1.0);
+    let xp = s.get("xp").map(|_| num(s, "xp", 0u32, errs).min(1000));
+    let summon = match s.get("summon") {
+        None => None,
+        Some((_, v, line)) => {
+            let mut w = v.split_whitespace();
+            let name = w.next().unwrap_or("").to_ascii_lowercase();
+            let count: u8 = w.next().and_then(|n| n.parse().ok()).unwrap_or(1).clamp(1, 4);
+            let modded = ctx.reg.mobs.iter().position(|mob| mob.key == name || mob.key == format!("{}:{}", m.id, name)).map(|i| crate::entity::BASE_MOBS as usize + i);
+            let base = crate::entity::MobKind::from_base_name_public(&name).filter(|k| *k != crate::entity::MobKind::Wyrm).map(|k| k.index() as usize);
+            match modded.or(base).filter(|&i| i < 255) {
+                Some(i) => Some((i as u8, count)),
+                None => {
+                    errs.push(format!("line {line}: summon: no mob called \"{name}\""));
+                    None
+                }
+            }
+        }
+    };
+    let mob = &mut ctx.reg.mobs[i];
+    mob.trades = trades;
+    mob.boss = boss;
+    mob.enrage_at = enrage_at;
+    mob.enrage_speed = enrage_speed;
+    mob.enrage_cooldown = enrage_cooldown;
+    mob.summon = summon;
+    mob.summon_every = summon_every;
+    mob.knockback_resist = knockback_resist;
+    mob.xp = xp;
+}
+
+/// The `trade = ...` lines of a `[mob]`: up to 8 Hmmer-style trades, each
+/// `trade = <item> [n] [+ <item> [n]] -> <item> [n]` ("for" works instead of "->"),
+/// e.g. `trade = gold 2 -> bread 3`.
+fn parse_trades(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) -> Vec<crate::villagers::Trade> {
+    let mut out = Vec::new();
+    for (_, v, line) in s.kv.iter().filter(|(k, _, _)| k == "trade") {
+        let line = *line;
+        if out.len() >= 8 {
+            errs.push(format!("line {line}: a mob can have at most 8 trades; the rest are ignored"));
+            break;
+        }
+        let v = v.replace(" for ", " -> ");
+        let Some((give, get)) = v.split_once("->") else {
+            errs.push(format!("line {line}: a trade looks like `trade = gold 2 -> bread 3`"));
+            continue;
+        };
+        let mut gives = give.split('+').map(|g| parse_stack(ctx, &m.id, g.trim(), errs, line));
+        let first = gives.next().flatten();
+        let second = gives.next().flatten();
+        let get = parse_stack(ctx, &m.id, get.trim(), errs, line);
+        match (first, get) {
+            (Some(a), Some(b)) => out.push(crate::villagers::Trade { give: [a, second.unwrap_or((AIR, 0))], get: b, wear: 0 }),
+            _ => errs.push(format!("line {line}: a trade needs something to give and something to get")),
+        }
+    }
+    out
 }
 
 /// The `part = ...` lines of a `[mob]`: a custom body of up to
@@ -1655,6 +1723,63 @@ part = arm 0 0 0 1 1 1 anim=dance wobble pivot=1,2 colour=red
     }
 
     #[test]
+    fn trade_and_boss_keys_parse_with_limits() {
+        let mut many = String::from("[mob bazaar]\n");
+        for _ in 0..10 {
+            many.push_str("trade = dirt -> stone\n");
+        }
+        let text = format!(
+            r#"
+[mob plain]
+
+[mob shop]
+trade = gold 2 -> bread 3
+trade = bone + string 2 for diamond
+trade = gold
+trade = nothing_real -> bread
+
+[mob boss]
+boss = true
+enrage_at = 3
+enrage_speed = 9
+enrage_cooldown = 0
+summon = plain 9
+summon_every = 1
+xp = 5000
+
+[mob lost]
+summon = unicorn
+summon_every = 500
+knockback_resist = 0.25
+
+{many}"#
+        );
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "fair".into(), files }], &[]);
+        let plain = &reg.mobs[0];
+        assert!(plain.trades.is_empty() && !plain.boss && plain.summon.is_none() && plain.xp.is_none());
+        assert_eq!((plain.knockback_resist, plain.enrage_at), (0.0, 0.5));
+        let shop = &reg.mobs[1];
+        assert_eq!(shop.trades.len(), 2);
+        assert_eq!((shop.trades[0].give, shop.trades[0].get), ([(GOLD_INGOT, 2), (AIR, 0)], (BREAD, 3)));
+        assert_eq!((shop.trades[1].give, shop.trades[1].get), ([(BONE, 1), (STRING, 2)], (DIAMOND, 1)));
+        let boss = &reg.mobs[2];
+        assert!(boss.boss);
+        assert_eq!((boss.enrage_at, boss.enrage_speed, boss.enrage_cooldown, boss.summon_every, boss.knockback_resist), (1.0, 3.0, 0.25, 5.0, 0.7));
+        assert_eq!(boss.summon, Some((crate::entity::BASE_MOBS, 4)), "summons the first mob, at most four at a time");
+        assert_eq!(boss.xp, Some(1000));
+        let lost = &reg.mobs[3];
+        assert!(lost.summon.is_none());
+        assert_eq!((lost.summon_every, lost.knockback_resist), (120.0, 0.25));
+        assert_eq!(reg.mobs[4].trades.len(), 8);
+        let errors = &reg.mods[0].errors;
+        for needle in ["a trade looks like", "nothing_real", "no mob called \"unicorn\"", "at most 8 trades"] {
+            assert!(errors.iter().any(|e| e.contains(needle)), "missing {needle:?} in {errors:#?}");
+        }
+    }
+
+    #[test]
     fn projectile_effect_parser_accepts_only_safe_bounded_effects() {
         let text = r#"
 [mob speed]
@@ -1805,6 +1930,10 @@ projectile_effect_duration = NaN
         assert!(bat.flying && bat.perches && bat.tame_item == Some(slice) && bat.breed_item == Some(slice));
         let seeker = reg.mobs.iter().find(|mob| mob.key == "cheese:cheese_seeker").expect("shipped seeker");
         assert_eq!((seeker.projectile_homing, seeker.projectile_blast), (60.0, 2.5));
+        let monger = reg.mobs.iter().find(|mob| mob.key == "cheese:cheesemonger").expect("shipped trader");
+        assert_eq!(monger.trades.len(), 3);
+        let king = reg.mobs.iter().find(|mob| mob.key == "cheese:big_cheese").expect("shipped boss");
+        assert!(king.boss && king.summon.is_some() && king.xp == Some(200));
         let crab = reg.mobs.iter().find(|mob| mob.key == "cheese:cheese_crab").expect("shipped crab");
         assert_eq!(crab.parts.len(), 8);
         assert_eq!(crate::entity::modded_parts(crab).len(), 8);

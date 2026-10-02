@@ -2743,6 +2743,7 @@ impl Game {
                 MobEvent::Fireball(from, vel, big) => self.spawn_fireball(from, vel, big, mob_id),
                 MobEvent::Fangs(from, to) => self.late_fees(from, to),
                 MobEvent::Summon(at) => self.summon_fees(at),
+                MobEvent::SummonMod(at, kind, n) => self.boss_summon(at, kind, n),
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
             }
         }
@@ -2802,6 +2803,12 @@ impl Game {
                     self.spawn_orbs(m.body.pos + Vec3::Y * 0.5, points);
                     self.sculk_spread(at, points);
                     self.vibrate(at, None);
+                    if let Some(d) = m.kind.mod_def().filter(|d| d.boss) {
+                        let t = format!("The {} has been defeated!", d.name);
+                        self.msg(t.clone());
+                        self.system_message(None, &t);
+                        self.sfx(Sfx::Fanfare, Some(at));
+                    }
                     let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
                     for (item, n) in drops.into_iter().flatten() {
                         if !self.creative {
@@ -2864,6 +2871,28 @@ impl Game {
     }
 
     /// A new mob; returns its id.
+    /// A modded boss calls for help: up to `n` of `kind` around it, but never
+    /// more than eight of them within 64 blocks.
+    fn boss_summon(&mut self, at: Vec3, kind: u8, n: u8) {
+        let Some(kind) = MobKind::from_index(kind) else { return };
+        if kind == MobKind::Wyrm {
+            return;
+        }
+        // (Counted well beyond the fight, so ones that wandered off still count.)
+        let near = self.mobs.iter().filter(|m| m.kind == kind && m.body.pos.distance(at) < 64.0).count();
+        let n = (n.min(4) as usize).min(8usize.saturating_sub(near));
+        for _ in 0..n {
+            let off = Vec3::new(self.rng.range(-2.5, 2.5), 0.5, self.rng.range(-2.5, 2.5));
+            let p = at + off;
+            if is_solid(self.world.get_v(p.floor().as_ivec3())) {
+                continue;
+            }
+            self.alloc_mob(kind, p);
+            self.smoke(p + Vec3::Y, 8, 0.4);
+        }
+        self.sfx(Sfx::Warp, Some(at));
+    }
+
     pub(crate) fn alloc_mob(&mut self, kind: MobKind, pos: Vec3) -> u32 {
         self.alloc_mob_sized(kind, pos, 1)
     }
@@ -4894,7 +4923,7 @@ looks_like = diamond
         g.use_item();
         assert_eq!(g.trading, Some(id));
         let (job, list) = g.trade_list().unwrap();
-        assert_eq!((job, list.clone()), (Job::Smith, trades(seed)));
+        assert_eq!((job, list.clone()), (format!("Hmmer: {}", Job::Smith.name()), trades(seed)));
         // Coal for gold.
         let coal = list.iter().position(|t| t.give[0].0 == COAL).unwrap();
         g.inv.slots = [None; 36];
@@ -5529,6 +5558,86 @@ looks_like = diamond
             let bytes = crate::animals::encode_mobs(&g.mobs, &HashMap::new());
             let back = crate::animals::decode_mobs(&bytes, &mut crate::noise::Rng::new(1));
             assert!(back.iter().all(|m| m.owner.as_deref() == Some(me.as_str()) && m.kind == pup), "{}", back.len());
+        });
+    }
+
+    #[test]
+    fn modded_traders_trade_through_the_hmmer_screen() {
+        let src = "[mob merchant]\nname = Cheese Merchant\ntexture = stone\ntrade = gold 2 -> bread 3\ntrade = bone + string 2 for diamond\n\n[mob crook]\ntexture = stone\nhostile = true\nattack_damage = 2\ntrade = dirt -> diamond 64\n";
+        crate::mods::with_mods(&[("shop", src)], |_reg| {
+            let mut g = arena(51);
+            g.creative = false;
+            let id = g.alloc_mob(MobKind::from_name("shop:merchant").unwrap(), Vec3::new(1.5, 50.0, 0.5));
+            let i = g.mobs.iter().position(|m| m.id == id).unwrap();
+            g.inv.add(GOLD_INGOT, 5);
+            assert!(g.use_on_mob(i));
+            assert_eq!(g.trading, Some(id));
+            let (title, list) = g.trade_list().expect("talking");
+            assert_eq!(title, "Cheese Merchant");
+            assert_eq!(list.len(), 2);
+            assert_eq!(list[1].give, [(BONE, 1), (STRING, 2)]);
+            g.make_trade(0);
+            assert_eq!((g.inv.count(GOLD_INGOT), g.inv.count(BREAD)), (3, 3));
+            // Can't afford the second.
+            g.make_trade(1);
+            assert_eq!(g.inv.count(DIAMOND), 0);
+            // Out of stock after six.
+            g.inv.add(GOLD_INGOT, 64);
+            for _ in 0..10 {
+                g.make_trade(0);
+            }
+            assert_eq!(g.inv.count(BREAD), 3 * crate::villagers::STOCK as u32);
+            // A monster on the loose doesn't trade.
+            let crook = g.alloc_mob(MobKind::from_name("shop:crook").unwrap(), Vec3::new(-1.5, 50.0, 0.5));
+            let m = g.mobs.iter().find(|m| m.id == crook).unwrap();
+            assert!(crate::villagers::trades_of(m).is_none());
+        });
+    }
+
+    #[test]
+    fn modded_bosses_enrage_summon_resist_taming_and_are_announced() {
+        let src = "[mob minion]\ntexture = stone\nhealth = 4\n\n[mob king]\nname = Cheese King\ntexture = stone\ntemplate = biped\nhealth = 40\nhostile = true\nattack_damage = 2\nattack_cooldown = 2\naggro_range = 30\nboss = true\nenrage_at = 0.5\nenrage_speed = 2\nenrage_cooldown = 0.5\nsummon = minion 3\nsummon_every = 5\nxp = 300\ntame_item = bone\ntame_chance = 1\n";
+        crate::mods::with_mods(&[("court", src)], |_reg| {
+            let king = MobKind::from_name("court:king").unwrap();
+            let minion = MobKind::from_name("court:minion").unwrap();
+            let def = king.mod_def().unwrap();
+            assert!(def.boss && def.knockback_resist > 0.5, "bosses shrug off knockback by default");
+            assert_eq!(king.xp_value(1.0, &mut crate::noise::Rng::new(1)), 300);
+            let mut g = arena(52);
+            let id = g.alloc_mob(king, Vec3::new(6.5, 50.0, 0.5));
+            let i = g.mobs.iter().position(|m| m.id == id).unwrap();
+            assert!(g.mobs[i].persistent, "a boss never despawns");
+            // It can't be tamed.
+            let me = crate::players::record_key(&g.player_name.clone());
+            let at = g.mobs[i].body.pos;
+            g.interact_mob(&me, at, id, BONE);
+            assert!(g.mobs[i].owner.is_none());
+            // Knockback barely moves it.
+            g.mobs[i].damage(1.0, g.player.body.pos);
+            assert!(g.mobs[i].body.vel.y < 3.0, "barely knocked up");
+            // Calm at full health: no help called.
+            for _ in 0..100 {
+                g.update_entities(0.05);
+                g.player.health = 20.0;
+            }
+            assert_eq!(g.mobs.iter().filter(|m| m.kind == minion).count(), 0);
+            // Hurt below half, it enrages and calls minions, never more than eight around.
+            let i = g.mobs.iter().position(|m| m.id == id).unwrap();
+            g.mobs[i].health = 15.0;
+            for _ in 0..1200 {
+                g.update_entities(0.05);
+                g.player.health = 20.0;
+                g.player.hurt = 0.0;
+            }
+            let b = g.mobs.iter().find(|m| m.id == id).expect("still there");
+            assert!(b.angry, "enraged");
+            let minions = g.mobs.iter().filter(|m| m.kind == minion).count();
+            assert!((3..=8).contains(&minions), "{minions} minions");
+            // Beaten: announced to everyone.
+            let i = g.mobs.iter().position(|m| m.id == id).unwrap();
+            g.mobs[i].health = -1.0;
+            g.update_entities(0.05);
+            assert!(g.chat_log.iter().any(|l| l == "The Cheese King has been defeated!"), "{:?}", g.chat_log);
         });
     }
 

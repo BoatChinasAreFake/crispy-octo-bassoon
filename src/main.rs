@@ -1614,17 +1614,30 @@ impl App {
         }
     }
 
-    /// The Hollow Wyrm's health, across the top while it's near.
+    /// A boss's health, across the top while it's near: the Hollow Wyrm, or
+    /// the nearest mod-defined boss.
     fn boss_bar(&self) {
         let g = &self.game;
-        let Some(m) = g.mobs.iter().find(|m| m.kind == entity::MobKind::Wyrm && m.body.pos.distance(g.player.body.pos) < 150.0) else { return };
+        let me = g.player.body.pos;
+        let wyrm = g.mobs.iter().find(|m| m.kind == entity::MobKind::Wyrm && m.body.pos.distance(me) < 150.0);
+        let modded = || {
+            g.mobs
+                .iter()
+                .filter(|m| m.health > 0.0 && m.kind.mod_def().is_some_and(|d| d.boss) && m.body.pos.distance(me) < 64.0)
+                .min_by(|a, b| a.body.pos.distance(me).total_cmp(&b.body.pos.distance(me)))
+        };
+        let Some(m) = wyrm.or_else(modded) else { return };
+        let (name, fill, back, label) = match m.kind.mod_def() {
+            Some(d) => (d.name.as_str(), Color::new(0.85, 0.2, 0.2, 1.0), Color::new(0.15, 0.04, 0.04, 0.9), Color::new(1.0, 0.7, 0.6, 1.0)),
+            None => ("Hollow Wyrm", Color::new(0.75, 0.25, 0.9, 1.0), Color::new(0.1, 0.05, 0.12, 0.9), Color::new(0.85, 0.6, 1.0, 1.0)),
+        };
         let (w, s) = (screen_width(), self.ui.s);
         let bw = (180.0 * s).min(w * 0.7);
         let (x, y) = (w / 2.0 - bw / 2.0, 18.0 * s);
         let frac = (m.health / m.kind.max_health()).clamp(0.0, 1.0);
-        self.ui.text_centered("Hollow Wyrm", w / 2.0, y - 3.0 * s, 9.0, Color::new(0.85, 0.6, 1.0, 1.0));
-        draw_rectangle(x, y, bw, 5.0 * s, Color::new(0.1, 0.05, 0.12, 0.9));
-        draw_rectangle(x, y, bw * frac, 5.0 * s, Color::new(0.75, 0.25, 0.9, 1.0));
+        self.ui.text_centered(name, w / 2.0, y - 3.0 * s, 9.0, label);
+        draw_rectangle(x, y, bw, 5.0 * s, back);
+        draw_rectangle(x, y, bw * frac, 5.0 * s, fill);
     }
 
     /// Potion effects and their time left, down the left side.
@@ -3250,7 +3263,7 @@ impl App {
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let slot = 20.0 * s;
-        let Some((job, list)) = self.game.trade_list() else { return };
+        let Some((title, list)) = self.game.trade_list() else { return };
         let row = slot * 1.1;
         let panel_w = slot * 9.0 + 12.0 * s;
         let panel_h = 24.0 * s + row * list.len() as f32 + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
@@ -3260,7 +3273,7 @@ impl App {
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
         let mut tooltip: Option<String> = None;
-        self.ui.text(&format!("Hmmer: {}", job.name()), sx, y0 + 12.0 * s, 10.0, WHITE);
+        self.ui.text(&title, sx, y0 + 12.0 * s, 10.0, WHITE);
         let top = y0 + 20.0 * s;
         let (mx, my) = mouse_position();
         for (i, t) in list.iter().enumerate() {
@@ -5199,9 +5212,12 @@ async fn game_main() {
                 let n = block::reg().mobs.len();
                 for i in 0..n {
                     let kind = entity::MobKind::Modded(i as u16);
-                    let r = (i as f32 - (n as f32 - 1.0) * 0.5) * 1.8;
+                    // Rows of five, further back each row.
+                    let (row, col) = (i / 5, i % 5);
+                    let in_row = (n - row * 5).min(5);
+                    let r = (col as f32 - (in_row as f32 - 1.0) * 0.5) * 2.2;
                     let up = if kind.flies() { 2.5 } else { 0.0 };
-                    let mut m = entity::Mob::new(kind, p + fwd * 4.5 + right * r + Vec3::Y * (2.0 + up), &mut rng);
+                    let mut m = entity::Mob::new(kind, p + fwd * (5.0 + row as f32 * 4.0) + right * r + Vec3::Y * (2.0 + up), &mut rng);
                     m.yaw = s.yaw + std::f32::consts::PI - 0.5;
                     m.id = 3000 + i as u32;
                     m.anim = 0.8;

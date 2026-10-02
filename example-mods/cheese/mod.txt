@@ -190,7 +190,8 @@ drops = slice 1
 name = Angry Cheese
 texture = wheel_top
 template = biped
-size = 1.1
+width = 0.7
+height = 1.9
 health = 24
 speed = 1.1
 hostile = true
@@ -210,7 +211,8 @@ drops = slice 2
 name = Cheese Slinger
 texture = butter
 template = biped
-size = 1.0
+width = 0.7
+height = 1.8
 health = 20
 speed = 1.0
 hostile = true
@@ -291,6 +293,45 @@ part = leg_l1 -0.6 0 -0.15 0.25 0.3 0.08 pivot=-0.4,0.3,-0.1 anim=walk amount=1
 part = leg_l2 -0.6 0 0.1 0.25 0.3 0.08 pivot=-0.4,0.3,0.14 anim=walk amount=-1
 part = leg_r1 0.35 0 -0.15 0.25 0.3 0.08 pivot=0.4,0.3,-0.1 anim=walk amount=-1
 part = leg_r2 0.35 0 0.1 0.25 0.3 0.08 pivot=0.4,0.3,0.14 anim=walk amount=1
+
+// A trader. Right-click it to open the same trading screen as a Hmmer.
+// trade = what you give [count] [+ a second thing [count]] -> what you get [count]
+// ("for" works instead of "->"). Up to 8 trades, each 6 times a day.
+[mob cheesemonger]
+name = Cheesemonger
+texture = butter
+template = biped
+width = 0.7
+height = 1.8
+health = 20
+trade = slice 8 -> gold 1
+trade = gold 2 -> wheel 1
+trade = gold 3 + slice 4 -> cheese_pickaxe
+
+// A boss: a health bar across the top of the screen, never tamed or
+// despawned, and everyone hears when it's beaten. Below half health it
+// enrages (faster, quicker to strike) and calls Angry Cheese for help.
+[mob big_cheese]
+name = The Big Cheese
+texture = wheel_top
+template = biped
+width = 1.4
+height = 2.8
+health = 200
+speed = 0.9
+hostile = true
+attack_damage = 7
+attack_reach = 2.2
+aggro_range = 28
+attack_cooldown = 1.5
+boss = true
+enrage_at = 0.5
+enrage_speed = 1.6
+enrage_cooldown = 0.6
+summon = angry_cheese 2
+summon_every = 20
+xp = 200
+drops = slice 32
 
 // ---------------------------------------------------------------- recipes
 // Inputs: up to 6 "item count" pairs. Base-game items use their plain names.

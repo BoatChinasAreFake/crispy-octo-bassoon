@@ -1119,6 +1119,25 @@ pub struct ModMob {
     /// A body built from the mod's own boxes (`part = ...` lines), used
     /// instead of `template` when there are any. At most `MAX_MOD_PARTS`.
     pub parts: Vec<ModPart>,
+    /// What it trades, Hmmer style (`trade = ...` lines; at most 8).
+    pub trades: Vec<crate::villagers::Trade>,
+    /// A boss: a health bar across the top of the screen, never tamed or
+    /// despawned, and an announcement when it's beaten.
+    pub boss: bool,
+    /// Health fraction (0-1) at which a boss enrages; 0 never does.
+    pub enrage_at: f32,
+    /// Enraged, it moves this many times faster (1-3)...
+    pub enrage_speed: f32,
+    /// ...and waits this fraction of its usual cooldowns between attacks (0.25-1).
+    pub enrage_cooldown: f32,
+    /// What an enraged boss calls for help: (mob kind index, how many, 1-4).
+    pub summon: Option<(u8, u8)>,
+    /// Seconds between calls for help (5-120).
+    pub summon_every: f32,
+    /// How much it shrugs off knockback (0 = none, 1 = immovable).
+    pub knockback_resist: f32,
+    /// Experience it drops (0-1000). None: the usual amount.
+    pub xp: Option<u32>,
 }
 
 /// Most boxes a modded mob's body may have (keeps drawing cheap).
