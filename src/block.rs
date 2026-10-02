@@ -6,6 +6,7 @@
 //! that). Saves and the network store names for mod things, so the numbers
 //! themselves can move between versions.
 
+use crate::potions::Potion;
 use crate::texture::*;
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
@@ -1003,6 +1004,14 @@ impl ProjectileAppearance {
     }
 }
 
+/// A bounded timed effect carried by a host-owned modded projectile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectileEffect {
+    pub kind: Potion,
+    pub duration: f32,
+    pub amplifier: u8,
+}
+
 /// A new mob type defined by a mod (a `[mob <name>]` section in `mod.txt`).
 ///
 /// A modded mob borrows one of a handful of base-game body shapes (`template`)
@@ -1013,13 +1022,13 @@ impl ProjectileAppearance {
 /// `attack_damage == 0` only counts toward the night-time monster cap and
 /// otherwise behaves like a passive wanderer (the backward-compatible default,
 /// so existing mod.txt files are unchanged). A `hostile` mob with
-/// `ranged_damage > 0` additionally fires projectiles at players, exactly like
-/// a base ranged attacker (host-authoritative and deterministic). Their bounded
-/// arrow, billboard or cube appearance is synchronized to joined clients;
-/// `ranged_damage == 0` (the default) keeps the ranged attack off, so existing
-/// mod.txt files are unchanged. Behaviours that need code (bosses, taming,
-/// raids, trading, flying, homing/AoE/status projectiles, bespoke geometry/UI)
-/// are deliberately out of scope so no modded mob can wedge the AI or the
+/// `ranged_damage > 0` or a configured projectile effect additionally fires
+/// projectiles at players, exactly like a base ranged attacker
+/// (host-authoritative and deterministic). Their bounded arrow, billboard or
+/// cube appearance is synchronized to joined clients; zero damage with no
+/// effect (the default) keeps the ranged attack off, so existing mod.txt files
+/// are unchanged. Behaviours that need code (bosses, taming,
+/// raids, trading, flying, homing/AoE projectiles, bespoke geometry/UI) are deliberately out of scope so no modded mob can wedge the AI or the
 /// renderer. See MODDING.md.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModMob {
@@ -1052,8 +1061,8 @@ pub struct ModMob {
     /// exploit. Clamped to `0.25..=10.0` at parse time (default `1.0`).
     pub attack_cooldown: f32,
     /// Ranged (arrow) damage dealt to a player per shot. `0.0` (the default)
-    /// means the mob never fires a projectile, even when `hostile` is true
-    /// (backward compatible). Clamped to `0.0..=30.0` at parse time.
+    /// means the mob only fires when `projectile_effect` is configured.
+    /// Clamped to `0.0..=30.0` at parse time.
     pub ranged_damage: f32,
     /// Maximum horizontal distance at which the mob opens fire, mirroring
     /// `aggro_range`'s bounds. Clamped to `1.0..=48.0` at parse time
@@ -1066,6 +1075,8 @@ pub struct ModMob {
     /// Client-visible projectile shape, optional texture and scale. The classic
     /// base arrow is the default, so existing mods keep their exact appearance.
     pub projectile_appearance: ProjectileAppearance,
+    /// Optional bounded timed effect applied on a confirmed player hit.
+    pub projectile_effect: Option<ProjectileEffect>,
     /// Seconds between shots. The `0.5` floor prevents a zero-cooldown
     /// projectile-spam exploit. Clamped to `0.5..=10.0` at parse time
     /// (default `2.0`).

@@ -70,8 +70,8 @@ pub struct Game {
     pub raid: Option<crate::raids::Raid>,
     pub omens: HashMap<u32, f32>,
     pub heroes: HashMap<u32, f32>,
-    /// Joined players the host knows have Strength on (seconds left).
-    pub strong: HashMap<u32, f32>,
+    /// Joined players the host knows have Strength on (seconds left, amplifier).
+    pub strong: HashMap<u32, (f32, u8)>,
     pub raid_hud: Option<(u8, u8, u8, u16, f32)>,
     pub raid_clock: f32,
     pub patrol_timer: f32,
@@ -200,8 +200,8 @@ pub struct Game {
     pub fancy_water: bool,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
-    /// Potion effects on the local player, with seconds left (see potions.rs).
-    pub effects: Vec<(crate::potions::Potion, f32)>,
+    /// Potion effects on the local player (see potions.rs).
+    pub effects: Vec<crate::potions::ActiveEffect>,
     /// Dispensers that were powered last time we looked (they fire on the change).
     pub dispensers_on: std::collections::HashSet<IVec3>,
     /// Hopper clock (see hoppers.rs).
@@ -1378,10 +1378,11 @@ impl Game {
     /// Fire a modded mob's arrow with a data-defined damage. Mirrors
     /// `spawn_arrow`'s mob-shot path (shooter = None) but takes the damage from
     /// the mod's `ranged_damage` field instead of the hardcoded base value.
-    pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32, appearance: ProjectileAppearance) {
+    pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32, appearance: ProjectileAppearance, effect: Option<ProjectileEffect>) {
         let mut a = Arrow::new(pos, vel, None, damage);
         a.modded = true;
         a.appearance = appearance;
+        a.effect = effect;
         self.arrows.push(a);
         self.sfx(Sfx::Twang, Some(pos));
         if self.arrows.len() > 200 {
@@ -1438,17 +1439,27 @@ impl Game {
                     let cause = if a.modded { "was shot down by a monster" } else { "was shot by a Rattler (with a Pointy Stick)" };
                     let me = self.player.body.clone();
                     if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
-                        self.player.hurt = 0.0;
-                        let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_player_from(d, cause, Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
-                        let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
-                        self.player.body.vel += knock;
+                        if a.damage > 0.0 {
+                            self.player.hurt = 0.0;
+                            let d = self.rules.difficulty.mob_damage(a.damage);
+                            self.hurt_player_from(d, cause, Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
+                            let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
+                            self.player.body.vel += knock;
+                        }
+                        if let Some(effect) = a.effect {
+                            self.timed_effect_amplified(effect.kind, effect.duration, effect.amplifier);
+                        }
                         return false;
                     }
                     let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
                     if let Some(id) = hit {
-                        let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_peer(id, d, cause, a.vel.normalize_or_zero() * 4.0);
+                        if a.damage > 0.0 {
+                            let d = self.rules.difficulty.mob_damage(a.damage);
+                            self.hurt_peer(id, d, cause, a.vel.normalize_or_zero() * 4.0);
+                        }
+                        if let Some(effect) = a.effect {
+                            self.send_timed_effect(id, effect.kind, effect.duration, effect.amplifier);
+                        }
                         return false;
                     }
                     true
@@ -1565,7 +1576,7 @@ impl Game {
                     // Early swings are weak; only a full one can crit (see combat.rs).
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
-                    let strength = if self.has_effect(crate::potions::Potion::Strength) { crate::potions::STRENGTH_BONUS } else { 0.0 };
+                    let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
                     let dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
                     self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
@@ -2602,7 +2613,7 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(to));
                 }
                 MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
-                MobEvent::ShootMod(from, vel, dmg, appearance) => self.spawn_arrow_dmg(from, vel, dmg, appearance),
+                MobEvent::ShootMod(from, vel, dmg, appearance, effect) => self.spawn_arrow_dmg(from, vel, dmg, appearance, effect),
                 MobEvent::Fireball(from, vel, big) => self.spawn_fireball(from, vel, big, mob_id),
                 MobEvent::Fangs(from, to) => self.late_fees(from, to),
                 MobEvent::Summon(at) => self.summon_fees(at),
@@ -5055,6 +5066,44 @@ looks_like = diamond
         g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
         g.spawn_timer = 1e9; // no surprise visitors
         g
+    }
+
+    #[test]
+    fn projectile_effect_requires_confirmed_hit_and_defaults_remain_inert() {
+        let effect = ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 };
+
+        let mut hit = arena(76);
+        let health = hit.player.health;
+        let mut arrow = Arrow::new(hit.player.body.pos + Vec3::new(-0.1, 0.9, 0.0), Vec3::X, None, 0.0);
+        arrow.effect = Some(effect);
+        hit.arrows.push(arrow);
+        hit.update_arrows(0.01);
+        assert_eq!(hit.player.health, health, "effect-only arrows deal no damage");
+        assert_eq!(hit.effect_amplifier(crate::potions::Potion::Speed), Some(2));
+        assert!(hit.arrows.is_empty());
+
+        let mut wall = arena(77);
+        wall.world.set(3, 50, 0, STONE);
+        let mut arrow = Arrow::new(Vec3::new(2.5, 50.5, 0.5), Vec3::X * 20.0, None, 0.0);
+        arrow.effect = Some(effect);
+        wall.arrows.push(arrow);
+        wall.update_arrows(0.05);
+        assert!(!wall.has_effect(crate::potions::Potion::Speed), "wall impact cannot apply an effect");
+        assert!(wall.arrows[0].stuck);
+
+        let mut miss = arena(78);
+        let mut arrow = Arrow::new(Vec3::new(5.0, 55.0, 5.0), Vec3::X, None, 0.0);
+        arrow.effect = Some(effect);
+        miss.arrows.push(arrow);
+        miss.update_arrows(0.05);
+        assert!(!miss.has_effect(crate::potions::Potion::Speed), "a miss cannot apply an effect");
+
+        let mut default = arena(79);
+        default.arrows.push(Arrow::new(default.player.body.pos + Vec3::new(-0.1, 0.9, 0.0), Vec3::X, None, 0.0));
+        default.update_arrows(0.01);
+        assert!(default.effects.is_empty(), "ordinary arrows carry no effect");
+        let mirrored = Arrow::from_wire(Vec3::ZERO, Vec3::X, ProjectileAppearance::default());
+        assert_eq!(mirrored.effect, None, "client snapshots cannot carry effects");
     }
 
     #[test]

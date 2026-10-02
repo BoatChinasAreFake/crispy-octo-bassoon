@@ -609,8 +609,8 @@ pub enum MobEvent {
     Warp(Vec3, Vec3),
     /// A Rattler loosed a Pointy Stick: (from, velocity).
     Shoot(Vec3, Vec3),
-    /// A modded mob fired a projectile: (from, velocity, damage, appearance).
-    ShootMod(Vec3, Vec3, f32, ProjectileAppearance),
+    /// A modded mob fired a projectile: (from, velocity, damage, appearance, effect).
+    ShootMod(Vec3, Vec3, f32, ProjectileAppearance, Option<ProjectileEffect>),
     /// A fireball thrown: (from, velocity, big (a Weeper's, which explodes)).
     Fireball(Vec3, Vec3, bool),
     /// An Invoicer's spell: Late Fees up out of the ground from here toward there, or Fees summoned.
@@ -1344,21 +1344,21 @@ impl Mob {
             MobKind::Modded(_) => {
                 // A hostile modded mob with attack_damage > 0 pursues and melee-
                 // attacks the player, mirroring the base Groaner; one with
-                // ranged_damage > 0 also fires base-game arrows at range,
-                // mirroring the Rattler. A mob that is not hostile, or has both
-                // attack_damage == 0 and ranged_damage == 0 (the backward-
-                // compatible default), stays a passive wanderer that flees when
+                // ranged_damage > 0 or a configured effect also fires
+                // projectiles at range, mirroring the Rattler. A mob that is
+                // not hostile, or has no melee damage, ranged damage or effect
+                // (the backward-compatible default), stays a passive wanderer that flees when
                 // hit. All of this runs host-side so it stays deterministic and
                 // host-authoritative; the events are applied in game.rs.
                 let attacking = self
                     .kind
                     .mod_def()
-                    .map(|d| (d.hostile && (d.attack_damage > 0.0 || d.ranged_damage > 0.0), d))
+                    .map(|d| (d.hostile && (d.attack_damage > 0.0 || d.ranged_damage > 0.0 || d.projectile_effect.is_some()), d))
                     .filter(|(a, _)| *a)
                     .map(|(_, d)| d);
                 if let Some(def) = attacking {
                     let melee = def.attack_damage > 0.0;
-                    let ranged = def.ranged_damage > 0.0;
+                    let ranged = def.ranged_damage > 0.0 || def.projectile_effect.is_some();
                     // A ranged mob still approaches/tracks within its firing
                     // range even when that reaches past aggro_range.
                     let pursue_range = if ranged { def.aggro_range.max(def.ranged_range) } else { def.aggro_range };
@@ -1385,7 +1385,7 @@ impl Mob {
                             let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
                             if clear {
                                 let vel = aim.normalize_or_zero() * def.projectile_speed + Vec3::Y * aim.length() * 0.42;
-                                ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, def.ranged_damage, def.projectile_appearance));
+                                ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, def.ranged_damage, def.projectile_appearance, def.projectile_effect));
                                 self.attack_cd = def.ranged_cooldown;
                             }
                         }
@@ -2268,6 +2268,8 @@ pub struct Arrow {
     pub modded: bool,
     /// Transient appearance mirrored to joined clients.
     pub appearance: ProjectileAppearance,
+    /// Host-only timed effect payload; never included in snapshots.
+    pub effect: Option<ProjectileEffect>,
 }
 
 impl Arrow {
@@ -2286,6 +2288,7 @@ impl Arrow {
             spear: None,
             modded: false,
             appearance: ProjectileAppearance::default(),
+            effect: None,
         }
     }
 
@@ -2331,6 +2334,7 @@ impl Arrow {
             spear: None,
             modded: false,
             appearance: appearance.normalized(),
+            effect: None,
         }
     }
 
@@ -2507,7 +2511,7 @@ mod tests {
         let mut n = 0;
         let mut dmg = 0.0;
         for e in ev {
-            if let MobEvent::ShootMod(_, _, d, _) = e {
+            if let MobEvent::ShootMod(_, _, d, _, _) = e {
                 n += 1;
                 dmg += *d;
             }
@@ -2646,6 +2650,29 @@ mod tests {
             for _ in 0..40 {
                 let ev = m.update(0.05, &world, player, true, 1.0, &mut rng);
                 assert_eq!(shoot_hits(&ev).0, 0, "ranged_damage == 0 never shoots");
+            }
+        });
+    }
+
+    #[test]
+    fn projectile_effect_enables_effect_only_production_path() {
+        let src = "[mob hexer]\ntexture = stone\nhostile = true\nranged_damage = 0\nranged_range = 20\nprojectile_effect = speed\nprojectile_effect_duration = 12\nprojectile_effect_amplifier = 2\n\n[mob idle]\ntexture = stone\nhostile = true\nranged_damage = 0\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let mut rng = Rng::new(17);
+            let world = World::new(1);
+            let player = Vec3::new(8.0, 80.0, 0.0);
+            let mut hexer = Mob::new(MobKind::from_name("zoo:hexer").unwrap(), Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            let events = hexer.update(0.05, &world, player, true, 1.0, &mut rng);
+            assert_eq!(shoot_hits(&events), (1, 0.0));
+            let effect = events.iter().find_map(|event| match event {
+                MobEvent::ShootMod(_, _, _, _, effect) => *effect,
+                _ => None,
+            });
+            assert_eq!(effect, Some(ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 }));
+
+            let mut idle = Mob::new(MobKind::from_name("zoo:idle").unwrap(), Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            for _ in 0..20 {
+                assert_eq!(shoot_hits(&idle.update(0.05, &world, player, true, 1.0, &mut rng)).0, 0);
             }
         });
     }

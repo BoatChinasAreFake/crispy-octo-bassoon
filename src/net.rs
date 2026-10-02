@@ -26,7 +26,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// (Trade), enchanted books at the anvil (Repair), portals (UsePortal).
 /// v16: game modes (GameMode, spectators in PlayerState flags) and hardcore (Rules).
 /// v19: modded projectile appearance in authoritative arrow snapshots.
-pub const PROTOCOL: u32 = 19;
+/// v20: timed effects carry bounded amplifier levels.
+pub const PROTOCOL: u32 = 20;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -172,8 +173,8 @@ pub enum Msg {
     /// host -> client: how the raid you're in is going (state 0 none, 1 on,
     /// 2 won, 3 lost; see raids.rs).
     Raid { state: u8, wave: u8, waves: u8, left: u16 },
-    /// host -> client: an effect for `secs` (`potions::EFFECTS` index): Bad Omen, Hero of the Village.
-    TimedEffect { effect: u8, secs: f32 },
+    /// host -> client: an effect for `secs` (`potions::EFFECTS` index) at a bounded amplifier.
+    TimedEffect { effect: u8, secs: f32, amplifier: u8 },
     /// client -> host: I repaired `item` at the anvil at x,y,z, with `used` of
     /// `material` (or, `combine`, by merging two of them).
     /// `ench`, `other_ench`: the enchantments on the item and on what it was combined with.
@@ -687,10 +688,11 @@ impl Msg {
                 w.u8(*waves);
                 w.u16(*left);
             }
-            Msg::TimedEffect { effect, secs } => {
+            Msg::TimedEffect { effect, secs, amplifier } => {
                 w.u8(71);
                 w.u8(*effect);
                 w.f32(*secs);
+                w.u8((*amplifier).min(3));
             }
             Msg::Weather { kind } => {
                 w.u8(42);
@@ -980,7 +982,7 @@ impl Msg {
             68 => Msg::Died { cause: r.str()? },
             69 => Msg::Deflect { at: r.v3()?, dir: r.v3()? },
             70 => Msg::Raid { state: r.u8()?, wave: r.u8()?, waves: r.u8()?, left: r.u16()? },
-            71 => Msg::TimedEffect { effect: r.u8()?, secs: r.f32()? },
+            71 => Msg::TimedEffect { effect: r.u8()?, secs: r.f32()?, amplifier: r.u8()?.min(3) },
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
             44 => Msg::Enchant { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, choice: r.u8()? },
@@ -1528,7 +1530,7 @@ mod tests {
             Msg::Died { cause: "was bloop'd".into() },
             Msg::Deflect { at: Vec3::new(1.0, 40.0, -2.0), dir: Vec3::Z },
             Msg::Raid { state: 1, wave: 2, waves: 5, left: 7 },
-            Msg::TimedEffect { effect: 7, secs: 600.0 },
+            Msg::TimedEffect { effect: 7, secs: 600.0, amplifier: 3 },
             Msg::Weather { kind: 2 },
             Msg::Lightning { at: Vec3::new(4.0, 70.0, -9.5) },
             Msg::Enchant { x: 3, y: 64, z: -7, item: 0x8003, choice: 2 },
@@ -1582,6 +1584,13 @@ mod tests {
         }
         assert!(Msg::decode(&[200]).is_err());
         assert!(Msg::decode(&[4, 255, 255, 255, 255]).is_err(), "huge counts must be rejected");
+    }
+
+    #[test]
+    fn projectile_effect_wire_amplifier_is_clamped() {
+        let mut bytes = Msg::TimedEffect { effect: 1, secs: 10.0, amplifier: 0 }.encode();
+        *bytes.last_mut().unwrap() = u8::MAX;
+        assert_eq!(Msg::decode(&bytes).unwrap(), Msg::TimedEffect { effect: 1, secs: 10.0, amplifier: 3 });
     }
 
     #[test]

@@ -59,6 +59,39 @@ pub const EFFECTS: [Potion; 9] = [Potion::Healing, Potion::Speed, Potion::FireRe
 pub const STRENGTH_BONUS: f32 = 3.0;
 pub const REGEN_EVERY: f32 = 2.5;
 
+/// One canonical timed effect on a player.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ActiveEffect {
+    pub kind: Potion,
+    pub seconds: f32,
+    pub amplifier: u8,
+}
+
+/// Add or refresh an effect without allowing a weaker refresh to downgrade it.
+pub fn apply_timed_effect(effects: &mut Vec<ActiveEffect>, kind: Potion, seconds: f32, amplifier: u8) {
+    let amplifier = amplifier.min(3);
+    match effects.iter_mut().find(|effect| effect.kind == kind) {
+        Some(effect) if amplifier > effect.amplifier => {
+            effect.seconds = seconds;
+            effect.amplifier = amplifier;
+        }
+        Some(effect) => effect.seconds = effect.seconds.max(seconds),
+        None => effects.push(ActiveEffect { kind, seconds, amplifier }),
+    }
+}
+
+pub fn effect_amplifier(effects: &[ActiveEffect], kind: Potion) -> Option<u8> {
+    effects.iter().find(|effect| effect.kind == kind).map(|effect| effect.amplifier)
+}
+
+pub fn effect_level(effects: &[ActiveEffect], kind: Potion) -> u8 {
+    effect_amplifier(effects, kind).map_or(0, |amplifier| amplifier + 1)
+}
+
+pub fn strength_bonus(amplifier: u8) -> f32 {
+    STRENGTH_BONUS * (amplifier.min(3) as f32 + 1.0)
+}
+
 impl Potion {
     pub fn index(self) -> usize {
         BREWABLE.iter().position(|&p| p == self).unwrap_or(0)
@@ -173,37 +206,73 @@ impl Game {
             self.player.health = (self.player.health + 8.0).min(20.0);
             return;
         }
-        self.effects.retain(|e| e.0 != p);
-        self.effects.push((p, EFFECT_SECS));
+        self.timed_effect_amplified(p, EFFECT_SECS, 0);
         self.msg(format!("You feel... {}.", p.name().to_lowercase()));
     }
 
     /// An effect for `secs` (from food rather than a potion), quietly.
     pub fn timed_effect(&mut self, p: Potion, secs: f32) {
-        self.effects.retain(|e| e.0 != p);
-        self.effects.push((p, secs));
+        self.timed_effect_amplified(p, secs, 0);
+    }
+
+    pub fn timed_effect_amplified(&mut self, p: Potion, secs: f32, amplifier: u8) {
+        apply_timed_effect(&mut self.effects, p, secs, amplifier);
+    }
+
+    pub fn effect_amplifier(&self, p: Potion) -> Option<u8> {
+        effect_amplifier(&self.effects, p)
+    }
+
+    pub fn effect_level(&self, p: Potion) -> u8 {
+        effect_level(&self.effects, p)
     }
 
     pub fn has_effect(&self, p: Potion) -> bool {
-        self.effects.iter().any(|e| e.0 == p)
+        self.effect_amplifier(p).is_some()
+    }
+
+    pub fn track_peer_strength(&mut self, id: u32, secs: f32, amplifier: u8) {
+        let amplifier = amplifier.min(3);
+        match self.strong.get_mut(&id) {
+            Some((active_secs, active_amplifier)) if amplifier > *active_amplifier => {
+                *active_secs = secs;
+                *active_amplifier = amplifier;
+            }
+            Some((active_secs, _)) => *active_secs = (*active_secs).max(secs),
+            None => {
+                self.strong.insert(id, (secs, amplifier));
+            }
+        }
+    }
+
+    /// Send a host-authored timed effect to a joined player and retain any
+    /// Strength level needed to validate that player's later attacks.
+    pub fn send_timed_effect(&mut self, id: u32, p: Potion, secs: f32, amplifier: u8) {
+        let amplifier = amplifier.min(3);
+        self.net_send_to(id, Msg::TimedEffect { effect: p.effect_index(), secs, amplifier });
+        if p == Potion::Strength {
+            self.track_peer_strength(id, secs, amplifier);
+        }
     }
 
     /// Effects wear off.
     pub fn effects_tick(&mut self, dt: f32) {
-        for e in self.effects.iter_mut() {
-            e.1 -= dt;
+        for effect in self.effects.iter_mut() {
+            effect.seconds -= dt;
         }
-        let ended: Vec<Potion> = self.effects.iter().filter(|e| e.1 <= 0.0).map(|e| e.0).collect();
-        self.effects.retain(|e| e.1 > 0.0);
+        let ended: Vec<Potion> = self.effects.iter().filter(|effect| effect.seconds <= 0.0).map(|effect| effect.kind).collect();
+        self.effects.retain(|effect| effect.seconds > 0.0);
         for p in ended {
             self.msg(format!("{} wore off.", p.name()));
         }
         // What the effects do to the player's body.
-        self.player.speed_boost = if self.has_effect(Potion::Speed) { 1.35 } else { 1.0 };
-        self.player.leaping = self.has_effect(Potion::Leaping);
-        if self.has_effect(Potion::Regeneration) && self.dead.is_none() {
+        let speed_level = self.effect_level(Potion::Speed) as f32;
+        self.player.speed_boost = 1.0 + 0.35 * speed_level;
+        self.player.leaping = self.effect_level(Potion::Leaping);
+        let regeneration_level = self.effect_level(Potion::Regeneration) as f32;
+        if regeneration_level > 0.0 && self.dead.is_none() {
             self.regen_clock += dt;
-            if self.regen_clock >= REGEN_EVERY {
+            if self.regen_clock >= REGEN_EVERY / regeneration_level {
                 self.regen_clock = 0.0;
                 self.player.health = (self.player.health + 1.0).min(20.0);
             }
@@ -273,7 +342,7 @@ impl Game {
         for id in hit {
             self.net_send_to(id, Msg::PotionEffect { item: potion_item(p, false) });
             if p == Potion::Strength {
-                self.strong.insert(id, EFFECT_SECS);
+                self.track_peer_strength(id, EFFECT_SECS, 0);
             }
         }
         if p == Potion::Healing {
@@ -331,6 +400,39 @@ mod tests {
         assert_eq!(c.slots[crate::containers::OUTPUT], Some((potion_item(Potion::FireResistance, false), 1)));
         assert_eq!(c.slots[crate::containers::INPUT], Some((EMBER_SHROOM, 1)));
         assert_eq!(c.slots[crate::containers::FUEL], None);
+    }
+
+    #[test]
+    fn amplified_timed_effects_use_canonical_semantics() {
+        let mut g = crate::game::tests::arena(62);
+        g.timed_effect_amplified(Potion::Speed, 20.0, 2);
+        g.timed_effect_amplified(Potion::Leaping, 20.0, 3);
+        g.effects_tick(0.01);
+        assert_eq!(g.effect_level(Potion::Speed), 3);
+        assert!((g.player.speed_boost - 2.05).abs() < 1e-6);
+        assert_eq!(g.player.leaping, 4);
+        assert_eq!(strength_bonus(2), 9.0);
+
+        g.timed_effect_amplified(Potion::Strength, 100.0, 3);
+        g.timed_effect_amplified(Potion::Strength, 200.0, 0);
+        let strength = g.effects.iter().find(|effect| effect.kind == Potion::Strength).unwrap();
+        assert_eq!((strength.amplifier, strength.seconds), (3, 200.0));
+
+        g.send_timed_effect(7, Potion::Strength, 30.0, 2);
+        g.send_timed_effect(7, Potion::Strength, 40.0, 0);
+        assert_eq!(g.strong.get(&7), Some(&(40.0, 2)), "host retains joined-player Strength amplifier");
+
+        g.player.health = 10.0;
+        g.timed_effect_amplified(Potion::Regeneration, 20.0, 1);
+        g.effects_tick(REGEN_EVERY / 2.0 - 0.02);
+        assert_eq!(g.player.health, 10.0);
+        g.effects_tick(0.03);
+        assert_eq!(g.player.health, 11.0);
+
+        g.timed_effect(Potion::FireResistance, 10.0);
+        g.timed_effect(Potion::NightVision, 10.0);
+        assert_eq!(g.effect_amplifier(Potion::FireResistance), Some(0));
+        assert_eq!(g.effect_amplifier(Potion::NightVision), Some(0));
     }
 
     #[test]

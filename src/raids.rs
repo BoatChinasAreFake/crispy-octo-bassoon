@@ -149,7 +149,7 @@ impl Game {
         if who == self.my_id && !self.dedicated {
             self.timed_effect(effect, secs);
         } else if self.peers.contains_key(&who) {
-            self.net_send_to(who, Msg::TimedEffect { effect: effect.effect_index(), secs });
+            self.send_timed_effect(who, effect, secs, 0);
         }
         match effect {
             Potion::BadOmen => {
@@ -185,12 +185,15 @@ impl Game {
         if self.is_client() {
             return;
         }
-        for t in self.omens.values_mut().chain(self.heroes.values_mut()).chain(self.strong.values_mut()) {
+        for t in self.omens.values_mut().chain(self.heroes.values_mut()) {
             *t -= dt;
+        }
+        for (seconds, _) in self.strong.values_mut() {
+            *seconds -= dt;
         }
         self.omens.retain(|_, t| *t > 0.0);
         self.heroes.retain(|_, t| *t > 0.0);
-        self.strong.retain(|_, t| *t > 0.0);
+        self.strong.retain(|_, (seconds, _)| *seconds > 0.0);
         self.raid_clock -= dt;
         if self.raid_clock > 0.0 {
             return;
@@ -210,9 +213,9 @@ impl Game {
                 if let Some(centre) = self.village_at(at) {
                     self.omens.remove(&id);
                     if id == self.my_id {
-                        self.effects.retain(|e| e.0 != Potion::BadOmen);
+                        self.effects.retain(|effect| effect.kind != Potion::BadOmen);
                     } else {
-                        self.net_send_to(id, Msg::TimedEffect { effect: Potion::BadOmen.effect_index(), secs: 0.0 });
+                        self.net_send_to(id, Msg::TimedEffect { effect: Potion::BadOmen.effect_index(), secs: 0.0, amplifier: 0 });
                     }
                     self.start_raid(centre);
                     break;

@@ -583,7 +583,7 @@ impl Game {
                 // No harder than the weapon they really own (x1.5 for a falling crit).
                 let sharpness = crate::enchant::level((self.verified_ench(from) as u32) << 16, crate::enchant::Enchant::Sharpness);
                 // (Strength is drunk on their own machine; the host saw the bottle go.)
-                let strength = if self.strong.contains_key(&from) { crate::potions::STRENGTH_BONUS } else { 0.0 };
+                let strength = self.strong.get(&from).map_or(0.0, |&(_, amplifier)| crate::potions::strength_bonus(amplifier));
                 let dmg = dmg.clamp(0.0, (attack_damage_with(self.verified_held(from), sharpness) + strength) * 1.5);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
                     m.damage(dmg, eye);
@@ -1063,12 +1063,12 @@ impl Game {
             Msg::Raid { state, wave, waves, left } => {
                 self.raid_hud = (state != 0).then_some((state, wave, waves, left, if state == 1 { 3.0 } else { 6.0 }));
             }
-            Msg::TimedEffect { effect, secs } => {
+            Msg::TimedEffect { effect, secs, amplifier } => {
                 if let Some(&p) = crate::potions::EFFECTS.get(effect as usize) {
                     if secs > 0.0 {
-                        self.timed_effect(p, secs.min(3600.0));
+                        self.timed_effect_amplified(p, secs.min(3600.0), amplifier.min(3));
                     } else {
-                        self.effects.retain(|e| e.0 != p);
+                        self.effects.retain(|active| active.kind != p);
                     }
                 }
             }
@@ -1379,6 +1379,34 @@ mod tests {
         assert_eq!(arrow.damage, 0.0, "host-only damage is not in the snapshot");
         assert_eq!(arrow.shooter, None, "host-only attribution is not in the snapshot");
         assert!(!arrow.modded, "host-only attribution is not in the snapshot");
+        assert_eq!(arrow.effect, None, "host-only effects are not in the snapshot");
+    }
+
+    #[test]
+    fn projectile_effect_remote_message_is_bounded_and_host_only() {
+        let mut client = Game::new(8, true, false);
+        client.client_handle(Msg::TimedEffect {
+            effect: crate::potions::Potion::Strength.effect_index(),
+            secs: 12.0,
+            amplifier: u8::MAX,
+        });
+        assert_eq!(client.effect_amplifier(crate::potions::Potion::Strength), Some(3));
+        client.client_handle(Msg::TimedEffect {
+            effect: crate::potions::Potion::Strength.effect_index(),
+            secs: 20.0,
+            amplifier: 0,
+        });
+        assert_eq!(client.effect_amplifier(crate::potions::Potion::Strength), Some(3), "weaker refresh cannot downgrade");
+
+        let mut host = Game::new(9, true, false);
+        host.peers.insert(4, Peer::new("Modified Client".into(), host.spawn));
+        host.host_handle_joined(4, Msg::TimedEffect {
+            effect: crate::potions::Potion::Speed.effect_index(),
+            secs: 300.0,
+            amplifier: 3,
+        });
+        assert!(host.effects.is_empty(), "clients cannot apply timed effects to the host");
+        assert_eq!(host.peers[&4].strikes, 1, "client-authored timed effects are rejected");
     }
 
     #[test]

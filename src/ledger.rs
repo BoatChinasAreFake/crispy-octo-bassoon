@@ -469,7 +469,7 @@ impl Game {
                 l.bag.add(GLASS_BOTTLE, had.min(n as u32));
             }
             if had > 0 && crate::potions::potion_of(item) == Some((crate::potions::Potion::Strength, false)) {
-                self.strong.insert(from, crate::potions::EFFECT_SECS);
+                self.track_peer_strength(from, crate::potions::EFFECT_SECS, 0);
             }
         }
     }

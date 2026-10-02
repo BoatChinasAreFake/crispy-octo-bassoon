@@ -50,7 +50,8 @@ pub struct Player {
     pub ground_speed: f32,
     /// Potion effects on the body: faster walking, higher jumps (see potions.rs).
     pub speed_boost: f32,
-    pub leaping: bool,
+    /// Leaping effect level (zero when absent).
+    pub leaping: u8,
     /// Set when a bouncy block launched us (the game plays a sound and clears it).
     pub bounced: bool,
     /// Set on landing to how far we fell (for trampling and hay bales).
@@ -82,7 +83,7 @@ impl Player {
             swing: 0.0,
             ground_speed: 1.0,
             speed_boost: 1.0,
-            leaping: false,
+            leaping: 0,
             bounced: false,
             landed: None,
         }
@@ -222,7 +223,7 @@ impl Player {
         } else {
             b.vel.y = (b.vel.y - GRAVITY * dt).max(-60.0);
             if input.jump && b.on_ground {
-                b.vel.y = if self.leaping { 11.0 } else { 8.7 };
+                b.vel.y = 8.7 + 2.3 * self.leaping as f32;
                 self.jumped = true;
                 if self.sprinting {
                     b.vel.x += fwd.x * 1.5;

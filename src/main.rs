@@ -1631,12 +1631,14 @@ impl App {
     fn effects_hud(&self) {
         let s = self.ui.s;
         let h = screen_height();
-        for (i, (p, left)) in self.game.effects.iter().enumerate() {
+        for (i, effect) in self.game.effects.iter().enumerate() {
             let y = h * 0.35 + i as f32 * 12.0 * s;
-            let c = p.colour();
-            let secs = left.max(0.0) as i32;
+            let c = effect.kind.colour();
+            let secs = effect.seconds.max(0.0) as i32;
+            let level = effect.amplifier as u16 + 1;
+            let name = if level > 1 { format!("{} {level}", effect.kind.name()) } else { effect.kind.name().to_string() };
             draw_rectangle(4.0 * s, y - 7.0 * s, 6.0 * s, 6.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
-            self.ui.text(&format!("{} {}:{:02}", p.name(), secs / 60, secs % 60), 13.0 * s, y, 8.0, WHITE);
+            self.ui.text(&format!("{name} {}:{:02}", secs / 60, secs % 60), 13.0 * s, y, 8.0, WHITE);
         }
     }
 
