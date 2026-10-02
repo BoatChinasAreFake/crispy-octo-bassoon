@@ -194,7 +194,7 @@ Terrain that was already generated doesn't change. Explore new areas, or start a
 
 ### `[mob <name>]`
 
-Defines a new mob *type*. It's a passive wanderer that borrows one of a few base-game body shapes and wears your texture. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items.
+Defines a new mob *type*. It borrows one of a few base-game body shapes and wears your texture. By default it's a passive wanderer; mark it `hostile` and give it an `attack_damage` and it will pursue and melee-attack players just like a base-game monster. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items; attacks are resolved host-side so multiplayer stays authoritative and deterministic.
 
 | Key | Meaning | Default |
 | --- | --- | --- |
@@ -205,8 +205,14 @@ Defines a new mob *type*. It's a passive wanderer that borrows one of a few base
 | `width`, `height` | Override `size` for one dimension (width 0.2–8, height 0.2–8) | from `size` |
 | `health` | Hit points (1–1000) | `10` |
 | `speed` | Walking-speed multiplier (0.1–4) | `1` |
-| `hostile` | Counts toward the night-time monster cap (it still doesn't attack in this version) | `false` |
+| `hostile` | Spawns at night and counts toward the monster cap. With `attack_damage > 0` it also pursues and melee-attacks players; with `attack_damage = 0` it only counts toward the cap (unchanged from before) | `false` |
+| `attack_damage` | Melee damage per hit (0–50). `0` means it never attacks, even when `hostile` | `0` |
+| `attack_reach` | Horizontal distance within which it can land a hit (0.5–4) | `1.3` |
+| `aggro_range` | How far it notices and chases a player (1–48) | `16` |
+| `attack_cooldown` | Seconds between hits (0.25–10; the 0.25 floor prevents a zero-cooldown exploit) | `1` |
 | `drops` | One item it may drop on death: `item [count]` (1–64) | nothing |
+
+A mob attacks only when it is `hostile` **and** `attack_damage > 0`. Existing mods that set `hostile = true` without the attack fields keep `attack_damage = 0`, so they behave exactly as before (they count toward the monster cap but don't attack).
 
 ```text
 [mob mouse]
@@ -217,6 +223,18 @@ size = 0.4
 health = 6
 speed = 1.5
 drops = cheese_slice 2
+
+[mob brute]
+name = Angry Brute
+texture = mouse
+template = biped
+health = 30
+speed = 1.2
+hostile = true
+attack_damage = 5      // now it actually bites
+attack_reach = 1.5
+aggro_range = 20
+attack_cooldown = 1.0
 ```
 
 Then, from a `.rhai` script in the same mod folder:
@@ -233,7 +251,7 @@ fn on_chat(player, text) {
 
 If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
 
-This first version covers mob *types* with their own stats, drop and a templated look. Behaviours that need code (bosses, taming, trading, flying, custom attacks) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
+Data-defined mobs cover their own stats, a drop, a templated look, and hostile melee combat (pursue and bite). Behaviours that need code (bosses, taming, trading, flying, ranged/projectile attacks) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
 
 ### `[splashes]`
 

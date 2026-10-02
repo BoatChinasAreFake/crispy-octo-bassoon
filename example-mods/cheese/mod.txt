@@ -182,6 +182,26 @@ health = 6
 speed = 1.4
 drops = slice 1
 
+// A hostile mob that actually attacks: mark it hostile and give it an
+// attack_damage, and it will pursue and bite nearby players, host-side, like a
+// base-game monster. Leave attack_damage off (0) and a hostile mob just counts
+// toward the monster cap, as before. See the [mob] key table in MODDING.md.
+[mob angry_cheese]
+name = Angry Cheese
+texture = wheel_top
+template = biped
+size = 1.1
+health = 24
+speed = 1.1
+hostile = true
+// bites for 5 (clamped to 0-50); reach is how close it must be (0.5-4);
+// aggro_range is how far it notices you (1-48); cooldown is seconds per bite (min 0.25).
+attack_damage = 5
+attack_reach = 1.6
+aggro_range = 20
+attack_cooldown = 1.2
+drops = slice 2
+
 // ---------------------------------------------------------------- recipes
 // Inputs: up to 6 "item count" pairs. Base-game items use their plain names.
 [recipe]
