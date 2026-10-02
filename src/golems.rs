@@ -46,7 +46,7 @@ impl Game {
             let prey = self
                 .mobs
                 .iter()
-                .filter(|o| o.kind.hostile() && o.health > 0.0 && o.body.pos.distance(pos) < GUARD_RANGE && o.body.pos.distance(home) < GUARD_RANGE + HOME_RANGE)
+                .filter(|o| o.menacing() && o.health > 0.0 && o.body.pos.distance(pos) < GUARD_RANGE && o.body.pos.distance(home) < GUARD_RANGE + HOME_RANGE)
                 .min_by(|a, b| a.body.pos.distance(pos).total_cmp(&b.body.pos.distance(pos)))
                 .map(|o| (o.id, o.body.pos));
             let m = &mut self.mobs[i];

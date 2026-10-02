@@ -34,6 +34,40 @@ fn projectile_fan(center: Vec3, count: u8, spread: f32) -> Vec<Vec3> {
     }).collect()
 }
 
+/// Seconds a homing projectile lasts before it fizzles out.
+pub const HOMING_LIFE: f32 = 5.0;
+/// How far away a homing projectile can notice a player.
+const HOMING_RANGE: f32 = 32.0;
+
+/// Turn a homing projectile toward the nearest target ahead of it, by at most
+/// its turn rate, keeping its speed. Targets behind it are ignored, so a shot
+/// that overshoots doesn't loop back round.
+fn steer(a: &mut Arrow, targets: &[Vec3], dt: f32) {
+    let speed = a.vel.length();
+    let dir = a.vel.normalize_or_zero();
+    if speed <= 0.0 || dir == Vec3::ZERO {
+        return;
+    }
+    let best = targets
+        .iter()
+        .map(|t| *t - a.pos)
+        .filter(|d| d.length() < HOMING_RANGE && d.normalize_or_zero().dot(dir) > 0.0)
+        .min_by(|x, y| x.length().total_cmp(&y.length()));
+    let Some(want) = best.map(|d| d.normalize_or_zero()) else { return };
+    let angle = dir.angle_between(want);
+    let max = a.homing.to_radians() * dt;
+    let new = if angle <= max {
+        want
+    } else {
+        let axis = dir.cross(want).normalize_or_zero();
+        if axis == Vec3::ZERO {
+            return;
+        }
+        macroquad::math::Quat::from_axis_angle(axis, max) * dir
+    };
+    a.vel = new * speed;
+}
+
 #[derive(Default, Clone)]
 pub struct Controls {
     pub input: Input,
@@ -1271,7 +1305,7 @@ impl Game {
             return;
         }
         let me = self.player.body.pos;
-        if self.mobs.iter().any(|m| m.kind.hostile() && m.body.pos.distance(me) < 10.0) {
+        if self.mobs.iter().any(|m| m.menacing() && m.body.pos.distance(me) < 10.0) {
             self.msg("You may not rest now, there are monsters nearby. They're very loud sleepers.");
             return;
         }
@@ -1285,7 +1319,7 @@ impl Game {
             self.set_weather(crate::weather::Weather::Clear);
         }
         self.net_broadcast(Msg::Time(self.time));
-        self.mobs.retain(|m| !m.kind.hostile() || m.body.pos.distance(me) > 64.0);
+        self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
         self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set.");
         self.advance("sweet_dreams");
     }
@@ -1393,6 +1427,12 @@ impl Game {
             arrow.modded = true;
             arrow.appearance = spec.appearance;
             arrow.effect = spec.effect;
+            arrow.homing = spec.homing.clamp(0.0, 180.0);
+            arrow.blast = spec.blast.clamp(0.0, 4.0);
+            if arrow.homing > 0.0 {
+                // A seeker that misses fizzles out rather than circling forever.
+                arrow.life = arrow.life.min(HOMING_LIFE);
+            }
             self.arrows.push(arrow);
         }
         self.sfx(Sfx::Twang, Some(pos));
@@ -1400,12 +1440,75 @@ impl Game {
         self.arrows.drain(..excess);
     }
 
+    /// Where a homing projectile may aim: the chests of every player it could hurt.
+    fn homing_targets(&self) -> Vec<Vec3> {
+        let mut v = Vec::new();
+        if !self.dedicated && !self.spectator && self.dead.is_none() {
+            v.push(self.player.body.pos + Vec3::Y * 1.0);
+        }
+        v.extend(self.peers.values().filter(|p| p.alive() && p.mode != crate::modes::GameMode::Spectator).map(|p| p.target + Vec3::Y * 1.0));
+        v
+    }
+
+    /// A modded blast projectile goes off: everyone within `r` takes up to
+    /// `damage` (half at the edge) and the shot's effect, and is pushed away.
+    /// Mobs and blocks are left alone. Host side.
+    fn projectile_blast(&mut self, at: Vec3, r: f32, damage: f32, effect: Option<crate::block::ProjectileEffect>) {
+        let r = r.clamp(0.5, 4.0);
+        let cause = "was blown up by a monster";
+        self.sfx(Sfx::Explode, Some(at));
+        self.explosion_effects(at, r);
+        self.net_broadcast(Msg::Explosion { at, r });
+        let share = |d: f32| 1.0 - 0.5 * (d / r).min(1.0);
+        let me = self.player.body.pos + Vec3::Y * 0.9;
+        if !self.dedicated && !self.spectator && self.dead.is_none() && me.distance(at) <= r {
+            let d = me.distance(at);
+            if damage > 0.0 {
+                self.player.hurt = 0.0;
+                let dmg = self.rules.difficulty.mob_damage(damage * share(d));
+                self.hurt_player_from(dmg, cause, Some(at), false);
+                let knock = self.steadied((me - at).normalize_or(Vec3::Y) * 5.0);
+                self.player.body.vel += knock;
+            }
+            if let Some(e) = effect {
+                self.timed_effect_amplified(e.kind, e.duration, e.amplifier);
+            }
+        }
+        let hit: Vec<(u32, f32, Vec3)> = self
+            .peers
+            .iter()
+            .filter(|(_, p)| p.alive() && p.mode != crate::modes::GameMode::Spectator)
+            .map(|(&id, p)| (id, (p.target + Vec3::Y * 0.9).distance(at), p.target + Vec3::Y * 0.9))
+            .filter(|&(_, d, _)| d <= r)
+            .collect();
+        for (id, d, pos) in hit {
+            if damage > 0.0 {
+                let dmg = self.rules.difficulty.mob_damage(damage * share(d));
+                self.hurt_peer(id, dmg, cause, (pos - at).normalize_or(Vec3::Y) * 5.0);
+            }
+            if let Some(e) = effect {
+                self.send_timed_effect(id, e.kind, e.duration, e.amplifier);
+            }
+        }
+    }
+
     /// Move arrows and see what they hit (host / single player only).
     fn update_arrows(&mut self, dt: f32) {
         let mut arrows = std::mem::take(&mut self.arrows);
         let mut landed = Vec::new();
+        let mut blasts: Vec<(Vec3, f32, f32, Option<crate::block::ProjectileEffect>)> = Vec::new();
+        let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
-            if a.fly(dt, &self.world) {
+            if a.homing > 0.0 && !a.stuck {
+                steer(a, &targets, dt);
+            }
+            let thunk = a.fly(dt, &self.world);
+            // A blast shot goes off where it lands (or fizzles at the end of its life).
+            if a.blast > 0.0 && (thunk || a.life <= 0.0) {
+                blasts.push((a.pos - a.dir * 0.3, a.blast, a.damage, a.effect));
+                return false;
+            }
+            if thunk {
                 self.sfx(Sfx::Thunk, Some(a.pos));
             }
             // A spear that hits the ground drops, ready to be picked up.
@@ -1448,6 +1551,16 @@ impl Game {
                     // on a Rattler.
                     let cause = if a.modded { "was shot down by a monster" } else { "was shot by a Rattler (with a Pointy Stick)" };
                     let me = self.player.body.clone();
+                    if a.blast > 0.0 {
+                        // A blast shot goes off on whoever it touches.
+                        let touched = (!self.dedicated && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()))
+                            || self.peers.values().any(|p| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3)));
+                        if touched {
+                            blasts.push((a.pos, a.blast, a.damage, a.effect));
+                            return false;
+                        }
+                        return true;
+                    }
                     if !self.dedicated && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         if a.damage > 0.0 {
                             self.player.hurt = 0.0;
@@ -1479,6 +1592,9 @@ impl Game {
         // Anything fired while we were busy (none today, but keep them).
         arrows.append(&mut self.arrows);
         self.arrows = arrows;
+        for (at, r, damage, effect) in blasts {
+            self.projectile_blast(at, r, damage, effect);
+        }
         for (at, wear) in landed {
             self.spawn_drop(at, SPEAR, 1, wear, Vec3::ZERO, 0.5);
         }
@@ -2743,7 +2859,7 @@ impl Game {
         self.drops_tick(dt);
         self.orbs_tick(dt);
         if !self.rules.difficulty.monsters() {
-            self.mobs.retain(|m| !m.kind.hostile());
+            self.mobs.retain(|m| !m.menacing());
         }
     }
 
@@ -2947,7 +3063,7 @@ impl Game {
         self.dead = None;
         self.player = Player::new(self.spawn);
         if self.net.is_none() {
-            self.mobs.retain(|m| !m.kind.hostile());
+            self.mobs.retain(|m| !m.menacing());
         }
         self.ready = false;
         self.msg(if self.rules.keep_inventory {
@@ -5110,7 +5226,7 @@ looks_like = diamond
         let effect = ProjectileEffect { kind: crate::potions::Potion::Leaping, duration: 4.0, amplifier: 1 };
         let pos = Vec3::new(2.0, 55.0, 3.0);
         let center = Vec3::new(0.0, 8.0, -24.0);
-        g.spawn_mod_projectiles(pos, center, ModProjectileSpec { damage: 0.0, appearance, effect: Some(effect), count: 9, spread: 30.0 });
+        g.spawn_mod_projectiles(pos, center, ModProjectileSpec { damage: 0.0, appearance, effect: Some(effect), count: 9, spread: 30.0, homing: 0.0, blast: 0.0 });
 
         assert_eq!(g.arrows.len(), 200, "the existing global arrow cap is preserved");
         let volley: Vec<_> = g.arrows.iter().filter(|arrow| arrow.modded).collect();
@@ -5157,6 +5273,64 @@ looks_like = diamond
         assert!(default.effects.is_empty(), "ordinary arrows carry no effect");
         let mirrored = Arrow::from_wire(Vec3::ZERO, Vec3::X, ProjectileAppearance::default());
         assert_eq!(mirrored.effect, None, "client snapshots cannot carry effects");
+    }
+
+    #[test]
+    fn homing_projectiles_turn_at_a_bounded_rate_and_fizzle_out() {
+        let mut g = arena(91);
+        g.player.body.pos = Vec3::new(0.5, 50.0, 6.5);
+        // Fired along +X, past the player off to the side (+Z).
+        let spec = ModProjectileSpec { damage: 2.0, appearance: ProjectileAppearance::default(), effect: None, count: 1, spread: 0.0, homing: 90.0, blast: 0.0 };
+        g.spawn_mod_projectiles(Vec3::new(-6.0, 51.0, 0.5), Vec3::X * 10.0, spec);
+        assert!(g.arrows[0].life <= HOMING_LIFE, "homing shots have a short life");
+        let before = g.arrows[0].vel.normalize();
+        g.update_arrows(0.1);
+        let a = &g.arrows[0];
+        let turned = before.angle_between(a.vel.normalize()).to_degrees();
+        assert!(turned > 1.0 && turned <= 9.0 + 0.01, "turned {turned} degrees in 0.1 s at 90 degrees per second");
+        assert!(a.vel.z > 0.0, "it turns toward the player");
+        assert!((a.vel.length() - 10.0).abs() < 0.01, "homing keeps its speed (no gravity)");
+        // Eventually it reaches the player.
+        let health = g.player.health;
+        for _ in 0..60 {
+            g.update_arrows(0.05);
+        }
+        assert!(g.player.health < health, "the seeker found its mark");
+        // One that never finds anyone fizzles out.
+        let mut lonely = arena(92);
+        lonely.dead = Some("gone".into());
+        lonely.spawn_mod_projectiles(Vec3::new(0.0, 55.0, 0.0), Vec3::X * 0.5, spec);
+        for _ in 0..((HOMING_LIFE / 0.1) as usize + 2) {
+            lonely.update_arrows(0.1);
+        }
+        assert!(lonely.arrows.is_empty());
+    }
+
+    #[test]
+    fn blast_projectiles_hurt_everyone_nearby_but_never_blocks() {
+        let effect = ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 5.0, amplifier: 0 };
+        let spec = ModProjectileSpec { damage: 6.0, appearance: ProjectileAppearance::default(), effect: Some(effect), count: 1, spread: 0.0, homing: 0.0, blast: 3.0 };
+        // Landing on the floor a block and a half from the player still catches them.
+        let mut g = arena(93);
+        let health = g.player.health;
+        g.spawn_mod_projectiles(Vec3::new(2.0, 51.0, 0.5), Vec3::new(0.0, -10.0, 0.0), spec);
+        for _ in 0..10 {
+            g.update_arrows(0.05);
+        }
+        assert!(g.arrows.is_empty(), "a blast shot is used up when it lands");
+        assert!(g.player.health < health && g.player.health > health - 6.0, "splash damage, less than a direct hit: {}", g.player.health);
+        assert!(g.has_effect(crate::potions::Potion::Speed));
+        assert_eq!(g.world.get(1, 49, 0), STONE, "blasts never break blocks");
+        assert_eq!(g.world.get(2, 49, 0), STONE);
+        // Out of range: nothing.
+        let mut far = arena(94);
+        let health = far.player.health;
+        far.spawn_mod_projectiles(Vec3::new(9.0, 51.0, 9.0), Vec3::new(0.0, -10.0, 0.0), spec);
+        for _ in 0..10 {
+            far.update_arrows(0.05);
+        }
+        assert_eq!(far.player.health, health);
+        assert!(!far.has_effect(crate::potions::Potion::Speed));
     }
 
     #[test]
@@ -5250,6 +5424,111 @@ looks_like = diamond
             let death = g.dead.as_deref().expect("the Slinger eventually killed the player");
             assert!(!death.contains("Rattler"), "a modded shot must not be blamed on a Rattler: {death:?}");
             assert!(death.contains("was shot down by a monster"), "modded shot uses the generic cause: {death:?}");
+        });
+    }
+
+    #[test]
+    fn modded_fliers_cruise_swoop_and_land_when_told_to_sit() {
+        let src = "[mob bat]\nname = Bat\ntexture = stone\ntemplate = bird\nflying = true\nfly_height = 5\nfly_speed = 4\ntame_item = bone\ntame_chance = 1\n\n[mob owl]\ntexture = stone\ntemplate = bird\nflying = true\nperches = true\n\n[mob swooper]\ntexture = stone\ntemplate = bird\nflying = true\nfly_height = 6\nhostile = true\nattack_damage = 3\naggro_range = 20\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let bat = MobKind::from_name("zoo:bat").expect("resolves");
+            assert!(bat.flies());
+            let mut g = arena(41);
+            g.alloc_mob(bat, Vec3::new(5.5, 50.0, 5.5));
+            for _ in 0..200 {
+                g.update_entities(0.05);
+            }
+            let m = &g.mobs[0];
+            assert!((53.5..=56.5).contains(&m.body.pos.y), "cruises about 5 blocks up: y = {}", m.body.pos.y);
+            // Tamed, it sits (and lands); called along, it flies to its owner.
+            let me = crate::players::record_key(&g.player_name.clone());
+            let (id, at) = (g.mobs[0].id, g.mobs[0].body.pos);
+            assert_eq!(g.interact_mob(&me, at, id, BONE), crate::animals::Interaction::Ate);
+            assert!(g.mobs[0].sitting && g.mobs[0].owner.is_some());
+            for _ in 0..120 {
+                g.update_entities(0.05);
+            }
+            assert!(g.mobs[0].body.pos.y < 51.0, "a sitting flier lands: y = {}", g.mobs[0].body.pos.y);
+            let at = g.mobs[0].body.pos;
+            assert_eq!(g.interact_mob(&me, at, id, AIR), crate::animals::Interaction::Toggled);
+            g.player.body.pos = Vec3::new(-6.5, 50.0, -6.5);
+            for _ in 0..200 {
+                g.update_entities(0.05);
+            }
+            let m = &g.mobs[0];
+            let flat = Vec3::new(m.body.pos.x - g.player.body.pos.x, 0.0, m.body.pos.z - g.player.body.pos.z).length();
+            assert!(flat < 4.0 && m.body.pos.y > 50.5, "follows its owner through the air: {:?}", m.body.pos);
+
+            // A percher lands for a rest now and then, then takes off again.
+            let mut g = arena(44);
+            g.alloc_mob(MobKind::from_name("zoo:owl").unwrap(), Vec3::new(5.5, 54.0, 5.5));
+            let (mut landed, mut flew) = (false, false);
+            for _ in 0..1600 {
+                g.update_entities(0.05);
+                let m = &g.mobs[0];
+                landed |= m.sitting && m.body.on_ground;
+                flew |= landed && !m.sitting && m.body.pos.y > 52.0;
+            }
+            assert!(landed && flew, "perched (landed: {landed}) and took off again (flew: {flew})");
+
+            // A hostile flier dives to bite.
+            let mut g = arena(42);
+            g.alloc_mob(MobKind::from_name("zoo:swooper").unwrap(), Vec3::new(4.5, 56.0, 0.5));
+            let health = g.player.health;
+            for _ in 0..200 {
+                g.update_entities(0.05);
+                g.player.hurt = 0.0;
+            }
+            assert!(g.player.health < health, "the swooper came down to bite");
+        });
+    }
+
+    #[test]
+    fn modded_mobs_tame_breed_and_tamed_monsters_stay_friendly() {
+        let src = "[mob pup]\ntexture = stone\nhealth = 12\nhostile = true\nattack_damage = 4\naggro_range = 20\ntame_item = bone\ntame_chance = 1\nbreed_item = wheat\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let pup = MobKind::from_name("zoo:pup").expect("resolves");
+            let mut g = arena(43);
+            g.alloc_mob(pup, Vec3::new(1.5, 50.0, 0.5));
+            g.alloc_mob(pup, Vec3::new(2.5, 50.0, 0.5));
+            let me = crate::players::record_key(&g.player_name.clone());
+            // Wild and hostile: wheat does nothing yet.
+            let (id0, at0) = (g.mobs[0].id, g.mobs[0].body.pos);
+            assert_eq!(g.interact_mob(&me, at0, id0, WHEAT), crate::animals::Interaction::Nothing);
+            for i in 0..2 {
+                let (id, at) = (g.mobs[i].id, g.mobs[i].body.pos);
+                assert_eq!(g.interact_mob(&me, at, id, BONE), crate::animals::Interaction::Ate);
+                assert!(!g.mobs[i].menacing());
+            }
+            // Tamed monsters right next to the player never bite them.
+            let health = g.player.health;
+            for i in 0..2 {
+                let (id, at) = (g.mobs[i].id, g.mobs[i].body.pos);
+                g.interact_mob(&me, at, id, AIR); // stand up
+                assert!(!g.mobs[i].sitting);
+            }
+            for _ in 0..100 {
+                g.update_entities(0.05);
+            }
+            assert_eq!(g.player.health, health, "a tamed monster is friendly");
+            // Feed both: a baby, born tame.
+            for i in 0..2 {
+                let (id, at) = (g.mobs[i].id, g.mobs[i].body.pos);
+                assert_eq!(g.interact_mob(&me, at, id, WHEAT), crate::animals::Interaction::Ate);
+            }
+            for _ in 0..400 {
+                g.update_entities(0.05);
+                if g.mobs.len() > 2 {
+                    break;
+                }
+            }
+            assert_eq!(g.mobs.len(), 3, "the pair had a baby");
+            let baby = &g.mobs[2];
+            assert!(baby.baby > 0.0 && baby.owner.as_deref() == Some(me.as_str()) && baby.kind == pup);
+            // Saved and loaded, pets keep their owner.
+            let bytes = crate::animals::encode_mobs(&g.mobs, &HashMap::new());
+            let back = crate::animals::decode_mobs(&bytes, &mut crate::noise::Rng::new(1));
+            assert!(back.iter().all(|m| m.owner.as_deref() == Some(me.as_str()) && m.kind == pup), "{}", back.len());
         });
     }
 

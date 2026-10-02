@@ -193,6 +193,53 @@ pub fn decode(b: &[u8]) -> BTreeMap<String, PlayerRecord> {
 }
 
 impl Game {
+    /// For scripts: a player's health (0–20), as the host last heard it, or -1 if unknown.
+    /// Joined players report every few seconds, so theirs can lag slightly behind.
+    pub fn script_health(&self, name: &str) -> f32 {
+        if self.is_local_player(name) {
+            return self.player.health;
+        }
+        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.report.as_ref().map(|r| r.health).unwrap_or(20.0)).unwrap_or(-1.0)
+    }
+
+    /// For scripts: a player's food level (0–20), or -1 if unknown.
+    pub fn script_food(&self, name: &str) -> f32 {
+        if self.is_local_player(name) {
+            return self.player.hunger.food;
+        }
+        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.report.as_ref().map(|r| r.food).unwrap_or(20.0)).unwrap_or(-1.0)
+    }
+
+    /// For scripts: what a player holds. For joined players, only what the
+    /// host knows they really have (bare hands otherwise). None: no such player.
+    pub fn script_held(&self, name: &str) -> Option<Id> {
+        if self.is_local_player(name) {
+            return Some(self.inv.held());
+        }
+        self.peer_by_name(name).map(|id| self.verified_held(id))
+    }
+
+    /// For scripts: how many of an item a player has. For joined players this
+    /// is the host's own tally (the ledger), so it can't be faked.
+    pub fn script_count(&self, name: &str, item: Id) -> u32 {
+        if self.is_local_player(name) {
+            return self.inv.count(item);
+        }
+        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.ledger.bag.count(item)).unwrap_or(0)
+    }
+
+    /// For scripts: everything a player has, as (item, count), sorted by item.
+    pub fn script_items(&self, name: &str) -> Vec<(Id, u32)> {
+        let mut v: Vec<(Id, u32)> = if self.is_local_player(name) {
+            self.inv.counts().into_iter().collect()
+        } else {
+            self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.ledger.bag.items()).unwrap_or_default()
+        };
+        v.retain(|&(id, n)| id != AIR && n > 0);
+        v.sort_unstable();
+        v
+    }
+
     /// Joined players: every few seconds, tell the host what we look like.
     pub fn report_tick(&mut self, dt: f32) {
         if !self.is_client() {

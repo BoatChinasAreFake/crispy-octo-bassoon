@@ -239,7 +239,7 @@ impl Game {
         if target.eq_ignore_ascii_case("mobs") || target.eq_ignore_ascii_case("monsters") {
             let monsters = target.eq_ignore_ascii_case("monsters");
             let before = self.mobs.len();
-            self.mobs.retain(|m| m.persistent || m.kind == crate::entity::MobKind::Wyrm || (monsters && !m.kind.hostile()));
+            self.mobs.retain(|m| m.persistent || m.kind == crate::entity::MobKind::Wyrm || (monsters && !m.menacing()));
             return vec![format!("Removed {} mob{}.", before - self.mobs.len(), if before - self.mobs.len() == 1 { "" } else { "s" })];
         }
         if let Some(kind) = crate::entity::MobKind::from_name(target).filter(|_| !self.is_player(target)) {

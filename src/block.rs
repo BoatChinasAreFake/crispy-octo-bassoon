@@ -1085,6 +1085,14 @@ pub struct ModMob {
     /// Total horizontal fan spread in degrees. Clamped to `0.0..=45.0` at
     /// parse time (default `0.0`).
     pub projectile_spread: f32,
+    /// How fast its projectiles turn toward the nearest player, in degrees per
+    /// second. `0.0` (the default) is an ordinary lobbed shot; above zero the
+    /// projectile flies straight (no drop) and steers. Clamped to `0.0..=180.0`.
+    pub projectile_homing: f32,
+    /// Blast radius in blocks when a projectile lands: everyone inside takes
+    /// its damage (less toward the edge) and its effect. Never breaks blocks.
+    /// `0.0` (the default) means a plain single-target hit. Clamped to `0.0..=4.0`.
+    pub projectile_blast: f32,
     /// Seconds between shots. The `0.5` floor prevents a zero-cooldown
     /// projectile-spam exploit. Clamped to `0.5..=10.0` at parse time
     /// (default `2.0`).
@@ -1093,6 +1101,21 @@ pub struct ModMob {
     pub drop: Option<(Id, u8)>,
     /// Which base-game body shape to render with.
     pub template: MobTemplate,
+    /// Flies instead of walking (no gravity), holding `fly_height` above the
+    /// ground and dropping to a player's height to fight.
+    pub flying: bool,
+    /// Blocks above the ground a flier cruises at. Clamped to `1.0..=16.0`.
+    pub fly_height: f32,
+    /// A flier's top speed, in blocks per second. Clamped to `0.5..=10.0`.
+    pub fly_speed: f32,
+    /// A flier that lands now and then to rest (and when told to sit).
+    pub perches: bool,
+    /// Right-click it with this to (maybe) tame it. None: can't be tamed.
+    pub tame_item: Option<Id>,
+    /// Chance each `tame_item` works. Clamped to `0.01..=1.0`.
+    pub tame_chance: f32,
+    /// Feed it this to breed it (and it follows anyone holding it). None: doesn't breed.
+    pub breed_item: Option<Id>,
 }
 
 /// The curated base-game body shapes a modded mob may borrow for v1.

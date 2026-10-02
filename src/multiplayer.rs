@@ -49,7 +49,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    fn new(name: String, pos: Vec3) -> Peer {
+    pub(crate) fn new(name: String, pos: Vec3) -> Peer {
         Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos }
     }
     pub fn alive(&self) -> bool {

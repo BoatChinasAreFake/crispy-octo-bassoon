@@ -473,7 +473,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None });
                     }
                 }
                 _ => {}
@@ -931,11 +931,48 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
         errs.push(format!("line {line}: projectile_spread should be a finite number"));
         0.0
     };
+    // Homing and blast are bounded so a mod can't make an unavoidable or
+    // server-wide attack: a capped turn rate, a short lifetime (see Arrow), and
+    // a small radius that hurts players but never breaks blocks.
+    let mut finite = |key: &str, lo: f32, hi: f32| {
+        let v = num(s, key, 0.0f32, errs);
+        if v.is_finite() {
+            v.clamp(lo, hi)
+        } else {
+            let line = s.get(key).map_or(s.line, |(_, _, line)| *line);
+            errs.push(format!("line {line}: {key} should be a finite number"));
+            0.0
+        }
+    };
+    let projectile_homing = finite("projectile_homing", 0.0, 180.0);
+    let projectile_blast = finite("projectile_blast", 0.0, 4.0);
     let ranged_cooldown = num(s, "ranged_cooldown", 2.0f32, errs).clamp(0.5, 10.0);
     let drop = match s.get("drops") {
         None => None,
         Some((_, v, l)) => parse_stack(ctx, &m.id, v, errs, *l),
     };
+    // Flying, taming and breeding (all off by default, so older mods are unchanged).
+    let flying = flag(s, "flying", false, errs);
+    let fly_height = num(s, "fly_height", 4.0f32, errs);
+    let fly_height = if fly_height.is_finite() { fly_height.clamp(1.0, 16.0) } else { 4.0 };
+    let fly_speed = num(s, "fly_speed", 3.0f32, errs);
+    let fly_speed = if fly_speed.is_finite() { fly_speed.clamp(0.5, 10.0) } else { 3.0 };
+    let perches = flag(s, "perches", false, errs);
+    let one_item = |key: &str, errs: &mut Vec<String>| match s.get(key) {
+        None => None,
+        Some((_, v, _)) if v.trim().eq_ignore_ascii_case("none") => None,
+        Some((_, v, l)) => match ctx.resolve(&m.id, v) {
+            Some(id) if id != AIR => Some(id),
+            _ => {
+                errs.push(format!("line {l}: {key}: no block or item called \"{}\"", v.trim()));
+                None
+            }
+        },
+    };
+    let tame_item = one_item("tame_item", errs);
+    let breed_item = one_item("breed_item", errs);
+    let tame_chance = num(s, "tame_chance", 1.0f32 / 3.0, errs);
+    let tame_chance = if tame_chance.is_finite() { tame_chance.clamp(0.01, 1.0) } else { 1.0 / 3.0 };
     if let Some(name) = s.str("name") {
         ctx.reg.mobs[i].name = name.to_string();
     }
@@ -958,8 +995,17 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.projectile_effect = projectile_effect;
     mob.projectile_count = projectile_count;
     mob.projectile_spread = projectile_spread;
+    mob.projectile_homing = projectile_homing;
+    mob.projectile_blast = projectile_blast;
     mob.ranged_cooldown = ranged_cooldown;
     mob.drop = drop;
+    mob.flying = flying;
+    mob.fly_height = fly_height;
+    mob.fly_speed = fly_speed;
+    mob.perches = perches;
+    mob.tame_item = tame_item;
+    mob.tame_chance = tame_chance;
+    mob.breed_item = breed_item;
 }
 
 fn parse_stack(ctx: &Ctx, modid: &str, v: &str, errs: &mut Vec<String>, line: usize) -> Option<(Id, u8)> {
@@ -1428,6 +1474,68 @@ projectile_spread = NaN
     }
 
     #[test]
+    fn homing_and_blast_parser_defaults_and_caps() {
+        let text = r#"
+[mob plain]
+
+[mob wild]
+projectile_homing = 9999
+projectile_blast = 50
+
+[mob negative]
+projectile_homing = -10
+projectile_blast = -1
+
+[mob nonfinite]
+projectile_homing = NaN
+projectile_blast = inf
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "seek".into(), files }], &[]);
+        let got: Vec<(f32, f32)> = reg.mobs.iter().map(|m| (m.projectile_homing, m.projectile_blast)).collect();
+        assert_eq!(got, vec![(0.0, 0.0), (180.0, 4.0), (0.0, 0.0), (0.0, 0.0)]);
+        let errors = &reg.mods[0].errors;
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().all(|e| e.contains("should be a finite number")), "{errors:?}");
+    }
+
+    #[test]
+    fn flying_taming_and_breeding_parser_defaults_and_caps() {
+        let text = r#"
+[mob plain]
+
+[mob owl]
+flying = true
+fly_height = 99
+fly_speed = 0
+perches = yes
+tame_item = bone
+tame_chance = 5
+breed_item = wheat_seeds
+
+[mob odd]
+tame_item = no_such_thing
+breed_item = none
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "birds".into(), files }], &[]);
+        let plain = &reg.mobs[0];
+        assert!(!plain.flying && !plain.perches && plain.tame_item.is_none() && plain.breed_item.is_none());
+        assert_eq!((plain.fly_height, plain.fly_speed), (4.0, 3.0));
+        let owl = &reg.mobs[1];
+        assert!(owl.flying && owl.perches);
+        assert_eq!((owl.fly_height, owl.fly_speed, owl.tame_chance), (16.0, 0.5, 1.0));
+        assert_eq!((owl.tame_item, owl.breed_item), (Some(BONE), Some(WHEAT_SEEDS)));
+        let odd = &reg.mobs[2];
+        assert!(odd.tame_item.is_none() && odd.breed_item.is_none());
+        let errors = &reg.mods[0].errors;
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("tame_item") && errors[0].contains("no_such_thing"), "{errors:?}");
+    }
+
+    #[test]
     fn projectile_effect_parser_accepts_only_safe_bounded_effects() {
         let text = r#"
 [mob speed]
@@ -1574,6 +1682,10 @@ projectile_effect_duration = NaN
         assert_eq!(slinger.projectile_appearance, ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(slice_tile), scale: 0.75 });
         assert_eq!(slinger.projectile_effect, Some(ProjectileEffect { kind: crate::potions::Potion::Leaping, duration: 4.0, amplifier: 0 }));
         assert_eq!((slinger.projectile_count, slinger.projectile_spread), (3, 18.0));
+        let bat = reg.mobs.iter().find(|mob| mob.key == "cheese:cheese_bat").expect("shipped bat");
+        assert!(bat.flying && bat.perches && bat.tame_item == Some(slice) && bat.breed_item == Some(slice));
+        let seeker = reg.mobs.iter().find(|mob| mob.key == "cheese:cheese_seeker").expect("shipped seeker");
+        assert_eq!((seeker.projectile_homing, seeker.projectile_blast), (60.0, 2.5));
     }
 
     #[test]
