@@ -162,15 +162,17 @@ fn register_api(e: &mut Engine) {
             None => Dynamic::UNIT,
         })
     });
-    e.register_fn("player_health", |name: &str| -> Res<FLOAT> {
-        with_game(|g| if g.is_local_player(name) { g.player.health as FLOAT } else { -1.0 })
-    });
+    e.register_fn("player_health", |name: &str| -> Res<FLOAT> { with_game(|g| g.script_health(name) as FLOAT) });
+    e.register_fn("player_food", |name: &str| -> Res<FLOAT> { with_game(|g| g.script_food(name) as FLOAT) });
     e.register_fn("held_item", |name: &str| -> Res<ImmutableString> {
-        with_game(|g| if g.is_local_player(name) { reg().key_of(g.inv.held()).into() } else { "".into() })
+        with_game(|g| g.script_held(name).map(|id| reg().key_of(id).into()).unwrap_or_default())
     });
     e.register_fn("count_item", |name: &str, item: &str| -> Res<INT> {
         let id = lookup(item)?;
-        with_game(|g| if g.is_local_player(name) { g.inv.count(id) as INT } else { 0 })
+        with_game(|g| g.script_count(name, id) as INT)
+    });
+    e.register_fn("player_items", |name: &str| -> Res<Array> {
+        with_game(|g| g.script_items(name).into_iter().map(|(id, n)| Dynamic::from(vec![Dynamic::from(ImmutableString::from(reg().key_of(id))), Dynamic::from(n as INT)])).collect())
     });
     e.register_fn("time", || -> Res<FLOAT> { with_game(|g| g.time as FLOAT) });
     e.register_fn("is_night", || -> Res<bool> { with_game(|g| g.is_night()) });
@@ -635,6 +637,34 @@ mod tests {
         // Events a mod doesn't define are skipped.
         assert!(!host.call(&g, "on_tick", vec![Dynamic::from(0.05 as FLOAT)]).handled);
         assert!(!host.call(&g, "on_block_break", vec!["S".into(), 0.into(), 0.into(), 0.into(), "bedrock".into()]).allow);
+    }
+
+    #[test]
+    fn scripts_can_read_joined_players_health_and_inventory() {
+        let (mut host, problems) = ScriptHost::new(&[src(
+            "peek",
+            r#"
+            fn on_chat(player, text) {
+                let items = player_items("Guest");
+                message(player, `${player_health("Guest")} ${player_food("Guest")} ${held_item("Guest")} ${count_item("Guest", "diamond")} ${items.len()} ${player_health("Nobody")} [${held_item("Nobody")}]`);
+                false
+            }
+            "#,
+        )]);
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut g = Game::new(3, false, false);
+        let mut peer = crate::multiplayer::Peer::new("Guest".into(), g.spawn);
+        peer.ledger.bag.add(DIAMOND, 5);
+        peer.ledger.bag.add(COBBLE, 12);
+        peer.ledger.held = DIAMOND;
+        peer.report = Some(crate::players::Report { slots: vec![], health: 13.0, food: 7.0, saturation: 1.0 });
+        g.peers.insert(9, peer);
+        let r = host.call(&g, "on_chat", vec!["Host".into(), "?".into()]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(r.cmds, vec![Cmd::Message("Host".into(), "13.0 7.0 diamond 5 2 -1.0 []".into())]);
+        // Holding something the host doesn't know they have reads as bare hands.
+        g.peers.get_mut(&9).unwrap().ledger.held = PICK_IRON;
+        assert_eq!(g.script_held("guest"), Some(AIR));
     }
 
     #[test]

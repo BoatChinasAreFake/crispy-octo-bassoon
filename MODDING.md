@@ -222,7 +222,16 @@ Defines a new mob *type*. It borrows one of a few base-game body shapes and wear
 | `projectile_count` | Projectiles per volley (1–5) | `1` |
 | `projectile_spread` | Total horizontal fan angle in degrees (0–45) | `0` |
 | `ranged_cooldown` | Seconds between volleys (0.5–10; the 0.5 floor prevents a projectile-spam exploit) | `2` |
+| `projectile_homing` | How fast its projectiles turn toward the nearest player, in degrees per second (0–180). Above `0` they fly straight (no drop), never turn back for a player behind them, and fizzle out after 5 seconds | `0` |
+| `projectile_blast` | Blast radius in blocks when a projectile lands (0–4). Everyone inside takes its damage (half at the edge) and its effect; blocks and mobs are never harmed | `0` |
 | `drops` | One item it may drop on death: `item [count]` (1–64) | nothing |
+| `flying` | Flies instead of walking (no gravity) | `false` |
+| `fly_height` | Blocks above the ground it cruises at (1–16) | `4` |
+| `fly_speed` | Top flying speed, blocks/second (0.5–10) | `3` |
+| `perches` | A wild flier lands to rest now and then, then takes off again | `false` |
+| `tame_item` | Right-click it with this to (maybe) tame it. `none`: can't be tamed | `none` |
+| `tame_chance` | Chance each `tame_item` works (0.01–1) | `0.33` |
+| `breed_item` | Feed two of them this to breed them; wild ones follow anyone holding it (or the `tame_item`). `none`: doesn't breed | `none` |
 
 A mob melee-attacks only when it is `hostile` **and** `attack_damage > 0`. It fires projectiles when it is `hostile` and either `ranged_damage > 0` or `projectile_effect` is set, so an effect-only volley with zero damage is supported. A ranged mob fires only while the player is within `ranged_range` and has a clear line of sight. If it has both melee and ranged attacks, melee takes priority inside `attack_reach`; both attacks and the entire volley share one cooldown, so a multishot volley consumes only one `ranged_cooldown`.
 
@@ -276,6 +285,40 @@ attack_reach = 1.5
 aggro_range = 24
 ```
 
+**Homing and blasts.** `projectile_homing` and `projectile_blast` work with all the other projectile keys (count, spread, effects, looks). A homing shot steers toward the nearest player ahead of it, at most `projectile_homing` degrees a second, so you can still dodge a slow-turning one. A blast shot goes off when it hits a player, a block, or runs out of time, and hurts every player within the radius (the full `ranged_damage` at the centre, half at the edge) and gives them its effect. Blasts never break blocks or hurt mobs, so a mod can't use them to grief a world.
+
+**Flying.** A `flying` mob cruises `fly_height` above whatever is under it, rising over hills and trees. A hostile flier with `attack_damage` swoops down to the player's height to bite; one with only ranged attacks keeps its height and shoots from above. Set `perches = true` and a wild one lands for a rest every so often (a tamed one lands when told to sit).
+
+**Taming and breeding.** Give a mob a `tame_item` and right-clicking it with that item has a `tame_chance` of making it yours, Woofer style: it sits straight away; right-click to make it follow you (or sit again). It follows you, teleports to you if left far behind, goes after whatever you hit (if it has `attack_damage`), and is saved with the world. A tamed **hostile** mob never attacks players and isn't cleared by sleeping, Peaceful or golems. With a `breed_item`, feeding two adults makes them fall in love and have a baby; a tamed pair's baby is born tame. Feeding your own hurt pet its `breed_item` heals it. Wild hostile mobs can't be bred until tamed.
+
+```text
+[mob cheese_bat]
+name = Cheese Bat
+texture = mouse
+template = bird
+size = 0.5
+flying = true
+fly_height = 5
+fly_speed = 4
+perches = true
+tame_item = cheese_slice
+tame_chance = 0.5
+breed_item = cheese_slice
+
+[mob stinker]
+name = Stinky Seeker
+texture = mouse
+template = blob
+hostile = true
+ranged_damage = 3
+ranged_range = 20
+projectile_model = billboard
+projectile_texture = cheese_slice
+projectile_homing = 60       // gently curves toward you
+projectile_blast = 2.5       // and splashes everyone nearby
+ranged_cooldown = 3
+```
+
 Then, from a `.rhai` script in the same mod folder:
 
 ```rust
@@ -290,7 +333,7 @@ fn on_chat(player, text) {
 
 If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
 
-Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, and hostile ranged combat with bounded appearance, timed effects, and deterministic multishot. Homing projectiles, area-of-effect projectiles, arbitrary projectile geometry/rendering, bosses, taming, trading, flying, bespoke per-mob geometry, and custom UI screens still require a Rust change.
+Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, hostile ranged combat with bounded appearance, timed effects, deterministic multishot, homing and blast projectiles, flying, and taming and breeding. Arbitrary projectile geometry/rendering, bosses, trading, bespoke per-mob geometry, and custom UI screens still require a Rust change.
 
 ### `[splashes]`
 

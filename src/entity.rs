@@ -495,7 +495,7 @@ impl MobKind {
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
-        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee)
+        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee) || self.mod_def().is_some_and(|d| d.flying)
     }
     /// Lava and fire don't bother it.
     pub fn fireproof(self) -> bool {
@@ -517,6 +517,7 @@ impl MobKind {
             MobKind::Strutter => &[EMBER_SHROOM],
             MobKind::Galloper => &[APPLE],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
+            MobKind::Modded(_) => self.mod_def().and_then(|d| d.breed_item.as_ref()).map(std::slice::from_ref).unwrap_or(&[]),
             _ => &[],
         }
     }
@@ -608,6 +609,10 @@ pub struct ModProjectileSpec {
     pub effect: Option<ProjectileEffect>,
     pub count: u8,
     pub spread: f32,
+    /// Turn rate toward the nearest player, degrees per second (0 = none).
+    pub homing: f32,
+    /// Blast radius on landing (0 = a plain hit).
+    pub blast: f32,
 }
 
 pub enum MobEvent {
@@ -709,8 +714,20 @@ impl Mob {
     }
 
     /// Can it fall in love right now?
+    /// A monster that's actually a threat: hostile, and not somebody's pet
+    /// (a tamed modded monster is left alone by beds, golems and Peaceful).
+    pub fn menacing(&self) -> bool {
+        self.kind.hostile() && self.owner.is_none()
+    }
+
     pub fn ready_to_breed(&self) -> bool {
-        self.baby <= 0.0 && self.breed_cd <= 0.0 && self.love <= 0.0 && (self.kind != MobKind::Woofer || self.owner.is_some())
+        // Woofers (and hostile modded mobs) only once tamed.
+        let wild_ok = match self.kind {
+            MobKind::Woofer => false,
+            MobKind::Modded(_) => !self.kind.mod_def().is_some_and(|d| d.hostile),
+            _ => true,
+        };
+        self.baby <= 0.0 && self.breed_cd <= 0.0 && self.love <= 0.0 && (wild_ok || self.owner.is_some())
     }
 
     /// Resize (Bloops): scales the body, and health with the square of the size.
@@ -1359,21 +1376,45 @@ impl Mob {
                 // (the backward-compatible default), stays a passive wanderer that flees when
                 // hit. All of this runs host-side so it stays deterministic and
                 // host-authoritative; the events are applied in game.rs.
-                let attacking = self
-                    .kind
-                    .mod_def()
-                    .map(|d| (d.hostile && (d.attack_damage > 0.0 || d.ranged_damage > 0.0 || d.projectile_effect.is_some()), d))
-                    .filter(|(a, _)| *a)
-                    .map(|(_, d)| d);
-                if let Some(def) = attacking {
+                // A tamed one never turns on players; a sitting one stays put.
+                let def = self.kind.mod_def();
+                let tamed = self.owner.is_some();
+                let attacking = def
+                    .filter(|d| !tamed && d.hostile && (d.attack_damage > 0.0 || d.ranged_damage > 0.0 || d.projectile_effect.is_some()));
+                let flier = def.filter(|d| d.flying);
+                // How high a flier wants to be: cruising height unless it has
+                // somewhere (or someone) to get to.
+                let mut fly_goal: Option<f32> = None;
+                let mut chasing = false;
+                if let Some(d) = flier {
+                    // Untamed perchers land for a rest now and then.
+                    if d.perches && !tamed {
+                        self.hop_cd -= dt;
+                        if self.flee > 0.0 || (attacking.is_some() && player_visible && dist < d.aggro_range) {
+                            self.sitting = false;
+                        } else if self.hop_cd <= 0.0 {
+                            self.sitting = !self.sitting;
+                            self.hop_cd = if self.sitting { rng.range(5.0, 15.0) } else { rng.range(10.0, 25.0) };
+                        }
+                    }
+                }
+                if self.sitting {
+                    may_wander = false;
+                } else if let Some(def) = attacking {
                     let melee = def.attack_damage > 0.0;
                     let ranged = def.ranged_damage > 0.0 || def.projectile_effect.is_some();
                     // A ranged mob still approaches/tracks within its firing
                     // range even when that reaches past aggro_range.
                     let pursue_range = if ranged { def.aggro_range.max(def.ranged_range) } else { def.aggro_range };
                     if player_visible && dist < pursue_range {
-                        // Pursue at the base chase speed scaled by the def's speed.
-                        want = Some((face, 2.3 * def.speed));
+                        // Pursue at the base chase speed scaled by the def's speed
+                        // (a flier at its own speed, swooping to the player's height
+                        // to bite, or holding its altitude to shoot).
+                        chasing = true;
+                        want = Some((face, if def.flying { def.fly_speed } else { 2.3 * def.speed }));
+                        if def.flying && melee {
+                            fly_goal = Some(player.y + 0.6);
+                        }
                         let fd = flat.length();
                         // Melee takes priority up close; otherwise fire a ranged
                         // shot at distance. Both share the self.attack_cd timer
@@ -1393,13 +1434,17 @@ impl Mob {
                             let aim = player - eye;
                             let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
                             if clear {
-                                let vel = aim.normalize_or_zero() * def.projectile_speed + Vec3::Y * aim.length() * 0.42;
+                                // A homing shot flies straight (no drop), so it needs no lob.
+                                let lob = if def.projectile_homing > 0.0 { 0.0 } else { 0.42 };
+                                let vel = aim.normalize_or_zero() * def.projectile_speed + Vec3::Y * aim.length() * lob;
                                 let spec = ModProjectileSpec {
                                     damage: def.ranged_damage,
                                     appearance: def.projectile_appearance,
                                     effect: def.projectile_effect,
                                     count: def.projectile_count,
                                     spread: def.projectile_spread,
+                                    homing: def.projectile_homing,
+                                    blast: def.projectile_blast,
                                 };
                                 ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, spec));
                                 self.attack_cd = def.ranged_cooldown;
@@ -1408,8 +1453,30 @@ impl Mob {
                     }
                 } else if self.flee > 0.0 {
                     // Passive / non-attacking: flee when hit, else amble.
-                    want = Some(((-flat.x).atan2(flat.z), 3.5));
+                    want = Some(((-flat.x).atan2(flat.z), flier.map(|d| d.fly_speed).unwrap_or(3.5)));
                 }
+                // An owner, a partner, or someone holding its favourite food (see animals.rs).
+                if !self.sitting && !chasing && self.flee <= 0.0
+                    && let Some(g) = self.goal {
+                        let d = g - self.body.pos;
+                        let fd = Vec3::new(d.x, 0.0, d.z).length();
+                        let speed = flier.map(|f| f.fly_speed).unwrap_or(2.0 * def.map(|d| d.speed).unwrap_or(1.0));
+                        if fd > 1.6 {
+                            want = Some((d.x.atan2(-d.z), speed));
+                        } else {
+                            may_wander = false;
+                        }
+                        if flier.is_some() {
+                            fly_goal = Some(g.y + 1.2);
+                        }
+                    }
+                if let Some(d) = flier
+                    && !self.sitting {
+                        let ground = ground_below(world, self.body.pos, 24);
+                        let target = fly_goal.unwrap_or(ground + d.fly_height).max(ground + 0.6);
+                        let bob = (self.wander_t * 2.0 + self.id as f32).sin() * 0.3;
+                        fly_vy = Some(((target - self.body.pos.y) * 2.0 + bob).clamp(-d.fly_speed, d.fly_speed));
+                    }
             }
         }
         if self.kind.burns() {
@@ -1463,7 +1530,9 @@ impl Mob {
         self.body.vel.x += (target_vel.x + self.knock.x - self.body.vel.x) * k;
         self.body.vel.z += (target_vel.z + self.knock.z - self.body.vel.z) * k;
         self.knock *= (1.0 - dt * 6.0).max(0.0);
-        if self.kind.flies() {
+        // A modded flier that has landed (perched or told to sit) falls like anything else.
+        let grounded_flier = self.sitting && matches!(self.kind, MobKind::Modded(_));
+        if self.kind.flies() && !grounded_flier {
             self.body.vel.y += (fly_vy.unwrap_or(0.0) - self.body.vel.y) * k;
         } else if let (true, Some(vy)) = (self.body.in_water, swim_vy) {
             self.body.vel.y += (vy - self.body.vel.y) * k;
@@ -2119,6 +2188,13 @@ fn model(kind: MobKind) -> &'static [Part] {
     }
 }
 
+/// Height of the first solid block below `at` (looking at most `max` blocks
+/// down); if there's none, as far down as it looked.
+pub fn ground_below(world: &World, at: Vec3, max: i32) -> f32 {
+    let (x, y, z) = (at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
+    (0..=max).map(|d| y - d).find(|&yy| is_solid(world.get(x, yy, z))).map(|yy| yy as f32 + 1.0).unwrap_or((y - max) as f32)
+}
+
 /// The body boxes for a modded mob: a base template re-textured with the mod's
 /// own tile. Built fresh each frame (modded mobs are rare), so it needs no
 /// `'static` storage and can carry a per-mob texture.
@@ -2286,6 +2362,11 @@ pub struct Arrow {
     pub appearance: ProjectileAppearance,
     /// Host-only timed effect payload; never included in snapshots.
     pub effect: Option<ProjectileEffect>,
+    /// Host-only: degrees per second it turns toward the nearest player. A
+    /// homing projectile isn't pulled down by gravity.
+    pub homing: f32,
+    /// Host-only: blast radius when it lands (0 = a plain hit).
+    pub blast: f32,
 }
 
 impl Arrow {
@@ -2305,6 +2386,8 @@ impl Arrow {
             modded: false,
             appearance: ProjectileAppearance::default(),
             effect: None,
+            homing: 0.0,
+            blast: 0.0,
         }
     }
 
@@ -2314,7 +2397,9 @@ impl Arrow {
         if self.stuck {
             return false;
         }
-        self.vel.y -= Self::GRAVITY * dt;
+        if self.homing <= 0.0 {
+            self.vel.y -= Self::GRAVITY * dt;
+        }
         self.dir = self.vel.normalize_or(self.dir);
         let d = self.vel * dt;
         let steps = (d.length() / 0.2).ceil().max(1.0) as i32;
@@ -2351,6 +2436,8 @@ impl Arrow {
             modded: false,
             appearance: appearance.normalized(),
             effect: None,
+            homing: 0.0,
+            blast: 0.0,
         }
     }
 

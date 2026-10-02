@@ -232,6 +232,43 @@ attack_reach = 1.5
 aggro_range = 24
 drops = slice 2
 
+// A flier you can tame and breed. It cruises five blocks up, lands for a
+// rest now and then (perches), and follows anyone holding a slice. Feed it
+// slices: half the time it's yours (it sits; right-click to call it along),
+// and two tamed bats fed slices have a baby bat, born tame.
+[mob cheese_bat]
+name = Cheese Bat
+texture = slice
+template = bird
+size = 0.5
+health = 8
+flying = true
+fly_height = 5
+fly_speed = 4
+perches = true
+tame_item = slice
+tame_chance = 0.5
+breed_item = slice
+
+// Its shots curve gently toward you (homing, degrees per second) and burst
+// when they land, hurting everyone within 2.5 blocks (blocks are never harmed).
+[mob cheese_seeker]
+name = Stinky Seeker
+texture = wheel_top
+template = blob
+size = 0.8
+health = 16
+hostile = true
+ranged_damage = 3
+ranged_range = 20
+projectile_model = billboard
+projectile_texture = slice
+projectile_homing = 60
+projectile_blast = 2.5
+ranged_cooldown = 3
+aggro_range = 24
+drops = slice 1
+
 // ---------------------------------------------------------------- recipes
 // Inputs: up to 6 "item count" pairs. Base-game items use their plain names.
 [recipe]

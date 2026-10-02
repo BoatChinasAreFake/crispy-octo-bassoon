@@ -145,6 +145,9 @@ impl Game {
             self.advance_for(who, "sly_friend");
             return Interaction::Ate;
         }
+        if let Some(r) = self.modded_interact(who, i, item, pos) {
+            return r;
+        }
         let m = &mut self.mobs[i];
         match m.kind {
             MobKind::Woofer if m.owner.is_none() => {
@@ -195,6 +198,49 @@ impl Game {
             }
             _ => Interaction::Nothing,
         }
+    }
+
+    /// Taming, feeding, breeding and sitting for a mod-defined mob (see the
+    /// `tame_item`, `tame_chance` and `breed_item` keys in MODDING.md). None:
+    /// not a modded mob, so the usual rules apply.
+    fn modded_interact(&mut self, who: &str, i: usize, item: Id, pos: Vec3) -> Option<Interaction> {
+        let m = &mut self.mobs[i];
+        let def = m.kind.mod_def()?;
+        let mine = m.owner.as_deref() == Some(who);
+        if item != AIR && m.owner.is_none() && def.tame_item == Some(item) {
+            if self.rng.chance(def.tame_chance) {
+                m.owner = Some(who.to_string());
+                m.angry = false;
+                m.flee = 0.0;
+                m.sitting = true;
+                m.persistent = true;
+                self.hearts(pos, 7);
+                self.tell(who, &format!("The {} is yours now. It's sitting; right-click to call it along.", def.name));
+            } else {
+                self.smoke(pos, 5, 0.2);
+            }
+            return Some(Interaction::Ate);
+        }
+        if item != AIR && def.breed_item == Some(item) {
+            if mine && m.health < def.max_health {
+                m.health = (m.health + 4.0).min(def.max_health);
+                self.hearts(pos, 2);
+                return Some(Interaction::Ate);
+            }
+            if (mine || m.owner.is_none()) && m.ready_to_breed() {
+                m.love = LOVE_SECS;
+                m.persistent = true;
+                self.hearts(pos, 4);
+                return Some(Interaction::Ate);
+            }
+            return Some(Interaction::Nothing);
+        }
+        if mine {
+            m.sitting = !m.sitting;
+            m.prey = None;
+            return Some(Interaction::Toggled);
+        }
+        Some(Interaction::Nothing)
     }
 
     /// The local player right-clicked a mob.
@@ -301,7 +347,9 @@ impl Game {
         if !hostile_or_any {
             return;
         }
-        for m in self.mobs.iter_mut().filter(|m| m.owner.as_deref() == Some(owner) && !m.sitting && m.id != target) {
+        // (Modded pets only join in if they can fight.)
+        let fights = |m: &Mob| m.kind.mod_def().is_none_or(|d| d.attack_damage > 0.0);
+        for m in self.mobs.iter_mut().filter(|m| m.owner.as_deref() == Some(owner) && !m.sitting && m.id != target && fights(m)) {
             m.prey = Some(target);
         }
     }
@@ -334,7 +382,8 @@ impl Game {
                         _ => self.mobs[i].prey = None,
                     }
                 }
-                if goal.is_none() && !self.mobs[i].sitting
+                // (One in love goes looking for a partner instead.)
+                if goal.is_none() && !self.mobs[i].sitting && self.mobs[i].love <= 0.0
                     && let Some(o) = owner_at {
                         goal = Some(o);
                         // Left behind: catch up.
@@ -373,6 +422,12 @@ impl Game {
                 let food = if kind == MobKind::Woofer { &[BONE][..] } else { kind.breed_food() };
                 goal = players.iter().filter(|p| food.contains(&p.2) && p.1.distance(pos) < FOOD_RANGE).map(|p| p.1).next();
             }
+            // A wild modded mob follows its breeding food, or what tames it (unless it's out for blood).
+            if goal.is_none() && self.mobs[i].baby <= 0.0 && self.mobs[i].owner.is_none()
+                && let Some(d) = kind.mod_def()
+                && !d.hostile {
+                    goal = players.iter().filter(|p| p.2 != AIR && (d.breed_item == Some(p.2) || d.tame_item == Some(p.2)) && p.1.distance(pos) < FOOD_RANGE).map(|p| p.1).next();
+                }
             // Babies trail after a grown-up of their kind.
             if goal.is_none() && self.mobs[i].baby > 0.0 {
                 goal = (0..n).filter(|&j| self.mobs[j].kind == kind && self.mobs[j].baby <= 0.0 && self.mobs[j].body.pos.distance(pos) < 12.0).map(|j| self.mobs[j].body.pos).next();
@@ -398,14 +453,19 @@ impl Game {
             if self.mobs[i].attack_cd > 0.0 {
                 continue;
             }
-            self.mobs[i].attack_cd = 1.0;
+            let biter = self.mobs[i].kind;
+            // A modded pet bites as hard (and as often) as its data says.
+            let (bite, cd) = biter.mod_def().map(|d| (d.attack_damage, d.attack_cooldown)).unwrap_or((4.0, 1.0));
+            self.mobs[i].attack_cd = cd;
             let from = self.mobs[i].body.pos;
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == prey) {
                 m.hurt = 0.0;
-                m.damage(4.0, from);
+                m.damage(bite, from);
                 let (kind, at) = (m.kind, m.body.pos);
                 self.sfx(Sfx::hurt_of(kind), Some(at));
-                self.sfx(Sfx::Woof, Some(from));
+                if biter == MobKind::Woofer {
+                    self.sfx(Sfx::Woof, Some(from));
+                }
             }
         }
         for (kind, at, owner) in babies {
@@ -415,7 +475,10 @@ impl Game {
             b.set_baby(GROW_SECS);
             b.persistent = true;
             b.breed_cd = GROW_SECS;
-            if kind == MobKind::Woofer {
+            if matches!(kind, MobKind::Modded(_)) {
+                // Tamed parents' babies are born tame.
+                b.owner = owner;
+            } else if kind == MobKind::Woofer {
                 b.owner = owner;
                 b.health = TAMED_HEALTH;
             }
