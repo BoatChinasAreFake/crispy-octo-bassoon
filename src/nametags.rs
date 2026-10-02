@@ -13,8 +13,11 @@ use crate::game::Game;
 use crate::net::Msg;
 use crate::texture::T_SKIN_FIRST;
 
+/// A skin: name, skin tone, hair, shirt, trousers.
+pub type Skin = (&'static str, [u8; 3], [u8; 3], [u8; 3], [u8; 3]);
+
 /// The skins: name, skin tone, hair, shirt, trousers.
-pub const SKINS: [(&str, [u8; 3], [u8; 3], [u8; 3], [u8; 3]); 6] = [
+pub const SKINS: [Skin; 6] = [
     ("Stove", [200, 150, 110], [60, 40, 20], [60, 170, 170], [60, 60, 150]),
     ("Alexa", [230, 185, 150], [200, 100, 40], [80, 160, 70], [110, 80, 50]),
     ("Kettle", [140, 95, 65], [25, 20, 20], [200, 60, 60], [50, 50, 60]),

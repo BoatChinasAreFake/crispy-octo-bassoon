@@ -379,8 +379,8 @@ impl Game {
                     let pw = server.password.clone();
                     let Some(c) = server.get(from) else { return };
                     let Some(nonce) = c.nonce else { return };
-                    if let Some(pw) = pw {
-                        if !proof_matches(&proof, &auth_proof(&nonce, &pw)) {
+                    if let Some(pw) = pw
+                        && !proof_matches(&proof, &auth_proof(&nonce, &pw)) {
                             let who = c.conn.peer_addr();
                             let locked = server.record_failure(from);
                             server.kick(from, "Wrong password.");
@@ -390,7 +390,6 @@ impl Game {
                             }
                             return;
                         }
-                    }
                     self.complete_join(from);
                 }
                 _ => {}
@@ -542,14 +541,13 @@ impl Game {
                         self.block_change_feedback(IVec3::new(x, y, z), old, id);
                     }
                 }
-                if let Some(Net::Host(s)) = &mut self.net {
-                    if let Some(c) = s.get(from) {
+                if let Some(Net::Host(s)) = &mut self.net
+                    && let Some(c) = s.get(from) {
                         c.edit_budget = budget;
                         if !corrections.is_empty() {
                             c.conn.send(&Msg::Blocks(corrections));
                         }
                     }
-                }
             }
             Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, .. } => {
                 self.set_peer_held(from, held, held_ench);
@@ -914,7 +912,7 @@ impl Game {
         }
         // Two slabs make a block.
         if slab_of(old).is_some() {
-            return new == AIR || (new == made_of(old) && new != AIR);
+            return new == AIR || new == made_of(old);
         }
         match new {
             AIR => true,
@@ -948,11 +946,10 @@ impl Game {
             Msg::Blocks(list) => {
                 let quiet = list.len() > 4;
                 for (x, y, z, id) in list {
-                    if let Some(old) = self.world.set_remote(x, y, z, id) {
-                        if !quiet {
+                    if let Some(old) = self.world.set_remote(x, y, z, id)
+                        && !quiet {
                             self.block_change_feedback(IVec3::new(x, y, z), old, id);
                         }
-                    }
                 }
             }
             Msg::PlayerJoin { id, name } => {

@@ -270,6 +270,12 @@ pub fn read_from(path: &std::path::Path) -> io::Result<SaveData> {
     let spawn = [r.f32()?, r.f32()?, r.f32()?];
     let (yaw, pitch, health) = (r.f32()?, r.f32()?, r.f32()?);
     let n = r.u32()? as usize;
+    // Cap before reserving: a damaged header mustn't make us try to allocate
+    // billions of slots (which aborts the process) instead of reporting the
+    // damage. A real inventory is tiny; the matching `wear` list is capped too.
+    if n > 4096 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "save file damaged (bad slot count)"));
+    }
     let mut slots = Vec::with_capacity(n);
     for _ in 0..n {
         let id = if wide { r.u16()? } else { legacy_id(r.u8()?) };
@@ -652,6 +658,33 @@ mod tests {
         write_to(&path, &d).unwrap();
         let again = read_from(&path).unwrap();
         assert_eq!((again.slots, again.palette), (d.slots, d.palette));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_bogus_slot_count_is_rejected_not_allocated() {
+        // A hand-written v16 header whose slot count is absurd. Before the cap,
+        // read_from reached `Vec::with_capacity(n)` with a four-billion n and
+        // aborted the process; now it surfaces a clean "damaged" error, so a
+        // corrupt save fails to load instead of taking the game down.
+        let mut w = W(Vec::new());
+        w.0.extend_from_slice(MAGIC);
+        w.u32(VERSION);
+        w.u32(1); // seed
+        w.u8(0); // survival
+        for _ in 0..10 {
+            w.f32(0.0); // time, pos (3), spawn (3), yaw, pitch, health
+        }
+        w.u32(u32::MAX); // slot count: nonsense
+        let root = tmp("bogus-slots");
+        let path = root.join("w.mncr");
+        std::fs::write(&path, &w.0).unwrap();
+        let err = match read_from(&path) {
+            Ok(_) => panic!("a bogus slot count should not load"),
+            Err(e) => e,
+        };
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("slot count"), "{err}");
         std::fs::remove_dir_all(&root).ok();
     }
 

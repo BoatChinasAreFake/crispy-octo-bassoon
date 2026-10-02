@@ -584,6 +584,8 @@ impl Game {
         g
     }
 
+    // Takes &mut self because it must return the held cursor item to the inventory before snapshotting.
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_save(&mut self) -> SaveData {
         self.inv.return_cursor();
         SaveData {
@@ -1477,11 +1479,10 @@ impl Game {
         let block_dist = hit.as_ref().map(|h| h.dist).unwrap_or(f32::MAX);
         let mut best: Option<(usize, f32)> = None;
         for (i, m) in self.mobs.iter().enumerate() {
-            if let Some(t) = ray_aabb(eye, dir, m.body.min(), m.body.max()) {
-                if t < reach.min(block_dist) && best.map(|b| t < b.1).unwrap_or(true) {
+            if let Some(t) = ray_aabb(eye, dir, m.body.min(), m.body.max())
+                && t < reach.min(block_dist) && best.map(|b| t < b.1).unwrap_or(true) {
                     best = Some((i, t));
                 }
-            }
         }
         let mut ride: Option<(usize, f32)> = None;
         for (i, v) in self.vehicles.iter().enumerate() {
@@ -1639,7 +1640,7 @@ impl Game {
             self.breaking = None;
         }
 
-        if (c.use_pressed || (c.use_held && self.use_cd <= 0.0)) && self.use_cd <= 0.0 {
+        if (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
             self.use_cd = 0.25;
             self.use_item();
         }
@@ -1647,15 +1648,14 @@ impl Game {
             self.use_cd = 0.0;
         }
 
-        if c.pick {
-            if let Some(Target::Block(h)) = &self.target {
+        if c.pick
+            && let Some(Target::Block(h)) = &self.target {
                 let id = self.world.get_v(h.pos);
                 if self.creative && is_block_item(id) {
                     self.inv.slots[self.inv.selected] = Some((id, 64));
                     self.held_name = 2.0;
                 }
             }
-        }
         if c.drop {
             self.throw_held(c.drop_all);
         }
@@ -2525,6 +2525,7 @@ impl Game {
                     MobKind::Rampager => noises.push((Sfx::Roar, m.body.pos)),
                     MobKind::Sizzler | MobKind::Fee => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
+                    MobKind::Modded(_) => {}
                 }
             }
         }
@@ -2604,7 +2605,7 @@ impl Game {
                     let at = m.body.pos + Vec3::Y * 0.5;
                     self.smoke(at, 10, 0.3);
                     let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
-                    let args = vec![m.kind.name().to_ascii_lowercase().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
+                    let args = vec![m.kind.script_name().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
                     self.fire("on_mob_death", args);
                     if m.kind == MobKind::Wyrm {
                         self.wyrm_defeated(at);
@@ -2630,6 +2631,7 @@ impl Game {
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
+                            MobKind::Modded(_) => {}
                         }
                     }
                     // Big Bloops split into smaller ones.
@@ -3136,14 +3138,13 @@ impl Game {
             g.begin(Pass::Blend, [0.0, 0.0, 0.0, 0.55], true);
             // Edges sit entirely outside the block so the (now depth-tested) outline never z-fights.
             outline(&mut g, min - Vec3::splat(0.014), max + Vec3::splat(0.014), 0.012);
-            if let Some((bp, prog)) = self.breaking {
-                if bp == h.pos {
+            if let Some((bp, prog)) = self.breaking
+                && bp == h.pos {
                     let stage = ((prog * 5.0) as u16).min(4);
                     g.begin(Pass::Blend, [1.0; 4], false);
                     let m = Mat4::from_translation(min - Vec3::splat(0.006)) * Mat4::from_scale(max - min + Vec3::splat(0.012));
                     g.cube(&m, [T_CRACK0 + stage; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
                 }
-            }
         }
 
         if !self.third_person && !self.spectator {
@@ -3371,6 +3372,15 @@ fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
     Some(t0)
 }
 
+/// Gliding players lie flat, head first (turned about the middle of the body).
+fn glide_pose(gliding: bool) -> Mat4 {
+    if !gliding {
+        return Mat4::IDENTITY;
+    }
+    let mid = Vec3::Y * 0.9;
+    Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -3423,7 +3433,7 @@ pub(crate) mod tests {
                         continue;
                     }
                     for (n, _, _) in crate::mesher::FACES {
-                        if !is_opaque(w.get(x + n[0], y + n[1], z + n[2])) && !(w.get(x + n[0], y + n[1], z + n[2]) == id && block(id).see_through) {
+                        if !(is_opaque(w.get(x + n[0], y + n[1], z + n[2])) || w.get(x + n[0], y + n[1], z + n[2]) == id && block(id).see_through) {
                             faces += 1;
                         }
                     }
@@ -3975,6 +3985,98 @@ pub(crate) mod tests {
         g.inv.wear[0] = 0;
         g.use_tool(5);
         assert_eq!(g.inv.wear[0], 0);
+    }
+
+    #[test]
+    fn mod_tools_wear_out_and_an_anvil_mends_them() {
+        // A mod tool with its own durability and repair material. Mining wears
+        // it through the normal path, and an anvil mends it with that material.
+        let mod_txt = "\
+[item ruby]
+
+[item ruby_pick]
+durability = 20
+repair = ruby
+
+[item ruby_blade]
+damage = 7
+durability = 900
+repair = ruby
+";
+        crate::mods::with_mods(&[("gems", mod_txt)], |reg| {
+            let ruby = reg.lookup("gems:ruby").unwrap();
+            let pick = reg.lookup("gems:ruby_pick").unwrap();
+            let blade = reg.lookup("gems:ruby_blade").unwrap();
+            // The documented rules: durability is honoured, and a damaging,
+            // non-pickaxe, non-armour mod tool counts as a weapon ("sword").
+            assert_eq!(durability(pick), Some(20));
+            assert_eq!(durability(blade), Some(900));
+            assert!(is_sword(blade) && !is_sword(pick));
+            assert_eq!(crate::anvil::repair_material(pick), Some(ruby));
+
+            let mut g = arena(61);
+            // Mining with the mod tool wears it one use per block, like any tool.
+            g.inv.slots[g.inv.selected] = Some((pick, 1));
+            g.inv.wear[g.inv.selected] = 10;
+            g.world.set(2, 50, 2, STONE);
+            g.break_block(IVec3::new(2, 50, 2), true);
+            assert_eq!(g.inv.wear[g.inv.selected], 11, "the mod tool wore a use");
+
+            // Mend it at an anvil with its repair material (ruby). Each unit
+            // restores a quarter of the max (20 / 4 = 5 uses).
+            let worn = g.inv.wear[g.inv.selected];
+            g.give(ruby, 4);
+            g.xp = crate::xp::points_for_level(30);
+            let anvil_pos = IVec3::new(-2, 50, 0);
+            g.world.set_v(anvil_pos, ANVIL);
+            g.open_anvil(anvil_pos);
+            let ui = g.anvil.as_mut().unwrap();
+            ui.slots[0] = Some((pick, 1));
+            ui.wear[0] = worn;
+            ui.slots[1] = Some((ruby, 4));
+            let (item, plan) = g.anvil_plan().expect("the anvil knows how to mend it");
+            assert_eq!(item, pick);
+            assert_eq!(plan.wear, worn.saturating_sub(5 * plan.used as u32), "a quarter per ruby");
+            assert!(plan.wear < worn && plan.used >= 1);
+            g.anvil_take();
+            assert_eq!(g.inv.cursor, Some((pick, 1)));
+            assert_eq!(g.inv.cursor_wear, plan.wear, "the mended tool is less worn");
+        });
+    }
+
+    #[test]
+    fn mod_armour_is_worn_and_softens_blows() {
+        // A mod chestplate with its own armour points. It equips into the
+        // right slot, counts towards protection, and cuts incoming damage by
+        // the documented 4% per point.
+        let mod_txt = "\
+[item ruby_chestplate]
+armor = chestplate
+armor_points = 5
+looks_like = diamond
+";
+        crate::mods::with_mods(&[("gems", mod_txt)], |reg| {
+            let chest = reg.lookup("gems:ruby_chestplate").unwrap();
+            // armor_of yields (slot, looks_like); armor_points yields K.
+            assert_eq!(armor_of(chest), Some((CHESTPLATE, 3))); // diamond tier = 3
+            assert_eq!(armor_points(chest), 5);
+
+            let mut g = arena(62);
+            // Only the chest slot accepts it: a helmet slot rejects it.
+            g.inv.cursor = Some((chest, 1));
+            g.inv.click_armor(HELMET);
+            assert_eq!(g.inv.armor[HELMET], None, "wrong slot refuses it");
+            g.inv.click_armor(CHESTPLATE);
+            assert_eq!(g.inv.armor[CHESTPLATE], Some((chest, 1)));
+            g.inv.cursor = None;
+            assert_eq!(g.inv.armor_points(), 5);
+
+            // 5 points cut 20% off a hit (4% each): a 10-damage blow does 8.
+            g.player.health = MAX_HEALTH;
+            g.player.hurt = 0.0;
+            g.hurt_player_armored(10.0, "tested mod armour");
+            assert!((g.player.health - (MAX_HEALTH - 8.0)).abs() < 1e-3, "{}", g.player.health);
+        });
     }
 
     #[test]
@@ -5279,14 +5381,5 @@ pub(crate) mod tests {
         assert!(!back.creative);
         std::fs::remove_dir_all(&dir).ok();
     }
-}
-
-/// Gliding players lie flat, head first (turned about the middle of the body).
-fn glide_pose(gliding: bool) -> Mat4 {
-    if !gliding {
-        return Mat4::IDENTITY;
-    }
-    let mid = Vec3::Y * 0.9;
-    Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
 }
 

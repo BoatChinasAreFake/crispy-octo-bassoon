@@ -750,4 +750,43 @@ mod tests {
         assert_eq!(decode(&encode(&map), 4), map);
         assert!(decode(&[1, 2, 3], 4).is_empty());
     }
+
+    #[test]
+    fn a_furnace_smelts_mod_items_and_burns_mod_fuel() {
+        // A mod item that smelts into a base item, and a mod item that burns as
+        // fuel. The whole cooking path (smelt/fuel_secs/accepts/furnace_tick)
+        // must honour mod ids just like base-game ones.
+        let mod_txt = "\
+[item ruby]
+smelts_into = gold
+
+[item fire_dust]
+burns_for = 20
+";
+        crate::mods::with_mods(&[("gems", mod_txt)], |reg| {
+            let ruby = reg.lookup("gems:ruby").unwrap();
+            let fire_dust = reg.lookup("gems:fire_dust").unwrap();
+            assert!(ruby >= FIRST_MOD_ITEM && fire_dust >= FIRST_MOD_ITEM);
+            // The mod data reached the furnace lookups.
+            assert_eq!(smelt(ruby), Some(GOLD_INGOT));
+            assert_eq!(fuel_secs(fire_dust), Some(20.0));
+            // The mod fuel is accepted in the fuel slot (and the input slot takes anything).
+            assert!(accepts(FURNACE, FUEL, fire_dust));
+            assert!(accepts(FURNACE, INPUT, ruby));
+
+            let mut f = Container::for_block(FURNACE);
+            f.slots[INPUT] = Some((ruby, 3));
+            f.slots[FUEL] = Some((fire_dust, 1));
+            // 20s of fuel cooks two rubies (8s each) and starts a third.
+            let mut t = 0.0;
+            while t < 20.0 {
+                f.furnace_tick(0.1);
+                t += 0.1;
+            }
+            assert_eq!(f.slots[OUTPUT], Some((GOLD_INGOT, 2)), "two rubies smelted into gold");
+            assert_eq!(f.slots[INPUT], Some((ruby, 1)));
+            assert_eq!(f.slots[FUEL], None, "the mod fuel was consumed");
+            assert!(f.burn < 0.5, "and all but burnt out ({})", f.burn);
+        });
+    }
 }

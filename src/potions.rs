@@ -298,11 +298,10 @@ impl Game {
         let Some(q) = self.peers.get(&from) else { return };
         let c = (q.target + Vec3::Y).floor().as_ivec3();
         let near_water = (-5..=5).any(|dy| (-5..=5).any(|dz| (-5..=5).any(|dx| is_water(self.world.get_v(c + macroquad::math::ivec3(dx, dy, dz))))));
-        if near_water && self.peer_take(from, GLASS_BOTTLE, 1) {
-            if let Some(l) = self.ledger(from) {
+        if near_water && self.peer_take(from, GLASS_BOTTLE, 1)
+            && let Some(l) = self.ledger(from) {
                 l.bag.add(WATER_BOTTLE, 1);
             }
-        }
     }
 }
 

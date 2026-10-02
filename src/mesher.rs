@@ -479,7 +479,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 if !s2 {
                                     add(p2);
                                 }
-                                if !sc && !(s1 && s2) {
+                                if !(sc || s1 && s2) {
                                     add(pc);
                                 }
                                 v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade + wet, sky / n_s, blk / n_s]);

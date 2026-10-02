@@ -192,6 +192,49 @@ chance = 0.01       // per surface column (max 0.2)
 
 Terrain that was already generated doesn't change. Explore new areas, or start a new world.
 
+### `[mob <name>]`
+
+Defines a new mob *type*. It's a passive wanderer that borrows one of a few base-game body shapes and wears your texture. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items.
+
+| Key | Meaning | Default |
+| --- | --- | --- |
+| `name` | Display name | the section name |
+| `texture` | Painted over the whole body | white |
+| `template` / `model` | Body shape: `quadruped`, `biped`, `blob` or `bird` | `quadruped` |
+| `size` | Body width and height, in blocks | `0.9` |
+| `width`, `height` | Override `size` for one dimension (width 0.2–8, height 0.2–8) | from `size` |
+| `health` | Hit points (1–1000) | `10` |
+| `speed` | Walking-speed multiplier (0.1–4) | `1` |
+| `hostile` | Counts toward the night-time monster cap (it still doesn't attack in this version) | `false` |
+| `drops` | One item it may drop on death: `item [count]` (1–64) | nothing |
+
+```text
+[mob mouse]
+name = Tiny Mouse
+texture = mouse        // a [texture] in this mod, or a base-game name
+template = quadruped
+size = 0.4
+health = 6
+speed = 1.5
+drops = cheese_slice 2
+```
+
+Then, from a `.rhai` script in the same mod folder:
+
+```rust
+fn on_chat(player, text) {
+    if text == "/mouse" {
+        let p = player_pos(player);
+        spawn_mob("mouse", p.x, p.y, p.z);   // resolves "mouse" or "mymod:mouse"
+        return false;
+    }
+}
+```
+
+If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
+
+This first version covers mob *types* with their own stats, drop and a templated look. Behaviours that need code (bosses, taming, trading, flying, custom attacks) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
+
 ### `[splashes]`
 
 Each line is an extra title-screen splash text.
@@ -203,16 +246,16 @@ Each line is an extra title-screen splash text.
 - **Blocks:** `grass dirt stone cobblestone sand gravel water lava log leaves planks glass bedrock coal_ore iron_ore diamond_ore snowy_grass bricks tnt crafting_table glowrock torch flower tall_grass gold_ore pumpkin jack_o_lantern cactus ice bouncy_goo bed cake sponge wool sandstone stone_bricks mossy_cobblestone hay_bale bookshelf lantern mushroom scarecrow weeds farmland farmland_wet wheat_0..wheat_3 carrots_0..carrots_3 potatoes_0..potatoes_3 chest furnace furnace_lit planks_slab cobblestone_slab stone_brick_slab planks_stairs cobblestone_stairs stone_brick_stairs anvil anvil_chipped anvil_damaged glowshroom pointy_rock enchanting_table obsidian zap_ore lever button pressure_plate zap_block zap_lamp scorchrock embersand scorch_gold_ore rail powered_rail sign item_frame sapling fence glass_pane fence_gate ladder trapdoor black_wool red_wool orange_wool yellow_wool green_wool blue_wool purple_wool white_stained_glass black_stained_glass red_stained_glass orange_stained_glass yellow_stained_glass green_stained_glass blue_stained_glass purple_stained_glass ember_shroom brewing_stand zappy_torch repeater piston_north sticky_piston_north dispenser hopper hollow_stone eye_frame wyrm_crystal wyrm_egg spruce_log spruce_leaves jungle_log jungle_leaves mud lily_pad red_sand terracotta orange_terracotta red_terracotta yellow_terracotta dead_bush melon detector_rail comparator beacon` (plus the upside-down and turned variants, joined fences and panes, open gates and trapdoors, facings of pistons, repeaters, comparators, dispensers and hoppers, lit detector rails, the beacon's other effects, door halves, fire and portals, which players don't hold)
 - **Items:** `stick coal iron diamond gunpowder porkchop goo wooden_pickaxe stone_pickaxe iron_pickaxe diamond_pickaxe wooden_sword stone_sword iron_sword diamond_sword gold golden_oinkchop stare_pearl mutton feather cluckets moo_steak bone pointy_stick string bow hoe wheat_seeds wheat carrot potato bone_dust compost wood_ash soil_probe bread fishing_rod cod salmon pufferfish tropical_fish big_bob soggy_boot message_bottle fish_and_chips suspicious_stew worm cooked_oinkchop cooked_mutton cooked_cluckets steak cooked_cod cooked_salmon baked_potato cooked_pufferfish cooked_boot door wool_helmet wool_chestplate wool_leggings wool_boots iron_helmet iron_chestplate iron_leggings iron_boots golden_helmet golden_chestplate golden_leggings golden_boots diamond_helmet diamond_chestplate diamond_leggings diamond_boots bucket water_bucket lava_bucket shears zap_dust book enchanted_book shield sparker boat minecart compass map apple white_dye black_dye red_dye orange_dye yellow_dye green_dye blue_dye purple_dye glass_bottle water_bottle potion_of_healing potion_of_speed potion_of_fire_resistance potion_of_night_vision potion_of_leaping splash_potion_of_healing splash_potion_of_speed splash_potion_of_fire_resistance splash_potion_of_night_vision splash_potion_of_leaping grumbler_tusk saddle staring_eye name_tag melon_slice chest_minecart hopper_minecart`
 
-Furnaces only cook, and only burn, the base-game things listed in the README. Mod items can't be smelted or used as fuel yet. Mod tools and weapons never wear out, and they can't be worn as armour.
+Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](#block-name) to make it smeltable, and [`burns_for`](#block-name) to make it fuel. Mod items with [`durability`](#item-name) wear out as you use them (and the right `damage` makes one a sword), and those with `armor` (plus `armor_points` and `looks_like`) are worn and soften blows just like base-game gear. All of it mends at an anvil with its [`repair`](#item-name) material. See the `[block …]` and `[item …]` tables above for every key.
 
 ## Limits
 
-- Up to **32,000 mod blocks**, **32,000 mod items** and about **3,800 mod textures**, across all mods together.
+- Up to **32,000 mod blocks**, **32,000 mod items**, **222 mod mobs** and about **3,800 mod textures**, across all mods together.
 - 1 MB per file, and 4 MB for all of a server's mods together.
 
 ## Worlds and multiplayer
 
-- **Saves and changing mods:** saves (and each region file, which holds block edits, containers, signs and frames) store mod blocks and items by name. Adding, removing or reordering mods doesn't scramble a world. Blocks from a mod you removed turn into air, and its items disappear.
+- **Saves and changing mods:** saves (and each region file, which holds block edits, containers, signs and frames) store mod blocks and items by name. Adding, removing or reordering mods doesn't scramble a world. Blocks from a mod you removed turn into air, and its items disappear. Saved mod mobs (ones you've tamed, bred, fed or named) are stored by name too; one from a mod you removed is dropped on load rather than turning into some other creature.
 - **Joining a server:** the server's mods replace yours while you're connected, and yours come back when you leave. Servers only send `.txt` and `.png` files.
 - **Dedicated servers:** they load mods from the `mods/` folder where the server runs, and list them in the console at startup.
 - **Turning mods off:** the On/Off buttons on the Mods screen write `mods/disabled.txt`. You can edit that file yourself: one mod folder name per line.

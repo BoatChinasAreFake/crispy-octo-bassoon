@@ -82,8 +82,8 @@ Define any of these functions and the game calls them. Returning `false` from th
   - in single player: **Save World**, or quitting;
   - on a multiplayer host: the host saving;
   - on a dedicated server: every 5 minutes, and on `stop`.
-- **What can be saved:** `()`, true/false, whole numbers, decimals, text, single characters, blobs, arrays and maps, nested inside each other up to 32 levels, and up to 8 MB per mod.
-- **What can't:** function pointers and closures (`Fn("name")`, `|x| ...`). Variables holding them are skipped with a chat message rather than failing the save.
+- **What can be saved:** `()`, true/false, whole numbers, decimals, text, single characters, blobs, arrays and maps, nested inside each other up to 32 levels, and up to 8 MB per mod. Named function pointers (`Fn("on_tick")`) are also saved: only the name is stored, and it is rebound to the matching function when the world loads.
+- **What can't:** closures and curried function pointers (`|x| x + 1`, `Fn("add").curry(10)`). They capture live runtime state that can't be reconstructed on load, so variables holding them are skipped with a chat message rather than failing the save.
 - **Mods switched off:** variables belong to the mod's folder name. If a mod is switched off or missing when a world loads, its saved variables are kept and written back untouched, so turning a mod off for a while doesn't lose its data. Renaming a mod's folder does start it fresh.
 - **Starting over:** to reset a mod's data, overwrite each variable, for example with `set_var("key", ())`.
 
@@ -128,4 +128,5 @@ Errors appear in chat, in the console, and on the Mods screen (errors when loadi
 ## Limitations
 
 - **Joined players:** scripts can read a joined player's position but not their inventory or health.
-- **Scripts can't define new mob types, UI screens or rendering.** Those need a Rust change.
+- **New mob types:** a mod can now define new mob *types* with a `[mob <name>]` section in its `mod.txt` (name, texture, size, health, speed, a drop, and one of a few base body shapes). Because a code mod is a single folder that may ship both `mod.txt` and `.rhai` files, a script can spawn its own data-defined mobs with `spawn_mob("mymob", x, y, z)` (or the mod `spawn <name>` action), and `on_mob_death` reports the mob's name. See the `[mob]` section in [MODDING.md](MODDING.md). These mobs are host-authoritative and sync to joined players like blocks and items. In this first version they are passive wanderers; behaviours that need code (bosses, taming, trading, flying, custom attacks) are not yet configurable from data.
+- **Custom UI screens and bespoke rendering still need a Rust change.** Modded mobs reuse an existing body template painted with the mod's texture; arbitrary per-mob geometry is not exposed. Game screens (menus, inventories, the furnace UI, and so on) are Rust state machines in `ui.rs`/`main.rs` with no scripting surface, so a mod cannot add or replace a screen. These remain out of scope.

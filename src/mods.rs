@@ -47,13 +47,11 @@ pub fn read_disk(dir: &Path) -> Vec<ModSource> {
                 for f in inner.flatten() {
                     let fname = f.file_name().to_string_lossy().to_string();
                     let lower = fname.to_ascii_lowercase();
-                    if (lower.ends_with(".txt") || lower.ends_with(".png") || lower.ends_with(".rhai")) && f.path().is_file() {
-                        if let Ok(bytes) = std::fs::read(f.path()) {
-                            if bytes.len() <= MAX_FILE {
+                    if (lower.ends_with(".txt") || lower.ends_with(".png") || lower.ends_with(".rhai")) && f.path().is_file()
+                        && let Ok(bytes) = std::fs::read(f.path())
+                            && bytes.len() <= MAX_FILE {
                                 files.insert(fname, bytes);
                             }
-                        }
-                    }
                 }
             }
             if files.contains_key("mod.txt") && !id.is_empty() {
@@ -290,6 +288,22 @@ fn parse_color(v: &str) -> Option<[u8; 4]> {
 }
 
 impl Ctx<'_> {
+    /// Resolve a mob name to a wire index for the `spawn` action: a base-game
+    /// kind, or a mod mob in the registry being built (which may be this mod's
+    /// own, so resolve against `self.reg` rather than the installed registry).
+    fn spawn_kind(&self, modid: &str, name: &str) -> Option<u8> {
+        let lower = name.trim().to_ascii_lowercase();
+        if let Some(k) = crate::entity::MobKind::from_base_name_public(&lower) {
+            return Some(k.index());
+        }
+        let keyed = format!("{modid}:{lower}");
+        self.reg
+            .mobs
+            .iter()
+            .position(|m| m.key == lower || m.key == keyed)
+            .map(|i| crate::entity::BASE_MOBS.saturating_add(i.min(crate::entity::MAX_MOD_MOBS - 1) as u8))
+    }
+
     fn resolve(&self, modid: &str, name: &str) -> Option<Id> {
         let name = name.trim().to_ascii_lowercase();
         if name.contains(':') {
@@ -365,7 +379,7 @@ impl Ctx<'_> {
                     "midnight" => Some(Action::SetTime(0.75)),
                     x => x.parse::<f32>().ok().map(|t| Action::SetTime(t.rem_euclid(1.0))),
                 },
-                "spawn" => crate::entity::MobKind::from_name(arg).map(|k| Action::Spawn(k.index())),
+                "spawn" => self.spawn_kind(modid, arg).map(Action::Spawn),
                 _ => None,
             };
             match a {
@@ -449,6 +463,19 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         info.added.1 += 1;
                     }
                 }
+                "mob" if s.name.is_empty() || s.name.contains(':') => {
+                    errs.push(format!("line {}: [mob ...] needs a simple name like [mob mouse]", s.line));
+                }
+                "mob" => {
+                    if reg.mobs.len() >= crate::entity::MAX_MOD_MOBS {
+                        errs.push(format!("line {}: too many mobs across all mods ({} max)", s.line, crate::entity::MAX_MOD_MOBS));
+                    } else if reg.mobs.iter().any(|m| m.key == key) {
+                        errs.push(format!("line {}: {} is defined twice", s.line, s.name));
+                    } else {
+                        // Reserve the slot now (deterministic order); fill it in pass 2.
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, drop: None, template: crate::block::MobTemplate::Quadruped });
+                    }
+                }
                 _ => {}
             }
         }
@@ -472,11 +499,10 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                 errs.push(format!("line {}: [texture] needs a name", s.line));
                 continue;
             }
-            if let Some(px) = build_texture(&mut ctx, m, s, errs) {
-                if let Some(t) = ctx.alloc_tile(px, errs, s.line) {
+            if let Some(px) = build_texture(&mut ctx, m, s, errs)
+                && let Some(t) = ctx.alloc_tile(px, errs, s.line) {
                     ctx.textures.insert(format!("{}:{}", m.id, s.name.to_ascii_lowercase()), t);
                 }
-            }
         }
     }
     for (mi, sections, errs) in parsed.iter_mut() {
@@ -485,14 +511,12 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
             match s.kind.as_str() {
                 "block" => fill_block(&mut ctx, m, s, errs),
                 "item" => fill_item(&mut ctx, m, s, errs),
-                "recipe" => match parse_recipe(&ctx, m, s, errs) {
-                    Some(r) => {
-                        ctx.reg.recipes.push(r);
-                        if let Some(info) = ctx.reg.mods.iter_mut().find(|i| i.id == m.id) {
-                            info.added.2 += 1;
-                        }
+                "mob" => fill_mob(&mut ctx, m, s, errs),
+                "recipe" => if let Some(r) = parse_recipe(&ctx, m, s, errs) {
+                    ctx.reg.recipes.push(r);
+                    if let Some(info) = ctx.reg.mods.iter_mut().find(|i| i.id == m.id) {
+                        info.added.2 += 1;
                     }
-                    None => {}
                 },
                 "ore" => {
                     let b = s.str("block").and_then(|v| ctx.resolve(&m.id, v)).filter(|&b| b < FIRST_ITEM);
@@ -806,6 +830,42 @@ fn fill_item(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) 
     it.consume = flag(s, "consume", true, errs);
 }
 
+fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
+    let key = format!("{}:{}", m.id, s.name.to_ascii_lowercase());
+    let Some(i) = ctx.reg.mobs.iter().position(|mob| mob.key == key) else { return };
+    let tile = s.get("texture").map(|(_, v, l)| ctx.texture(m, v, errs, *l)).unwrap_or(crate::texture::T_WHITE);
+    let template = match s.str("template").or_else(|| s.str("model")) {
+        None => crate::block::MobTemplate::Quadruped,
+        Some(v) => crate::block::MobTemplate::from_name(v).unwrap_or_else(|| {
+            errs.push(format!("line {}: template should be quadruped, biped, blob or bird, not \"{v}\"", s.line));
+            crate::block::MobTemplate::Quadruped
+        }),
+    };
+    // A single `size` sets both dimensions; `width`/`height` override.
+    let size = num(s, "size", 0.9f32, errs);
+    let half_width = (num(s, "width", size, errs) * 0.5).clamp(0.1, 4.0);
+    let height = num(s, "height", size, errs).clamp(0.2, 8.0);
+    let max_health = num(s, "health", 10.0f32, errs).clamp(1.0, 1000.0);
+    let speed = num(s, "speed", 1.0f32, errs).clamp(0.1, 4.0);
+    let hostile = flag(s, "hostile", false, errs);
+    let drop = match s.get("drops") {
+        None => None,
+        Some((_, v, l)) => parse_stack(ctx, &m.id, v, errs, *l),
+    };
+    if let Some(name) = s.str("name") {
+        ctx.reg.mobs[i].name = name.to_string();
+    }
+    let mob = &mut ctx.reg.mobs[i];
+    mob.tile = tile;
+    mob.template = template;
+    mob.half_width = half_width;
+    mob.height = height;
+    mob.max_health = max_health;
+    mob.speed = speed;
+    mob.hostile = hostile;
+    mob.drop = drop;
+}
+
 fn parse_stack(ctx: &Ctx, modid: &str, v: &str, errs: &mut Vec<String>, line: usize) -> Option<(Id, u8)> {
     let mut w = v.split_whitespace();
     let name = w.next()?;
@@ -835,6 +895,45 @@ fn parse_recipe(ctx: &Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) -
         return None;
     }
     Some(Recipe { inputs: ins, output: out })
+}
+
+/// A process-wide lock shared by every test that cares about which registry is
+/// globally installed. The gear/furnace end-to-end tests install a mod
+/// registry for a moment (see `with_mods`); any test that asserts the *base*
+/// registry's exact shape takes the same lock so the two never overlap.
+#[cfg(test)]
+pub(crate) fn registry_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Test helper: build a registry from inline `mod.txt` sources, install it
+/// globally, run `body`, then put the base registry back. Serialised across
+/// the whole test binary (via `registry_test_lock`) so the brief window where
+/// `reg()` holds mod content never overlaps a test that reads the registry.
+/// Returns whatever `body` returns.
+#[cfg(test)]
+pub(crate) fn with_mods<T>(sources: &[(&str, &str)], body: impl FnOnce(&Registry) -> T) -> T {
+    let srcs: Vec<ModSource> = sources
+        .iter()
+        .map(|(id, text)| {
+            let mut files = BTreeMap::new();
+            files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+            ModSource { id: (*id).to_string(), files }
+        })
+        .collect();
+    let reg = build(&srcs, &[]);
+    // Hold the lock for the whole installed window, and always restore the base
+    // registry afterwards (even if `body` panics).
+    let _guard = registry_test_lock();
+    install(reg);
+    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(crate::block::reg())));
+    install(Registry::base());
+    match out {
+        Ok(v) => v,
+        Err(e) => std::panic::resume_unwind(e),
+    }
 }
 
 #[cfg(test)]
@@ -1015,6 +1114,93 @@ armor = hat
         let helmet = &reg.items[(reg.lookup("gems:ruby_helmet").unwrap() - FIRST_ITEM) as usize];
         assert_eq!(helmet.armor, Some(ModArmor { slot: 0, points: 4, looks_like: 2 }));
         assert_eq!(helmet.durability, Some(200));
+    }
+
+    #[test]
+    fn mods_define_new_mob_types() {
+        let text = r#"
+[item nib]
+texture = stick
+
+[mob mouse]
+name = Tiny Mouse
+texture = stone
+template = quadruped
+size = 0.4
+health = 6
+speed = 1.5
+hostile = false
+drops = nib 2
+
+[mob brute]
+texture = stone
+template = biped
+width = 0.8
+height = 2.1
+health = 40
+hostile = true
+
+[mob bad]
+template = dragon
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "zoo".into(), files }], &[]);
+        // The only error is the unknown template.
+        let errs = &reg.mods[0].errors;
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].contains("template"));
+        // Two mobs, in declaration order.
+        assert_eq!(reg.mobs.len(), 3);
+        let mouse = &reg.mobs[0];
+        assert_eq!(mouse.key, "zoo:mouse");
+        assert_eq!(mouse.name, "Tiny Mouse");
+        assert_eq!(mouse.template, crate::block::MobTemplate::Quadruped);
+        assert_eq!(mouse.max_health, 6.0);
+        assert_eq!(mouse.speed, 1.5);
+        assert!(!mouse.hostile);
+        assert_eq!(mouse.half_width, 0.2);
+        assert_eq!(mouse.height, 0.4);
+        let nib = reg.lookup("zoo:nib").unwrap();
+        assert_eq!(mouse.drop, Some((nib, 2)));
+        // A base-atlas texture name resolves to that tile (no mod tile needed).
+        assert_eq!(mouse.tile, crate::texture::T_STONE);
+        let brute = &reg.mobs[1];
+        assert_eq!(brute.template, crate::block::MobTemplate::Biped);
+        assert_eq!((brute.half_width, brute.height), (0.4, 2.1));
+        assert!(brute.hostile);
+        // The one with an unknown template still exists, with the default shape.
+        assert_eq!(reg.mobs[2].template, crate::block::MobTemplate::Quadruped);
+    }
+
+    #[test]
+    fn a_mob_section_needs_a_name() {
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), b"[mob]\nhealth = 5\n".to_vec());
+        let reg = build(&[ModSource { id: "z".into(), files }], &[]);
+        assert!(reg.mobs.is_empty());
+        assert!(reg.mods[0].errors.iter().any(|e| e.contains("[mob ...] needs a simple name")));
+    }
+
+    #[test]
+    fn mod_mob_resolves_by_name_once_installed() {
+        use crate::entity::MobKind;
+        let src = "[mob mouse]\ntexture = stone\nhealth = 6\n";
+        with_mods(&[("zoo", src)], |reg| {
+            assert_eq!(reg.mobs.len(), 1);
+            // Resolves by full key, bare name, and both are the same Modded kind.
+            let k = MobKind::from_name("zoo:mouse").expect("key resolves");
+            assert_eq!(k, MobKind::Modded(0));
+            assert_eq!(MobKind::from_name("mouse"), Some(k));
+            // It carries the def's stats, and renders from a (non-empty) template.
+            assert_eq!(k.max_health(), 6.0);
+            assert_eq!(k.name(), "mouse");
+            assert!(!crate::entity::modded_parts(&reg.mobs[0]).is_empty());
+            // Round-trips through the wire index.
+            assert_eq!(MobKind::from_index(k.index()), Some(k));
+            // One past the end is unknown, not a panic.
+            assert_eq!(MobKind::from_index(k.index() + 1), None);
+        });
     }
 
     #[test]

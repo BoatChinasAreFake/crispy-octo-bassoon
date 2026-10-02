@@ -710,6 +710,58 @@ impl World {
     }
 }
 
+/// A buried ruin: walls sunk into the ground (a few stones poking up give it
+/// away) and fill hiding suspicious blocks, more of them the deeper you go.
+fn ruin_blocks(site: &Site) -> Vec<(IVec3, Id)> {
+    let o = site.origin;
+    let s = site.seed;
+    let mut out = Vec::new();
+    let (wall, fill, sus, floor): (&[Id], Id, Id, Id) = match site.kind {
+        Kind::DesertRuins => (&[SANDSTONE, SANDSTONE, TERRACOTTA + 1], SAND, SUSPICIOUS_SAND, SANDSTONE),
+        Kind::TrailRuins => (&[TERRACOTTA, TERRACOTTA + 2, BRICK, MUD, TERRACOTTA + 3], GRAVEL, SUSPICIOUS_GRAVEL, BRICK),
+        _ => (&[STONE_BRICKS, MOSSY_COBBLE, STONE_BRICKS], SAND, SUSPICIOUS_SAND, STONE_BRICKS),
+    };
+    let ocean = site.kind == Kind::OceanRuins;
+    // Two overlapping rooms, so the footprint isn't just a square.
+    let rooms = [(0, 0, 4 + (s % 2) as i32), (3 + (s % 3) as i32, -2 - (s % 2) as i32, 3)];
+    let inside = |x: i32, z: i32| rooms.iter().any(|&(rx, rz, r)| (x - rx).abs() < r && (z - rz).abs() < r);
+    let on_wall = |x: i32, z: i32| !inside(x, z) && rooms.iter().any(|&(rx, rz, r)| (x - rx).abs() <= r && (z - rz).abs() <= r);
+    let depth = if ocean { 4 } else { 8 };
+    for x in -8..=10 {
+        for z in -8..=8 {
+            let (wall_here, in_here) = (on_wall(x, z), inside(x, z));
+            if !wall_here && !in_here {
+                continue;
+            }
+            for y in -depth..=2 {
+                let p = ivec3(o.x + x, o.y + y, o.z + z);
+                let r = hash3(s, x, y, z);
+                if y == -depth {
+                    out.push((p, floor));
+                } else if wall_here {
+                    // Ruined: underground it's whole, above ground just a stub here and there.
+                    let keep = if ocean { y <= 1 && r < 0.75 } else { y < 0 || (y == 0 && r < 0.35) || (y == 1 && r < 0.12) };
+                    if keep {
+                        out.push((p, wall[(hash3(s ^ 9, x, y, z) * wall.len() as f32) as usize % wall.len()]));
+                    }
+                } else if y < 0 {
+                    // Fill, with finds; deeper fill hides more.
+                    let chance = 0.05 + (-y) as f32 * 0.012;
+                    out.push((p, if r < chance { sus } else { fill }));
+                } else if ocean && y == 0 && r < 0.08 {
+                    out.push((p, sus));
+                }
+            }
+            // The odd pot left standing at the bottom of a room.
+            if in_here && hash3(s ^ 0x907, x, 0, z) < 0.04 {
+                let shard = 1 + (hash3(s ^ 0x908, x, 0, z) * 12.0) as Id % 12;
+                out.push((ivec3(o.x + x, o.y - depth + 1, o.z + z), POT_FIRST + shard));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,56 +823,4 @@ mod tests {
         let (lx, lz) = (o.x - cx * CW, o.z - cz * CW);
         assert_eq!(blocks[crate::world::idx(lx, o.y, lz)], PLANKS, "the hut floor");
     }
-}
-
-/// A buried ruin: walls sunk into the ground (a few stones poking up give it
-/// away) and fill hiding suspicious blocks, more of them the deeper you go.
-fn ruin_blocks(site: &Site) -> Vec<(IVec3, Id)> {
-    let o = site.origin;
-    let s = site.seed;
-    let mut out = Vec::new();
-    let (wall, fill, sus, floor): (&[Id], Id, Id, Id) = match site.kind {
-        Kind::DesertRuins => (&[SANDSTONE, SANDSTONE, TERRACOTTA + 1], SAND, SUSPICIOUS_SAND, SANDSTONE),
-        Kind::TrailRuins => (&[TERRACOTTA, TERRACOTTA + 2, BRICK, MUD, TERRACOTTA + 3], GRAVEL, SUSPICIOUS_GRAVEL, BRICK),
-        _ => (&[STONE_BRICKS, MOSSY_COBBLE, STONE_BRICKS], SAND, SUSPICIOUS_SAND, STONE_BRICKS),
-    };
-    let ocean = site.kind == Kind::OceanRuins;
-    // Two overlapping rooms, so the footprint isn't just a square.
-    let rooms = [(0, 0, 4 + (s % 2) as i32), (3 + (s % 3) as i32, -2 - (s % 2) as i32, 3)];
-    let inside = |x: i32, z: i32| rooms.iter().any(|&(rx, rz, r)| (x - rx).abs() < r && (z - rz).abs() < r);
-    let on_wall = |x: i32, z: i32| !inside(x, z) && rooms.iter().any(|&(rx, rz, r)| (x - rx).abs() <= r && (z - rz).abs() <= r);
-    let depth = if ocean { 4 } else { 8 };
-    for x in -8..=10 {
-        for z in -8..=8 {
-            let (wall_here, in_here) = (on_wall(x, z), inside(x, z));
-            if !wall_here && !in_here {
-                continue;
-            }
-            for y in -depth..=2 {
-                let p = ivec3(o.x + x, o.y + y, o.z + z);
-                let r = hash3(s, x, y, z);
-                if y == -depth {
-                    out.push((p, floor));
-                } else if wall_here {
-                    // Ruined: underground it's whole, above ground just a stub here and there.
-                    let keep = if ocean { y <= 1 && r < 0.75 } else { y < 0 || (y == 0 && r < 0.35) || (y == 1 && r < 0.12) };
-                    if keep {
-                        out.push((p, wall[(hash3(s ^ 9, x, y, z) * wall.len() as f32) as usize % wall.len()]));
-                    }
-                } else if y < 0 {
-                    // Fill, with finds; deeper fill hides more.
-                    let chance = 0.05 + (-y) as f32 * 0.012;
-                    out.push((p, if r < chance { sus } else { fill }));
-                } else if ocean && y == 0 && r < 0.08 {
-                    out.push((p, sus));
-                }
-            }
-            // The odd pot left standing at the bottom of a room.
-            if in_here && hash3(s ^ 0x907, x, 0, z) < 0.04 {
-                let shard = 1 + (hash3(s ^ 0x908, x, 0, z) * 12.0) as Id % 12;
-                out.push((ivec3(o.x + x, o.y - depth + 1, o.z + z), POT_FIRST + shard));
-            }
-        }
-    }
-    out
 }

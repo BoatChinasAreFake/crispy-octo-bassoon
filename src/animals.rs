@@ -334,18 +334,16 @@ impl Game {
                         _ => self.mobs[i].prey = None,
                     }
                 }
-                if goal.is_none() && !self.mobs[i].sitting {
-                    if let Some(o) = owner_at {
+                if goal.is_none() && !self.mobs[i].sitting
+                    && let Some(o) = owner_at {
                         goal = Some(o);
                         // Left behind: catch up.
-                        if o.distance(pos) > LEASH && self.world.is_loaded(o.x.floor() as i32, o.z.floor() as i32) {
-                            if let Some(spot) = crate::entity::warp_spot(&self.world, o, 2.5, &mut self.rng) {
+                        if o.distance(pos) > LEASH && self.world.is_loaded(o.x.floor() as i32, o.z.floor() as i32)
+                            && let Some(spot) = crate::entity::warp_spot(&self.world, o, 2.5, &mut self.rng) {
                                 self.mobs[i].body.pos = spot;
                                 self.mobs[i].body.vel = Vec3::ZERO;
                             }
-                        }
                     }
-                }
             }
             // In love: find a partner.
             if goal.is_none() && self.mobs[i].love > 0.0 {
@@ -434,13 +432,29 @@ impl Game {
 
 // ------------------------------------------------------------------ saving
 
+/// Marks a mod-defined mob in the save stream: the kind byte is this sentinel,
+/// then a length-prefixed "modid:name" key (base kinds never reach 255; see
+/// `MAX_MOD_MOBS`).
+const MODDED_MOB_TAG: u8 = 255;
+
 /// A mob kept in the save file (only the ones worth keeping: see `Mob::persistent`).
 pub fn encode_mobs(mobs: &[Mob], names: &std::collections::HashMap<u32, String>) -> Vec<u8> {
     let mut out = Vec::new();
     let keep: Vec<&Mob> = mobs.iter().filter(|m| m.persistent && m.health > 0.0).collect();
     out.extend_from_slice(&(keep.len() as u32).to_le_bytes());
     for m in keep {
-        out.push(m.kind.index());
+        // Base kinds store their stable index. A mod-defined kind stores a 255
+        // sentinel then its "modid:name" key, so a save survives mods being
+        // added, removed or reordered (an unknown key is dropped on load).
+        if let MobKind::Modded(_) = m.kind {
+            out.push(MODDED_MOB_TAG);
+            let key = m.kind.mod_def().map(|d| d.key.as_str()).unwrap_or("");
+            let key = &key.as_bytes()[..key.len().min(255)];
+            out.push(key.len() as u8);
+            out.extend_from_slice(key);
+        } else {
+            out.push(m.kind.index());
+        }
         for v in [m.body.pos.x, m.body.pos.y, m.body.pos.z, m.yaw, m.health, m.baby.max(0.0), m.breed_cd] {
             out.extend_from_slice(&v.to_le_bytes());
         }
@@ -484,7 +498,19 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
     };
     let Some(count) = take(4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])) else { return v };
     for _ in 0..count.min(4096) {
-        let Some(kind) = take(1).and_then(|s| MobKind::from_index(s[0])) else { break };
+        let Some(tag) = take(1).map(|s| s[0]) else { break };
+        // A modded mob stored its key by name; resolve it against the loaded
+        // mods, and skip (drop) the mob if that mod is no longer present.
+        let kind = if tag == MODDED_MOB_TAG {
+            let Some(len) = take(1).map(|s| s[0] as usize) else { break };
+            let Some(key) = take(len).map(|s| String::from_utf8_lossy(s).into_owned()) else { break };
+            MobKind::from_name(&key)
+        } else {
+            MobKind::from_index(tag)
+        };
+        // Unknown or removed kind: still consume this record's bytes, then drop it.
+        let known = kind.is_some();
+        let kind = kind.unwrap_or(MobKind::Oinker);
         let Some(f) = take(28).map(|s| (0..7).map(|k| f32::from_le_bytes([s[k * 4], s[k * 4 + 1], s[k * 4 + 2], s[k * 4 + 3]])).collect::<Vec<f32>>()) else { break };
         let Some(&[size, flags]) = take(2) else { break };
         let Some(seed) = take(4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])) else { break };
@@ -498,7 +524,7 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
         } else {
             None
         };
-        if !f.iter().all(|x| x.is_finite()) {
+        if !known || !f.iter().all(|x| x.is_finite()) {
             continue;
         }
         let mut m = Mob::new(kind, Vec3::new(f[0], f[1], f[2]), rng).with_size(size.max(1));
@@ -516,4 +542,38 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
         v.push((m, name));
     }
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::noise::Rng;
+    use std::collections::HashMap;
+
+    /// A saved modded mob comes back while its mod is loaded, and is dropped
+    /// gracefully (not scrambled into some other kind) once the mod is gone.
+    #[test]
+    fn modded_mobs_save_by_name_and_degrade_gracefully() {
+        let src = "[mob mouse]\ntexture = stone\nhealth = 6\n";
+        // Encode a persistent modded mob (plus a base one) with the mod loaded.
+        let bytes = crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let kind = MobKind::from_name("zoo:mouse").expect("resolves");
+            let mut rng = Rng::new(1);
+            let mut modded = Mob::new(kind, Vec3::new(1.0, 64.0, 2.0), &mut rng);
+            modded.persistent = true;
+            let mut pig = Mob::new(MobKind::Oinker, Vec3::new(3.0, 64.0, 4.0), &mut rng);
+            pig.persistent = true;
+            let bytes = encode_mobs(&[modded, pig], &HashMap::new());
+            // With the mod still loaded, both come back, the modded one intact.
+            let back = decode_mobs(&bytes, &mut Rng::new(2));
+            assert_eq!(back.len(), 2);
+            assert_eq!(back[0].kind, kind);
+            assert_eq!(back[1].kind, MobKind::Oinker);
+            bytes
+        });
+        // The mod is gone now: the modded mob is dropped, the base one survives.
+        let back = decode_mobs(&bytes, &mut Rng::new(3));
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].kind, MobKind::Oinker);
+    }
 }
