@@ -231,6 +231,8 @@ fn on_chat(player, text) {
 }
 ```
 
+If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
+
 This first version covers mob *types* with their own stats, drop and a templated look. Behaviours that need code (bosses, taming, trading, flying, custom attacks) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
 
 ### `[splashes]`

@@ -2319,4 +2319,28 @@ mod tests {
             assert!(matches!(drop, Some((crate::block::STICK, n)) if (1..=3).contains(&n)));
         });
     }
+
+    #[test]
+    fn modded_index_never_reaches_the_save_sentinel() {
+        // The save/wire code (animals::encode_mobs) uses 255 as the "modded mob,
+        // read a name" sentinel, so a modded kind's one-byte index must never be
+        // able to reach it. The only thing guaranteeing that is MAX_MOD_MOBS, so
+        // pin the boundary: the highest allotable modded index stays strictly
+        // below 255. A future bump to BASE_MOBS or MAX_MOD_MOBS that erodes this
+        // headroom fails here loudly.
+        const SAVE_SENTINEL: usize = 255;
+        let highest_modded_index = BASE_MOBS as usize + (MAX_MOD_MOBS - 1);
+        assert!(
+            highest_modded_index < SAVE_SENTINEL,
+            "modded index {highest_modded_index} must stay below the {SAVE_SENTINEL} save sentinel",
+        );
+
+        // The index arithmetic round-trips at the top of the modded range. We
+        // test the pure math (index -> byte) without installing a registry, then
+        // confirm the byte is still below the sentinel and fits a u8.
+        let top = MobKind::Modded(MAX_MOD_MOBS as u16 - 1);
+        let byte = top.index();
+        assert_eq!(byte as usize, highest_modded_index);
+        assert!((byte as usize) < SAVE_SENTINEL);
+    }
 }
