@@ -473,7 +473,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, drop: None, template: crate::block::MobTemplate::Quadruped });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, drop: None, template: crate::block::MobTemplate::Quadruped });
                     }
                 }
                 _ => {}
@@ -848,6 +848,16 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     let max_health = num(s, "health", 10.0f32, errs).clamp(1.0, 1000.0);
     let speed = num(s, "speed", 1.0f32, errs).clamp(0.1, 4.0);
     let hostile = flag(s, "hostile", false, errs);
+    // Melee attack parameters. All clamped so a malformed/adversarial mod cannot
+    // wedge or exploit the sim. BACKWARD COMPAT: attack_damage defaults to 0.0,
+    // so an existing [mob] with hostile=true but no attack fields keeps the exact
+    // v1 behavior (counts toward the monster cap but never attacks). A mob attacks
+    // only when it is hostile AND attack_damage > 0.0.
+    let attack_damage = num(s, "attack_damage", 0.0f32, errs).clamp(0.0, 50.0);
+    let attack_reach = num(s, "attack_reach", 1.3f32, errs).clamp(0.5, 4.0);
+    let aggro_range = num(s, "aggro_range", 16.0f32, errs).clamp(1.0, 48.0);
+    // The 0.25 minimum is essential: it prevents a zero-cooldown DPS exploit.
+    let attack_cooldown = num(s, "attack_cooldown", 1.0f32, errs).clamp(0.25, 10.0);
     let drop = match s.get("drops") {
         None => None,
         Some((_, v, l)) => parse_stack(ctx, &m.id, v, errs, *l),
@@ -863,6 +873,10 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.max_health = max_health;
     mob.speed = speed;
     mob.hostile = hostile;
+    mob.attack_damage = attack_damage;
+    mob.attack_reach = attack_reach;
+    mob.aggro_range = aggro_range;
+    mob.attack_cooldown = attack_cooldown;
     mob.drop = drop;
 }
 
@@ -1171,6 +1185,45 @@ template = dragon
         assert!(brute.hostile);
         // The one with an unknown template still exists, with the default shape.
         assert_eq!(reg.mobs[2].template, crate::block::MobTemplate::Quadruped);
+    }
+
+    #[test]
+    fn mob_attack_fields_parse_and_clamp() {
+        let text = r#"
+[mob fierce]
+texture = stone
+template = biped
+hostile = true
+attack_damage = 999
+attack_reach = 99
+aggro_range = 999
+attack_cooldown = 0.01
+
+[mob gentle]
+texture = stone
+template = quadruped
+hostile = true
+attack_reach = 0.1
+aggro_range = 0.1
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "zoo".into(), files }], &[]);
+        assert!(reg.mods[0].errors.is_empty(), "{:?}", reg.mods[0].errors);
+        let fierce = &reg.mobs[0];
+        // Over-range values clamp down to their maxima.
+        assert_eq!(fierce.attack_damage, 50.0, "damage clamps to 50");
+        assert_eq!(fierce.attack_reach, 4.0, "reach clamps to 4");
+        assert_eq!(fierce.aggro_range, 48.0, "aggro clamps to 48");
+        // The critical anti-DPS-exploit clamp: cooldown has a 0.25 minimum.
+        assert_eq!(fierce.attack_cooldown, 0.25, "cooldown clamps up to 0.25");
+        // Under-range reach/aggro clamp up to their minima.
+        let gentle = &reg.mobs[1];
+        assert_eq!(gentle.attack_reach, 0.5, "reach clamps up to 0.5");
+        assert_eq!(gentle.aggro_range, 1.0, "aggro clamps up to 1.0");
+        // Backward compat: no attack fields -> attack_damage defaults to 0.0.
+        assert_eq!(gentle.attack_damage, 0.0, "default attack_damage is 0.0 (non-attacking)");
+        assert_eq!(gentle.attack_cooldown, 1.0, "default cooldown is 1.0");
     }
 
     #[test]

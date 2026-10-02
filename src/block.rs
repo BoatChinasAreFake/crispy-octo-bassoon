@@ -949,12 +949,17 @@ pub struct ModArmor {
 
 /// A new mob type defined by a mod (a `[mob <name>]` section in `mod.txt`).
 ///
-/// This is the first, data-driven version: a modded mob is a passive wanderer
-/// that borrows one of a handful of base-game body shapes (`template`) and
-/// paints it with the mod's own texture tile. It has its own size, health,
-/// walking speed and (optionally) a single drop. Behaviours that need code
-/// (bosses, taming, raids, trading, flying) are deliberately out of scope so
-/// no modded mob can wedge the AI or the renderer. See MODDING.md.
+/// A modded mob borrows one of a handful of base-game body shapes (`template`)
+/// and paints it with the mod's own texture tile. It has its own size, health,
+/// walking speed and (optionally) a single drop. A `hostile` mob with
+/// `attack_damage > 0` will pursue and melee-attack players exactly like a base
+/// hostile mob (host-authoritative and deterministic); a `hostile` mob with
+/// `attack_damage == 0` only counts toward the night-time monster cap and
+/// otherwise behaves like a passive wanderer (the backward-compatible default,
+/// so existing mod.txt files are unchanged). Behaviours that need code (bosses,
+/// taming, raids, trading, flying, ranged/projectile attacks, bespoke
+/// geometry/UI) are deliberately out of scope so no modded mob can wedge the
+/// AI or the renderer. See MODDING.md.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModMob {
     /// Stable identifier, e.g. "cheese:mouse" (used by saves and `from_name`).
@@ -969,9 +974,22 @@ pub struct ModMob {
     pub max_health: f32,
     /// Walking speed multiplier over the base wander speed.
     pub speed: f32,
-    /// Counts toward the night-time monster cap and chases the player.
-    /// (v1 modded mobs never actually attack; `hostile` only affects spawning.)
+    /// Counts toward the night-time monster cap. When combined with
+    /// `attack_damage > 0` the mob also pursues and melee-attacks players.
     pub hostile: bool,
+    /// Melee damage dealt to a player per hit. `0.0` (the default) means the
+    /// mob never attacks, even when `hostile` is true (backward compatible).
+    /// Clamped to `0.0..=50.0` at parse time.
+    pub attack_damage: f32,
+    /// Horizontal distance within which the mob can land a melee hit.
+    /// Clamped to `0.5..=4.0` at parse time (default `1.3`).
+    pub attack_reach: f32,
+    /// How far the mob will notice and pursue a player.
+    /// Clamped to `1.0..=48.0` at parse time (default `16.0`).
+    pub aggro_range: f32,
+    /// Seconds between hits. The non-zero minimum prevents a zero-cooldown DPS
+    /// exploit. Clamped to `0.25..=10.0` at parse time (default `1.0`).
+    pub attack_cooldown: f32,
     /// One item it may drop on death: (item id, up to this many).
     pub drop: Option<(Id, u8)>,
     /// Which base-game body shape to render with.

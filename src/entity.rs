@@ -482,8 +482,9 @@ impl MobKind {
     /// (Starers and daytime Webbers are only hostile once provoked, but they keep monster hours.)
     pub fn hostile(self) -> bool {
         if let MobKind::Modded(_) = self {
-            // Modded mobs never actually attack in v1; `hostile` only decides
-            // whether they spawn at night and count toward the monster cap.
+            // `hostile` decides whether a modded mob spawns at night and counts
+            // toward the monster cap. Whether it also attacks additionally
+            // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
         !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee)
@@ -1339,8 +1340,34 @@ impl Mob {
                 }
             }
             MobKind::Modded(_) => {
-                // v1 modded mobs are passive wanderers: flee when hit, else amble.
-                if self.flee > 0.0 {
+                // A hostile modded mob with attack_damage > 0 pursues and melee-
+                // attacks the player, mirroring the base Groaner. A mob that is
+                // not hostile or has attack_damage == 0 (the backward-compatible
+                // default) stays a passive wanderer that flees when hit. All of
+                // this runs host-side so it stays deterministic and host-
+                // authoritative; the HurtPlayer event is applied in game.rs.
+                let attacking = self
+                    .kind
+                    .mod_def()
+                    .map(|d| (d.hostile && d.attack_damage > 0.0, d))
+                    .filter(|(a, _)| *a)
+                    .map(|(_, d)| d);
+                if let Some(def) = attacking {
+                    if player_visible && dist < def.aggro_range {
+                        // Pursue at the base chase speed scaled by the def's speed.
+                        want = Some((face, 2.3 * def.speed));
+                        if flat.length() < def.attack_reach
+                            && to_player.y.abs() < 1.6
+                            && self.attack_cd <= 0.0
+                        {
+                            // Fixed &'static cause (HurtPlayer takes a &'static str,
+                            // so we cannot use the mob's dynamic name here).
+                            ev.push(MobEvent::HurtPlayer(def.attack_damage, "was mauled by a monster"));
+                            self.attack_cd = def.attack_cooldown;
+                        }
+                    }
+                } else if self.flee > 0.0 {
+                    // Passive / non-attacking: flee when hit, else amble.
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 }
             }
@@ -2342,5 +2369,100 @@ mod tests {
         let byte = top.index();
         assert_eq!(byte as usize, highest_modded_index);
         assert!((byte as usize) < SAVE_SENTINEL);
+    }
+
+    /// Count the HurtPlayer events in a tick, returning (count, total_damage).
+    fn hurt_hits(ev: &[MobEvent]) -> (usize, f32) {
+        let mut n = 0;
+        let mut dmg = 0.0;
+        for e in ev {
+            if let MobEvent::HurtPlayer(d, _) = e {
+                n += 1;
+                dmg += *d;
+            }
+        }
+        (n, dmg)
+    }
+
+    #[test]
+    fn hostile_modded_mob_attacks_in_reach_then_respects_cooldown() {
+        let src = "[mob biter]\nname = Biter\ntexture = stone\ntemplate = biped\nsize = 0.9\nhealth = 20\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 20\nattack_cooldown = 1.5\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let k = MobKind::from_name("zoo:biter").expect("resolves");
+            assert!(k.hostile());
+            let def = k.mod_def().expect("def");
+            assert_eq!(def.attack_damage, 4.0);
+            assert_eq!(def.attack_cooldown, 1.5);
+
+            let mut rng = Rng::new(7);
+            let world = World::new(1);
+            let pos = Vec3::new(0.0, 80.0, 0.0);
+            let mut m = Mob::new(k, pos, &mut rng);
+            // Place the player right next to the mob (within attack_reach).
+            let player = Vec3::new(1.0, 80.0, 0.0);
+            // Cooldown starts at 0, so the first tick lands exactly one hit.
+            let ev = m.update(0.05, &world, player, true, 1.0, &mut rng);
+            let (n, dmg) = hurt_hits(&ev);
+            assert_eq!(n, 1, "exactly one HurtPlayer on the first in-reach tick");
+            assert_eq!(dmg, 4.0, "deals the configured attack_damage");
+            // The cooldown is now set to the configured value, so the very next
+            // tick (minus the small dt decrement) must not attack again.
+            assert!(m.attack_cd > 1.0);
+            let ev2 = m.update(0.05, &world, player, true, 1.0, &mut rng);
+            assert_eq!(hurt_hits(&ev2).0, 0, "respects the cooldown on the next tick");
+        });
+    }
+
+    #[test]
+    fn hostile_modded_mob_in_aggro_but_out_of_reach_does_not_attack() {
+        let src = "[mob biter]\nname = Biter\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 20\nattack_cooldown = 1.0\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let k = MobKind::from_name("zoo:biter").expect("resolves");
+            let mut rng = Rng::new(11);
+            let world = World::new(1);
+            let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            // Within aggro_range (20) but well beyond attack_reach (1.5).
+            let player = Vec3::new(8.0, 80.0, 0.0);
+            let ev = m.update(0.05, &world, player, true, 1.0, &mut rng);
+            assert_eq!(hurt_hits(&ev).0, 0, "no hit beyond attack_reach");
+            // It should still be pursuing (its yaw turns toward the player: +x).
+            assert!(m.body.vel.x > 0.0 || m.yaw.abs() < std::f32::consts::FRAC_PI_2);
+        });
+    }
+
+    #[test]
+    fn hostile_mob_without_damage_and_nonhostile_mob_never_attack() {
+        // hostile = true but attack_damage left at the default 0.0.
+        let passive_hostile = "[mob lurker]\nname = Lurker\ntexture = stone\ntemplate = biped\nhostile = true\n";
+        crate::mods::with_mods(&[("zoo", passive_hostile)], |_reg| {
+            let k = MobKind::from_name("zoo:lurker").expect("resolves");
+            assert!(k.hostile());
+            assert_eq!(k.mod_def().unwrap().attack_damage, 0.0);
+            let mut rng = Rng::new(3);
+            let world = World::new(1);
+            let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            let player = Vec3::new(0.5, 80.0, 0.0); // adjacent
+            for _ in 0..20 {
+                let ev = m.update(0.05, &world, player, true, 1.0, &mut rng);
+                assert_eq!(hurt_hits(&ev).0, 0, "attack_damage == 0 never attacks");
+            }
+        });
+
+        // A plain non-hostile mob never attacks either, and still flees when hit.
+        let passive = "[mob mouse]\nname = Mouse\ntexture = stone\ntemplate = quadruped\n";
+        crate::mods::with_mods(&[("zoo", passive)], |_reg| {
+            let k = MobKind::from_name("zoo:mouse").expect("resolves");
+            assert!(!k.hostile());
+            let mut rng = Rng::new(5);
+            let world = World::new(1);
+            let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            let player = Vec3::new(0.5, 80.0, 0.0);
+            for _ in 0..20 {
+                let ev = m.update(0.05, &world, player, true, 1.0, &mut rng);
+                assert_eq!(hurt_hits(&ev).0, 0, "non-hostile never attacks");
+            }
+            m.damage(2.0, Vec3::ZERO);
+            assert!(m.flee > 0.0, "passive flee-when-hit behavior is preserved");
+        });
     }
 }
