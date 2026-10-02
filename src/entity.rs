@@ -2448,11 +2448,40 @@ mod tests {
             arrow.appearance = appearance;
             let mut geo = DynGeo::default();
             arrow.draw(&mut geo, &world, pos + Vec3::X * 4.0);
-            (geo.mesh.verts.len(), geo.mesh.idx.len())
+            geo
         };
-        assert_eq!(render(ProjectileAppearance { model: ProjectileModel::Arrow, tile: Some(T_STONE), scale: 2.0 }), (24, 36));
-        assert_eq!(render(ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(T_STONE), scale: 1.0 }), (8, 12));
-        assert_eq!(render(ProjectileAppearance { model: ProjectileModel::Cube, tile: Some(T_STONE), scale: 0.5 }), (24, 36));
+        let assert_render = |geo: &DynGeo, counts: (usize, usize), expected_extent: Vec3| {
+            assert_eq!((geo.mesh.verts.len(), geo.mesh.idx.len()), counts);
+            let (u, v, _) = tile_uv(T_STONE);
+            let expected_tile = [-u - 2.0, -v - 2.0];
+            assert!(geo.mesh.verts.iter().all(|vertex| vertex.tile == expected_tile));
+            let mut min = Vec3::splat(f32::INFINITY);
+            let mut max = Vec3::splat(f32::NEG_INFINITY);
+            for vertex in &geo.mesh.verts {
+                let point = Vec3::from_array(vertex.pos);
+                min = min.min(point);
+                max = max.max(point);
+            }
+            let extent = max - min;
+            assert!((extent.x - expected_extent.x).abs() < 1e-5, "{extent:?}");
+            assert!((extent.y - expected_extent.y).abs() < 1e-5, "{extent:?}");
+            assert!((extent.z - expected_extent.z).abs() < 1e-5, "{extent:?}");
+        };
+        assert_render(
+            &render(ProjectileAppearance { model: ProjectileModel::Arrow, tile: Some(T_STONE), scale: 2.0 }),
+            (24, 36),
+            Vec3::new(0.12, 0.12, 1.3),
+        );
+        assert_render(
+            &render(ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(T_STONE), scale: 1.5 }),
+            (8, 12),
+            Vec3::new(0.0, 1.05, 1.05),
+        );
+        assert_render(
+            &render(ProjectileAppearance { model: ProjectileModel::Cube, tile: Some(T_STONE), scale: 0.5 }),
+            (24, 36),
+            Vec3::splat(0.2),
+        );
     }
 
     #[test]

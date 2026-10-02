@@ -880,7 +880,14 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
         },
     };
     let projectile_tile = s.get("projectile_texture").map(|(_, value, line)| ctx.texture(m, value, errs, *line));
-    let projectile_scale = num(s, "projectile_scale", 1.0f32, errs).clamp(0.25, 4.0);
+    let parsed_scale = num(s, "projectile_scale", 1.0f32, errs);
+    let projectile_scale = if parsed_scale.is_finite() {
+        parsed_scale.clamp(0.25, 4.0)
+    } else {
+        let line = s.get("projectile_scale").map_or(s.line, |(_, _, line)| *line);
+        errs.push(format!("line {line}: projectile_scale should be a finite number"));
+        1.0
+    };
     let projectile_appearance = ProjectileAppearance { model: projectile_model, tile: projectile_tile, scale: projectile_scale };
     let projectile_effect = match s.get("projectile_effect") {
         None => None,
@@ -1369,6 +1376,9 @@ projectile_scale = 2
 [mob bad]
 projectile_model = pyramid
 projectile_texture = missing
+
+[mob nonfinite]
+projectile_scale = NaN
 "#;
         let source = |id: &str, text: &str| {
             let mut files = BTreeMap::new();
@@ -1383,9 +1393,11 @@ projectile_texture = missing
         assert_eq!(reg.mobs[3].projectile_appearance, ProjectileAppearance { model: ProjectileModel::Arrow, tile: Some(crate::texture::T_STONE), scale: 2.0 });
         assert_eq!(reg.mobs[4].projectile_appearance.model, ProjectileModel::Arrow);
         assert_eq!(reg.mobs[4].projectile_appearance.tile, Some(crate::texture::T_WHITE));
+        assert_eq!(reg.mobs[5].projectile_appearance, ProjectileAppearance::default());
         let errors = &reg.mods[1].errors;
         assert!(errors.iter().any(|e| e.contains("line") && e.contains("projectile_model")), "{errors:?}");
         assert!(errors.iter().any(|e| e.contains("line") && e.contains("unknown texture")), "{errors:?}");
+        assert!(errors.iter().any(|e| e == "line 19: projectile_scale should be a finite number"), "{errors:?}");
     }
 
     #[test]
