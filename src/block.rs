@@ -1025,11 +1025,13 @@ pub struct ProjectileEffect {
 /// `ranged_damage > 0` or a configured projectile effect additionally fires
 /// projectiles at players, exactly like a base ranged attacker
 /// (host-authoritative and deterministic). Their bounded arrow, billboard or
-/// cube appearance is synchronized to joined clients; zero damage with no
-/// effect (the default) keeps the ranged attack off, so existing mod.txt files
-/// are unchanged. Behaviours that need code (bosses, taming,
-/// raids, trading, flying, homing/AoE projectiles, bespoke geometry/UI) are deliberately out of scope so no modded mob can wedge the AI or the
-/// renderer. See MODDING.md.
+/// cube appearance, safe timed hit effect, and one-to-five-shot deterministic
+/// fan are data-defined; projectile state and appearance are synchronized to
+/// joined clients. Zero damage with no effect (the default) keeps the ranged
+/// attack off, so existing mod.txt files are unchanged. Behaviours that need
+/// code (bosses, taming, raids, trading, flying, homing/AoE projectiles,
+/// bespoke geometry/UI) are deliberately out of scope so no modded mob can
+/// wedge the AI or the renderer. See MODDING.md.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModMob {
     /// Stable identifier, e.g. "cheese:mouse" (used by saves and `from_name`).
@@ -1077,6 +1079,12 @@ pub struct ModMob {
     pub projectile_appearance: ProjectileAppearance,
     /// Optional bounded timed effect applied on a confirmed player hit.
     pub projectile_effect: Option<ProjectileEffect>,
+    /// Projectiles fired in one volley. Clamped to `1..=5` at parse time
+    /// (default `1`).
+    pub projectile_count: u8,
+    /// Total horizontal fan spread in degrees. Clamped to `0.0..=45.0` at
+    /// parse time (default `0.0`).
+    pub projectile_spread: f32,
     /// Seconds between shots. The `0.5` floor prevents a zero-cooldown
     /// projectile-spam exploit. Clamped to `0.5..=10.0` at parse time
     /// (default `2.0`).

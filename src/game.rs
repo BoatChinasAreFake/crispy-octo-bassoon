@@ -24,6 +24,16 @@ use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 1200.0;
 
+fn projectile_fan(center: Vec3, count: u8, spread: f32) -> Vec<Vec3> {
+    let count = count.clamp(1, 5) as usize;
+    let spread = if spread.is_finite() { spread.clamp(0.0, 45.0) } else { 0.0 };
+    (0..count).map(|i| {
+        let angle = if count == 1 { 0.0 } else { -spread * 0.5 + i as f32 * spread / (count - 1) as f32 };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        Vec3::new(center.x * cos + center.z * sin, center.y, -center.x * sin + center.z * cos)
+    }).collect()
+}
+
 #[derive(Default, Clone)]
 pub struct Controls {
     pub input: Input,
@@ -1375,19 +1385,19 @@ impl Game {
         }
     }
 
-    /// Fire a modded mob's arrow with a data-defined damage. Mirrors
-    /// `spawn_arrow`'s mob-shot path (shooter = None) but takes the damage from
-    /// the mod's `ranged_damage` field instead of the hardcoded base value.
-    pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32, appearance: ProjectileAppearance, effect: Option<ProjectileEffect>) {
-        let mut a = Arrow::new(pos, vel, None, damage);
-        a.modded = true;
-        a.appearance = appearance;
-        a.effect = effect;
-        self.arrows.push(a);
-        self.sfx(Sfx::Twang, Some(pos));
-        if self.arrows.len() > 200 {
-            self.arrows.remove(0);
+    /// Fire one deterministic, data-defined projectile volley for a modded mob.
+    /// Every projectile shares the center shot's vertical lob and payload.
+    pub fn spawn_mod_projectiles(&mut self, pos: Vec3, center_vel: Vec3, spec: ModProjectileSpec) {
+        for vel in projectile_fan(center_vel, spec.count, spec.spread) {
+            let mut arrow = Arrow::new(pos, vel, None, spec.damage);
+            arrow.modded = true;
+            arrow.appearance = spec.appearance;
+            arrow.effect = spec.effect;
+            self.arrows.push(arrow);
         }
+        self.sfx(Sfx::Twang, Some(pos));
+        let excess = self.arrows.len().saturating_sub(200);
+        self.arrows.drain(..excess);
     }
 
     /// Move arrows and see what they hit (host / single player only).
@@ -2613,7 +2623,7 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(to));
                 }
                 MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
-                MobEvent::ShootMod(from, vel, dmg, appearance, effect) => self.spawn_arrow_dmg(from, vel, dmg, appearance, effect),
+                MobEvent::ShootMod(from, vel, spec) => self.spawn_mod_projectiles(from, vel, spec),
                 MobEvent::Fireball(from, vel, big) => self.spawn_fireball(from, vel, big, mob_id),
                 MobEvent::Fangs(from, to) => self.late_fees(from, to),
                 MobEvent::Summon(at) => self.summon_fees(at),
@@ -5066,6 +5076,49 @@ looks_like = diamond
         g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
         g.spawn_timer = 1e9; // no surprise visitors
         g
+    }
+
+    #[test]
+    fn projectile_fan_is_repeatable_and_odd_even_symmetric() {
+        let center = Vec3::new(0.0, 7.5, -20.0);
+        let odd = projectile_fan(center, 3, 20.0);
+        assert_eq!(odd, projectile_fan(center, 3, 20.0), "fan generation is repeatable");
+        assert_eq!(odd[1], center, "an odd fan includes the center ray");
+        assert!((odd[0].x + odd[2].x).abs() < 1e-5);
+        assert!((odd[0].z - odd[2].z).abs() < 1e-5);
+        assert!((odd[0].x.abs().atan2(-odd[0].z) - 10.0f32.to_radians()).abs() < 1e-6);
+
+        let even = projectile_fan(center, 4, 30.0);
+        assert_eq!(even, projectile_fan(center, 4, 30.0), "even fan is repeatable");
+        assert!(even[1].x * even[2].x < 0.0, "even fan straddles the center ray");
+        for i in 0..2 {
+            assert!((even[i].x + even[3 - i].x).abs() < 1e-5);
+            assert!((even[i].z - even[3 - i].z).abs() < 1e-5);
+        }
+        assert!(odd.iter().chain(&even).all(|vel| vel.y == center.y), "rotation preserves the vertical lob");
+        assert_eq!(projectile_fan(center, 1, 45.0), vec![center], "one projectile always uses angle zero");
+    }
+
+    #[test]
+    fn projectile_multishot_expands_one_effect_only_volley_and_caps_arrows() {
+        let mut g = arena(80);
+        for i in 0..199 {
+            g.arrows.push(Arrow::new(Vec3::new(i as f32, 60.0, 0.0), Vec3::Z, None, 3.0));
+        }
+        g.sounds.clear();
+        let appearance = ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(T_STONE), scale: 0.75 };
+        let effect = ProjectileEffect { kind: crate::potions::Potion::Leaping, duration: 4.0, amplifier: 1 };
+        let pos = Vec3::new(2.0, 55.0, 3.0);
+        let center = Vec3::new(0.0, 8.0, -24.0);
+        g.spawn_mod_projectiles(pos, center, ModProjectileSpec { damage: 0.0, appearance, effect: Some(effect), count: 9, spread: 30.0 });
+
+        assert_eq!(g.arrows.len(), 200, "the existing global arrow cap is preserved");
+        let volley: Vec<_> = g.arrows.iter().filter(|arrow| arrow.modded).collect();
+        assert_eq!(volley.len(), 5, "one event expands to at most five arrows");
+        assert!(volley.iter().all(|arrow| {
+            arrow.pos == pos && arrow.vel.y == center.y && arrow.damage == 0.0 && arrow.appearance == appearance && arrow.effect == Some(effect)
+        }), "every arrow shares the spawn, vertical lob, and effect-only payload");
+        assert_eq!(g.sounds.iter().filter(|(sound, _)| matches!(sound, Sfx::Twang)).count(), 1, "one twang per volley");
     }
 
     #[test]

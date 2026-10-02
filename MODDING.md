@@ -194,7 +194,7 @@ Terrain that was already generated doesn't change. Explore new areas, or start a
 
 ### `[mob <name>]`
 
-Defines a new mob *type*. It borrows one of a few base-game body shapes and wears your texture. By default it's a passive wanderer; mark it `hostile` and give it an `attack_damage` (for melee) and/or a `ranged_damage` (for projectiles) and it will pursue and attack players just like a base-game monster. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items; attacks are resolved host-side so multiplayer stays authoritative and deterministic.
+Defines a new mob *type*. It borrows one of a few base-game body shapes and wears your texture. By default it's a passive wanderer; mark it `hostile` and give it `attack_damage` (for melee), `ranged_damage`, and/or a `projectile_effect` (for projectiles) and it will pursue and attack players just like a base-game monster. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items; attacks are resolved host-side so multiplayer stays authoritative and deterministic.
 
 | Key | Meaning | Default |
 | --- | --- | --- |
@@ -210,16 +210,25 @@ Defines a new mob *type*. It borrows one of a few base-game body shapes and wear
 | `attack_reach` | Horizontal distance within which it can land a hit (0.5–4) | `1.3` |
 | `aggro_range` | How far it notices and chases a player (1–48) | `16` |
 | `attack_cooldown` | Seconds between hits (0.25–10; the 0.25 floor prevents a zero-cooldown exploit) | `1` |
-| `ranged_damage` | Ranged/projectile damage per hit (0–30). `0` (default) means it never fires a projectile | `0` |
+| `ranged_damage` | Ranged/projectile damage per hit (0–30). `0` still fires when `projectile_effect` is set | `0` |
 | `ranged_range` | How far it will open fire with a projectile (1–48) | `16` |
 | `projectile_speed` | How fast the projectile flies, in blocks/second (8–48) | `24` |
-| `projectile_model` | Shape: `arrow`, camera-facing `billboard`, or `cube` | `arrow` |
+| `projectile_model` | Bounded shape: `arrow`, camera-facing `billboard`, or `cube` | `arrow` |
 | `projectile_texture` | Optional local, qualified, or base-game texture for the projectile | classic arrow textures |
 | `projectile_scale` | Projectile render scale (0.25–4) | `1` |
-| `ranged_cooldown` | Seconds between shots (0.5–10; the 0.5 floor prevents a projectile-spam exploit) | `2` |
+| `projectile_effect` | Timed effect on a confirmed player hit: `none`, `speed`, `fire_resistance`, `night_vision`, `leaping`, `strength`, or `regeneration` | `none` |
+| `projectile_effect_duration` | Effect duration in seconds (0.5–300; used when an effect is set) | `10` |
+| `projectile_effect_amplifier` | Effect amplifier (0–3; `0` is level I) | `0` |
+| `projectile_count` | Projectiles per volley (1–5) | `1` |
+| `projectile_spread` | Total horizontal fan angle in degrees (0–45) | `0` |
+| `ranged_cooldown` | Seconds between volleys (0.5–10; the 0.5 floor prevents a projectile-spam exploit) | `2` |
 | `drops` | One item it may drop on death: `item [count]` (1–64) | nothing |
 
-A mob melee-attacks only when it is `hostile` **and** `attack_damage > 0`, and it fires projectiles only when it is `hostile` **and** `ranged_damage > 0`. A ranged mob shoots when the player is within `ranged_range` and has a clear line of sight; the projectile is resolved host-side (deterministic and authoritative) exactly like a Rattler's arrow. Its bounded model, texture, and scale are replicated to joined players in the mob snapshot, while damage and attribution remain host-only. If a mob has **both** `attack_damage > 0` and `ranged_damage > 0`, melee takes priority up close (inside `attack_reach`) and it shoots at range; melee and ranged share one cooldown timer, so it can't do both in the same window. Both `attack_damage` and `ranged_damage` default to `0`, so existing mods that set `hostile = true` without the attack fields behave exactly as before (they count toward the monster cap but don't attack, and ranged is OFF).
+A mob melee-attacks only when it is `hostile` **and** `attack_damage > 0`. It fires projectiles when it is `hostile` and either `ranged_damage > 0` or `projectile_effect` is set, so an effect-only volley with zero damage is supported. A ranged mob fires only while the player is within `ranged_range` and has a clear line of sight. If it has both melee and ranged attacks, melee takes priority inside `attack_reach`; both attacks and the entire volley share one cooldown, so a multishot volley consumes only one `ranged_cooldown`.
+
+Multishot is deterministic and uses no random numbers or wall clock. For `n = 1`, the projectile uses the center aim (`0°`). For `n > 1`, projectile `i` uses `-spread/2 + i*spread/(n-1)` degrees around world Y, in index order. Thus odd counts include the center ray, even counts straddle it symmetrically, and `projectile_spread` is the **total** angle from the first ray to the last. Every projectile keeps the same vertical lob, spawn point, damage, appearance, and optional effect.
+
+The host creates the volley, simulates collision and damage, and applies effects, so combat remains authoritative. Projectile positions, velocities, and bounded model/texture/scale are included in normal arrow snapshots for joined players; timed effects are sent from the host after a confirmed hit. Counts and spreads default to one centered projectile, preserving existing mods and base arrows. `ranged_damage` and `projectile_effect` both default off, so an old `hostile = true` mob with no attack fields still only counts toward the monster cap.
 
 ```text
 [mob mouse]
@@ -256,6 +265,11 @@ projectile_speed = 26
 projectile_model = billboard
 projectile_texture = cheese_slice
 projectile_scale = 0.75
+projectile_effect = leaping
+projectile_effect_duration = 4
+projectile_effect_amplifier = 0
+projectile_count = 3
+projectile_spread = 18       // total fan: -9°, 0°, +9°
 ranged_cooldown = 2.0
 attack_damage = 3      // ...and still bites up close (melee wins inside attack_reach)
 attack_reach = 1.5
@@ -276,7 +290,7 @@ fn on_chat(player, text) {
 
 If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
 
-Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat (pursue and bite), and hostile ranged combat (fire a projectile at range). Behaviours that need code (bosses, taming, trading, flying, and homing/AoE/status-effect projectiles) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
+Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, and hostile ranged combat with bounded appearance, timed effects, and deterministic multishot. Homing projectiles, area-of-effect projectiles, arbitrary projectile geometry/rendering, bosses, taming, trading, flying, bespoke per-mob geometry, and custom UI screens still require a Rust change.
 
 ### `[splashes]`
 

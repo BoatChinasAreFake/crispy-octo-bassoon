@@ -601,6 +601,15 @@ pub struct Mob {
     pub rider: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModProjectileSpec {
+    pub damage: f32,
+    pub appearance: ProjectileAppearance,
+    pub effect: Option<ProjectileEffect>,
+    pub count: u8,
+    pub spread: f32,
+}
+
 pub enum MobEvent {
     HurtPlayer(f32, &'static str),
     Explode(Vec3, f32, &'static str),
@@ -609,8 +618,8 @@ pub enum MobEvent {
     Warp(Vec3, Vec3),
     /// A Rattler loosed a Pointy Stick: (from, velocity).
     Shoot(Vec3, Vec3),
-    /// A modded mob fired a projectile: (from, velocity, damage, appearance, effect).
-    ShootMod(Vec3, Vec3, f32, ProjectileAppearance, Option<ProjectileEffect>),
+    /// A modded mob fired one projectile volley: (from, center velocity, specification).
+    ShootMod(Vec3, Vec3, ModProjectileSpec),
     /// A fireball thrown: (from, velocity, big (a Weeper's, which explodes)).
     Fireball(Vec3, Vec3, bool),
     /// An Invoicer's spell: Late Fees up out of the ground from here toward there, or Fees summoned.
@@ -1385,7 +1394,14 @@ impl Mob {
                             let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
                             if clear {
                                 let vel = aim.normalize_or_zero() * def.projectile_speed + Vec3::Y * aim.length() * 0.42;
-                                ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, def.ranged_damage, def.projectile_appearance, def.projectile_effect));
+                                let spec = ModProjectileSpec {
+                                    damage: def.ranged_damage,
+                                    appearance: def.projectile_appearance,
+                                    effect: def.projectile_effect,
+                                    count: def.projectile_count,
+                                    spread: def.projectile_spread,
+                                };
+                                ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, spec));
                                 self.attack_cd = def.ranged_cooldown;
                             }
                         }
@@ -2511,9 +2527,9 @@ mod tests {
         let mut n = 0;
         let mut dmg = 0.0;
         for e in ev {
-            if let MobEvent::ShootMod(_, _, d, _, _) = e {
+            if let MobEvent::ShootMod(_, _, spec) = e {
                 n += 1;
-                dmg += *d;
+                dmg += spec.damage;
             }
         }
         (n, dmg)
@@ -2602,8 +2618,8 @@ mod tests {
     }
 
     #[test]
-    fn ranged_modded_mob_shoots_at_distance_and_melees_up_close() {
-        let src = "[mob slinger]\nname = Slinger\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 10\nattack_cooldown = 1.0\nranged_damage = 6\nranged_range = 20\nprojectile_speed = 24\nranged_cooldown = 2\n";
+    fn projectile_multishot_emits_one_volley_and_one_cooldown_with_melee_priority() {
+        let src = "[mob slinger]\nname = Slinger\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 10\nattack_cooldown = 1.0\nranged_damage = 6\nranged_range = 20\nprojectile_speed = 24\nprojectile_count = 3\nprojectile_spread = 18\nranged_cooldown = 2\n";
         crate::mods::with_mods(&[("zoo", src)], |_reg| {
             let k = MobKind::from_name("zoo:slinger").expect("resolves");
             let def = k.mod_def().expect("def");
@@ -2614,25 +2630,30 @@ mod tests {
             let world = World::new(1);
             let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
 
-            // Beyond attack_reach (1.5) but within ranged_range (20): a ShootMod,
-            // not a HurtPlayer. Line of sight is clear in an empty world.
+            // Beyond attack_reach (1.5) but within ranged_range (20): one
+            // ShootMod volley event, not one event per projectile.
             let far = Vec3::new(8.0, 80.0, 0.0);
             let ev = m.update(0.05, &world, far, true, 1.0, &mut rng);
             assert_eq!(hurt_hits(&ev).0, 0, "no melee hit beyond attack_reach");
             let (n, dmg) = shoot_hits(&ev);
-            assert_eq!(n, 1, "exactly one ShootMod on the first in-range tick");
+            assert_eq!(n, 1, "exactly one ShootMod for the volley");
             assert_eq!(dmg, 6.0, "fires the configured ranged_damage");
-            // Cooldown now set to ranged_cooldown; next tick must not fire again.
-            assert!(m.attack_cd > 1.5);
+            let spec = ev.iter().find_map(|event| match event {
+                MobEvent::ShootMod(_, _, spec) => Some(*spec),
+                _ => None,
+            }).expect("volley specification");
+            assert_eq!((spec.count, spec.spread), (3, 18.0));
+            // The whole volley consumes the configured cooldown exactly once.
+            assert_eq!(m.attack_cd, 2.0);
             let ev2 = m.update(0.05, &world, far, true, 1.0, &mut rng);
             assert_eq!(shoot_hits(&ev2).0, 0, "respects ranged cooldown");
 
-            // Within attack_reach: melee takes priority over ranged.
+            // Within attack_reach: melee takes priority over the whole volley.
             let mut m2 = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
             let near = Vec3::new(1.0, 80.0, 0.0);
             let ev3 = m2.update(0.05, &world, near, true, 1.0, &mut rng);
             assert_eq!(hurt_hits(&ev3).0, 1, "melees up close");
-            assert_eq!(shoot_hits(&ev3).0, 0, "no ranged shot inside attack_reach");
+            assert_eq!(shoot_hits(&ev3).0, 0, "no ranged volley inside attack_reach");
         });
     }
 
@@ -2655,8 +2676,8 @@ mod tests {
     }
 
     #[test]
-    fn projectile_effect_enables_effect_only_production_path() {
-        let src = "[mob hexer]\ntexture = stone\nhostile = true\nranged_damage = 0\nranged_range = 20\nprojectile_effect = speed\nprojectile_effect_duration = 12\nprojectile_effect_amplifier = 2\n\n[mob idle]\ntexture = stone\nhostile = true\nranged_damage = 0\n";
+    fn projectile_multishot_effect_only_volley_uses_one_event() {
+        let src = "[mob hexer]\ntexture = stone\nhostile = true\nranged_damage = 0\nranged_range = 20\nprojectile_effect = speed\nprojectile_effect_duration = 12\nprojectile_effect_amplifier = 2\nprojectile_count = 4\nprojectile_spread = 12\n\n[mob idle]\ntexture = stone\nhostile = true\nranged_damage = 0\n";
         crate::mods::with_mods(&[("zoo", src)], |_reg| {
             let mut rng = Rng::new(17);
             let world = World::new(1);
@@ -2664,11 +2685,12 @@ mod tests {
             let mut hexer = Mob::new(MobKind::from_name("zoo:hexer").unwrap(), Vec3::new(0.0, 80.0, 0.0), &mut rng);
             let events = hexer.update(0.05, &world, player, true, 1.0, &mut rng);
             assert_eq!(shoot_hits(&events), (1, 0.0));
-            let effect = events.iter().find_map(|event| match event {
-                MobEvent::ShootMod(_, _, _, _, effect) => *effect,
+            let spec = events.iter().find_map(|event| match event {
+                MobEvent::ShootMod(_, _, spec) => Some(*spec),
                 _ => None,
-            });
-            assert_eq!(effect, Some(ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 }));
+            }).expect("effect-only volley");
+            assert_eq!((spec.count, spec.spread), (4, 12.0));
+            assert_eq!(spec.effect, Some(ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 }));
 
             let mut idle = Mob::new(MobKind::from_name("zoo:idle").unwrap(), Vec3::new(0.0, 80.0, 0.0), &mut rng);
             for _ in 0..20 {

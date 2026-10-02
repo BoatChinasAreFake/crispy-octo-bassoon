@@ -202,13 +202,10 @@ aggro_range = 20
 attack_cooldown = 1.2
 drops = slice 2
 
-// A hostile mob that fights at range: give it a ranged_damage and it fires a
-// projectile (the base-game Pointy Stick/arrow) at players within ranged_range
-// that it can see, host-side and deterministic like a base-game Rattler. Leave
-// ranged_damage off (0, the default) and a mob never shoots, so existing mods
-// are unchanged. This one also keeps a small attack_damage, so it bites up
-// close (melee wins inside attack_reach) and slings arrows from afar; melee and
-// ranged share one cooldown. It reuses the slice texture (no new texture here).
+// A hostile mob that fights at range. Its three-shot fan reuses the slice
+// texture as a bounded billboard and gives a short Leaping effect on a hit.
+// It also keeps a small attack_damage, so it bites up close (melee wins inside
+// attack_reach); melee and the whole ranged volley share one cooldown.
 [mob cheese_slinger]
 name = Cheese Slinger
 texture = slice
@@ -217,11 +214,17 @@ size = 1.0
 health = 20
 speed = 1.0
 hostile = true
-// shoots for 4 (clamped 0-30); ranged_range is how far it opens fire (1-48);
-// projectile_speed is blocks/sec (8-48); ranged_cooldown is seconds per shot (min 0.5).
 ranged_damage = 4
 ranged_range = 18
 projectile_speed = 26
+projectile_model = billboard
+projectile_texture = slice
+projectile_scale = 0.75
+projectile_effect = leaping
+projectile_effect_duration = 4
+projectile_effect_amplifier = 0
+projectile_count = 3
+projectile_spread = 18
 ranged_cooldown = 2.0
 // also bites a little up close, to show the melee + ranged combo.
 attack_damage = 3
