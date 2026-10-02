@@ -1095,7 +1095,7 @@ impl Game {
     }
 
     /// Mirror the host's mob list, keeping local copies so they can be smoothed.
-    fn sync_mobs(&mut self, snaps: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<(Vec3, Vec3)>) {
+    fn sync_mobs(&mut self, snaps: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<ArrowSnap>) {
         let mut next = Vec::with_capacity(snaps.len());
         let mut old: Vec<Mob> = std::mem::take(&mut self.mobs);
         for s in snaps {
@@ -1135,7 +1135,7 @@ impl Game {
         }
         self.mobs = next;
         self.tnts = tnts.into_iter().map(|(pos, fuse)| PrimedTnt { pos, fuse }).collect();
-        self.arrows = arrows.into_iter().map(|(p, v)| Arrow::from_wire(p, v)).collect();
+        self.arrows = arrows.into_iter().map(|a| Arrow::from_wire(a.pos, a.vel, a.appearance)).collect();
     }
 
     /// Client-side entity tick: particles plus smoothing the host's mobs.
@@ -1266,7 +1266,11 @@ impl Game {
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
-                let arrows = self.arrows.iter().map(|a| (a.pos, a.wire_vel())).collect();
+                let arrows = self
+                    .arrows
+                    .iter()
+                    .map(|a| ArrowSnap { pos: a.pos, vel: a.wire_vel(), appearance: a.appearance })
+                    .collect();
                 let falling = self.falling.iter().map(|f| (f.pos, f.vel, f.id)).collect();
                 let fireballs = self.fireballs.iter().map(|f| (f.pos, f.vel, f.big)).collect();
                 self.net_broadcast(Msg::Mobs { mobs, tnts, arrows, falling, fireballs });
@@ -1354,6 +1358,27 @@ mod tests {
             std::thread::sleep(Duration::from_millis(4));
         }
         false
+    }
+
+    #[test]
+    fn projectile_appearance_snapshot_decodes_and_syncs_to_client() {
+        let appearance = ProjectileAppearance { model: ProjectileModel::Cube, tile: Some(crate::texture::T_STONE), scale: 1.75 };
+        let snapshot = Msg::Mobs {
+            mobs: vec![],
+            tnts: vec![],
+            arrows: vec![ArrowSnap { pos: Vec3::new(1.0, 70.0, 2.0), vel: Vec3::X * 12.0, appearance }],
+            falling: vec![],
+            fireballs: vec![],
+        };
+        let Msg::Mobs { mobs, tnts, arrows, .. } = Msg::decode(&snapshot.encode()).expect("snapshot decodes") else { panic!("not mobs") };
+        let mut client = Game::new(7, true, false);
+        client.sync_mobs(mobs, tnts, arrows);
+        assert_eq!(client.arrows.len(), 1);
+        let arrow = &client.arrows[0];
+        assert_eq!(arrow.appearance, appearance);
+        assert_eq!(arrow.damage, 0.0, "host-only damage is not in the snapshot");
+        assert_eq!(arrow.shooter, None, "host-only attribution is not in the snapshot");
+        assert!(!arrow.modded, "host-only attribution is not in the snapshot");
     }
 
     #[test]

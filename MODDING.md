@@ -213,10 +213,13 @@ Defines a new mob *type*. It borrows one of a few base-game body shapes and wear
 | `ranged_damage` | Ranged/projectile damage per hit (0–30). `0` (default) means it never fires a projectile | `0` |
 | `ranged_range` | How far it will open fire with a projectile (1–48) | `16` |
 | `projectile_speed` | How fast the projectile flies, in blocks/second (8–48) | `24` |
+| `projectile_model` | Shape: `arrow`, camera-facing `billboard`, or `cube` | `arrow` |
+| `projectile_texture` | Optional local, qualified, or base-game texture for the projectile | classic arrow textures |
+| `projectile_scale` | Projectile render scale (0.25–4) | `1` |
 | `ranged_cooldown` | Seconds between shots (0.5–10; the 0.5 floor prevents a projectile-spam exploit) | `2` |
 | `drops` | One item it may drop on death: `item [count]` (1–64) | nothing |
 
-A mob melee-attacks only when it is `hostile` **and** `attack_damage > 0`, and it fires projectiles only when it is `hostile` **and** `ranged_damage > 0`. A ranged mob shoots when the player is within `ranged_range` and has a clear line of sight; the projectile is the base-game Pointy Stick/arrow and is resolved host-side (deterministic and authoritative) exactly like a Rattler's arrow, replicated to joined players over the existing mob snapshot. If a mob has **both** `attack_damage > 0` and `ranged_damage > 0`, melee takes priority up close (inside `attack_reach`) and it shoots at range; melee and ranged share one cooldown timer, so it can't do both in the same window. Both `attack_damage` and `ranged_damage` default to `0`, so existing mods that set `hostile = true` without the attack fields behave exactly as before (they count toward the monster cap but don't attack, and ranged is OFF).
+A mob melee-attacks only when it is `hostile` **and** `attack_damage > 0`, and it fires projectiles only when it is `hostile` **and** `ranged_damage > 0`. A ranged mob shoots when the player is within `ranged_range` and has a clear line of sight; the projectile is resolved host-side (deterministic and authoritative) exactly like a Rattler's arrow. Its bounded model, texture, and scale are replicated to joined players in the mob snapshot, while damage and attribution remain host-only. If a mob has **both** `attack_damage > 0` and `ranged_damage > 0`, melee takes priority up close (inside `attack_reach`) and it shoots at range; melee and ranged share one cooldown timer, so it can't do both in the same window. Both `attack_damage` and `ranged_damage` default to `0`, so existing mods that set `hostile = true` without the attack fields behave exactly as before (they count toward the monster cap but don't attack, and ranged is OFF).
 
 ```text
 [mob mouse]
@@ -250,6 +253,9 @@ hostile = true
 ranged_damage = 4      // lobs an arrow when you're at range...
 ranged_range = 18
 projectile_speed = 26
+projectile_model = billboard
+projectile_texture = cheese_slice
+projectile_scale = 0.75
 ranged_cooldown = 2.0
 attack_damage = 3      // ...and still bites up close (melee wins inside attack_reach)
 attack_reach = 1.5

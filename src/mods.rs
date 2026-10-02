@@ -473,7 +473,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped });
                     }
                 }
                 _ => {}
@@ -866,6 +866,21 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     let ranged_damage = num(s, "ranged_damage", 0.0f32, errs).clamp(0.0, 30.0);
     let ranged_range = num(s, "ranged_range", 16.0f32, errs).clamp(1.0, 48.0);
     let projectile_speed = num(s, "projectile_speed", 24.0f32, errs).clamp(8.0, 48.0);
+    let projectile_model = match s.get("projectile_model") {
+        None => ProjectileModel::Arrow,
+        Some((_, value, line)) => match value.trim().to_ascii_lowercase().as_str() {
+            "arrow" => ProjectileModel::Arrow,
+            "billboard" => ProjectileModel::Billboard,
+            "cube" => ProjectileModel::Cube,
+            _ => {
+                errs.push(format!("line {line}: projectile_model should be arrow, billboard or cube, not \"{value}\""));
+                ProjectileModel::Arrow
+            }
+        },
+    };
+    let projectile_tile = s.get("projectile_texture").map(|(_, value, line)| ctx.texture(m, value, errs, *line));
+    let projectile_scale = num(s, "projectile_scale", 1.0f32, errs).clamp(0.25, 4.0);
+    let projectile_appearance = ProjectileAppearance { model: projectile_model, tile: projectile_tile, scale: projectile_scale };
     let ranged_cooldown = num(s, "ranged_cooldown", 2.0f32, errs).clamp(0.5, 10.0);
     let drop = match s.get("drops") {
         None => None,
@@ -889,6 +904,7 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.ranged_damage = ranged_damage;
     mob.ranged_range = ranged_range;
     mob.projectile_speed = projectile_speed;
+    mob.projectile_appearance = projectile_appearance;
     mob.ranged_cooldown = ranged_cooldown;
     mob.drop = drop;
 }
@@ -1276,6 +1292,52 @@ attack_damage = 5
         assert_eq!(plain.ranged_range, 16.0, "default ranged range is 16.0");
         assert_eq!(plain.projectile_speed, 24.0, "default projectile speed is 24.0");
         assert_eq!(plain.ranged_cooldown, 2.0, "default ranged cooldown is 2.0");
+    }
+
+    #[test]
+    fn projectile_appearance_parser_defaults_clamps_and_reports_errors() {
+        let art = r#"
+[texture bolt]
+noise = 200,100,50
+
+[mob local]
+projectile_model = billboard
+projectile_texture = bolt
+projectile_scale = 9
+"#;
+        let mobs = r#"
+[mob plain]
+
+[mob qualified]
+projectile_model = cube
+projectile_texture = art:bolt
+projectile_scale = 0.1
+
+[mob base]
+projectile_model = arrow
+projectile_texture = stone
+projectile_scale = 2
+
+[mob bad]
+projectile_model = pyramid
+projectile_texture = missing
+"#;
+        let source = |id: &str, text: &str| {
+            let mut files = BTreeMap::new();
+            files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+            ModSource { id: id.to_string(), files }
+        };
+        let reg = build(&[source("art", art), source("mobs", mobs)], &[]);
+        let tile = reg.mobs[0].projectile_appearance.tile.expect("local texture");
+        assert_eq!(reg.mobs[0].projectile_appearance, ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(tile), scale: 4.0 });
+        assert_eq!(reg.mobs[1].projectile_appearance, ProjectileAppearance::default());
+        assert_eq!(reg.mobs[2].projectile_appearance, ProjectileAppearance { model: ProjectileModel::Cube, tile: Some(tile), scale: 0.25 });
+        assert_eq!(reg.mobs[3].projectile_appearance, ProjectileAppearance { model: ProjectileModel::Arrow, tile: Some(crate::texture::T_STONE), scale: 2.0 });
+        assert_eq!(reg.mobs[4].projectile_appearance.model, ProjectileModel::Arrow);
+        assert_eq!(reg.mobs[4].projectile_appearance.tile, Some(crate::texture::T_WHITE));
+        let errors = &reg.mods[1].errors;
+        assert!(errors.iter().any(|e| e.contains("line") && e.contains("projectile_model")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("line") && e.contains("unknown texture")), "{errors:?}");
     }
 
     #[test]

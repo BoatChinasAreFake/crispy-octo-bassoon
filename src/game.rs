@@ -1378,9 +1378,10 @@ impl Game {
     /// Fire a modded mob's arrow with a data-defined damage. Mirrors
     /// `spawn_arrow`'s mob-shot path (shooter = None) but takes the damage from
     /// the mod's `ranged_damage` field instead of the hardcoded base value.
-    pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32) {
+    pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32, appearance: ProjectileAppearance) {
         let mut a = Arrow::new(pos, vel, None, damage);
         a.modded = true;
+        a.appearance = appearance;
         self.arrows.push(a);
         self.sfx(Sfx::Twang, Some(pos));
         if self.arrows.len() > 200 {
@@ -2601,7 +2602,7 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(to));
                 }
                 MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
-                MobEvent::ShootMod(from, vel, dmg) => self.spawn_arrow_dmg(from, vel, dmg),
+                MobEvent::ShootMod(from, vel, dmg, appearance) => self.spawn_arrow_dmg(from, vel, dmg, appearance),
                 MobEvent::Fireball(from, vel, big) => self.spawn_fireball(from, vel, big, mob_id),
                 MobEvent::Fangs(from, to) => self.late_fees(from, to),
                 MobEvent::Summon(at) => self.summon_fees(at),
@@ -3059,7 +3060,7 @@ impl Game {
         if !self.arrows.is_empty() {
             g.begin(Pass::Opaque, [1.0; 4], false);
             for a in self.arrows.iter().filter(|a| a.pos.distance(eye) < (render_distance * 16) as f32) {
-                a.draw(&mut g, &self.world);
+                a.draw(&mut g, &self.world, eye);
             }
         }
         // The fishing line and bobber
