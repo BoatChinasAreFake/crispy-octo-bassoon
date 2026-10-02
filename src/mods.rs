@@ -473,7 +473,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, drop: None, template: crate::block::MobTemplate::Quadruped });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped });
                     }
                 }
                 _ => {}
@@ -858,6 +858,15 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     let aggro_range = num(s, "aggro_range", 16.0f32, errs).clamp(1.0, 48.0);
     // The 0.25 minimum is essential: it prevents a zero-cooldown DPS exploit.
     let attack_cooldown = num(s, "attack_cooldown", 1.0f32, errs).clamp(0.25, 10.0);
+    // Ranged attack parameters, all clamped like the melee ones. BACKWARD COMPAT:
+    // ranged_damage defaults to 0.0, so an existing [mob] section is unchanged and
+    // never fires. A mob shoots only when it is hostile AND ranged_damage > 0.0.
+    // The 0.5 cooldown floor prevents a zero-cooldown projectile-spam exploit, and
+    // the speed/range clamps bound what an adversarial mod can do.
+    let ranged_damage = num(s, "ranged_damage", 0.0f32, errs).clamp(0.0, 30.0);
+    let ranged_range = num(s, "ranged_range", 16.0f32, errs).clamp(1.0, 48.0);
+    let projectile_speed = num(s, "projectile_speed", 24.0f32, errs).clamp(8.0, 48.0);
+    let ranged_cooldown = num(s, "ranged_cooldown", 2.0f32, errs).clamp(0.5, 10.0);
     let drop = match s.get("drops") {
         None => None,
         Some((_, v, l)) => parse_stack(ctx, &m.id, v, errs, *l),
@@ -877,6 +886,10 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.attack_reach = attack_reach;
     mob.aggro_range = aggro_range;
     mob.attack_cooldown = attack_cooldown;
+    mob.ranged_damage = ranged_damage;
+    mob.ranged_range = ranged_range;
+    mob.projectile_speed = projectile_speed;
+    mob.ranged_cooldown = ranged_cooldown;
     mob.drop = drop;
 }
 
@@ -1198,6 +1211,10 @@ attack_damage = 999
 attack_reach = 99
 aggro_range = 999
 attack_cooldown = 0.01
+ranged_damage = 999
+ranged_range = 999
+projectile_speed = 999
+ranged_cooldown = 0.01
 
 [mob gentle]
 texture = stone
@@ -1205,6 +1222,9 @@ template = quadruped
 hostile = true
 attack_reach = 0.1
 aggro_range = 0.1
+ranged_range = 0.1
+projectile_speed = 0.1
+ranged_cooldown = 99
 "#;
         let mut files = BTreeMap::new();
         files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
@@ -1217,13 +1237,45 @@ aggro_range = 0.1
         assert_eq!(fierce.aggro_range, 48.0, "aggro clamps to 48");
         // The critical anti-DPS-exploit clamp: cooldown has a 0.25 minimum.
         assert_eq!(fierce.attack_cooldown, 0.25, "cooldown clamps up to 0.25");
+        // Ranged fields clamp down to their maxima / up to their minima too.
+        assert_eq!(fierce.ranged_damage, 30.0, "ranged damage clamps to 30");
+        assert_eq!(fierce.ranged_range, 48.0, "ranged range clamps to 48");
+        assert_eq!(fierce.projectile_speed, 48.0, "projectile speed clamps to 48");
+        // The anti-spam clamp: ranged cooldown has a 0.5 minimum.
+        assert_eq!(fierce.ranged_cooldown, 0.5, "ranged cooldown clamps up to 0.5");
         // Under-range reach/aggro clamp up to their minima.
         let gentle = &reg.mobs[1];
         assert_eq!(gentle.attack_reach, 0.5, "reach clamps up to 0.5");
         assert_eq!(gentle.aggro_range, 1.0, "aggro clamps up to 1.0");
+        // Under-range ranged range/speed clamp up; over-range cooldown clamps down.
+        assert_eq!(gentle.ranged_range, 1.0, "ranged range clamps up to 1.0");
+        assert_eq!(gentle.projectile_speed, 8.0, "projectile speed clamps up to 8.0");
+        assert_eq!(gentle.ranged_cooldown, 10.0, "ranged cooldown clamps down to 10.0");
         // Backward compat: no attack fields -> attack_damage defaults to 0.0.
         assert_eq!(gentle.attack_damage, 0.0, "default attack_damage is 0.0 (non-attacking)");
         assert_eq!(gentle.attack_cooldown, 1.0, "default cooldown is 1.0");
+    }
+
+    #[test]
+    fn mob_ranged_fields_default_off() {
+        // A mob with no ranged fields at all keeps the backward-compatible
+        // defaults: ranged OFF (ranged_damage == 0.0) and the documented
+        // speed/range/cooldown defaults.
+        let text = r#"
+[mob plain]
+texture = stone
+hostile = true
+attack_damage = 5
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "zoo".into(), files }], &[]);
+        assert!(reg.mods[0].errors.is_empty(), "{:?}", reg.mods[0].errors);
+        let plain = &reg.mobs[0];
+        assert_eq!(plain.ranged_damage, 0.0, "ranged is OFF by default");
+        assert_eq!(plain.ranged_range, 16.0, "default ranged range is 16.0");
+        assert_eq!(plain.projectile_speed, 24.0, "default projectile speed is 24.0");
+        assert_eq!(plain.ranged_cooldown, 2.0, "default ranged cooldown is 2.0");
     }
 
     #[test]

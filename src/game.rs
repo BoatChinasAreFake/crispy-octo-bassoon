@@ -1375,6 +1375,19 @@ impl Game {
         }
     }
 
+    /// Fire a modded mob's arrow with a data-defined damage. Mirrors
+    /// `spawn_arrow`'s mob-shot path (shooter = None) but takes the damage from
+    /// the mod's `ranged_damage` field instead of the hardcoded base value.
+    pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32) {
+        let mut a = Arrow::new(pos, vel, None, damage);
+        a.modded = true;
+        self.arrows.push(a);
+        self.sfx(Sfx::Twang, Some(pos));
+        if self.arrows.len() > 200 {
+            self.arrows.remove(0);
+        }
+    }
+
     /// Move arrows and see what they hit (host / single player only).
     fn update_arrows(&mut self, dt: f32) {
         let mut arrows = std::mem::take(&mut self.arrows);
@@ -1418,12 +1431,15 @@ impl Game {
                     false
                 }
                 None => {
-                    // Rattlers' arrows hit players.
+                    // Rattlers' (and modded mobs') arrows hit players. A modded
+                    // mob's shot gets a generic cause so its kill isn't blamed
+                    // on a Rattler.
+                    let cause = if a.modded { "was shot down by a monster" } else { "was shot by a Rattler (with a Pointy Stick)" };
                     let me = self.player.body.clone();
                     if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         self.player.hurt = 0.0;
                         let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_player_from(d, "was shot by a Rattler (with a Pointy Stick)", Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
+                        self.hurt_player_from(d, cause, Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
                         let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
                         self.player.body.vel += knock;
                         return false;
@@ -1431,7 +1447,7 @@ impl Game {
                     let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
                     if let Some(id) = hit {
                         let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_peer(id, d, "was shot by a Rattler (with a Pointy Stick)", a.vel.normalize_or_zero() * 4.0);
+                        self.hurt_peer(id, d, cause, a.vel.normalize_or_zero() * 4.0);
                         return false;
                     }
                     true
@@ -2585,6 +2601,7 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(to));
                 }
                 MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
+                MobEvent::ShootMod(from, vel, dmg) => self.spawn_arrow_dmg(from, vel, dmg),
                 MobEvent::Fireball(from, vel, big) => self.spawn_fireball(from, vel, big, mob_id),
                 MobEvent::Fangs(from, to) => self.late_fees(from, to),
                 MobEvent::Summon(at) => self.summon_fees(at),
@@ -5071,6 +5088,76 @@ looks_like = diamond
             g.player.hurt = 0.0;
         }
         assert!(g.player.health < health, "the Rattler hit the player ({} left)", g.player.health);
+    }
+
+    #[test]
+    fn ranged_modded_mob_shoots_and_damages_the_player() {
+        // A hostile modded mob with ranged_damage > 0 fires base-game arrows at
+        // a visible player within ranged_range, reusing the whole arrow path, and
+        // only on its data-driven cooldown cadence.
+        let src = "[mob slinger]\nname = Slinger\ntexture = stone\ntemplate = biped\nhostile = true\nranged_damage = 6\nranged_range = 22\nprojectile_speed = 24\nranged_cooldown = 2\naggro_range = 12\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let k = MobKind::from_name("zoo:slinger").expect("resolves");
+            let mut g = arena(31);
+            // Clear line of sight down -Z, well beyond any melee reach.
+            g.alloc_mob(k, Vec3::new(0.5, 50.0, -9.5));
+            let health = g.player.health;
+            // One shot flies and hits within a couple of seconds.
+            let mut first_hit = 0;
+            for t in 0..200 {
+                g.update_entities(0.02);
+                g.player.hurt = 0.0;
+                if g.player.health < health && first_hit == 0 {
+                    first_hit = t;
+                }
+            }
+            assert!(g.player.health < health, "the Slinger shot the player ({} left)", g.player.health);
+            assert!(first_hit > 0, "an arrow actually travelled before landing");
+
+            // The kill is attributed to a generic monster, not misblamed on a
+            // Rattler: a modded slinger's arrow carries a generic death cause.
+            g.player.health = 1.0;
+            for _ in 0..400 {
+                g.update_entities(0.02);
+                if g.dead.is_some() {
+                    break;
+                }
+                g.player.hurt = 0.0; // keep taking hits until one is lethal
+            }
+            let death = g.dead.as_deref().expect("the Slinger eventually killed the player");
+            assert!(!death.contains("Rattler"), "a modded shot must not be blamed on a Rattler: {death:?}");
+            assert!(death.contains("was shot down by a monster"), "modded shot uses the generic cause: {death:?}");
+        });
+    }
+
+    #[test]
+    fn ranged_off_by_default_modded_mob_never_fires() {
+        // A plain hostile modded mob with no ranged fields never spawns an arrow
+        // and never ranged-damages the player; a melee-only one likewise never
+        // fires (it only melees).
+        let passive = "[mob lurker]\nname = Lurker\ntexture = stone\ntemplate = biped\nhostile = true\naggro_range = 20\n";
+        crate::mods::with_mods(&[("zoo", passive)], |_reg| {
+            let k = MobKind::from_name("zoo:lurker").expect("resolves");
+            let mut g = arena(32);
+            g.alloc_mob(k, Vec3::new(0.5, 50.0, -6.5));
+            for _ in 0..200 {
+                g.update_entities(0.02);
+                assert!(g.arrows.is_empty(), "ranged off by default: no arrow ever spawns");
+            }
+        });
+
+        // Melee-only: it closes in and bites, but still never fires an arrow.
+        let melee = "[mob biter]\nname = Biter\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 20\nattack_cooldown = 1.0\n";
+        crate::mods::with_mods(&[("zoo", melee)], |_reg| {
+            let k = MobKind::from_name("zoo:biter").expect("resolves");
+            let mut g = arena(33);
+            g.alloc_mob(k, Vec3::new(0.5, 50.0, -3.5));
+            for _ in 0..200 {
+                g.update_entities(0.02);
+                g.player.hurt = 0.0;
+                assert!(g.arrows.is_empty(), "a melee-only mob never fires an arrow");
+            }
+        });
     }
 
     #[test]

@@ -194,7 +194,7 @@ Terrain that was already generated doesn't change. Explore new areas, or start a
 
 ### `[mob <name>]`
 
-Defines a new mob *type*. It borrows one of a few base-game body shapes and wears your texture. By default it's a passive wanderer; mark it `hostile` and give it an `attack_damage` and it will pursue and melee-attack players just like a base-game monster. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items; attacks are resolved host-side so multiplayer stays authoritative and deterministic.
+Defines a new mob *type*. It borrows one of a few base-game body shapes and wears your texture. By default it's a passive wanderer; mark it `hostile` and give it an `attack_damage` (for melee) and/or a `ranged_damage` (for projectiles) and it will pursue and attack players just like a base-game monster. It never spawns naturally; spawn it from a script with `spawn_mob("<name>", x, y, z)`, from a block's `on_break`/`on_use` with the `spawn <name>` action, or with cheats. The host owns every mob and syncs them to joined players, just like blocks and items; attacks are resolved host-side so multiplayer stays authoritative and deterministic.
 
 | Key | Meaning | Default |
 | --- | --- | --- |
@@ -210,9 +210,13 @@ Defines a new mob *type*. It borrows one of a few base-game body shapes and wear
 | `attack_reach` | Horizontal distance within which it can land a hit (0.5–4) | `1.3` |
 | `aggro_range` | How far it notices and chases a player (1–48) | `16` |
 | `attack_cooldown` | Seconds between hits (0.25–10; the 0.25 floor prevents a zero-cooldown exploit) | `1` |
+| `ranged_damage` | Ranged/projectile damage per hit (0–30). `0` (default) means it never fires a projectile | `0` |
+| `ranged_range` | How far it will open fire with a projectile (1–48) | `16` |
+| `projectile_speed` | How fast the projectile flies, in blocks/second (8–48) | `24` |
+| `ranged_cooldown` | Seconds between shots (0.5–10; the 0.5 floor prevents a projectile-spam exploit) | `2` |
 | `drops` | One item it may drop on death: `item [count]` (1–64) | nothing |
 
-A mob attacks only when it is `hostile` **and** `attack_damage > 0`. Existing mods that set `hostile = true` without the attack fields keep `attack_damage = 0`, so they behave exactly as before (they count toward the monster cap but don't attack).
+A mob melee-attacks only when it is `hostile` **and** `attack_damage > 0`, and it fires projectiles only when it is `hostile` **and** `ranged_damage > 0`. A ranged mob shoots when the player is within `ranged_range` and has a clear line of sight; the projectile is the base-game Pointy Stick/arrow and is resolved host-side (deterministic and authoritative) exactly like a Rattler's arrow, replicated to joined players over the existing mob snapshot. If a mob has **both** `attack_damage > 0` and `ranged_damage > 0`, melee takes priority up close (inside `attack_reach`) and it shoots at range; melee and ranged share one cooldown timer, so it can't do both in the same window. Both `attack_damage` and `ranged_damage` default to `0`, so existing mods that set `hostile = true` without the attack fields behave exactly as before (they count toward the monster cap but don't attack, and ranged is OFF).
 
 ```text
 [mob mouse]
@@ -235,6 +239,21 @@ attack_damage = 5      // now it actually bites
 attack_reach = 1.5
 aggro_range = 20
 attack_cooldown = 1.0
+
+[mob slinger]
+name = Cheese Slinger
+texture = mouse
+template = biped
+health = 20
+speed = 1.0
+hostile = true
+ranged_damage = 4      // lobs an arrow when you're at range...
+ranged_range = 18
+projectile_speed = 26
+ranged_cooldown = 2.0
+attack_damage = 3      // ...and still bites up close (melee wins inside attack_reach)
+attack_reach = 1.5
+aggro_range = 24
 ```
 
 Then, from a `.rhai` script in the same mod folder:
@@ -251,7 +270,7 @@ fn on_chat(player, text) {
 
 If two mods both define a `[mob]` with the same section name, a bare name resolves to the first match; use the full `modfolder:name` key (`mymod:mouse`) to pick the one you mean.
 
-Data-defined mobs cover their own stats, a drop, a templated look, and hostile melee combat (pursue and bite). Behaviours that need code (bosses, taming, trading, flying, ranged/projectile attacks) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
+Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat (pursue and bite), and hostile ranged combat (fire a projectile at range). Behaviours that need code (bosses, taming, trading, flying, and homing/AoE/status-effect projectiles) and bespoke per-mob geometry or custom UI screens are not configurable from data; those still need a Rust change.
 
 ### `[splashes]`
 

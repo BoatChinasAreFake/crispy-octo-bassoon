@@ -609,6 +609,8 @@ pub enum MobEvent {
     Warp(Vec3, Vec3),
     /// A Rattler loosed a Pointy Stick: (from, velocity).
     Shoot(Vec3, Vec3),
+    /// A modded mob fired a projectile: (from, velocity, damage).
+    ShootMod(Vec3, Vec3, f32),
     /// A fireball thrown: (from, velocity, big (a Weeper's, which explodes)).
     Fireball(Vec3, Vec3, bool),
     /// An Invoicer's spell: Late Fees up out of the ground from here toward there, or Fees summoned.
@@ -1341,29 +1343,51 @@ impl Mob {
             }
             MobKind::Modded(_) => {
                 // A hostile modded mob with attack_damage > 0 pursues and melee-
-                // attacks the player, mirroring the base Groaner. A mob that is
-                // not hostile or has attack_damage == 0 (the backward-compatible
-                // default) stays a passive wanderer that flees when hit. All of
-                // this runs host-side so it stays deterministic and host-
-                // authoritative; the HurtPlayer event is applied in game.rs.
+                // attacks the player, mirroring the base Groaner; one with
+                // ranged_damage > 0 also fires base-game arrows at range,
+                // mirroring the Rattler. A mob that is not hostile, or has both
+                // attack_damage == 0 and ranged_damage == 0 (the backward-
+                // compatible default), stays a passive wanderer that flees when
+                // hit. All of this runs host-side so it stays deterministic and
+                // host-authoritative; the events are applied in game.rs.
                 let attacking = self
                     .kind
                     .mod_def()
-                    .map(|d| (d.hostile && d.attack_damage > 0.0, d))
+                    .map(|d| (d.hostile && (d.attack_damage > 0.0 || d.ranged_damage > 0.0), d))
                     .filter(|(a, _)| *a)
                     .map(|(_, d)| d);
                 if let Some(def) = attacking {
-                    if player_visible && dist < def.aggro_range {
+                    let melee = def.attack_damage > 0.0;
+                    let ranged = def.ranged_damage > 0.0;
+                    // A ranged mob still approaches/tracks within its firing
+                    // range even when that reaches past aggro_range.
+                    let pursue_range = if ranged { def.aggro_range.max(def.ranged_range) } else { def.aggro_range };
+                    if player_visible && dist < pursue_range {
                         // Pursue at the base chase speed scaled by the def's speed.
                         want = Some((face, 2.3 * def.speed));
-                        if flat.length() < def.attack_reach
-                            && to_player.y.abs() < 1.6
-                            && self.attack_cd <= 0.0
-                        {
+                        let fd = flat.length();
+                        // Melee takes priority up close; otherwise fire a ranged
+                        // shot at distance. Both share the self.attack_cd timer
+                        // (decremented by dt at the top of update), so the mob
+                        // can't melee and shoot in the same cooldown window.
+                        if melee && fd < def.attack_reach && to_player.y.abs() < 1.6 && self.attack_cd <= 0.0 {
                             // Fixed &'static cause (HurtPlayer takes a &'static str,
                             // so we cannot use the mob's dynamic name here).
                             ev.push(MobEvent::HurtPlayer(def.attack_damage, "was mauled by a monster"));
                             self.attack_cd = def.attack_cooldown;
+                        } else if ranged && fd < def.ranged_range && self.attack_cd <= 0.0 {
+                            // Raycast a clear line of sight before loosing, like
+                            // the Rattler. Lob it higher the further away (arrows
+                            // drop). Cadence is the data-driven ranged_cooldown,
+                            // with no added jitter, so it stays reproducible.
+                            let eye = self.eye();
+                            let aim = player - eye;
+                            let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                            if clear {
+                                let vel = aim.normalize_or_zero() * def.projectile_speed + Vec3::Y * aim.length() * 0.42;
+                                ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, def.ranged_damage));
+                                self.attack_cd = def.ranged_cooldown;
+                            }
                         }
                     }
                 } else if self.flee > 0.0 {
@@ -2238,6 +2262,10 @@ pub struct Arrow {
     /// A thrown Soggy Spear (with its wear) instead of a Pointy Stick: it
     /// drops where it lands, to be picked up again.
     pub spear: Option<u32>,
+    /// Fired by a modded mob rather than a base Rattler. Host-side only (never
+    /// sent over the wire); only changes the death-message attribution so a
+    /// modded slinger's kill isn't blamed on a Rattler.
+    pub modded: bool,
 }
 
 impl Arrow {
@@ -2245,7 +2273,7 @@ impl Arrow {
     const GRAVITY: f32 = 20.0;
 
     pub fn new(pos: Vec3, vel: Vec3, shooter: Option<u32>, damage: f32) -> Arrow {
-        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z), spear: None }
+        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z), spear: None, modded: false }
     }
 
     /// Fly for `dt`. Returns true if it just hit a block (and stuck there).
@@ -2279,7 +2307,7 @@ impl Arrow {
     /// A client's copy, from the host's snapshot.
     pub fn from_wire(pos: Vec3, v: Vec3) -> Arrow {
         let stuck = v.length() < 0.01;
-        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z), spear: None }
+        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z), spear: None, modded: false }
     }
 
     pub fn draw(&self, geo: &mut DynGeo, world: &World) {
@@ -2384,6 +2412,19 @@ mod tests {
         (n, dmg)
     }
 
+    /// Count the ShootMod events in a tick, returning (count, total_damage).
+    fn shoot_hits(ev: &[MobEvent]) -> (usize, f32) {
+        let mut n = 0;
+        let mut dmg = 0.0;
+        for e in ev {
+            if let MobEvent::ShootMod(_, _, d) = e {
+                n += 1;
+                dmg += *d;
+            }
+        }
+        (n, dmg)
+    }
+
     #[test]
     fn hostile_modded_mob_attacks_in_reach_then_respects_cooldown() {
         let src = "[mob biter]\nname = Biter\ntexture = stone\ntemplate = biped\nsize = 0.9\nhealth = 20\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 20\nattack_cooldown = 1.5\n";
@@ -2463,6 +2504,59 @@ mod tests {
             }
             m.damage(2.0, Vec3::ZERO);
             assert!(m.flee > 0.0, "passive flee-when-hit behavior is preserved");
+        });
+    }
+
+    #[test]
+    fn ranged_modded_mob_shoots_at_distance_and_melees_up_close() {
+        let src = "[mob slinger]\nname = Slinger\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 10\nattack_cooldown = 1.0\nranged_damage = 6\nranged_range = 20\nprojectile_speed = 24\nranged_cooldown = 2\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let k = MobKind::from_name("zoo:slinger").expect("resolves");
+            let def = k.mod_def().expect("def");
+            assert_eq!(def.ranged_damage, 6.0);
+            assert_eq!(def.ranged_cooldown, 2.0);
+
+            let mut rng = Rng::new(7);
+            let world = World::new(1);
+            let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
+
+            // Beyond attack_reach (1.5) but within ranged_range (20): a ShootMod,
+            // not a HurtPlayer. Line of sight is clear in an empty world.
+            let far = Vec3::new(8.0, 80.0, 0.0);
+            let ev = m.update(0.05, &world, far, true, 1.0, &mut rng);
+            assert_eq!(hurt_hits(&ev).0, 0, "no melee hit beyond attack_reach");
+            let (n, dmg) = shoot_hits(&ev);
+            assert_eq!(n, 1, "exactly one ShootMod on the first in-range tick");
+            assert_eq!(dmg, 6.0, "fires the configured ranged_damage");
+            // Cooldown now set to ranged_cooldown; next tick must not fire again.
+            assert!(m.attack_cd > 1.5);
+            let ev2 = m.update(0.05, &world, far, true, 1.0, &mut rng);
+            assert_eq!(shoot_hits(&ev2).0, 0, "respects ranged cooldown");
+
+            // Within attack_reach: melee takes priority over ranged.
+            let mut m2 = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            let near = Vec3::new(1.0, 80.0, 0.0);
+            let ev3 = m2.update(0.05, &world, near, true, 1.0, &mut rng);
+            assert_eq!(hurt_hits(&ev3).0, 1, "melees up close");
+            assert_eq!(shoot_hits(&ev3).0, 0, "no ranged shot inside attack_reach");
+        });
+    }
+
+    #[test]
+    fn ranged_off_by_default_modded_mob_never_shoots() {
+        // A melee-only hostile mob (no ranged fields) never emits ShootMod.
+        let src = "[mob biter]\nname = Biter\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 20\nattack_cooldown = 1.0\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let k = MobKind::from_name("zoo:biter").expect("resolves");
+            assert_eq!(k.mod_def().unwrap().ranged_damage, 0.0);
+            let mut rng = Rng::new(13);
+            let world = World::new(1);
+            let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            let player = Vec3::new(8.0, 80.0, 0.0); // in aggro range, out of reach
+            for _ in 0..40 {
+                let ev = m.update(0.05, &world, player, true, 1.0, &mut rng);
+                assert_eq!(shoot_hits(&ev).0, 0, "ranged_damage == 0 never shoots");
+            }
         });
     }
 }
