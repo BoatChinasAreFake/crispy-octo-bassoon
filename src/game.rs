@@ -24,6 +24,16 @@ use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 1200.0;
 
+fn projectile_fan(center: Vec3, count: u8, spread: f32) -> Vec<Vec3> {
+    let count = count.clamp(1, 5) as usize;
+    let spread = if spread.is_finite() { spread.clamp(0.0, 45.0) } else { 0.0 };
+    (0..count).map(|i| {
+        let angle = if count == 1 { 0.0 } else { -spread * 0.5 + i as f32 * spread / (count - 1) as f32 };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        Vec3::new(center.x * cos + center.z * sin, center.y, -center.x * sin + center.z * cos)
+    }).collect()
+}
+
 #[derive(Default, Clone)]
 pub struct Controls {
     pub input: Input,
@@ -70,8 +80,8 @@ pub struct Game {
     pub raid: Option<crate::raids::Raid>,
     pub omens: HashMap<u32, f32>,
     pub heroes: HashMap<u32, f32>,
-    /// Joined players the host knows have Strength on (seconds left).
-    pub strong: HashMap<u32, f32>,
+    /// Joined players the host knows have Strength on (seconds left, amplifier).
+    pub strong: HashMap<u32, (f32, u8)>,
     pub raid_hud: Option<(u8, u8, u8, u16, f32)>,
     pub raid_clock: f32,
     pub patrol_timer: f32,
@@ -200,8 +210,8 @@ pub struct Game {
     pub fancy_water: bool,
     /// Fire update clock (see fire.rs).
     pub fire_timer: f32,
-    /// Potion effects on the local player, with seconds left (see potions.rs).
-    pub effects: Vec<(crate::potions::Potion, f32)>,
+    /// Potion effects on the local player (see potions.rs).
+    pub effects: Vec<crate::potions::ActiveEffect>,
     /// Dispensers that were powered last time we looked (they fire on the change).
     pub dispensers_on: std::collections::HashSet<IVec3>,
     /// Hopper clock (see hoppers.rs).
@@ -1375,17 +1385,19 @@ impl Game {
         }
     }
 
-    /// Fire a modded mob's arrow with a data-defined damage. Mirrors
-    /// `spawn_arrow`'s mob-shot path (shooter = None) but takes the damage from
-    /// the mod's `ranged_damage` field instead of the hardcoded base value.
-    pub fn spawn_arrow_dmg(&mut self, pos: Vec3, vel: Vec3, damage: f32) {
-        let mut a = Arrow::new(pos, vel, None, damage);
-        a.modded = true;
-        self.arrows.push(a);
-        self.sfx(Sfx::Twang, Some(pos));
-        if self.arrows.len() > 200 {
-            self.arrows.remove(0);
+    /// Fire one deterministic, data-defined projectile volley for a modded mob.
+    /// Every projectile shares the center shot's vertical lob and payload.
+    pub fn spawn_mod_projectiles(&mut self, pos: Vec3, center_vel: Vec3, spec: ModProjectileSpec) {
+        for vel in projectile_fan(center_vel, spec.count, spec.spread) {
+            let mut arrow = Arrow::new(pos, vel, None, spec.damage);
+            arrow.modded = true;
+            arrow.appearance = spec.appearance;
+            arrow.effect = spec.effect;
+            self.arrows.push(arrow);
         }
+        self.sfx(Sfx::Twang, Some(pos));
+        let excess = self.arrows.len().saturating_sub(200);
+        self.arrows.drain(..excess);
     }
 
     /// Move arrows and see what they hit (host / single player only).
@@ -1436,18 +1448,28 @@ impl Game {
                     // on a Rattler.
                     let cause = if a.modded { "was shot down by a monster" } else { "was shot by a Rattler (with a Pointy Stick)" };
                     let me = self.player.body.clone();
-                    if !self.dedicated && self.dead.is_none() && hit_box(me.min(), me.max()) {
-                        self.player.hurt = 0.0;
-                        let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_player_from(d, cause, Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
-                        let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
-                        self.player.body.vel += knock;
+                    if !self.dedicated && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()) {
+                        if a.damage > 0.0 {
+                            self.player.hurt = 0.0;
+                            let d = self.rules.difficulty.mob_damage(a.damage);
+                            self.hurt_player_from(d, cause, Some(a.pos - a.vel.normalize_or_zero() * 2.0), false);
+                            let knock = self.steadied(a.vel.normalize_or_zero() * 4.0);
+                            self.player.body.vel += knock;
+                        }
+                        if let Some(effect) = a.effect {
+                            self.timed_effect_amplified(effect.kind, effect.duration, effect.amplifier);
+                        }
                         return false;
                     }
                     let hit = self.peers.iter().find(|(_, p)| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3))).map(|(&id, _)| id);
                     if let Some(id) = hit {
-                        let d = self.rules.difficulty.mob_damage(a.damage);
-                        self.hurt_peer(id, d, cause, a.vel.normalize_or_zero() * 4.0);
+                        if a.damage > 0.0 {
+                            let d = self.rules.difficulty.mob_damage(a.damage);
+                            self.hurt_peer(id, d, cause, a.vel.normalize_or_zero() * 4.0);
+                        }
+                        if let Some(effect) = a.effect {
+                            self.send_timed_effect(id, effect.kind, effect.duration, effect.amplifier);
+                        }
                         return false;
                     }
                     true
@@ -1564,7 +1586,7 @@ impl Game {
                     // Early swings are weak; only a full one can crit (see combat.rs).
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
-                    let strength = if self.has_effect(crate::potions::Potion::Strength) { crate::potions::STRENGTH_BONUS } else { 0.0 };
+                    let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
                     let dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
                     self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
@@ -2601,7 +2623,7 @@ impl Game {
                     self.sfx(Sfx::Warp, Some(to));
                 }
                 MobEvent::Shoot(from, vel) => self.spawn_arrow(from, vel, None),
-                MobEvent::ShootMod(from, vel, dmg) => self.spawn_arrow_dmg(from, vel, dmg),
+                MobEvent::ShootMod(from, vel, spec) => self.spawn_mod_projectiles(from, vel, spec),
                 MobEvent::Fireball(from, vel, big) => self.spawn_fireball(from, vel, big, mob_id),
                 MobEvent::Fangs(from, to) => self.late_fees(from, to),
                 MobEvent::Summon(at) => self.summon_fees(at),
@@ -3059,7 +3081,7 @@ impl Game {
         if !self.arrows.is_empty() {
             g.begin(Pass::Opaque, [1.0; 4], false);
             for a in self.arrows.iter().filter(|a| a.pos.distance(eye) < (render_distance * 16) as f32) {
-                a.draw(&mut g, &self.world);
+                a.draw(&mut g, &self.world, eye);
             }
         }
         // The fishing line and bobber
@@ -5054,6 +5076,107 @@ looks_like = diamond
         g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
         g.spawn_timer = 1e9; // no surprise visitors
         g
+    }
+
+    #[test]
+    fn projectile_fan_is_repeatable_and_odd_even_symmetric() {
+        let center = Vec3::new(0.0, 7.5, -20.0);
+        let odd = projectile_fan(center, 3, 20.0);
+        assert_eq!(odd, projectile_fan(center, 3, 20.0), "fan generation is repeatable");
+        assert_eq!(odd[1], center, "an odd fan includes the center ray");
+        assert!((odd[0].x + odd[2].x).abs() < 1e-5);
+        assert!((odd[0].z - odd[2].z).abs() < 1e-5);
+        assert!((odd[0].x.abs().atan2(-odd[0].z) - 10.0f32.to_radians()).abs() < 1e-6);
+
+        let even = projectile_fan(center, 4, 30.0);
+        assert_eq!(even, projectile_fan(center, 4, 30.0), "even fan is repeatable");
+        assert!(even[1].x * even[2].x < 0.0, "even fan straddles the center ray");
+        for i in 0..2 {
+            assert!((even[i].x + even[3 - i].x).abs() < 1e-5);
+            assert!((even[i].z - even[3 - i].z).abs() < 1e-5);
+        }
+        assert!(odd.iter().chain(&even).all(|vel| vel.y == center.y), "rotation preserves the vertical lob");
+        assert_eq!(projectile_fan(center, 1, 45.0), vec![center], "one projectile always uses angle zero");
+    }
+
+    #[test]
+    fn projectile_multishot_expands_one_effect_only_volley_and_caps_arrows() {
+        let mut g = arena(80);
+        for i in 0..199 {
+            g.arrows.push(Arrow::new(Vec3::new(i as f32, 60.0, 0.0), Vec3::Z, None, 3.0));
+        }
+        g.sounds.clear();
+        let appearance = ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(T_STONE), scale: 0.75 };
+        let effect = ProjectileEffect { kind: crate::potions::Potion::Leaping, duration: 4.0, amplifier: 1 };
+        let pos = Vec3::new(2.0, 55.0, 3.0);
+        let center = Vec3::new(0.0, 8.0, -24.0);
+        g.spawn_mod_projectiles(pos, center, ModProjectileSpec { damage: 0.0, appearance, effect: Some(effect), count: 9, spread: 30.0 });
+
+        assert_eq!(g.arrows.len(), 200, "the existing global arrow cap is preserved");
+        let volley: Vec<_> = g.arrows.iter().filter(|arrow| arrow.modded).collect();
+        assert_eq!(volley.len(), 5, "one event expands to at most five arrows");
+        assert!(volley.iter().all(|arrow| {
+            arrow.pos == pos && arrow.vel.y == center.y && arrow.damage == 0.0 && arrow.appearance == appearance && arrow.effect == Some(effect)
+        }), "every arrow shares the spawn, vertical lob, and effect-only payload");
+        assert_eq!(g.sounds.iter().filter(|(sound, _)| matches!(sound, Sfx::Twang)).count(), 1, "one twang per volley");
+    }
+
+    #[test]
+    fn projectile_effect_requires_confirmed_hit_and_defaults_remain_inert() {
+        let effect = ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 };
+
+        let mut hit = arena(76);
+        let health = hit.player.health;
+        let mut arrow = Arrow::new(hit.player.body.pos + Vec3::new(-0.1, 0.9, 0.0), Vec3::X, None, 0.0);
+        arrow.effect = Some(effect);
+        hit.arrows.push(arrow);
+        hit.update_arrows(0.01);
+        assert_eq!(hit.player.health, health, "effect-only arrows deal no damage");
+        assert_eq!(hit.effect_amplifier(crate::potions::Potion::Speed), Some(2));
+        assert!(hit.arrows.is_empty());
+
+        let mut wall = arena(77);
+        wall.world.set(3, 50, 0, STONE);
+        let mut arrow = Arrow::new(Vec3::new(2.5, 50.5, 0.5), Vec3::X * 20.0, None, 0.0);
+        arrow.effect = Some(effect);
+        wall.arrows.push(arrow);
+        wall.update_arrows(0.05);
+        assert!(!wall.has_effect(crate::potions::Potion::Speed), "wall impact cannot apply an effect");
+        assert!(wall.arrows[0].stuck);
+
+        let mut miss = arena(78);
+        let mut arrow = Arrow::new(Vec3::new(5.0, 55.0, 5.0), Vec3::X, None, 0.0);
+        arrow.effect = Some(effect);
+        miss.arrows.push(arrow);
+        miss.update_arrows(0.05);
+        assert!(!miss.has_effect(crate::potions::Potion::Speed), "a miss cannot apply an effect");
+
+        let mut default = arena(79);
+        default.arrows.push(Arrow::new(default.player.body.pos + Vec3::new(-0.1, 0.9, 0.0), Vec3::X, None, 0.0));
+        default.update_arrows(0.01);
+        assert!(default.effects.is_empty(), "ordinary arrows carry no effect");
+        let mirrored = Arrow::from_wire(Vec3::ZERO, Vec3::X, ProjectileAppearance::default());
+        assert_eq!(mirrored.effect, None, "client snapshots cannot carry effects");
+    }
+
+    #[test]
+    fn projectile_effect_ignores_local_spectator() {
+        let mut spectator = arena(81);
+        spectator.spectator = true;
+        let health = spectator.player.health;
+        let pos = spectator.player.body.pos + Vec3::new(-0.1, 0.9, 0.0);
+
+        let effect = ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 };
+        let mut effect_only = Arrow::new(pos, Vec3::X, None, 0.0);
+        effect_only.effect = Some(effect);
+        spectator.arrows.push(effect_only);
+        spectator.arrows.push(Arrow::new(pos, Vec3::X, None, 6.0));
+
+        spectator.update_arrows(0.01);
+
+        assert_eq!(spectator.player.health, health, "spectators cannot be damaged by projectiles");
+        assert!(!spectator.has_effect(crate::potions::Potion::Speed), "spectators cannot receive projectile effects");
+        assert_eq!(spectator.arrows.len(), 2, "overlapping projectiles pass through spectators without being consumed");
     }
 
     #[test]

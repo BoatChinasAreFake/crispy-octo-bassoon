@@ -473,7 +473,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped });
                     }
                 }
                 _ => {}
@@ -859,13 +859,78 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     // The 0.25 minimum is essential: it prevents a zero-cooldown DPS exploit.
     let attack_cooldown = num(s, "attack_cooldown", 1.0f32, errs).clamp(0.25, 10.0);
     // Ranged attack parameters, all clamped like the melee ones. BACKWARD COMPAT:
-    // ranged_damage defaults to 0.0, so an existing [mob] section is unchanged and
-    // never fires. A mob shoots only when it is hostile AND ranged_damage > 0.0.
+    // ranged_damage and projectile_effect default off, so an existing [mob]
+    // section is unchanged and never fires. A hostile mob shoots when it has
+    // positive ranged damage or a configured effect.
     // The 0.5 cooldown floor prevents a zero-cooldown projectile-spam exploit, and
     // the speed/range clamps bound what an adversarial mod can do.
     let ranged_damage = num(s, "ranged_damage", 0.0f32, errs).clamp(0.0, 30.0);
     let ranged_range = num(s, "ranged_range", 16.0f32, errs).clamp(1.0, 48.0);
     let projectile_speed = num(s, "projectile_speed", 24.0f32, errs).clamp(8.0, 48.0);
+    let projectile_model = match s.get("projectile_model") {
+        None => ProjectileModel::Arrow,
+        Some((_, value, line)) => match value.trim().to_ascii_lowercase().as_str() {
+            "arrow" => ProjectileModel::Arrow,
+            "billboard" => ProjectileModel::Billboard,
+            "cube" => ProjectileModel::Cube,
+            _ => {
+                errs.push(format!("line {line}: projectile_model should be arrow, billboard or cube, not \"{value}\""));
+                ProjectileModel::Arrow
+            }
+        },
+    };
+    let projectile_tile = s.get("projectile_texture").map(|(_, value, line)| ctx.texture(m, value, errs, *line));
+    let parsed_scale = num(s, "projectile_scale", 1.0f32, errs);
+    let projectile_scale = if parsed_scale.is_finite() {
+        parsed_scale.clamp(0.25, 4.0)
+    } else {
+        let line = s.get("projectile_scale").map_or(s.line, |(_, _, line)| *line);
+        errs.push(format!("line {line}: projectile_scale should be a finite number"));
+        1.0
+    };
+    let projectile_appearance = ProjectileAppearance { model: projectile_model, tile: projectile_tile, scale: projectile_scale };
+    let projectile_effect = match s.get("projectile_effect") {
+        None => None,
+        Some((_, value, _)) if value.trim().eq_ignore_ascii_case("none") => None,
+        Some((_, value, line)) => {
+            let kind = match value.trim().to_ascii_lowercase().as_str() {
+                "speed" => Some(crate::potions::Potion::Speed),
+                "fire_resistance" => Some(crate::potions::Potion::FireResistance),
+                "night_vision" => Some(crate::potions::Potion::NightVision),
+                "leaping" => Some(crate::potions::Potion::Leaping),
+                "strength" => Some(crate::potions::Potion::Strength),
+                "regeneration" => Some(crate::potions::Potion::Regeneration),
+                _ => {
+                    errs.push(format!("line {line}: projectile_effect should be none, speed, fire_resistance, night_vision, leaping, strength or regeneration, not \"{value}\""));
+                    None
+                }
+            };
+            kind.map(|kind| {
+                let parsed_duration = num(s, "projectile_effect_duration", 10.0f32, errs);
+                let duration = if parsed_duration.is_finite() {
+                    parsed_duration.clamp(0.5, 300.0)
+                } else {
+                    let line = s.get("projectile_effect_duration").map_or(s.line, |(_, _, line)| *line);
+                    errs.push(format!("line {line}: projectile_effect_duration should be a finite number"));
+                    10.0
+                };
+                ProjectileEffect {
+                    kind,
+                    duration,
+                    amplifier: num(s, "projectile_effect_amplifier", 0i32, errs).clamp(0, 3) as u8,
+                }
+            })
+        }
+    };
+    let projectile_count = num(s, "projectile_count", 1u8, errs).clamp(1, 5);
+    let parsed_spread = num(s, "projectile_spread", 0.0f32, errs);
+    let projectile_spread = if parsed_spread.is_finite() {
+        parsed_spread.clamp(0.0, 45.0)
+    } else {
+        let line = s.get("projectile_spread").map_or(s.line, |(_, _, line)| *line);
+        errs.push(format!("line {line}: projectile_spread should be a finite number"));
+        0.0
+    };
     let ranged_cooldown = num(s, "ranged_cooldown", 2.0f32, errs).clamp(0.5, 10.0);
     let drop = match s.get("drops") {
         None => None,
@@ -889,6 +954,10 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.ranged_damage = ranged_damage;
     mob.ranged_range = ranged_range;
     mob.projectile_speed = projectile_speed;
+    mob.projectile_appearance = projectile_appearance;
+    mob.projectile_effect = projectile_effect;
+    mob.projectile_count = projectile_count;
+    mob.projectile_spread = projectile_spread;
     mob.ranged_cooldown = ranged_cooldown;
     mob.drop = drop;
 }
@@ -1275,7 +1344,143 @@ attack_damage = 5
         assert_eq!(plain.ranged_damage, 0.0, "ranged is OFF by default");
         assert_eq!(plain.ranged_range, 16.0, "default ranged range is 16.0");
         assert_eq!(plain.projectile_speed, 24.0, "default projectile speed is 24.0");
+        assert_eq!(plain.projectile_count, 1, "default projectile count is one");
+        assert_eq!(plain.projectile_spread, 0.0, "default projectile spread is zero");
         assert_eq!(plain.ranged_cooldown, 2.0, "default ranged cooldown is 2.0");
+    }
+
+    #[test]
+    fn projectile_appearance_parser_defaults_clamps_and_reports_errors() {
+        let art = r#"
+[texture bolt]
+noise = 200,100,50
+
+[mob local]
+projectile_model = billboard
+projectile_texture = bolt
+projectile_scale = 9
+"#;
+        let mobs = r#"
+[mob plain]
+
+[mob qualified]
+projectile_model = cube
+projectile_texture = art:bolt
+projectile_scale = 0.1
+
+[mob base]
+projectile_model = arrow
+projectile_texture = stone
+projectile_scale = 2
+
+[mob bad]
+projectile_model = pyramid
+projectile_texture = missing
+
+[mob nonfinite]
+projectile_scale = NaN
+"#;
+        let source = |id: &str, text: &str| {
+            let mut files = BTreeMap::new();
+            files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+            ModSource { id: id.to_string(), files }
+        };
+        let reg = build(&[source("art", art), source("mobs", mobs)], &[]);
+        let tile = reg.mobs[0].projectile_appearance.tile.expect("local texture");
+        assert_eq!(reg.mobs[0].projectile_appearance, ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(tile), scale: 4.0 });
+        assert_eq!(reg.mobs[1].projectile_appearance, ProjectileAppearance::default());
+        assert_eq!(reg.mobs[2].projectile_appearance, ProjectileAppearance { model: ProjectileModel::Cube, tile: Some(tile), scale: 0.25 });
+        assert_eq!(reg.mobs[3].projectile_appearance, ProjectileAppearance { model: ProjectileModel::Arrow, tile: Some(crate::texture::T_STONE), scale: 2.0 });
+        assert_eq!(reg.mobs[4].projectile_appearance.model, ProjectileModel::Arrow);
+        assert_eq!(reg.mobs[4].projectile_appearance.tile, Some(crate::texture::T_WHITE));
+        assert_eq!(reg.mobs[5].projectile_appearance, ProjectileAppearance::default());
+        let errors = &reg.mods[1].errors;
+        assert!(errors.iter().any(|e| e.contains("line") && e.contains("projectile_model")), "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("line") && e.contains("unknown texture")), "{errors:?}");
+        assert!(errors.iter().any(|e| e == "line 19: projectile_scale should be a finite number"), "{errors:?}");
+    }
+
+    #[test]
+    fn projectile_multishot_parser_defaults_and_caps() {
+        let text = r#"
+[mob plain]
+
+[mob high]
+projectile_count = 9
+projectile_spread = 90
+
+[mob low]
+projectile_count = 0
+projectile_spread = -5
+
+[mob nonfinite]
+projectile_spread = NaN
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "fans".into(), files }], &[]);
+        assert_eq!((reg.mobs[0].projectile_count, reg.mobs[0].projectile_spread), (1, 0.0));
+        assert_eq!((reg.mobs[1].projectile_count, reg.mobs[1].projectile_spread), (5, 45.0));
+        assert_eq!((reg.mobs[2].projectile_count, reg.mobs[2].projectile_spread), (1, 0.0));
+        assert_eq!((reg.mobs[3].projectile_count, reg.mobs[3].projectile_spread), (1, 0.0));
+        assert_eq!(reg.mods[0].errors.len(), 1, "{:?}", reg.mods[0].errors);
+        assert!(reg.mods[0].errors[0].contains("projectile_spread"));
+    }
+
+    #[test]
+    fn projectile_effect_parser_accepts_only_safe_bounded_effects() {
+        let text = r#"
+[mob speed]
+projectile_effect = speed
+
+[mob fire]
+projectile_effect = fire_resistance
+projectile_effect_duration = 999
+projectile_effect_amplifier = 999
+
+[mob night]
+projectile_effect = night_vision
+
+[mob leap]
+projectile_effect = leaping
+projectile_effect_duration = 0.01
+
+[mob strong]
+projectile_effect = strength
+
+[mob regen]
+projectile_effect = regeneration
+
+[mob none]
+projectile_effect = none
+
+[mob instant]
+projectile_effect = healing
+
+[mob raid]
+projectile_effect = bad_omen
+
+[mob nonfinite]
+projectile_effect = regeneration
+projectile_effect_duration = NaN
+"#;
+        let mut files = BTreeMap::new();
+        files.insert("mod.txt".to_string(), text.as_bytes().to_vec());
+        let reg = build(&[ModSource { id: "effects".into(), files }], &[]);
+        let effects: Vec<_> = reg.mobs.iter().map(|mob| mob.projectile_effect).collect();
+        assert_eq!(effects[0], Some(ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 10.0, amplifier: 0 }));
+        assert_eq!(effects[1], Some(ProjectileEffect { kind: crate::potions::Potion::FireResistance, duration: 300.0, amplifier: 3 }));
+        assert_eq!(effects[2].unwrap().kind, crate::potions::Potion::NightVision);
+        assert_eq!(effects[3], Some(ProjectileEffect { kind: crate::potions::Potion::Leaping, duration: 0.5, amplifier: 0 }));
+        assert_eq!(effects[4].unwrap().kind, crate::potions::Potion::Strength);
+        assert_eq!(effects[5].unwrap().kind, crate::potions::Potion::Regeneration);
+        assert_eq!(effects[6], None);
+        assert_eq!(effects[7], None);
+        assert_eq!(effects[8], None);
+        assert_eq!(effects[9].unwrap().duration, 10.0);
+        let errors = &reg.mods[0].errors;
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().all(|error| error.contains("line") && error.contains("projectile_effect")), "{errors:?}");
     }
 
     #[test]
@@ -1363,6 +1568,12 @@ attack_damage = 5
         let (_, px) = reg.textures.iter().find(|(t, _)| *t == wheel.tex[1]).unwrap();
         assert_eq!(px[3], 255);
         assert_eq!(wheel.bounce, 0.85);
+        let slinger = reg.mobs.iter().find(|mob| mob.key == "cheese:cheese_slinger").expect("shipped slinger");
+        let slice = reg.lookup("cheese:slice").unwrap();
+        let slice_tile = reg.items[(slice - FIRST_ITEM) as usize].tile;
+        assert_eq!(slinger.projectile_appearance, ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(slice_tile), scale: 0.75 });
+        assert_eq!(slinger.projectile_effect, Some(ProjectileEffect { kind: crate::potions::Potion::Leaping, duration: 4.0, amplifier: 0 }));
+        assert_eq!((slinger.projectile_count, slinger.projectile_spread), (3, 18.0));
     }
 
     #[test]

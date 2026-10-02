@@ -6,6 +6,7 @@
 //! that). Saves and the network store names for mod things, so the numbers
 //! themselves can move between versions.
 
+use crate::potions::Potion;
 use crate::texture::*;
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
@@ -947,6 +948,70 @@ pub struct ModArmor {
     pub looks_like: u8,
 }
 
+/// A bounded shape for a modded mob's projectile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectileModel {
+    Arrow,
+    Billboard,
+    Cube,
+}
+
+impl ProjectileModel {
+    pub fn to_wire(self) -> u8 {
+        match self {
+            ProjectileModel::Arrow => 0,
+            ProjectileModel::Billboard => 1,
+            ProjectileModel::Cube => 2,
+        }
+    }
+
+    pub fn from_wire(value: u8) -> ProjectileModel {
+        match value {
+            1 => ProjectileModel::Billboard,
+            2 => ProjectileModel::Cube,
+            _ => ProjectileModel::Arrow,
+        }
+    }
+}
+
+/// The transient, client-visible appearance of a modded mob's projectile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectileAppearance {
+    pub model: ProjectileModel,
+    pub tile: Option<u16>,
+    pub scale: f32,
+}
+
+impl Default for ProjectileAppearance {
+    fn default() -> Self {
+        Self { model: ProjectileModel::Arrow, tile: None, scale: 1.0 }
+    }
+}
+
+impl ProjectileAppearance {
+    /// Normalize untrusted wire values before they can reach the renderer.
+    pub fn from_wire(model: u8, tile: u16, scale: f32) -> Self {
+        let max_tile = TILES_PER_ROW * TILES_PER_ROW;
+        Self {
+            model: ProjectileModel::from_wire(model),
+            tile: (tile != u16::MAX && tile < max_tile).then_some(tile),
+            scale: if scale.is_finite() { scale.clamp(0.25, 4.0) } else { 1.0 },
+        }
+    }
+
+    pub fn normalized(self) -> Self {
+        Self::from_wire(self.model.to_wire(), self.tile.unwrap_or(u16::MAX), self.scale)
+    }
+}
+
+/// A bounded timed effect carried by a host-owned modded projectile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProjectileEffect {
+    pub kind: Potion,
+    pub duration: f32,
+    pub amplifier: u8,
+}
+
 /// A new mob type defined by a mod (a `[mob <name>]` section in `mod.txt`).
 ///
 /// A modded mob borrows one of a handful of base-game body shapes (`template`)
@@ -957,13 +1022,16 @@ pub struct ModArmor {
 /// `attack_damage == 0` only counts toward the night-time monster cap and
 /// otherwise behaves like a passive wanderer (the backward-compatible default,
 /// so existing mod.txt files are unchanged). A `hostile` mob with
-/// `ranged_damage > 0` additionally fires base-game arrows at players, exactly
-/// like a base ranged attacker (host-authoritative and deterministic);
-/// `ranged_damage == 0` (the default) keeps the ranged attack off, so existing
-/// mod.txt files are unchanged. Behaviours that need code (bosses, taming,
-/// raids, trading, flying, homing/AoE/status projectiles, bespoke geometry/UI)
-/// are deliberately out of scope so no modded mob can wedge the AI or the
-/// renderer. See MODDING.md.
+/// `ranged_damage > 0` or a configured projectile effect additionally fires
+/// projectiles at players, exactly like a base ranged attacker
+/// (host-authoritative and deterministic). Their bounded arrow, billboard or
+/// cube appearance, safe timed hit effect, and one-to-five-shot deterministic
+/// fan are data-defined; projectile state and appearance are synchronized to
+/// joined clients. Zero damage with no effect (the default) keeps the ranged
+/// attack off, so existing mod.txt files are unchanged. Behaviours that need
+/// code (bosses, taming, raids, trading, flying, homing/AoE projectiles,
+/// bespoke geometry/UI) are deliberately out of scope so no modded mob can
+/// wedge the AI or the renderer. See MODDING.md.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModMob {
     /// Stable identifier, e.g. "cheese:mouse" (used by saves and `from_name`).
@@ -995,17 +1063,28 @@ pub struct ModMob {
     /// exploit. Clamped to `0.25..=10.0` at parse time (default `1.0`).
     pub attack_cooldown: f32,
     /// Ranged (arrow) damage dealt to a player per shot. `0.0` (the default)
-    /// means the mob never fires a projectile, even when `hostile` is true
-    /// (backward compatible). Clamped to `0.0..=30.0` at parse time.
+    /// means the mob only fires when `projectile_effect` is configured.
+    /// Clamped to `0.0..=30.0` at parse time.
     pub ranged_damage: f32,
     /// Maximum horizontal distance at which the mob opens fire, mirroring
     /// `aggro_range`'s bounds. Clamped to `1.0..=48.0` at parse time
     /// (default `16.0`).
     pub ranged_range: f32,
-    /// Launch speed of the fired arrow, in blocks per second (base
+    /// Launch speed of the fired projectile, in blocks per second (base
     /// `Arrow::SPEED` is `24.0`). Clamped to `8.0..=48.0` at parse time
     /// (default `24.0`).
     pub projectile_speed: f32,
+    /// Client-visible projectile shape, optional texture and scale. The classic
+    /// base arrow is the default, so existing mods keep their exact appearance.
+    pub projectile_appearance: ProjectileAppearance,
+    /// Optional bounded timed effect applied on a confirmed player hit.
+    pub projectile_effect: Option<ProjectileEffect>,
+    /// Projectiles fired in one volley. Clamped to `1..=5` at parse time
+    /// (default `1`).
+    pub projectile_count: u8,
+    /// Total horizontal fan spread in degrees. Clamped to `0.0..=45.0` at
+    /// parse time (default `0.0`).
+    pub projectile_spread: f32,
     /// Seconds between shots. The `0.5` floor prevents a zero-cooldown
     /// projectile-spam exploit. Clamped to `0.5..=10.0` at parse time
     /// (default `2.0`).

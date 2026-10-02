@@ -59,10 +59,7 @@ impl Game {
             self.player.health = (self.player.health + 2.0).min(20.0);
             return;
         }
-        match self.effects.iter_mut().find(|e| e.0 == p) {
-            Some(e) => e.1 = e.1.max(LASTS),
-            None => self.effects.push((p, LASTS)),
-        }
+        self.timed_effect(p, LASTS);
     }
 
     /// Where the world lives: every working beacon pulses now and then.

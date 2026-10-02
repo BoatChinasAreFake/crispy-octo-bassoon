@@ -601,6 +601,15 @@ pub struct Mob {
     pub rider: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModProjectileSpec {
+    pub damage: f32,
+    pub appearance: ProjectileAppearance,
+    pub effect: Option<ProjectileEffect>,
+    pub count: u8,
+    pub spread: f32,
+}
+
 pub enum MobEvent {
     HurtPlayer(f32, &'static str),
     Explode(Vec3, f32, &'static str),
@@ -609,8 +618,8 @@ pub enum MobEvent {
     Warp(Vec3, Vec3),
     /// A Rattler loosed a Pointy Stick: (from, velocity).
     Shoot(Vec3, Vec3),
-    /// A modded mob fired a projectile: (from, velocity, damage).
-    ShootMod(Vec3, Vec3, f32),
+    /// A modded mob fired one projectile volley: (from, center velocity, specification).
+    ShootMod(Vec3, Vec3, ModProjectileSpec),
     /// A fireball thrown: (from, velocity, big (a Weeper's, which explodes)).
     Fireball(Vec3, Vec3, bool),
     /// An Invoicer's spell: Late Fees up out of the ground from here toward there, or Fees summoned.
@@ -1344,21 +1353,21 @@ impl Mob {
             MobKind::Modded(_) => {
                 // A hostile modded mob with attack_damage > 0 pursues and melee-
                 // attacks the player, mirroring the base Groaner; one with
-                // ranged_damage > 0 also fires base-game arrows at range,
-                // mirroring the Rattler. A mob that is not hostile, or has both
-                // attack_damage == 0 and ranged_damage == 0 (the backward-
-                // compatible default), stays a passive wanderer that flees when
+                // ranged_damage > 0 or a configured effect also fires
+                // projectiles at range, mirroring the Rattler. A mob that is
+                // not hostile, or has no melee damage, ranged damage or effect
+                // (the backward-compatible default), stays a passive wanderer that flees when
                 // hit. All of this runs host-side so it stays deterministic and
                 // host-authoritative; the events are applied in game.rs.
                 let attacking = self
                     .kind
                     .mod_def()
-                    .map(|d| (d.hostile && (d.attack_damage > 0.0 || d.ranged_damage > 0.0), d))
+                    .map(|d| (d.hostile && (d.attack_damage > 0.0 || d.ranged_damage > 0.0 || d.projectile_effect.is_some()), d))
                     .filter(|(a, _)| *a)
                     .map(|(_, d)| d);
                 if let Some(def) = attacking {
                     let melee = def.attack_damage > 0.0;
-                    let ranged = def.ranged_damage > 0.0;
+                    let ranged = def.ranged_damage > 0.0 || def.projectile_effect.is_some();
                     // A ranged mob still approaches/tracks within its firing
                     // range even when that reaches past aggro_range.
                     let pursue_range = if ranged { def.aggro_range.max(def.ranged_range) } else { def.aggro_range };
@@ -1385,7 +1394,14 @@ impl Mob {
                             let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
                             if clear {
                                 let vel = aim.normalize_or_zero() * def.projectile_speed + Vec3::Y * aim.length() * 0.42;
-                                ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, def.ranged_damage));
+                                let spec = ModProjectileSpec {
+                                    damage: def.ranged_damage,
+                                    appearance: def.projectile_appearance,
+                                    effect: def.projectile_effect,
+                                    count: def.projectile_count,
+                                    spread: def.projectile_spread,
+                                };
+                                ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, spec));
                                 self.attack_cd = def.ranged_cooldown;
                             }
                         }
@@ -2266,6 +2282,10 @@ pub struct Arrow {
     /// sent over the wire); only changes the death-message attribution so a
     /// modded slinger's kill isn't blamed on a Rattler.
     pub modded: bool,
+    /// Transient appearance mirrored to joined clients.
+    pub appearance: ProjectileAppearance,
+    /// Host-only timed effect payload; never included in snapshots.
+    pub effect: Option<ProjectileEffect>,
 }
 
 impl Arrow {
@@ -2273,7 +2293,19 @@ impl Arrow {
     const GRAVITY: f32 = 20.0;
 
     pub fn new(pos: Vec3, vel: Vec3, shooter: Option<u32>, damage: f32) -> Arrow {
-        Arrow { pos, vel, shooter, damage, life: 8.0, stuck: false, dir: vel.normalize_or(Vec3::Z), spear: None, modded: false }
+        Arrow {
+            pos,
+            vel,
+            shooter,
+            damage,
+            life: 8.0,
+            stuck: false,
+            dir: vel.normalize_or(Vec3::Z),
+            spear: None,
+            modded: false,
+            appearance: ProjectileAppearance::default(),
+            effect: None,
+        }
     }
 
     /// Fly for `dt`. Returns true if it just hit a block (and stuck there).
@@ -2305,18 +2337,62 @@ impl Arrow {
     }
 
     /// A client's copy, from the host's snapshot.
-    pub fn from_wire(pos: Vec3, v: Vec3) -> Arrow {
+    pub fn from_wire(pos: Vec3, v: Vec3, appearance: ProjectileAppearance) -> Arrow {
         let stuck = v.length() < 0.01;
-        Arrow { pos, vel: if stuck { Vec3::ZERO } else { v }, shooter: None, damage: 0.0, life: 1.0, stuck, dir: v.normalize_or(Vec3::Z), spear: None, modded: false }
+        Arrow {
+            pos,
+            vel: if stuck { Vec3::ZERO } else { v },
+            shooter: None,
+            damage: 0.0,
+            life: 1.0,
+            stuck,
+            dir: v.normalize_or(Vec3::Z),
+            spear: None,
+            modded: false,
+            appearance: appearance.normalized(),
+            effect: None,
+        }
     }
 
-    pub fn draw(&self, geo: &mut DynGeo, world: &World) {
+    pub fn draw(&self, geo: &mut DynGeo, world: &World, camera: Vec3) {
         let sky = world.shade_near(self.pos);
-        let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, self.dir);
-        let m = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.03, -0.03, -0.55)) * Mat4::from_scale(Vec3::new(0.06, 0.06, 0.6));
-        geo.cube(&m, [T_PLANKS; 6], sky, [0.0, 0.0, 0.25, 0.25]);
-        let tip = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.04, -0.04, 0.0)) * Mat4::from_scale(Vec3::new(0.08, 0.08, 0.1));
-        geo.cube(&tip, [T_STONE; 6], sky, [0.0, 0.0, 0.25, 0.25]);
+        let appearance = self.appearance.normalized();
+        if appearance == ProjectileAppearance::default() {
+            let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, self.dir);
+            let m = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.03, -0.03, -0.55)) * Mat4::from_scale(Vec3::new(0.06, 0.06, 0.6));
+            geo.cube(&m, [T_PLANKS; 6], sky, [0.0, 0.0, 0.25, 0.25]);
+            let tip = Mat4::from_translation(self.pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.04, -0.04, 0.0)) * Mat4::from_scale(Vec3::new(0.08, 0.08, 0.1));
+            geo.cube(&tip, [T_STONE; 6], sky, [0.0, 0.0, 0.25, 0.25]);
+            return;
+        }
+
+        let scale = appearance.scale;
+        match appearance.model {
+            ProjectileModel::Arrow => {
+                let tile = appearance.tile.unwrap_or(T_PLANKS);
+                let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, self.dir);
+                let m = Mat4::from_translation(self.pos)
+                    * Mat4::from_quat(rot)
+                    * Mat4::from_translation(Vec3::new(-0.03, -0.03, -0.55) * scale)
+                    * Mat4::from_scale(Vec3::new(0.06, 0.06, 0.65) * scale);
+                geo.cube(&m, [tile; 6], sky, [0.0, 0.0, 1.0, 1.0]);
+            }
+            ProjectileModel::Billboard => {
+                let tile = appearance.tile.unwrap_or(T_WHITE);
+                let half = 0.35 * scale;
+                let right = Vec3::Y.cross(camera - self.pos).normalize_or(Vec3::X) * half;
+                let up = Vec3::Y * half;
+                let corners = [self.pos - right - up, self.pos + right - up, self.pos + right + up, self.pos - right + up];
+                geo.quad(corners, tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky]);
+                geo.quad([corners[1], corners[0], corners[3], corners[2]], tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky]);
+            }
+            ProjectileModel::Cube => {
+                let tile = appearance.tile.unwrap_or(T_WHITE);
+                let size = 0.4 * scale;
+                let m = Mat4::from_translation(self.pos - Vec3::splat(size * 0.5)) * Mat4::from_scale(Vec3::splat(size));
+                geo.cube(&m, [tile; 6], sky, [0.0, 0.0, 1.0, 1.0]);
+            }
+        }
     }
 }
 
@@ -2343,6 +2419,69 @@ mod tests {
         // Just past the base set is unknown when no mods are loaded.
         assert_eq!(MobKind::from_index(BASE_MOBS), None);
         assert_eq!(MobKind::from_index(u8::MAX), None);
+    }
+
+    #[test]
+    fn projectile_appearance_render_shapes_preserve_classic_arrow() {
+        let world = World::new(1);
+        let pos = Vec3::new(2.0, 80.0, 3.0);
+        let arrow = Arrow::new(pos, Vec3::Z, None, 3.0);
+        let mut classic = DynGeo::default();
+        arrow.draw(&mut classic, &world, pos + Vec3::X * 4.0);
+
+        // Pin the exact pre-customization shaft and stone-tip geometry.
+        let sky = world.shade_near(pos);
+        let rot = macroquad::math::Quat::from_rotation_arc(Vec3::Z, Vec3::Z);
+        let mut expected = DynGeo::default();
+        let shaft = Mat4::from_translation(pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.03, -0.03, -0.55)) * Mat4::from_scale(Vec3::new(0.06, 0.06, 0.6));
+        expected.cube(&shaft, [T_PLANKS; 6], sky, [0.0, 0.0, 0.25, 0.25]);
+        let tip = Mat4::from_translation(pos) * Mat4::from_quat(rot) * Mat4::from_translation(Vec3::new(-0.04, -0.04, 0.0)) * Mat4::from_scale(Vec3::new(0.08, 0.08, 0.1));
+        expected.cube(&tip, [T_STONE; 6], sky, [0.0, 0.0, 0.25, 0.25]);
+        assert_eq!(classic.mesh.idx, expected.mesh.idx);
+        assert_eq!(classic.mesh.verts.len(), expected.mesh.verts.len());
+        for (actual, expected) in classic.mesh.verts.iter().zip(&expected.mesh.verts) {
+            assert_eq!((actual.pos, actual.uv, actual.light, actual.tile), (expected.pos, expected.uv, expected.light, expected.tile));
+        }
+
+        let render = |appearance| {
+            let mut arrow = Arrow::new(pos, Vec3::Z, None, 3.0);
+            arrow.appearance = appearance;
+            let mut geo = DynGeo::default();
+            arrow.draw(&mut geo, &world, pos + Vec3::X * 4.0);
+            geo
+        };
+        let assert_render = |geo: &DynGeo, counts: (usize, usize), expected_extent: Vec3| {
+            assert_eq!((geo.mesh.verts.len(), geo.mesh.idx.len()), counts);
+            let (u, v, _) = tile_uv(T_STONE);
+            let expected_tile = [-u - 2.0, -v - 2.0];
+            assert!(geo.mesh.verts.iter().all(|vertex| vertex.tile == expected_tile));
+            let mut min = Vec3::splat(f32::INFINITY);
+            let mut max = Vec3::splat(f32::NEG_INFINITY);
+            for vertex in &geo.mesh.verts {
+                let point = Vec3::from_array(vertex.pos);
+                min = min.min(point);
+                max = max.max(point);
+            }
+            let extent = max - min;
+            assert!((extent.x - expected_extent.x).abs() < 1e-5, "{extent:?}");
+            assert!((extent.y - expected_extent.y).abs() < 1e-5, "{extent:?}");
+            assert!((extent.z - expected_extent.z).abs() < 1e-5, "{extent:?}");
+        };
+        assert_render(
+            &render(ProjectileAppearance { model: ProjectileModel::Arrow, tile: Some(T_STONE), scale: 2.0 }),
+            (24, 36),
+            Vec3::new(0.12, 0.12, 1.3),
+        );
+        assert_render(
+            &render(ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(T_STONE), scale: 1.5 }),
+            (8, 12),
+            Vec3::new(0.0, 1.05, 1.05),
+        );
+        assert_render(
+            &render(ProjectileAppearance { model: ProjectileModel::Cube, tile: Some(T_STONE), scale: 0.5 }),
+            (24, 36),
+            Vec3::splat(0.2),
+        );
     }
 
     #[test]
@@ -2417,9 +2556,9 @@ mod tests {
         let mut n = 0;
         let mut dmg = 0.0;
         for e in ev {
-            if let MobEvent::ShootMod(_, _, d) = e {
+            if let MobEvent::ShootMod(_, _, spec) = e {
                 n += 1;
-                dmg += *d;
+                dmg += spec.damage;
             }
         }
         (n, dmg)
@@ -2508,8 +2647,8 @@ mod tests {
     }
 
     #[test]
-    fn ranged_modded_mob_shoots_at_distance_and_melees_up_close() {
-        let src = "[mob slinger]\nname = Slinger\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 10\nattack_cooldown = 1.0\nranged_damage = 6\nranged_range = 20\nprojectile_speed = 24\nranged_cooldown = 2\n";
+    fn projectile_multishot_emits_one_volley_and_one_cooldown_with_melee_priority() {
+        let src = "[mob slinger]\nname = Slinger\ntexture = stone\ntemplate = biped\nhostile = true\nattack_damage = 4\nattack_reach = 1.5\naggro_range = 10\nattack_cooldown = 1.0\nranged_damage = 6\nranged_range = 20\nprojectile_speed = 24\nprojectile_count = 3\nprojectile_spread = 18\nranged_cooldown = 2\n";
         crate::mods::with_mods(&[("zoo", src)], |_reg| {
             let k = MobKind::from_name("zoo:slinger").expect("resolves");
             let def = k.mod_def().expect("def");
@@ -2520,25 +2659,30 @@ mod tests {
             let world = World::new(1);
             let mut m = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
 
-            // Beyond attack_reach (1.5) but within ranged_range (20): a ShootMod,
-            // not a HurtPlayer. Line of sight is clear in an empty world.
+            // Beyond attack_reach (1.5) but within ranged_range (20): one
+            // ShootMod volley event, not one event per projectile.
             let far = Vec3::new(8.0, 80.0, 0.0);
             let ev = m.update(0.05, &world, far, true, 1.0, &mut rng);
             assert_eq!(hurt_hits(&ev).0, 0, "no melee hit beyond attack_reach");
             let (n, dmg) = shoot_hits(&ev);
-            assert_eq!(n, 1, "exactly one ShootMod on the first in-range tick");
+            assert_eq!(n, 1, "exactly one ShootMod for the volley");
             assert_eq!(dmg, 6.0, "fires the configured ranged_damage");
-            // Cooldown now set to ranged_cooldown; next tick must not fire again.
-            assert!(m.attack_cd > 1.5);
+            let spec = ev.iter().find_map(|event| match event {
+                MobEvent::ShootMod(_, _, spec) => Some(*spec),
+                _ => None,
+            }).expect("volley specification");
+            assert_eq!((spec.count, spec.spread), (3, 18.0));
+            // The whole volley consumes the configured cooldown exactly once.
+            assert_eq!(m.attack_cd, 2.0);
             let ev2 = m.update(0.05, &world, far, true, 1.0, &mut rng);
             assert_eq!(shoot_hits(&ev2).0, 0, "respects ranged cooldown");
 
-            // Within attack_reach: melee takes priority over ranged.
+            // Within attack_reach: melee takes priority over the whole volley.
             let mut m2 = Mob::new(k, Vec3::new(0.0, 80.0, 0.0), &mut rng);
             let near = Vec3::new(1.0, 80.0, 0.0);
             let ev3 = m2.update(0.05, &world, near, true, 1.0, &mut rng);
             assert_eq!(hurt_hits(&ev3).0, 1, "melees up close");
-            assert_eq!(shoot_hits(&ev3).0, 0, "no ranged shot inside attack_reach");
+            assert_eq!(shoot_hits(&ev3).0, 0, "no ranged volley inside attack_reach");
         });
     }
 
@@ -2556,6 +2700,30 @@ mod tests {
             for _ in 0..40 {
                 let ev = m.update(0.05, &world, player, true, 1.0, &mut rng);
                 assert_eq!(shoot_hits(&ev).0, 0, "ranged_damage == 0 never shoots");
+            }
+        });
+    }
+
+    #[test]
+    fn projectile_multishot_effect_only_volley_uses_one_event() {
+        let src = "[mob hexer]\ntexture = stone\nhostile = true\nranged_damage = 0\nranged_range = 20\nprojectile_effect = speed\nprojectile_effect_duration = 12\nprojectile_effect_amplifier = 2\nprojectile_count = 4\nprojectile_spread = 12\n\n[mob idle]\ntexture = stone\nhostile = true\nranged_damage = 0\n";
+        crate::mods::with_mods(&[("zoo", src)], |_reg| {
+            let mut rng = Rng::new(17);
+            let world = World::new(1);
+            let player = Vec3::new(8.0, 80.0, 0.0);
+            let mut hexer = Mob::new(MobKind::from_name("zoo:hexer").unwrap(), Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            let events = hexer.update(0.05, &world, player, true, 1.0, &mut rng);
+            assert_eq!(shoot_hits(&events), (1, 0.0));
+            let spec = events.iter().find_map(|event| match event {
+                MobEvent::ShootMod(_, _, spec) => Some(*spec),
+                _ => None,
+            }).expect("effect-only volley");
+            assert_eq!((spec.count, spec.spread), (4, 12.0));
+            assert_eq!(spec.effect, Some(ProjectileEffect { kind: crate::potions::Potion::Speed, duration: 12.0, amplifier: 2 }));
+
+            let mut idle = Mob::new(MobKind::from_name("zoo:idle").unwrap(), Vec3::new(0.0, 80.0, 0.0), &mut rng);
+            for _ in 0..20 {
+                assert_eq!(shoot_hits(&idle.update(0.05, &world, player, true, 1.0, &mut rng)).0, 0);
             }
         });
     }
