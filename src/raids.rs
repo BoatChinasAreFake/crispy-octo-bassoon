@@ -40,6 +40,8 @@ pub const OMEN_SECS: f32 = 1200.0;
 pub const HERO_SECS: f32 = 1200.0;
 /// Seconds between waves.
 pub const WAVE_GAP: f32 = 12.0;
+/// Seconds before retrying a wave whose candidate chunks are unloaded.
+const WAVE_RETRY: f32 = 1.0;
 /// How close to a village's square counts as being in the village.
 pub const VILLAGE_RANGE: f32 = 48.0;
 /// Seconds with nobody defending before the raid is lost.
@@ -48,6 +50,13 @@ const LOST_AFTER: f32 = 240.0;
 pub const HERO_DISCOUNT: f32 = 0.33;
 /// How long the Bell makes raiders glow.
 pub const GLOW_SECS: f32 = 4.0;
+
+#[derive(Clone, Debug)]
+struct PendingWave {
+    wave: u8,
+    edge: Vec3,
+    candidates: Vec<(MobKind, i32, i32)>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Raid {
@@ -63,6 +72,7 @@ pub struct Raid {
     pub size: u16,
     /// Hmmers at the start (none left: lost).
     pub hmmers: usize,
+    pending: Option<PendingWave>,
 }
 
 /// Who marches in wave `wave` (1-based) of `waves`, with `players` defending.
@@ -235,10 +245,35 @@ impl Game {
             crate::rules::Difficulty::Hard => 7,
         };
         let hmmers = self.mobs.iter().filter(|m| m.kind == MobKind::Hmmer && m.body.pos.distance(centre) < VILLAGE_RANGE).count();
-        self.raid = Some(Raid { centre, wave: 0, waves, between: 6.0, idle: 0.0, raiders: Vec::new(), size: 0, hmmers });
+        self.raid = Some(Raid {
+            centre,
+            wave: 0,
+            waves,
+            between: 6.0,
+            idle: 0.0,
+            raiders: Vec::new(),
+            size: 0,
+            hmmers,
+            pending: None,
+        });
         self.system_message(None, "A raid has begun! Defend the village.");
         self.sfx(Sfx::Thunder, Some(centre));
         self.ring_bell_at(centre);
+    }
+
+    fn spawn_raid_candidate(&mut self, r: &mut Raid, k: usize, kind: MobKind, x: i32, z: i32) -> bool {
+        if !self.world.is_loaded(x, z) {
+            return false;
+        }
+        let y = self.world.surface_y(x, z) + 1;
+        let id = self.alloc_mob(kind, Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5));
+        let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else { return false };
+        m.home = Some(r.centre);
+        m.persistent = true;
+        // The wave's first Pilferer carries the banner.
+        m.seed = (k == 0 && kind == MobKind::Pilferer) as u32;
+        r.raiders.push(id);
+        true
     }
 
     fn raid_step(&mut self, dt: f32) {
@@ -276,30 +311,41 @@ impl Game {
             }
             r.between -= dt;
             if r.between <= 0.0 {
-                r.wave += 1;
-                r.between = WAVE_GAP;
-                let mix = wave_mix(r.wave, r.waves, self.peers.len() + (!self.dedicated) as usize);
-                let a = self.rng.range(0.0, std::f32::consts::TAU);
-                let edge = r.centre + Vec3::new(a.cos(), 0.0, a.sin()) * (VILLAGE_RANGE * 0.7);
-                for (k, kind) in mix.into_iter().enumerate() {
-                    let off = Vec3::new(self.rng.range(-4.0, 4.0), 0.0, self.rng.range(-4.0, 4.0));
-                    let (x, z) = ((edge.x + off.x).floor() as i32, (edge.z + off.z).floor() as i32);
-                    if !self.world.is_loaded(x, z) {
-                        continue;
+                let mut pending = if let Some(pending) = r.pending.take() {
+                    pending
+                } else {
+                    let wave = r.wave + 1;
+                    let a = self.rng.range(0.0, std::f32::consts::TAU);
+                    let edge = r.centre + Vec3::new(a.cos(), 0.0, a.sin()) * (VILLAGE_RANGE * 0.7);
+                    PendingWave { wave, edge, candidates: Vec::new() }
+                };
+                let mut spawned = false;
+                if pending.candidates.is_empty() {
+                    let mix = wave_mix(pending.wave, r.waves, self.peers.len() + (!self.dedicated) as usize);
+                    for (k, kind) in mix.into_iter().enumerate() {
+                        // Generate and try candidates together on the first attempt so loaded
+                        // worlds retain the existing offset/mob RNG call order. An entirely
+                        // unloaded attempt retains those candidates and consumes no retry RNG.
+                        let off = Vec3::new(self.rng.range(-4.0, 4.0), 0.0, self.rng.range(-4.0, 4.0));
+                        let (x, z) = ((pending.edge.x + off.x).floor() as i32, (pending.edge.z + off.z).floor() as i32);
+                        pending.candidates.push((kind, x, z));
+                        spawned |= self.spawn_raid_candidate(&mut r, k, kind, x, z);
                     }
-                    let y = self.world.surface_y(x, z) + 1;
-                    let id = self.alloc_mob(kind, Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5));
-                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                        m.home = Some(r.centre);
-                        m.persistent = true;
-                        // The wave's first Pilferer carries the banner.
-                        m.seed = (k == 0 && kind == MobKind::Pilferer) as u32;
-                        r.raiders.push(id);
+                } else {
+                    for (k, &(kind, x, z)) in pending.candidates.iter().enumerate() {
+                        spawned |= self.spawn_raid_candidate(&mut r, k, kind, x, z);
                     }
                 }
-                r.size = r.raiders.len() as u16;
-                self.system_message(None, &format!("Wave {} of {}!", r.wave, r.waves));
-                self.sfx(Sfx::Thunder, Some(edge));
+                if spawned {
+                    r.wave = pending.wave;
+                    r.between = WAVE_GAP;
+                    r.size = r.raiders.len() as u16;
+                    self.system_message(None, &format!("Wave {} of {}!", r.wave, r.waves));
+                    self.sfx(Sfx::Thunder, Some(pending.edge));
+                } else {
+                    r.between = WAVE_RETRY;
+                    r.pending = Some(pending);
+                }
             }
         }
         let state = Msg::Raid { state: 1, wave: r.wave.max(1), waves: r.waves, left: r.raiders.len() as u16 };
@@ -562,18 +608,29 @@ mod tests {
         assert!(g.has_effect(Potion::Regeneration));
     }
 
+    fn load_raid_ring(g: &mut Game) {
+        for cz in -3..=2 {
+            for cx in -3..=2 {
+                g.world.load_now(cx, cz);
+            }
+        }
+    }
+
     #[test]
     fn a_raid_comes_in_waves_and_heroes_win_it() {
         let mut g = crate::game::tests::arena(98);
         g.rules.difficulty = crate::rules::Difficulty::Easy;
         let centre = g.player.body.pos;
+        load_raid_ring(&mut g);
         g.start_raid(centre);
-        let mut waves_seen = 0;
+        let mut waves_seen = Vec::new();
         for _ in 0..400 {
             g.raids_tick(1.0);
             let Some(r) = g.raid.as_ref() else { break };
             if !r.raiders.is_empty() {
-                waves_seen = waves_seen.max(r.wave);
+                if waves_seen.last() != Some(&r.wave) {
+                    waves_seen.push(r.wave);
+                }
                 assert!(g.mobs.iter().filter(|m| r.raiders.contains(&m.id)).all(|m| m.home.is_some()), "raiders head for the square");
                 // The defenders do their job.
                 let ids = r.raiders.clone();
@@ -581,7 +638,41 @@ mod tests {
             }
         }
         assert!(g.raid.is_none(), "the raid ended");
-        assert_eq!(waves_seen, 3, "Easy has three waves");
+        assert_eq!(waves_seen, vec![1, 2, 3], "Easy has three ordered non-empty waves");
+        assert!(g.has_effect(Potion::Hero));
+        assert_eq!(g.raid_hud.map(|h| h.0), Some(2), "victory on the bar");
+    }
+
+    #[test]
+    fn an_unloaded_raid_wave_waits_for_its_chunks() {
+        let mut g = crate::game::tests::arena(98);
+        g.rules.difficulty = crate::rules::Difficulty::Easy;
+        let centre = g.player.body.pos;
+        g.world.chunks.clear();
+        g.start_raid(centre);
+
+        for _ in 0..40 {
+            g.raid_step(1.0);
+        }
+        let r = g.raid.as_ref().expect("an unloaded raid remains active");
+        assert_eq!(r.wave, 0, "an empty wave is not committed");
+        assert!(r.raiders.is_empty());
+        assert!(!g.has_effect(Potion::Hero));
+        assert_ne!(g.raid_hud.map(|h| h.0), Some(2), "an empty raid is not won");
+
+        load_raid_ring(&mut g);
+        let mut waves_seen = Vec::new();
+        for _ in 0..100 {
+            g.raid_step(1.0);
+            let Some(r) = g.raid.as_ref() else { break };
+            if !r.raiders.is_empty() {
+                waves_seen.push(r.wave);
+                let ids = r.raiders.clone();
+                g.mobs.retain(|m| !ids.contains(&m.id));
+            }
+        }
+        assert_eq!(waves_seen, vec![1, 2, 3], "the loaded raid has three ordered non-empty waves");
+        assert!(g.raid.is_none(), "the raid ended");
         assert!(g.has_effect(Potion::Hero));
         assert_eq!(g.raid_hud.map(|h| h.0), Some(2), "victory on the bar");
     }
