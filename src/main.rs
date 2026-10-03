@@ -2194,7 +2194,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" => {
+            "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" | "golems" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
@@ -2450,7 +2450,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2505,6 +2505,52 @@ async fn game_main() {
                         app.game.world.set_v(frame, block::FRAME_FIRST + facing as u16);
                         app.game.world.frames.insert(frame, (block::MAP, 0));
                     }
+                }
+            }
+            if s.mode == "golems" && frames == 125 {
+                // A Copper Golem between its chests, a harnessed Floaty, a saddled
+                // Rotsteed, and the new ground covers, with an iron spear in hand.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y0 = p.y.floor() as i32;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y0, v.z.floor() as i32)
+                };
+                app.game.world.set_v(at(4.0, -3.0), block::COPPER_CHEST);
+                app.game.world.set_v(at(4.0, 3.0), block::CHEST);
+                app.game.world.set_v(at(3.0, -5.5), block::FIREFLY_BUSH);
+                app.game.world.set_v(at(3.0, 5.5), block::EYEBLOSSOM_OPEN);
+                app.game.world.set_v(at(9.0, -6.0), block::RESIN_BRICKS);
+                app.game.world.set_v(at(9.0, -6.0) + IVec3::Y, block::RESIN_BLOCK);
+                for f in 5..8 {
+                    for r in -6..-2 {
+                        app.game.world.set_v(at(f as f32, r as f32), block::LEAF_LITTER);
+                    }
+                    for r in 3..7 {
+                        app.game.world.set_v(at(f as f32, r as f32), block::WILDFLOWERS);
+                    }
+                }
+                app.game.inv.slots[0] = Some((block::SPEAR_FIRST + 2, 1));
+                app.game.inv.selected = 0;
+            }
+            if s.mode == "golems" && frames == 150 {
+                use entity::MobKind as K;
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(11);
+                for (i, (kind, f, r, up)) in [(K::CopperGolem, 4.0, 0.0, 0.0), (K::Rotsteed, 7.0, -2.5, 0.0), (K::Floaty, 13.0, 2.0, 2.5)].into_iter().enumerate() {
+                    let mut m = entity::Mob::new(kind, p + fwd * f + right * r + Vec3::Y * up, &mut rng);
+                    m.yaw = s.yaw + std::f32::consts::PI + if kind == K::Rotsteed { 1.2 } else { 0.0 };
+                    m.id = 2100 + i as u32;
+                    m.saddled = kind != K::CopperGolem;
+                    if kind == K::CopperGolem {
+                        m.seed = block::RESIN_CLUMP as u32 | 5 << 16;
+                    }
+                    m.persistent = true;
+                    app.game.mobs.push(m);
                 }
             }
             if s.mode == "farm" && frames == 125 {
@@ -3224,7 +3270,7 @@ async fn game_main() {
                 app.game.raid_hud = Some((1, 2, 5, 7, 999.0));
                 app.game.bell_glow = 999.0;
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "raid") && frames > 150 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "raid" | "golems") && frames > 150 {
                 // Hold still for the photo.
                 for m in app.game.mobs.iter_mut() {
                     m.yaw = s.yaw + std::f32::consts::PI;
