@@ -3833,14 +3833,16 @@ pub(crate) mod tests {
 
     /// A world with the 3x3 chunks around the origin generated (x and z in -16..32).
     fn loaded_world(seed: u32) -> World {
+        // Exactly these nine chunks, made here in a fixed order: waiting on the
+        // generator threads let a varying number of extra chunks arrive, and
+        // anything done per loaded chunk (random ticks) then played out
+        // differently from run to run.
         let mut w = World::new(seed);
-        let start = std::time::Instant::now();
-        let ready = |w: &World| (-1..=1).all(|cz| (-1..=1).all(|cx| w.chunks.contains_key(&(cx, cz))));
-        while !ready(&w) && start.elapsed().as_secs() < 20 {
-            w.stream(&[(Vec3::ZERO, 1)]);
-            std::thread::sleep(std::time::Duration::from_millis(5));
+        for cz in -1..=1 {
+            for cx in -1..=1 {
+                w.load_now(cx, cz);
+            }
         }
-        assert!(ready(&w), "chunks never generated");
         w
     }
 
@@ -5715,6 +5717,22 @@ looks_like = diamond
             assert!(!death.contains("Rattler"), "a modded shot must not be blamed on a Rattler: {death:?}");
             assert!(death.contains("was shot down by a monster"), "modded shot uses the generic cause: {death:?}");
         });
+    }
+
+    #[test]
+    fn the_same_seed_plays_out_the_same_way() {
+        // Tests (and bug reports) rely on a world doing the same thing twice.
+        let run = || {
+            let mut g = arena(57);
+            for (i, k) in [MobKind::Oinker, MobKind::Mooer, MobKind::Groaner, MobKind::Rattler].into_iter().enumerate() {
+                g.alloc_mob(k, Vec3::new(-6.5 + 4.0 * i as f32, 50.0, 6.5));
+            }
+            for _ in 0..300 {
+                g.update_entities(0.05);
+            }
+            g.mobs.iter().map(|m| (m.kind, (m.body.pos * 1000.0).round(), m.health)).collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
     }
 
     #[test]
