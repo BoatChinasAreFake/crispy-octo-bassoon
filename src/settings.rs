@@ -56,6 +56,8 @@ pub struct Settings {
     /// Sun shadows, and deep water with light rippling under it (see render.rs).
     pub shadows: bool,
     pub fancy_water: bool,
+    /// Low-detail land past the render distance (see lod.rs).
+    pub distant_terrain: bool,
     /// The banner painted on your shield (a design, see banners.rs; 0: plain).
     pub shield_banner: u16,
 }
@@ -99,6 +101,7 @@ impl Default for Settings {
             clouds: true,
             shadows: true,
             fancy_water: true,
+            distant_terrain: true,
             shield_banner: 0,
         }
     }
@@ -117,7 +120,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nfancy_water={}\nshield_banner={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nfancy_water={}\ndistant_terrain={}\nshield_banner={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -145,6 +148,7 @@ impl Settings {
             self.clouds,
             self.shadows,
             self.fancy_water,
+            self.distant_terrain,
             self.shield_banner,
         ) + self.binds.to_text().as_str()
     }
@@ -191,6 +195,7 @@ impl Settings {
                 "fog" => s.fog = flag(s.fog),
                 "shadows" => s.shadows = flag(s.shadows),
                 "fancy_water" => s.fancy_water = flag(s.fancy_water),
+                "distant_terrain" => s.distant_terrain = flag(s.distant_terrain),
                 "shield_banner" => s.shield_banner = v.parse().unwrap_or(0),
                 "clouds" => s.clouds = flag(s.clouds),
                 k => {
@@ -280,6 +285,7 @@ mod tests {
             clouds: false,
             shadows: false,
             fancy_water: false,
+            distant_terrain: false,
             shield_banner: 0x0042,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);

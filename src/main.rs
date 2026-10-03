@@ -51,6 +51,7 @@ mod inventory;
 mod keybinds;
 mod ledger;
 mod light;
+mod lod;
 mod liquids;
 mod mesher;
 mod modes;
@@ -2087,6 +2088,7 @@ impl App {
         self.game.water_reflections = self.settings.water_reflections;
         self.game.shadows = self.settings.shadows;
         self.game.fancy_water = self.settings.fancy_water;
+        self.game.distant_terrain = self.settings.distant_terrain;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
             mesher::set_smooth(self.settings.smooth_lighting);
@@ -3103,6 +3105,10 @@ impl App {
         let depth = if st.fancy_water { "Water Depth: Fancy" } else { "Water Depth: Simple" };
         if self.ui.button(Rect::new(right, y, half, bh), depth, true) {
             self.settings.fancy_water = !st.fancy_water;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Distant Terrain", st.distant_terrain), true) {
+            self.settings.distant_terrain = !st.distant_terrain;
         }
         y += bh + 4.0 * s;
         // VSync and anti-aliasing are set when the window opens.

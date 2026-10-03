@@ -265,6 +265,9 @@ pub struct Game {
     pub seat_no: u8,
     /// When fireflies were last let out (see nature.rs).
     pub firefly_acc: f32,
+    /// Distant terrain past the render distance (Video Settings; see lod.rs).
+    pub distant_terrain: bool,
+    pub lod: crate::lod::Lod,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -494,6 +497,8 @@ impl Game {
             mounted: None,
             seat_no: 0,
             firefly_acc: 0.0,
+            distant_terrain: true,
+            lod: crate::lod::Lod::default(),
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -949,6 +954,16 @@ impl Game {
         }
         for k in self.world.stream(&centers) {
             renderer.drop_chunk(ctx, k);
+        }
+        // The far-off land, kept up with where we are.
+        if self.distant_terrain && !self.in_scorch() && !self.in_hollow() {
+            let generator = self.world.generator.clone();
+            if let Some((_, mesh)) = self.lod.tick(&generator, center, radius) {
+                renderer.set_far(ctx, Some(&mesh));
+            }
+        } else if renderer.has_far() {
+            renderer.set_far(ctx, None);
+            self.lod = crate::lod::Lod::default();
         }
         let (pcx, pcz) = ((center.x / 16.0).floor() as i32, (center.z / 16.0).floor() as i32);
         let near = (radius + 1) * (radius + 1);
@@ -3693,6 +3708,7 @@ impl Game {
         let underwater = !self.menu && self.player.head_in_water(&self.world);
         let sky = self.sky_color();
         let far = (render_distance * 16) as f32;
+        let far_land = self.distant_terrain && renderer.has_far() && !self.in_scorch() && !self.in_hollow();
         let (fog_color, fog_start, fog_end) = if underwater {
             ([0.05, 0.12, 0.35], 0.0, 22.0)
         } else if self.in_scorch() {
@@ -3702,6 +3718,10 @@ impl Game {
             ([0.1, 0.05, 0.14], far * 0.4, far)
         } else if !self.fog_on {
             (sky, 0.0, 0.0)
+        } else if far_land {
+            // The haze starts later and reaches the far-off land's edge.
+            let lod = crate::lod::far_for(render_distance) as f32;
+            (sky, far * 0.7, lod - 8.0)
         } else {
             (sky, far * 0.55, far - 4.0)
         };
@@ -3713,7 +3733,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = self.sun_angle(); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = self.sun_angle(); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
     }
 }
 
