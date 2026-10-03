@@ -164,7 +164,7 @@ impl App {
                     )
                 },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
-                format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
+                format!("Time: {:02}:00  Daylight: {:.2}  Day {} ({})", hours, g.daylight(), g.day + 1, moon::NAMES[g.moon_phase() as usize]),
                 format!("Seed: {}  Mode: {}{}", g.world.seed(), g.mode().name(), if g.rules.hardcore { " (hardcore)" } else { "" }),
                 match &g.net {
                     None => "Network: single player".to_string(),
@@ -334,6 +334,56 @@ impl App {
                 draw_triangle(vec2(cx + fx * k, cy + fy * k), vec2(cx - fx * k * 0.6 + rx * k * 0.6, cy - fy * k * 0.6 + ry * k * 0.6), vec2(cx - fx * k * 0.6 - rx * k * 0.6, cy - fy * k * 0.6 - ry * k * 0.6), Color::new(0.9, 0.1, 0.1, 1.0));
             }
         }
+        if held == block::TREASURE_MAP {
+            self.treasure_map_hud(dt);
+        }
+    }
+
+    /// A Treasure Map: the land round the X (as far as anyone's seen it), you
+    /// on it once you're close, and how far off it is (see treasure.rs).
+    fn treasure_map_hud(&mut self, dt: f32) {
+        let (w, s) = (screen_width(), self.ui.s);
+        let wear = self.game.inv.wear[self.game.inv.selected];
+        let me = self.game.player.body.pos;
+        let size = 150.0 * s;
+        let (x, y) = (w - size - 10.0 * s, 10.0 * s);
+        draw_rectangle(x - 4.0 * s, y - 4.0 * s, size + 8.0 * s, size + 8.0 * s, Color::new(0.55, 0.43, 0.26, 1.0));
+        let caption = treasure::caption(wear, me);
+        if let Some((tx, tz)) = treasure::marked(wear) {
+            const SCALE: i32 = 2;
+            self.map_timer -= dt;
+            if self.map_timer <= 0.0 || self.map_tex.is_none() {
+                self.map_timer = 0.5;
+                let px = navigation::map_pixels(&self.game.world, vec3(tx as f32 + 0.5, 64.0, tz as f32 + 0.5), &self.map_colors, SCALE);
+                let n = navigation::MAP_SIZE as u16;
+                match &self.map_tex {
+                    Some(t) => t.update_from_bytes(n as u32, n as u32, &px),
+                    None => {
+                        let t = Texture2D::from_rgba8(n, n, &px);
+                        t.set_filter(FilterMode::Nearest);
+                        self.map_tex = Some(t);
+                    }
+                }
+            }
+            if let Some(t) = &self.map_tex {
+                draw_texture_ex(t, x, y, Color::new(1.0, 0.92, 0.8, 1.0), DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+            }
+            let (cx, cy) = (x + size / 2.0, y + size / 2.0);
+            let red = Color::new(0.8, 0.1, 0.1, 1.0);
+            let k = 6.0 * s;
+            draw_line(cx - k, cy - k, cx + k, cy + k, 3.0 * s, red);
+            draw_line(cx - k, cy + k, cx + k, cy - k, 3.0 * s, red);
+            // You, once you're on the map.
+            let per_px = size / navigation::MAP_SIZE as f32 / SCALE as f32;
+            let (dx, dz) = ((me.x - tx as f32 - 0.5) * per_px, (me.z - tz as f32 - 0.5) * per_px);
+            if dx.abs() < size / 2.0 - 3.0 * s && dz.abs() < size / 2.0 - 3.0 * s {
+                draw_circle(cx + dx, cy + dz, 3.5 * s, Color::new(1.0, 1.0, 1.0, 1.0));
+                draw_circle_lines(cx + dx, cy + dz, 3.5 * s, s, Color::new(0.1, 0.1, 0.1, 1.0));
+            }
+        } else {
+            draw_rectangle(x, y, size, size, Color::new(0.77, 0.7, 0.55, 1.0));
+        }
+        self.ui.text_centered(&caption, x + size / 2.0, y + size + 14.0 * s, 8.0, WHITE);
     }
 
     /// A boss's health, across the top while it's near: the Hollow Wyrm, or

@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | COPPER_CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
+    matches!(id, CHEST | COPPER_CHEST | BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -48,8 +48,9 @@ pub fn is_three_slot(id: Id) -> bool {
     is_furnace(id) || id == BREWING_STAND
 }
 
+/// Furnaces, Smokers and Blast Furnaces (see home.rs).
 pub fn is_furnace(id: Id) -> bool {
-    matches!(id, FURNACE | FURNACE_LIT)
+    matches!(id, FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT)
 }
 
 /// What cooking `id` makes.
@@ -106,11 +107,14 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if crate::hoppers::is_hopper(kind) {
         return slot < crate::hoppers::SLOTS;
     }
+    if crate::home::is_stand(kind) {
+        return armor_of(item).is_some_and(|(s, _)| s == slot);
+    }
     if !is_furnace(kind) {
         return slot < CHEST_SLOTS;
     }
     match slot {
-        INPUT => true,
+        INPUT => crate::home::cooks_in(kind, item),
         FUEL => fuel_secs(item).is_some(),
         _ => false, // the output is take-only
     }
@@ -124,6 +128,8 @@ impl Container {
             DISPENSER_SLOTS
         } else if crate::hoppers::is_hopper(id) {
             crate::hoppers::SLOTS
+        } else if crate::home::is_stand(id) {
+            crate::home::STAND_SLOTS
         } else {
             CHEST_SLOTS
         };
@@ -360,6 +366,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get_mut(&k);
     }
+    if let Some(id) = crate::wildlife::pack_of_key(p) {
+        return world.packs.get_mut(&id);
+    }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter_mut().find(|v| v.id == id)?.contents.as_mut(),
         None => world.containers.get_mut(&p),
@@ -369,6 +378,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
 pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a Container> {
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get(&k);
+    }
+    if let Some(id) = crate::wildlife::pack_of_key(p) {
+        return world.packs.get(&id);
     }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter().find(|v| v.id == id)?.contents.as_ref(),
@@ -380,6 +392,10 @@ pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle],
 pub fn store_kind(world: &World, vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Id {
     if crate::stash::stash_of_key(p).is_some() {
         return PERSONAL_CHEST;
+    }
+    // A Llama's pack works like a chest (see wildlife.rs).
+    if crate::wildlife::pack_of_key(p).is_some() {
+        return CHEST;
     }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter().find(|v| v.id == id && v.contents.is_some()).map(|v| v.container_block()).unwrap_or(AIR),
@@ -401,6 +417,7 @@ impl Game {
         if !self.is_client() {
             self.ensure_container(pos);
         }
+        self.treasure_advancements(pos);
         self.open = Some(pos);
         self.sfx(Sfx::Place(Mat::Wood), Some(store_centre(&self.vehicles, pos)));
         if self.is_client() {
@@ -579,6 +596,9 @@ impl Game {
                 if crate::stash::stash_of_key(p).is_some() {
                     return crate::stash::near_personal_chest(&self.world, self.player.eye());
                 }
+                if let Some(id) = crate::wildlife::pack_of_key(p) {
+                    return self.pack_near(id, self.player.eye(), None);
+                }
                 is_container(store_kind(&self.world, &self.vehicles, p)) && (crate::vehicles::cart_of_key(p).is_none() || store_centre(&self.vehicles, p).distance(self.player.eye()) < REACH)
             })
             .unwrap_or(false)
@@ -613,12 +633,12 @@ impl Game {
         }
         let furnaces: Vec<IVec3> = self.world.containers.keys().copied().filter(|p| self.world.is_loaded(p.x, p.z) && is_furnace(self.world.get_v(*p))).collect();
         for p in furnaces {
+            let kind = self.world.get_v(p);
             let Some(c) = self.world.containers.get_mut(&p) else { continue };
-            if !c.furnace_tick(dt) {
+            if !c.furnace_tick(dt * crate::home::furnace_speed(kind)) {
                 continue;
             }
-            let lit = c.burn > 0.0;
-            let want = if lit { FURNACE_LIT } else { FURNACE };
+            let want = crate::home::furnace_lit(kind, c.burn > 0.0);
             if self.world.get_v(p) != want {
                 self.world.set_v(p, want);
             }
@@ -641,6 +661,8 @@ impl Game {
         let msg = Msg::Container { x: p.x, y: p.y, z: p.z, slots, burn, cook };
         let viewers: Vec<u32> = match only {
             Some(id) => vec![id],
+            // Everyone sees what an armour stand wears.
+            None if crate::home::is_stand(self.world.get_v(p)) => self.peers.keys().copied().collect(),
             None => self.viewers.get(&p).map(|v| v.iter().copied().collect()).unwrap_or_default(),
         };
         for id in viewers {
@@ -652,6 +674,10 @@ impl Game {
         // Someone's own Personal Chest storage: only theirs, and only by a Personal Chest.
         if crate::stash::stash_of_key(p).is_some() {
             return self.peers.get(&from).is_some_and(|q| crate::stash::stash_key(&q.name) == p && crate::stash::near_personal_chest(&self.world, q.target + Vec3::Y * 1.6));
+        }
+        // A Llama's pack: only its owner's, and only beside it.
+        if let Some(id) = crate::wildlife::pack_of_key(p) {
+            return self.peers.get(&from).is_some_and(|q| self.pack_near(id, q.target + Vec3::Y * 1.6, Some(&crate::players::record_key(&q.name))));
         }
         self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(store_centre(&self.vehicles, p)) <= REACH).unwrap_or(false)
     }
@@ -754,6 +780,8 @@ impl Game {
     pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, Wear)>, burn: f32, cook: f32) {
         let c = if let Some(k) = crate::stash::stash_of_key(p) {
             self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST))
+        } else if let Some(id) = crate::wildlife::pack_of_key(p) {
+            self.world.packs.entry(id).or_insert_with(|| Container::for_block(CHEST))
         } else if crate::vehicles::cart_of_key(p).is_some() {
             let Some(c) = store(&mut self.world, &mut self.vehicles, p) else { return };
             c

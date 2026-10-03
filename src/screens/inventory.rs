@@ -456,6 +456,8 @@ impl App {
             let hint = match c.slots[INPUT] {
                 Some((id, _)) if containers::smelt(id).is_none() => format!("{} won't cook. It's been asked.", item_name(id)),
                 Some(_) if burn <= 0.0 && c.slots[FUEL].is_none() => "Needs fuel: coal, wood, sticks...".to_string(),
+                None if kind == SMOKER || kind == SMOKER_LIT => "Raw food goes on top (twice as fast)".to_string(),
+                None if kind == BLAST_FURNACE || kind == BLAST_FURNACE_LIT => "Sand, cobble and the like on top (twice as fast; no food)".to_string(),
                 None => "Raw food, sand or cobble goes on top".to_string(),
                 _ => String::new(),
             };

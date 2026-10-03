@@ -419,7 +419,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                     if flush && is_opaque(hood.get(lx + nrm[0], y + nrm[1], lz + nrm[2])) {
                                         continue;
                                     }
-                                    let tile = face_tile(id, f);
+                                    // Each painting's picture depends on where it hangs (see home.rs).
+                                    let tile = if crate::home::is_painting(id) { crate::home::painting_tile(wx as i32, y, wz as i32) } else { face_tile(id, f) };
                                     let mut v = [Vertex::default(); 4];
                                     for i in 0..4 {
                                         let c = corners[i];

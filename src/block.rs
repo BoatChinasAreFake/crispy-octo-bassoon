@@ -315,7 +315,22 @@ pub const WILDFLOWERS: Id = 485;
 pub const DRIED_FLOATY: Id = 486;
 /// Mangrove roots standing in water (drawn with the water in them).
 pub const MANGROVE_ROOTS_WET: Id = 487;
-pub const NUM_BLOCKS: Id = 488;
+/// Cooks food dropped on it, slowly, and sends up smoke (see home.rs).
+pub const CAMPFIRE: Id = 488;
+/// Furnaces that work twice as fast: one for food, one for everything else.
+pub const SMOKER: Id = 489;
+pub const SMOKER_LIT: Id = 490;
+pub const BLAST_FURNACE: Id = 491;
+pub const BLAST_FURNACE_LIT: Id = 492;
+/// A chest you can put things on top of.
+pub const BARREL: Id = 493;
+/// Laid on beaches by turtles (see turtles in animals.rs).
+pub const TURTLE_EGG: Id = 494;
+/// A painting on one side of its cell (four facings; the picture depends on where it hangs).
+pub const PAINTING_FIRST: Id = 495;
+/// Shows off a set of armour (four facings; it holds the armour like a chest).
+pub const ARMOUR_STAND_FIRST: Id = 499;
+pub const NUM_BLOCKS: Id = 503;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -511,7 +526,13 @@ pub const HARNESS: Id = FIRST_ITEM + 230;
 /// Craftable spears, wood to dimond (the Soggy Spear sits between stone and iron).
 pub const SPEAR_FIRST: Id = FIRST_ITEM + 231;
 pub const SPEARS: usize = 4;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 235;
+/// From shipwrecks and Cartographers: marks where treasure is buried (see treasure.rs).
+pub const TREASURE_MAP: Id = FIRST_ITEM + 235;
+/// Dropped by turtles as they grow up; five make a Turtle Shell.
+pub const TURTLE_SCUTE: Id = FIRST_ITEM + 236;
+/// A helmet: you see much further underwater.
+pub const TURTLE_SHELL: Id = FIRST_ITEM + 237;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 238;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -578,6 +599,8 @@ pub const GLIDER_TIER: usize = 4;
 pub const COPPER_TIER: usize = 5;
 /// Scorchite armour's row (see smithing.rs).
 pub const SCORCHITE_TIER: usize = 6;
+/// The Turtle Shell's look.
+pub const TURTLE_TIER: usize = 7;
 
 /// (slot, tier) of an armour item.
 /// For mod armour, the tier is the one it looks like when worn.
@@ -616,8 +639,10 @@ pub fn durability(id: Id) -> Option<u16> {
     if let Some(n) = crate::tools::tool_uses(id) {
         return Some(n);
     }
-    if let Some((slot, tier)) = armor_of(id) {
-        return Some(ARMOR[tier][slot]);
+    if let Some((slot, tier)) = armor_of(id)
+        && let Some(row) = ARMOR.get(tier)
+    {
+        return Some(row[slot]);
     }
     Some(match id {
         PICK_WOOD | SWORD_WOOD | HOE => 59,
@@ -710,6 +735,12 @@ pub enum Shape {
     Sheet,
     /// A bell hanging from a beam.
     Bell,
+    /// Two logs crossed on the ground.
+    Campfire,
+    /// A painting flat on one side of its cell.
+    Painting { facing: u8 },
+    /// An armour stand: a base and a post, its shoulders across `facing`.
+    Stand { facing: u8 },
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -869,6 +900,23 @@ impl Shape {
             Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
             Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
             Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
+            Shape::Campfire => ([([0.0, 0.0, 0.3125], [1.0, 0.25, 0.6875]), ([0.3125, 0.25, 0.0], [0.6875, 0.4375, 1.0]), full], 2),
+            Shape::Painting { facing } => {
+                let t = 1.0 / 16.0;
+                let b = match facing % 4 {
+                    0 => ([0.0, 0.0, 0.0], [1.0, 1.0, t]),
+                    1 => ([1.0 - t, 0.0, 0.0], [1.0, 1.0, 1.0]),
+                    2 => ([0.0, 0.0, 1.0 - t], [1.0, 1.0, 1.0]),
+                    _ => ([0.0, 0.0, 0.0], [t, 1.0, 1.0]),
+                };
+                ([b, full, full], 1)
+            }
+            Shape::Stand { facing } => {
+                let base = ([0.125, 0.0, 0.125], [0.875, 0.0625, 0.875]);
+                let post = ([0.4375, 0.0625, 0.4375], [0.5625, 1.0, 0.5625]);
+                let bar = if facing % 2 == 0 { ([0.125, 0.75, 0.4375], [0.875, 0.8125, 0.5625]) } else { ([0.4375, 0.75, 0.125], [0.5625, 0.8125, 0.875]) };
+                ([base, post, bar], 3)
+            }
             Shape::Frame { facing } => {
                 let t = 1.0 / 16.0;
                 let b = match facing % 4 {
@@ -940,6 +988,15 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if (FRAME_FIRST..FRAME_FIRST + 4).contains(&id) {
         return Some(FRAME_FIRST);
+    }
+    if crate::home::is_painting(id) {
+        return Some(PAINTING_FIRST);
+    }
+    if crate::home::is_stand(id) {
+        return Some(ARMOUR_STAND_FIRST);
+    }
+    if id == SMOKER_LIT || id == BLAST_FURNACE_LIT {
+        return Some(id - 1);
     }
     if crate::hoppers::is_hopper(id) {
         return Some(HOPPER_FIRST);
@@ -2074,6 +2131,35 @@ impl Registry {
         wet.see_through = true;
         wet.creative = false;
         blocks.push(wet);
+        let mut fire = def("campfire", "Campfire (Marshmallows Not Included)", Shaped, false, false, [T_CAMPFIRE_TOP, T_CAMPFIRE_SIDE, T_LOG_TOP], 2.0, 0, false, CAMPFIRE, 15.0, S_WOOD);
+        fire.shape = Shape::Campfire;
+        blocks.push(fire);
+        for (key, name, tex, tile_lit, lit_name) in [
+            ("smoker", "Smoker (Food, Fast)", [T_SMOKER_TOP, T_SMOKER_SIDE, T_SMOKER_TOP], T_SMOKER_LIT, "Smoker (Smoking)"),
+            ("blast_furnace", "Blast Furnace (Everything but Food, Fast)", [T_BLAST_TOP, T_BLAST_SIDE, T_BLAST_TOP], T_BLAST_LIT, "Blast Furnace (Blasting)"),
+        ] {
+            let id = blocks.len() as Id;
+            blocks.push(def(key, name, Cube, true, true, tex, 3.5, 1, true, id, 0.0, S_STONE));
+            let mut lit = def(leak(&format!("{key}_lit")), lit_name, Cube, true, true, [tex[0], tile_lit, tex[2]], 3.5, 1, true, id, 13.0, S_STONE);
+            lit.creative = false;
+            blocks.push(lit);
+        }
+        blocks.push(def("barrel", "Barrel (A Chest, but Round)", Cube, true, true, [T_BARREL_TOP, T_BARREL_SIDE, T_BARREL_TOP], 2.5, 0, false, BARREL, 0.0, S_WOOD));
+        let mut egg = def("turtle_egg", "Turtle Eggs (Do Not Step On)", Shaped, false, false, [T_TURTLE_EGG; 3], 0.5, 0, false, AIR, 0.0, S_SAND);
+        egg.shape = Shape::Button { down: false };
+        blocks.push(egg);
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("painting{}", ["", "_east", "_south", "_west"][facing as usize])), "Painting (Original Art, Probably)", Shaped, false, false, [T_PAINTING_FIRST; 3], 0.4, 0, false, PAINTING_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Painting { facing };
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
+        for facing in 0..4u8 {
+            let mut d = def(leak(&format!("armour_stand{}", ["", "_east", "_south", "_west"][facing as usize])), "Armour Stand (Dressed to Impress)", Shaped, false, false, [T_PLANKS; 3], 1.0, 0, false, ARMOUR_STAND_FIRST, 0.0, S_WOOD);
+            d.shape = Shape::Stand { facing };
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2322,6 +2408,9 @@ impl Registry {
         {
             items.push(ItemDef { stack: 1, damage, ..item(key, name, T_SPEAR_FIRST + i as u16) });
         }
+        items.push(ItemDef { stack: 1, consume: false, ..item("treasure_map", "Treasure Map (X Marks the Spot)", T_TREASURE_MAP) });
+        items.push(item("turtle_scute", "Turtle Scute (Shell Shard)", T_TURTLE_SCUTE));
+        items.push(ItemDef { stack: 1, durability: Some(275), armor: Some(ModArmor { slot: 0, points: 2, looks_like: TURTLE_TIER as u8 }), repair: TURTLE_SCUTE, ..item("turtle_shell", "Turtle Shell (Clear Sight Underwater)", T_TURTLE_SHELL) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2447,6 +2536,13 @@ impl Registry {
             r(&[(STICK, 2), (COBBLE, 1)], (SPEAR_FIRST + 1, 1)),
             r(&[(STICK, 2), (IRON, 1)], (SPEAR_FIRST + 2, 1)),
             r(&[(STICK, 2), (DIAMOND, 1)], (SPEAR_FIRST + 3, 1)),
+            r(&[(STICK, 3), (COAL, 1), (LOG, 3)], (CAMPFIRE, 1)),
+            r(&[(FURNACE, 1), (LOG, 4)], (SMOKER, 1)),
+            r(&[(FURNACE, 1), (IRON, 5), (STONE, 3)], (BLAST_FURNACE, 1)),
+            r(&[(PLANKS, 7)], (BARREL, 1)),
+            r(&[(STICK, 8), (WOOL, 2)], (PAINTING_FIRST, 1)),
+            r(&[(STICK, 6), (STONE, 1)], (ARMOUR_STAND_FIRST, 1)),
+            r(&[(TURTLE_SCUTE, 5)], (TURTLE_SHELL, 1)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
@@ -2843,6 +2939,13 @@ mod id_order_tests {
             (WILDFLOWERS, "wildflowers"),
             (DRIED_FLOATY, "dried_floaty"),
             (MANGROVE_ROOTS_WET, "mangrove_roots_wet"),
+            (CAMPFIRE, "campfire"),
+            (SMOKER_LIT, "smoker_lit"),
+            (BLAST_FURNACE, "blast_furnace"),
+            (BARREL, "barrel"),
+            (TURTLE_EGG, "turtle_egg"),
+            (PAINTING_FIRST + 3, "painting_west"),
+            (ARMOUR_STAND_FIRST, "armour_stand"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }
@@ -2862,6 +2965,8 @@ mod id_order_tests {
             (HARNESS, "harness"),
             (SPEAR_FIRST, "wooden_spear"),
             (SPEAR_FIRST + 3, "dimond_spear"),
+            (TREASURE_MAP, "treasure_map"),
+            (TURTLE_SHELL, "turtle_shell"),
         ] {
             assert_eq!(reg().key_of(id), key, "item {id}");
         }

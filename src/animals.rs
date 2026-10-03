@@ -151,6 +151,12 @@ impl Game {
             self.advance_for(who, "sly_friend");
             return Interaction::Ate;
         }
+        if let Some(r) = self.wildlife_interact(who, i, item) {
+            return r;
+        }
+        if let Some(r) = self.hmmer_interact(who, i, item) {
+            return r;
+        }
         if let Some(r) = self.modded_interact(who, i, item, pos) {
             return r;
         }
@@ -257,6 +263,11 @@ impl Game {
         // A Name Tag asks for a name (see nametags.rs).
         if held == NAME_TAG {
             self.naming = Some(id);
+            return true;
+        }
+        // Your Llama's pack.
+        if self.wants_pack(mob_index) {
+            self.open_container(crate::wildlife::pack_key(id));
             return true;
         }
         // A trader (unless you're offering it its taming or breeding food).
@@ -480,6 +491,11 @@ impl Game {
             }
         }
         for (kind, at, owner, variant) in babies {
+            // Turtles lay eggs on the beach instead (see wildlife.rs).
+            if kind == MobKind::Turtle && self.lay_turtle_eggs(at) {
+                self.hearts(at + Vec3::Y * 0.5, 6);
+                continue;
+            }
             let mut b = Mob::new(kind, at, &mut self.rng);
             b.variant = variant;
             b.id = self.next_mob_id;

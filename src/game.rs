@@ -265,11 +265,17 @@ pub struct Game {
     pub seat_no: u8,
     /// When fireflies were last let out (see nature.rs).
     pub firefly_acc: f32,
+    /// Seconds since campfire smoke was last puffed (see home.rs).
+    pub smoke_acc: f32,
+    /// Seconds until a Wanderer might turn up (see villagers.rs).
+    pub wanderer_timer: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
     pub lod: crate::lod::Lod,
     /// Trades made with each Hmmer, by each player (see villagers.rs).
     pub regulars: HashMap<(u32, String), u16>,
+    /// Days gone by (for the moon's phase; see moon.rs).
+    pub day: u32,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -499,9 +505,12 @@ impl Game {
             mounted: None,
             seat_no: 0,
             firefly_acc: 0.0,
+            smoke_acc: 0.0,
+            wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
+            day: 0,
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -690,6 +699,10 @@ impl Game {
             }
             g.mobs.push(m);
         }
+        // Llamas get their packs back (saved by seed; see wildlife.rs).
+        if let Some((_, b)) = extras.iter().find(|(k, _)| k == "packs") {
+            g.decode_packs(b);
+        }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -754,6 +767,8 @@ impl Game {
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
+            ("day".to_string(), self.day.to_le_bytes().to_vec()),
+            ("packs".to_string(), self.encode_packs()),
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
@@ -791,6 +806,9 @@ impl Game {
         }
         if let Some(b) = extra("bee_log") {
             self.bee_log = crate::bees::BeeLog::decode(b);
+        }
+        if let Some(b) = extra("day").and_then(|b| b.get(..4)) {
+            self.day = u32::from_le_bytes(b.try_into().unwrap());
         }
         if let Some(b) = extra("regulars") {
             self.regulars = crate::villagers::decode_regulars(b);
@@ -1066,7 +1084,9 @@ impl Game {
     fn update_local(&mut self, dt: f32, c: &Controls) {
         self.clock += dt;
         if self.rules.daylight_cycle {
+            let before = self.time;
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+            self.count_days(before);
         }
         self.weather_tick(dt);
         self.liquid_tick(dt);
@@ -1169,6 +1189,7 @@ impl Game {
         }
         self.recipe_news = (self.recipe_news - dt).max(0.0);
         self.report_tick(dt);
+        self.campfire_smoke(dt);
         self.update_entities(dt);
         self.script_tick(dt);
     }
@@ -1331,7 +1352,7 @@ impl Game {
                 }
                 Cmd::SetTime(t) => {
                     self.time = t;
-                    self.net_broadcast(Msg::Time(t));
+                    self.net_broadcast(self.time_msg());
                 }
                 Cmd::Sound(s, at) => {
                     self.sfx(s, Some(at));
@@ -1429,7 +1450,7 @@ impl Game {
         if self.weather.kind.wet() {
             self.set_weather(crate::weather::Weather::Clear);
         }
-        self.net_broadcast(Msg::Time(self.time));
+        self.net_broadcast(self.time_msg());
         self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
         self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set.");
         self.advance("sweet_dreams");
@@ -2320,6 +2341,10 @@ impl Game {
         if !self.player.sneaking && crate::decor::is_frame(hit_id) && self.use_frame(hit_pos) {
             return;
         }
+        // Campfires take raw food to cook.
+        if hit_id == CAMPFIRE && self.use_campfire(hit_pos) {
+            return;
+        }
         // Gates and trapdoors swing (sneak to place against them instead).
         if !self.player.sneaking && self.toggle_hinged(hit_pos) {
             return;
@@ -2390,7 +2415,7 @@ impl Game {
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
             TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
-            FRAME_FIRST | LADDER_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
+            FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -2583,7 +2608,7 @@ impl Game {
                         self.msg("Only the host can change the time.");
                     } else {
                         self.time = *t;
-                        self.net_broadcast(Msg::Time(*t));
+                        self.net_broadcast(self.time_msg());
                     }
                 }
                 Action::Spawn(k) => {
@@ -2828,7 +2853,9 @@ impl Game {
         self.net_receive(dt);
         self.clock += dt;
         if self.rules.daylight_cycle {
+            let before = self.time;
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+            self.count_days(before);
         }
         self.weather_tick(dt);
         self.liquid_tick(dt);
@@ -2894,9 +2921,11 @@ impl Game {
         self.beacons_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
+        self.wildlife_tick(dt);
         self.copper_golems_tick(dt);
         self.floaties_tick();
         self.fireflies_tick(dt);
+        self.campfires_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
@@ -2904,6 +2933,7 @@ impl Game {
         self.snouts_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
+        self.zombie_hmmers_tick(dt);
         self.free_riderless();
         self.tidy_mob_names();
         for m in self.mobs.iter_mut() {
@@ -2954,6 +2984,9 @@ impl Game {
                     MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rotsteed => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::CopperGolem | MobKind::Floaty => {}
+                    MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
+                    MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -3033,6 +3066,9 @@ impl Game {
             let far = !m.persistent && (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
+                if m.kind == MobKind::Llama && m.health <= 0.0 {
+                    self.spill_pack(m.id, m.body.pos + Vec3::Y * 0.8);
+                }
                 if m.health <= 0.0 && m.kind.raider() {
                     self.raider_died(&m);
                 }
@@ -3067,6 +3103,7 @@ impl Game {
                             MobKind::Breeze => self.advance("breeze_through"),
                             MobKind::Creaking => self.advance("heartbreak"),
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
+                            MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
@@ -3235,6 +3272,14 @@ impl Game {
                 }
                 return;
             }
+            // Dolphins in the open sea, in little pods.
+            let dolphins = self.mobs.iter().filter(|m| m.kind == MobKind::Dolphin).count();
+            if dolphins < 6 && depth >= 5 && biome == Biome::Ocean && !self.is_night() && self.rng.chance(0.15) {
+                for i in 0..self.rng.int(1, 3) {
+                    self.alloc_mob(MobKind::Dolphin, Vec3::new(x as f32 + 0.5 + i as f32 * 1.2, (y - 2) as f32, z as f32 + 0.5));
+                }
+                return;
+            }
             if fish < 12 && depth >= 2 && self.rng.chance(0.6) {
                 let n = self.rng.int(2, 4);
                 for i in 0..n {
@@ -3251,6 +3296,15 @@ impl Game {
                 {
                     m.seed = 1;
                 }
+            }
+            return;
+        }
+        // Turtles on beaches, Pandas in jungles, Polar Bears on the snow, Llamas on the plains (see wildlife.rs).
+        if !self.is_night() && passive < 8 && matches!(top, SAND | GRASS | SNOW_GRASS) && clear(&self.world, y + 1) && (top != SAND || (crate::world::SEA - 1..=crate::world::SEA + 2).contains(&y))
+            && let Some(kind) = crate::wildlife::spawn_kind(biome, top, &mut self.rng)
+        {
+            for i in 0..self.rng.int(1, 2) {
+                self.alloc_mob(kind, Vec3::new(x as f32 + 0.5 + i as f32 * 0.9, y as f32 + 1.0, z as f32 + 0.5));
             }
             return;
         }
@@ -3286,7 +3340,8 @@ impl Game {
             }
             return;
         }
-        if hostile >= 12 + 4 * self.peers.len() || !self.rules.difficulty.monsters() {
+        let cap = ((12 + 4 * self.peers.len()) as f32 * crate::moon::monster_scale(self.moon_phase())) as usize;
+        if hostile >= cap || !self.rules.difficulty.monsters() {
             return;
         }
         let roll = self.rng.f32();
@@ -3432,7 +3487,7 @@ impl Game {
         let scorch = self.elsewhere();
         if !scorch {
             sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
-            sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
+            sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, crate::texture::T_MOON_PHASES + self.moon_phase() as u16);
         }
 
         // Clouds: a scrolling blocky layer.
@@ -3592,6 +3647,7 @@ impl Game {
         self.draw_vehicles(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
+        self.draw_stands(&mut g, eye, 48.0);
         self.draw_banners(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
@@ -3717,7 +3773,9 @@ impl Game {
         let far = (render_distance * 16) as f32;
         let far_land = self.distant_terrain && renderer.has_far() && !self.in_scorch() && !self.in_hollow();
         let (fog_color, fog_start, fog_end) = if underwater {
-            ([0.05, 0.12, 0.35], 0.0, 22.0)
+            // A Turtle Shell lets you see a good way further.
+            let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
+            ([0.05, 0.12, 0.35], 0.0, if shell { 48.0 } else { 22.0 })
         } else if self.in_scorch() {
             // Hazy, hot air.
             (sky, far * 0.2, far * 0.8)

@@ -300,7 +300,7 @@ impl Game {
                 match t {
                     Some(t) => {
                         self.time = t.rem_euclid(1.0);
-                        self.net_broadcast(crate::net::Msg::Time(self.time));
+                        self.net_broadcast(self.time_msg());
                         out.push(format!("Time set to {:.2}.", self.time));
                     }
                     None => out.push("Usage: time <day|noon|night|midnight|0.0-1.0>".into()),

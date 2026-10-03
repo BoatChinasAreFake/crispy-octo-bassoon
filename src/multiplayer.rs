@@ -748,6 +748,7 @@ impl Game {
             Msg::Loom { design, dye } => self.host_loom(from, design, dye),
             Msg::SortContainer { x, y, z } => self.host_sort(from, IVec3::new(x, y, z)),
             Msg::RegularAsk { mob } => self.host_regular_ask(from, mob),
+            Msg::CampfirePut { x, y, z, item } => self.host_campfire_put(from, IVec3::new(x, y, z), item),
             Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
                 let p = IVec3::new(x, y, z);
                 if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
@@ -1113,7 +1114,11 @@ impl Game {
                     self.sfx(s, Some(at));
                 }
             }
-            Msg::Time(t) => self.time = t.rem_euclid(1.0),
+            Msg::Time(t) => {
+                // The day count rides in front of the time of day (see moon.rs).
+                self.time = t.rem_euclid(1.0);
+                self.day = t.floor().max(0.0) as u32;
+            }
             Msg::MountMob { mob } => self.mount_mob(mob),
             Msg::MobName { mob, name } => {
                 let name = crate::nametags::clean_name(&name);
@@ -1172,7 +1177,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } => {}
         }
     }
 
@@ -1196,7 +1201,7 @@ impl Game {
             // Starers (and Weepers) reuse the fuse field for "angry".
             m.angry = matches!(kind, MobKind::Starer | MobKind::Weeper) && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
-            if matches!(kind, MobKind::Hmmer | MobKind::Sneaker | MobKind::CopperGolem) {
+            if matches!(kind, MobKind::Hmmer | MobKind::Wanderer | MobKind::Sneaker | MobKind::CopperGolem) {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
@@ -1347,7 +1352,7 @@ impl Game {
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
                         // (Bosses send their health, for the boss bar.)
-                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker | MobKind::CopperGolem) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
+                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Wanderer | MobKind::Sneaker | MobKind::CopperGolem) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         // Its size (low half) and colouring (high half).
@@ -1369,7 +1374,7 @@ impl Game {
             self.send_orbs(dt);
             if self.net_timers[2] <= 0.0 {
                 self.net_timers[2] = 2.0;
-                self.net_broadcast(Msg::Time(self.time));
+                self.net_broadcast(self.time_msg());
             }
             let fwd: Vec<Msg> = self
                 .sounds

@@ -200,6 +200,12 @@ Run the tests with `cargo test --release`. GitHub Actions runs the tests, Clippy
 - **Fireflies, leaf litter and wildflowers.** **Firefly Bushes** grow in swamps and mangroves, and at night fireflies blink around them. **Leaf Litter** drifts under forest trees, and **Wildflowers** fill the meadows.
 - **Spears and Rotsteeds.** Wooden, stone, iron and dimond **spears** (two sticks and the material) stab, and throw like the Soggy Spear. Hit something with a spear from a mount that's moving and the charge goes into the blow (and sends it flying). **Rotsteeds**, undead horses, wander the plains at night: tame, saddle and ride one like a Galloper.
 - **Distant terrain.** Past the edge of the loaded world, a low-detail picture of the land carries on to the horizon (about two and a half times the render distance), so mountains, coasts and seas show from far off. Turn it off in Video Settings.
+- **Smarter mobs.** Mobs find their way round walls, up steps and through open doors to get where they're going (or to you), instead of walking straight into things, and go as near as they can when there's no way through.
+- **Moon phases.** The moon waxes and wanes over an eight-day cycle. A full moon brings more monsters out (and hatches eggs sooner); a new moon is quieter. F3 shows the day and the phase.
+- **Home blocks.** A **Campfire** (three sticks, coal and three logs) cooks raw food put on it (right-click, or just drop it there) without fuel, and lights the place up; don't stand in it. A **Smoker** (a furnace and four logs) cooks food twice as fast, and a **Blast Furnace** (a furnace, five iron and three stone) does everything else twice as fast. A **Barrel** (seven planks) is a chest. An **Armour Stand** (six sticks and stone) holds a set of armour and wears it for everyone to see. **Paintings** (eight sticks and two wool) hang on walls; the picture depends on where you hang one.
+- **Shipwrecks and buried treasure.** Wrecks lie broken on the sea bed with a chest at each end (`/locate shipwreck`). Their chests often hold a **Treasure Map**: hold it to see the land around the X and how far off it is, then dig up the **Buried Treasure** in the beach (gold, iron, dimonds and more).
+- **Turtles, Dolphins, Pandas, Polar Bears and Llamas.** **Turtles** come ashore on beaches; fed Lily Pads, a pair lays **Turtle Eggs** in the sand that hatch at night, and the babies shed **Turtle Scutes** as they grow (five make a **Turtle Shell**, a helmet you can see much further underwater in). **Dolphins** swim in pods in the open sea; feed one a fish and it leads you to the nearest shipwreck. **Pandas** laze about in jungles and breed on bamboo. **Polar Bears** roam the snow and leave you be, unless you go near a cub. **Llamas** graze the plains: feed one hay to tame it and it follows you about; give it a chest and it carries a chest's worth of things (right-click it empty-handed to open the pack; sneak-click to tell it to stay).
+- **Villager life.** Hmmers who move in now have eight jobs: besides Farmers, Librarians, Smiths and Fishers there are **Clerics**, **Armourers**, **Cartographers** (who sell Treasure Maps) and **Butchers**. A Groaner that catches a Hmmer turns it into a **Zombie Hmmer**; give one a Golden Chop and after a while it's itself again, and so grateful you get its best prices. Now and then a **Wanderer** turns up with odds and ends to sell, and wanders off again after a couple of days.
 - **Advancement tabs.** The advancements screen sorts them into Getting Started, Creatures, Home and Craft, and Adventure, with how many of each you've done.
 - **Video settings.** **Options > Video Settings** has render distance, brightness, **Max FPS** (30 to 240, or unlimited), **VSync**, **Anti-aliasing** (off, 2x, 4x, 8x), **Particles** (all, fewer, minimal), **View Bobbing**, **Fog**, clouds (fancy, fast or off), leaves, water, lighting, **Shadows** (the sun and moon cast real shadows from blocks, mobs and players), **Water Depth** (deep water darkens and the bright ripples of caustics play across the sea floor), **Distant Terrain** and fullscreen. VSync and anti-aliasing apply the next time the game starts.
 - **Saved settings.** Render distance, FOV, sensitivity, fullscreen, volume, music, key bindings, skin, subtitles, colour-blind mode, graphics options, brightness, and your multiplayer name and last server are kept in `settings.txt` in the data folder (see Download and play). It's plain `key=value` text: edit it by hand if you like, and anything it can't make sense of falls back to the default.
@@ -333,6 +339,8 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/tint.rs` | Biome colours for grass, leaves and water, blended across borders |
 | `src/render.rs` | Raw OpenGL pipelines and shaders |
 | `src/lod.rs` | Distant terrain past the render distance |
+| `src/pathing.rs` | Mobs finding their way round walls, up steps and through doors |
+| `src/moon.rs` | Moon phases and what they change |
 | `src/entity.rs` | Physics, mobs, models, particles |
 | `src/player.rs` | Player controller |
 | `src/texture.rs` | Procedural texture atlas |
@@ -348,6 +356,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/anvil.rs` | Anvil repairs and merging |
 | `src/enchant.rs` | Enchantments, the enchanting table and its offers |
 | `src/structures.rs` | Dungeons, towers, huts and wells, and their loot |
+| `src/treasure.rs` | Shipwrecks, Treasure Maps and Buried Treasure |
 | `src/trial.rs` | Trial Chambers: Trial Spawners, Vaults, Breezes' wind charges |
 | `src/fireworks.rs` | Firework rockets and crossbows |
 | `src/trims.rs` | Armour trims |
@@ -370,7 +379,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/liquids.rs` | Flowing water and lava, buckets |
 | `src/animals.rs` | Breeding, taming and shearing |
 | `src/wiring.rs` | Zappy Dust, switches, lamps and powered doors |
-| `src/villagers.rs` | Hmmers and trading |
+| `src/villagers.rs` | Hmmers and trading, their jobs, Zombie Hmmers and Wanderers |
 | `src/combat.rs` | Attack charge, sweeps, shields and knockback |
 | `src/scorch.rs` | The Scorchlands and portals |
 | `src/vehicles.rs` | Boats, minecarts (plain, chest and hopper), rails and detector rails |
@@ -391,6 +400,8 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/golems.rs` | Clankers guarding villages, and Copper Golems sorting chests |
 | `src/floaty.rs` | Floaties: hatching, harnesses and four-seat flying |
 | `src/nature.rs` | Fireflies (and the ground covers they live among) |
+| `src/home.rs` | Campfires, Smokers, Blast Furnaces, Barrels, Armour Stands and Paintings |
+| `src/wildlife.rs` | Turtles, Dolphins, Pandas, Polar Bears and Llamas (and their packs) |
 | `src/beacon.rs` | Beacons and their effects |
 | `src/crafting.rs` | Crafting tables and the recipe book |
 | `src/bees.rs` | Bees, colonies, hives and honey |
@@ -421,7 +432,7 @@ Punch a **Tree Chunk** to get logs, then craft **Planks**, then **Sticks**, then
 | `src/copper.rs` | Random block ticks: copper weathering, bamboo growth, coral drying out |
 | `src/tools.rs` | Axes, shovels and the copper tier: which tool digs what, and how fast |
 
-For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|controls|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow|liquids|animals|zappy|trade|scorch|portal|vehicles|decor|carpentry|brewing|contraptions|hollow|machines|village|swamp|jungle|badlands|taiga|cave|caverain|modzoo|backups|stats|video|newblocks|glider|reef|spire|cherry|mangrove|trials|newmobs|palegarden|banners|golems|advancements [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z] [--distance chunks] [--colour-blind] [--subtitles] [--flat-lighting] [--brightness 0..1] [--hold ITEM] [--ui-scale 0.8..1.4] [--fast-clouds] [--pretend-update TAG] [--seed N]` renders a scene and saves a PNG.
+For headless testing, `minceraft --screenshot out.png --mode title|survival|creative|inventory|night|options|controls|host|join|internet|mods|palette|showcase|worlds|createform|newworld|farm|fish|zoo|kitchen|chest|furnace|building|armour|death|anvil|rules|xp|enchant|table|hut|tower|well|dungeon|ravine|rain|thunder|snow|liquids|animals|zappy|trade|scorch|portal|vehicles|decor|carpentry|brewing|contraptions|hollow|machines|village|swamp|jungle|badlands|taiga|cave|caverain|modzoo|backups|stats|video|newblocks|glider|reef|spire|cherry|mangrove|trials|newmobs|palegarden|banners|golems|advancements|shipwreck|homestead [--frames N] [--time 0..1] [--yaw R] [--pitch R] [--pos x,y,z] [--distance chunks] [--colour-blind] [--subtitles] [--flat-lighting] [--brightness 0..1] [--hold ITEM] [--ui-scale 0.8..1.4] [--fast-clouds] [--pretend-update TAG] [--seed N]` renders a scene and saves a PNG.
 
 `minceraft --playtest [--bots N] [--seconds S] [--seed N] [--port N]` is a multiplayer check in one command: it hosts a world and connects bot players to it over real sockets (no window needed). The bots wander, build and knock down blocks, chat and fill a shared chest, then it checks that the host and every bot agree on every block, that the bots see and hear each other, that each bot's inventory matches the host's ledger, and that the chest holds what went in. Then it tries the newer things: a bot glides (the host must see it), throws a Soggy Spear and picks it up again, breaks a full Hollow Box and puts it down elsewhere (the contents must come too), and is made a spectator (hidden from the others, its block edits refused); and the host must have everyone's statistics. Then the latest batch: a chest is refused without a crafting table and allowed with one, a bot smokes a hive and bottles its honey, brushes suspicious sand, upgrades a pickaxe to Scorchite at a smithing table, and `/kill` must reach everyone as a death message. And the newest: sand and gravel fall for everyone, a bot tunes a note block and swaps a disc in and out of a jukebox, swats a fireball back, gets Bad Omen and sees a raid's bar, and is saved by a Totem. It exits non-zero on any mismatch; CI runs it with six bots for a minute.
 
