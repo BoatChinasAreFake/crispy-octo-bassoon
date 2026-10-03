@@ -667,6 +667,14 @@ impl Game {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
                 }
+                if item == ROCKET && self.peer_rate_ok(from, "rocket", 0.25) {
+                    self.host_rocket(from);
+                    return;
+                }
+                if item == CROSSBOW && self.peer_rate_ok(from, "crossbow", 1.0) && self.peer_has(from, CROSSBOW) {
+                    self.host_crossbow(from);
+                    return;
+                }
                 if item == GOAT_HORN && self.peer_rate_ok(from, "horn", 5.0) && self.peer_has(from, GOAT_HORN) {
                     if let Some(at) = self.peers.get(&from).map(|p| p.target + Vec3::Y * 1.6) {
                         self.sfx(Sfx::Horn, Some(at));
@@ -1045,6 +1053,11 @@ impl Game {
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
+            }
+            Msg::Firework { at, colour } => {
+                if at.is_finite() {
+                    self.firework_sparks(at, colour);
+                }
             }
             Msg::Sound { sfx, at } => {
                 if let Some(s) = Sfx::from_wire(sfx) {

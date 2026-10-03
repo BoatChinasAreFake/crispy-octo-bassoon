@@ -2634,6 +2634,14 @@ impl Particle {
         let r = [self.uv[0], self.uv[1], self.uv[0] + 0.25, self.uv[1] + 0.25];
         geo.cube(&m, [self.tile; 6], sky, r);
     }
+
+    /// Drawn at full brightness whatever the light (firework sparks).
+    pub fn draw_lit(&self, geo: &mut DynGeo) {
+        let s = self.size;
+        let m = Mat4::from_translation(self.pos - Vec3::splat(s * 0.5)) * Mat4::from_scale(Vec3::splat(s));
+        let r = [self.uv[0], self.uv[1], self.uv[0] + 0.25, self.uv[1] + 0.25];
+        geo.cube(&m, [self.tile; 6], 1.0, r);
+    }
 }
 
 /// A Pointy Stick in flight (or stuck in something).
@@ -2666,6 +2674,8 @@ pub struct Arrow {
     pub blast: f32,
     /// Host-only: a wind charge (flies straight; bursts on whatever it meets, see trial.rs).
     pub wind: bool,
+    /// Host-only: a firework rocket, by colour + 1 (0: not one; see fireworks.rs).
+    pub firework: u8,
 }
 
 impl Arrow {
@@ -2688,6 +2698,7 @@ impl Arrow {
             homing: 0.0,
             blast: 0.0,
             wind: false,
+            firework: 0,
         }
     }
 
@@ -2697,7 +2708,7 @@ impl Arrow {
         if self.stuck {
             return false;
         }
-        if self.homing <= 0.0 && !self.wind {
+        if self.homing <= 0.0 && !self.wind && self.firework == 0 {
             self.vel.y -= Self::GRAVITY * dt;
         }
         self.dir = self.vel.normalize_or(self.dir);
@@ -2739,6 +2750,7 @@ impl Arrow {
             homing: 0.0,
             blast: 0.0,
             wind: false,
+            firework: 0,
         }
     }
 

@@ -178,7 +178,7 @@ impl Game {
         self.player.swing = 1.0;
         self.use_cd = 0.5;
         if self.is_client() {
-            self.net_send_msg(Msg::UseItem { item: WIND_CHARGE });
+            // (The host heard about it with the rest of our item use.)
             self.inv.consume_held();
             self.sfx(Sfx::Gust, None);
             return;
@@ -196,9 +196,6 @@ impl Game {
         self.use_cd = 5.0;
         self.player.swing = 1.0;
         let at = self.player.eye();
-        if self.is_client() {
-            self.net_send_msg(Msg::UseItem { item: GOAT_HORN });
-        }
         self.sfx(Sfx::Horn, Some(at));
     }
 

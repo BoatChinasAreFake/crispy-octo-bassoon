@@ -33,6 +33,7 @@ mod farming;
 mod fortress;
 mod music;
 mod fire;
+mod fireworks;
 mod fishing;
 mod game;
 mod glider;
@@ -5188,24 +5189,24 @@ async fn game_main() {
                 }
             }
             if s.mode == "newmobs" && frames == 150 {
-                // This batch's mobs: the Scorchlands' up front, raiders behind, a Weeper over it all.
+                // This batch's mobs (a Camel with both seats, an Axolotl in a puddle), under fireworks.
                 use entity::MobKind as K;
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
                 let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
                 let mut rng = noise::Rng::new(9);
-                let line = [(K::Sizzler, 6.0, -3.0), (K::Strutter, 6.0, -1.0), (K::Snout, 6.0, 1.0), (K::Fee, 6.0, 3.0), (K::Pilferer, 10.0, -4.5), (K::Hackler, 10.0, -2.5), (K::Invoicer, 10.0, -0.5), (K::Rampager, 10.5, 2.5), (K::Weeper, 19.0, 0.0)];
+                let line = [(K::Axolotl, 4.0, -2.0), (K::Goat, 5.0, -0.3), (K::Breeze, 5.0, 2.0), (K::Camel, 8.5, -1.2)];
+                for (x, y, z) in [(-8.0, 14.0, 22.0), (4.0, 17.0, 26.0), (12.0, 12.0, 20.0)] {
+                    let colour = (x as i32).rem_euclid(8) as u8;
+                    app.game.firework_sparks(p + right * x + Vec3::Y * y + fwd * z, colour);
+                }
                 for (i, (kind, f, r)) in line.into_iter().enumerate() {
-                    let up = if kind == K::Weeper { 4.0 } else if kind == K::Sizzler || kind == K::Fee { 1.2 } else { 0.0 };
+                    let up = 0.0;
                     let mut m = entity::Mob::new(kind, p + fwd * f + right * r + Vec3::Y * (2.0 + up), &mut rng);
                     m.yaw = s.yaw + std::f32::consts::PI;
                     m.id = 2000 + i as u32;
                     // A captain with its banner, a Snout admiring gold, an Invoicer casting.
-                    m.seed = matches!(kind, K::Pilferer | K::Snout) as u32;
-                    m.angry = kind == K::Weeper;
-                    if kind == K::Invoicer {
-                        m.fuse = 1.0;
-                    }
+                    m.saddled = kind == K::Camel;
                     app.game.mobs.push(m);
                 }
             }

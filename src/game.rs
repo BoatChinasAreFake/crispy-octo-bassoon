@@ -1511,12 +1511,30 @@ impl Game {
         let mut landed = Vec::new();
         let mut blasts: Vec<(Vec3, f32, f32, Option<crate::block::ProjectileEffect>)> = Vec::new();
         let mut winds: Vec<(Vec3, Option<u32>)> = Vec::new();
+        let mut bursts: Vec<(Vec3, u8, f32, Option<u32>)> = Vec::new();
         let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
             if a.homing > 0.0 && !a.stuck {
                 steer(a, &targets, dt);
             }
+            if a.firework > 0 && a.damage <= 0.0 {
+                // Off the ground: it speeds up as it climbs.
+                a.vel.y += 12.0 * dt;
+            }
             let thunk = a.fly(dt, &self.world);
+            if a.firework > 0 {
+                // A crossbow's rocket goes off on the first thing it touches.
+                let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
+                let touched = a.damage > 0.0
+                    && (self.mobs.iter().any(|m| near(m.body.pos + Vec3::Y * m.body.height * 0.5, m.body.half + m.body.height * 0.5 + 0.2))
+                        || (Some(self.my_id) != a.shooter && !self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1))
+                        || self.peers.iter().any(|(id, p)| Some(*id) != a.shooter && p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)));
+                if thunk || touched || a.life <= 0.0 {
+                    bursts.push((a.pos - a.dir * 0.3, a.firework - 1, a.damage, a.shooter));
+                    return false;
+                }
+                return true;
+            }
             if a.wind {
                 // A wind charge bursts on the first thing it meets: a wall, or
                 // a mob (a player's) or a player (a Breeze's).
@@ -1625,6 +1643,9 @@ impl Game {
         }
         for (at, shooter) in winds {
             self.wind_burst(at, shooter);
+        }
+        for (at, colour, damage, shooter) in bursts {
+            self.firework_burst(at, colour, damage, shooter);
         }
         for (at, wear) in landed {
             self.spawn_drop(at, SPEAR, 1, wear, Vec3::ZERO, 0.5);
@@ -2094,6 +2115,10 @@ impl Game {
         }
         if held == BOW {
             self.shoot_bow();
+            return;
+        }
+        if held == CROSSBOW {
+            self.shoot_crossbow();
             return;
         }
         if held == ROD {
@@ -3364,8 +3389,14 @@ impl Game {
         self.draw_orbs(&mut g, eye, 48.0);
         // Particles
         g.begin(Pass::Opaque, [1.0; 4], false);
-        for p in &self.particles {
+        let spark = |p: &&crate::entity::Particle| (crate::texture::T_SPARK_FIRST..crate::texture::T_SPARK_FIRST + crate::fireworks::COLOURS as u16).contains(&p.tile);
+        for p in self.particles.iter().filter(|p| !spark(p)) {
             p.draw(&mut g, &self.world);
+        }
+        // Firework sparks glow, day or night.
+        g.begin(Pass::Opaque, [2.2, 2.2, 2.2, 1.0], false);
+        for p in self.particles.iter().filter(spark) {
+            p.draw_lit(&mut g);
         }
 
         if self.menu || self.dead.is_some() {

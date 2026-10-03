@@ -27,7 +27,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v16: game modes (GameMode, spectators in PlayerState flags) and hardcore (Rules).
 /// v19: modded projectile appearance in authoritative arrow snapshots.
 /// v20: timed effects carry bounded amplifier levels.
-pub const PROTOCOL: u32 = 20;
+/// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
+pub const PROTOCOL: u32 = 21;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -109,6 +110,8 @@ pub enum Msg {
     /// `wear`: how used it is, for tools and armour.
     Give { item: Id, n: u8, wear: u32 },
     Explosion { at: Vec3, r: f32 },
+    /// host -> client: a firework burst, in one of the spark colours.
+    Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
     Time(f32),
     Chat { from: u32, text: String },
@@ -688,6 +691,11 @@ impl Msg {
                 w.u8(*waves);
                 w.u16(*left);
             }
+            Msg::Firework { at, colour } => {
+                w.u8(72);
+                w.v3(*at);
+                w.u8(*colour);
+            }
             Msg::TimedEffect { effect, secs, amplifier } => {
                 w.u8(71);
                 w.u8(*effect);
@@ -982,6 +990,7 @@ impl Msg {
             68 => Msg::Died { cause: r.str()? },
             69 => Msg::Deflect { at: r.v3()?, dir: r.v3()? },
             70 => Msg::Raid { state: r.u8()?, wave: r.u8()?, waves: r.u8()?, left: r.u16()? },
+            72 => Msg::Firework { at: r.v3()?, colour: r.u8()? },
             71 => Msg::TimedEffect { effect: r.u8()?, secs: r.f32()?, amplifier: r.u8()?.min(3) },
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
@@ -1548,6 +1557,7 @@ mod tests {
             Msg::Splash { item: 0x8070, at: Vec3::new(1.0, 2.0, 3.0) },
             Msg::PotionEffect { item: 0x8065 },
             Msg::MountMob { mob: 42 },
+            Msg::Firework { at: Vec3::new(1.0, 90.0, -3.0), colour: 5 },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },
             Msg::BeaconEffect { item: 0x8066 },

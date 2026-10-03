@@ -440,6 +440,11 @@ impl Game {
                 self.spawn_arrow(mouth, d.as_vec3() * crate::entity::Arrow::SPEED, None);
                 self.sfx(Sfx::Twang, Some(mouth));
             }
+            ROCKET => {
+                keep(self, None);
+                let colour = self.rng.int(0, crate::fireworks::COLOURS as i32 - 1) as u8;
+                self.launch_firework(mouth, d.as_vec3() * 14.0 + Vec3::Y * 2.0, colour, None, false);
+            }
             WATER_BUCKET | LAVA_BUCKET if replaceable(self.world.get_v(front)) => {
                 keep(self, Some(BUCKET));
                 self.world.set_v(front, if item == WATER_BUCKET { WATER } else { LAVA });
