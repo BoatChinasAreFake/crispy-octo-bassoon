@@ -143,6 +143,8 @@ pub const ALL: &[Advancement] = &[
     adv("published", "Published Author", "Sign a book you wrote. A literary career begins."),
     adv("loomed", "Flying the Flag", "Pattern a banner at a Loom."),
     adv("homing_in", "Country Lode, Take Me Home", "Point a compass at a Lodestone."),
+    adv("copper_golem", "Some Assembly Required", "Build a Copper Golem: a pumpkin on a block of copper."),
+    adv("sorted", "Sorted", "Watch a Copper Golem put something away. Neatly."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

@@ -2387,6 +2387,10 @@ impl Game {
             JACK => self.advance("spooky"),
             _ => {}
         }
+        if matches!(held, PUMPKIN | JACK) && !self.is_client() {
+            let me = crate::players::record_key(&self.player_name);
+            self.try_build_copper_golem(place, &me);
+        }
     }
 
     pub fn break_block(&mut self, pos: IVec3, drops: bool) {
@@ -2848,6 +2852,8 @@ impl Game {
         self.clankers_tick(dt);
         self.beacons_tick(dt);
         self.animals_tick(dt);
+        // (After animals_tick, which sets every mob's goal.)
+        self.copper_golems_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
@@ -2903,6 +2909,8 @@ impl Game {
                     MobKind::Goat => noises.push((Sfx::Bleat, m.body.pos)),
                     MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel | MobKind::Creaking => {}
                     MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
+                    MobKind::Rotsteed => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::CopperGolem | MobKind::Floaty => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -3015,7 +3023,7 @@ impl Game {
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Breeze => self.advance("breeze_through"),
                             MobKind::Creaking => self.advance("heartbreak"),
-                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer => {}
+                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}

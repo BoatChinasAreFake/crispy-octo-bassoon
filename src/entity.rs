@@ -232,6 +232,14 @@ pub enum MobKind {
     Creaking,
     /// Huge, gentle and ancient: sniffs out old seeds (see sniffers.rs).
     Sniffer,
+    /// Built from a pumpkin on copper: carries things from Copper Chests to
+    /// the chests that already hold them (see golems.rs).
+    CopperGolem,
+    /// A big, gentle cloud of a creature: harness one and fly it, with up to
+    /// three friends aboard (see floaty.rs).
+    Floaty,
+    /// An undead horse that wanders at night; tame and ride it like a Galloper.
+    Rotsteed,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -247,7 +255,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 39] = [
+    pub const ALL: [MobKind; 42] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -288,6 +296,9 @@ impl MobKind {
         MobKind::Camel,
         MobKind::Creaking,
         MobKind::Sniffer,
+        MobKind::CopperGolem,
+        MobKind::Floaty,
+        MobKind::Rotsteed,
     ];
 
     pub fn index(self) -> u8 {
@@ -371,6 +382,9 @@ impl MobKind {
             "camel" => Some(MobKind::Camel),
             "creaking" => Some(MobKind::Creaking),
             "sniffer" => Some(MobKind::Sniffer),
+            "copper golem" | "copper_golem" | "coppergolem" => Some(MobKind::CopperGolem),
+            "floaty" | "happy_ghast" => Some(MobKind::Floaty),
+            "rotsteed" | "zombie_horse" => Some(MobKind::Rotsteed),
             _ => None,
         }
     }
@@ -418,6 +432,9 @@ impl MobKind {
             MobKind::Camel => "Camel",
             MobKind::Creaking => "Creaking",
             MobKind::Sniffer => "Sniffer",
+            MobKind::CopperGolem => "Copper Golem",
+            MobKind::Floaty => "Floaty",
+            MobKind::Rotsteed => "Rotsteed",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -464,6 +481,9 @@ impl MobKind {
             MobKind::Camel => (0.7, 2.35),
             MobKind::Creaking => (0.4, 2.7),
             MobKind::Sniffer => (0.9, 1.75),
+            MobKind::CopperGolem => (0.3, 1.2),
+            MobKind::Floaty => (1.9, 3.8),
+            MobKind::Rotsteed => (0.6, 1.6),
             MobKind::Modded(_) => (0.4, 0.9),
         }
     }
@@ -511,6 +531,9 @@ impl MobKind {
             MobKind::Camel => 32.0,
             MobKind::Creaking => 1.0,
             MobKind::Sniffer => 28.0,
+            MobKind::CopperGolem => 12.0,
+            MobKind::Floaty => 20.0,
+            MobKind::Rotsteed => 18.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -534,7 +557,7 @@ impl MobKind {
             // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
@@ -542,7 +565,7 @@ impl MobKind {
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
-        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee) || self.mod_def().is_some_and(|d| d.flying)
+        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee | MobKind::Floaty) || self.mod_def().is_some_and(|d| d.flying)
     }
     /// Lava and fire don't bother it.
     pub fn fireproof(self) -> bool {
@@ -653,6 +676,8 @@ pub struct Mob {
     pub rider: u32,
     /// A Camel's second seat, behind the driver: 0 nobody, else player id + 1.
     pub passenger: u32,
+    /// A Floaty's other two seats (see floaty.rs), the same way.
+    pub crew: [u32; 2],
     /// Which colouring it has (Gallopers, Woofers, Mooers, Axolotls; see `variant_tint`).
     pub variant: u8,
 }
@@ -819,6 +844,7 @@ impl Mob {
             temper: 0,
             rider: 0,
             passenger: 0,
+            crew: [0; 2],
             variant: if variants(kind) > 1 { roll_variant(kind, rng) } else { 0 },
         }
     }
@@ -958,7 +984,7 @@ impl Mob {
         let face = flat.x.atan2(-flat.z);
         match self.kind {
             // (The Wyrm flies on its own, see hollow.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter | MobKind::Camel => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -1548,6 +1574,42 @@ impl Mob {
                     }
                 }
             }
+            MobKind::CopperGolem => {
+                // Off to a chest (golems.rs picks which), or pottering about.
+                if self.flee > 0.0 {
+                    want = Some(((-flat.x).atan2(flat.z), 2.4));
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 1.3 {
+                        want = Some((d.x.atan2(-d.z), 1.7));
+                    } else {
+                        self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        may_wander = false;
+                    }
+                }
+            }
+            MobKind::Floaty => {
+                // Drifts about a few blocks up; harnessed and riderless, it waits where it is.
+                let ground = ground_below(world, self.body.pos, 24);
+                let cruise = ground + if self.baby > 0.0 { 2.5 } else { 4.5 };
+                if self.saddled && self.rider == 0 {
+                    may_wander = false;
+                    fly_vy = Some(0.0);
+                    self.body.vel.x *= 1.0 - (dt * 3.0).min(1.0);
+                    self.body.vel.z *= 1.0 - (dt * 3.0).min(1.0);
+                } else if let Some(g) = self.goal {
+                    // Someone holding a Harness or a snowball: come and see.
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 4.0 {
+                        want = Some((d.x.atan2(-d.z), 2.2));
+                    } else {
+                        may_wander = false;
+                    }
+                    fly_vy = Some(((g.y + 1.5 - self.body.pos.y) * 0.8).clamp(-2.0, 2.0));
+                } else {
+                    fly_vy = Some(((cruise - self.body.pos.y) * 0.6).clamp(-1.5, 1.5));
+                }
+            }
             MobKind::Sniffer => {
                 // Now and then it stops, sniffs, and digs something up (see sniffers.rs).
                 self.warp_cd = (self.warp_cd - dt).max(0.0);
@@ -1922,6 +1984,11 @@ impl Mob {
             MobKind::Invoicer => Some((TOTEM, 1)),
             MobKind::Rampager => Some((SADDLE, 1)),
             MobKind::Breeze => Some((BREEZE_ROD, rng.int(1, 2) as u8)),
+            // A Copper Golem drops what it was carrying, and some copper.
+            MobKind::CopperGolem if self.seed != 0 => Some(((self.seed & 0xFFFF) as Id, ((self.seed >> 16) & 0xFF).max(1) as u8)),
+            MobKind::CopperGolem => Some((COPPER_INGOT, 2 + n)),
+            MobKind::Rotsteed if n > 0 => Some((GOO, n)),
+            MobKind::Floaty => Some((STRING, 1 + n)),
             MobKind::Modded(_) => self.kind.mod_def().and_then(|d| d.drop).map(|(id, max)| (id, rng.int(1, max.max(1) as i32) as u8)),
             _ => None,
         }
@@ -2037,6 +2104,8 @@ impl Mob {
             draw_model(geo, &root, &WOOFER_ARMOUR, 0.0, sky, false);
         } else if self.saddled && self.kind == MobKind::Camel {
             draw_model(geo, &root, &CAMEL_SADDLE, 0.0, sky, false);
+        } else if self.saddled && self.kind == MobKind::Floaty {
+            draw_model(geo, &root, &FLOATY_HARNESS, 0.0, sky, false);
         } else if self.saddled {
             draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
         }
@@ -2048,6 +2117,7 @@ impl Mob {
             MobKind::Pilferer => Some(if self.fuse > 0.0 { T_CROSSBOW_LOADED } else { T_CROSSBOW }),
             MobKind::Hackler => Some(item_tile(AXE_FIRST + 3)),
             MobKind::Snout if self.seed == 1 => Some(item_tile(GOLD_INGOT)),
+            MobKind::CopperGolem if self.seed != 0 => Some(item_tile((self.seed & 0xFFFF) as Id)),
             _ => None,
         };
         if let Some(tile) = carried {
@@ -2294,7 +2364,7 @@ const GL: u16 = T_GALLOPER;
 /// Where a Galloper's neck and head bend from, and by how much.
 const NECK: [f32; 3] = [0.0, 1.25, -0.77];
 const HEAD: [f32; 3] = [0.0, 1.71, -1.05];
-static GALLOPER: [Part; 13] = [
+const GALLOPER_PARTS: [Part; 13] = [
     // A long body on four long legs, and a tail.
     part([-0.3, 0.85, -0.75], [0.6, 0.6, 1.5], [0.0; 3], Limb::Fixed, [GL; 6]),
     part([-0.28, 0.0, -0.72], [0.16, 0.85, 0.16], [0.0, 0.85, -0.64], Limb::Swing(1.0), [GL; 6]),
@@ -2313,6 +2383,58 @@ static GALLOPER: [Part; 13] = [
     part([-0.16, 1.62, -1.3], [0.32, 0.06, 0.06], HEAD, Limb::Tilt(-0.5), [T_GALLOP_MANE; 6]),
 ];
 /// A saddle on a Galloper's back.
+static GALLOPER: [Part; 13] = GALLOPER_PARTS;
+/// The same shape in other tiles (`map`: (from, to) pairs).
+const fn retile<const N: usize>(mut parts: [Part; N], map: [(u16, u16); 4]) -> [Part; N] {
+    let mut i = 0;
+    while i < N {
+        let mut f = 0;
+        while f < 6 {
+            let mut k = 0;
+            while k < 4 {
+                if parts[i].tiles[f] == map[k].0 {
+                    parts[i].tiles[f] = map[k].1;
+                    k = 4;
+                } else {
+                    k += 1;
+                }
+            }
+            f += 1;
+        }
+        i += 1;
+    }
+    parts
+}
+static ROTSTEED: [Part; 13] = retile(GALLOPER_PARTS, [(GL, T_ROTSTEED), (T_GALLOP_MANE, T_ROTSTEED_FACE), (T_GALLOP_EYE, T_ROTSTEED_FACE), (T_GALLOP_FACE, T_ROTSTEED_FACE)]);
+const CG: u16 = T_COPPER_GOLEM;
+static COPPER_GOLEM: [Part; 9] = [
+    part([-0.2, 0.0, -0.08], [0.15, 0.3, 0.16], [0.0, 0.3, 0.0], Limb::Swing(1.0), [CG; 6]),
+    part([0.05, 0.0, -0.08], [0.15, 0.3, 0.16], [0.0, 0.3, 0.0], Limb::Swing(-1.0), [CG; 6]),
+    part([-0.25, 0.3, -0.15], [0.5, 0.36, 0.3], [0.0; 3], Limb::Fixed, [CG; 6]),
+    part([-0.37, 0.3, -0.07], [0.12, 0.34, 0.14], [0.0, 0.64, 0.0], Limb::Swing(-0.7), [CG; 6]),
+    part([0.25, 0.3, -0.07], [0.12, 0.34, 0.14], [0.0, 0.64, 0.0], Limb::Swing(0.7), [CG; 6]),
+    part([-0.28, 0.66, -0.25], [0.56, 0.32, 0.5], [0.0; 3], Limb::Fixed, [CG, CG, CG, CG, CG, T_COPPER_GOLEM_FACE]),
+    part([-0.05, 0.7, -0.33], [0.1, 0.16, 0.08], [0.0; 3], Limb::Fixed, [CG; 6]),
+    // A lightning rod on its head.
+    part([-0.03, 0.98, -0.03], [0.06, 0.14, 0.06], [0.0; 3], Limb::Fixed, [CG; 6]),
+    part([-0.06, 1.1, -0.06], [0.12, 0.12, 0.12], [0.0, 1.0, 0.0], Limb::Bob(1.0), [CG; 6]),
+];
+const FL: u16 = T_FLOATY;
+static FLOATY: [Part; 6] = [
+    part([-1.9, 0.6, -1.9], [3.8, 3.2, 3.8], [0.0; 3], Limb::Fixed, [FL, FL, FL, FL, FL, T_FLOATY_FACE]),
+    // Short tentacles, swaying.
+    part([-1.2, 0.0, -1.2], [0.3, 0.7, 0.3], [0.0, 0.6, -1.05], Limb::Swing(0.4), [FL; 6]),
+    part([0.9, 0.0, -1.2], [0.3, 0.7, 0.3], [0.0, 0.6, -1.05], Limb::Swing(-0.4), [FL; 6]),
+    part([-1.2, 0.0, 0.9], [0.3, 0.7, 0.3], [0.0, 0.6, 1.05], Limb::Swing(-0.4), [FL; 6]),
+    part([0.9, 0.0, 0.9], [0.3, 0.7, 0.3], [0.0, 0.6, 1.05], Limb::Swing(0.4), [FL; 6]),
+    part([-0.15, 0.1, -0.15], [0.3, 0.6, 0.3], [0.0, 0.6, 0.0], Limb::Swing(0.6), [FL; 6]),
+];
+/// A harness on top, with room for four.
+static FLOATY_HARNESS: [Part; 3] = [
+    part([-1.95, 3.75, -1.95], [3.9, 0.12, 3.9], [0.0; 3], Limb::Fixed, [T_HARNESS_WORN; 6]),
+    part([-1.95, 2.2, -1.95], [3.9, 0.25, 0.06], [0.0; 3], Limb::Fixed, [T_HARNESS_WORN; 6]),
+    part([-1.95, 2.2, 1.89], [3.9, 0.25, 0.06], [0.0; 3], Limb::Fixed, [T_HARNESS_WORN; 6]),
+];
 pub static SADDLE_PART: [Part; 1] = [part([-0.32, 1.44, -0.3], [0.64, 0.1, 0.5], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6])];
 static WOOFER_COLLAR: [Part; 1] = [part([-0.21, 0.52, -0.46], [0.42, 0.1, 0.08], [0.0; 3], Limb::Fixed, [T_COLLAR; 6])];
 static FLUFFER_SHEARED: [Part; 6] = [
@@ -2603,6 +2725,9 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Camel => &CAMEL,
         MobKind::Creaking => &CREAKING,
         MobKind::Sniffer => &SNIFFER,
+        MobKind::CopperGolem => &COPPER_GOLEM,
+        MobKind::Floaty => &FLOATY,
+        MobKind::Rotsteed => &ROTSTEED,
         // Modded mobs are drawn from a runtime-built, textured copy of a base
         // template (see `modded_parts`); this static fallback keeps `model`
         // total and is used only where the texture doesn't matter (e.g. the

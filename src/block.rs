@@ -298,7 +298,22 @@ pub const BANNER: Id = 475;
 pub const LOOM: Id = 476;
 /// Opens to your own storage, wherever it is (see stash.rs).
 pub const PERSONAL_CHEST: Id = 477;
-pub const NUM_BLOCKS: Id = 478;
+/// A chest Copper Golems sort from (see golems.rs).
+pub const COPPER_CHEST: Id = 478;
+/// Pale Garden flowers: shut by day, open (and glowing a little) at night.
+pub const EYEBLOSSOM: Id = 479;
+pub const EYEBLOSSOM_OPEN: Id = 480;
+/// Resin, from Creaking Hearts (see creaking.rs).
+pub const RESIN_BLOCK: Id = 481;
+pub const RESIN_BRICKS: Id = 482;
+/// Fireflies come out of it at night (see ambient in render.rs).
+pub const FIREFLY_BUSH: Id = 483;
+/// Thin ground covers.
+pub const LEAF_LITTER: Id = 484;
+pub const WILDFLOWERS: Id = 485;
+/// Put it next to water and it slowly wakes into a baby Floaty (see floaty.rs).
+pub const DRIED_FLOATY: Id = 486;
+pub const NUM_BLOCKS: Id = 487;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -486,7 +501,15 @@ pub const PITCHER_POD: Id = FIRST_ITEM + 225;
 /// Write in it; sign it and it's a Written Book (see books.rs).
 pub const BOOK_AND_QUILL: Id = FIRST_ITEM + 226;
 pub const WRITTEN_BOOK: Id = FIRST_ITEM + 227;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 228;
+/// Knocked out of a Creaking Heart when its Creaking is hit; bake it into bricks.
+pub const RESIN_CLUMP: Id = FIRST_ITEM + 228;
+pub const RESIN_BRICK: Id = FIRST_ITEM + 229;
+/// Put it on a grown Floaty to ride it (see floaty.rs).
+pub const HARNESS: Id = FIRST_ITEM + 230;
+/// Craftable spears, wood to dimond (the Soggy Spear sits between stone and iron).
+pub const SPEAR_FIRST: Id = FIRST_ITEM + 231;
+pub const SPEARS: usize = 4;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 235;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -579,6 +602,10 @@ pub fn durability(id: Id) -> Option<u16> {
     match id {
         GLIDER => return Some(432),
         SPEAR => return Some(250),
+        SPEAR_FIRST => return Some(60),
+        x if x == SPEAR_FIRST + 1 => return Some(132),
+        x if x == SPEAR_FIRST + 2 => return Some(250),
+        x if x == SPEAR_FIRST + 3 => return Some(1561),
         BRUSH => return Some(64),
         DIAMOND_BRUSH => return Some(256),
         BEE_SMOKER => return Some(64),
@@ -2023,6 +2050,24 @@ impl Registry {
         blocks.push(def("banner", "Banner (Flag-Adjacent)", Empty, false, false, [T_BANNER_ICON; 3], 1.0, 0, false, AIR, 0.0, S_GRASS));
         blocks.push(def("loom", "Loom (Pattern Machine)", Cube, true, true, [T_LOOM_TOP, T_LOOM_SIDE, T_PLANKS], 2.5, 0, false, LOOM, 0.0, S_WOOD));
         blocks.push(def("personal_chest", "Personal Chest (Yours Alone)", Cube, true, true, [T_PERSONAL_CHEST_TOP, T_PERSONAL_CHEST_SIDE, T_PERSONAL_CHEST_TOP], 22.0, 1, true, PERSONAL_CHEST, 7.0, S_STONE));
+        blocks.push(def("copper_chest", "Copper Chest (Sorted, Hopefully)", Cube, true, true, [T_COPPER_CHEST_TOP, T_COPPER_CHEST_SIDE, T_COPPER_CHEST_TOP], 3.0, 0, false, COPPER_CHEST, 0.0, S_STONE));
+        blocks.push(def("eyeblossom", "Eyeblossom (Pretending to Sleep)", Cross, false, false, [T_EYEBLOSSOM; 3], 0.0, 0, false, EYEBLOSSOM, 0.0, S_GRASS));
+        let mut open = def("eyeblossom_open", "Eyeblossom (Wide Awake)", Cross, false, false, [T_EYEBLOSSOM_OPEN; 3], 0.0, 0, false, EYEBLOSSOM, 3.0, S_GRASS);
+        open.creative = false;
+        blocks.push(open);
+        blocks.push(def("resin_block", "Block of Resin (Sticky)", Cube, true, true, [T_RESIN_BLOCK; 3], 0.5, 0, false, RESIN_BLOCK, 0.0, S_GRASS));
+        blocks.push(def("resin_bricks", "Resin Bricks (Amber Masonry)", Cube, true, true, [T_RESIN_BRICKS; 3], 1.5, 1, true, RESIN_BRICKS, 0.0, S_STONE));
+        blocks.push(def("firefly_bush", "Firefly Bush (Twinkly After Dark)", Cross, false, false, [T_FIREFLY_BUSH; 3], 0.0, 0, false, FIREFLY_BUSH, 2.0, S_GRASS));
+        let mut litter = def("leaf_litter", "Leaf Litter (Crunchy)", Shaped, false, false, [T_LEAF_LITTER; 3], 0.0, 0, false, LEAF_LITTER, 0.0, S_GRASS);
+        litter.shape = Shape::Dust;
+        blocks.push(litter);
+        let mut wild = def("wildflowers", "Wildflowers (Yellow Confetti)", Shaped, false, false, [T_WILDFLOWERS; 3], 0.0, 0, false, WILDFLOWERS, 0.0, S_GRASS);
+        wild.shape = Shape::Dust;
+        blocks.push(wild);
+        let mut dried = def("dried_floaty", "Dried Floaty (Just Add Water)", Shaped, true, false, [T_DRIED_FLOATY; 3], 0.5, 0, false, DRIED_FLOATY, 0.0, S_GRASS);
+        dried.see_through = true;
+        dried.shape = Shape::Table;
+        blocks.push(dried);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2257,6 +2302,20 @@ impl Registry {
         items.push(item("pitcher_pod", "Pitcher Pod (Very Old Seed)", T_PITCHER_POD));
         items.push(ItemDef { stack: 1, consume: false, ..item("writable_book", "Book and Quill (Blank, Full of Promise)", T_BOOK_QUILL) });
         items.push(ItemDef { stack: 1, consume: false, ..item("written_book", "Written Book (Signed and Everything)", T_WRITTEN_BOOK) });
+        items.push(item("resin_clump", "Resin Clump (Tree Gum, Basically)", T_RESIN_CLUMP));
+        items.push(item("resin_brick", "Resin Brick (Amber, Tiny)", T_RESIN_BRICK));
+        items.push(ItemDef { stack: 1, ..item("harness", "Harness (Floaty-Sized)", T_HARNESS) });
+        for (i, (key, name, damage)) in [
+            ("wooden_spear", "Wooden Spear (Pointy Stick, Promoted)", 4.0),
+            ("stone_spear", "Stone Spear (Flint-ish)", 5.0),
+            ("iron_spear", "Iron Spear (Jousting Optional)", 6.5),
+            ("dimond_spear", "Dimond Spear (Very Pointy)", 8.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            items.push(ItemDef { stack: 1, damage, ..item(key, name, T_SPEAR_FIRST + i as u16) });
+        }
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2373,6 +2432,15 @@ impl Registry {
             r(&[(WOOL, 6), (STICK, 1)], (BANNER, 1)),
             r(&[(PLANKS, 2), (STRING, 2)], (LOOM, 1)),
             r(&[(OBSIDIAN, 8), (STARING_EYE, 1)], (PERSONAL_CHEST, 1)),
+            r(&[(CHEST, 1), (COPPER_INGOT, 4)], (COPPER_CHEST, 1)),
+            r(&[(RESIN_CLUMP, 9)], (RESIN_BLOCK, 1)),
+            r(&[(RESIN_BLOCK, 1)], (RESIN_CLUMP, 9)),
+            r(&[(RESIN_BRICK, 4)], (RESIN_BRICKS, 1)),
+            r(&[(WOOL, 3), (STRING, 2), (GLASS, 2)], (HARNESS, 1)),
+            r(&[(STICK, 2), (PLANKS, 1)], (SPEAR_FIRST, 1)),
+            r(&[(STICK, 2), (COBBLE, 1)], (SPEAR_FIRST + 1, 1)),
+            r(&[(STICK, 2), (IRON, 1)], (SPEAR_FIRST + 2, 1)),
+            r(&[(STICK, 2), (DIAMOND, 1)], (SPEAR_FIRST + 3, 1)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
@@ -2756,6 +2824,12 @@ mod id_order_tests {
             (BANNER, "banner"),
             (LOOM, "loom"),
             (PERSONAL_CHEST, "personal_chest"),
+            (COPPER_CHEST, "copper_chest"),
+            (EYEBLOSSOM_OPEN, "eyeblossom_open"),
+            (RESIN_BRICKS, "resin_bricks"),
+            (FIREFLY_BUSH, "firefly_bush"),
+            (WILDFLOWERS, "wildflowers"),
+            (DRIED_FLOATY, "dried_floaty"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }
@@ -2771,6 +2845,10 @@ mod id_order_tests {
             (PITCHER_POD, "pitcher_pod"),
             (BOOK_AND_QUILL, "writable_book"),
             (WRITTEN_BOOK, "written_book"),
+            (RESIN_CLUMP, "resin_clump"),
+            (HARNESS, "harness"),
+            (SPEAR_FIRST, "wooden_spear"),
+            (SPEAR_FIRST + 3, "dimond_spear"),
         ] {
             assert_eq!(reg().key_of(id), key, "item {id}");
         }

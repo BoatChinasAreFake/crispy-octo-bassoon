@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
+    matches!(id, CHEST | COPPER_CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
