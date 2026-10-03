@@ -5724,12 +5724,23 @@ looks_like = diamond
             let bat = MobKind::from_name("zoo:bat").expect("resolves");
             assert!(bat.flies());
             let mut g = arena(41);
+            // A wandering bat can cross the arena's edge, where it would
+            // cruise over the real (lower) terrain: give it the whole of the
+            // loaded ground to fly over.
+            for x in -16..32 {
+                for z in -16..32 {
+                    g.world.set(x, 49, z, STONE);
+                    for y in 50..62 {
+                        g.world.set(x, y, z, AIR);
+                    }
+                }
+            }
             g.alloc_mob(bat, Vec3::new(5.5, 50.0, 5.5));
             for _ in 0..200 {
                 g.update_entities(0.05);
             }
             let m = &g.mobs[0];
-            assert!((53.5..=56.5).contains(&m.body.pos.y), "cruises about 5 blocks up: y = {}", m.body.pos.y);
+            assert!((53.5..=56.5).contains(&m.body.pos.y), "cruises about 5 blocks up: {:?}", m.body.pos);
             // Tamed, it sits (and lands); called along, it flies to its owner.
             let me = crate::players::record_key(&g.player_name.clone());
             let (id, at) = (g.mobs[0].id, g.mobs[0].body.pos);
