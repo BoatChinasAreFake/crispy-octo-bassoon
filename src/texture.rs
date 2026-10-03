@@ -596,6 +596,8 @@ pub const T_SPEAR_FIRST: u16 = 736;
 pub const T_ROTSTEED: u16 = 740;
 pub const T_ROTSTEED_FACE: u16 = 741;
 pub const T_HARNESS_WORN: u16 = 742;
+/// The moon in each of its eight phases, full first (see moon.rs).
+pub const T_MOON_PHASES: u16 = 743;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3397,6 +3399,19 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let d = ((x as f32 - 7.5).abs()).max((y as f32 - 7.5).abs());
         if d < 5.0 { shade(rgb(225, 225, 235), r.range(0.8, 1.0)) } else { [0, 0, 0, 0] }
     });
+    for p in 0..crate::moon::PHASES {
+        let f = crate::moon::brightness(p);
+        a.each(T_MOON_PHASES + p as u16, |x, y, r, _| {
+            let d = ((x as f32 - 7.5).abs()).max((y as f32 - 7.5).abs());
+            if d >= 5.0 {
+                return [0, 0, 0, 0];
+            }
+            // Waning, the dark creeps in from the right; waxing, it leaves from the left.
+            let u = (x as f32 - 7.5) / 5.0;
+            let lit = if p == 0 { true } else if p < crate::moon::PHASES / 2 { u < 2.0 * f - 1.0 } else { u > 1.0 - 2.0 * f };
+            if lit { shade(rgb(225, 225, 235), r.range(0.8, 1.0)) } else { shade(rgb(45, 45, 60), r.range(0.8, 1.0)) }
+        });
+    }
 
     a.px
 }

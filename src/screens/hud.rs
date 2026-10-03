@@ -164,7 +164,7 @@ impl App {
                     )
                 },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
-                format!("Time: {:02}:00  Daylight: {:.2}", hours, g.daylight()),
+                format!("Time: {:02}:00  Daylight: {:.2}  Day {} ({})", hours, g.daylight(), g.day + 1, moon::NAMES[g.moon_phase() as usize]),
                 format!("Seed: {}  Mode: {}{}", g.world.seed(), g.mode().name(), if g.rules.hardcore { " (hardcore)" } else { "" }),
                 match &g.net {
                     None => "Network: single player".to_string(),

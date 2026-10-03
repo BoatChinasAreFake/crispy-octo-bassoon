@@ -56,6 +56,7 @@ mod liquids;
 mod mesher;
 mod modes;
 mod mods;
+mod moon;
 mod multiplayer;
 mod nametags;
 mod nature;

@@ -270,6 +270,8 @@ pub struct Game {
     pub lod: crate::lod::Lod,
     /// Trades made with each Hmmer, by each player (see villagers.rs).
     pub regulars: HashMap<(u32, String), u16>,
+    /// Days gone by (for the moon's phase; see moon.rs).
+    pub day: u32,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -502,6 +504,7 @@ impl Game {
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
+            day: 0,
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -754,6 +757,7 @@ impl Game {
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
+            ("day".to_string(), self.day.to_le_bytes().to_vec()),
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
@@ -791,6 +795,9 @@ impl Game {
         }
         if let Some(b) = extra("bee_log") {
             self.bee_log = crate::bees::BeeLog::decode(b);
+        }
+        if let Some(b) = extra("day").and_then(|b| b.get(..4)) {
+            self.day = u32::from_le_bytes(b.try_into().unwrap());
         }
         if let Some(b) = extra("regulars") {
             self.regulars = crate::villagers::decode_regulars(b);
@@ -1066,7 +1073,9 @@ impl Game {
     fn update_local(&mut self, dt: f32, c: &Controls) {
         self.clock += dt;
         if self.rules.daylight_cycle {
+            let before = self.time;
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+            self.count_days(before);
         }
         self.weather_tick(dt);
         self.liquid_tick(dt);
@@ -1331,7 +1340,7 @@ impl Game {
                 }
                 Cmd::SetTime(t) => {
                     self.time = t;
-                    self.net_broadcast(Msg::Time(t));
+                    self.net_broadcast(self.time_msg());
                 }
                 Cmd::Sound(s, at) => {
                     self.sfx(s, Some(at));
@@ -1429,7 +1438,7 @@ impl Game {
         if self.weather.kind.wet() {
             self.set_weather(crate::weather::Weather::Clear);
         }
-        self.net_broadcast(Msg::Time(self.time));
+        self.net_broadcast(self.time_msg());
         self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
         self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set.");
         self.advance("sweet_dreams");
@@ -2583,7 +2592,7 @@ impl Game {
                         self.msg("Only the host can change the time.");
                     } else {
                         self.time = *t;
-                        self.net_broadcast(Msg::Time(*t));
+                        self.net_broadcast(self.time_msg());
                     }
                 }
                 Action::Spawn(k) => {
@@ -2828,7 +2837,9 @@ impl Game {
         self.net_receive(dt);
         self.clock += dt;
         if self.rules.daylight_cycle {
+            let before = self.time;
             self.time = (self.time + dt / DAY_SECONDS) % 1.0;
+            self.count_days(before);
         }
         self.weather_tick(dt);
         self.liquid_tick(dt);
@@ -3286,7 +3297,8 @@ impl Game {
             }
             return;
         }
-        if hostile >= 12 + 4 * self.peers.len() || !self.rules.difficulty.monsters() {
+        let cap = ((12 + 4 * self.peers.len()) as f32 * crate::moon::monster_scale(self.moon_phase())) as usize;
+        if hostile >= cap || !self.rules.difficulty.monsters() {
             return;
         }
         let roll = self.rng.f32();
@@ -3432,7 +3444,7 @@ impl Game {
         let scorch = self.elsewhere();
         if !scorch {
             sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
-            sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, T_MOON);
+            sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, crate::texture::T_MOON_PHASES + self.moon_phase() as u16);
         }
 
         // Clouds: a scrolling blocky layer.

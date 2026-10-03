@@ -1113,7 +1113,11 @@ impl Game {
                     self.sfx(s, Some(at));
                 }
             }
-            Msg::Time(t) => self.time = t.rem_euclid(1.0),
+            Msg::Time(t) => {
+                // The day count rides in front of the time of day (see moon.rs).
+                self.time = t.rem_euclid(1.0);
+                self.day = t.floor().max(0.0) as u32;
+            }
             Msg::MountMob { mob } => self.mount_mob(mob),
             Msg::MobName { mob, name } => {
                 let name = crate::nametags::clean_name(&name);
@@ -1369,7 +1373,7 @@ impl Game {
             self.send_orbs(dt);
             if self.net_timers[2] <= 0.0 {
                 self.net_timers[2] = 2.0;
-                self.net_broadcast(Msg::Time(self.time));
+                self.net_broadcast(self.time_msg());
             }
             let fwd: Vec<Msg> = self
                 .sounds

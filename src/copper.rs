@@ -106,7 +106,8 @@ impl Game {
         } else if id == SNIFFER_EGG {
             // Hatches in time (sooner on moss).
             let moss = matches!(self.world.get_v(p - IVec3::Y), PALE_MOSS | MUD);
-            if self.rng.chance(if moss { crate::sniffers::HATCH_CHANCE_MOSS } else { crate::sniffers::HATCH_CHANCE }) {
+            let chance = if moss { crate::sniffers::HATCH_CHANCE_MOSS } else { crate::sniffers::HATCH_CHANCE } * crate::moon::hatch_scale(self.moon_phase());
+            if self.rng.chance(chance) {
                 self.world.set_v(p, AIR);
                 let at = p.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5);
                 let id = self.alloc_mob(crate::entity::MobKind::Sniffer, at);
