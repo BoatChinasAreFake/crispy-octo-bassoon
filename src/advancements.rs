@@ -154,6 +154,38 @@ pub const ALL: &[Advancement] = &[
     adv("trading_hall", "Trading Hall", "Trade with a Farmer, a Librarian, a Smith and a Fisher."),
 ];
 
+/// The advancements screen's tabs (everything not listed is an Adventure).
+pub const TABS: [&str; 5] = ["All", "Getting Started", "Creatures", "Home and Craft", "Adventure"];
+const STARTED: &[&str] = &[
+    "getting_wood", "benchmarking", "stone_age", "tool_time", "iron_will", "dimonds", "fools_gold", "golden_boy", "boing", "ouch", "zoomies", "sweet_dreams", "cake", "spooky", "thirsty",
+    "kaboom", "centurion", "why_cross", "suit_up", "cover_me", "open_door_policy", "butterfingers", "hot_stuff", "not_today",
+];
+const CREATURES: &[&str] = &[
+    "bacon", "hiss_tory", "groan_up", "fluffed", "dont_blink", "staring_champ", "rude_teleport", "udderly", "bone_zone", "arachno", "split_decision", "robin_hood", "good_boy",
+    "the_birds_and_the_bees", "giddy_up", "hello_my_name_is", "pretty_polly", "soggy", "spear_it", "fishy_business", "sly_friend", "special_delivery", "tongue_tied", "scute_cute",
+    "armoured_pup", "too_hot", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
+    "full_flight", "jousting", "resin_up",
+];
+const HOME: &[&str] = &[
+    "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
+    "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
+    "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
+    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane",
+];
+
+/// Which tab (1..) an advancement is on.
+pub fn tab_of(key: &str) -> usize {
+    if STARTED.contains(&key) {
+        1
+    } else if CREATURES.contains(&key) {
+        2
+    } else if HOME.contains(&key) {
+        3
+    } else {
+        4
+    }
+}
+
 pub fn find(key: &str) -> Option<&'static Advancement> {
     ALL.iter().find(|a| a.key == key)
 }
@@ -199,6 +231,18 @@ impl Progress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_tab_names_real_advancements_and_each_has_one_tab() {
+        for key in STARTED.iter().chain(CREATURES).chain(HOME) {
+            assert!(find(key).is_some(), "no advancement {key}");
+        }
+        for a in ALL {
+            let n = [STARTED, CREATURES, HOME].iter().filter(|l| l.contains(&a.key)).count();
+            assert!(n <= 1, "{} is on two tabs", a.key);
+        }
+        assert!(ALL.iter().any(|a| tab_of(a.key) == 4), "some adventures");
+    }
 
     #[test]
     fn keys_are_unique_and_grants_once() {

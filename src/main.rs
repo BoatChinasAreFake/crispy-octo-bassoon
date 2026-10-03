@@ -275,6 +275,8 @@ struct App {
     rebind_armed: bool,
     mods_scroll: usize,
     adv_scroll: usize,
+    /// Which advancements tab is showing (see advancements::TABS).
+    adv_tab: usize,
     /// Joined a server, so its mods (not ours) are active.
     using_server_mods: bool,
     // ---- world slots
@@ -2571,14 +2573,28 @@ impl App {
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
         let title = format!("Advancements: {}/{} (they're per world, like memories)", self.game.advancements.count(), advancements::ALL.len());
-        self.ui.text_centered(&title, w / 2.0, h * 0.08, 14.0, WHITE);
+        self.ui.text_centered(&title, w / 2.0, h * 0.06, 14.0, WHITE);
+        // Tabs, each with how many are done.
+        let tab_w = ((w - 20.0 * s) / advancements::TABS.len() as f32).min(118.0 * s);
+        let tabs_x = w / 2.0 - tab_w * advancements::TABS.len() as f32 / 2.0;
+        for (t, name) in advancements::TABS.iter().enumerate() {
+            let on: Vec<&advancements::Advancement> = advancements::ALL.iter().filter(|a| t == 0 || advancements::tab_of(a.key) == t).collect();
+            let done = on.iter().filter(|a| self.game.advancements.has(a.key)).count();
+            let label = self.ui.fit(&format!("{name} {done}/{}", on.len()), 8.0, tab_w - 8.0 * s);
+            let r = Rect::new(tabs_x + t as f32 * tab_w + 1.0 * s, h * 0.085, tab_w - 2.0 * s, 15.0 * s);
+            if self.ui.button(r, &label, self.adv_tab != t) {
+                self.adv_tab = t;
+                self.adv_scroll = 0;
+            }
+        }
+        let shown: Vec<&advancements::Advancement> = advancements::ALL.iter().filter(|a| self.adv_tab == 0 || advancements::tab_of(a.key) == self.adv_tab).collect();
         let p = &self.game.advancements;
         let cols = if w >= 2.0 * 220.0 * s { 2 } else { 1 };
         let col_w = ((w - 20.0 * s) / cols as f32).min(290.0 * s);
         let row_h = 21.0 * s;
-        let per_col = advancements::ALL.len().div_ceil(cols);
+        let per_col = shown.len().div_ceil(cols);
         let x0 = w / 2.0 - col_w * cols as f32 / 2.0;
-        let y0 = h * 0.12;
+        let y0 = h * 0.085 + 19.0 * s;
         let max_rows = ((h * 0.84 - y0) / row_h).floor().max(1.0) as usize;
         let max_scroll = per_col.saturating_sub(max_rows);
         let wheel = mouse_wheel().1;
@@ -2586,7 +2602,7 @@ impl App {
             self.adv_scroll = if wheel > 0.0 { self.adv_scroll.saturating_sub(1) } else { self.adv_scroll + 1 };
         }
         self.adv_scroll = self.adv_scroll.min(max_scroll);
-        for (i, a) in advancements::ALL.iter().enumerate() {
+        for (i, a) in shown.iter().enumerate() {
             let (c, r) = (i / per_col, i % per_col);
             let Some(r) = r.checked_sub(self.adv_scroll).filter(|&r| r < max_rows) else { continue };
             let (x, y) = (x0 + c as f32 * col_w, y0 + r as f32 * row_h);
@@ -4419,6 +4435,7 @@ async fn game_main() {
         rebind_armed: false,
         mods_scroll: 0,
         adv_scroll: 0,
+        adv_tab: 0,
         using_server_mods: false,
         current_world: None,
         worlds: Vec::new(),
