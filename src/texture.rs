@@ -481,6 +481,16 @@ pub const T_RAMPAGER: u16 = 620;
 pub const T_RAMPAGER_FACE: u16 = 621;
 pub const T_BANNER_WORN: u16 = 622;
 pub const T_SPAWNER: u16 = 623;
+pub const T_CHERRY_LOG_SIDE: u16 = 624;
+pub const T_CHERRY_LOG_TOP: u16 = 625;
+pub const T_CHERRY_LEAVES: u16 = 626;
+pub const T_PINK_PETALS: u16 = 627;
+pub const T_CHERRY_PLANKS: u16 = 628;
+pub const T_MANGROVE_LOG_SIDE: u16 = 629;
+pub const T_MANGROVE_LOG_TOP: u16 = 630;
+pub const T_MANGROVE_LEAVES: u16 = 631;
+pub const T_MANGROVE_ROOTS: u16 = 632;
+pub const T_MANGROVE_PLANKS: u16 = 633;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2617,6 +2627,31 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     };
     bark(&mut a, T_SPRUCE_LOG_SIDE, T_SPRUCE_LOG_TOP, [70, 50, 32], [140, 105, 65]);
     bark(&mut a, T_JUNGLE_LOG_SIDE, T_JUNGLE_LOG_TOP, [110, 90, 45], [175, 130, 80]);
+    bark(&mut a, T_CHERRY_LOG_SIDE, T_CHERRY_LOG_TOP, [60, 30, 38], [215, 150, 150]);
+    bark(&mut a, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP, [90, 55, 40], [150, 60, 50]);
+    a.each(T_CHERRY_LEAVES, |x, y, r, _| {
+        if r.chance(0.13) { return [240, 170, 200, 0]; }
+        let blossom = (x * 7 + y * 3) % 5 == 0;
+        shade(if blossom { rgb(255, 215, 230) } else { rgb(240, 160, 195) }, r.range(0.82, 1.1))
+    });
+    a.each(T_PINK_PETALS, |x, y, r, _| {
+        // Little scattered petals on the ground; the gaps show the grass.
+        let petal = (x * 5 + y * 11) % 7 < 2 && r.chance(0.8);
+        if petal { shade(rgb(245, 170, 205), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_MANGROVE_LEAVES, |_, _, r, _| if r.chance(0.14) { [60, 140, 40, 0] } else { shade(rgb(70, 145, 45), r.range(0.72, 1.15)) });
+    a.each(T_MANGROVE_ROOTS, |x, y, r, _| {
+        // A tangle: diagonal roots with gaps between.
+        let root = (x + y) % 5 < 2 || (x + 16 - y) % 6 < 2;
+        if root { shade(rgb(95, 75, 55), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    for (t, light, dark) in [(T_CHERRY_PLANKS, rgb(225, 175, 170), rgb(150, 95, 100)), (T_MANGROVE_PLANKS, rgb(150, 70, 60), rgb(95, 40, 35))] {
+        a.each(t, |x, y, r, _| {
+            let board = y / 4;
+            let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
+            if seam { dark } else { shade(light, r.range(0.9, 1.08)) }
+        });
+    }
     a.each(T_SPRUCE_LEAVES, |x, y, r, _| {
         // Needles: darker, bluer, in little diagonal strokes.
         if r.chance(0.2) { return [40, 80, 55, 0]; }

@@ -3782,11 +3782,13 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
-        "swamp" | "jungle" | "badlands" | "taiga" => {
+        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" => {
             let want = match mode {
                 "swamp" => world::Biome::Swamp,
                 "jungle" => world::Biome::Jungle,
                 "badlands" => world::Biome::Badlands,
+                "cherry" => world::Biome::Cherry,
+                "mangrove" => world::Biome::Mangrove,
                 _ => world::Biome::Taiga,
             };
             // Somewhere well inside the biome (all nine columns around agree), looking across it.
@@ -4168,7 +4170,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);

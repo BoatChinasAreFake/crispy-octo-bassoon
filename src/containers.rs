@@ -66,7 +66,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         BOOT => COOKED_BOOT,
         SAND => GLASS,
         COBBLE => STONE,
-        LOG | SPRUCE_LOG | JUNGLE_LOG => COAL, // charcoal, legally distinct
+        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,
         COBBLED_DEEPSLATE => DEEPSLATE,
         // Mod recipes.
@@ -78,7 +78,7 @@ pub fn smelt(id: Id) -> Option<Id> {
 pub fn fuel_secs(id: Id) -> Option<f32> {
     Some(match id {
         COAL => 80.0,
-        LOG | SPRUCE_LOG | JUNGLE_LOG | PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
+        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PLANKS | CHERRY_PLANKS | MANGROVE_PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
         HAY => 45.0,
         STICK | WHEAT => 5.0,
         DOOR => 10.0,

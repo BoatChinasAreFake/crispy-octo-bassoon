@@ -765,7 +765,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
-            LOG | SPRUCE_LOG | JUNGLE_LOG => "getting_wood",
+            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
             DIAMOND => "dimonds",

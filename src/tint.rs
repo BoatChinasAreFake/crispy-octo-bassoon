@@ -27,7 +27,7 @@ pub enum Kind {
 pub fn kind_of(id: Id, face: usize) -> Option<Kind> {
     match id {
         GRASS if face == 2 => Some(Kind::Grass),
-        LEAVES | JUNGLE_LEAVES | TALL_GRASS => Some(Kind::Grass),
+        LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES | TALL_GRASS => Some(Kind::Grass),
         _ if is_water(id) => Some(Kind::Water),
         _ => None,
     }
@@ -45,6 +45,8 @@ pub fn grass(b: Biome) -> [f32; 3] {
         Biome::Swamp => [0.72, 0.78, 0.5],
         Biome::Jungle => [0.78, 1.18, 0.62],
         Biome::Taiga => [0.8, 0.95, 0.92],
+        Biome::Cherry => [1.05, 1.08, 0.85],
+        Biome::Mangrove => [0.78, 0.9, 0.55],
     }
 }
 
@@ -53,6 +55,8 @@ pub fn water(b: Biome) -> [f32; 3] {
     match b {
         Biome::Plains | Biome::Forest | Biome::Ocean => [1.0, 1.0, 1.0],
         Biome::Swamp => [0.6, 0.92, 0.42],
+        Biome::Mangrove => [0.65, 0.95, 0.55],
+        Biome::Cherry => [0.95, 1.0, 1.1],
         Biome::Jungle => [0.8, 1.08, 0.95],
         Biome::Snowy => [0.85, 0.95, 1.18],
         Biome::Taiga => [0.85, 0.98, 1.1],

@@ -246,7 +246,16 @@ pub const GILDED_SCORCHROCK: Id = 421;
 pub const BELL: Id = 422;
 /// A dungeon's monster cage (see fortress.rs, where the Sizzler Cages live too).
 pub const SPAWNER: Id = 423;
-pub const NUM_BLOCKS: Id = 424;
+/// Cherry Groves and Mangrove Swamps (see world.rs).
+pub const CHERRY_LOG: Id = 424;
+pub const CHERRY_LEAVES: Id = 425;
+pub const PINK_PETALS: Id = 426;
+pub const CHERRY_PLANKS: Id = 427;
+pub const MANGROVE_LOG: Id = 428;
+pub const MANGROVE_LEAVES: Id = 429;
+pub const MANGROVE_ROOTS: Id = 430;
+pub const MANGROVE_PLANKS: Id = 431;
+pub const NUM_BLOCKS: Id = 432;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -1859,6 +1868,19 @@ impl Registry {
         let mut spawner = def("monster_cage", "Monster Cage (Still Occupied)", Cube, true, false, [T_SPAWNER; 3], 5.0, 1, true, AIR, 2.0, S_STONE);
         spawner.see_through = true;
         blocks.push(spawner);
+        // Cherry Groves and Mangrove Swamps.
+        blocks.push(def("cherry_log", "Cherry Log (Pink Inside)", Cube, true, true, [T_CHERRY_LOG_TOP, T_CHERRY_LOG_SIDE, T_CHERRY_LOG_TOP], 2.0, 0, false, CHERRY_LOG, 0.0, S_WOOD));
+        blocks.push(def("cherry_leaves", "Cherry Blossom (Extremely Pink)", Cube, true, false, [T_CHERRY_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        let mut petals = def("pink_petals", "Pink Petals (Ground Confetti)", Shaped, false, false, [T_PINK_PETALS; 3], 0.0, 0, false, PINK_PETALS, 0.0, S_GRASS);
+        petals.shape = Shape::Dust;
+        blocks.push(petals);
+        blocks.push(def("cherry_planks", "Cherry Planks (Blush)", Cube, true, true, [T_CHERRY_PLANKS; 3], 2.0, 0, false, CHERRY_PLANKS, 0.0, S_WOOD));
+        blocks.push(def("mangrove_log", "Mangrove Log (Damp Tree Chunk)", Cube, true, true, [T_MANGROVE_LOG_TOP, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP], 2.0, 0, false, MANGROVE_LOG, 0.0, S_WOOD));
+        blocks.push(def("mangrove_leaves", "Mangrove Leaves (Salty)", Cube, true, false, [T_MANGROVE_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        let mut roots = def("mangrove_roots", "Mangrove Roots (Tangled)", Cube, true, false, [T_MANGROVE_ROOTS; 3], 0.7, 0, false, MANGROVE_ROOTS, 0.0, S_WOOD);
+        roots.see_through = true;
+        blocks.push(roots);
+        blocks.push(def("mangrove_planks", "Mangrove Planks (Reddish)", Cube, true, true, [T_MANGROVE_PLANKS; 3], 2.0, 0, false, MANGROVE_PLANKS, 0.0, S_WOOD));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2085,6 +2107,11 @@ impl Registry {
             r(&[(LOG, 1)], (PLANKS, 4)),
             r(&[(SPRUCE_LOG, 1)], (PLANKS, 4)),
             r(&[(JUNGLE_LOG, 1)], (PLANKS, 4)),
+            r(&[(CHERRY_LOG, 1)], (CHERRY_PLANKS, 4)),
+            r(&[(MANGROVE_LOG, 1)], (MANGROVE_PLANKS, 4)),
+            // The new woods do anything plain planks do, once you've made them plain.
+            r(&[(CHERRY_PLANKS, 1)], (PLANKS, 1)),
+            r(&[(MANGROVE_PLANKS, 1)], (PLANKS, 1)),
             r(&[(MELON_SLICE, 9)], (MELON, 1)),
             r(&[(MINECART, 1), (CHEST, 1)], (CHEST_MINECART, 1)),
             r(&[(MINECART, 1), (HOPPER_FIRST, 1)], (HOPPER_MINECART, 1)),
@@ -2346,12 +2373,12 @@ pub fn dapples_sky(id: Id) -> bool {
 /// Any kind of tree trunk.
 #[inline]
 pub fn is_log(id: Id) -> bool {
-    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG)
+    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG)
 }
 /// Any kind of leaves.
 #[inline]
 pub fn is_leaves(id: Id) -> bool {
-    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES)
+    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES)
 }
 /// Can the player point at it (and break it)?
 #[inline]
