@@ -240,6 +240,20 @@ pub enum MobKind {
     Floaty,
     /// An undead horse that wanders at night; tame and ride it like a Galloper.
     Rotsteed,
+    /// Sea turtles: come ashore to lay eggs on the beach they hatched on (see wildlife.rs).
+    Turtle,
+    /// Quick and friendly; feed one cod and it leads you to a shipwreck (see wildlife.rs).
+    Dolphin,
+    /// Lazy jungle bears that live on bamboo (see wildlife.rs).
+    Panda,
+    /// Big, white and fine until you go near its cub (see wildlife.rs).
+    PolarBear,
+    /// Tame one with hay and it'll follow you about; give it a chest to carry (see wildlife.rs).
+    Llama,
+    /// A Hmmer a Groaner got to: cure it with a Golden Chop (see villagers.rs).
+    ZombieHmmer,
+    /// Turns up now and then with things to sell, then wanders off again (see villagers.rs).
+    Wanderer,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -255,7 +269,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 42] = [
+    pub const ALL: [MobKind; 49] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -299,6 +313,13 @@ impl MobKind {
         MobKind::CopperGolem,
         MobKind::Floaty,
         MobKind::Rotsteed,
+        MobKind::Turtle,
+        MobKind::Dolphin,
+        MobKind::Panda,
+        MobKind::PolarBear,
+        MobKind::Llama,
+        MobKind::ZombieHmmer,
+        MobKind::Wanderer,
     ];
 
     pub fn index(self) -> u8 {
@@ -385,6 +406,13 @@ impl MobKind {
             "copper golem" | "copper_golem" | "coppergolem" => Some(MobKind::CopperGolem),
             "floaty" | "happy_ghast" => Some(MobKind::Floaty),
             "rotsteed" | "zombie_horse" => Some(MobKind::Rotsteed),
+            "turtle" => Some(MobKind::Turtle),
+            "dolphin" => Some(MobKind::Dolphin),
+            "panda" => Some(MobKind::Panda),
+            "polar bear" | "polar_bear" | "polarbear" => Some(MobKind::PolarBear),
+            "llama" => Some(MobKind::Llama),
+            "zombie hmmer" | "zombie_hmmer" | "zombiehmmer" | "zombie_villager" => Some(MobKind::ZombieHmmer),
+            "wanderer" | "wandering_trader" | "wandering trader" => Some(MobKind::Wanderer),
             _ => None,
         }
     }
@@ -435,6 +463,13 @@ impl MobKind {
             MobKind::CopperGolem => "Copper Golem",
             MobKind::Floaty => "Floaty",
             MobKind::Rotsteed => "Rotsteed",
+            MobKind::Turtle => "Turtle",
+            MobKind::Dolphin => "Dolphin",
+            MobKind::Panda => "Panda",
+            MobKind::PolarBear => "Polar Bear",
+            MobKind::Llama => "Llama",
+            MobKind::ZombieHmmer => "Zombie Hmmer",
+            MobKind::Wanderer => "Wanderer",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -484,6 +519,12 @@ impl MobKind {
             MobKind::CopperGolem => (0.3, 1.2),
             MobKind::Floaty => (1.9, 3.8),
             MobKind::Rotsteed => (0.6, 1.6),
+            MobKind::Turtle => (0.55, 0.45),
+            MobKind::Dolphin => (0.45, 0.6),
+            MobKind::Panda => (0.6, 1.25),
+            MobKind::PolarBear => (0.6, 1.4),
+            MobKind::Llama => (0.45, 1.85),
+            MobKind::ZombieHmmer | MobKind::Wanderer => (0.3, 1.95),
             MobKind::Modded(_) => (0.4, 0.9),
         }
     }
@@ -534,6 +575,13 @@ impl MobKind {
             MobKind::CopperGolem => 12.0,
             MobKind::Floaty => 20.0,
             MobKind::Rotsteed => 18.0,
+            MobKind::Turtle => 30.0,
+            MobKind::Dolphin => 10.0,
+            MobKind::Panda => 20.0,
+            MobKind::PolarBear => 30.0,
+            MobKind::Llama => 22.0,
+            MobKind::ZombieHmmer => 20.0,
+            MobKind::Wanderer => 20.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -557,11 +605,11 @@ impl MobKind {
             // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::Turtle | MobKind::Panda | MobKind::Llama)
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
@@ -590,6 +638,9 @@ impl MobKind {
             MobKind::Camel => &[CACTUS],
             MobKind::Sniffer => &[TORCHFLOWER_SEEDS],
             MobKind::Axolotl => &[TROPICAL],
+            MobKind::Turtle => &[LILY_PAD],
+            MobKind::Panda => &[BAMBOO],
+            MobKind::Llama => &[HAY],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             MobKind::Modded(_) => self.mod_def().and_then(|d| d.breed_item.as_ref()).map(std::slice::from_ref).unwrap_or(&[]),
             _ => &[],
@@ -597,7 +648,7 @@ impl MobKind {
     }
     /// Undead: burn in sunlight.
     fn burns(self) -> bool {
-        matches!(self, MobKind::Groaner | MobKind::Rattler)
+        matches!(self, MobKind::Groaner | MobKind::Rattler | MobKind::ZombieHmmer)
     }
     /// The lowercase name scripts see (e.g. in `on_mob_death`). For a modded
     /// mob this is the bare section name from its key, so `spawn_mob` and
@@ -625,12 +676,12 @@ pub struct Mob {
     pub fuse: f32,
     pub attack_cd: f32,
     pub flee: f32,
-    wander_t: f32,
-    wander_dir: Option<f32>,
+    pub(crate) wander_t: f32,
+    pub(crate) wander_dir: Option<f32>,
     pub anim: f32,
     /// Wingbeats while a bird drops through the air.
     pub flap: f32,
-    knock: Vec3,
+    pub(crate) knock: Vec3,
     pub burning: bool,
     /// Seconds left on fire (from lava; water puts it out).
     pub on_fire: f32,
@@ -838,7 +889,7 @@ impl Mob {
             goal: None,
             // A boss stays until it's beaten.
             persistent: kind.mod_def().is_some_and(|d| d.boss),
-            seed: 0,
+            seed: if kind == MobKind::Llama { crate::wildlife::llama_seed(rng) } else { 0 },
             home: None,
             trades_used: [0; 8],
             restock: crate::villagers::RESTOCK_SECS,
@@ -921,6 +972,10 @@ impl Mob {
         match self.kind {
             MobKind::Webber => self.angry = true,
             MobKind::Woofer if self.owner.is_none() => self.angry = true,
+            MobKind::Llama if self.owner.is_none() => self.angry = true,
+            MobKind::PolarBear if self.baby > 0.0 => self.flee = 4.0,
+            MobKind::Dolphin | MobKind::PolarBear => self.angry = true,
+            MobKind::Wanderer => self.flee = 4.0,
             MobKind::Rollo => {
                 self.fuse = 6.0;
                 self.knock *= 0.3;
@@ -968,6 +1023,10 @@ impl Mob {
             self.baby -= dt;
             if self.baby <= 0.0 {
                 self.set_baby(0.0);
+                // A turtle sheds a scute as it grows up.
+                if self.kind == MobKind::Turtle {
+                    ev.push(MobEvent::DropItem(self.body.pos + Vec3::Y * 0.3, TURTLE_SCUTE));
+                }
             }
         }
         if self.kind == MobKind::Wyrm {
@@ -987,7 +1046,7 @@ impl Mob {
         let face = flat.x.atan2(-flat.z);
         match self.kind {
             // (The Wyrm flies on its own, see hollow.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -1428,14 +1487,24 @@ impl Mob {
                     self.health -= dt;
                 }
             }
-            MobKind::Groaner => {
-                if player_visible && dist < 24.0 {
+            MobKind::Groaner | MobKind::ZombieHmmer => {
+                if self.kind == MobKind::ZombieHmmer && self.sitting {
+                    // Being cured: it just shakes (see villagers.rs).
+                    may_wander = false;
+                } else if player_visible && dist < 24.0 {
                     want = Some((flat.x.atan2(-flat.z), 2.3));
                     if flat.length() < 1.3 && to_player.y.abs() < 1.6 && self.attack_cd <= 0.0 {
-                        ev.push(MobEvent::HurtPlayer(3.0, "was groaned to death"));
+                        ev.push(MobEvent::HurtPlayer(3.0, if self.kind == MobKind::Groaner { "was groaned to death" } else { "was mobbed by a Zombie Hmmer" }));
                         self.attack_cd = 1.0;
                     }
+                } else if let Some(g) = self.goal {
+                    // After a Hmmer to bite (see villagers.rs).
+                    let d = g - self.body.pos;
+                    want = Some((d.x.atan2(-d.z), 2.0));
                 }
+            }
+            MobKind::Turtle | MobKind::Dolphin | MobKind::PolarBear | MobKind::Llama => {
+                crate::wildlife::update(self, dt, world, player, player_visible, rng, &mut want, &mut swim_vy, &mut may_wander, &mut ev);
             }
             MobKind::Rattler => {
                 let fd = flat.length();
@@ -2016,6 +2085,12 @@ impl Mob {
             MobKind::CopperGolem => Some((COPPER_INGOT, 2 + n)),
             MobKind::Rotsteed if n > 0 => Some((GOO, n)),
             MobKind::Floaty => Some((STRING, 1 + n)),
+            MobKind::Turtle if rng.chance(0.3) => Some((LILY_PAD, 1)),
+            MobKind::Dolphin => Some((COD, n.min(1))).filter(|d| d.1 > 0),
+            MobKind::Panda => Some((BAMBOO, n.max(1))),
+            MobKind::PolarBear => Some(([COD, SALMON][rng.int(0, 1) as usize], n.max(1))),
+            MobKind::Llama => Some((WOOL, n.max(1))),
+            MobKind::ZombieHmmer if n > 0 => Some((GOO, n)),
             MobKind::Modded(_) => self.kind.mod_def().and_then(|d| d.drop).map(|(id, max)| (id, rng.int(1, max.max(1) as i32) as u8)),
             _ => None,
         }
@@ -2133,6 +2208,8 @@ impl Mob {
             draw_model(geo, &root, &CAMEL_SADDLE, 0.0, sky, false);
         } else if self.saddled && self.kind == MobKind::Floaty {
             draw_model(geo, &root, &FLOATY_HARNESS, 0.0, sky, false);
+        } else if self.saddled && self.kind == MobKind::Llama {
+            draw_model(geo, &root, &LLAMA_PACK, 0.0, sky, false);
         } else if self.saddled {
             draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
         }
@@ -2637,6 +2714,83 @@ static BREEZE: [Part; 6] = [
     part([-0.16, 0.0, -0.16], [0.32, 0.45, 0.32], [0.0; 3], Limb::Spin(7.0), [BZ; 6]),
 ];
 const GT: u16 = T_GOAT;
+const TU: u16 = crate::texture::T_TURTLE;
+static TURTLE: [Part; 7] = [
+    // A wide, flat shell over a pale body.
+    part([-0.5, 0.12, -0.55], [1.0, 0.3, 1.1], [0.0; 3], Limb::Fixed, [crate::texture::T_TURTLE_SHELL_TOP; 6]),
+    part([-0.18, 0.1, -0.85], [0.36, 0.26, 0.32], [0.0; 3], Limb::Fixed, [TU, TU, TU, TU, TU, crate::texture::T_TURTLE_FACE]),
+    part([-0.65, 0.08, -0.45], [0.2, 0.08, 0.3], [-0.45, 0.12, -0.3], Limb::SwingY(1.0), [TU; 6]),
+    part([0.45, 0.08, -0.45], [0.2, 0.08, 0.3], [0.45, 0.12, -0.3], Limb::SwingY(-1.0), [TU; 6]),
+    part([-0.55, 0.08, 0.3], [0.18, 0.08, 0.26], [-0.4, 0.12, 0.4], Limb::SwingY(-1.0), [TU; 6]),
+    part([0.37, 0.08, 0.3], [0.18, 0.08, 0.26], [0.4, 0.12, 0.4], Limb::SwingY(1.0), [TU; 6]),
+    part([-0.3, 0.02, -0.5], [0.6, 0.12, 1.0], [0.0; 3], Limb::Fixed, [TU; 6]),
+];
+const DO: u16 = crate::texture::T_DOLPHIN;
+static DOLPHIN: [Part; 5] = [
+    part([-0.25, 0.1, -0.6], [0.5, 0.45, 1.1], [0.0; 3], Limb::Fixed, [DO; 6]),
+    part([-0.2, 0.12, -0.95], [0.4, 0.38, 0.35], [0.0; 3], Limb::Fixed, [DO, DO, DO, DO, DO, crate::texture::T_DOLPHIN_FACE]),
+    part([-0.06, 0.18, -1.15], [0.12, 0.1, 0.2], [0.0; 3], Limb::Fixed, [DO; 6]),
+    part([-0.04, 0.55, -0.15], [0.08, 0.22, 0.3], [0.0; 3], Limb::Fixed, [DO; 6]),
+    part([-0.3, 0.25, 0.5], [0.6, 0.08, 0.3], [0.0, 0.3, 0.5], Limb::Swing(1.5), [DO; 6]),
+];
+const PA: u16 = crate::texture::T_PANDA;
+const PB: u16 = crate::texture::T_PANDA_BLACK;
+static PANDA: [Part; 8] = [
+    part([-0.5, 0.45, -0.7], [1.0, 0.75, 1.4], [0.0; 3], Limb::Fixed, [PA, PA, PA, PB, PA, PA]),
+    part([-0.32, 0.6, -1.15], [0.64, 0.55, 0.5], [0.0; 3], Limb::Fixed, [PA, PA, PA, PA, PA, crate::texture::T_PANDA_FACE]),
+    part([-0.32, 1.12, -0.95], [0.16, 0.14, 0.1], [0.0; 3], Limb::Fixed, [PB; 6]),
+    part([0.16, 1.12, -0.95], [0.16, 0.14, 0.1], [0.0; 3], Limb::Fixed, [PB; 6]),
+    part([-0.45, 0.0, -0.6], [0.3, 0.5, 0.3], [0.0, 0.5, -0.45], Limb::Swing(0.8), [PB; 6]),
+    part([0.15, 0.0, -0.6], [0.3, 0.5, 0.3], [0.0, 0.5, -0.45], Limb::Swing(-0.8), [PB; 6]),
+    part([-0.45, 0.0, 0.3], [0.3, 0.5, 0.3], [0.0, 0.5, 0.45], Limb::Swing(-0.8), [PB; 6]),
+    part([0.15, 0.0, 0.3], [0.3, 0.5, 0.3], [0.0, 0.5, 0.45], Limb::Swing(0.8), [PB; 6]),
+];
+const PO: u16 = crate::texture::T_POLAR;
+static POLAR_BEAR: [Part; 8] = [
+    part([-0.5, 0.55, -0.8], [1.0, 0.8, 1.6], [0.0; 3], Limb::Fixed, [PO; 6]),
+    part([-0.3, 0.75, -1.3], [0.6, 0.5, 0.55], [0.0; 3], Limb::Fixed, [PO, PO, PO, PO, PO, crate::texture::T_POLAR_FACE]),
+    part([-0.3, 1.25, -1.05], [0.14, 0.12, 0.1], [0.0; 3], Limb::Fixed, [PO; 6]),
+    part([0.16, 1.25, -1.05], [0.14, 0.12, 0.1], [0.0; 3], Limb::Fixed, [PO; 6]),
+    part([-0.45, 0.0, -0.7], [0.3, 0.6, 0.3], [0.0, 0.6, -0.55], Limb::Swing(0.9), [PO; 6]),
+    part([0.15, 0.0, -0.7], [0.3, 0.6, 0.3], [0.0, 0.6, -0.55], Limb::Swing(-0.9), [PO; 6]),
+    part([-0.45, 0.0, 0.4], [0.3, 0.6, 0.3], [0.0, 0.6, 0.55], Limb::Swing(-0.9), [PO; 6]),
+    part([0.15, 0.0, 0.4], [0.3, 0.6, 0.3], [0.0, 0.6, 0.55], Limb::Swing(0.9), [PO; 6]),
+];
+const LL: u16 = crate::texture::T_LLAMA;
+static LLAMA: [Part; 8] = [
+    part([-0.35, 0.8, -0.6], [0.7, 0.6, 1.2], [0.0; 3], Limb::Fixed, [LL; 6]),
+    // A long neck, a head, and banana ears.
+    part([-0.16, 1.2, -0.75], [0.32, 0.65, 0.3], [0.0; 3], Limb::Fixed, [LL; 6]),
+    part([-0.18, 1.6, -1.1], [0.36, 0.3, 0.42], [0.0; 3], Limb::Fixed, [LL, LL, LL, LL, LL, crate::texture::T_LLAMA_FACE]),
+    part([-0.16, 1.9, -0.8], [0.08, 0.18, 0.06], [0.0; 3], Limb::Fixed, [LL; 6]),
+    part([0.08, 1.9, -0.8], [0.08, 0.18, 0.06], [0.0; 3], Limb::Fixed, [LL; 6]),
+    part([-0.3, 0.0, -0.5], [0.18, 0.8, 0.18], [0.0, 0.8, -0.4], Limb::Swing(0.9), [LL; 6]),
+    part([0.12, 0.0, -0.5], [0.18, 0.8, 0.18], [0.0, 0.8, -0.4], Limb::Swing(-0.9), [LL; 6]),
+    part([-0.09, 0.0, 0.3], [0.18, 0.8, 0.18], [0.0, 0.8, 0.4], Limb::Swing(-0.9), [LL; 6]),
+];
+/// A Llama's chest, either side of its back.
+pub static LLAMA_PACK: [Part; 2] = [
+    part([-0.5, 0.85, -0.1], [0.15, 0.4, 0.45], [0.0; 3], Limb::Fixed, [T_CHEST_SIDE; 6]),
+    part([0.35, 0.85, -0.1], [0.15, 0.4, 0.45], [0.0; 3], Limb::Fixed, [T_CHEST_SIDE; 6]),
+];
+static ZOMBIE_HMMER: [Part; 7] = {
+    let h = humanoid(GS, crate::texture::T_ZHMM_FACE, crate::texture::T_ZHMM_ROBE, crate::texture::T_ZHMM_ROBE, Limb::Forward, Limb::Forward);
+    [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.06, 1.55, -0.38], [0.12, 0.22, 0.14], [0.0; 3], Limb::Fixed, [GS; 6])]
+};
+static WANDERER: [Part; 8] = {
+    let h = humanoid(T_SKIN, T_HMM_FACE, crate::texture::T_WANDERER_ROBE, crate::texture::T_WANDERER_ROBE, Limb::Fixed, Limb::Fixed);
+    [
+        h[0],
+        h[1],
+        h[2],
+        part([-0.3, 1.0, -0.3], [0.6, 0.22, 0.25], [0.0; 3], Limb::Fixed, [crate::texture::T_WANDERER_ROBE; 6]),
+        part([-0.25, 0.3, -0.13], [0.5, 0.5, 0.26], [0.0; 3], Limb::Fixed, [crate::texture::T_WANDERER_ROBE; 6]),
+        h[5],
+        part([-0.06, 1.55, -0.38], [0.12, 0.22, 0.14], [0.0; 3], Limb::Fixed, [T_SKIN; 6]),
+        // A big blue hood.
+        part([-0.28, 1.75, -0.28], [0.56, 0.3, 0.56], [0.0; 3], Limb::Fixed, [crate::texture::T_WANDERER_ROBE; 6]),
+    ]
+};
 static GOAT: [Part; 10] = [
     part([-0.25, 0.6, -0.45], [0.5, 0.5, 0.9], [0.0; 3], Limb::Fixed, [GT; 6]),
     part([-0.17, 0.85, -0.82], [0.34, 0.36, 0.42], [0.0; 3], Limb::Fixed, [GT, GT, GT, GT, GT, T_GOAT_FACE]),
@@ -2755,6 +2909,13 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::CopperGolem => &COPPER_GOLEM,
         MobKind::Floaty => &FLOATY,
         MobKind::Rotsteed => &ROTSTEED,
+        MobKind::Turtle => &TURTLE,
+        MobKind::Dolphin => &DOLPHIN,
+        MobKind::Panda => &PANDA,
+        MobKind::PolarBear => &POLAR_BEAR,
+        MobKind::Llama => &LLAMA,
+        MobKind::ZombieHmmer => &ZOMBIE_HMMER,
+        MobKind::Wanderer => &WANDERER,
         // Modded mobs are drawn from a runtime-built, textured copy of a base
         // template (see `modded_parts`); this static fallback keeps `model`
         // total and is used only where the texture doesn't matter (e.g. the

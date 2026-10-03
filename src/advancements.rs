@@ -57,6 +57,8 @@ pub const ALL: &[Advancement] = &[
     adv("cover_me", "Cover Me in Dimonds", "Wear a full set of Dimond armour. Subtle."),
     adv("open_door_policy", "Open Door Policy", "Open a door. Then close it. Then open it again."),
     adv("butterfingers", "Butterfingers", "Throw something on the floor with Q. On purpose, surely."),
+    adv("follow_the_fin", "Follow the Fin", "Feed a Dolphin a fish and let it show you the way."),
+    adv("llama_drama", "Llama Drama", "Tame a Llama. It still might spit."),
     adv("ahoy", "Ahoy!", "Open a chest in a shipwreck. Finders keepers."),
     adv("x_marks_the_spot", "X Marks the Spot", "Dig up buried treasure. The map wasn't lying."),
     adv("hot_stuff", "Hot Stuff", "Get a bucket of lava. Or get into lava. One of those is a good idea."),

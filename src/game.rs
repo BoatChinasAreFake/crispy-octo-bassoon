@@ -696,6 +696,10 @@ impl Game {
             }
             g.mobs.push(m);
         }
+        // Llamas get their packs back (saved by seed; see wildlife.rs).
+        if let Some((_, b)) = extras.iter().find(|(k, _)| k == "packs") {
+            g.decode_packs(b);
+        }
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -761,6 +765,7 @@ impl Game {
             ("journal".to_string(), self.journal.encode()),
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
             ("day".to_string(), self.day.to_le_bytes().to_vec()),
+            ("packs".to_string(), self.encode_packs()),
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
@@ -2913,6 +2918,7 @@ impl Game {
         self.beacons_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
+        self.wildlife_tick(dt);
         self.copper_golems_tick(dt);
         self.floaties_tick();
         self.fireflies_tick(dt);
@@ -2974,6 +2980,9 @@ impl Game {
                     MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rotsteed => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::CopperGolem | MobKind::Floaty => {}
+                    MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
+                    MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -3053,6 +3062,9 @@ impl Game {
             let far = !m.persistent && (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
+                if m.kind == MobKind::Llama && m.health <= 0.0 {
+                    self.spill_pack(m.id, m.body.pos + Vec3::Y * 0.8);
+                }
                 if m.health <= 0.0 && m.kind.raider() {
                     self.raider_died(&m);
                 }
@@ -3087,6 +3099,7 @@ impl Game {
                             MobKind::Breeze => self.advance("breeze_through"),
                             MobKind::Creaking => self.advance("heartbreak"),
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
+                            MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
@@ -3255,6 +3268,14 @@ impl Game {
                 }
                 return;
             }
+            // Dolphins in the open sea, in little pods.
+            let dolphins = self.mobs.iter().filter(|m| m.kind == MobKind::Dolphin).count();
+            if dolphins < 6 && depth >= 5 && biome == Biome::Ocean && !self.is_night() && self.rng.chance(0.15) {
+                for i in 0..self.rng.int(1, 3) {
+                    self.alloc_mob(MobKind::Dolphin, Vec3::new(x as f32 + 0.5 + i as f32 * 1.2, (y - 2) as f32, z as f32 + 0.5));
+                }
+                return;
+            }
             if fish < 12 && depth >= 2 && self.rng.chance(0.6) {
                 let n = self.rng.int(2, 4);
                 for i in 0..n {
@@ -3271,6 +3292,15 @@ impl Game {
                 {
                     m.seed = 1;
                 }
+            }
+            return;
+        }
+        // Turtles on beaches, Pandas in jungles, Polar Bears on the snow, Llamas on the plains (see wildlife.rs).
+        if !self.is_night() && passive < 8 && matches!(top, SAND | GRASS | SNOW_GRASS) && clear(&self.world, y + 1) && (top != SAND || (crate::world::SEA - 1..=crate::world::SEA + 2).contains(&y))
+            && let Some(kind) = crate::wildlife::spawn_kind(biome, top, &mut self.rng)
+        {
+            for i in 0..self.rng.int(1, 2) {
+                self.alloc_mob(kind, Vec3::new(x as f32 + 0.5 + i as f32 * 0.9, y as f32 + 1.0, z as f32 + 0.5));
             }
             return;
         }

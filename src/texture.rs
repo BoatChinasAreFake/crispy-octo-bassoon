@@ -617,6 +617,21 @@ pub const T_TREASURE_MAP: u16 = 770;
 pub const T_TURTLE_SCUTE: u16 = 771;
 pub const T_TURTLE_SHELL: u16 = 772;
 pub const T_TURTLE_WORN: u16 = 773;
+pub const T_TURTLE: u16 = 774;
+pub const T_TURTLE_FACE: u16 = 775;
+pub const T_TURTLE_SHELL_TOP: u16 = 776;
+pub const T_DOLPHIN: u16 = 777;
+pub const T_DOLPHIN_FACE: u16 = 778;
+pub const T_PANDA: u16 = 779;
+pub const T_PANDA_BLACK: u16 = 780;
+pub const T_PANDA_FACE: u16 = 781;
+pub const T_POLAR: u16 = 782;
+pub const T_POLAR_FACE: u16 = 783;
+pub const T_LLAMA: u16 = 784;
+pub const T_LLAMA_FACE: u16 = 785;
+pub const T_ZHMM_FACE: u16 = 786;
+pub const T_ZHMM_ROBE: u16 = 787;
+pub const T_WANDERER_ROBE: u16 = 788;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3556,6 +3571,46 @@ fn home_tiles(a: &mut Atlas) {
         if dome { shade(if plate { rgb(60, 120, 50) } else { rgb(90, 170, 70) }, r.range(0.88, 1.05)) } else { [0, 0, 0, 0] }
     });
     a.each(T_TURTLE_WORN, |x, y, r, _| shade(if (x + y * 2) % 5 == 0 { rgb(60, 120, 50) } else { rgb(90, 170, 70) }, r.range(0.88, 1.05)));
+    mob_tiles(a);
+}
+
+/// v0.1.20's creatures: turtles, dolphins, pandas, polar bears, llamas, and two new Hmmers.
+fn mob_tiles(a: &mut Atlas) {
+    let eyes = |x: usize, y: usize| (5..7).contains(&y) && (x == 4 || x == 11);
+    a.each(T_TURTLE, |x, y, r, _| shade(if (x * 3 + y) % 7 == 0 { rgb(150, 170, 120) } else { rgb(120, 160, 95) }, r.range(0.88, 1.05)));
+    a.each(T_TURTLE_FACE, |x, y, r, _| if eyes(x, y) { rgb(20, 20, 20) } else { shade(rgb(120, 160, 95), r.range(0.88, 1.05)) });
+    a.each(T_TURTLE_SHELL_TOP, |x, y, r, _| {
+        let seam = x % 5 == 0 || y % 5 == 0;
+        shade(if seam { rgb(55, 85, 40) } else { rgb(70, 120, 55) }, r.range(0.85, 1.05))
+    });
+    a.each(T_DOLPHIN, |_, y, r, _| shade(if y > 10 { rgb(200, 205, 215) } else { rgb(110, 125, 145) }, r.range(0.92, 1.04)));
+    a.each(T_DOLPHIN_FACE, |x, y, r, _| {
+        let smile = y == 11 && (4..12).contains(&x);
+        if eyes(x, y) { rgb(15, 15, 25) } else if smile { rgb(70, 80, 95) } else { shade(if y > 10 { rgb(200, 205, 215) } else { rgb(110, 125, 145) }, r.range(0.92, 1.04)) }
+    });
+    a.each(T_PANDA, |_, _, r, _| shade(rgb(235, 235, 230), r.range(0.92, 1.04)));
+    a.each(T_PANDA_BLACK, |_, _, r, _| shade(rgb(40, 40, 42), r.range(0.9, 1.06)));
+    a.each(T_PANDA_FACE, |x, y, r, _| {
+        let patch = (3..7).contains(&y) && ((2..7).contains(&x) || (9..14).contains(&x));
+        let nose = (9..11).contains(&y) && (7..9).contains(&x);
+        if eyes(x, y) { rgb(240, 240, 240) } else if patch || nose { rgb(35, 35, 38) } else { shade(rgb(235, 235, 230), r.range(0.92, 1.04)) }
+    });
+    a.each(T_POLAR, |_, _, r, _| shade(rgb(240, 238, 228), r.range(0.9, 1.04)));
+    a.each(T_POLAR_FACE, |x, y, r, _| {
+        let nose = (8..11).contains(&y) && (6..10).contains(&x);
+        if eyes(x, y) || nose { rgb(25, 25, 25) } else { shade(rgb(240, 238, 228), r.range(0.9, 1.04)) }
+    });
+    a.each(T_LLAMA, |x, y, r, _| shade(if (x * 5 + y * 3) % 9 == 0 { rgb(200, 180, 140) } else { rgb(225, 210, 175) }, r.range(0.88, 1.05)));
+    a.each(T_LLAMA_FACE, |x, y, r, _| {
+        let mouth = y == 12 && (6..10).contains(&x);
+        if eyes(x, y) || mouth { rgb(40, 30, 25) } else { shade(rgb(225, 210, 175), r.range(0.88, 1.05)) }
+    });
+    a.each(T_ZHMM_ROBE, |x, y, r, _| shade(if (x + y) % 6 == 0 { rgb(70, 90, 60) } else { rgb(95, 75, 60) }, r.range(0.8, 1.05)));
+    a.each(T_ZHMM_FACE, |x, y, r, _| {
+        let nose = (6..11).contains(&y) && (7..9).contains(&x);
+        if eyes(x, y) { rgb(160, 30, 20) } else if nose { rgb(80, 120, 70) } else { shade(rgb(100, 150, 90), r.range(0.85, 1.05)) }
+    });
+    a.each(T_WANDERER_ROBE, |x, y, r, _| shade(if y % 5 == 0 || x % 7 == 0 { rgb(220, 190, 60) } else { rgb(50, 80, 160) }, r.range(0.88, 1.05)));
 }
 
 /// Mipmap levels 1.. for the atlas, built tile by tile (down to one texel a

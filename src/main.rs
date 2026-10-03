@@ -46,6 +46,7 @@ mod golems;
 mod hollow;
 mod home;
 mod treasure;
+mod wildlife;
 mod hoppers;
 mod horses;
 mod hunger;
@@ -2204,7 +2205,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" | "golems" => {
+            "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" | "golems" | "homestead" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
@@ -2460,7 +2461,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2515,6 +2516,64 @@ async fn game_main() {
                         app.game.world.set_v(frame, block::FRAME_FIRST + facing as u16);
                         app.game.world.frames.insert(frame, (block::MAP, 0));
                     }
+                }
+            }
+            if s.mode == "homestead" && frames == 125 {
+                // The v0.1.20 home blocks: a campfire cooking, a smoker and a blast
+                // furnace going, a barrel, a dressed armour stand and paintings on a wall.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y0 = p.y.floor() as i32;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y0, v.z.floor() as i32)
+                };
+                let fire = at(4.0, 0.0);
+                app.game.world.set_v(fire, block::CAMPFIRE);
+                app.game.put_on_campfire(fire, block::PORKCHOP);
+                app.game.put_on_campfire(fire, block::COD);
+                app.game.world.set_v(at(6.0, -3.0), block::SMOKER_LIT);
+                app.game.world.set_v(at(6.0, -2.0), block::BLAST_FURNACE_LIT);
+                app.game.world.set_v(at(6.0, 2.0), block::BARREL);
+                app.game.world.set_v(at(6.0, 2.0) + IVec3::Y, block::BARREL);
+                let facing = (((s.yaw / std::f32::consts::FRAC_PI_2).round() as i32 + 2).rem_euclid(4)) as u16;
+                let stand = at(3.5, 2.5);
+                app.game.world.set_v(stand, block::ARMOUR_STAND_FIRST + facing);
+                let mut c = containers::Container::for_block(block::ARMOUR_STAND_FIRST);
+                c.slots[0] = Some((block::TURTLE_SHELL, 1));
+                c.slots[1] = Some((block::ARMOR_FIRST + 12 + block::CHESTPLATE as u16, 1));
+                c.slots[2] = Some((block::ARMOR_FIRST + 8 + block::LEGGINGS as u16, 1));
+                c.slots[3] = Some((block::ARMOR_FIRST + 4 + block::BOOTS as u16, 1));
+                app.game.world.containers.insert(stand, c);
+                // A wall at the back with three paintings on it.
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                if let Some(facing) = decor::frame_facing(-f) {
+                    for r in -4..=4 {
+                        for up in 0..4 {
+                            app.game.world.set_v(at(10.0, r as f32) + IVec3::Y * up, block::PLANKS);
+                        }
+                    }
+                    for r in [-3, 0, 3] {
+                        app.game.world.set_v(at(10.0, r as f32) + IVec3::Y * 2 - f, block::PAINTING_FIRST + facing as u16);
+                    }
+                }
+                app.game.inv.slots[0] = Some((block::TREASURE_MAP, 1));
+                app.game.inv.wear[0] = treasure::mark(at(40.0, 10.0));
+                app.game.inv.selected = 0;
+            }
+            if s.mode == "homestead" && frames == 150 {
+                use entity::MobKind as K;
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let mut rng = noise::Rng::new(12);
+                for (i, (kind, f, r)) in [(K::Llama, 7.0, -6.0), (K::Panda, 8.0, -2.0), (K::PolarBear, 8.5, 1.5), (K::Turtle, 4.5, -3.0), (K::Dolphin, 9.0, 0.0), (K::Wanderer, 7.0, 4.0), (K::ZombieHmmer, 6.5, -4.0)].into_iter().enumerate() {
+                    let mut m = entity::Mob::new(kind, p + fwd * f + right * r, &mut rng);
+                    m.id = 2200 + i as u32;
+                    m.saddled = kind == K::Llama;
+                    m.persistent = true;
+                    app.game.mobs.push(m);
                 }
             }
             if s.mode == "golems" && frames == 125 {
@@ -3280,7 +3339,7 @@ async fn game_main() {
                 app.game.raid_hud = Some((1, 2, 5, 7, 999.0));
                 app.game.bell_glow = 999.0;
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "raid" | "golems") && frames > 150 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "raid" | "golems" | "homestead") && frames > 150 {
                 // Hold still for the photo.
                 for m in app.game.mobs.iter_mut() {
                     m.yaw = s.yaw + std::f32::consts::PI;

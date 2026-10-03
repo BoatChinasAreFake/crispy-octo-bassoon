@@ -866,6 +866,8 @@ pub struct World {
     pub containers: HashMap<IVec3, Container>,
     /// Each player's Personal Chest storage, by `stash::stash_key` (see stash.rs).
     pub stashes: HashMap<i32, Container>,
+    /// Llamas' packs, by mob id (see wildlife.rs).
+    pub packs: HashMap<u32, Container>,
     /// Fill structure chests when their chunks first arrive (off for joined
     /// players: the host has the real contents).
     pub structure_loot: bool,
@@ -938,6 +940,7 @@ impl World {
             farm: HashMap::new(),
             containers: HashMap::new(),
             stashes: HashMap::new(),
+            packs: HashMap::new(),
             structure_loot: true,
             liquid_dirty: HashSet::new(),
             fall_dirty: HashSet::new(),

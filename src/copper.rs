@@ -103,6 +103,8 @@ impl Game {
             if self.rng.chance(0.06) && self.world.sky_light(p.x, p.y, p.z) > 0.3 {
                 self.world.set_v(p, PITCHER_PLANT);
             }
+        } else if id == TURTLE_EGG {
+            self.turtle_egg_tick(p);
         } else if id == SNIFFER_EGG {
             // Hatches in time (sooner on moss).
             let moss = matches!(self.world.get_v(p - IVec3::Y), PALE_MOSS | MUD);
