@@ -345,6 +345,13 @@ pub struct Game {
     /// A joined player's view of their Bundles (the host's word), and the one just used.
     pub bundle_mirror: HashMap<u16, Vec<(Id, u8)>>,
     pub bundle_pending: Option<usize>,
+    /// Written books' words and lecterns' books (see books.rs); the book open on screen,
+    /// one we're waiting on the host for (tag, our writable slot, lectern), and one just written.
+    pub books: HashMap<u16, crate::books::Book>,
+    pub lecterns: HashMap<IVec3, (Id, u16)>,
+    pub reading: Option<crate::books::BookView>,
+    pub book_waiting: Option<(u16, Option<usize>, Option<IVec3>)>,
+    pub book_pending: Option<usize>,
     pub spyglass: bool,
 }
 
@@ -527,6 +534,11 @@ impl Game {
             lodestone: None,
             bundle_mirror: HashMap::new(),
             bundle_pending: None,
+            books: HashMap::new(),
+            lecterns: HashMap::new(),
+            reading: None,
+            book_waiting: None,
+            book_pending: None,
             spyglass: false,
         }
     }
@@ -708,6 +720,7 @@ impl Game {
         let mut v = vec![
             ("known".to_string(), crate::crafting::encode_known(&self.known).into_bytes()),
             ("hives".to_string(), crate::bees::encode(&self.hives)),
+            ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
         ];
@@ -732,6 +745,9 @@ impl Game {
         if let Some(b) = extra("pinned").and_then(|b| b.get(..4)) {
             let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
             self.pinned = (p < recipes().len()).then_some(p);
+        }
+        if let Some(b) = extra("books") {
+            (self.books, self.lecterns) = crate::books::decode(b);
         }
         if let Some(b) = extra("hives") {
             self.hives = crate::bees::decode(b);
@@ -1971,6 +1987,10 @@ impl Game {
                 self.use_vault(pos);
                 return;
             }
+            if crate::books::is_lectern(id) {
+                self.use_lectern(pos, held);
+                return;
+            }
             if id == LODESTONE && held == COMPASS {
                 self.link_lodestone(pos);
                 return;
@@ -2120,6 +2140,10 @@ impl Game {
         }
         if held == BUNDLE {
             self.tip_bundle();
+            return;
+        }
+        if crate::books::is_book(held) {
+            self.open_held_book();
             return;
         }
         if held == BOTTLE {
@@ -2336,6 +2360,7 @@ impl Game {
         if !self.is_client() {
             self.spill_container(pos);
             self.spill_frame(pos);
+            self.spill_lectern(pos);
             self.block_gone(pos, id);
         }
         self.world.set_v(pos, AIR);

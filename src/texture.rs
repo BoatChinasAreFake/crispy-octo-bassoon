@@ -559,6 +559,12 @@ pub const T_SNIFFER_EGG: u16 = 705;
 pub const T_PITCHER_POD: u16 = 706;
 pub const T_PITCHER_CROP: u16 = 707;
 pub const T_PITCHER_PLANT: u16 = 708;
+/// Books and lecterns.
+pub const T_BOOK_QUILL: u16 = 709;
+pub const T_WRITTEN_BOOK: u16 = 710;
+pub const T_LECTERN_TOP: u16 = 711;
+pub const T_LECTERN_SIDE: u16 = 712;
+pub const T_LECTERN_BOOK_TOP: u16 = 713;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2744,6 +2750,18 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             if d < 3.0 { shade(eye, r.range(0.85, 1.1)) } else if d < 4.0 { rgb(60, 50, 45) } else { shade(rgb(175, 170, 165), r.range(0.85, 1.05)) }
         });
     }
+    a.sprite(T_BOOK_QUILL, &ORB_SPRITE, &[('#', rgb(60, 35, 20)), ('h', rgb(240, 235, 220)), ('b', rgb(150, 90, 50)), ('d', rgb(110, 65, 35))]);
+    a.sprite(T_WRITTEN_BOOK, &ORB_SPRITE, &[('#', rgb(50, 25, 15)), ('h', rgb(230, 200, 90)), ('b', rgb(130, 55, 35)), ('d', rgb(95, 35, 25))]);
+    let plank = |x: usize, y: usize, r: &mut Rng| {
+        let seam = y % 4 == 3 || (x + (y / 4) * 5) % 16 == 0;
+        if seam { rgb(110, 80, 45) } else { shade(rgb(170, 130, 80), r.range(0.9, 1.07)) }
+    };
+    a.each(T_LECTERN_SIDE, |x, y, r, _| if (5..11).contains(&x) && y > 3 { shade(rgb(130, 95, 55), r.range(0.9, 1.05)) } else { plank(x, y, r) });
+    a.each(T_LECTERN_TOP, |x, y, r, _| plank(x, y, r));
+    a.each(T_LECTERN_BOOK_TOP, |x, y, r, _| {
+        let page = (2..14).contains(&x) && (3..13).contains(&y);
+        if page && x != 7 && x != 8 { if y % 2 == 0 && (3..12).contains(&x) && x != 6 && x != 9 { rgb(150, 145, 130) } else { rgb(240, 235, 220) } } else if page { rgb(120, 60, 35) } else { plank(x, y, r) }
+    });
     a.each(T_SNIFFER, |x, y, r, _| {
         let tuft = (x * 5 + y * 3) % 9 == 0;
         shade(if tuft { rgb(90, 160, 80) } else { rgb(170, 70, 55) }, r.range(0.82, 1.1))

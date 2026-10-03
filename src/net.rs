@@ -115,6 +115,14 @@ pub enum Msg {
     BundleUse { tag: u16, item: Id, n: u8, put: bool },
     /// host -> client: the Bundle tagged `old` is now tagged `new` and holds this.
     BundleState { old: u16, new: u16, contents: Vec<(Id, u8)> },
+    /// client -> host: the words in one of my books (0: a new one), and whether I signed it.
+    BookWrite { tag: u16, title: String, pages: Vec<String>, sign: bool },
+    /// host -> client: a book's words (`old` -> `new` retags one of yours; `open`: show it).
+    BookState { old: u16, new: u16, signed: bool, open: bool, title: String, author: String, pages: Vec<String> },
+    /// client -> host: what does this book say? (By its tag, or `y` != i32::MIN: the lectern's.)
+    BookAsk { tag: u16, x: i32, y: i32, z: i32 },
+    /// client -> host: I'll take the book off this lectern.
+    LecternTake { x: i32, y: i32, z: i32 },
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -697,6 +705,41 @@ impl Msg {
                 w.u8(*waves);
                 w.u16(*left);
             }
+            Msg::BookWrite { tag, title, pages, sign } => {
+                w.u8(75);
+                w.u16(*tag);
+                w.str(title);
+                w.u8(pages.len().min(crate::books::MAX_PAGES) as u8);
+                for p in pages.iter().take(crate::books::MAX_PAGES) {
+                    w.str(p);
+                }
+                w.u8(*sign as u8);
+            }
+            Msg::BookState { old, new, signed, open, title, author, pages } => {
+                w.u8(76);
+                w.u16(*old);
+                w.u16(*new);
+                w.u8(*signed as u8 | (*open as u8) << 1);
+                w.str(title);
+                w.str(author);
+                w.u8(pages.len().min(crate::books::MAX_PAGES) as u8);
+                for p in pages.iter().take(crate::books::MAX_PAGES) {
+                    w.str(p);
+                }
+            }
+            Msg::BookAsk { tag, x, y, z } => {
+                w.u8(77);
+                w.u16(*tag);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::LecternTake { x, y, z } => {
+                w.u8(78);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
             Msg::BundleUse { tag, item, n, put } => {
                 w.u8(73);
                 w.u16(*tag);
@@ -1014,6 +1057,28 @@ impl Msg {
             69 => Msg::Deflect { at: r.v3()?, dir: r.v3()? },
             70 => Msg::Raid { state: r.u8()?, wave: r.u8()?, waves: r.u8()?, left: r.u16()? },
             72 => Msg::Firework { at: r.v3()?, colour: r.u8()? },
+            75 => {
+                let tag = r.u16()?;
+                let title = r.str()?;
+                let n = (r.u8()? as usize).min(crate::books::MAX_PAGES);
+                let mut pages = Vec::with_capacity(n);
+                for _ in 0..n {
+                    pages.push(r.str()?);
+                }
+                Msg::BookWrite { tag, title, pages, sign: r.u8()? != 0 }
+            }
+            76 => {
+                let (old, new, flags) = (r.u16()?, r.u16()?, r.u8()?);
+                let (title, author) = (r.str()?, r.str()?);
+                let n = (r.u8()? as usize).min(crate::books::MAX_PAGES);
+                let mut pages = Vec::with_capacity(n);
+                for _ in 0..n {
+                    pages.push(r.str()?);
+                }
+                Msg::BookState { old, new, signed: flags & 1 != 0, open: flags & 2 != 0, title, author, pages }
+            }
+            77 => Msg::BookAsk { tag: r.u16()?, x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
             74 => {
                 let (old, new) = (r.u16()?, r.u16()?);
@@ -1592,6 +1657,10 @@ mod tests {
             Msg::MountMob { mob: 42 },
             Msg::Firework { at: Vec3::new(1.0, 90.0, -3.0), colour: 5 },
             Msg::BundleUse { tag: 7, item: 0x8010, n: 12, put: true },
+            Msg::BookWrite { tag: 3, title: "Hi".into(), pages: vec!["one".into(), "two\nlines".into()], sign: true },
+            Msg::BookState { old: 0, new: 3, signed: true, open: false, title: "Hi".into(), author: "Ann".into(), pages: vec!["one".into()] },
+            Msg::BookAsk { tag: 0, x: 1, y: 60, z: -2 },
+            Msg::LecternTake { x: 1, y: 60, z: -2 },
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },

@@ -44,7 +44,7 @@ pub fn keeps_wear(item: Id) -> bool {
 /// number (see boxes.rs), a queen's temperament (bees.rs), a find's condition
 /// (archaeology.rs), a book's enchantment.
 pub fn tagged(item: Id) -> bool {
-    item == ENCHANTED_BOOK || item == HOLLOW_BOX || item == BUNDLE || item == QUEEN_BEE || crate::archaeology::is_find(item)
+    item == ENCHANTED_BOOK || item == HOLLOW_BOX || item == BUNDLE || item == BOOK_AND_QUILL || item == WRITTEN_BOOK || item == QUEEN_BEE || crate::archaeology::is_find(item)
 }
 
 /// Keep only what makes sense for `item` (saves and other players can't be trusted).

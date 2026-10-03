@@ -290,7 +290,10 @@ pub const CREAKING_HEART_AWAKE: Id = 469;
 pub const SNIFFER_EGG: Id = 470;
 pub const PITCHER_CROP: Id = 471;
 pub const PITCHER_PLANT: Id = 472;
-pub const NUM_BLOCKS: Id = 473;
+/// Read books on it (see books.rs); with a book on it.
+pub const LECTERN: Id = 473;
+pub const LECTERN_BOOK: Id = 474;
+pub const NUM_BLOCKS: Id = 475;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -475,7 +478,10 @@ pub const MACE: Id = FIRST_ITEM + 223;
 pub const OMINOUS_BOTTLE: Id = FIRST_ITEM + 224;
 /// A seed a Sniffer dug up: plant it for a Pitcher plant.
 pub const PITCHER_POD: Id = FIRST_ITEM + 225;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 226;
+/// Write in it; sign it and it's a Written Book (see books.rs).
+pub const BOOK_AND_QUILL: Id = FIRST_ITEM + 226;
+pub const WRITTEN_BOOK: Id = FIRST_ITEM + 227;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 228;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2002,6 +2008,13 @@ impl Registry {
         crop.creative = false;
         blocks.push(crop);
         blocks.push(def("pitcher_plant", "Pitcher Plant (Ancient, Teal)", Cross, false, false, [T_PITCHER_PLANT; 3], 0.0, 0, false, PITCHER_PLANT, 0.0, S_GRASS));
+        let mut lectern = def("lectern", "Lectern (Reading Stand)", Shaped, true, false, [T_LECTERN_TOP, T_LECTERN_SIDE, T_PLANKS], 2.5, 0, false, LECTERN, 0.0, S_WOOD);
+        lectern.shape = Shape::Table;
+        blocks.push(lectern);
+        let mut with_book = def("lectern_book", "Lectern (With a Book)", Shaped, true, false, [T_LECTERN_BOOK_TOP, T_LECTERN_SIDE, T_PLANKS], 2.5, 0, false, LECTERN, 0.0, S_WOOD);
+        with_book.shape = Shape::Table;
+        with_book.creative = false;
+        blocks.push(with_book);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2234,6 +2247,8 @@ impl Registry {
         items.push(ItemDef { stack: 1, damage: 6.0, durability: Some(500), ..item("mace", "Mace (Gravity Assisted)", T_MACE) });
         items.push(ItemDef { stack: 16, ..item("ominous_bottle", "Ominous Bottle (Tastes Foreboding)", T_OMINOUS_BOTTLE) });
         items.push(item("pitcher_pod", "Pitcher Pod (Very Old Seed)", T_PITCHER_POD));
+        items.push(ItemDef { stack: 1, consume: false, ..item("writable_book", "Book and Quill (Blank, Full of Promise)", T_BOOK_QUILL) });
+        items.push(ItemDef { stack: 1, consume: false, ..item("written_book", "Written Book (Signed and Everything)", T_WRITTEN_BOOK) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2345,6 +2360,8 @@ impl Registry {
             r(&[(STONE_BRICKS, 8), (IRON, 1)], (LODESTONE, 1)),
             r(&[(GLASS, 1), (COPPER_INGOT, 2)], (SPYGLASS, 1)),
             r(&[(HEAVY_CORE, 1), (BREEZE_ROD, 1)], (MACE, 1)),
+            r(&[(BOOK, 1), (FEATHER, 1), (COAL, 1)], (BOOK_AND_QUILL, 1)),
+            r(&[(PLANKS, 4), (BOOKSHELF, 1)], (LECTERN, 1)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),

@@ -13,6 +13,7 @@ mod bees;
 mod backups;
 mod beacon;
 mod block;
+mod books;
 mod boxes;
 mod building;
 mod carpentry;
@@ -135,6 +136,8 @@ const SPLASHES: &[&str] = &[
 
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
+    /// A book open to read or write in (see books.rs).
+    Book,
     Title,
     Playing,
     Paused,
@@ -247,6 +250,12 @@ struct App {
     /// Lines being written on a sign, and which line.
     sign_lines: [String; 4],
     sign_line: usize,
+    /// The book on screen: its pages, which one is showing, a title being
+    /// typed to sign it, and whether it's already been put away.
+    book_pages: Vec<String>,
+    book_page: usize,
+    book_title: Option<String>,
+    book_done: bool,
     /// A game controller, if one is plugged in, and what it did this frame.
     pad: pad::Pad,
     pad_frame: pad::PadFrame,
@@ -391,6 +400,25 @@ impl App {
                 let lines = self.sign_lines.clone();
                 self.game.set_sign(pos, &lines);
             }
+        }
+        if self.screen == Screen::Book && s != Screen::Book {
+            // Closing a Book and Quill keeps what was written.
+            if let Some(view) = self.game.reading.take()
+                && let Some(slot) = view.writing
+                && !self.book_done
+            {
+                self.game.finish_writing(slot, std::mem::take(&mut self.book_pages), None);
+            }
+        }
+        if s == Screen::Book {
+            self.book_pages = self.game.reading.as_ref().map(|r| r.book.pages.clone()).unwrap_or_default();
+            if self.book_pages.is_empty() {
+                self.book_pages.push(String::new());
+            }
+            self.book_page = 0;
+            self.book_title = None;
+            self.book_done = false;
+            drain_chars();
         }
         if s == Screen::Sign {
             self.sign_lines = Default::default();
@@ -781,6 +809,30 @@ impl App {
                     type_into(&mut self.name_line, nametags::NAME_LEN);
                 }
             }
+            Screen::Book => {
+                let writing = self.game.reading.as_ref().is_some_and(|r| r.writing.is_some());
+                if is_key_pressed(KeyCode::Escape) {
+                    if self.book_title.is_some() {
+                        self.book_title = None;
+                    } else {
+                        self.set_screen(Screen::Playing);
+                    }
+                } else if let Some(title) = self.book_title.as_mut() {
+                    if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                        self.sign_book();
+                    } else {
+                        type_into(title, books::TITLE_LEN);
+                    }
+                } else if writing {
+                    let page = &mut self.book_pages[self.book_page];
+                    if (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter)) && page.chars().count() < books::PAGE_LEN {
+                        page.push('\n');
+                    }
+                    type_into(page, books::PAGE_LEN);
+                } else {
+                    drain_chars();
+                }
+            }
             Screen::Sign => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Playing);
@@ -907,6 +959,9 @@ impl App {
         }
         if self.game.editing_sign.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Sign);
+        }
+        if self.game.reading.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Book);
         }
         if self.game.naming.is_some() && self.screen == Screen::Playing {
             drain_chars();
@@ -1577,6 +1632,103 @@ impl App {
         }
     }
 
+    /// A book open on screen: read it, or (a Book and Quill) write in it and sign it.
+    fn book_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        let Some(view) = self.game.reading.clone() else {
+            self.set_screen(Screen::Playing);
+            return;
+        };
+        let writing = view.writing.is_some();
+        let (bw, bh) = (230.0 * s, 260.0 * s);
+        let (x0, y0) = ((w - bw) / 2.0, (h - bh) / 2.0 - 16.0 * s);
+        draw_rectangle(x0, y0, bw, bh, Color::new(0.93, 0.89, 0.78, 1.0));
+        draw_rectangle_lines(x0, y0, bw, bh, 2.0 * s, Color::new(0.45, 0.3, 0.18, 1.0));
+        let ink = Color::new(0.12, 0.08, 0.05, 1.0);
+        if let Some(title) = &self.book_title {
+            // Signing: a title, then it's done for good.
+            self.ui.text_centered("Give it a title (Enter: sign, Esc: back)", w / 2.0, y0 + 20.0 * s, 9.0, ink);
+            let cursor = if (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+            self.ui.text_centered(&format!("{title}{cursor}"), w / 2.0, y0 + 60.0 * s, 12.0, ink);
+            self.ui.text_centered(&format!("by {}", self.game.player_name), w / 2.0, y0 + 84.0 * s, 9.0, Color::new(0.35, 0.28, 0.2, 1.0));
+            self.ui.text_centered("Once signed, nobody can change it.", w / 2.0, y0 + 120.0 * s, 8.0, Color::new(0.45, 0.35, 0.25, 1.0));
+            if self.ui.button(Rect::new(w / 2.0 - 50.0 * s, y0 + bh + 8.0 * s, 100.0 * s, 20.0 * s), "Sign", true) {
+                self.sign_book();
+            }
+            return;
+        }
+        let pages = self.book_pages.len();
+        if !view.book.title.is_empty() && !writing {
+            self.ui.text_centered(&format!("{} by {}", view.book.title, view.book.author), w / 2.0, y0 - 8.0 * s, 9.0, WHITE);
+        }
+        self.ui.text_centered(&format!("Page {} of {}", self.book_page + 1, pages), w / 2.0, y0 + 14.0 * s, 8.0, Color::new(0.4, 0.3, 0.2, 1.0));
+        // The page, wrapped to the paper.
+        let per_line = 30;
+        let mut lines: Vec<String> = Vec::new();
+        for para in self.book_pages[self.book_page].split('\n') {
+            let chars: Vec<char> = para.chars().collect();
+            if chars.is_empty() {
+                lines.push(String::new());
+            }
+            for chunk in chars.chunks(per_line) {
+                lines.push(chunk.iter().collect());
+            }
+        }
+        if writing && (get_time() * 2.0) as i64 % 2 == 0 {
+            if let Some(last) = lines.last_mut() {
+                last.push('_');
+            }
+        }
+        for (i, l) in lines.iter().take(14).enumerate() {
+            self.ui.text(l, x0 + 12.0 * s, y0 + 34.0 * s + i as f32 * 15.0 * s, 9.5, ink);
+        }
+        let by = y0 + bh + 8.0 * s;
+        let bwid = 52.0 * s;
+        if self.ui.button(Rect::new(x0, by, bwid, 20.0 * s), "< Back", self.book_page > 0) {
+            self.book_page -= 1;
+        }
+        let can_next = self.book_page + 1 < pages || (writing && pages < books::MAX_PAGES);
+        if self.ui.button(Rect::new(x0 + bw - bwid, by, bwid, 20.0 * s), "Next >", can_next) {
+            if self.book_page + 1 == pages {
+                self.book_pages.push(String::new());
+            }
+            self.book_page += 1;
+        }
+        let mid = Rect::new(w / 2.0 - 54.0 * s, by, 52.0 * s, 20.0 * s);
+        let right = Rect::new(w / 2.0 + 2.0 * s, by, 52.0 * s, 20.0 * s);
+        if writing {
+            if self.ui.button(mid, "Sign", true) {
+                self.book_title = Some(String::new());
+                drain_chars();
+            }
+        } else if let Some(p) = view.lectern
+            && self.ui.button(mid, "Take", true)
+        {
+            self.game.take_from_lectern(p);
+            self.set_screen(Screen::Playing);
+            return;
+        }
+        if self.ui.button(right, "Done", true) {
+            self.set_screen(Screen::Playing);
+        }
+    }
+
+    /// Sign the Book and Quill on screen with the title typed in.
+    fn sign_book(&mut self) {
+        let title = self.book_title.clone().unwrap_or_default();
+        if title.trim().is_empty() {
+            return;
+        }
+        if let Some(slot) = self.game.reading.as_ref().and_then(|r| r.writing) {
+            let pages = self.book_pages.clone();
+            self.game.finish_writing(slot, pages, Some(title));
+            self.book_done = true;
+        }
+        self.set_screen(Screen::Playing);
+    }
+
     /// Writing a Name Tag for a mob.
     fn name_tag_screen(&mut self) {
         let (w, h) = (screen_width(), screen_height());
@@ -1892,6 +2044,7 @@ impl App {
                     Screen::Enchant => self.enchant_screen(),
                     Screen::Trade => self.trade_screen(),
                     Screen::Sign => self.sign_screen(),
+                    Screen::Book => self.book_screen(),
                     Screen::NameTag => self.name_tag_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
@@ -4093,6 +4246,10 @@ async fn game_main() {
         map_timer: 0.0,
         sign_lines: Default::default(),
         sign_line: 0,
+        book_pages: Vec::new(),
+        book_page: 0,
+        book_title: None,
+        book_done: false,
         pad: pad::Pad::new(),
         pad_frame: Default::default(),
         rebinding: None,

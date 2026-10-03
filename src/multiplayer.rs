@@ -523,6 +523,7 @@ impl Game {
                     }
                     if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
                         self.spill_frame(IVec3::new(x, y, z));
+                        self.spill_lectern(IVec3::new(x, y, z));
                     }
                     // Hives, pots and sculk notice (and the Deep Dark hears it).
                     if old != id && crate::ledger::is_break(old, id) {
@@ -727,6 +728,15 @@ impl Game {
                 }
             }
             Msg::BundleUse { tag, item, n, put } => self.host_bundle_use(from, tag, item, n, put),
+            Msg::BookWrite { tag, title, pages, sign } => self.host_book_write(from, tag, title, pages, sign),
+            Msg::BookAsk { tag, x, y, z } => self.host_book_ask(from, tag, IVec3::new(x, y, z)),
+            Msg::LecternTake { x, y, z } => self.host_lectern_take(from, IVec3::new(x, y, z)),
+            Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
+                let p = IVec3::new(x, y, z);
+                if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
+                    self.host_lectern_put(from, p, item);
+                }
+            }
             Msg::Shoot { pos, dir } => {
                 // Only from roughly where they are, in a real direction, at a bow's pace.
                 let Some(p) = self.peers.get(&from) else { return };
@@ -1073,6 +1083,7 @@ impl Game {
                 self.explosion_effects(at, r);
             }
             Msg::BundleState { old, new, contents } => self.bundle_state(old, new, contents),
+            Msg::BookState { old, new, signed, open, title, author, pages } => self.book_state(old, new, signed, open, title, author, pages),
             Msg::Firework { at, colour } => {
                 if at.is_finite() {
                     self.firework_sparks(at, colour);
@@ -1142,7 +1153,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } => {}
         }
     }
 
@@ -2534,6 +2545,27 @@ mod tests {
         assert!(pump(&mut host, &mut client, |_, c| c.inv.count(COBBLE) == 40 && c.inv.wear[b] == 0));
         assert_eq!(host.peers[&id].ledger.bag.count(COBBLE), 40);
         assert!(host.boxes.get(&tag).is_none());
+    }
+
+    #[test]
+    fn joined_players_write_and_sign_books_through_the_host() {
+        let mut host = Game::new(786, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Writer", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).is_some_and(|p| p.target.distance(spawn) < 1.0)));
+        host.give_peer(id, BOOK_AND_QUILL, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BOOK_AND_QUILL) == 1));
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == BOOK_AND_QUILL)).unwrap();
+        client.finish_writing(slot, vec!["Dear diary".into()], Some("Diary".into()));
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.slots[slot] == Some((WRITTEN_BOOK, 1))));
+        let tag = crate::boxes::box_id(client.inv.wear[slot]);
+        assert_eq!(host.books.get(&tag).map(|b| (b.title.as_str(), b.author.as_str())), Some(("Diary", "Writer")));
+        assert!(host.peers[&id].ledger.owns_enchanted(WRITTEN_BOOK, tag));
+        assert_eq!(host.peers[&id].ledger.bag.count(BOOK_AND_QUILL), 0);
     }
 
 }
