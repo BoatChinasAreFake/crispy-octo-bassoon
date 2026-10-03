@@ -179,7 +179,7 @@ impl Game {
 
 /// Is any part of this box in fire?
 pub fn touches_fire(world: &World, min: Vec3, max: Vec3) -> bool {
-    (min.y.floor() as i32..=max.y.floor() as i32).any(|y| (min.z.floor() as i32..=max.z.floor() as i32).any(|z| (min.x.floor() as i32..=max.x.floor() as i32).any(|x| world.get(x, y, z) == FIRE)))
+    (min.y.floor() as i32..=max.y.floor() as i32).any(|y| (min.z.floor() as i32..=max.z.floor() as i32).any(|z| (min.x.floor() as i32..=max.x.floor() as i32).any(|x| matches!(world.get(x, y, z), FIRE | CAMPFIRE))))
 }
 
 #[cfg(test)]

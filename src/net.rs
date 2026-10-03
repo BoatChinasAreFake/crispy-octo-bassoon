@@ -30,7 +30,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
 /// v22: bundles, books and banners through the host; chest sorting.
 /// v23: seats in mount ids (Floaties), regulars' discounts, spears by kind.
-pub const PROTOCOL: u32 = 23;
+pub const PROTOCOL: u32 = 24;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -135,6 +135,8 @@ pub enum Msg {
     RegularAsk { mob: u32 },
     /// host -> client: you've traded with this Hmmer this many times (see villagers.rs).
     Regular { mob: u32, trades: u16 },
+    /// client -> host: I put one of these on the Campfire here to cook (see home.rs).
+    CampfirePut { x: i32, y: i32, z: i32, item: Id },
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -769,6 +771,13 @@ impl Msg {
                 w.u8(82);
                 w.u32(*mob);
             }
+            Msg::CampfirePut { x, y, z, item } => {
+                w.u8(84);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*item);
+            }
             Msg::Regular { mob, trades } => {
                 w.u8(83);
                 w.u32(*mob);
@@ -1126,6 +1135,7 @@ impl Msg {
             81 => Msg::SortContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             82 => Msg::RegularAsk { mob: r.u32()? },
             83 => Msg::Regular { mob: r.u32()?, trades: r.u16()? },
+            84 => Msg::CampfirePut { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()? },
             78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
             74 => {
@@ -1714,6 +1724,7 @@ mod tests {
             Msg::SortContainer { x: 1, y: -4097, z: -2 },
             Msg::RegularAsk { mob: 77 },
             Msg::Regular { mob: 77, trades: 31 },
+            Msg::CampfirePut { x: 1, y: 60, z: -2, item: 0x8028 },
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },

@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | COPPER_CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
+    matches!(id, CHEST | COPPER_CHEST | BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -48,8 +48,9 @@ pub fn is_three_slot(id: Id) -> bool {
     is_furnace(id) || id == BREWING_STAND
 }
 
+/// Furnaces, Smokers and Blast Furnaces (see home.rs).
 pub fn is_furnace(id: Id) -> bool {
-    matches!(id, FURNACE | FURNACE_LIT)
+    matches!(id, FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT)
 }
 
 /// What cooking `id` makes.
@@ -106,11 +107,14 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if crate::hoppers::is_hopper(kind) {
         return slot < crate::hoppers::SLOTS;
     }
+    if crate::home::is_stand(kind) {
+        return armor_of(item).is_some_and(|(s, _)| s == slot);
+    }
     if !is_furnace(kind) {
         return slot < CHEST_SLOTS;
     }
     match slot {
-        INPUT => true,
+        INPUT => crate::home::cooks_in(kind, item),
         FUEL => fuel_secs(item).is_some(),
         _ => false, // the output is take-only
     }
@@ -124,6 +128,8 @@ impl Container {
             DISPENSER_SLOTS
         } else if crate::hoppers::is_hopper(id) {
             crate::hoppers::SLOTS
+        } else if crate::home::is_stand(id) {
+            crate::home::STAND_SLOTS
         } else {
             CHEST_SLOTS
         };
@@ -613,12 +619,12 @@ impl Game {
         }
         let furnaces: Vec<IVec3> = self.world.containers.keys().copied().filter(|p| self.world.is_loaded(p.x, p.z) && is_furnace(self.world.get_v(*p))).collect();
         for p in furnaces {
+            let kind = self.world.get_v(p);
             let Some(c) = self.world.containers.get_mut(&p) else { continue };
-            if !c.furnace_tick(dt) {
+            if !c.furnace_tick(dt * crate::home::furnace_speed(kind)) {
                 continue;
             }
-            let lit = c.burn > 0.0;
-            let want = if lit { FURNACE_LIT } else { FURNACE };
+            let want = crate::home::furnace_lit(kind, c.burn > 0.0);
             if self.world.get_v(p) != want {
                 self.world.set_v(p, want);
             }
@@ -641,6 +647,8 @@ impl Game {
         let msg = Msg::Container { x: p.x, y: p.y, z: p.z, slots, burn, cook };
         let viewers: Vec<u32> = match only {
             Some(id) => vec![id],
+            // Everyone sees what an armour stand wears.
+            None if crate::home::is_stand(self.world.get_v(p)) => self.peers.keys().copied().collect(),
             None => self.viewers.get(&p).map(|v| v.iter().copied().collect()).unwrap_or_default(),
         };
         for id in viewers {

@@ -43,6 +43,9 @@ pub fn repair_material(id: Id) -> Option<Id> {
     if let Some(t) = crate::tools::axe_tier(id).or_else(|| crate::tools::shovel_tier(id)) {
         return Some([PLANKS, COBBLE, COPPER_INGOT, IRON, DIAMOND, SCORCHITE_INGOT][t]);
     }
+    if id == TURTLE_SHELL {
+        return Some(TURTLE_SCUTE);
+    }
     if armor_of(id).is_some_and(|(_, t)| t == COPPER_TIER) {
         return Some(COPPER_INGOT);
     }

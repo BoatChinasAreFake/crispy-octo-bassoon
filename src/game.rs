@@ -265,6 +265,8 @@ pub struct Game {
     pub seat_no: u8,
     /// When fireflies were last let out (see nature.rs).
     pub firefly_acc: f32,
+    /// Seconds since campfire smoke was last puffed (see home.rs).
+    pub smoke_acc: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
     pub lod: crate::lod::Lod,
@@ -501,6 +503,7 @@ impl Game {
             mounted: None,
             seat_no: 0,
             firefly_acc: 0.0,
+            smoke_acc: 0.0,
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -1178,6 +1181,7 @@ impl Game {
         }
         self.recipe_news = (self.recipe_news - dt).max(0.0);
         self.report_tick(dt);
+        self.campfire_smoke(dt);
         self.update_entities(dt);
         self.script_tick(dt);
     }
@@ -2329,6 +2333,10 @@ impl Game {
         if !self.player.sneaking && crate::decor::is_frame(hit_id) && self.use_frame(hit_pos) {
             return;
         }
+        // Campfires take raw food to cook.
+        if hit_id == CAMPFIRE && self.use_campfire(hit_pos) {
+            return;
+        }
         // Gates and trapdoors swing (sneak to place against them instead).
         if !self.player.sneaking && self.toggle_hinged(hit_pos) {
             return;
@@ -2399,7 +2407,7 @@ impl Game {
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
             TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
-            FRAME_FIRST | LADDER_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
+            FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -2908,6 +2916,7 @@ impl Game {
         self.copper_golems_tick(dt);
         self.floaties_tick();
         self.fireflies_tick(dt);
+        self.campfires_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
@@ -3604,6 +3613,7 @@ impl Game {
         self.draw_vehicles(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
+        self.draw_stands(&mut g, eye, 48.0);
         self.draw_banners(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
@@ -3729,7 +3739,9 @@ impl Game {
         let far = (render_distance * 16) as f32;
         let far_land = self.distant_terrain && renderer.has_far() && !self.in_scorch() && !self.in_hollow();
         let (fog_color, fog_start, fog_end) = if underwater {
-            ([0.05, 0.12, 0.35], 0.0, 22.0)
+            // A Turtle Shell lets you see a good way further.
+            let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
+            ([0.05, 0.12, 0.35], 0.0, if shell { 48.0 } else { 22.0 })
         } else if self.in_scorch() {
             // Hazy, hot air.
             (sky, far * 0.2, far * 0.8)

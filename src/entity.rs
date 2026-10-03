@@ -2870,6 +2870,7 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f3
         let tile = match t as usize {
             1..=4 => T_ARMOR_WORN + t - 1,
             t if t == COPPER_TIER + 1 => T_COPPER_ARMOR_WORN,
+            t if t == TURTLE_TIER + 1 => crate::texture::T_TURTLE_WORN,
             // Nothing, or a Glider (drawn below).
             _ => return,
         };

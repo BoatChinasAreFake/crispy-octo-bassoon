@@ -598,6 +598,25 @@ pub const T_ROTSTEED_FACE: u16 = 741;
 pub const T_HARNESS_WORN: u16 = 742;
 /// The moon in each of its eight phases, full first (see moon.rs).
 pub const T_MOON_PHASES: u16 = 743;
+/// v0.1.20: home blocks, treasure, new animals and Hmmers.
+pub const T_CAMPFIRE_TOP: u16 = 751;
+pub const T_CAMPFIRE_SIDE: u16 = 752;
+pub const T_SMOKER_TOP: u16 = 753;
+pub const T_SMOKER_SIDE: u16 = 754;
+pub const T_SMOKER_LIT: u16 = 755;
+pub const T_BLAST_TOP: u16 = 756;
+pub const T_BLAST_SIDE: u16 = 757;
+pub const T_BLAST_LIT: u16 = 758;
+pub const T_BARREL_TOP: u16 = 759;
+pub const T_BARREL_SIDE: u16 = 760;
+pub const T_TURTLE_EGG: u16 = 761;
+/// Eight pictures in a row (see home.rs).
+pub const T_PAINTING_FIRST: u16 = 762;
+pub const PAINTINGS: u16 = 8;
+pub const T_TREASURE_MAP: u16 = 770;
+pub const T_TURTLE_SCUTE: u16 = 771;
+pub const T_TURTLE_SHELL: u16 = 772;
+pub const T_TURTLE_WORN: u16 = 773;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3412,8 +3431,131 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             if lit { shade(rgb(225, 225, 235), r.range(0.8, 1.0)) } else { shade(rgb(45, 45, 60), r.range(0.8, 1.0)) }
         });
     }
+    home_tiles(&mut a);
 
     a.px
+}
+
+/// v0.1.20: campfires, smokers, blast furnaces, barrels, turtle eggs, paintings and treasure.
+fn home_tiles(a: &mut Atlas) {
+    a.each(T_CAMPFIRE_SIDE, |x, y, r, _| {
+        let bark = (x * 3 + y) % 5 == 0;
+        let ember = y > 11 && (x * 7 + y * 3) % 6 == 0;
+        if ember { rgb(255, 140, 30) } else { shade(if bark { rgb(70, 50, 30) } else { rgb(105, 75, 45) }, r.range(0.8, 1.05)) }
+    });
+    a.each(T_CAMPFIRE_TOP, |x, y, r, _| {
+        let ash = (x * 5 + y * 7) % 4 == 0;
+        let ember = (x * 11 + y * 13) % 9 == 0;
+        if ember { rgb(255, 120, 20) } else { shade(if ash { rgb(60, 55, 55) } else { rgb(95, 70, 45) }, r.range(0.8, 1.05)) }
+    });
+    // Smoker: a furnace in a log jacket; blast furnace: iron-banded stone.
+    a.copy(T_FURNACE_SIDE, T_SMOKER_SIDE);
+    a.copy(T_FURNACE_SIDE, T_BLAST_SIDE);
+    a.copy(T_FURNACE_LIT, T_SMOKER_LIT);
+    a.copy(T_FURNACE_LIT, T_BLAST_LIT);
+    for t in [T_SMOKER_SIDE, T_SMOKER_LIT] {
+        for y in 0..16 {
+            for x in 0..16 {
+                if !(3..13).contains(&x) || !(4..14).contains(&y) {
+                    let c = if (x + y * 3) % 7 == 0 { rgb(70, 50, 30) } else { rgb(110, 80, 50) };
+                    a.set(t, x, y, shade(c, 0.9 + ((x * 7 + y) % 5) as f32 * 0.04));
+                }
+            }
+        }
+    }
+    for t in [T_BLAST_SIDE, T_BLAST_LIT] {
+        for y in 0..16 {
+            for x in 0..16 {
+                if y < 3 || y > 13 || x < 2 || x > 13 {
+                    let c = if y % 4 == 0 { rgb(70, 72, 78) } else { rgb(130, 132, 138) };
+                    a.set(t, x, y, shade(c, 0.9 + ((x * 3 + y) % 5) as f32 * 0.04));
+                }
+            }
+        }
+    }
+    a.each(T_SMOKER_TOP, |x, y, r, _| {
+        let vent = (5..11).contains(&x) && (5..11).contains(&y) && (x + y) % 2 == 0;
+        if vent { rgb(30, 30, 30) } else { shade(rgb(100, 72, 45), r.range(0.82, 1.05)) }
+    });
+    a.each(T_BLAST_TOP, |x, y, r, _| {
+        let vent = (4..12).contains(&x) && (4..12).contains(&y) && x % 2 == 0;
+        if vent { rgb(35, 35, 40) } else { shade(rgb(125, 127, 133), r.range(0.82, 1.05)) }
+    });
+    a.each(T_BARREL_SIDE, |x, y, r, _| {
+        let hoop = y == 2 || y == 13;
+        let seam = x % 4 == 0;
+        if hoop { shade(rgb(80, 80, 85), r.range(0.9, 1.05)) } else { shade(if seam { rgb(95, 65, 35) } else { rgb(140, 100, 55) }, r.range(0.85, 1.05)) }
+    });
+    a.each(T_BARREL_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let hole = (6..10).contains(&x) && (6..10).contains(&y);
+        if rim { rgb(80, 80, 85) } else if hole { rgb(55, 35, 20) } else { shade(if x % 4 == 0 { rgb(110, 75, 40) } else { rgb(150, 110, 60) }, r.range(0.85, 1.05)) }
+    });
+    a.each(T_TURTLE_EGG, |x, y, r, _| {
+        let spot = (x * 5 + y * 3) % 7 == 0;
+        shade(if spot { rgb(120, 170, 110) } else { rgb(235, 230, 205) }, r.range(0.9, 1.05))
+    });
+    // Eight pictures, each in a wooden frame.
+    for i in 0..PAINTINGS {
+        a.each(T_PAINTING_FIRST + i, |x, y, r, _| {
+            if x == 0 || y == 0 || x == 15 || y == 15 {
+                return shade(rgb(120, 85, 50), r.range(0.85, 1.05));
+            }
+            let (fx, fy) = (x as f32 / 15.0, y as f32 / 15.0);
+            let c = match i {
+                // Sunset over the sea.
+                0 => {
+                    let sun = (fx - 0.5).powi(2) + (fy - 0.55).powi(2) < 0.04;
+                    if fy > 0.6 { rgb(40, 80, 150) } else if sun { rgb(255, 210, 80) } else { rgb(250, (120.0 + 80.0 * fy) as u8, 80) }
+                }
+                // Mountains with snow.
+                1 => {
+                    let peak = 0.25 + (fx * 6.0).sin().abs() * 0.35;
+                    if fy < peak { rgb(150, 200, 240) } else if fy < peak + 0.12 { rgb(240, 240, 245) } else { rgb(90, 110, 90) }
+                }
+                // A Hisser, looking smug.
+                2 => {
+                    let face = [(4, 5), (5, 5), (10, 5), (11, 5), (4, 6), (5, 6), (10, 6), (11, 6), (7, 8), (8, 8), (6, 9), (9, 9), (6, 10), (9, 10), (7, 9), (8, 9)];
+                    if face.contains(&(x, y)) { rgb(20, 30, 20) } else { shade(rgb(80, 170, 70), r.range(0.85, 1.1)) }
+                }
+                // A boat at night.
+                3 => {
+                    let boat = (11..13).contains(&y) && (4..12).contains(&x) || y == 13 && (5..11).contains(&x);
+                    let star = (x * 7 + y * 11) % 17 == 0 && y < 8;
+                    if boat { rgb(120, 80, 40) } else if star { rgb(250, 250, 200) } else if fy > 0.85 { rgb(30, 60, 110) } else { rgb(20, 25, 60) }
+                }
+                // Flowers in a vase.
+                4 => {
+                    let vase = (6..10).contains(&x) && y > 9;
+                    let bloom = [(5, 4), (8, 3), (10, 5), (7, 5), (6, 6), (9, 6)].iter().any(|&(bx, by)| (x as i32 - bx).abs() + (y as i32 - by).abs() < 2);
+                    if vase { rgb(70, 110, 180) } else if bloom { [rgb(230, 60, 80), rgb(250, 200, 60)][(x + y) % 2] } else if (7..9).contains(&x) && y > 5 { rgb(60, 130, 60) } else { rgb(235, 225, 200) }
+                }
+                // Stripes, very modern.
+                5 => [rgb(220, 70, 60), rgb(240, 200, 70), rgb(60, 120, 200), rgb(240, 240, 235)][((x + y) / 3) % 4],
+                // A pig in a field.
+                6 => {
+                    let pig = (5..11).contains(&x) && (7..11).contains(&y) || (10..13).contains(&x) && (6..9).contains(&y);
+                    let legs = y == 11 && (x == 6 || x == 9);
+                    if pig { rgb(240, 170, 170) } else if legs { rgb(200, 130, 130) } else if fy > 0.7 { rgb(100, 170, 70) } else { rgb(160, 210, 245) }
+                }
+                // The moon over the hills.
+                _ => {
+                    let moon = (fx - 0.7).powi(2) + (fy - 0.3).powi(2) < 0.02;
+                    let hill = fy > 0.65 + (fx * 4.0).sin() * 0.08;
+                    if moon { rgb(240, 240, 220) } else if hill { rgb(40, 70, 50) } else { rgb(30, 35, 80) }
+                }
+            };
+            shade(c, r.range(0.93, 1.04))
+        });
+    }
+    a.sprite(T_TREASURE_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(215, 190, 140)), ('g', rgb(190, 160, 110)), ('b', rgb(80, 120, 210)), ('r', rgb(220, 30, 30))]);
+    a.sprite(T_TURTLE_SCUTE, &SCUTE_SPRITE, &[('#', rgb(40, 90, 40)), ('b', rgb(80, 160, 70)), ('h', rgb(130, 200, 110)), ('d', rgb(55, 120, 50))]);
+    a.each(T_TURTLE_SHELL, |x, y, r, _| {
+        let dome = ((x as f32 - 7.5) / 7.0).powi(2) + ((y as f32 - 9.0) / 6.0).powi(2) < 1.0 && y < 13;
+        let plate = (x + y * 2) % 5 == 0;
+        if dome { shade(if plate { rgb(60, 120, 50) } else { rgb(90, 170, 70) }, r.range(0.88, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_TURTLE_WORN, |x, y, r, _| shade(if (x + y * 2) % 5 == 0 { rgb(60, 120, 50) } else { rgb(90, 170, 70) }, r.range(0.88, 1.05)));
 }
 
 /// Mipmap levels 1.. for the atlas, built tile by tile (down to one texel a

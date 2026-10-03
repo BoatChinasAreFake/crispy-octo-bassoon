@@ -48,13 +48,15 @@ pub struct ItemDrop {
     /// Joined players: the host's latest position, and when we last asked for it.
     pub net_pos: Vec3,
     pub asked: f32,
+    /// Seconds it's been cooking on a Campfire (see home.rs).
+    pub cooking: f32,
 }
 
 impl ItemDrop {
     pub fn new(id: u32, item: Id, n: u8, pos: Vec3, vel: Vec3, delay: f32) -> ItemDrop {
         let mut body = Body::new(pos, 0.125, 0.25);
         body.vel = vel;
-        ItemDrop { id, item, n, body, age: 0.0, delay, wear: 0, net_pos: pos, asked: 0.0 }
+        ItemDrop { id, item, n, body, age: 0.0, delay, wear: 0, net_pos: pos, asked: 0.0, cooking: 0.0 }
     }
 
     fn update(&mut self, dt: f32, world: &World) {

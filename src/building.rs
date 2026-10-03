@@ -57,8 +57,12 @@ impl Game {
             HOPPER_FIRST => return Game::hopper_facing(normal),
             _ => {}
         }
-        if held == FRAME_FIRST {
-            return FRAME_FIRST + crate::decor::frame_facing(normal).unwrap_or(0) as Id;
+        if held == FRAME_FIRST || held == PAINTING_FIRST {
+            return held + crate::decor::frame_facing(normal).unwrap_or(0) as Id;
+        }
+        // An armour stand faces whoever put it down.
+        if held == ARMOUR_STAND_FIRST {
+            return held + ((self.facing() + 2) % 4) as Id;
         }
         held
     }

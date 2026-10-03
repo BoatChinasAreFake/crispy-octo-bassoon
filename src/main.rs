@@ -44,6 +44,7 @@ mod game;
 mod glider;
 mod golems;
 mod hollow;
+mod home;
 mod hoppers;
 mod horses;
 mod hunger;
