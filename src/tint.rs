@@ -199,7 +199,7 @@ mod tests {
     fn what_gets_tinted() {
         assert_eq!(kind_of(GRASS, 2), Some(Kind::Grass));
         assert_eq!(kind_of(GRASS, 0), None, "grass sides keep their dirt");
-        assert_eq!(kind_of(LEAVES, 4), Some(Kind::Grass));
+        assert_eq!(kind_of(LEAVES, 4), Some(Kind::Leaves), "leaves follow the grass, and turn further with the seasons");
         assert_eq!(kind_of(WATER, 2), Some(Kind::Water));
         assert_eq!(kind_of(STONE, 2), None);
         assert_eq!(kind_of(SPRUCE_LEAVES, 2), None, "spruce keeps its own colour");
