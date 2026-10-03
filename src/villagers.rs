@@ -98,6 +98,17 @@ pub fn trades(seed: u32) -> Vec<Trade> {
     v
 }
 
+/// Who a mob is as a trader, and its trades: a Hmmer's job and list, or a
+/// mod-defined trader's name and the `trade` lines from its mod. None: it
+/// doesn't trade (or, being a monster on the loose, won't).
+pub fn trades_of(m: &Mob) -> Option<(String, Vec<Trade>)> {
+    if m.kind == MobKind::Hmmer {
+        return Some((format!("Hmmer: {}", Job::of(m.seed).name()), trades(m.seed)));
+    }
+    let d = m.kind.mod_def()?;
+    (!d.trades.is_empty() && !m.menacing()).then(|| (d.name.clone(), d.trades.clone()))
+}
+
 /// Does this inventory (item counts) have what a trade asks for?
 pub fn can_afford(counts: impl Fn(Id) -> u32, t: &Trade) -> bool {
     t.give.iter().all(|&(id, n)| id == AIR || counts(id) >= n as u32)
@@ -119,7 +130,7 @@ impl Game {
 
     /// Hmmers stay near home and restock over time.
     pub fn hmmers_tick(&mut self, dt: f32) {
-        for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Hmmer) {
+        for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Hmmer || m.kind.mod_def().is_some_and(|d| !d.trades.is_empty())) {
             m.restock -= dt;
             if m.restock <= 0.0 {
                 m.restock = RESTOCK_SECS;
@@ -141,15 +152,17 @@ impl Game {
         self.sfx(Sfx::Hmm, at);
     }
 
-    /// The trades of the Hmmer we're talking to (and whether it's still there).
-    pub fn trade_list(&self) -> Option<(Job, Vec<Trade>)> {
+    /// The trades of the Hmmer (or modded trader) we're talking to, under its
+    /// title (and whether it's still there).
+    pub fn trade_list(&self) -> Option<(String, Vec<Trade>)> {
         let id = self.trading?;
-        let m = self.mobs.iter().find(|m| m.id == id && m.kind == MobKind::Hmmer)?;
+        let m = self.mobs.iter().find(|m| m.id == id)?;
         if m.body.pos.distance(self.player.body.pos) > 8.0 {
             return None;
         }
+        let (title, list) = trades_of(m)?;
         let hero = self.has_effect(crate::potions::Potion::Hero);
-        Some((Job::of(m.seed), trades(m.seed).into_iter().map(|t| if hero { crate::raids::hero_price(t) } else { t }).collect()))
+        Some((title, list.into_iter().map(|t| if hero { crate::raids::hero_price(t) } else { t }).collect()))
     }
 
     /// The local player makes trade `index` with the Hmmer they're talking to.
@@ -196,8 +209,8 @@ impl Game {
     /// A joined player's trade: check the Hmmer's stock and their ledger.
     pub fn host_trade(&mut self, from: u32, mob: u32, index: u8) {
         let Some(me) = self.peers.get(&from).map(|p| p.target) else { return };
-        let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && m.kind == MobKind::Hmmer && m.body.pos.distance(me) < 8.0) else { return };
-        let Some(&t) = trades(m.seed).get(index as usize) else { return };
+        let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && m.body.pos.distance(me) < 8.0) else { return };
+        let Some(&t) = trades_of(m).and_then(|(_, list)| list.get(index as usize).copied()).as_ref() else { return };
         let t = if self.heroes.contains_key(&from) { crate::raids::hero_price(t) } else { t };
         if m.trades_used[(index as usize).min(7)] >= STOCK {
             self.system_message(Some(from), "Hmm. (Out of stock until tomorrow.)");

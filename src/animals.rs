@@ -207,7 +207,7 @@ impl Game {
         let m = &mut self.mobs[i];
         let def = m.kind.mod_def()?;
         let mine = m.owner.as_deref() == Some(who);
-        if item != AIR && m.owner.is_none() && def.tame_item == Some(item) {
+        if item != AIR && m.owner.is_none() && def.tame_item == Some(item) && !def.boss {
             if self.rng.chance(def.tame_chance) {
                 m.owner = Some(who.to_string());
                 m.angry = false;
@@ -253,7 +253,9 @@ impl Game {
             self.naming = Some(id);
             return true;
         }
-        if mob.kind == MobKind::Hmmer {
+        // A trader (unless you're offering it its taming or breeding food).
+        let feeding = mob.kind.mod_def().is_some_and(|d| held != AIR && (d.tame_item == Some(held) || d.breed_item == Some(held)));
+        if !feeding && crate::villagers::trades_of(mob).is_some() {
             self.open_trade(id);
             return true;
         }

@@ -472,6 +472,9 @@ impl MobKind {
     }
     /// Experience for defeating one (`size`: a Bloop's size).
     pub fn xp_value(self, size: f32, rng: &mut Rng) -> u32 {
+        if let Some(xp) = self.mod_def().and_then(|d| d.xp) {
+            return xp;
+        }
         match self {
             MobKind::Bloop => size as u32,
             k if !k.hostile() => rng.int(1, 3) as u32,
@@ -630,6 +633,8 @@ pub enum MobEvent {
     /// An Invoicer's spell: Late Fees up out of the ground from here toward there, or Fees summoned.
     Fangs(Vec3, Vec3),
     Summon(Vec3),
+    /// A modded boss calls for help: (where, mob kind index, how many).
+    SummonMod(Vec3, u8, u8),
     /// The Hush's shush: a blast of sound from `from` at the player, through walls.
     Shush(Vec3),
 }
@@ -695,7 +700,8 @@ impl Mob {
             sitting: false,
             prey: None,
             goal: None,
-            persistent: false,
+            // A boss stays until it's beaten.
+            persistent: kind.mod_def().is_some_and(|d| d.boss),
             seed: 0,
             home: None,
             trades_used: [0; 8],
@@ -770,7 +776,13 @@ impl Mob {
                 self.knock *= 0.3;
             }
             k if k.passive() => self.flee = 4.0,
-            MobKind::Modded(_) => self.flee = 4.0,
+            MobKind::Modded(_) => {
+                self.flee = 4.0;
+                // Big things (bosses especially) barely budge.
+                let budge = 1.0 - self.kind.mod_def().map(|d| d.knockback_resist).unwrap_or(0.0);
+                self.knock *= budge;
+                self.body.vel.y *= budge;
+            }
             MobKind::Hmmer | MobKind::Fishy => self.flee = 4.0,
             MobKind::Grumbler | MobKind::Bee => self.angry = true,
             MobKind::Hush => {
@@ -1400,6 +1412,29 @@ impl Mob {
                         }
                     }
                 }
+                // A boss enrages below its threshold: faster, quicker to strike,
+                // and calling for help every so often (see `summon`).
+                let (mut spd_mul, mut cd_mul) = (1.0, 1.0);
+                if let Some(d) = def.filter(|d| d.boss && d.enrage_at > 0.0) {
+                    if !self.angry && self.health <= d.max_health * d.enrage_at {
+                        self.angry = true;
+                        self.warp_cd = 0.0;
+                        ev.push(MobEvent::Smoke(self.eye()));
+                    }
+                    if self.angry {
+                        spd_mul = d.enrage_speed;
+                        cd_mul = d.enrage_cooldown;
+                        self.warp_cd = (self.warp_cd - dt).max(0.0);
+                        if let Some((kind, n)) = d.summon
+                            && self.warp_cd <= 0.0
+                            && player_visible
+                            && dist < d.aggro_range.max(d.ranged_range)
+                        {
+                            ev.push(MobEvent::SummonMod(self.body.pos, kind, n));
+                            self.warp_cd = d.summon_every;
+                        }
+                    }
+                }
                 if self.sitting {
                     may_wander = false;
                 } else if let Some(def) = attacking {
@@ -1413,7 +1448,7 @@ impl Mob {
                         // (a flier at its own speed, swooping to the player's height
                         // to bite, or holding its altitude to shoot).
                         chasing = true;
-                        want = Some((face, if def.flying { def.fly_speed } else { 2.3 * def.speed }));
+                        want = Some((face, spd_mul * if def.flying { def.fly_speed } else { 2.3 * def.speed }));
                         if def.flying && melee {
                             fly_goal = Some(player.y + 0.6);
                         }
@@ -1426,7 +1461,7 @@ impl Mob {
                             // Fixed &'static cause (HurtPlayer takes a &'static str,
                             // so we cannot use the mob's dynamic name here).
                             ev.push(MobEvent::HurtPlayer(def.attack_damage, "was mauled by a monster"));
-                            self.attack_cd = def.attack_cooldown;
+                            self.attack_cd = def.attack_cooldown * cd_mul;
                         } else if ranged && fd < def.ranged_range && self.attack_cd <= 0.0 {
                             // Raycast a clear line of sight before loosing, like
                             // the Rattler. Lob it higher the further away (arrows
@@ -1449,7 +1484,7 @@ impl Mob {
                                     blast: def.projectile_blast,
                                 };
                                 ev.push(MobEvent::ShootMod(eye + aim.normalize_or_zero() * 0.5, vel, spec));
-                                self.attack_cd = def.ranged_cooldown;
+                                self.attack_cd = def.ranged_cooldown * cd_mul;
                             }
                         }
                     }
@@ -1692,6 +1727,21 @@ impl Mob {
         if let MobKind::Modded(_) = self.kind {
             if let Some(def) = self.kind.mod_def() {
                 let parts = modded_parts(def);
+                // A template body is scaled (keeping its proportions) to the
+                // mob's own height (custom parts are already measured in blocks).
+                let root = if def.parts.is_empty() {
+                    use crate::block::MobTemplate::*;
+                    let base = match def.template {
+                        Quadruped => MobKind::Oinker,
+                        Biped => MobKind::Groaner,
+                        Blob => MobKind::Bloop,
+                        Bird => MobKind::Cluckster,
+                    };
+                    let (_, h) = base.dims();
+                    root * Mat4::from_scale(Vec3::splat(def.height / h))
+                } else {
+                    root
+                };
                 draw_posed(geo, &root, &parts, self.anim, self.flap, sky);
             }
             return;
