@@ -261,7 +261,15 @@ pub struct Game {
     /// The Galloper we're riding, and when we last told the host (see horses.rs).
     pub mounted: Option<u32>,
     /// Sitting behind a Camel's driver (just along for the ride).
-    pub passenger_seat: bool,
+    /// Which seat we're in (0 drives; see horses.rs).
+    pub seat_no: u8,
+    /// When fireflies were last let out (see nature.rs).
+    pub firefly_acc: f32,
+    /// Distant terrain past the render distance (Video Settings; see lod.rs).
+    pub distant_terrain: bool,
+    pub lod: crate::lod::Lod,
+    /// Trades made with each Hmmer, by each player (see villagers.rs).
+    pub regulars: HashMap<(u32, String), u16>,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -489,7 +497,11 @@ impl Game {
             observer_pulses: HashMap::new(),
             hopper_timer: 0.0,
             mounted: None,
-            passenger_seat: false,
+            seat_no: 0,
+            firefly_acc: 0.0,
+            distant_terrain: true,
+            lod: crate::lod::Lod::default(),
+            regulars: HashMap::new(),
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -741,6 +753,7 @@ impl Game {
             ("stashes".to_string(), crate::stash::encode(&self.world.stashes)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
+            ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
@@ -778,6 +791,9 @@ impl Game {
         }
         if let Some(b) = extra("bee_log") {
             self.bee_log = crate::bees::BeeLog::decode(b);
+        }
+        if let Some(b) = extra("regulars") {
+            self.regulars = crate::villagers::decode_regulars(b);
         }
         if let Some(b) = extra("journal") {
             self.journal = crate::archaeology::Journal::decode(b);
@@ -945,6 +961,16 @@ impl Game {
         }
         for k in self.world.stream(&centers) {
             renderer.drop_chunk(ctx, k);
+        }
+        // The far-off land, kept up with where we are.
+        if self.distant_terrain && !self.in_scorch() && !self.in_hollow() {
+            let generator = self.world.generator.clone();
+            if let Some((_, mesh)) = self.lod.tick(&generator, center, radius) {
+                renderer.set_far(ctx, Some(&mesh));
+            }
+        } else if renderer.has_far() {
+            renderer.set_far(ctx, None);
+            self.lod = crate::lod::Lod::default();
         }
         let (pcx, pcz) = ((center.x / 16.0).floor() as i32, (center.z / 16.0).floor() as i32);
         let near = (radius + 1) * (radius + 1);
@@ -1466,15 +1492,15 @@ impl Game {
         }
     }
 
-    /// Throw the held Soggy Spear (the host owns thrown things, so clients ask it to).
-    fn throw_spear(&mut self) {
+    /// Throw the held spear (the host owns thrown things, so clients ask it to).
+    fn throw_spear(&mut self, item: Id) {
         let wear = self.inv.wear[self.inv.selected];
         self.player.swing = 1.0;
         self.use_cd = 0.8;
         self.advance("spear_it");
         if self.is_client() {
             // The host takes it from its ledger and throws it for us.
-            self.net_send_msg(Msg::UseItem { item: SPEAR });
+            self.net_send_msg(Msg::UseItem { item });
             self.inv.consume_held();
             return;
         }
@@ -1483,13 +1509,15 @@ impl Game {
         }
         let dir = self.player.look_dir();
         let me = self.my_id;
-        self.throw_spear_from(self.player.eye() + dir * 0.5, dir, me, crate::inventory::with_uses(wear, crate::inventory::uses(wear).saturating_add(1)));
+        self.throw_spear_from(self.player.eye() + dir * 0.5, dir, me, item, crate::inventory::with_uses(wear, crate::inventory::uses(wear).saturating_add(1)));
     }
 
     /// Launch a spear (host side).
-    pub fn throw_spear_from(&mut self, pos: Vec3, dir: Vec3, shooter: u32, wear: crate::inventory::Wear) {
-        let mut a = Arrow::new(pos, dir * Arrow::SPEED * 1.1, Some(shooter), 8.0);
-        a.spear = Some(wear);
+    pub fn throw_spear_from(&mut self, pos: Vec3, dir: Vec3, shooter: u32, item: Id, wear: crate::inventory::Wear) {
+        // Thrown, it hits about as hard as it stabs.
+        let damage = if item == SPEAR { 8.0 } else { attack_damage_with(item, 0) + 1.0 };
+        let mut a = Arrow::new(pos, dir * Arrow::SPEED * 1.1, Some(shooter), damage);
+        a.spear = Some((item, wear));
         self.arrows.push(a);
         self.sfx(Sfx::Twang, Some(pos));
     }
@@ -1630,10 +1658,10 @@ impl Game {
                 self.sfx(Sfx::Thunk, Some(a.pos));
             }
             // A spear that hits the ground drops, ready to be picked up.
-            if let Some(wear) = a.spear
+            if let Some(spear) = a.spear
                 && (a.stuck || a.life <= 0.0)
             {
-                landed.push((a.pos - a.dir * 0.3, wear));
+                landed.push((a.pos - a.dir * 0.3, spear));
                 return false;
             }
             if a.life <= 0.0 {
@@ -1656,8 +1684,8 @@ impl Game {
                     m.last_attacker = pid;
                     let (kind, at) = (m.kind, m.body.pos);
                     self.sfx(Sfx::hurt_of(kind), Some(at));
-                    if let Some(wear) = a.spear {
-                        landed.push((a.pos - a.dir * 0.5, wear));
+                    if let Some(spear) = a.spear {
+                        landed.push((a.pos - a.dir * 0.5, spear));
                     } else if pid == self.my_id && !self.dedicated {
                         self.advance("robin_hood");
                     }
@@ -1719,8 +1747,8 @@ impl Game {
         for (at, colour, damage, shooter) in bursts {
             self.firework_burst(at, colour, damage, shooter);
         }
-        for (at, wear) in landed {
-            self.spawn_drop(at, SPEAR, 1, wear, Vec3::ZERO, 0.5);
+        for (at, (item, wear)) in landed {
+            self.spawn_drop(at, item, 1, wear, Vec3::ZERO, 0.5);
         }
     }
 
@@ -1838,6 +1866,15 @@ impl Game {
                         self.sfx(Sfx::Thud, None);
                         self.advance("smash");
                     }
+                    // A spear from a moving mount: the charge goes into the blow.
+                    let charge_speed = self.mount_speed();
+                    let lunge = is_spear(held) && charge_speed > 2.0;
+                    if lunge {
+                        dmg += crate::combat::lunge_bonus(charge_speed);
+                        if charge_speed > 6.0 {
+                            self.advance("jousting");
+                        }
+                    }
                     self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
@@ -1861,11 +1898,15 @@ impl Game {
                             let me = self.my_id;
                             self.smash_around(at, i, me);
                         }
+                        self.creaking_hit(i);
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
                         self.sfx(Sfx::hurt_of(kind), Some(at));
-                        if charge > 0.9 {
+                        if lunge {
+                            let push = (at - from).normalize_or_zero() * (3.0 + charge_speed * 0.6);
+                            self.mobs[i].body.vel += push + Vec3::Y * 3.0;
+                        } else if charge > 0.9 {
                             if self.player.sprinting {
                                 // A running start sends them flying.
                                 let push = (at - from).normalize_or_zero() * 5.0;
@@ -2150,8 +2191,8 @@ impl Game {
         if self.eat_honey(held) {
             return;
         }
-        if held == SPEAR {
-            self.throw_spear();
+        if is_spear(held) {
+            self.throw_spear(held);
             return;
         }
         if held == WIND_CHARGE {
@@ -2386,6 +2427,10 @@ impl Game {
             SPONGE => self.soak(place),
             JACK => self.advance("spooky"),
             _ => {}
+        }
+        if matches!(held, PUMPKIN | JACK) && !self.is_client() {
+            let me = crate::players::record_key(&self.player_name);
+            self.try_build_copper_golem(place, &me);
         }
     }
 
@@ -2848,6 +2893,10 @@ impl Game {
         self.clankers_tick(dt);
         self.beacons_tick(dt);
         self.animals_tick(dt);
+        // (After animals_tick, which sets every mob's goal.)
+        self.copper_golems_tick(dt);
+        self.floaties_tick();
+        self.fireflies_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
@@ -2860,7 +2909,7 @@ impl Game {
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             // Ridden Gallopers go where their rider steers (see horses.rs).
-            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 || m.passenger != 0 {
+            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 || m.passenger != 0 || m.crew != [0, 0] {
                 continue;
             }
             let fuse_before = m.fuse;
@@ -2903,6 +2952,8 @@ impl Game {
                     MobKind::Goat => noises.push((Sfx::Bleat, m.body.pos)),
                     MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel | MobKind::Creaking => {}
                     MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
+                    MobKind::Rotsteed => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::CopperGolem | MobKind::Floaty => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -3015,7 +3066,7 @@ impl Game {
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Breeze => self.advance("breeze_through"),
                             MobKind::Creaking => self.advance("heartbreak"),
-                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer => {}
+                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
@@ -3240,6 +3291,8 @@ impl Game {
         }
         let roll = self.rng.f32();
         let kind = match roll {
+            // Rotsteeds wander the open plains at night.
+            r if matches!(biome, Biome::Plains) && r < 0.05 => MobKind::Rotsteed,
             // Swamps are Bloop country; the badlands rattle.
             r if biome == Biome::Swamp && r < 0.35 => MobKind::Bloop,
             r if biome == Biome::Badlands && r < 0.3 => MobKind::Rattler,
@@ -3263,7 +3316,10 @@ impl Game {
             self.alloc_mob_sized(kind, pos, size);
             return;
         }
-        // Caves are always spooky.
+        // Caves are always spooky (but no horses down there).
+        if kind == MobKind::Rotsteed {
+            return;
+        }
         let cy = self.rng.int(4, y.max(5));
         if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 && !torchlit(&self.world, cy) {
             let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
@@ -3659,6 +3715,7 @@ impl Game {
         let underwater = !self.menu && self.player.head_in_water(&self.world);
         let sky = self.sky_color();
         let far = (render_distance * 16) as f32;
+        let far_land = self.distant_terrain && renderer.has_far() && !self.in_scorch() && !self.in_hollow();
         let (fog_color, fog_start, fog_end) = if underwater {
             ([0.05, 0.12, 0.35], 0.0, 22.0)
         } else if self.in_scorch() {
@@ -3668,6 +3725,10 @@ impl Game {
             ([0.1, 0.05, 0.14], far * 0.4, far)
         } else if !self.fog_on {
             (sky, 0.0, 0.0)
+        } else if far_land {
+            // The haze starts later and reaches the far-off land's edge.
+            let lod = crate::lod::far_for(render_distance) as f32;
+            (sky, far * 0.7, lod - 8.0)
         } else {
             (sky, far * 0.55, far - 4.0)
         };
@@ -3679,7 +3740,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = self.sun_angle(); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = self.sun_angle(); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
     }
 }
 
@@ -3833,14 +3894,16 @@ pub(crate) mod tests {
 
     /// A world with the 3x3 chunks around the origin generated (x and z in -16..32).
     fn loaded_world(seed: u32) -> World {
+        // Exactly these nine chunks, made here in a fixed order: waiting on the
+        // generator threads let a varying number of extra chunks arrive, and
+        // anything done per loaded chunk (random ticks) then played out
+        // differently from run to run.
         let mut w = World::new(seed);
-        let start = std::time::Instant::now();
-        let ready = |w: &World| (-1..=1).all(|cz| (-1..=1).all(|cx| w.chunks.contains_key(&(cx, cz))));
-        while !ready(&w) && start.elapsed().as_secs() < 20 {
-            w.stream(&[(Vec3::ZERO, 1)]);
-            std::thread::sleep(std::time::Duration::from_millis(5));
+        for cz in -1..=1 {
+            for cx in -1..=1 {
+                w.load_now(cx, cz);
+            }
         }
-        assert!(ready(&w), "chunks never generated");
         w
     }
 
@@ -5715,6 +5778,22 @@ looks_like = diamond
             assert!(!death.contains("Rattler"), "a modded shot must not be blamed on a Rattler: {death:?}");
             assert!(death.contains("was shot down by a monster"), "modded shot uses the generic cause: {death:?}");
         });
+    }
+
+    #[test]
+    fn the_same_seed_plays_out_the_same_way() {
+        // Tests (and bug reports) rely on a world doing the same thing twice.
+        let run = || {
+            let mut g = arena(57);
+            for (i, k) in [MobKind::Oinker, MobKind::Mooer, MobKind::Groaner, MobKind::Rattler].into_iter().enumerate() {
+                g.alloc_mob(k, Vec3::new(-6.5 + 4.0 * i as f32, 50.0, 6.5));
+            }
+            for _ in 0..300 {
+                g.update_entities(0.05);
+            }
+            g.mobs.iter().map(|m| (m.kind, (m.body.pos * 1000.0).round(), m.health)).collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
     }
 
     #[test]

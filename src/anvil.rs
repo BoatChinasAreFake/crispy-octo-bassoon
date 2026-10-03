@@ -33,6 +33,7 @@ pub fn repair_material(id: Id) -> Option<Id> {
     match id {
         GLIDER => return Some(FEATHER),
         SPEAR | PICK_COPPER | SWORD_COPPER => return Some(COPPER_INGOT),
+        _ if (SPEAR_FIRST..SPEAR_FIRST + SPEARS as Id).contains(&id) => return Some([PLANKS, COBBLE, IRON, DIAMOND][(id - SPEAR_FIRST) as usize]),
         BRUSH => return Some(COPPER_INGOT),
         DIAMOND_BRUSH => return Some(DIAMOND),
         BEE_SMOKER => return Some(IRON),

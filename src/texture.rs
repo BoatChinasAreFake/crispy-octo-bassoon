@@ -572,6 +572,30 @@ pub const T_BANNER_ICON: u16 = 716;
 /// Personal Chests.
 pub const T_PERSONAL_CHEST_TOP: u16 = 717;
 pub const T_PERSONAL_CHEST_SIDE: u16 = 718;
+/// v0.1.18: copper chests and golems, the Pale Garden's flowers and resin,
+/// ground covers, Floaties, spears and Rotsteeds.
+pub const T_COPPER_CHEST_TOP: u16 = 719;
+pub const T_COPPER_CHEST_SIDE: u16 = 720;
+pub const T_COPPER_GOLEM: u16 = 721;
+pub const T_COPPER_GOLEM_FACE: u16 = 722;
+pub const T_EYEBLOSSOM: u16 = 723;
+pub const T_EYEBLOSSOM_OPEN: u16 = 724;
+pub const T_RESIN_BLOCK: u16 = 725;
+pub const T_RESIN_BRICKS: u16 = 726;
+pub const T_RESIN_CLUMP: u16 = 727;
+pub const T_RESIN_BRICK: u16 = 728;
+pub const T_FIREFLY_BUSH: u16 = 729;
+pub const T_LEAF_LITTER: u16 = 730;
+pub const T_WILDFLOWERS: u16 = 731;
+pub const T_DRIED_FLOATY: u16 = 732;
+pub const T_FLOATY: u16 = 733;
+pub const T_FLOATY_FACE: u16 = 734;
+pub const T_HARNESS: u16 = 735;
+/// Four in a row: wood, stone, iron, dimond.
+pub const T_SPEAR_FIRST: u16 = 736;
+pub const T_ROTSTEED: u16 = 740;
+pub const T_ROTSTEED_FACE: u16 = 741;
+pub const T_HARNESS_WORN: u16 = 742;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2797,6 +2821,103 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.each(T_SNIFFER_EGG, |x, y, r, _| {
         let spot = (x * 7 + y * 5) % 11 < 2;
         shade(if spot { rgb(60, 110, 70) } else { rgb(170, 70, 55) }, r.range(0.85, 1.1))
+    });
+    a.each(T_COPPER_CHEST_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        shade(if rim { rgb(120, 60, 35) } else { rgb(200, 110, 70) }, r.range(0.85, 1.1))
+    });
+    a.each(T_COPPER_CHEST_SIDE, |x, y, r, _| {
+        let rim = !(2..=13).contains(&x) || y > 13 || y == 6;
+        let latch = (7..9).contains(&x) && (5..9).contains(&y);
+        let teal = (x * 3 + y * 5) % 13 == 0;
+        if latch { rgb(70, 160, 140) } else { shade(if rim { rgb(120, 60, 35) } else if teal { rgb(90, 160, 130) } else { rgb(200, 110, 70) }, r.range(0.85, 1.1)) }
+    });
+    a.each(T_COPPER_GOLEM, |x, y, r, _| {
+        let rivet = (x % 5 == 2) && (y % 5 == 2);
+        let teal = (x * 7 + y * 3) % 17 == 0;
+        shade(if rivet { rgb(240, 160, 110) } else if teal { rgb(80, 160, 130) } else { rgb(195, 105, 65) }, r.range(0.85, 1.1))
+    });
+    a.each(T_COPPER_GOLEM_FACE, |x, y, r, _| {
+        let eye = (5..7).contains(&y) && (x == 4 || x == 5 || x == 10 || x == 11);
+        let nose = (7..9).contains(&x) && (6..11).contains(&y);
+        if eye { rgb(30, 20, 15) } else if nose { shade(rgb(230, 140, 90), r.range(0.9, 1.05)) } else { shade(rgb(195, 105, 65), r.range(0.85, 1.1)) }
+    });
+    a.each(T_EYEBLOSSOM, |x, y, r, _| {
+        let stem = (7..9).contains(&x) && y > 7;
+        let bud = (5..11).contains(&x) && (3..8).contains(&y);
+        if bud { shade(rgb(140, 140, 145), r.range(0.85, 1.1)) } else if stem { rgb(90, 100, 90) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_EYEBLOSSOM_OPEN, |x, y, r, _| {
+        let stem = (7..9).contains(&x) && y > 7;
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 5.0);
+        let petal = dx * dx + dy * dy < 18.0;
+        let eye = dx * dx + dy * dy < 3.0;
+        if eye { rgb(255, 150, 40) } else if petal { shade(rgb(230, 230, 235), r.range(0.9, 1.05)) } else if stem { rgb(90, 100, 90) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_RESIN_BLOCK, |x, y, r, _| {
+        let blob = (x * 5 + y * 9) % 7 == 0;
+        shade(if blob { rgb(250, 160, 50) } else { rgb(225, 120, 30) }, r.range(0.85, 1.1))
+    });
+    a.each(T_RESIN_BRICKS, |x, y, r, _| {
+        let mortar = y % 4 == 3 || (x + (y / 4) * 4) % 8 == 0;
+        shade(if mortar { rgb(150, 70, 20) } else { rgb(220, 115, 35) }, r.range(0.85, 1.1))
+    });
+    a.sprite(T_RESIN_CLUMP, &ORB_SPRITE, &[('#', rgb(110, 50, 10)), ('h', rgb(255, 190, 90)), ('b', rgb(230, 125, 35)), ('d', rgb(170, 80, 20))]);
+    a.sprite(T_RESIN_BRICK, &INGOT_SPRITE, &[('#', rgb(110, 50, 10)), ('b', rgb(225, 120, 35)), ('h', rgb(255, 180, 80)), ('d', rgb(160, 75, 20))]);
+    a.each(T_FIREFLY_BUSH, |x, y, r, _| {
+        let twig = (x * 3 + y * 7) % 5 == 0 && y > 3;
+        let glow = (x * 11 + y * 5) % 23 == 0 && y < 10;
+        if glow { rgb(250, 240, 120) } else if twig { shade(rgb(70, 95, 45), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_LEAF_LITTER, |x, y, r, _| {
+        let leaf = (x * 7 + y * 3) % 5 < 2;
+        let c = match (x * 3 + y) % 3 { 0 => rgb(160, 95, 40), 1 => rgb(185, 130, 55), _ => rgb(130, 75, 35) };
+        if leaf { shade(c, r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_WILDFLOWERS, |x, y, r, _| {
+        let head = (x * 5 + y * 7) % 11 == 0;
+        let leaf = (x * 3 + y * 5) % 7 == 0;
+        if head { shade(rgb(250, 215, 60), r.range(0.9, 1.05)) } else if leaf { rgb(80, 140, 60) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_DRIED_FLOATY, |x, y, r, _| {
+        let crack = (x + y * 3) % 7 == 0;
+        shade(if crack { rgb(110, 95, 85) } else { rgb(160, 145, 130) }, r.range(0.85, 1.08))
+    });
+    a.each(T_FLOATY, |_, _, r, _| shade(rgb(245, 245, 250), r.range(0.92, 1.03)));
+    a.each(T_FLOATY_FACE, |x, y, r, _| {
+        let eye = (5..8).contains(&y) && (x == 4 || x == 5 || x == 10 || x == 11);
+        let smile = y == 10 && (5..11).contains(&x) || y == 9 && (x == 4 || x == 11);
+        let cheek = y == 8 && (x == 2 || x == 13);
+        if eye || smile { rgb(40, 40, 50) } else if cheek { rgb(250, 160, 170) } else { shade(rgb(245, 245, 250), r.range(0.92, 1.03)) }
+    });
+    a.each(T_HARNESS, |x, y, r, _| {
+        let strap = (x + y) % 6 == 0 || (x + 15 - y) % 6 == 0;
+        let goggle = (y == 4 || y == 5) && ((3..6).contains(&x) || (10..13).contains(&x));
+        if goggle { rgb(160, 210, 240) } else if strap && (2..14).contains(&x) && (2..14).contains(&y) { shade(rgb(120, 70, 35), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_HARNESS_WORN, |x, y, r, _| {
+        let strap = y % 6 < 2 || x % 6 < 1;
+        shade(if strap { rgb(120, 70, 35) } else { rgb(200, 60, 60) }, r.range(0.85, 1.1))
+    });
+    for (i, (shaft, head, dark)) in [
+        (rgb(140, 100, 55), rgb(175, 130, 75), rgb(95, 65, 35)),
+        (rgb(140, 100, 55), rgb(140, 140, 140), rgb(80, 80, 80)),
+        (rgb(140, 100, 55), rgb(225, 225, 230), rgb(120, 120, 130)),
+        (rgb(140, 100, 55), rgb(110, 235, 225), rgb(40, 130, 125)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        a.sprite(T_SPEAR_FIRST + i as u16, &SPEAR_SPRITE, &[('#', dark), ('h', head), ('t', shaft)]);
+    }
+    a.each(T_ROTSTEED, |x, y, r, _| {
+        let bone = (x * 5 + y * 3) % 13 == 0;
+        shade(if bone { rgb(200, 205, 180) } else { rgb(85, 120, 75) }, r.range(0.82, 1.08))
+    });
+    a.each(T_ROTSTEED_FACE, |x, y, r, _| {
+        let eye = (4..6).contains(&y) && (x == 3 || x == 12);
+        let teeth = y == 12 && x % 2 == 0;
+        if eye { rgb(200, 40, 30) } else if teeth { rgb(220, 220, 200) } else { shade(rgb(85, 120, 75), r.range(0.82, 1.08)) }
     });
     a.sprite(T_PITCHER_POD, &ORB_SPRITE, &[('#', rgb(40, 60, 50)), ('h', rgb(130, 210, 190)), ('b', rgb(70, 150, 130)), ('d', rgb(50, 110, 95))]);
     a.each(T_PITCHER_CROP, |x, y, r, _| {

@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
+    matches!(id, CHEST | COPPER_CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -69,6 +69,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,
         COBBLED_DEEPSLATE => DEEPSLATE,
+        RESIN_CLUMP => RESIN_BRICK,
         // Mod recipes.
         _ => return reg().smelting.iter().find(|r| r.0 == id).map(|r| r.1),
     })

@@ -538,6 +538,10 @@ impl Game {
                     if packed != 0 {
                         self.unpack_box(IVec3::new(x, y, z), packed);
                     }
+                    if matches!(id, PUMPKIN | JACK) && old != id {
+                        let who = self.peer_name(from);
+                        self.try_build_copper_golem(IVec3::new(x, y, z), &crate::players::record_key(&who));
+                    }
                     if id == BANNER && old != BANNER {
                         let design = if self.verified_held(from) == BANNER { self.verified_ench(from) } else { 0 };
                         let facing = self.peers.get(&from).map(|p| crate::banners::facing_from_yaw(p.yaw)).unwrap_or(0);
@@ -597,7 +601,7 @@ impl Game {
                 let strength = self.strong.get(&from).map_or(0.0, |&(_, amplifier)| crate::potions::strength_bonus(amplifier));
                 let held = self.verified_held(from);
                 // (A Mace adds whatever their fall was worth; the host can't see falls, so it allows a long one.)
-                let smash = if held == MACE { crate::combat::smash_bonus(40.0) } else { 0.0 };
+                let smash = if held == MACE { crate::combat::smash_bonus(40.0) } else if is_spear(held) { crate::combat::LUNGE_MAX } else { 0.0 };
                 let dmg = dmg.clamp(0.0, (attack_damage_with(held, sharpness) + strength) * 1.5 + smash);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
                     m.damage(dmg, eye);
@@ -608,6 +612,9 @@ impl Game {
                     self.host_wear(from, held, hit_wear(held));
                     if let Some(name) = self.peers.get(&from).map(|p| crate::players::record_key(&p.name)) {
                         self.sic_pets(&name, mob);
+                    }
+                    if let Some(i) = self.mobs.iter().position(|o| o.id == mob) {
+                        self.creaking_hit(i);
                     }
                 }
             }
@@ -710,13 +717,13 @@ impl Game {
                     return;
                 }
                 // A thrown spear leaves their hands and flies from where they look.
-                if item == SPEAR && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, SPEAR) {
-                    let ench = if self.verified_held(from) == SPEAR { self.verified_ench(from) } else { 0 };
+                if is_spear(item) && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, item) {
+                    let ench = if self.verified_held(from) == item { self.verified_ench(from) } else { 0 };
                     if let Some(p) = self.peers.get(&from) {
                         let dir = Vec3::new(p.yaw.sin() * p.pitch.cos(), p.pitch.sin(), -p.yaw.cos() * p.pitch.cos());
                         let eye = p.target + Vec3::Y * 1.6;
-                        if self.peer_take(from, SPEAR, 1) {
-                            self.throw_spear_from(eye + dir * 0.5, dir, from, (ench as u32) << 16);
+                        if self.peer_take(from, item, 1) {
+                            self.throw_spear_from(eye + dir * 0.5, dir, from, item, (ench as u32) << 16);
                         }
                     }
                     return;
@@ -740,6 +747,7 @@ impl Game {
             Msg::LecternTake { x, y, z } => self.host_lectern_take(from, IVec3::new(x, y, z)),
             Msg::Loom { design, dye } => self.host_loom(from, design, dye),
             Msg::SortContainer { x, y, z } => self.host_sort(from, IVec3::new(x, y, z)),
+            Msg::RegularAsk { mob } => self.host_regular_ask(from, mob),
             Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
                 let p = IVec3::new(x, y, z);
                 if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
@@ -1093,6 +1101,7 @@ impl Game {
             }
             Msg::BundleState { old, new, contents } => self.bundle_state(old, new, contents),
             Msg::BookState { old, new, signed, open, title, author, pages } => self.book_state(old, new, signed, open, title, author, pages),
+            Msg::Regular { mob, trades } => self.regular_state(mob, trades),
             Msg::Banner { x, y, z, design, facing, up } => self.banner_msg(IVec3::new(x, y, z), design, facing, up),
             Msg::Firework { at, colour } => {
                 if at.is_finite() {
@@ -1163,7 +1172,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } => {}
         }
     }
 
@@ -1187,7 +1196,7 @@ impl Game {
             // Starers (and Weepers) reuse the fuse field for "angry".
             m.angry = matches!(kind, MobKind::Starer | MobKind::Weeper) && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
-            if matches!(kind, MobKind::Hmmer | MobKind::Sneaker) {
+            if matches!(kind, MobKind::Hmmer | MobKind::Sneaker | MobKind::CopperGolem) {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
@@ -1219,7 +1228,7 @@ impl Game {
     /// Client-side entity tick: particles plus smoothing the host's mobs.
     pub fn client_entities(&mut self, dt: f32) {
         // (A Camel's passenger lets the host move it.)
-        let mounted = self.mounted.filter(|_| !self.passenger_seat);
+        let mounted = self.mounted.filter(|_| self.seat_no == 0);
         for m in self.mobs.iter_mut() {
             // The Galloper we're riding goes where we steer it.
             if Some(m.id) == mounted {
@@ -1338,7 +1347,7 @@ impl Game {
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
                         // (Bosses send their health, for the boss bar.)
-                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
+                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker | MobKind::CopperGolem) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         // Its size (low half) and colouring (high half).

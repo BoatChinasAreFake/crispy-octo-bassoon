@@ -50,6 +50,12 @@ pub fn shield_blocks(look: Vec3, me: Vec3, from: Option<Vec3>) -> bool {
 }
 
 /// A Mace needs this much of a fall behind it to smash.
+/// A spear blow from a mount moving at `speed` (blocks a second): extra damage.
+pub fn lunge_bonus(speed: f32) -> f32 {
+    (speed * 1.1).min(LUNGE_MAX)
+}
+pub const LUNGE_MAX: f32 = 11.0;
+
 pub const SMASH_MIN: f32 = 1.5;
 
 /// Extra Mace damage for a fall of `fall` blocks: four a block for the first

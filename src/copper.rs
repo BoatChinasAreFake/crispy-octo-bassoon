@@ -15,7 +15,6 @@ use crate::block::*;
 use crate::game::Game;
 use crate::world::{CH, CW};
 use macroquad::math::{ivec3, IVec3};
-use std::collections::HashSet;
 
 /// Random ticks per 16-high slice of a chunk, per second (Minecraft's 3 a tick).
 const PER_SECTION: u32 = 60;
@@ -54,15 +53,18 @@ impl Game {
                 let p = self.player.body.pos;
                 centres.push((p.x.floor() as i32, p.z.floor() as i32));
             }
-            let mut chunks = HashSet::new();
+            let mut chunks = Vec::new();
             for (x, z) in centres {
                 let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
                 for dz in -RADIUS..=RADIUS {
                     for dx in -RADIUS..=RADIUS {
-                        chunks.insert((cx + dx, cz + dz));
+                        chunks.push((cx + dx, cz + dz));
                     }
                 }
             }
+            // (In a fixed order, so a seed plays out the same way every time.)
+            chunks.sort_unstable();
+            chunks.dedup();
             for (cx, cz) in chunks {
                 if !self.world.chunks.contains_key(&(cx, cz)) {
                     continue;
@@ -114,6 +116,17 @@ impl Game {
                 }
                 self.sfx(crate::sound::Sfx::Break(crate::sound::Mat::Glass), Some(at));
             }
+        } else if id == EYEBLOSSOM || id == EYEBLOSSOM_OPEN {
+            // Open at night, shut by day.
+            let want = if self.is_night() { EYEBLOSSOM_OPEN } else { EYEBLOSSOM };
+            if want != id && self.rng.chance(0.5) {
+                self.world.set_v(p, want);
+            }
+        } else if id == DRIED_FLOATY {
+            // Soaks up the water next to it, and wakes.
+            if crate::floaty::soaked(&self.world, p) && self.rng.chance(crate::floaty::HATCH_CHANCE) {
+                self.hatch_floaty(p);
+            }
         } else if id == TORCHFLOWER_SPROUT {
             // Ancient seeds take their time (and want a bit of light).
             if self.rng.chance(0.08) && self.world.sky_light(p.x, p.y, p.z) > 0.3 {
@@ -145,6 +158,24 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eyeblossoms_open_at_night_and_shut_by_day() {
+        let mut g = crate::game::tests::arena(81);
+        let p = ivec3(1, 50, 1);
+        g.world.set_v(p, EYEBLOSSOM);
+        g.time = 0.75; // midnight
+        for _ in 0..40 {
+            g.random_tick(p);
+        }
+        assert_eq!(g.world.get_v(p), EYEBLOSSOM_OPEN);
+        assert!(crate::block::block(EYEBLOSSOM_OPEN).light > 0.0, "and glows a little");
+        g.time = 0.25; // noon
+        for _ in 0..40 {
+            g.random_tick(p);
+        }
+        assert_eq!(g.world.get_v(p), EYEBLOSSOM);
+    }
 
     #[test]
     fn copper_waxes_and_coral_needs_water() {

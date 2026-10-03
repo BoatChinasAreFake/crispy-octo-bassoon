@@ -441,6 +441,8 @@ pub struct FrameParams {
     pub fog_color: [f32; 3],
     pub fog_start: f32,
     pub fog_end: f32,
+    /// Draw the distant terrain (see lod.rs).
+    pub far_land: bool,
     pub daylight: f32,
     /// Least light anywhere (0 for the ordinary world).
     pub ambient: f32,
@@ -472,6 +474,8 @@ pub struct Renderer {
     dyn_cap_v: usize,
     dyn_cap_i: usize,
     pub chunks: HashMap<(i32, i32), GpuChunk>,
+    /// Distant terrain (see lod.rs), drawn behind the chunks.
+    far: Option<GpuMesh>,
 }
 
 fn upload(ctx: &mut dyn RenderingBackend, m: &MeshData) -> Option<GpuMesh> {
@@ -590,7 +594,7 @@ impl Renderer {
         let (dyn_cap_v, dyn_cap_i) = (1 << 16, 3 << 15);
         let dyn_vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<Vertex>(dyn_cap_v));
         let dyn_ib = ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Stream, BufferSource::empty::<u32>(dyn_cap_i));
-        Renderer { opaque, blend, overlay, sky, texture, shadow_tex, shadow_pass, shadow_pipe, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new() }
+        Renderer { opaque, blend, overlay, sky, texture, shadow_tex, shadow_pass, shadow_pipe, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new(), far: None }
     }
 
     pub fn set_chunk(&mut self, ctx: &mut dyn RenderingBackend, key: (i32, i32), mesh: ChunkMesh) {
@@ -600,6 +604,17 @@ impl Renderer {
         }
         let g = GpuChunk { opaque: upload(ctx, &mesh.opaque), water: upload(ctx, &mesh.water), lights: mesh.lights };
         self.chunks.insert(key, g);
+    }
+
+    /// Swap in new distant terrain (or none).
+    pub fn set_far(&mut self, ctx: &mut dyn RenderingBackend, mesh: Option<&MeshData>) {
+        let old = self.far.take();
+        free(ctx, old);
+        self.far = mesh.and_then(|m| upload(ctx, m));
+    }
+
+    pub fn has_far(&self) -> bool {
+        self.far.is_some()
     }
 
     /// Replace the texture atlas (after mods change) and rebuild its mipmaps.
@@ -762,6 +777,13 @@ impl Renderer {
         // Opaque chunks
         ctx.apply_pipeline(&self.opaque);
         ctx.apply_uniforms(UniformsSource::table(&base));
+        // The far-off land first (it's sunk under the chunks where they meet).
+        if fp.far_land
+            && let Some(m) = &self.far
+        {
+            ctx.apply_bindings(&Bindings { vertex_buffers: vec![m.vb], index_buffer: m.ib, images: images.clone() });
+            ctx.draw(0, m.count, 1);
+        }
         let mut visible: Vec<((i32, i32), f32)> = Vec::new();
         for (&(cx, cz), c) in &self.chunks {
             let min = Vec3::new(cx as f32 * 16.0, 0.0, cz as f32 * 16.0);

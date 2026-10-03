@@ -701,6 +701,16 @@ impl Generator {
                     let meadow = matches!(biome, Biome::Plains | Biome::Forest) && hash2(s ^ 0xF12, x >> 4, z >> 4) < 0.15;
                     if r < 0.012 || (meadow && r < 0.07) {
                         b[idx(lx, top, lz)] = flower_for(biome, hash2(s ^ 0xF11, x >> 1, z >> 1));
+                    } else if meadow && r < 0.16 {
+                        // Wildflowers between the flowers.
+                        b[idx(lx, top, lz)] = WILDFLOWERS;
+                    } else if matches!(biome, Biome::Swamp | Biome::Mangrove) && r < 0.02 {
+                        // Where the fireflies live.
+                        b[idx(lx, top, lz)] = FIREFLY_BUSH;
+                    } else if biome == Biome::PaleGarden && r < 0.03 {
+                        // Eyeblossoms in the moss (open at night).
+                        b[idx(lx, h, lz)] = PALE_MOSS;
+                        b[idx(lx, top, lz)] = EYEBLOSSOM;
                     } else if biome == Biome::Cherry && r < 0.4 {
                         // Petals everywhere under the cherry trees.
                         b[idx(lx, top, lz)] = PINK_PETALS;
@@ -713,6 +723,9 @@ impl Generator {
                         b[idx(lx, top, lz)] = PUMPKIN;
                     } else if r < 0.125 && matches!(biome, Biome::Forest | Biome::Taiga) {
                         b[idx(lx, top, lz)] = MUSHROOM;
+                    } else if r < 0.3 && matches!(biome, Biome::Forest | Biome::Taiga) && hash2(s ^ 0x1EAF, x >> 2, z >> 2) < 0.45 {
+                        // Drifts of fallen leaves under the trees.
+                        b[idx(lx, top, lz)] = LEAF_LITTER;
                     } else if r < 0.2 && biome == Biome::Jungle {
                         // Jungles are thick with undergrowth.
                         b[idx(lx, top, lz)] = TALL_GRASS;
@@ -779,7 +792,7 @@ impl Generator {
                         continue;
                     }
                     let i = idx(lx, p.y, lz);
-                    if force || matches!(b[i], AIR | TALL_GRASS | FLOWER | LILY_PAD | PINK_PETALS | PALE_HANGING_MOSS) {
+                    if force || matches!(b[i], AIR | TALL_GRASS | FLOWER | LILY_PAD | PINK_PETALS | PALE_HANGING_MOSS | LEAF_LITTER | WILDFLOWERS | EYEBLOSSOM | FIREFLY_BUSH) {
                         b[i] = id;
                     }
                 }

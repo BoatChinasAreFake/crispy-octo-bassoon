@@ -6,6 +6,10 @@
 //! hurt (hits just make it twitch); break its heart and it crumbles. At dawn
 //! the heart sleeps again and its Creaking goes back into the ground.
 //!
+//! Hitting a Creaking does it no harm, but its heart oozes a little **Resin**
+//! (a clump drops by the heart now and then). Nine make a block; bake them
+//! into Resin Bricks.
+//!
 //! Hearts and their Creakings live where the world lives; joined players
 //! looking at a Creaking freeze it too (the host knows where they look).
 
@@ -35,6 +39,21 @@ pub fn watching(eye: Vec3, dir: Vec3, at: Vec3) -> bool {
 }
 
 impl Game {
+    /// Someone hit the Creaking `i`: its heart may ooze a resin clump (where the world lives).
+    pub fn creaking_hit(&mut self, i: usize) {
+        if self.is_client() || self.mobs[i].kind != MobKind::Creaking {
+            return;
+        }
+        let Some(home) = self.mobs[i].home else { return };
+        if self.rng.chance(0.5) {
+            self.pop_drop(home + Vec3::Y * 0.6, RESIN_CLUMP, 1);
+            self.sfx(Sfx::Break(crate::sound::Mat::Wood), Some(home));
+            if !self.dedicated && self.player.body.pos.distance(home) < 24.0 {
+                self.advance("resin_up");
+            }
+        }
+    }
+
     /// Hearts near players wake at night, sleep by day; Creakings freeze when watched.
     pub fn creaking_tick(&mut self, dt: f32) {
         if self.is_client() {
@@ -121,6 +140,21 @@ impl Game {
 mod tests {
     use super::*;
     use crate::game::tests::arena;
+
+    #[test]
+    fn hitting_a_creaking_knocks_resin_out_of_its_heart() {
+        let mut g = arena(63);
+        let heart = Vec3::new(3.5, 50.5, 3.5);
+        let id = g.alloc_mob(MobKind::Creaking, Vec3::new(0.5, 50.0, 0.5));
+        let i = g.mobs.iter().position(|m| m.id == id).unwrap();
+        g.mobs[i].home = Some(heart);
+        for _ in 0..20 {
+            g.creaking_hit(i);
+        }
+        let resin: u32 = g.drops.iter().filter(|d| d.item == RESIN_CLUMP).map(|d| d.n as u32).sum();
+        assert!(resin > 0, "resin by the heart");
+        assert_eq!(crate::containers::smelt(RESIN_CLUMP), Some(RESIN_BRICK));
+    }
 
     #[test]
     fn creakings_wake_at_night_freeze_when_watched_and_die_with_their_heart() {
