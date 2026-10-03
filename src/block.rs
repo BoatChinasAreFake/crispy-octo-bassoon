@@ -273,7 +273,11 @@ pub const VAULT: Id = 457;
 pub const VAULT_OPEN: Id = 458;
 /// Point a compass at it (see navigation.rs).
 pub const LODESTONE: Id = 459;
-pub const NUM_BLOCKS: Id = 460;
+/// Ominous Trials (see trial.rs): a spawner woken by someone with Bad Omen, its vaults, and their prize.
+pub const TRIAL_SPAWNER_OMINOUS: Id = 460;
+pub const VAULT_OMINOUS: Id = 461;
+pub const HEAVY_CORE: Id = 462;
+pub const NUM_BLOCKS: Id = 463;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -450,7 +454,13 @@ pub const TRIMS: usize = 4;
 pub const SPYGLASS: Id = FIRST_ITEM + 220;
 /// Holds a mix of small stacks in one slot (see bundle.rs).
 pub const BUNDLE: Id = FIRST_ITEM + 221;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 222;
+/// Opens an Ominous Vault (see trial.rs).
+pub const OMINOUS_TRIAL_KEY: Id = FIRST_ITEM + 222;
+/// Hits harder the further you fell first.
+pub const MACE: Id = FIRST_ITEM + 223;
+/// Drink it for a Bad Omen.
+pub const OMINOUS_BOTTLE: Id = FIRST_ITEM + 224;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 225;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -1950,6 +1960,14 @@ impl Registry {
             blocks.push(d);
         }
         blocks.push(def("lodestone", "Lodestone (Magnetic Personality)", Cube, true, true, [T_LODESTONE_TOP, T_LODESTONE_SIDE, T_LODESTONE_TOP], 3.5, 1, true, LODESTONE, 0.0, S_STONE));
+        let mut ominous = def("ominous_trial_spawner", "Trial Spawner (Ominous)", Cube, true, false, [T_TRIAL_SPAWNER_TOP, T_OMINOUS_SPAWNER, T_TRIAL_SPAWNER_TOP], 50.0, 2, true, AIR, 6.0, S_STONE);
+        ominous.see_through = true;
+        ominous.creative = false;
+        blocks.push(ominous);
+        let mut ov = def("ominous_vault", "Vault (Ominous, Locked)", Cube, true, true, [T_VAULT_TOP, T_VAULT_OMINOUS, T_VAULT_TOP], 50.0, 2, true, AIR, 6.0, S_STONE);
+        ov.creative = false;
+        blocks.push(ov);
+        blocks.push(def("heavy_core", "Heavy Core (Surprisingly Dense)", Cube, true, true, [T_HEAVY_CORE; 3], 10.0, 1, true, HEAVY_CORE, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2178,6 +2196,9 @@ impl Registry {
         }
         items.push(ItemDef { stack: 1, consume: false, ..item("spyglass", "Spyglass (Pirate Approved)", T_SPYGLASS) });
         items.push(ItemDef { stack: 1, consume: false, ..item("bundle", "Bundle (Bag of Bits)", T_BUNDLE) });
+        items.push(item("ominous_trial_key", "Ominous Trial Key (Opens an Ominous Vault)", T_OMINOUS_KEY));
+        items.push(ItemDef { stack: 1, damage: 6.0, durability: Some(500), ..item("mace", "Mace (Gravity Assisted)", T_MACE) });
+        items.push(ItemDef { stack: 16, ..item("ominous_bottle", "Ominous Bottle (Tastes Foreboding)", T_OMINOUS_BOTTLE) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2286,6 +2307,7 @@ impl Registry {
             r(&[(BREEZE_ROD, 1)], (WIND_CHARGE, 4)),
             r(&[(STONE_BRICKS, 8), (IRON, 1)], (LODESTONE, 1)),
             r(&[(GLASS, 1), (COPPER_INGOT, 2)], (SPYGLASS, 1)),
+            r(&[(HEAVY_CORE, 1), (BREEZE_ROD, 1)], (MACE, 1)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),

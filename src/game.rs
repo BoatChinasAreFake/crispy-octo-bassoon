@@ -1778,7 +1778,17 @@ impl Game {
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
                     let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
-                    let dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    let mut dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    // A Mace swung on the way down: the fall goes into the blow (and not into you).
+                    let fall = self.player.fall_start - self.player.body.pos.y;
+                    let smash = held == MACE && fall > crate::combat::SMASH_MIN && !self.player.body.on_ground;
+                    if smash {
+                        dmg += crate::combat::smash_bonus(fall);
+                        self.player.fall_start = self.player.body.pos.y;
+                        self.player.body.vel.y = self.player.body.vel.y.max(4.0);
+                        self.sfx(Sfx::Thud, None);
+                        self.advance("smash");
+                    }
                     self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
@@ -1797,6 +1807,11 @@ impl Game {
                         self.net_send_msg(Msg::Attack { mob, dmg, from });
                         self.mobs[i].hurt = 0.5;
                     } else {
+                        if smash {
+                            let at = self.mobs[i].body.pos;
+                            let me = self.my_id;
+                            self.smash_around(at, i, me);
+                        }
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
@@ -1944,7 +1959,7 @@ impl Game {
                 self.ring_bell(pos);
                 return;
             }
-            if id == VAULT {
+            if id == VAULT || id == VAULT_OMINOUS {
                 self.use_vault(pos);
                 return;
             }
@@ -2072,6 +2087,19 @@ impl Game {
         }
         if held == GOAT_HORN {
             self.blow_horn();
+            return;
+        }
+        if held == OMINOUS_BOTTLE {
+            // A Bad Omen: raids in villages, ominous trials in Trial Chambers.
+            if !self.is_client() {
+                let me = self.my_id;
+                self.give_effect_to(me, crate::potions::Potion::BadOmen, crate::raids::OMEN_SECS);
+            }
+            self.sfx(Sfx::Eat, None);
+            self.msg("You feel a Bad Omen. Something's going to go wrong (on purpose).");
+            if !self.creative {
+                self.use_up_held();
+            }
             return;
         }
         if held == SPYGLASS {

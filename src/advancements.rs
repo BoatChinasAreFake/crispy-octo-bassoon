@@ -136,6 +136,8 @@ pub const ALL: &[Advancement] = &[
     adv("bird_plane", "Is It a Bird?", "Look through a Spyglass."),
     adv("light_show", "Light Show", "Set off a firework from the ground."),
     adv("dressed_up", "Crafting a New Look", "Put a trim on some armour at a Smithing Table."),
+    adv("smash", "Smash Hit", "Land a Mace blow on the way down. Gravity did most of the work."),
+    adv("ominous_vault", "Ominous Outcome", "Open an Ominous Vault with an Ominous Trial Key."),
     adv("homing_in", "Country Lode, Take Me Home", "Point a compass at a Lodestone."),
 ];
 

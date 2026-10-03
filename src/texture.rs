@@ -533,6 +533,13 @@ pub const T_CAMEL_HUMP: u16 = 671;
 pub const T_SPARK_FIRST: u16 = 672;
 /// Armour trim colours, one per material (see trims.rs).
 pub const T_TRIM_FIRST: u16 = 680;
+/// Ominous Trials and the Mace.
+pub const T_OMINOUS_SPAWNER: u16 = 686;
+pub const T_VAULT_OMINOUS: u16 = 687;
+pub const T_HEAVY_CORE: u16 = 688;
+pub const T_OMINOUS_KEY: u16 = 689;
+pub const T_MACE: u16 = 690;
+pub const T_OMINOUS_BOTTLE: u16 = 691;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4710,6 +4717,43 @@ fn paint_scorch_and_raids(a: &mut Atlas) {
 }
 
 /// Trial Chambers, the new animals, fireworks, trims and tools.
+const MACE_SPRITE: [&str; 16] = [
+    "................",
+    "..........####..",
+    ".........#hhhh#.",
+    "........#hbhhbh#",
+    "........#hhbbhh#",
+    "........#hbhhbh#",
+    ".........#hhhh#.",
+    "........#s####..",
+    ".......#s#......",
+    "......#s#.......",
+    ".....#s#........",
+    "....#s#.........",
+    "...#s#..........",
+    "..#s#...........",
+    "..##............",
+    "................",
+];
+const OMINOUS_BOTTLE_SPRITE: [&str; 16] = [
+    "................",
+    "......####......",
+    "......#cc#......",
+    "......#gg#......",
+    ".....#gggg#.....",
+    "....#gkkkkg#....",
+    "...#gkkkkkkg#...",
+    "...#gkkggkkg#...",
+    "...#gkgkkgkg#...",
+    "...#gkkggkkg#...",
+    "...#gkkkkkkg#...",
+    "....#gkkkkg#....",
+    ".....######.....",
+    "................",
+    "................",
+    "................",
+];
+
 fn paint_trials_and_friends(a: &mut Atlas) {
     let tuff = rgb(95, 100, 92);
     a.each(T_TUFF_BRICKS, |x, y, r, _| {
@@ -4756,6 +4800,25 @@ fn paint_trials_and_friends(a: &mut Atlas) {
         shade(if d < 3.0 { rgb(70, 70, 75) } else if d < 4.5 { rgb(200, 200, 205) } else { rgb(110, 110, 115) }, r.range(0.9, 1.06))
     });
     a.sprite(T_TRIAL_KEY, &KEY_SPRITE, &[('#', rgb(70, 40, 20)), ('h', rgb(255, 220, 120)), ('b', rgb(220, 160, 60))]);
+    a.sprite(T_OMINOUS_KEY, &KEY_SPRITE, &[('#', rgb(25, 30, 45)), ('h', rgb(120, 220, 230)), ('b', rgb(60, 130, 160))]);
+    a.each(T_OMINOUS_SPAWNER, |x, y, r, _| {
+        let bar = x % 5 == 0 || y % 5 == 0 || x == 15 || y == 15;
+        if bar { shade(rgb(35, 40, 55), r.range(0.85, 1.1)) } else if (6..10).contains(&x) && (6..10).contains(&y) { shade(rgb(90, 200, 230), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_VAULT_OMINOUS, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        if (6..10).contains(&x) && (5..11).contains(&y) {
+            shade(rgb(110, 220, 235), r.range(0.85, 1.1))
+        } else {
+            shade(if rim { rgb(60, 95, 120) } else { rgb(40, 44, 55) }, r.range(0.88, 1.08))
+        }
+    });
+    a.each(T_HEAVY_CORE, |x, y, r, _| {
+        let d = (x as f32 - 7.5).abs().max((y as f32 - 7.5).abs());
+        shade(if d < 3.0 { rgb(80, 85, 95) } else if d < 5.0 { rgb(45, 48, 55) } else { rgb(120, 125, 135) }, r.range(0.85, 1.1))
+    });
+    a.sprite(T_MACE, &MACE_SPRITE, &[('#', rgb(30, 30, 35)), ('h', rgb(170, 175, 185)), ('b', rgb(95, 100, 110)), ('s', rgb(150, 170, 230))]);
+    a.sprite(T_OMINOUS_BOTTLE, &OMINOUS_BOTTLE_SPRITE, &[('#', rgb(25, 25, 30)), ('g', rgb(200, 220, 230)), ('k', rgb(60, 130, 160)), ('c', rgb(140, 100, 60))]);
     a.sprite(T_WIND_CHARGE, &ORB_SPRITE, &[('#', rgb(90, 110, 160)), ('h', rgb(240, 245, 255)), ('b', rgb(180, 200, 245)), ('d', rgb(130, 150, 210))]);
     a.sprite(T_BREEZE_ROD, &ROD_SPRITE, &[('#', rgb(60, 70, 110)), ('h', rgb(220, 230, 255)), ('b', rgb(150, 170, 230))]);
     a.sprite(T_GOAT_HORN, &HORN_SPRITE, &[('#', rgb(70, 60, 45)), ('h', rgb(240, 230, 205)), ('b', rgb(200, 185, 150))]);

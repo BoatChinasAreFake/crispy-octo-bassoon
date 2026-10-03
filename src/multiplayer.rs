@@ -587,7 +587,10 @@ impl Game {
                 let sharpness = crate::enchant::level((self.verified_ench(from) as u32) << 16, crate::enchant::Enchant::Sharpness);
                 // (Strength is drunk on their own machine; the host saw the bottle go.)
                 let strength = self.strong.get(&from).map_or(0.0, |&(_, amplifier)| crate::potions::strength_bonus(amplifier));
-                let dmg = dmg.clamp(0.0, (attack_damage_with(self.verified_held(from), sharpness) + strength) * 1.5);
+                let held = self.verified_held(from);
+                // (A Mace adds whatever their fall was worth; the host can't see falls, so it allows a long one.)
+                let smash = if held == MACE { crate::combat::smash_bonus(40.0) } else { 0.0 };
+                let dmg = dmg.clamp(0.0, (attack_damage_with(held, sharpness) + strength) * 1.5 + smash);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
                     m.damage(dmg, eye);
                     m.last_attacker = from;
@@ -678,6 +681,12 @@ impl Game {
                     self.host_crossbow(from);
                     return;
                 }
+                if item == OMINOUS_BOTTLE && self.peer_rate_ok(from, "bottle", 1.0) {
+                    if self.peer_take(from, OMINOUS_BOTTLE, 1) {
+                        self.give_effect_to(from, crate::potions::Potion::BadOmen, crate::raids::OMEN_SECS);
+                    }
+                    return;
+                }
                 if item == GOAT_HORN && self.peer_rate_ok(from, "horn", 5.0) && self.peer_has(from, GOAT_HORN) {
                     if let Some(at) = self.peers.get(&from).map(|p| p.target + Vec3::Y * 1.6) {
                         self.sfx(Sfx::Horn, Some(at));
@@ -723,7 +732,7 @@ impl Game {
                     self.host_wear(from, BOW, 1);
                 }
             }
-            Msg::Interact { x, y, z, item: TRIAL_KEY } if self.world.get(x, y, z) == VAULT => {
+            Msg::Interact { x, y, z, item: TRIAL_KEY | OMINOUS_TRIAL_KEY } if matches!(self.world.get(x, y, z), VAULT | VAULT_OMINOUS) => {
                 let p = IVec3::new(x, y, z);
                 let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
                 if near && self.peer_rate_ok(from, "vault", 0.5) {
