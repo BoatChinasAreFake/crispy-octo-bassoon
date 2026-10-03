@@ -12,7 +12,6 @@ use crate::noise::hash2;
 use crate::render::{DynGeo, Pass};
 use crate::sound::Sfx;
 use crate::texture::T_WHITE;
-use crate::world::Biome;
 use macroquad::math::{Mat4, Vec3};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,7 +93,7 @@ impl Game {
         } else {
             Mood::Day
         };
-        let wet = self.weather.kind.wet() && !self.elsewhere() && !biome.dry() && biome != Biome::Snowy;
+        let wet = self.weather.kind.wet() && !self.elsewhere() && !biome.dry() && !crate::seasons::snows(biome, self.season());
         // Out in it: full; under a roof: a muffled patter, fainter the deeper you are.
         let open = e.y >= self.world.rain_top(e.x, e.z);
         let rain = if wet && (open || sky > 0.0) { self.weather.strength * if open { 0.25 + 0.75 * sky } else { 0.3 * sky } } else { 0.0 };
@@ -219,7 +218,8 @@ impl Game {
             return;
         }
         let (ex, ez) = (eye.x.floor() as i32, eye.z.floor() as i32);
-        let snowy = self.world.generator.column(ex, ez).1 == Biome::Snowy;
+        let season = self.season();
+        let snowy = crate::seasons::snows(self.world.generator.column(ex, ez).1, season);
         let tint = if snowy { [1.0, 1.0, 1.0, 0.85 * strength] } else { [0.7, 0.75, 0.9, 0.45 * strength] };
         g.begin(Pass::Blend, tint, false);
         let t = self.clock;
@@ -234,7 +234,7 @@ impl Game {
                 if biome.dry() {
                     continue;
                 }
-                let snow = biome == Biome::Snowy;
+                let snow = crate::seasons::snows(biome, season);
                 let speed = if snow { 2.0 } else { 14.0 };
                 let span = 18.0;
                 let phase = hash2(17, x, z) * span;

@@ -380,6 +380,7 @@ impl Game {
         }
         let step = std::mem::take(&mut self.farm_timer);
         let daylight = self.daylight();
+        let season = crate::seasons::growth(self.season());
         let players: Vec<Vec3> = self.player_targets().into_iter().map(|t| t.1).collect();
         let keys: Vec<IVec3> = self.world.farm.keys().copied().filter(|p| self.world.is_loaded(p.x, p.z)).collect();
         let mut edits: Vec<(IVec3, Id)> = Vec::new();
@@ -402,7 +403,7 @@ impl Game {
                 Some((crop, _)) => {
                     soil.idle = 0.0;
                     let f = soil.factors(crop, light, watched);
-                    if let Some(stage) = soil.grow(crop, &f, step) {
+                    if let Some(stage) = soil.grow(crop, &f, step * season) {
                         edits.push((above, crop.block(stage)));
                     }
                 }

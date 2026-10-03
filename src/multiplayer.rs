@@ -460,7 +460,7 @@ impl Game {
 
     fn rules_msg(&self) -> Msg {
         let r = self.rules;
-        Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle, weather_cycle: r.weather_cycle, hardcore: r.hardcore }
+        Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle, weather_cycle: r.weather_cycle, hardcore: r.hardcore, seasons: r.seasons, border: r.border }
     }
 
     /// Change the world's rules (the owner's World Settings) and tell everyone.
@@ -1080,8 +1080,8 @@ impl Game {
             Msg::Orbs(list) => self.apply_orbs(list),
             Msg::Xp { points } => self.xp_update(points),
             Msg::Restore { pos, xp, slots, health, food, saturation } => self.apply_restore(pos, xp, slots, health, food, saturation),
-            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore } => {
-                self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle, hardcore };
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore, seasons, border } => {
+                self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle, hardcore, seasons, border };
             }
             Msg::Stats { data } => self.stats = crate::stats::Stats::decode(&data),
             Msg::GameMode { mode } => {

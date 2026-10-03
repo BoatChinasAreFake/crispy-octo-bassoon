@@ -84,6 +84,8 @@ mod rules;
 mod raids;
 mod save;
 mod scorch;
+mod seasons;
+mod skies;
 mod screens;
 mod scripting;
 mod server;
@@ -1400,6 +1402,12 @@ impl App {
             let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
             self.game.world.dirty.extend(all);
         }
+        if seasons::shown() != self.game.season() {
+            // Grass and leaves change colour: everything is meshed again.
+            seasons::set_shown(self.game.season());
+            let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
+            self.game.world.dirty.extend(all);
+        }
         if light::brightness() != self.settings.brightness {
             // Light is baked into the chunk meshes, so they all have to be redone.
             light::set_brightness(self.settings.brightness);
@@ -1682,8 +1690,11 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
-        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" => {
+        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "aurora" | "autumn" | "rainbow" => {
             let want = match mode {
+                "aurora" => world::Biome::Snowy,
+                "autumn" => world::Biome::Forest,
+                "rainbow" => world::Biome::Plains,
                 "swamp" => world::Biome::Swamp,
                 "jungle" => world::Biome::Jungle,
                 "badlands" => world::Biome::Badlands,
@@ -2091,10 +2102,21 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
-                g.time = s.time.unwrap_or(0.3);
+                g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
+                match s.mode.as_str() {
+                    "autumn" => {
+                        g.rules.seasons = true;
+                        g.day = seasons::SEASON_DAYS * 2 + 3;
+                    }
+                    "rainbow" => {
+                        g.rainbow = skies::RAINBOW_SECS;
+                        g.time = s.time.unwrap_or(0.38);
+                    }
+                    _ => {}
+                }
                 let kind = match s.mode.as_str() {
                     "rain" | "snow" => Some(weather::Weather::Rain),
                     "thunder" => Some(weather::Weather::Thunder),
@@ -2107,6 +2129,14 @@ async fn game_main() {
                 }
                 if let Some((pos, yaw, pitch)) = scenic_view(&g, &s.mode) {
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
+                }
+                // Look up at the sky: north for an aurora, away from the sun for a rainbow.
+                if s.mode == "aurora" {
+                    (s.yaw, s.pitch) = (0.0, 0.45);
+                } else if s.mode == "rainbow" {
+                    let a = g.sun_angle();
+                    let anti = -Vec3::new(a.cos(), a.sin(), 0.25);
+                    (s.yaw, s.pitch) = (anti.x.atan2(-anti.z), 0.2);
                 }
                 app.start_game(g);
                 app.show_debug = false;

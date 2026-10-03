@@ -187,7 +187,7 @@ pub enum Msg {
     /// host -> client: experience orbs floating around: (id, position, value).
     Orbs(Vec<(u32, Vec3, u16)>),
     /// host -> client: the world's rules (on joining, and whenever they change).
-    Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool, weather_cycle: bool, hardcore: bool },
+    Rules { keep_inventory: bool, difficulty: u8, daylight_cycle: bool, weather_cycle: bool, hardcore: bool, seasons: bool, border: u32 },
     /// Host -> player: you are now in this game mode (`modes::GameMode` index).
     GameMode { mode: u8 },
     /// A player's statistics (`stats::Stats::encode`): players send theirs to
@@ -668,13 +668,15 @@ impl Msg {
                     w.u16(value);
                 }
             }
-            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore } => {
+            Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore, seasons, border } => {
                 w.u8(38);
                 w.u8(*keep_inventory as u8);
                 w.u8(*difficulty);
                 w.u8(*daylight_cycle as u8);
                 w.u8(*weather_cycle as u8);
                 w.u8(*hardcore as u8);
+                w.u8(*seasons as u8);
+                w.u32(*border);
             }
             Msg::GameMode { mode } => {
                 w.u8(63);
@@ -1099,7 +1101,7 @@ impl Msg {
                 }
                 Msg::Orbs(list)
             }
-            38 => Msg::Rules { keep_inventory: r.u8()? != 0, difficulty: r.u8()?, daylight_cycle: r.u8()? != 0, weather_cycle: r.u8()? != 0, hardcore: r.u8()? != 0 },
+            38 => Msg::Rules { keep_inventory: r.u8()? != 0, difficulty: r.u8()?, daylight_cycle: r.u8()? != 0, weather_cycle: r.u8()? != 0, hardcore: r.u8()? != 0, seasons: r.u8()? != 0, border: r.u32()? },
             63 => Msg::GameMode { mode: r.u8()? },
             64 => {
                 let n = r.u32()? as usize;
@@ -1697,7 +1699,7 @@ mod tests {
             Msg::PlayerData { slots: vec![(3, 64, 0), (0x800c, 1, 0x0001_0005)], health: 12.5, food: 7.0, saturation: 0.5 },
             Msg::Restore { pos: Vec3::new(1.0, 64.0, 2.0), xp: 30, slots: vec![(0, 0, 0)], health: 20.0, food: 20.0, saturation: 5.0 },
             Msg::Orbs(vec![(3, Vec3::new(1.0, 2.0, 3.0), 17)]),
-            Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false, weather_cycle: true, hardcore: true },
+            Msg::Rules { keep_inventory: true, difficulty: 3, daylight_cycle: false, weather_cycle: true, hardcore: true, seasons: true, border: 2500 },
             Msg::GameMode { mode: 2 },
             Msg::Stats { data: b"mined=3\nwalked=12.5\n".to_vec() },
             Msg::Excavate { x: 1, y: -2, z: 3, cracks: 2 },

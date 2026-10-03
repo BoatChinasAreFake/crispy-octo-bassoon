@@ -272,6 +272,10 @@ pub struct Game {
     /// Frost Walker: seconds since boots last looked for water, and frozen water melting back (see enchant.rs).
     pub frost_acc: f32,
     pub frosted: Vec<(IVec3, f32)>,
+    /// The sky (see skies.rs): shooting stars, seconds of rainbow left, and whether it was raining.
+    pub shooting: Vec<crate::skies::ShootingStar>,
+    pub rainbow: f32,
+    pub was_wet: bool,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
     pub lod: crate::lod::Lod,
@@ -512,6 +516,9 @@ impl Game {
             wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
             frost_acc: 0.0,
             frosted: Vec::new(),
+            shooting: Vec::new(),
+            rainbow: 0.0,
+            was_wet: false,
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -667,7 +674,7 @@ impl Game {
                 rec.enchanted.retain(|e| e.0 != AIR);
             }
         }
-        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle, hardcore: d.hardcore };
+        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle, hardcore: d.hardcore, seasons: false, border: 0 };
         g.enchant_count = d.enchant_count;
         g.rules.hardcore = d.hardcore;
         g.stats = crate::stats::Stats::decode(&d.stats);
@@ -774,6 +781,7 @@ impl Game {
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
             ("day".to_string(), self.day.to_le_bytes().to_vec()),
             ("packs".to_string(), self.encode_packs()),
+            ("rules2".to_string(), [&[self.rules.seasons as u8][..], &self.rules.border.to_le_bytes()].concat()),
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
@@ -799,6 +807,10 @@ impl Game {
         }
         if let Some(b) = extra("stashes") {
             self.world.stashes = crate::stash::decode(b);
+        }
+        if let Some(b) = extra("rules2").filter(|b| b.len() >= 5) {
+            self.rules.seasons = b[0] != 0;
+            self.rules.border = u32::from_le_bytes([b[1], b[2], b[3], b[4]]);
         }
         if let Some(b) = extra("banners") {
             self.banners = crate::banners::decode(b);
@@ -1195,6 +1207,7 @@ impl Game {
         self.recipe_news = (self.recipe_news - dt).max(0.0);
         self.report_tick(dt);
         self.campfire_smoke(dt);
+        self.skies_tick(dt);
         self.frost_walk(dt);
         self.update_entities(dt);
         self.script_tick(dt);
@@ -3517,6 +3530,7 @@ impl Game {
             sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
             sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, crate::texture::T_MOON_PHASES + self.moon_phase() as u16);
         }
+        self.draw_skies(&mut g, eye, sun_dir);
 
         // Clouds: a scrolling blocky layer.
         let cloud_y = 112.0;
@@ -4861,7 +4875,7 @@ looks_like = diamond
         assert!(g.dead.is_some());
         // A frozen sun, and all of it saved.
         let mut g = arena(69);
-        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false, weather_cycle: false, hardcore: false };
+        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false, weather_cycle: false, hardcore: false, seasons: false, border: 0 };
         let t = g.time;
         let idle = Controls { input: Input { forward: 0.0, strafe: 0.0, jump: false, jump_pressed: false, sneak: false, sprint: false }, attack_held: false, attack_pressed: false, use_held: false, use_pressed: false, pick: false, drop: false, drop_all: false };
         for _ in 0..20 {

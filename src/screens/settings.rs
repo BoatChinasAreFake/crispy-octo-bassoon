@@ -282,6 +282,16 @@ impl App {
             let next = Weather::from_index((self.game.weather.kind.index() + 1) % 3);
             self.game.set_weather(next);
         }
+        y += bh + 5.0 * s;
+        let seasons = if rules.seasons { "Seasons: ON (eight days each)" } else { "Seasons: OFF" };
+        if self.ui.button(Rect::new(x, y, half, bh), seasons, owner) {
+            rules.seasons = !rules.seasons;
+        }
+        let border = if rules.border == 0 { "World Border: None".to_string() } else { format!("World Border: {} blocks", rules.border) };
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), &border, owner) {
+            let i = rules::BORDERS.iter().position(|b| *b == rules.border).unwrap_or(0);
+            rules.border = rules::BORDERS[(i + 1) % rules::BORDERS.len()];
+        }
         if rules != self.game.rules {
             self.game.set_rules(rules);
         }

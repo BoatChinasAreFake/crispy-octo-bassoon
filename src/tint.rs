@@ -20,6 +20,8 @@ const BLUR: i32 = 3;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Grass,
+    /// Leaves: the grass colour, but they turn further with the seasons.
+    Leaves,
     Water,
 }
 
@@ -27,7 +29,8 @@ pub enum Kind {
 pub fn kind_of(id: Id, face: usize) -> Option<Kind> {
     match id {
         GRASS if face == 2 => Some(Kind::Grass),
-        LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES | TALL_GRASS => Some(Kind::Grass),
+        TALL_GRASS => Some(Kind::Grass),
+        LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES => Some(Kind::Leaves),
         _ if is_water(id) => Some(Kind::Water),
         _ => None,
     }
@@ -75,6 +78,7 @@ fn pack(c: [f32; 3]) -> [u8; 4] {
 /// The blended colours at every column corner of a chunk: (CW + 1)^2 each.
 pub struct Field {
     grass: Vec<[u8; 4]>,
+    leaves: Vec<[u8; 4]>,
     water: Vec<[u8; 4]>,
 }
 
@@ -129,7 +133,7 @@ impl Field {
             }
             out
         };
-        let corners = |b: &[[f32; 3]]| -> Vec<[u8; 4]> {
+        let corners = |b: &[[f32; 3]], season: [f32; 3]| -> Vec<[u8; 4]> {
             let n = (CW + 1) as usize;
             let mut out = vec![NEUTRAL; n * n];
             for cz in 0..n {
@@ -142,12 +146,15 @@ impl Field {
                         let c = b[(j - dj) * span + (i - di)];
                         (0..3).for_each(|k| s[k] += c[k] * 0.25);
                     }
-                    out[cz * n + cx] = pack(s);
+                    out[cz * n + cx] = pack([s[0] * season[0], s[1] * season[1], s[2] * season[2]]);
                 }
             }
             out
         };
-        Field { grass: corners(&blur(&g)), water: corners(&blur(&w)) }
+        // The season turns grass, and leaves further (see seasons.rs).
+        let season = crate::seasons::shown();
+        let g = blur(&g);
+        Field { grass: corners(&g, crate::seasons::grass_tint(season)), leaves: corners(&g, crate::seasons::leaf_tint(season)), water: corners(&blur(&w), [1.0; 3]) }
     }
 
     /// The colour at a column corner (local 0..=CW each way).
@@ -156,6 +163,7 @@ impl Field {
         let i = (cz.clamp(0, CW) * n + cx.clamp(0, CW)) as usize;
         match kind {
             Kind::Grass => self.grass[i],
+            Kind::Leaves => self.leaves[i],
             Kind::Water => self.water[i],
         }
     }

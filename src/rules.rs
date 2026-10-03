@@ -74,11 +74,18 @@ pub struct WorldRules {
     pub weather_cycle: bool,
     /// One life: after dying you can only spectate (see modes.rs).
     pub hardcore: bool,
+    /// Spring, summer, autumn and winter (see seasons.rs).
+    pub seasons: bool,
+    /// How far from the middle of the world anyone can go, in blocks (0: as far as you like).
+    pub border: u32,
 }
+
+/// The world border sizes World Settings cycles through (0: none).
+pub const BORDERS: [u32; 5] = [0, 1000, 2500, 5000, 10000];
 
 impl Default for WorldRules {
     fn default() -> Self {
-        WorldRules { keep_inventory: false, difficulty: Difficulty::Normal, daylight_cycle: true, weather_cycle: true, hardcore: false }
+        WorldRules { keep_inventory: false, difficulty: Difficulty::Normal, daylight_cycle: true, weather_cycle: true, hardcore: false, seasons: false, border: 0 }
     }
 }
 
