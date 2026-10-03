@@ -724,6 +724,11 @@ impl Mob {
     /// Can it fall in love right now?
     /// A monster that's actually a threat: hostile, and not somebody's pet
     /// (a tamed modded monster is left alone by beds, golems and Peaceful).
+    /// Has a health bar across the top of the screen (the Wyrm, or a modded boss).
+    pub fn is_boss(&self) -> bool {
+        self.kind == MobKind::Wyrm || self.kind.mod_def().is_some_and(|d| d.boss)
+    }
+
     pub fn menacing(&self) -> bool {
         self.kind.hostile() && self.owner.is_none()
     }

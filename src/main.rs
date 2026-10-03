@@ -57,6 +57,7 @@ mod noise;
 mod pad;
 mod palette;
 mod paths;
+mod tint;
 mod updates;
 mod player;
 mod playtest;

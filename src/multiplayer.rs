@@ -1117,7 +1117,7 @@ impl Game {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
-            if kind.mod_def().is_some_and(|d| d.boss) {
+            if m.is_boss() {
                 m.health = s.fuse;
                 m.fuse = 0.0;
             }
@@ -1262,8 +1262,8 @@ impl Game {
                         yaw: m.yaw,
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
-                        // (Modded bosses send their health, for the boss bar.)
-                        fuse: if m.kind.mod_def().is_some_and(|d| d.boss) { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
+                        // (Bosses send their health, for the boss bar.)
+                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
@@ -2157,10 +2157,15 @@ mod tests {
             if let Some(k) = host.mobs.iter_mut().find(|m| m.id == king) {
                 k.health = 20.0;
             }
+            // (The Hollow Wyrm's bar, too.)
+            let wyrm = host.alloc_mob(MobKind::Wyrm, spawn + Vec3::new(0.0, 30.0, 20.0));
+            if let Some(w) = host.mobs.iter_mut().find(|m| m.id == wyrm) {
+                w.health = 77.0;
+            }
             host.give_peer(id, WHEAT, 8);
             assert!(pump(&mut host, &mut client, |_, c| c.inv.count(WHEAT) == 8 && c.mobs.iter().any(|m| m.id == merchant)));
             // The boss bar on a joined player's screen shows the host's health.
-            assert!(pump(&mut host, &mut client, |_, c| c.mobs.iter().any(|m| m.id == king && (m.health - 20.0).abs() < 0.5)));
+            assert!(pump(&mut host, &mut client, |_, c| c.mobs.iter().any(|m| m.id == king && (m.health - 20.0).abs() < 0.5) && c.mobs.iter().any(|m| m.id == wyrm && (m.health - 77.0).abs() < 0.5)));
             client.open_trade(merchant);
             let (title, list) = client.trade_list().expect("talking");
             assert_eq!(title, "Merchant");

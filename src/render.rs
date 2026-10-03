@@ -13,6 +13,7 @@ attribute vec3 in_pos;
 attribute vec2 in_uv;
 attribute vec3 in_light;
 attribute vec2 in_tile;
+attribute vec4 in_tint;
 
 uniform mat4 mvp;
 uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections, w: fancy water
@@ -25,6 +26,7 @@ varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 varying vec4 v_spos;
+varying vec3 v_tint;
 
 bool starts_at(vec2 t, vec2 o) {
     return abs(t.x - o.x) < 0.0001 && abs(t.y - o.y) < 0.0001;
@@ -45,6 +47,8 @@ void main() {
     v_wpos = p;
     v_tile = in_tile;
     v_spos = light_mvp * vec4(p, 1.0);
+    // Biome colour: 128 is "as painted" (see tint.rs).
+    v_tint = in_tint.rgb / 128.0;
 }
 "#;
 
@@ -62,6 +66,7 @@ varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 varying vec4 v_spos;
+varying vec3 v_tint;
 
 uniform sampler2D tex;
 uniform sampler2D shadow_map;
@@ -152,6 +157,7 @@ void main() {
     vec3 surface = cross(dFdx(v_wpos), dFdy(v_wpos));
 #endif
     vec4 c = sample_tile() * tint;
+    c.rgb *= v_tint;
     if (c.a < 0.08) discard;
     // The mesher marks faces under water (x + 4) and water surfaces with their depth (8 + depth).
     float lx = v_light.x;
@@ -204,7 +210,7 @@ void main() {
     if (depth >= 0.0 && params3.w > 0.5 && params2.x < 0.5) {
         // Deep water is darker, bluer and harder to see through.
         float k = clamp(depth / 10.0, 0.0, 1.0);
-        col *= mix(vec3(1.0), vec3(0.42, 0.58, 0.78), k);
+        col *= mix(vec3(1.0), vec3(0.42, 0.58, 0.78) * v_tint, k);
         c.a = c.a + (1.0 - c.a) * k * 0.8;
     }
 #ifdef GL_OES_standard_derivatives
@@ -215,7 +221,8 @@ void main() {
         if (abs(surface.y) > 0.7 * length(surface)) {
             vec3 view = normalize(v_wpos - cam_pos.xyz);
             float fresnel = pow(1.0 - abs(view.y), 3.0);
-            col = mix(col, fog_color.rgb * (0.55 + 0.45 * params.x), clamp(0.12 + fresnel * 0.7, 0.0, 0.8));
+            // (A murky swamp reflects murkily: the biome's water colour tints it too.)
+            col = mix(col, fog_color.rgb * (0.55 + 0.45 * params.x) * mix(vec3(1.0), v_tint, 0.6), clamp(0.12 + fresnel * 0.7, 0.0, 0.8));
             float t = params3.x;
             float ripple = sin(v_wpos.x * 3.1 + t * 1.7 + sin(v_wpos.z * 1.3)) * sin(v_wpos.z * 2.7 - t * 1.3 + sin(v_wpos.x * 1.1));
             col += vec3(pow(max(ripple, 0.0), 20.0) * 0.6 * params.x);
@@ -401,7 +408,7 @@ impl DynGeo {
         let uvs = [[a, d], [cc, d], [cc, b], [a, b]];
         let mut v = [Vertex::default(); 4];
         for i in 0..4 {
-            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light: [light[0], light[1], -1.0], tile: [-u0 - 2.0, -v0 - 2.0] };
+            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light: [light[0], light[1], -1.0], tile: [-u0 - 2.0, -v0 - 2.0], tint: crate::tint::NEUTRAL };
         }
         self.mesh.quad(v, false);
         self.end_batch();
@@ -509,6 +516,7 @@ impl Renderer {
             VertexAttribute::new("in_uv", VertexFormat::Float2),
             VertexAttribute::new("in_light", VertexFormat::Float3),
             VertexAttribute::new("in_tile", VertexFormat::Float2),
+            VertexAttribute::new("in_tint", VertexFormat::Byte4),
         ];
         let alpha = Some(BlendState::new(
             Equation::Add,
