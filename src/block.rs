@@ -293,7 +293,10 @@ pub const PITCHER_PLANT: Id = 472;
 /// Read books on it (see books.rs); with a book on it.
 pub const LECTERN: Id = 473;
 pub const LECTERN_BOOK: Id = 474;
-pub const NUM_BLOCKS: Id = 475;
+/// A banner on a pole (drawn live, see banners.rs), and the Loom that patterns them.
+pub const BANNER: Id = 475;
+pub const LOOM: Id = 476;
+pub const NUM_BLOCKS: Id = 477;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -2015,6 +2018,8 @@ impl Registry {
         with_book.shape = Shape::Table;
         with_book.creative = false;
         blocks.push(with_book);
+        blocks.push(def("banner", "Banner (Flag-Adjacent)", Empty, false, false, [T_BANNER_ICON; 3], 1.0, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("loom", "Loom (Pattern Machine)", Cube, true, true, [T_LOOM_TOP, T_LOOM_SIDE, T_PLANKS], 2.5, 0, false, LOOM, 0.0, S_WOOD));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2362,6 +2367,8 @@ impl Registry {
             r(&[(HEAVY_CORE, 1), (BREEZE_ROD, 1)], (MACE, 1)),
             r(&[(BOOK, 1), (FEATHER, 1), (COAL, 1)], (BOOK_AND_QUILL, 1)),
             r(&[(PLANKS, 4), (BOOKSHELF, 1)], (LECTERN, 1)),
+            r(&[(WOOL, 6), (STICK, 1)], (BANNER, 1)),
+            r(&[(PLANKS, 2), (STRING, 2)], (LOOM, 1)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
@@ -2579,7 +2586,8 @@ pub fn item_tile(id: Id) -> u16 {
 
 pub fn max_stack(id: Id) -> u8 {
     // Each Hollow Box carries its own contents.
-    if id == HOLLOW_BOX {
+    // (So does each Banner its design.)
+    if id == HOLLOW_BOX || id == BANNER {
         return 1;
     }
     item_def(id).map(|i| i.stack.clamp(1, 64)).unwrap_or(64)

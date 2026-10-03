@@ -141,6 +141,7 @@ pub const ALL: &[Advancement] = &[
     adv("heartbreak", "Heartbreaker", "Break a Creaking Heart and see its Creaking crumble."),
     adv("ancient_seeds", "Planting the Past", "Plant a seed a Sniffer dug up."),
     adv("published", "Published Author", "Sign a book you wrote. A literary career begins."),
+    adv("loomed", "Flying the Flag", "Pattern a banner at a Loom."),
     adv("homing_in", "Country Lode, Take Me Home", "Point a compass at a Lodestone."),
 ];
 

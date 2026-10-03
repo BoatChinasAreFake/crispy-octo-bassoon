@@ -11,6 +11,7 @@ mod anvil;
 mod archaeology;
 mod bees;
 mod backups;
+mod banners;
 mod beacon;
 mod block;
 mod books;
@@ -138,6 +139,8 @@ const SPLASHES: &[&str] = &[
 enum Screen {
     /// A book open to read or write in (see books.rs).
     Book,
+    /// At a Loom, patterning a banner or painting a shield (see banners.rs).
+    Loom,
     Title,
     Playing,
     Paused,
@@ -256,6 +259,9 @@ struct App {
     book_page: usize,
     book_title: Option<String>,
     book_done: bool,
+    /// The Loom's choice of pattern and dye colour.
+    loom_pattern: u8,
+    loom_colour: u8,
     /// A game controller, if one is plugged in, and what it did this frame.
     pad: pad::Pad,
     pad_frame: pad::PadFrame,
@@ -401,6 +407,9 @@ impl App {
                 self.game.set_sign(pos, &lines);
             }
         }
+        if self.screen == Screen::Loom && s != Screen::Loom {
+            self.game.loom = None;
+        }
         if self.screen == Screen::Book && s != Screen::Book {
             // Closing a Book and Quill keeps what was written.
             if let Some(view) = self.game.reading.take()
@@ -459,6 +468,7 @@ impl App {
         // We look like our settings say (joined players tell the host).
         let skin = self.settings.skin;
         self.game.set_skin(skin);
+        self.game.shield_banner = self.settings.shield_banner;
         self.set_screen(Screen::Playing);
     }
 
@@ -809,6 +819,11 @@ impl App {
                     type_into(&mut self.name_line, nametags::NAME_LEN);
                 }
             }
+            Screen::Loom => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.set_screen(Screen::Playing);
+                }
+            }
             Screen::Book => {
                 let writing = self.game.reading.as_ref().is_some_and(|r| r.writing.is_some());
                 if is_key_pressed(KeyCode::Escape) {
@@ -962,6 +977,9 @@ impl App {
         }
         if self.game.reading.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Book);
+        }
+        if self.game.loom.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Loom);
         }
         if self.game.naming.is_some() && self.screen == Screen::Playing {
             drain_chars();
@@ -1715,6 +1733,88 @@ impl App {
         }
     }
 
+    /// At a Loom: pattern the held banner (a pattern and a dye you have), or paint
+    /// one of your banners on your shield.
+    fn loom_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
+        let held = self.game.inv.held();
+        if held != BANNER && held != SHIELD {
+            self.set_screen(Screen::Playing);
+            return;
+        }
+        let (pw, ph) = (300.0 * s, 210.0 * s);
+        let (x0, y0) = ((w - pw) / 2.0, (h - ph) / 2.0);
+        draw_rectangle(x0, y0, pw, ph, Color::new(0.2, 0.17, 0.13, 0.95));
+        // A banner preview, drawn as coloured cells.
+        let preview = |design: banners::Design, px: f32, py: f32, cw: f32| {
+            for y in 0..banners::H {
+                for x in 0..banners::W {
+                    let c = carpentry::colour_rgb(design.cell(x, y) as usize);
+                    draw_rectangle(px + x as f32 * cw, py + y as f32 * cw, cw + 0.5, cw + 0.5, Color::from_rgba(c[0], c[1], c[2], 255));
+                }
+            }
+        };
+        if held == SHIELD {
+            self.ui.text("Paint one of your banners on your shield", x0 + 10.0 * s, y0 + 16.0 * s, 10.0, WHITE);
+            let designs: Vec<u16> = (0..self.game.inv.slots.len()).filter(|&i| self.game.inv.slots[i].is_some_and(|st| st.0 == BANNER)).map(|i| enchant::enchants(self.game.inv.wear[i])).collect();
+            if designs.is_empty() {
+                self.ui.text("You don't have any banners with you.", x0 + 10.0 * s, y0 + 40.0 * s, 9.0, GRAY);
+            }
+            for (k, d) in designs.iter().take(8).enumerate() {
+                let bx = x0 + 10.0 * s + k as f32 * 36.0 * s;
+                preview(banners::Design::from_bits(*d), bx, y0 + 34.0 * s, 4.0 * s);
+                if self.ui.button(Rect::new(bx, y0 + 86.0 * s, 32.0 * s, 16.0 * s), "Use", true) {
+                    self.settings.shield_banner = *d;
+                    self.game.shield_banner = *d;
+                    self.save_settings();
+                    self.game.advance("loomed");
+                }
+            }
+            if self.ui.button(Rect::new(x0 + 10.0 * s, y0 + 112.0 * s, 100.0 * s, 18.0 * s), "Plain shield", true) {
+                self.settings.shield_banner = 0;
+                self.game.shield_banner = 0;
+                self.save_settings();
+            }
+        } else {
+            let design = banners::Design::from_bits(enchant::enchants(self.game.inv.wear[self.game.inv.selected]));
+            self.ui.text(&design.describe(), x0 + 10.0 * s, y0 + 16.0 * s, 9.0, WHITE);
+            preview(design, x0 + pw - 60.0 * s, y0 + 30.0 * s, 6.0 * s);
+            self.ui.text("Pattern", x0 + 10.0 * s, y0 + 36.0 * s, 9.0, GRAY);
+            for (k, name) in banners::PATTERNS.iter().enumerate() {
+                let r = Rect::new(x0 + 10.0 * s + (k % 4) as f32 * 52.0 * s, y0 + 42.0 * s + (k / 4) as f32 * 20.0 * s, 50.0 * s, 18.0 * s);
+                let on = self.loom_pattern == k as u8;
+                let label = if on { format!("[{name}]") } else { name.to_string() };
+                if self.ui.button(r, &label, true) {
+                    self.loom_pattern = k as u8;
+                }
+            }
+            self.ui.text("Dye", x0 + 10.0 * s, y0 + 96.0 * s, 9.0, GRAY);
+            for c in 0..8u8 {
+                let have = self.game.creative || self.game.inv.count(DYE_FIRST + c as Id) > 0;
+                let r = Rect::new(x0 + 10.0 * s + c as f32 * 26.0 * s, y0 + 102.0 * s, 22.0 * s, 22.0 * s);
+                let rgb = carpentry::colour_rgb(c as usize);
+                draw_rectangle(r.x, r.y, r.w, r.h, Color::from_rgba(rgb[0], rgb[1], rgb[2], if have { 255 } else { 60 }));
+                if self.loom_colour == c {
+                    draw_rectangle_lines(r.x - 2.0, r.y - 2.0, r.w + 4.0, r.h + 4.0, 2.0 * s, WHITE);
+                }
+                if have && self.ui.hovered(r) && self.ui.clicked {
+                    self.loom_colour = c;
+                }
+            }
+            let next = design.with(self.loom_pattern, self.loom_colour);
+            self.ui.text("Becomes", x0 + pw - 60.0 * s, y0 + 116.0 * s, 8.0, GRAY);
+            preview(next, x0 + pw - 60.0 * s, y0 + 122.0 * s, 3.5 * s);
+            if self.ui.button(Rect::new(x0 + 10.0 * s, y0 + 136.0 * s, 100.0 * s, 20.0 * s), "Apply", true) && !self.game.loom_apply(self.loom_pattern, self.loom_colour) {
+                self.status = Some(("You need that dye.".into(), 2.0));
+            }
+        }
+        if self.ui.button(Rect::new(x0 + pw - 70.0 * s, y0 + ph - 26.0 * s, 60.0 * s, 20.0 * s), "Done", true) {
+            self.set_screen(Screen::Playing);
+        }
+    }
+
     /// Sign the Book and Quill on screen with the title typed in.
     fn sign_book(&mut self) {
         let title = self.book_title.clone().unwrap_or_default();
@@ -2045,6 +2145,7 @@ impl App {
                     Screen::Trade => self.trade_screen(),
                     Screen::Sign => self.sign_screen(),
                     Screen::Book => self.book_screen(),
+                    Screen::Loom => self.loom_screen(),
                     Screen::NameTag => self.name_tag_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
@@ -4122,6 +4223,9 @@ fn install_panic_hook() {
 fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     let (id, _) = stack?;
     let mut s = item_name(id).to_string();
+    if id == BANNER {
+        s += &format!(" [{}]", banners::Design::from_bits(enchant::enchants(wear)).describe());
+    }
     if id == HOLLOW_BOX || id == BUNDLE {
         if boxes::box_id(wear) != 0 {
             s += " [packed]";
@@ -4250,6 +4354,8 @@ async fn game_main() {
         book_page: 0,
         book_title: None,
         book_done: false,
+        loom_pattern: 1,
+        loom_colour: 2,
         pad: pad::Pad::new(),
         pad_frame: Default::default(),
         rebinding: None,
@@ -4491,7 +4597,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "zoo" | "animals" | "newmobs" | "music" | "modzoo" => {
+            "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
@@ -4747,7 +4853,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -4765,6 +4871,33 @@ async fn game_main() {
                         }
                     }
                 }
+            }
+            if s.mode == "banners" && frames == 125 {
+                // Three banners up in front, a lectern and a loom, and a painted shield in hand.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y0 = p.y.floor() as i32;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y0, v.z.floor() as i32)
+                };
+                let designs = [
+                    banners::Design::default().with(0, 2).with(1, 0).with(4, 4),
+                    banners::Design::default().with(0, 6).with(3, 0),
+                    banners::Design::default().with(0, 1).with(5, 3).with(6, 4),
+                ];
+                let facing = banners::facing_from_yaw(s.yaw);
+                for (k, d) in designs.iter().enumerate() {
+                    let q = at(5.0, (k as f32 - 1.0) * 2.0);
+                    app.game.world.set_v(q, block::BANNER);
+                    app.game.put_up_banner(q, d.bits(), facing);
+                }
+                app.game.world.set_v(at(3.0, -2.5), block::LECTERN_BOOK);
+                app.game.world.set_v(at(3.0, 2.5), block::LOOM);
+                app.game.inv.slots[0] = Some((block::SHIELD, 1));
+                app.game.inv.selected = 0;
+                app.game.shield_banner = designs[1].bits();
             }
             if s.mode == "farm" && frames == 125 {
                 // A little farm: three crops at every stage, watered down the middle,

@@ -349,6 +349,10 @@ pub struct Game {
     /// one we're waiting on the host for (tag, our writable slot, lectern), and one just written.
     pub books: HashMap<u16, crate::books::Book>,
     pub lecterns: HashMap<IVec3, (Id, u16)>,
+    /// Banners that are up (design, facing), the Loom we're at, and our shield's banner (see banners.rs).
+    pub banners: HashMap<IVec3, (u16, u8)>,
+    pub loom: Option<IVec3>,
+    pub shield_banner: u16,
     pub reading: Option<crate::books::BookView>,
     pub book_waiting: Option<(u16, Option<usize>, Option<IVec3>)>,
     pub book_pending: Option<usize>,
@@ -536,6 +540,9 @@ impl Game {
             bundle_pending: None,
             books: HashMap::new(),
             lecterns: HashMap::new(),
+            banners: HashMap::new(),
+            loom: None,
+            shield_banner: 0,
             reading: None,
             book_waiting: None,
             book_pending: None,
@@ -721,6 +728,7 @@ impl Game {
             ("known".to_string(), crate::crafting::encode_known(&self.known).into_bytes()),
             ("hives".to_string(), crate::bees::encode(&self.hives)),
             ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
+            ("banners".to_string(), crate::banners::encode(&self.banners)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
         ];
@@ -745,6 +753,9 @@ impl Game {
         if let Some(b) = extra("pinned").and_then(|b| b.get(..4)) {
             let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
             self.pinned = (p < recipes().len()).then_some(p);
+        }
+        if let Some(b) = extra("banners") {
+            self.banners = crate::banners::decode(b);
         }
         if let Some(b) = extra("books") {
             (self.books, self.lecterns) = crate::books::decode(b);
@@ -1987,6 +1998,10 @@ impl Game {
                 self.use_vault(pos);
                 return;
             }
+            if id == LOOM {
+                self.use_loom(pos);
+                return;
+            }
             if crate::books::is_lectern(id) {
                 self.use_lectern(pos, held);
                 return;
@@ -2320,6 +2335,11 @@ impl Game {
             let wear = self.inv.wear[self.inv.selected];
             self.unpack_box(place, wear);
         }
+        if held == BANNER && !self.is_client() {
+            let design = crate::enchant::enchants(self.inv.wear[self.inv.selected]);
+            let facing = crate::banners::facing_from_yaw(self.player.yaw);
+            self.put_up_banner(place, design, facing);
+        }
         if held == SIGN_FIRST {
             // Something to write on it.
             self.editing_sign = Some(place);
@@ -2361,6 +2381,7 @@ impl Game {
             self.spill_container(pos);
             self.spill_frame(pos);
             self.spill_lectern(pos);
+            self.spill_banner(pos);
             self.block_gone(pos, id);
         }
         self.world.set_v(pos, AIR);
@@ -3483,6 +3504,7 @@ impl Game {
         self.draw_vehicles(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
+        self.draw_banners(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
         self.draw_orbs(&mut g, eye, 48.0);
@@ -3593,6 +3615,11 @@ impl Game {
                 basis * local * Mat4::from_translation(Vec3::new(0.0, 0.08, 0.0)) * Mat4::from_rotation_y(-0.5) * Mat4::from_rotation_z(0.2)
             };
             extruded_sprite(g, &m, tile, if tool { 0.46 } else { 0.3 }, sky);
+            // Our banner, painted on the shield (see banners.rs).
+            if held == SHIELD && self.shield_banner != 0 {
+                let cloth = m * Mat4::from_translation(Vec3::new(-0.12, -0.17, 0.03)) * Mat4::from_scale(Vec3::new(0.24, 0.34, 1.0));
+                crate::banners::draw_cloth(g, &cloth, crate::banners::Design::from_bits(self.shield_banner), sky, Pass::Overlay);
+            }
         }
     }
 

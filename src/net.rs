@@ -28,7 +28,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v19: modded projectile appearance in authoritative arrow snapshots.
 /// v20: timed effects carry bounded amplifier levels.
 /// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
-pub const PROTOCOL: u32 = 21;
+/// v22: bundles, books and banners through the host.
+pub const PROTOCOL: u32 = 22;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -123,6 +124,10 @@ pub enum Msg {
     BookAsk { tag: u16, x: i32, y: i32, z: i32 },
     /// client -> host: I'll take the book off this lectern.
     LecternTake { x: i32, y: i32, z: i32 },
+    /// host -> client: a banner went up (`up`) or came down here (see banners.rs).
+    Banner { x: i32, y: i32, z: i32, design: u16, facing: u8, up: bool },
+    /// client -> host: I patterned the banner I'm holding into `design` with this dye.
+    Loom { design: u16, dye: Id },
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -734,6 +739,19 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
+            Msg::Banner { x, y, z, design, facing, up } => {
+                w.u8(79);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*design);
+                w.u8(*facing | (*up as u8) << 4);
+            }
+            Msg::Loom { design, dye } => {
+                w.u8(80);
+                w.u16(*design);
+                w.u16(*dye);
+            }
             Msg::LecternTake { x, y, z } => {
                 w.u8(78);
                 w.i32(*x);
@@ -1078,6 +1096,11 @@ impl Msg {
                 Msg::BookState { old, new, signed: flags & 1 != 0, open: flags & 2 != 0, title, author, pages }
             }
             77 => Msg::BookAsk { tag: r.u16()?, x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            79 => {
+                let (x, y, z, design, f) = (r.i32()?, r.i32()?, r.i32()?, r.u16()?, r.u8()?);
+                Msg::Banner { x, y, z, design, facing: f & 3, up: f & 16 != 0 }
+            }
+            80 => Msg::Loom { design: r.u16()?, dye: r.u16()? },
             78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
             74 => {
@@ -1661,6 +1684,8 @@ mod tests {
             Msg::BookState { old: 0, new: 3, signed: true, open: false, title: "Hi".into(), author: "Ann".into(), pages: vec!["one".into()] },
             Msg::BookAsk { tag: 0, x: 1, y: 60, z: -2 },
             Msg::LecternTake { x: 1, y: 60, z: -2 },
+            Msg::Banner { x: 1, y: 60, z: -2, design: 0x1234, facing: 3, up: true },
+            Msg::Loom { design: 0x0042, dye: 0x805c },
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },

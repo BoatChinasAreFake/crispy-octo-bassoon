@@ -435,6 +435,7 @@ impl Game {
             // Words on signs and things in frames.
             roster.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
             roster.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+            roster.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -524,6 +525,7 @@ impl Game {
                     if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
                         self.spill_frame(IVec3::new(x, y, z));
                         self.spill_lectern(IVec3::new(x, y, z));
+                        self.spill_banner(IVec3::new(x, y, z));
                     }
                     // Hives, pots and sculk notice (and the Deep Dark hears it).
                     if old != id && crate::ledger::is_break(old, id) {
@@ -535,6 +537,11 @@ impl Game {
                     self.world.set(x, y, z, id);
                     if packed != 0 {
                         self.unpack_box(IVec3::new(x, y, z), packed);
+                    }
+                    if id == BANNER && old != BANNER {
+                        let design = if self.verified_held(from) == BANNER { self.verified_ench(from) } else { 0 };
+                        let facing = self.peers.get(&from).map(|p| crate::banners::facing_from_yaw(p.yaw)).unwrap_or(0);
+                        self.put_up_banner(IVec3::new(x, y, z), design, facing);
                     }
                     // Half a door takes the other half with it.
                     if is_door(old) && !is_door(id) {
@@ -731,6 +738,7 @@ impl Game {
             Msg::BookWrite { tag, title, pages, sign } => self.host_book_write(from, tag, title, pages, sign),
             Msg::BookAsk { tag, x, y, z } => self.host_book_ask(from, tag, IVec3::new(x, y, z)),
             Msg::LecternTake { x, y, z } => self.host_lectern_take(from, IVec3::new(x, y, z)),
+            Msg::Loom { design, dye } => self.host_loom(from, design, dye),
             Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
                 let p = IVec3::new(x, y, z);
                 if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
@@ -1084,6 +1092,7 @@ impl Game {
             }
             Msg::BundleState { old, new, contents } => self.bundle_state(old, new, contents),
             Msg::BookState { old, new, signed, open, title, author, pages } => self.book_state(old, new, signed, open, title, author, pages),
+            Msg::Banner { x, y, z, design, facing, up } => self.banner_msg(IVec3::new(x, y, z), design, facing, up),
             Msg::Firework { at, colour } => {
                 if at.is_finite() {
                     self.firework_sparks(at, colour);
@@ -1153,7 +1162,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } => {}
         }
     }
 

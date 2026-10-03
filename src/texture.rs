@@ -565,6 +565,10 @@ pub const T_WRITTEN_BOOK: u16 = 710;
 pub const T_LECTERN_TOP: u16 = 711;
 pub const T_LECTERN_SIDE: u16 = 712;
 pub const T_LECTERN_BOOK_TOP: u16 = 713;
+/// Looms and banners.
+pub const T_LOOM_TOP: u16 = 714;
+pub const T_LOOM_SIDE: u16 = 715;
+pub const T_BANNER_ICON: u16 = 716;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2761,6 +2765,14 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.each(T_LECTERN_BOOK_TOP, |x, y, r, _| {
         let page = (2..14).contains(&x) && (3..13).contains(&y);
         if page && x != 7 && x != 8 { if y % 2 == 0 && (3..12).contains(&x) && x != 6 && x != 9 { rgb(150, 145, 130) } else { rgb(240, 235, 220) } } else if page { rgb(120, 60, 35) } else { plank(x, y, r) }
+    });
+    a.each(T_LOOM_TOP, |x, y, r, _| if (2..14).contains(&x) && y % 3 == 1 { rgb(235, 230, 215) } else { plank(x, y, r) });
+    a.each(T_LOOM_SIDE, |x, y, r, _| if (3..13).contains(&x) && (2..8).contains(&y) && x % 2 == 0 { rgb(235, 230, 215) } else { plank(x, y, r) });
+    a.each(T_BANNER_ICON, |x, y, r, _| {
+        let pole = x == 7 || x == 8;
+        let bar = y == 1 && (3..13).contains(&x);
+        let cloth = (4..12).contains(&x) && (2..13).contains(&y);
+        if bar || (pole && !cloth) { rgb(150, 110, 60) } else if cloth { shade(rgb(235, 235, 230), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
     });
     a.each(T_SNIFFER, |x, y, r, _| {
         let tuft = (x * 5 + y * 3) % 9 == 0;
