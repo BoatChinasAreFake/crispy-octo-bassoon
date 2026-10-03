@@ -268,6 +268,8 @@ pub struct Game {
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
     pub lod: crate::lod::Lod,
+    /// Trades made with each Hmmer, by each player (see villagers.rs).
+    pub regulars: HashMap<(u32, String), u16>,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -499,6 +501,7 @@ impl Game {
             firefly_acc: 0.0,
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
+            regulars: HashMap::new(),
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -750,6 +753,7 @@ impl Game {
             ("stashes".to_string(), crate::stash::encode(&self.world.stashes)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
+            ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
@@ -787,6 +791,9 @@ impl Game {
         }
         if let Some(b) = extra("bee_log") {
             self.bee_log = crate::bees::BeeLog::decode(b);
+        }
+        if let Some(b) = extra("regulars") {
+            self.regulars = crate::villagers::decode_regulars(b);
         }
         if let Some(b) = extra("journal") {
             self.journal = crate::archaeology::Journal::decode(b);

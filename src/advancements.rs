@@ -150,6 +150,8 @@ pub const ALL: &[Advancement] = &[
     adv("full_flight", "Full Flight", "Fill all four seats on a Floaty."),
     adv("resin_up", "Sticky Situation", "Knock some Resin out of a Creaking's heart."),
     adv("jousting", "Jousting Champion", "Hit something with a spear from a galloping mount."),
+    adv("the_usual", "The Usual, Please", "Trade fifteen times with the same Hmmer. They know your order now."),
+    adv("trading_hall", "Trading Hall", "Trade with a Farmer, a Librarian, a Smith and a Fisher."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {
