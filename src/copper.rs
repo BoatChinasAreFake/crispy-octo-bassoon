@@ -116,6 +116,12 @@ impl Game {
                 }
                 self.sfx(crate::sound::Sfx::Break(crate::sound::Mat::Glass), Some(at));
             }
+        } else if id == EYEBLOSSOM || id == EYEBLOSSOM_OPEN {
+            // Open at night, shut by day.
+            let want = if self.is_night() { EYEBLOSSOM_OPEN } else { EYEBLOSSOM };
+            if want != id && self.rng.chance(0.5) {
+                self.world.set_v(p, want);
+            }
         } else if id == DRIED_FLOATY {
             // Soaks up the water next to it, and wakes.
             if crate::floaty::soaked(&self.world, p) && self.rng.chance(crate::floaty::HATCH_CHANCE) {
@@ -152,6 +158,24 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eyeblossoms_open_at_night_and_shut_by_day() {
+        let mut g = crate::game::tests::arena(81);
+        let p = ivec3(1, 50, 1);
+        g.world.set_v(p, EYEBLOSSOM);
+        g.time = 0.75; // midnight
+        for _ in 0..40 {
+            g.random_tick(p);
+        }
+        assert_eq!(g.world.get_v(p), EYEBLOSSOM_OPEN);
+        assert!(crate::block::block(EYEBLOSSOM_OPEN).light > 0.0, "and glows a little");
+        g.time = 0.25; // noon
+        for _ in 0..40 {
+            g.random_tick(p);
+        }
+        assert_eq!(g.world.get_v(p), EYEBLOSSOM);
+    }
 
     #[test]
     fn copper_waxes_and_coral_needs_water() {

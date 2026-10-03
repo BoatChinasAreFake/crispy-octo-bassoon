@@ -69,6 +69,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,
         COBBLED_DEEPSLATE => DEEPSLATE,
+        RESIN_CLUMP => RESIN_BRICK,
         // Mod recipes.
         _ => return reg().smelting.iter().find(|r| r.0 == id).map(|r| r.1),
     })

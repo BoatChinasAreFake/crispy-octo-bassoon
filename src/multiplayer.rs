@@ -613,6 +613,9 @@ impl Game {
                     if let Some(name) = self.peers.get(&from).map(|p| crate::players::record_key(&p.name)) {
                         self.sic_pets(&name, mob);
                     }
+                    if let Some(i) = self.mobs.iter().position(|o| o.id == mob) {
+                        self.creaking_hit(i);
+                    }
                 }
             }
             Msg::Ignite { x, y, z } => {

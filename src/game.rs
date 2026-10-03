@@ -263,6 +263,8 @@ pub struct Game {
     /// Sitting behind a Camel's driver (just along for the ride).
     /// Which seat we're in (0 drives; see horses.rs).
     pub seat_no: u8,
+    /// When fireflies were last let out (see nature.rs).
+    pub firefly_acc: f32,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -491,6 +493,7 @@ impl Game {
             hopper_timer: 0.0,
             mounted: None,
             seat_no: 0,
+            firefly_acc: 0.0,
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -1862,6 +1865,7 @@ impl Game {
                             let me = self.my_id;
                             self.smash_around(at, i, me);
                         }
+                        self.creaking_hit(i);
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
@@ -2856,6 +2860,7 @@ impl Game {
         // (After animals_tick, which sets every mob's goal.)
         self.copper_golems_tick(dt);
         self.floaties_tick();
+        self.fireflies_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);

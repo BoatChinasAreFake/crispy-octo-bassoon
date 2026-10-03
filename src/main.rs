@@ -57,6 +57,7 @@ mod modes;
 mod mods;
 mod multiplayer;
 mod nametags;
+mod nature;
 mod navigation;
 mod net;
 mod noise;
