@@ -2603,6 +2603,18 @@ async fn game_main() {
                         app.game.world.set_v(at(10.0, r as f32) + IVec3::Y * 2 - f, block::PAINTING_FIRST + facing as u16);
                     }
                 }
+                // v0.1.21's building blocks along the left.
+                for c in 0..4u16 {
+                    app.game.world.set_v(at(3.0 + c as f32, -8.0), block::CONCRETE_FIRST + c * 2);
+                    app.game.world.set_v(at(3.0 + c as f32, -8.0) + IVec3::Y, block::GLAZED_FIRST + c * 2 + 1);
+                }
+                app.game.world.set_v(at(2.5, -4.5), block::CANDLE_LIT);
+                app.game.world.set_v(at(2.5, -3.5), block::CANDLE);
+                for up in 0..3 {
+                    app.game.world.set_v(at(8.0, -8.0) + IVec3::Y * up, block::SCAFFOLDING);
+                }
+                app.game.world.set_v(at(9.5, 1.0) + IVec3::Y * 3, block::CHAIN);
+                app.game.world.set_v(at(9.5, 1.0) + IVec3::Y * 2, block::LANTERN_HANGING);
                 app.game.inv.slots[0] = Some((block::TREASURE_MAP, 1));
                 app.game.inv.wear[0] = treasure::mark(at(40.0, 10.0));
                 app.game.inv.selected = 0;
