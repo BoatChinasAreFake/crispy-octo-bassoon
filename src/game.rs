@@ -2345,6 +2345,10 @@ impl Game {
         if hit_id == CAMPFIRE && self.use_campfire(hit_pos) {
             return;
         }
+        // Candles light and go out.
+        if matches!(hit_id, CANDLE | CANDLE_LIT) && self.use_candle(hit_pos) {
+            return;
+        }
         // Gates and trapdoors swing (sneak to place against them instead).
         if !self.player.sneaking && self.toggle_hinged(hit_pos) {
             return;
@@ -2451,6 +2455,7 @@ impl Game {
         match held {
             SPONGE => self.soak(place),
             JACK => self.advance("spooky"),
+            p if crate::masonry::is_powder(p) && !self.is_client() => self.harden_powder(place),
             _ => {}
         }
         if matches!(held, PUMPKIN | JACK) && !self.is_client() {

@@ -23,7 +23,7 @@ const MAX_PER_TICK: usize = 512;
 
 /// Does this block fall when there's nothing under it?
 pub fn is_gravity(id: Id) -> bool {
-    matches!(id, SAND | GRAVEL | RED_SAND | SUSPICIOUS_SAND | SUSPICIOUS_GRAVEL) || crate::anvil::is_anvil(id)
+    matches!(id, SAND | GRAVEL | RED_SAND | SUSPICIOUS_SAND | SUSPICIOUS_GRAVEL) || crate::anvil::is_anvil(id) || crate::masonry::is_powder(id)
 }
 
 /// Can a falling block drop through a cell holding `id`?
@@ -84,6 +84,11 @@ impl Game {
             let centre = at.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
             if falls_through(here) {
                 self.world.set_v(at, f.id);
+                // Concrete Powder sets if it lands in (or by) water.
+                if crate::masonry::is_powder(f.id) && is_water(here) {
+                    self.world.set_v(at, crate::masonry::set_form(f.id));
+                }
+                self.harden_powder(at);
             } else {
                 // Somewhere it can't sit (a slab, a torch post): it breaks into an item.
                 self.pop_drop(centre + Vec3::Y * 0.3, f.id, 1);

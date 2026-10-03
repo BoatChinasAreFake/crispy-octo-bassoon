@@ -330,7 +330,20 @@ pub const TURTLE_EGG: Id = 494;
 pub const PAINTING_FIRST: Id = 495;
 /// Shows off a set of armour (four facings; it holds the armour like a chest).
 pub const ARMOUR_STAND_FIRST: Id = 499;
-pub const NUM_BLOCKS: Id = 503;
+/// Building blocks (see masonry.rs): concrete and its powder (which sets in
+/// water), and glazed terracotta, each in the eight colours (`+ colour`).
+pub const CONCRETE_FIRST: Id = 503;
+pub const CONCRETE_POWDER_FIRST: Id = 511;
+pub const GLAZED_FIRST: Id = 519;
+/// A candle, and one burning.
+pub const CANDLE: Id = 527;
+pub const CANDLE_LIT: Id = 528;
+pub const CHAIN: Id = 529;
+/// Climbable from inside, like a ladder you can stand in.
+pub const SCAFFOLDING: Id = 530;
+/// A lantern hung from the block above.
+pub const LANTERN_HANGING: Id = 531;
+pub const NUM_BLOCKS: Id = 532;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -741,6 +754,14 @@ pub enum Shape {
     Painting { facing: u8 },
     /// An armour stand: a base and a post, its shoulders across `facing`.
     Stand { facing: u8 },
+    /// A small candle standing on the floor.
+    Candle,
+    /// A thin chain running up and down the middle of the cell.
+    Chain,
+    /// Scaffolding: four posts and a platform on top.
+    Scaffold,
+    /// A lantern hanging from the block above.
+    Hanging,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -900,6 +921,10 @@ impl Shape {
             Shape::Brewer => ([([0.0625, 0.0, 0.0625], [0.9375, 0.125, 0.9375]), ([0.4375, 0.125, 0.4375], [0.5625, 0.875, 0.5625]), ([0.25, 0.5, 0.4375], [0.75, 0.625, 0.5625])], 3),
             Shape::Trapdoor { open: false, .. } => ([([0.0; 3], [1.0, 0.1875, 1.0]), full, full], 1),
             Shape::Trapdoor { facing, open: true } => ([side_box(facing), full, full], 1),
+            Shape::Candle => ([([0.4375, 0.0, 0.4375], [0.5625, 0.4375, 0.5625]), full, full], 1),
+            Shape::Chain => ([([0.4375, 0.0, 0.4375], [0.5625, 1.0, 0.5625]), full, full], 1),
+            Shape::Scaffold => ([([0.0, 0.875, 0.0], [1.0, 1.0, 1.0]), ([0.0, 0.0, 0.0], [0.125, 0.875, 0.125]), ([0.875, 0.0, 0.875], [1.0, 0.875, 1.0])], 3),
+            Shape::Hanging => ([([0.3125, 0.0625, 0.3125], [0.6875, 0.5625, 0.6875]), ([0.4375, 0.5625, 0.4375], [0.5625, 1.0, 0.5625]), full], 2),
             Shape::Campfire => ([([0.0, 0.0, 0.3125], [1.0, 0.25, 0.6875]), ([0.3125, 0.25, 0.0], [0.6875, 0.4375, 1.0]), full], 2),
             Shape::Painting { facing } => {
                 let t = 1.0 / 16.0;
@@ -997,6 +1022,12 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if id == SMOKER_LIT || id == BLAST_FURNACE_LIT {
         return Some(id - 1);
+    }
+    if id == CANDLE_LIT {
+        return Some(CANDLE);
+    }
+    if id == LANTERN_HANGING {
+        return Some(LANTERN);
     }
     if crate::hoppers::is_hopper(id) {
         return Some(HOPPER_FIRST);
@@ -2160,6 +2191,38 @@ impl Registry {
             d.creative = facing == 0;
             blocks.push(d);
         }
+        for c in 0..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            let id = blocks.len() as Id;
+            blocks.push(def(leak(&format!("{key}_concrete")), leak(&format!("{name} Concrete")), Cube, true, true, [T_CONCRETE + c; 3], 1.8, 1, true, id, 0.0, S_STONE));
+        }
+        for c in 0..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            let id = blocks.len() as Id;
+            blocks.push(def(leak(&format!("{key}_concrete_powder")), leak(&format!("{name} Concrete Powder (Just Add Water)")), Cube, true, true, [T_CONCRETE_POWDER + c; 3], 0.5, 0, false, id, 0.0, S_SAND));
+        }
+        for c in 0..8u16 {
+            let (key, name) = crate::carpentry::COLOURS[c as usize];
+            let id = blocks.len() as Id;
+            blocks.push(def(leak(&format!("{key}_glazed_terracotta")), leak(&format!("{name} Glazed Terracotta")), Cube, true, true, [T_GLAZED + c; 3], 1.4, 1, true, id, 0.0, S_STONE));
+        }
+        let mut candle = def("candle", "Candle (Romantic, Probably)", Shaped, false, false, [T_CANDLE; 3], 0.1, 0, false, CANDLE, 0.0, S_GRASS);
+        candle.shape = Shape::Candle;
+        blocks.push(candle);
+        let mut lit = def("candle_lit", "Candle (Lit)", Shaped, false, false, [T_CANDLE_LIT; 3], 0.1, 0, false, CANDLE, 6.0, S_GRASS);
+        lit.shape = Shape::Candle;
+        lit.creative = false;
+        blocks.push(lit);
+        let mut chain = def("chain", "Chain (Strong Links)", Shaped, false, false, [T_CHAIN; 3], 2.5, 1, true, CHAIN, 0.0, S_STONE);
+        chain.shape = Shape::Chain;
+        blocks.push(chain);
+        let mut scaffold = def("scaffolding", "Scaffolding (Climb Inside It)", Shaped, false, false, [T_SCAFFOLD_TOP, T_SCAFFOLD_SIDE, T_SCAFFOLD_TOP], 0.1, 0, false, SCAFFOLDING, 0.0, S_WOOD);
+        scaffold.shape = Shape::Scaffold;
+        blocks.push(scaffold);
+        let mut hanging = def("lantern_hanging", "Lantern (Hanging)", Shaped, false, false, [T_LANTERN; 3], 0.8, 0, false, LANTERN, 14.0, S_GLASS);
+        hanging.shape = Shape::Hanging;
+        hanging.creative = false;
+        blocks.push(hanging);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2543,6 +2606,9 @@ impl Registry {
             r(&[(STICK, 8), (WOOL, 2)], (PAINTING_FIRST, 1)),
             r(&[(STICK, 6), (STONE, 1)], (ARMOUR_STAND_FIRST, 1)),
             r(&[(TURTLE_SCUTE, 5)], (TURTLE_SHELL, 1)),
+            r(&[(STRING, 1), (HONEYCOMB, 1)], (CANDLE, 2)),
+            r(&[(IRON, 3)], (CHAIN, 2)),
+            r(&[(BAMBOO, 6), (STRING, 1)], (SCAFFOLDING, 6)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
@@ -2569,6 +2635,7 @@ impl Registry {
                 recipes.push(r(&[(WOOL, 1), (DYE_FIRST + c, 1)], (wool, 1)));
             }
             recipes.push(r(&[(GLASS, 8), (DYE_FIRST + c, 1)], (STAINED_GLASS + c, 8)));
+            recipes.push(r(&[(SAND, 4), (GRAVEL, 4), (DYE_FIRST + c, 1)], (CONCRETE_POWDER_FIRST + c, 8)));
         }
         for (m, (full, _)) in MATERIALS.iter().enumerate() {
             recipes.push(r(&[(*full, 3)], (slab(m, false), 6)));
@@ -2946,6 +3013,12 @@ mod id_order_tests {
             (TURTLE_EGG, "turtle_egg"),
             (PAINTING_FIRST + 3, "painting_west"),
             (ARMOUR_STAND_FIRST, "armour_stand"),
+            (CONCRETE_FIRST, "white_concrete"),
+            (CONCRETE_POWDER_FIRST + 7, "purple_concrete_powder"),
+            (GLAZED_FIRST + 2, "red_glazed_terracotta"),
+            (CANDLE_LIT, "candle_lit"),
+            (SCAFFOLDING, "scaffolding"),
+            (LANTERN_HANGING, "lantern_hanging"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }

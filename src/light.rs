@@ -111,6 +111,7 @@ pub fn emission(id: Id) -> u8 {
     match id {
         TORCH => 14,
         FURNACE_LIT | SMOKER_LIT | BLAST_FURNACE_LIT => 13,
+        CANDLE_LIT => 6,
         ENCHANTING_TABLE => 7,
         _ => ((r + 6.0).round() as i32).clamp(1, MAX as i32) as u8,
     }

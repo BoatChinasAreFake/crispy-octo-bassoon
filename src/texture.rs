@@ -632,6 +632,15 @@ pub const T_LLAMA_FACE: u16 = 785;
 pub const T_ZHMM_FACE: u16 = 786;
 pub const T_ZHMM_ROBE: u16 = 787;
 pub const T_WANDERER_ROBE: u16 = 788;
+/// v0.1.21: building blocks (eight colours each, in carpentry::COLOURS order).
+pub const T_CONCRETE: u16 = 789;
+pub const T_CONCRETE_POWDER: u16 = 797;
+pub const T_GLAZED: u16 = 805;
+pub const T_CANDLE: u16 = 813;
+pub const T_CANDLE_LIT: u16 = 814;
+pub const T_CHAIN: u16 = 815;
+pub const T_SCAFFOLD_TOP: u16 = 816;
+pub const T_SCAFFOLD_SIDE: u16 = 817;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3572,6 +3581,54 @@ fn home_tiles(a: &mut Atlas) {
     });
     a.each(T_TURTLE_WORN, |x, y, r, _| shade(if (x + y * 2) % 5 == 0 { rgb(60, 120, 50) } else { rgb(90, 170, 70) }, r.range(0.88, 1.05)));
     mob_tiles(a);
+    masonry_tiles(a);
+}
+
+/// v0.1.21's building blocks.
+fn masonry_tiles(a: &mut Atlas) {
+    for c in 0..8u16 {
+        let [r0, g0, b0] = crate::carpentry::colour_rgb(c as usize);
+        let base = rgb(r0, g0, b0);
+        a.each(T_CONCRETE + c, |_, _, r, _| shade(base, r.range(0.95, 1.02)));
+        a.each(T_CONCRETE_POWDER + c, |_, _, r, _| shade(base, r.range(0.78, 1.12)));
+        // Glazed terracotta: a swirl in the colour round a pale middle.
+        let pale = shade(base, 1.35);
+        let dark = shade(base, 0.6);
+        a.each(T_GLAZED + c, move |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let ring = ((dx * dx + dy * dy).sqrt() + dx.atan2(dy) * 2.0) as i32 % 4;
+            let c = match ring {
+                0 => dark,
+                1 | 2 => base,
+                _ => pale,
+            };
+            shade(c, r.range(0.93, 1.04))
+        });
+    }
+    a.each(T_CANDLE, |x, y, r, _| {
+        let wax = (6..10).contains(&x) && y >= 6;
+        let wick = x == 8 && (4..6).contains(&y);
+        if wax { shade(rgb(235, 225, 190), r.range(0.9, 1.03)) } else if wick { rgb(40, 35, 30) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_CANDLE_LIT, |x, y, r, _| {
+        let wax = (6..10).contains(&x) && y >= 6;
+        let flame = (7..10).contains(&x) && (1..6).contains(&y);
+        if flame { if y < 3 { rgb(255, 240, 150) } else { rgb(255, 170, 50) } } else if wax { shade(rgb(235, 225, 190), r.range(0.9, 1.03)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_CHAIN, |x, y, r, _| {
+        let link = (6..10).contains(&x) && (y % 6 != 0 || x == 6 || x == 9) && !((7..9).contains(&x) && y % 6 > 1 && y % 6 < 5);
+        if link { shade(rgb(70, 75, 85), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SCAFFOLD_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        let slat = x % 4 == 0;
+        if rim { shade(rgb(180, 150, 70), r.range(0.9, 1.05)) } else if slat { shade(rgb(150, 120, 55), r.range(0.9, 1.05)) } else { shade(rgb(205, 175, 90), r.range(0.9, 1.05)) }
+    });
+    a.each(T_SCAFFOLD_SIDE, |x, y, r, _| {
+        let frame = x < 2 || x > 13 || y < 2;
+        let brace = (x as i32 - y as i32).abs() < 2;
+        if frame || brace { shade(rgb(185, 155, 75), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
 }
 
 /// v0.1.20's creatures: turtles, dolphins, pandas, polar bears, llamas, and two new Hmmers.

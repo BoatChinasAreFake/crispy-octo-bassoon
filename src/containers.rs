@@ -71,6 +71,8 @@ pub fn smelt(id: Id) -> Option<Id> {
         OLD_DEBRIS => SCORCHITE_SCRAP,
         COBBLED_DEEPSLATE => DEEPSLATE,
         RESIN_CLUMP => RESIN_BRICK,
+        // Concrete bakes into glazed terracotta of its colour (see masonry.rs).
+        c if crate::masonry::is_concrete(c) => c - CONCRETE_FIRST + GLAZED_FIRST,
         // Mod recipes.
         _ => return reg().smelting.iter().find(|r| r.0 == id).map(|r| r.1),
     })

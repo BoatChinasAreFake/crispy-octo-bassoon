@@ -207,7 +207,7 @@ impl Player {
             if input.jump {
                 b.vel.y = (b.vel.y + 22.0 * dt).min(3.5);
             }
-        } else if crate::carpentry::on_ladder(world, b.min(), b.max()) {
+        } else if crate::carpentry::on_ladder(world, b.min(), b.max()) || crate::masonry::in_scaffolding(world, b.min(), b.max()) {
             // Ladders: walk into them (or jump) to climb, sneak to hold on, slide down otherwise.
             let climbing = input.forward.abs() > 0.1 || input.strafe.abs() > 0.1 || input.jump;
             b.vel.y = if climbing && !self.sneaking {

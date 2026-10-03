@@ -535,6 +535,9 @@ impl Game {
                     }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);
+                    if crate::masonry::is_powder(id) {
+                        self.harden_powder(IVec3::new(x, y, z));
+                    }
                     if packed != 0 {
                         self.unpack_box(IVec3::new(x, y, z), packed);
                     }
@@ -965,7 +968,7 @@ impl Game {
             return a == b && matches!(a, GATE_FIRST | TRAPDOOR_FIRST);
         }
         // Levers flip both ways, buttons only go in (the host lets them out).
-        if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON)) {
+        if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON) | (CANDLE, CANDLE_LIT) | (CANDLE_LIT, CANDLE)) {
             return true;
         }
         // Beacons switch effect.

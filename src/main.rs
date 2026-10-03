@@ -45,6 +45,7 @@ mod glider;
 mod golems;
 mod hollow;
 mod home;
+mod masonry;
 mod treasure;
 mod wildlife;
 mod hoppers;

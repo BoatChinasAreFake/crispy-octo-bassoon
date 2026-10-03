@@ -57,6 +57,10 @@ impl Game {
             HOPPER_FIRST => return Game::hopper_facing(normal),
             _ => {}
         }
+        // A lantern put on the underside of a block hangs from it.
+        if held == LANTERN && normal == IVec3::NEG_Y {
+            return LANTERN_HANGING;
+        }
         if held == FRAME_FIRST || held == PAINTING_FIRST {
             return held + crate::decor::frame_facing(normal).unwrap_or(0) as Id;
         }

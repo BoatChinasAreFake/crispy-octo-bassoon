@@ -103,6 +103,8 @@ impl Game {
             if self.rng.chance(0.06) && self.world.sky_light(p.x, p.y, p.z) > 0.3 {
                 self.world.set_v(p, PITCHER_PLANT);
             }
+        } else if crate::masonry::is_powder(id) {
+            self.harden_powder(p);
         } else if id == TURTLE_EGG {
             self.turtle_egg_tick(p);
         } else if id == SNIFFER_EGG {
