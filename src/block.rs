@@ -255,7 +255,14 @@ pub const MANGROVE_LOG: Id = 428;
 pub const MANGROVE_LEAVES: Id = 429;
 pub const MANGROVE_ROOTS: Id = 430;
 pub const MANGROVE_PLANKS: Id = 431;
-pub const NUM_BLOCKS: Id = 432;
+/// Observers: `OBSERVER_FIRST + facing * 2 + on` (facing: the way it looks; see contraptions.rs).
+pub const OBSERVER_FIRST: Id = 432;
+/// Crafters: `CRAFTER_FIRST + facing` (facing: where its results come out).
+pub const CRAFTER_FIRST: Id = 444;
+/// A copper lamp that flips on or off each time power arrives.
+pub const COPPER_BULB: Id = 450;
+pub const COPPER_BULB_ON: Id = 451;
+pub const NUM_BLOCKS: Id = 452;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -432,7 +439,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -1881,6 +1888,25 @@ impl Registry {
         roots.see_through = true;
         blocks.push(roots);
         blocks.push(def("mangrove_planks", "Mangrove Planks (Reddish)", Cube, true, true, [T_MANGROVE_PLANKS; 3], 2.0, 0, false, MANGROVE_PLANKS, 0.0, S_WOOD));
+        // Automation (see contraptions.rs).
+        for facing in 0..6u8 {
+            for on in [false, true] {
+                let key = format!("observer{}{}", ["", "_east", "_south", "_west", "_up", "_down"][facing as usize], if on { "_on" } else { "" });
+                let mut d = def(leak(&key), "Observer (Nosy)", Cube, true, true, [T_OBSERVER_SIDE; 3], 3.0, 1, true, OBSERVER_FIRST, 0.0, S_STONE);
+                d.creative = facing == 0 && !on;
+                blocks.push(d);
+            }
+        }
+        for facing in 0..6u8 {
+            let key = format!("crafter{}", ["", "_east", "_south", "_west", "_up", "_down"][facing as usize]);
+            let mut d = def(leak(&key), "Crafter (Crafts Unsupervised)", Cube, true, true, [T_CRAFTER_TOP, T_CRAFTER_SIDE, T_CRAFTER_SIDE], 3.5, 1, true, CRAFTER_FIRST, 0.0, S_STONE);
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
+        blocks.push(def("copper_bulb", "Copper Bulb (Off, For Now)", Cube, true, true, [T_COPPER_BULB; 3], 3.0, 1, true, COPPER_BULB, 0.0, S_STONE));
+        let mut lit = def("copper_bulb_on", "Copper Bulb (On, For Now)", Cube, true, true, [T_COPPER_BULB_ON; 3], 3.0, 1, true, COPPER_BULB, 15.0, S_STONE);
+        lit.creative = false;
+        blocks.push(lit);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2199,6 +2225,9 @@ impl Registry {
             r(&[(PLANKS, 3), (COBBLE, 4), (IRON, 1), (ZAP_DUST, 1)], (PISTON_FIRST, 1)),
             r(&[(PISTON_FIRST, 1), (GOO, 1)], (STICKY_FIRST, 1)),
             r(&[(COBBLE, 7), (BOW, 1), (ZAP_DUST, 1)], (DISPENSER_FIRST, 1)),
+            r(&[(COBBLE, 6), (ZAP_DUST, 2), (GLASS, 1)], (OBSERVER_FIRST, 1)),
+            r(&[(IRON, 5), (TABLE, 1), (ZAP_DUST, 2), (DISPENSER_FIRST, 1)], (CRAFTER_FIRST, 1)),
+            r(&[(COPPER_INGOT, 4), (ZAP_DUST, 1), (TORCH, 1)], (COPPER_BULB, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
             r(&[(PEARL, 1), (EMBER_SHROOM, 1)], (STARING_EYE, 1)),

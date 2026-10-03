@@ -131,6 +131,7 @@ impl Game {
             }
         }
         self.pressure_plates(dt);
+        self.observers_tick(dt);
         self.detector_rails(dt);
         // Comparators watch their containers (which change without any block changing).
         let comparators: Vec<IVec3> = self.world.comparators.iter().copied().filter(|p| self.world.is_loaded(p.x, p.z)).collect();

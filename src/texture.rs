@@ -491,6 +491,15 @@ pub const T_MANGROVE_LOG_TOP: u16 = 630;
 pub const T_MANGROVE_LEAVES: u16 = 631;
 pub const T_MANGROVE_ROOTS: u16 = 632;
 pub const T_MANGROVE_PLANKS: u16 = 633;
+pub const T_OBSERVER_FACE: u16 = 634;
+pub const T_OBSERVER_SIDE: u16 = 635;
+pub const T_OBSERVER_BACK: u16 = 636;
+pub const T_OBSERVER_BACK_ON: u16 = 637;
+pub const T_CRAFTER_TOP: u16 = 638;
+pub const T_CRAFTER_SIDE: u16 = 639;
+pub const T_CRAFTER_FACE: u16 = 640;
+pub const T_COPPER_BULB: u16 = 641;
+pub const T_COPPER_BULB_ON: u16 = 642;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2628,6 +2637,34 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     bark(&mut a, T_SPRUCE_LOG_SIDE, T_SPRUCE_LOG_TOP, [70, 50, 32], [140, 105, 65]);
     bark(&mut a, T_JUNGLE_LOG_SIDE, T_JUNGLE_LOG_TOP, [110, 90, 45], [175, 130, 80]);
     bark(&mut a, T_CHERRY_LOG_SIDE, T_CHERRY_LOG_TOP, [60, 30, 38], [215, 150, 150]);
+    // Observers: a stone box with a face (two eyes) and a back that lights up.
+    let stone_box = |x: usize, y: usize, r: &mut Rng| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if rim { rgb(70, 70, 74) } else { rgb(120, 120, 125) }, r.range(0.9, 1.08))
+    };
+    a.each(T_OBSERVER_SIDE, |x, y, r, _| if (3..13).contains(&x) && y % 4 == 1 { shade(rgb(85, 85, 90), r.range(0.9, 1.05)) } else { stone_box(x, y, r) });
+    a.each(T_OBSERVER_FACE, |x, y, r, _| {
+        let eye = (4..7).contains(&x) && (5..9).contains(&y) || (9..12).contains(&x) && (5..9).contains(&y);
+        if eye { rgb(20, 20, 24) } else if (3..13).contains(&x) && (11..13).contains(&y) { rgb(45, 45, 50) } else { stone_box(x, y, r) }
+    });
+    for (t, dot) in [(T_OBSERVER_BACK, rgb(70, 20, 20)), (T_OBSERVER_BACK_ON, rgb(255, 60, 40))] {
+        a.each(t, |x, y, r, _| if (6..10).contains(&x) && (6..10).contains(&y) { dot } else { stone_box(x, y, r) });
+    }
+    // Crafters: an iron box with a crafting grid on top and a mouth in front.
+    let iron_box = |x: usize, y: usize, r: &mut Rng| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if rim { rgb(90, 90, 96) } else { rgb(160, 160, 166) }, r.range(0.92, 1.06))
+    };
+    a.each(T_CRAFTER_TOP, |x, y, r, _| if (x % 5 == 0 || y % 5 == 0) && (1..15).contains(&x) && (1..15).contains(&y) { rgb(60, 45, 30) } else { iron_box(x, y, r) });
+    a.each(T_CRAFTER_SIDE, |x, y, r, _| if y < 3 { shade(rgb(150, 115, 70), r.range(0.9, 1.05)) } else { iron_box(x, y, r) });
+    a.each(T_CRAFTER_FACE, |x, y, r, _| if (5..11).contains(&x) && (6..11).contains(&y) { rgb(25, 22, 20) } else if y < 3 { shade(rgb(150, 115, 70), r.range(0.9, 1.05)) } else { iron_box(x, y, r) });
+    // Copper Bulbs: copper casing round a glass lamp, dark or glowing.
+    for (t, inner) in [(T_COPPER_BULB, rgb(90, 60, 40)), (T_COPPER_BULB_ON, rgb(255, 225, 150))] {
+        a.each(t, |x, y, r, _| {
+            let frame = x < 3 || y < 3 || x > 12 || y > 12 || x == 7 || x == 8;
+            if frame { shade(rgb(195, 110, 75), r.range(0.85, 1.1)) } else { shade(inner, r.range(0.9, 1.08)) }
+        });
+    }
     bark(&mut a, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP, [90, 55, 40], [150, 60, 50]);
     a.each(T_CHERRY_LEAVES, |x, y, r, _| {
         if r.chance(0.13) { return [240, 170, 200, 0]; }

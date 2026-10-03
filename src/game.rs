@@ -248,6 +248,9 @@ pub struct Game {
     pub effects: Vec<crate::potions::ActiveEffect>,
     /// Dispensers that were powered last time we looked (they fire on the change).
     pub dispensers_on: std::collections::HashSet<IVec3>,
+    /// What each observer last saw in front of it, and pulses still going.
+    pub observed: HashMap<IVec3, Id>,
+    pub observer_pulses: HashMap<IVec3, f32>,
     /// Hopper clock (see hoppers.rs).
     pub hopper_timer: f32,
     /// The Galloper we're riding, and when we last told the host (see horses.rs).
@@ -452,6 +455,8 @@ impl Game {
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
+            observed: HashMap::new(),
+            observer_pulses: HashMap::new(),
             hopper_timer: 0.0,
             mounted: None,
             ride_sync: 0.0,
@@ -5639,6 +5644,66 @@ looks_like = diamond
             g.update_entities(0.05);
             assert!(g.chat_log.iter().any(|l| l == "The Cheese King has been defeated!"), "{:?}", g.chat_log);
         });
+    }
+
+    #[test]
+    fn observers_pulse_bulbs_toggle_and_crafters_craft() {
+        use crate::contraptions::{observer, observer_state};
+        let zap = |g: &mut Game, secs: f32| {
+            for _ in 0..(secs / 0.05) as usize {
+                g.zap_tick(0.05);
+            }
+        };
+        // An observer looking east at (2, 50, 0), a lamp behind it.
+        let mut g = arena(61);
+        let (obs, front, lamp) = (IVec3::new(1, 50, 0), IVec3::new(2, 50, 0), IVec3::new(0, 50, 0));
+        g.world.set_v(lamp, LAMP);
+        g.world.set_v(obs, observer(crate::contraptions::facing_of(IVec3::X), false));
+        zap(&mut g, 0.3);
+        assert_eq!(g.world.get_v(lamp), LAMP, "nothing changed yet");
+        g.world.set_v(front, STONE);
+        let mut lit = false;
+        for _ in 0..10 {
+            g.zap_tick(0.05);
+            lit |= g.world.get_v(lamp) == LAMP_ON && observer_state(g.world.get_v(obs)).1;
+        }
+        assert!(lit, "a change in front sends a pulse out of the back");
+        zap(&mut g, 0.6);
+        assert_eq!(g.world.get_v(lamp), LAMP, "and the pulse ends");
+        assert!(!observer_state(g.world.get_v(obs)).1);
+
+        // A copper bulb flips each time power arrives.
+        let mut g = arena(62);
+        let (bulb, lever) = (IVec3::new(0, 50, 0), IVec3::new(1, 50, 0));
+        g.world.set_v(bulb, COPPER_BULB);
+        g.world.set_v(lever, LEVER);
+        zap(&mut g, 0.2);
+        let mut states = Vec::new();
+        for on in [true, false, true, false] {
+            g.world.set_v(lever, if on { LEVER_ON } else { LEVER });
+            zap(&mut g, 0.3);
+            states.push(g.world.get_v(bulb) == COPPER_BULB_ON);
+        }
+        assert_eq!(states, [true, true, false, false], "on, stays on, off, stays off");
+        assert!(block(COPPER_BULB_ON).light > 10.0);
+
+        // A crafter makes the recipe its grid adds up to when powered.
+        let mut g = arena(63);
+        let (crafter, lever) = (IVec3::new(0, 50, 0), IVec3::new(0, 50, 1));
+        g.world.set_v(crafter, CRAFTER_FIRST + crate::contraptions::facing_of(IVec3::X) as Id);
+        g.world.set_v(lever, LEVER);
+        if let Some(c) = g.world.containers.get_mut(&crafter) {
+            c.slots[0] = Some((PLANKS, 1));
+            c.slots[4] = Some((PLANKS, 1));
+        }
+        zap(&mut g, 0.2);
+        g.world.set_v(lever, LEVER_ON);
+        zap(&mut g, 0.3);
+        assert!(g.drops.iter().any(|d| d.item == STICK && d.n == 4), "planks into sticks");
+        assert!(g.world.containers[&crafter].slots.iter().all(|s| s.is_none()), "the grid is used up");
+        // Spare ingredients: no recipe, nothing made.
+        assert!(crate::contraptions::crafter_recipe(&[Some((PLANKS, 2)), Some((DIRT, 1))]).is_none());
+        assert!(crate::contraptions::crafter_recipe(&[None; 9]).is_none());
     }
 
     #[test]
