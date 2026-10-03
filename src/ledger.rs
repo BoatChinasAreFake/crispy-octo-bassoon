@@ -282,8 +282,14 @@ impl Game {
             if drops {
                 let center = at.as_vec3() + macroquad::math::Vec3::splat(0.5);
                 let roll = self.rng.f32();
-                let n = fortune_count(old, level((ench as u32) << 16, Enchant::Fortune), roll);
-                self.pop_drop(center, block(old).drop, n);
+                let silk = level((ench as u32) << 16, Enchant::SilkTouch) > 0 && Enchant::SilkTouch.fits(held);
+                match crate::enchant::silk_drop(old).filter(|_| silk) {
+                    Some(whole) => self.pop_drop(center, whole, 1),
+                    None => {
+                        let n = fortune_count(old, level((ench as u32) << 16, Enchant::Fortune), roll);
+                        self.pop_drop(center, block(old).drop, n);
+                    }
+                }
                 let points = crate::xp::ore_xp(old, &mut self.rng);
                 self.spawn_orbs(center, points);
                 for (item, n) in crate::farming::random_drops(old, &mut self.rng) {

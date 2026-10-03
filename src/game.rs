@@ -269,6 +269,9 @@ pub struct Game {
     pub smoke_acc: f32,
     /// Seconds until a Wanderer might turn up (see villagers.rs).
     pub wanderer_timer: f32,
+    /// Frost Walker: seconds since boots last looked for water, and frozen water melting back (see enchant.rs).
+    pub frost_acc: f32,
+    pub frosted: Vec<(IVec3, f32)>,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
     pub lod: crate::lod::Lod,
@@ -507,6 +510,8 @@ impl Game {
             firefly_acc: 0.0,
             smoke_acc: 0.0,
             wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
+            frost_acc: 0.0,
+            frosted: Vec::new(),
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -1190,6 +1195,7 @@ impl Game {
         self.recipe_news = (self.recipe_news - dt).max(0.0);
         self.report_tick(dt);
         self.campfire_smoke(dt);
+        self.frost_walk(dt);
         self.update_entities(dt);
         self.script_tick(dt);
     }
@@ -1516,6 +1522,10 @@ impl Game {
     /// Throw the held spear (the host owns thrown things, so clients ask it to).
     fn throw_spear(&mut self, item: Id) {
         let wear = self.inv.wear[self.inv.selected];
+        // Riptide: in water or rain, the spear takes you with it instead.
+        if self.riptide(wear) {
+            return;
+        }
         self.player.swing = 1.0;
         self.use_cd = 0.8;
         self.advance("spear_it");
@@ -2517,12 +2527,15 @@ impl Game {
             if !self.is_client() {
                 let center = pos.as_vec3() + Vec3::splat(0.5);
                 let d = block(id).drop;
-                if d != AIR {
+                let silk = self.held_level(Enchant::SilkTouch) > 0 && (crate::enchant::Enchant::SilkTouch).fits(self.inv.held());
+                if let Some(whole) = crate::enchant::silk_drop(id).filter(|_| silk) {
+                    self.pop_drop(center, whole, 1);
+                } else if d != AIR {
                     let roll = self.rng.range(0.0, 1.0);
                     let n = fortune_count(id, self.held_level(Enchant::Fortune), roll);
                     self.pop_drop(center, d, n);
                 }
-                for (item, n) in crate::farming::random_drops(id, &mut self.rng) {
+                for (item, n) in crate::farming::random_drops(id, &mut self.rng).into_iter().filter(|_| !silk) {
                     match item {
                         COAL => self.msg("Found coal in the gravel. Don't ask."),
                         BAIT => self.msg("You found a Wiggly Worm. The fish will love it."),
@@ -2931,6 +2944,7 @@ impl Game {
         self.floaties_tick();
         self.fireflies_tick(dt);
         self.campfires_tick(dt);
+        self.frost_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
@@ -3133,7 +3147,16 @@ impl Game {
                         self.system_message(None, &t);
                         self.sfx(Sfx::Fanfare, Some(at));
                     }
-                    let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
+                    // Looting on whatever killed it: a little more of each.
+                    let looting = if m.last_attacker == self.my_id && !self.dedicated {
+                        if Enchant::Looting.fits(self.inv.held()) { self.held_level(Enchant::Looting) } else { 0 }
+                    } else if self.peers.contains_key(&m.last_attacker) && Enchant::Looting.fits(self.verified_held(m.last_attacker)) {
+                        crate::enchant::level((self.verified_ench(m.last_attacker) as u32) << 16, Enchant::Looting)
+                    } else {
+                        0
+                    };
+                    let extra = if looting > 0 { self.rng.int(0, looting as i32) as u8 } else { 0 };
+                    let drops = [m.loot(&mut self.rng).map(|(i, n)| (i, n.saturating_add(extra))), m.extra_loot(&mut self.rng)];
                     for (item, n) in drops.into_iter().flatten() {
                         if !self.creative {
                             self.pop_drop(m.body.pos + Vec3::Y * 0.5, item, n);

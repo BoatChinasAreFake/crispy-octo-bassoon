@@ -138,6 +138,8 @@ impl Game {
         if points == 0 {
             return;
         }
+        // Mending takes its share first (see enchant.rs).
+        let points = points - self.mend(points);
         let before = level_of(self.xp).0;
         self.xp = self.xp.saturating_add(points).min(1 << 24);
         let after = level_of(self.xp).0;

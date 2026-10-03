@@ -1838,7 +1838,7 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
             s += &format!(" [X at {x}, {z}]");
         }
     } else if enchant::is_enchanted(wear) {
-        s += &format!(" [{}]", enchant::describe(wear));
+        s += &format!(" [{}]", enchant::describe_for(id, wear));
     }
     if let Some(t) = trims::describe(wear).filter(|_| armor_of(id).is_some()) {
         s += &format!(" [{t}]");

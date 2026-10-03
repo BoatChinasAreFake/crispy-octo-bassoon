@@ -752,6 +752,8 @@ impl Game {
             Msg::SortContainer { x, y, z } => self.host_sort(from, IVec3::new(x, y, z)),
             Msg::RegularAsk { mob } => self.host_regular_ask(from, mob),
             Msg::CampfirePut { x, y, z, item } => self.host_campfire_put(from, IVec3::new(x, y, z), item),
+            Msg::Mend { points } => self.host_mend(from, points),
+            Msg::FrostWalk => self.host_frost_walk(from),
             Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
                 let p = IVec3::new(x, y, z);
                 if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
@@ -1076,7 +1078,7 @@ impl Game {
             Msg::Container { x, y, z, slots, burn, cook } => self.apply_container(IVec3::new(x, y, z), slots, burn, cook),
             Msg::Drops(list) => self.apply_drops(list),
             Msg::Orbs(list) => self.apply_orbs(list),
-            Msg::Xp { points } => self.xp = points.min(1 << 24),
+            Msg::Xp { points } => self.xp_update(points),
             Msg::Restore { pos, xp, slots, health, food, saturation } => self.apply_restore(pos, xp, slots, health, food, saturation),
             Msg::Rules { keep_inventory, difficulty, daylight_cycle, weather_cycle, hardcore } => {
                 self.rules = crate::rules::WorldRules { keep_inventory, difficulty: crate::rules::Difficulty::from_index(difficulty), daylight_cycle, weather_cycle, hardcore };
@@ -1180,7 +1182,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk => {}
         }
     }
 

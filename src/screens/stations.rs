@@ -50,14 +50,15 @@ impl App {
             draw_rectangle(r.x, r.y, r.w, r.h, bg);
             draw_rectangle_lines(r.x, r.y, r.w, r.h, s, Color::new(0.6, 0.5, 0.7, 1.0));
             // Only the first enchantment is revealed (Minecraft keeps some mystery too).
-            let first = enchant::Enchant::ALL.iter().find(|e| enchant::level(bits, **e) > 0).map(|e| enchant::describe(enchant::with_level(0, *e, enchant::level(bits, *e)))).unwrap_or_default();
+            let on = item.map(|s| s.0).unwrap_or(BOOK);
+            let first = enchant::Enchant::ALL.iter().find(|e| e.fits(on) && enchant::level(bits, **e) > 0).map(|e| enchant::describe_for(on, enchant::with_level(0, *e, enchant::level(bits, *e)))).unwrap_or_default();
             let color = if blocked.is_some() { GRAY } else { Color::new(0.85, 1.0, 0.6, 1.0) };
             self.ui.text(&format!("{first} . . . ?"), r.x + 4.0 * s, r.y + bh * 0.45, 8.0, color);
             let cost = choice + 1;
             let req = format!("Level {need}+   costs {cost} level{} and {cost} gold", if cost == 1 { "" } else { "s" });
             self.ui.text(&req, r.x + 4.0 * s, r.y + bh * 0.85, 7.0, if level >= need || self.game.creative { GRAY } else { Color::new(1.0, 0.4, 0.4, 1.0) });
             if hover {
-                let what = enchant::Enchant::ALL.iter().find(|e| enchant::level(bits, **e) > 0).map(|e| e.name()).unwrap_or("Something");
+                let what = enchant::Enchant::ALL.iter().find(|e| e.fits(on) && enchant::level(bits, **e) > 0).map(|e| e.name()).unwrap_or("Something");
                 tooltip = Some(blocked.clone().unwrap_or_else(|| format!("{what}, and maybe more")));
                 if is_mouse_button_pressed(MouseButton::Left) && self.game.inv.cursor.is_none() {
                     self.game.enchant_pick(choice);

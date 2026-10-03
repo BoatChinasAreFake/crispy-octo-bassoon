@@ -1,5 +1,13 @@
 //! Enchantments: stored in the high 16 bits of an item's wear (see
-//! `inventory::Wear`), three bits per enchantment.
+//! `inventory::Wear`).
+//!
+//! The first five took three bits each (bits 16..31). Unbreaking and Fortune
+//! never go above III, so the top bit of each was always clear: those two
+//! bits now hold **Mending** (27) and **Silk Touch** (30), and older items
+//! read exactly as before. Three more share another's bits on the things only
+//! they fit: **Looting** is Fortune's bits on a weapon, and **Frost Walker**
+//! (boots) and **Riptide** (spears) are Efficiency's. On a book they're the
+//! same bits, so a book reads as both ("Fortune/Looting III").
 
 use crate::block::*;
 use crate::game::Game;
@@ -21,21 +29,61 @@ pub enum Enchant {
     Unbreaking,
     /// Pickaxes get more from ores.
     Fortune,
+    /// Experience you pick up mends it instead.
+    Mending,
+    /// Blocks come away whole (glass as glass, ore as ore).
+    SilkTouch,
+    /// Weapons: more loot (Fortune's bits).
+    Looting,
+    /// Boots: water freezes underfoot (Efficiency's bits).
+    FrostWalker,
+    /// Spears: thrown in water or rain, it takes you with it (Efficiency's bits).
+    Riptide,
 }
 
 impl Enchant {
-    pub const ALL: [Enchant; 5] = [Enchant::Efficiency, Enchant::Sharpness, Enchant::Protection, Enchant::Unbreaking, Enchant::Fortune];
+    pub const ALL: [Enchant; 10] = [
+        Enchant::Efficiency,
+        Enchant::Sharpness,
+        Enchant::Protection,
+        Enchant::Unbreaking,
+        Enchant::Fortune,
+        Enchant::Mending,
+        Enchant::SilkTouch,
+        Enchant::Looting,
+        Enchant::FrostWalker,
+        Enchant::Riptide,
+    ];
 
-    fn shift(self) -> u32 {
-        16 + 3 * self as u32
+    /// Where it's kept: (first bit, mask).
+    fn bits(self) -> (u32, u32) {
+        match self {
+            Enchant::Efficiency | Enchant::FrostWalker | Enchant::Riptide => (16, 7),
+            Enchant::Sharpness => (19, 7),
+            Enchant::Protection => (22, 7),
+            Enchant::Unbreaking => (25, 3),
+            Enchant::Mending => (27, 1),
+            Enchant::Fortune | Enchant::Looting => (28, 3),
+            Enchant::SilkTouch => (30, 1),
+        }
     }
 
     pub fn max_level(self) -> u8 {
         match self {
             Enchant::Efficiency | Enchant::Sharpness => 5,
             Enchant::Protection => 4,
-            Enchant::Unbreaking | Enchant::Fortune => 3,
+            Enchant::Unbreaking | Enchant::Fortune | Enchant::Looting | Enchant::Riptide => 3,
+            Enchant::FrostWalker => 2,
+            Enchant::Mending | Enchant::SilkTouch => 1,
         }
+    }
+
+    /// The enchantments with their own bits (each shared one counted once).
+    pub const STORED: [Enchant; 7] = [Enchant::Efficiency, Enchant::Sharpness, Enchant::Protection, Enchant::Unbreaking, Enchant::Fortune, Enchant::Mending, Enchant::SilkTouch];
+
+    /// Only from treasure (books in chests, Librarians), never the table.
+    pub fn treasure(self) -> bool {
+        self == Enchant::Mending
     }
 
     pub fn name(self) -> &'static str {
@@ -45,6 +93,11 @@ impl Enchant {
             Enchant::Protection => "Protection (Extra Padding)",
             Enchant::Unbreaking => "Unbreaking (Mostly)",
             Enchant::Fortune => "Fortune (Rocks Pay Better)",
+            Enchant::Mending => "Mending (Experience Fixes It)",
+            Enchant::SilkTouch => "Silk Touch (Gentle Hands)",
+            Enchant::Looting => "Looting (Monsters Pay Better)",
+            Enchant::FrostWalker => "Frost Walker (Walk on Water, Sort Of)",
+            Enchant::Riptide => "Riptide (Spear Express)",
         }
     }
 
@@ -55,6 +108,11 @@ impl Enchant {
             Enchant::Protection => "Protection",
             Enchant::Unbreaking => "Unbreaking",
             Enchant::Fortune => "Fortune",
+            Enchant::Mending => "Mending",
+            Enchant::SilkTouch => "Silk Touch",
+            Enchant::Looting => "Looting",
+            Enchant::FrostWalker => "Frost Walker",
+            Enchant::Riptide => "Riptide",
         }
     }
 
@@ -64,11 +122,16 @@ impl Enchant {
             return true;
         }
         let pick = pick_tier(item) > 0 || crate::tools::is_digger(item);
+        let boots = armor_of(item).is_some_and(|(slot, _)| slot == BOOTS);
+        let spear = crate::block::is_spear(item);
         match self {
-            Enchant::Efficiency | Enchant::Fortune => pick,
+            Enchant::Efficiency | Enchant::Fortune | Enchant::SilkTouch => pick,
             Enchant::Sharpness => is_sword(item),
             Enchant::Protection => armor_of(item).is_some() || item == SHIELD,
-            Enchant::Unbreaking => durability(item).is_some(),
+            Enchant::Unbreaking | Enchant::Mending => durability(item).is_some(),
+            Enchant::Looting => is_sword(item) && !pick,
+            Enchant::FrostWalker => boots,
+            Enchant::Riptide => spear && !pick,
         }
     }
 }
@@ -76,7 +139,9 @@ impl Enchant {
 /// Enchantments an enchanting table (or a lucky chest) might give `item` at
 /// power `power` (1..=30): one or two that fit it, stronger at higher power.
 pub fn roll(item: Id, power: u8, rng: &mut crate::noise::Rng) -> Wear {
-    let fits: Vec<Enchant> = Enchant::ALL.iter().copied().filter(|e| e.fits(item)).collect();
+    // (A book rolls only the enchantments with their own bits, so it never names two at once.)
+    let pool: &[Enchant] = if item == BOOK || item == ENCHANTED_BOOK { &Enchant::STORED } else { &Enchant::ALL };
+    let fits: Vec<Enchant> = pool.iter().copied().filter(|e| e.fits(item) && !e.treasure()).collect();
     if fits.is_empty() || power == 0 {
         return 0;
     }
@@ -88,21 +153,28 @@ pub fn roll(item: Id, power: u8, rng: &mut crate::noise::Rng) -> Wear {
         let lvl = (1.0 + (power as f32 / 30.0) * top * rng.range(0.6, 1.1)).floor().clamp(1.0, top) as u8;
         w = with_level(w, e, lvl.max(level(w, e)));
     }
+    // Silk Touch and Fortune don't go together.
+    if level(w, Enchant::SilkTouch) > 0 && level(w, Enchant::Fortune) > 0 && item != BOOK && item != ENCHANTED_BOOK {
+        w = with_level(w, Enchant::Fortune, 0);
+    }
     w
 }
 
-/// An enchanted book from a treasure chest: something strong.
+/// An enchanted book from a treasure chest: something strong (now and then Mending).
 pub fn random_book(rng: &mut crate::noise::Rng) -> Wear {
-    roll(BOOK, rng.int(15, 30) as u8, rng)
+    let w = roll(BOOK, rng.int(15, 30) as u8, rng);
+    if rng.chance(0.2) { with_level(0, Enchant::Mending, 1) } else { w }
 }
 
 /// An enchantment's level on an item (0: none).
 pub fn level(w: Wear, e: Enchant) -> u8 {
-    ((w >> e.shift()) & 7) as u8
+    let (shift, mask) = e.bits();
+    ((w >> shift) & mask) as u8
 }
 
 pub fn with_level(w: Wear, e: Enchant, lvl: u8) -> Wear {
-    (w & !(7 << e.shift())) | ((lvl.min(e.max_level()) as u32) << e.shift())
+    let (shift, mask) = e.bits();
+    (w & !(mask << shift)) | ((lvl.min(e.max_level()) as u32 & mask) << shift)
 }
 
 pub fn is_enchanted(w: Wear) -> bool {
@@ -111,7 +183,7 @@ pub fn is_enchanted(w: Wear) -> bool {
 
 /// Total levels of all its enchantments.
 pub fn total_levels(w: Wear) -> u32 {
-    Enchant::ALL.iter().map(|e| level(w, *e) as u32).sum()
+    Enchant::STORED.iter().map(|e| level(w, *e) as u32).sum()
 }
 
 /// `a`'s enchantments with `b`'s added, as far as they fit `item`: a level
@@ -121,7 +193,9 @@ pub fn merge(item: Id, a: Wear, b: Wear) -> Wear {
     let mut w = a & 0x7FFF_0000;
     for e in Enchant::ALL {
         let (la, lb) = (level(a, e), level(b, e));
-        if lb == 0 || !e.fits(item) {
+        // (Shared bits: only the one that fits this item counts, and only once.)
+        let book = item == BOOK || item == ENCHANTED_BOOK;
+        if lb == 0 || !e.fits(item) || (book && !Enchant::STORED.contains(&e)) {
             continue;
         }
         let new = if la == lb { (la + 1).min(e.max_level()) } else { la.max(lb) };
@@ -135,10 +209,49 @@ pub fn enchanted_form(item: Id) -> Id {
     if item == BOOK { ENCHANTED_BOOK } else { item }
 }
 
-/// "Efficiency III, Unbreaking I".
-pub fn describe(w: Wear) -> String {
+/// What an item's enchantments are called, as they apply to that item:
+/// "Efficiency III, Unbreaking I" (a book's shared bits read "Fortune/Looting III").
+pub fn describe_for(item: Id, w: Wear) -> String {
     let roman = ["", "I", "II", "III", "IV", "V", "VI", "VII"];
-    Enchant::ALL.iter().filter(|e| level(w, **e) > 0).map(|e| format!("{} {}", e.short(), roman[level(w, *e) as usize])).collect::<Vec<_>>().join(", ")
+    let book = item == BOOK || item == ENCHANTED_BOOK;
+    let name = |e: Enchant| -> String {
+        if !book {
+            return e.short().to_string();
+        }
+        match e {
+            Enchant::Fortune => "Fortune/Looting".into(),
+            Enchant::Efficiency => "Efficiency/Frost Walker/Riptide".into(),
+            e => e.short().to_string(),
+        }
+    };
+    let list: Vec<Enchant> = if book { Enchant::STORED.to_vec() } else { Enchant::ALL.iter().copied().filter(|e| e.fits(item)).collect() };
+    list.into_iter().filter(|e| level(w, *e) > 0).map(|e| format!("{} {}", name(e), roman[level(w, e) as usize])).collect::<Vec<_>>().join(", ")
+}
+
+/// What a block drops broken with Silk Touch: itself, when it's something a
+/// player could place (None: Silk Touch makes no difference).
+pub fn silk_drop(id: Id) -> Option<Id> {
+    let b = block(id);
+    (b.drop != id && b.hardness >= 0.0 && !is_liquid(id) && b.model == Model::Cube && placing_item(id) == Some(id)).then_some(id)
+}
+
+/// How long frozen water stays frozen (seconds), and how often boots look for water.
+pub const FROST_SECS: f32 = 8.0;
+const FROST_EVERY: f32 = 0.15;
+
+/// Water sources in a ring of `radius` round `feet` (one block down), to freeze.
+pub fn frost_cells(world: &crate::world::World, feet: Vec3, radius: i32) -> Vec<IVec3> {
+    let c = (feet - Vec3::Y * 0.5).floor().as_ivec3();
+    let mut v = Vec::new();
+    for dz in -radius..=radius {
+        for dx in -radius..=radius {
+            let p = c + IVec3::new(dx, 0, dz);
+            if dx * dx + dz * dz <= radius * radius && world.get_v(p) == WATER && world.get_v(p + IVec3::Y) == AIR {
+                v.push(p);
+            }
+        }
+    }
+    v
 }
 
 /// Top enchantments need this many bookshelves around the table.
@@ -152,7 +265,7 @@ pub fn enchants(w: Wear) -> u16 {
 
 /// Can the table do anything with this?
 pub fn enchantable(item: Id, w: Wear) -> bool {
-    !is_enchanted(w) && Enchant::ALL.iter().any(|e| e.fits(item))
+    !is_enchanted(w) && Enchant::ALL.iter().any(|e| e.fits(item) && !e.treasure())
 }
 
 /// What seeds a player's offers: the same on their screen and on the host.
@@ -192,6 +305,135 @@ pub struct EnchantUi {
 }
 
 impl Game {
+    /// Mending: picked-up experience mends whatever you're holding and wearing
+    /// that has Mending (two uses a point). Returns the points it took.
+    pub fn mend(&mut self, points: u32) -> u32 {
+        let mut left = points;
+        let inv = &mut self.inv;
+        let sel = inv.selected;
+        let mut spots: Vec<(Id, &mut Wear)> = Vec::new();
+        if let Some((id, _)) = inv.slots[sel] {
+            spots.push((id, &mut inv.wear[sel]));
+        }
+        if let Some((id, _)) = inv.offhand {
+            spots.push((id, &mut inv.offhand_wear));
+        }
+        for (s, w) in inv.armor.iter().zip(inv.armor_wear.iter_mut()) {
+            if let Some((id, _)) = s {
+                spots.push((*id, w));
+            }
+        }
+        for (_, w) in spots {
+            if left == 0 {
+                break;
+            }
+            let used = crate::inventory::uses(*w) as u32;
+            if level(*w, Enchant::Mending) == 0 || used == 0 {
+                continue;
+            }
+            let fix = used.min(left * 2);
+            *w = crate::inventory::with_uses(*w, (used - fix) as u16);
+            left -= fix.div_ceil(2);
+        }
+        points - left
+    }
+
+    /// Joined players: the host says our experience went up; Mending takes its share first.
+    pub fn xp_update(&mut self, total: u32) {
+        let gained = total.saturating_sub(self.xp);
+        let used = self.mend(gained);
+        self.xp = total.min(1 << 24) - used.min(total);
+        if used > 0 {
+            self.net_send_msg(Msg::Mend { points: used });
+        }
+    }
+
+    /// The host: a joined player's Mending used some of their experience.
+    pub fn host_mend(&mut self, from: u32, points: u32) {
+        if let Some(p) = self.peers.get_mut(&from) {
+            p.ledger.xp = p.ledger.xp.saturating_sub(points);
+        }
+    }
+
+    /// Frost Walker boots freeze the water round your feet (the local player).
+    pub fn frost_walk(&mut self, dt: f32) {
+        self.frost_acc += dt;
+        if self.frost_acc < FROST_EVERY {
+            return;
+        }
+        self.frost_acc = 0.0;
+        let lvl = self.inv.armor[BOOTS].map(|_| level(self.inv.armor_wear[BOOTS], Enchant::FrostWalker)).unwrap_or(0);
+        let b = &self.player.body;
+        if lvl == 0 || !b.on_ground || b.in_water || self.spectator {
+            return;
+        }
+        if self.is_client() {
+            if !frost_cells(&self.world, b.pos, 1 + lvl as i32).is_empty() {
+                self.net_send_msg(Msg::FrostWalk);
+            }
+            return;
+        }
+        let at = b.pos;
+        self.freeze_round(at, lvl);
+    }
+
+    /// The host: a joined player's Frost Walker boots (if their ledger says they have some).
+    pub fn host_frost_walk(&mut self, from: u32) {
+        let Some(p) = self.peers.get(&from) else { return };
+        let at = p.target;
+        let lvl = p.ledger.enchanted.keys().filter(|(item, _)| armor_of(*item).is_some_and(|(slot, _)| slot == BOOTS)).map(|(_, ench)| level((*ench as u32) << 16, Enchant::FrostWalker)).max().unwrap_or(0);
+        if lvl > 0 {
+            self.freeze_round(at, lvl);
+        }
+    }
+
+    fn freeze_round(&mut self, at: Vec3, lvl: u8) {
+        for p in frost_cells(&self.world, at, 1 + lvl as i32) {
+            self.world.set_v(p, ICE);
+            self.frosted.push((p, FROST_SECS + self.rng.range(0.0, 3.0)));
+        }
+    }
+
+    /// Where the world lives: frozen water melts back after a while.
+    pub fn frost_tick(&mut self, dt: f32) {
+        if self.frosted.is_empty() {
+            return;
+        }
+        let mut melt = Vec::new();
+        self.frosted.retain_mut(|(p, t)| {
+            *t -= dt;
+            if *t <= 0.0 {
+                melt.push(*p);
+                false
+            } else {
+                true
+            }
+        });
+        for p in melt {
+            if self.world.get_v(p) == ICE {
+                self.world.set_v(p, WATER);
+            }
+        }
+    }
+
+    /// Riptide: a spear thrown in water or the rain takes you with it (true if it did).
+    pub fn riptide(&mut self, wear: Wear) -> bool {
+        let lvl = level(wear, Enchant::Riptide);
+        let p = self.player.body.pos;
+        let wet = self.player.body.in_water || self.rained_on(p.x.floor() as i32, (p.y + 1.0).floor() as i32, p.z.floor() as i32);
+        if lvl == 0 || !wet {
+            return false;
+        }
+        self.player.body.vel = self.player.look_dir() * (12.0 + 5.0 * lvl as f32);
+        self.player.body.on_ground = false;
+        self.player.swing = 1.0;
+        self.use_cd = 0.8;
+        self.use_tool(1);
+        self.sfx(Sfx::Gust, None);
+        self.advance("riptide");
+        true
+    }
+
     /// An enchantment's level on the item in hand.
     pub fn held_level(&self, e: Enchant) -> u8 {
         level(self.inv.wear[self.inv.selected], e)
@@ -412,5 +654,79 @@ impl Game {
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use macroquad::math::ivec3;
+
+    #[test]
+    fn old_enchantments_read_the_same_and_new_ones_fit_in_the_spare_bits() {
+        // An item from an older save: Unbreaking III and Fortune III use only two bits each.
+        let old = with_level(with_level(0, Enchant::Unbreaking, 3), Enchant::Fortune, 3);
+        assert_eq!(old, (3 << 25) | (3 << 28));
+        assert_eq!(level(old, Enchant::Mending), 0);
+        assert_eq!(level(old, Enchant::SilkTouch), 0);
+        let w = with_level(with_level(old, Enchant::Mending, 1), Enchant::SilkTouch, 1);
+        assert_eq!((level(w, Enchant::Unbreaking), level(w, Enchant::Fortune), level(w, Enchant::Mending), level(w, Enchant::SilkTouch)), (3, 3, 1, 1));
+        assert_eq!(w & (1 << 31), 0, "the trim bit stays clear");
+        // Shared bits name the right thing for the item.
+        let boots = ARMOR_FIRST + 4 + BOOTS as Id;
+        assert!(Enchant::FrostWalker.fits(boots) && !Enchant::FrostWalker.fits(PICK_IRON) && !Enchant::Efficiency.fits(boots));
+        assert!(Enchant::Looting.fits(SWORD_IRON) && !Enchant::Fortune.fits(SWORD_IRON));
+        assert!(Enchant::Riptide.fits(SPEAR_FIRST + 2));
+        let fw = with_level(0, Enchant::FrostWalker, 2);
+        assert_eq!(describe_for(boots, fw), "Frost Walker II");
+        assert_eq!(describe_for(BOOK, with_level(0, Enchant::Looting, 3)), "Fortune/Looting III");
+        assert_eq!(level(merge(boots, 0, fw), Enchant::FrostWalker), 2, "a book's Efficiency bits go onto boots as Frost Walker");
+        // The table never gives Mending; Silk Touch and Fortune don't share a pick.
+        let mut rng = crate::noise::Rng::new(5);
+        for _ in 0..400 {
+            let r = roll(PICK_DIAMOND, 30, &mut rng);
+            assert_eq!(level(r, Enchant::Mending), 0);
+            assert!(level(r, Enchant::SilkTouch) == 0 || level(r, Enchant::Fortune) == 0);
+        }
+        assert!((0..200).any(|_| level(random_book(&mut rng), Enchant::Mending) == 1), "Mending turns up in treasure");
+    }
+
+    #[test]
+    fn mending_silk_touch_and_frost_walker_work() {
+        let mut g = crate::game::tests::arena(181);
+        // Mending: experience fixes a worn pick before it counts.
+        g.inv.slots[0] = Some((PICK_IRON, 1));
+        g.inv.selected = 0;
+        g.inv.wear[0] = with_level(crate::inventory::with_uses(0, 10), Enchant::Mending, 1);
+        g.add_xp(8);
+        assert_eq!(crate::inventory::uses(g.inv.wear[0]), 0, "mended");
+        assert_eq!(g.xp, 3, "five points went on mending");
+        // Silk Touch: glass comes away whole.
+        assert_eq!(silk_drop(GLASS), Some(GLASS));
+        assert_eq!(silk_drop(STONE), Some(STONE));
+        assert_eq!(silk_drop(COBBLE), None, "cobble drops itself anyway");
+        g.inv.wear[0] = with_level(0, Enchant::SilkTouch, 1);
+        let p = ivec3(2, 50, 2);
+        g.world.set_v(p, GLASS);
+        g.break_block(p, true);
+        assert!(g.drops.iter().any(|d| d.item == GLASS), "glass, not nothing");
+        // Frost Walker: the pond freezes round you, then melts.
+        for x in -2..=2 {
+            for z in -2..=2 {
+                g.world.set_v(ivec3(x + 6, 49, z), WATER);
+            }
+        }
+        g.world.set_v(ivec3(6, 49, 0), STONE);
+        g.player.body.pos = Vec3::new(6.5, 50.0, 0.5);
+        g.player.body.on_ground = true;
+        g.inv.armor[BOOTS] = Some((ARMOR_FIRST + 4 + BOOTS as Id, 1));
+        g.inv.armor_wear[BOOTS] = with_level(0, Enchant::FrostWalker, 1);
+        g.frost_walk(1.0);
+        assert_eq!(g.world.get_v(ivec3(7, 49, 0)), ICE);
+        assert_eq!(g.world.get_v(ivec3(8, 49, 2)), WATER, "only a little way round");
+        for _ in 0..30 {
+            g.frost_tick(0.5);
+        }
+        assert_eq!(g.world.get_v(ivec3(7, 49, 0)), WATER, "melted again");
     }
 }

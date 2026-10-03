@@ -30,7 +30,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
 /// v22: bundles, books and banners through the host; chest sorting.
 /// v23: seats in mount ids (Floaties), regulars' discounts, spears by kind.
-pub const PROTOCOL: u32 = 24;
+pub const PROTOCOL: u32 = 25;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -137,6 +137,10 @@ pub enum Msg {
     Regular { mob: u32, trades: u16 },
     /// client -> host: I put one of these on the Campfire here to cook (see home.rs).
     CampfirePut { x: i32, y: i32, z: i32, item: Id },
+    /// client -> host: Mending used this much of my experience (see enchant.rs).
+    Mend { points: u32 },
+    /// client -> host: my Frost Walker boots are by water; freeze it.
+    FrostWalk,
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -771,6 +775,11 @@ impl Msg {
                 w.u8(82);
                 w.u32(*mob);
             }
+            Msg::Mend { points } => {
+                w.u8(85);
+                w.u32(*points);
+            }
+            Msg::FrostWalk => w.u8(86),
             Msg::CampfirePut { x, y, z, item } => {
                 w.u8(84);
                 w.i32(*x);
@@ -1136,6 +1145,8 @@ impl Msg {
             82 => Msg::RegularAsk { mob: r.u32()? },
             83 => Msg::Regular { mob: r.u32()?, trades: r.u16()? },
             84 => Msg::CampfirePut { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()? },
+            85 => Msg::Mend { points: r.u32()? },
+            86 => Msg::FrostWalk,
             78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
             74 => {
@@ -1725,6 +1736,8 @@ mod tests {
             Msg::RegularAsk { mob: 77 },
             Msg::Regular { mob: 77, trades: 31 },
             Msg::CampfirePut { x: 1, y: 60, z: -2, item: 0x8028 },
+            Msg::Mend { points: 9 },
+            Msg::FrostWalk,
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },
