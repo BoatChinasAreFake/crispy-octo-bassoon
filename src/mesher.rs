@@ -299,207 +299,214 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                 if def.light > 0.0 {
                     out.lights.push([wx + 0.5, wy + 0.6, wz + 0.5, def.light]);
                 }
-                match def.model {
-                    Model::Empty => {}
-                    Model::Cross => {
-                        let (sky, blk) = hood.lit(lx, y, lz);
-                        let tile = def.tex[1];
-                        let (a, b) = if id == TORCH || crate::contraptions::is_ztorch(id) { (0.3, 0.7) } else { (0.15, 0.85) };
-                        let diag = [
-                            [[a, 0., a], [b, 0., b], [b, 1., b], [a, 1., a]],
-                            [[b, 0., a], [a, 0., b], [a, 1., b], [b, 1., a]],
-                        ];
-                        // A pointy rock hanging from a ceiling points down (a stalactite).
-                        let hanging = id == POINTY_ROCK && is_solid(hood.get(lx, y + 1, lz)) && !is_solid(hood.get(lx, y - 1, lz));
-                        let uv = if hanging { [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] } else { CORNER_UV };
-                        for d in diag {
-                            let tint = tint_at(id, 0, wx + 0.5, wz + 0.5);
-                            let v = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
-                            out.opaque.quad([v(0), v(1), v(2), v(3)], false);
-                            // Back side with reversed winding.
-                            let w = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
-                            out.opaque.quad([w(1), w(0), w(3), w(2)], false);
+                // Wet mangrove roots are roots with water in them: drawn as both.
+                let layers = if id == MANGROVE_ROOTS_WET { 2 } else { 1 };
+                for id in [id, WATER].into_iter().take(layers) {
+                    let def = block(id);
+                    match def.model {
+                        Model::Empty => {}
+                        Model::Cross => {
+                            let (sky, blk) = hood.lit(lx, y, lz);
+                            let tile = def.tex[1];
+                            let (a, b) = if id == TORCH || crate::contraptions::is_ztorch(id) { (0.3, 0.7) } else { (0.15, 0.85) };
+                            let diag = [
+                                [[a, 0., a], [b, 0., b], [b, 1., b], [a, 1., a]],
+                                [[b, 0., a], [a, 0., b], [a, 1., b], [b, 1., a]],
+                            ];
+                            // A pointy rock hanging from a ceiling points down (a stalactite).
+                            let hanging = id == POINTY_ROCK && is_solid(hood.get(lx, y + 1, lz)) && !is_solid(hood.get(lx, y - 1, lz));
+                            let uv = if hanging { [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] } else { CORNER_UV };
+                            for d in diag {
+                                let tint = tint_at(id, 0, wx + 0.5, wz + 0.5);
+                                let v = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
+                                out.opaque.quad([v(0), v(1), v(2), v(3)], false);
+                                // Back side with reversed winding.
+                                let w = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
+                                out.opaque.quad([w(1), w(0), w(3), w(2)], false);
+                            }
                         }
-                    }
-                    Model::Liquid => {
-                        // Water is translucent; lava glows and hides what's behind it.
-                        let lava = is_lava(id);
-                        let same = |b: Id| if lava { is_lava(b) } else { is_water(b) };
-                        // Surface height of a same-kind cell (1.0 if more of it sits on top).
-                        let height = |x: i32, z: i32| -> Option<f32> {
-                            let b = hood.get(x, y, z);
-                            if !same(b) {
-                                return None;
-                            }
-                            if same(hood.get(x, y + 1, z)) {
-                                return Some(1.0);
-                            }
-                            let reach = if lava { LAVA_REACH } else { WATER_REACH } as f32;
-                            Some(0.875 * (1.0 - liquid_level(b) as f32 / (reach + 1.0)))
-                        };
-                        // Each top corner averages the cells around it, so flows slope.
-                        let corner = |cx: i32, cz: i32| -> f32 {
-                            let mut sum = 0.0;
-                            let mut n = 0.0;
-                            for dz in cz - 1..=cz {
-                                for dx in cx - 1..=cx {
-                                    match height(lx + dx, lz + dz) {
-                                        Some(1.0) => return 1.0,
-                                        Some(h) => {
-                                            sum += h;
-                                            n += 1.0;
+                        Model::Liquid => {
+                            // Water is translucent; lava glows and hides what's behind it.
+                            let lava = is_lava(id);
+                            let same = |b: Id| if lava { is_lava(b) } else { is_water(b) || b == MANGROVE_ROOTS_WET };
+                            // Surface height of a same-kind cell (1.0 if more of it sits on top).
+                            let height = |x: i32, z: i32| -> Option<f32> {
+                                let b = hood.get(x, y, z);
+                                if !same(b) {
+                                    return None;
+                                }
+                                // (Wet roots hold still water.)
+                                let b = if b == MANGROVE_ROOTS_WET { WATER } else { b };
+                                if same(hood.get(x, y + 1, z)) {
+                                    return Some(1.0);
+                                }
+                                let reach = if lava { LAVA_REACH } else { WATER_REACH } as f32;
+                                Some(0.875 * (1.0 - liquid_level(b) as f32 / (reach + 1.0)))
+                            };
+                            // Each top corner averages the cells around it, so flows slope.
+                            let corner = |cx: i32, cz: i32| -> f32 {
+                                let mut sum = 0.0;
+                                let mut n = 0.0;
+                                for dz in cz - 1..=cz {
+                                    for dx in cx - 1..=cx {
+                                        match height(lx + dx, lz + dz) {
+                                            Some(1.0) => return 1.0,
+                                            Some(h) => {
+                                                sum += h;
+                                                n += 1.0;
+                                            }
+                                            None => {}
                                         }
-                                        None => {}
                                     }
                                 }
-                            }
-                            if n > 0.0 { sum / n } else { 0.1 }
-                        };
-                        let tops = [[corner(0, 0), corner(1, 0)], [corner(0, 1), corner(1, 1)]];
-                        let tile = def.tex[1];
-                        if lava && (wx as i32).rem_euclid(3) == 0 && (wz as i32).rem_euclid(3) == 0 && !same(hood.get(lx, y + 1, lz)) {
-                            out.lights.push([wx + 0.5, wy + 1.0, wz + 0.5, 9.0]);
-                        }
-                        for (f, (n, corners, shade)) in FACES.iter().enumerate() {
-                            let nb = hood.get(lx + n[0], y + n[1], lz + n[2]);
-                            // A block resting on the water only hides its surface
-                            // when the water reaches all the way up to it.
-                            let full = tops.iter().flatten().all(|&h| h >= 1.0);
-                            if same(nb) || (is_opaque(nb) && (f != 2 || full)) {
-                                continue;
-                            }
-                            // Under a block, the surface is lit by the water's own cell.
-                            let (sky, blk) = if is_opaque(nb) { hood.lit(lx, y, lz) } else { hood.lit(lx + n[0], y + n[1].max(0), lz + n[2]) };
-                            // Lava lights itself (the shader reads x above 1.5 as "glowing").
-                            // A water surface carries how deep the water is under it
-                            // (8 + depth: deeper looks darker and bluer).
-                            let surface = !lava && f == 2 && !same(nb);
-                            let light = if lava {
-                                [2.45, sky, blk]
-                            } else if surface {
-                                let mut depth = 1;
-                                while depth < 12 && same(hood.get(lx, y - depth, lz)) {
-                                    depth += 1;
-                                }
-                                [8.0 + depth as f32, sky, blk]
-                            } else {
-                                [*shade, sky, blk]
+                                if n > 0.0 { sum / n } else { 0.1 }
                             };
-                            let mut v = [Vertex::default(); 4];
-                            for i in 0..4 {
-                                let c = corners[i];
-                                let cy = if c[1] > 0.5 { tops[c[2] as usize][c[0] as usize] } else { 0.0 };
-                                v[i] = vert([wx + c[0], wy + cy, wz + c[2]], tile, CORNER_UV[i], light);
-                                v[i].tint = tint_at(id, f, wx + c[0], wz + c[2]);
+                            let tops = [[corner(0, 0), corner(1, 0)], [corner(0, 1), corner(1, 1)]];
+                            let tile = def.tex[1];
+                            if lava && (wx as i32).rem_euclid(3) == 0 && (wz as i32).rem_euclid(3) == 0 && !same(hood.get(lx, y + 1, lz)) {
+                                out.lights.push([wx + 0.5, wy + 1.0, wz + 0.5, 9.0]);
                             }
-                            if lava {
-                                out.opaque.quad(v, false);
-                            } else {
-                                out.water.quad(v, false);
-                            }
-                        }
-                    }
-                    Model::Shaped => {
-                        // Slabs, stairs, doors: each box's faces, skipping only those
-                        // flush against an opaque neighbour. The texture follows the
-                        // box's position in the cell, so a slab shows half a tile.
-                        let ((s0, b0), (s1, b1)) = (hood.lit(lx, y, lz), hood.lit(lx, y + 1, lz));
-                        let (sky, blk) = (s0.max(s1), b0.max(b1));
-                        let (boxes, n) = def.shape.boxes();
-                        for &(bmin, bmax) in &boxes[..n] {
-                            for (f, (nrm, corners, shade)) in FACES.iter().enumerate() {
-                                let axis = if nrm[0] != 0 { 0 } else if nrm[1] != 0 { 1 } else { 2 };
-                                let flush = if nrm[axis] > 0 { bmax[axis] >= 1.0 } else { bmin[axis] <= 0.0 };
-                                if flush && is_opaque(hood.get(lx + nrm[0], y + nrm[1], lz + nrm[2])) {
+                            for (f, (n, corners, shade)) in FACES.iter().enumerate() {
+                                let nb = hood.get(lx + n[0], y + n[1], lz + n[2]);
+                                // A block resting on the water only hides its surface
+                                // when the water reaches all the way up to it.
+                                let full = tops.iter().flatten().all(|&h| h >= 1.0);
+                                if same(nb) || (is_opaque(nb) && (f != 2 || full)) {
                                     continue;
                                 }
-                                let tile = face_tile(id, f);
+                                // Under a block, the surface is lit by the water's own cell.
+                                let (sky, blk) = if is_opaque(nb) { hood.lit(lx, y, lz) } else { hood.lit(lx + n[0], y + n[1].max(0), lz + n[2]) };
+                                // Lava lights itself (the shader reads x above 1.5 as "glowing").
+                                // A water surface carries how deep the water is under it
+                                // (8 + depth: deeper looks darker and bluer).
+                                let surface = !lava && f == 2 && !same(nb);
+                                let light = if lava {
+                                    [2.45, sky, blk]
+                                } else if surface {
+                                    let mut depth = 1;
+                                    while depth < 12 && same(hood.get(lx, y - depth, lz)) {
+                                        depth += 1;
+                                    }
+                                    [8.0 + depth as f32, sky, blk]
+                                } else {
+                                    [*shade, sky, blk]
+                                };
                                 let mut v = [Vertex::default(); 4];
                                 for i in 0..4 {
                                     let c = corners[i];
-                                    let p = [0, 1, 2].map(|k| if c[k] > 0.5 { bmax[k] } else { bmin[k] });
-                                    let uv = match f {
-                                        0 => [1.0 - p[2], 1.0 - p[1]],
-                                        1 => [p[2], 1.0 - p[1]],
-                                        2 => [p[0], p[2]],
-                                        3 => [p[0], 1.0 - p[2]],
-                                        4 => [p[0], 1.0 - p[1]],
-                                        _ => [1.0 - p[0], 1.0 - p[1]],
-                                    };
-                                    // Portals glow (see the shader's "above 1.5" rule).
-                                    let lx = if crate::scorch::is_portal(id) { 2.3 } else { shade * 0.95 };
-                                    v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [lx, sky, blk]);
+                                    let cy = if c[1] > 0.5 { tops[c[2] as usize][c[0] as usize] } else { 0.0 };
+                                    v[i] = vert([wx + c[0], wy + cy, wz + c[2]], tile, CORNER_UV[i], light);
+                                    v[i].tint = tint_at(id, f, wx + c[0], wz + c[2]);
                                 }
-                                out.opaque.quad(v, false);
+                                if lava {
+                                    out.opaque.quad(v, false);
+                                } else {
+                                    out.water.quad(v, false);
+                                }
                             }
                         }
-                    }
-                    Model::Cube => {
-                        for (f, (n, corners, shade)) in FACES.iter().enumerate() {
-                            let (nx, ny, nz) = (lx + n[0], y + n[1], lz + n[2]);
-                            let nb = hood.get(nx, ny, nz);
-                            if is_opaque(nb) || (nb == id && def.see_through) {
-                                continue;
+                        Model::Shaped => {
+                            // Slabs, stairs, doors: each box's faces, skipping only those
+                            // flush against an opaque neighbour. The texture follows the
+                            // box's position in the cell, so a slab shows half a tile.
+                            let ((s0, b0), (s1, b1)) = (hood.lit(lx, y, lz), hood.lit(lx, y + 1, lz));
+                            let (sky, blk) = (s0.max(s1), b0.max(b1));
+                            let (boxes, n) = def.shape.boxes();
+                            for &(bmin, bmax) in &boxes[..n] {
+                                for (f, (nrm, corners, shade)) in FACES.iter().enumerate() {
+                                    let axis = if nrm[0] != 0 { 0 } else if nrm[1] != 0 { 1 } else { 2 };
+                                    let flush = if nrm[axis] > 0 { bmax[axis] >= 1.0 } else { bmin[axis] <= 0.0 };
+                                    if flush && is_opaque(hood.get(lx + nrm[0], y + nrm[1], lz + nrm[2])) {
+                                        continue;
+                                    }
+                                    let tile = face_tile(id, f);
+                                    let mut v = [Vertex::default(); 4];
+                                    for i in 0..4 {
+                                        let c = corners[i];
+                                        let p = [0, 1, 2].map(|k| if c[k] > 0.5 { bmax[k] } else { bmin[k] });
+                                        let uv = match f {
+                                            0 => [1.0 - p[2], 1.0 - p[1]],
+                                            1 => [p[2], 1.0 - p[1]],
+                                            2 => [p[0], p[2]],
+                                            3 => [p[0], 1.0 - p[2]],
+                                            4 => [p[0], 1.0 - p[1]],
+                                            _ => [1.0 - p[0], 1.0 - p[1]],
+                                        };
+                                        // Portals glow (see the shader's "above 1.5" rule).
+                                        let lx = if crate::scorch::is_portal(id) { 2.3 } else { shade * 0.95 };
+                                        v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], tile, uv, [lx, sky, blk]);
+                                    }
+                                    out.opaque.quad(v, false);
+                                }
                             }
-                            let tile = face_tile(id, f);
-                            let shade = if dapples_sky(id) { &FOLIAGE_SHADE[f] } else { shade };
-                            // Faces looking out into water are marked (x + 4) for the shader's caustics.
-                            let wet = if is_water(nb) { 4.0 } else { 0.0 };
-                            let axis = if n[0] != 0 { 0 } else if n[1] != 0 { 1 } else { 2 };
-                            let (t1, t2) = match axis {
-                                0 => (1, 2),
-                                1 => (0, 2),
-                                _ => (0, 1),
-                            };
-                            let mut v = [Vertex::default(); 4];
-                            let mut ao = [0.0f32; 4];
-                            if !smooth() {
-                                let (sky, blk) = hood.lit(nx, ny, nz);
+                        }
+                        Model::Cube => {
+                            for (f, (n, corners, shade)) in FACES.iter().enumerate() {
+                                let (nx, ny, nz) = (lx + n[0], y + n[1], lz + n[2]);
+                                let nb = hood.get(nx, ny, nz);
+                                if is_opaque(nb) || (nb == id && def.see_through) {
+                                    continue;
+                                }
+                                let tile = face_tile(id, f);
+                                let shade = if dapples_sky(id) { &FOLIAGE_SHADE[f] } else { shade };
+                                // Faces looking out into water are marked (x + 4) for the shader's caustics.
+                                let wet = if is_water(nb) { 4.0 } else { 0.0 };
+                                let axis = if n[0] != 0 { 0 } else if n[1] != 0 { 1 } else { 2 };
+                                let (t1, t2) = match axis {
+                                    0 => (1, 2),
+                                    1 => (0, 2),
+                                    _ => (0, 1),
+                                };
+                                let mut v = [Vertex::default(); 4];
+                                let mut ao = [0.0f32; 4];
+                                if !smooth() {
+                                    let (sky, blk) = hood.lit(nx, ny, nz);
+                                    for i in 0..4 {
+                                        let c = corners[i];
+                                        v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [shade * 1.0 + wet, sky, blk]);
+                                    }
+                                    let tint = corners.map(|c| tint_at(id, f, wx + c[0], wz + c[2]));
+                                    flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light), tint };
+                                    continue;
+                                }
                                 for i in 0..4 {
                                     let c = corners[i];
-                                    v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [shade * 1.0 + wet, sky, blk]);
+                                    let mut d1 = [0i32; 3];
+                                    let mut d2 = [0i32; 3];
+                                    d1[t1] = if c[t1] > 0.5 { 1 } else { -1 };
+                                    d2[t2] = if c[t2] > 0.5 { 1 } else { -1 };
+                                    let p1 = (nx + d1[0], ny + d1[1], nz + d1[2]);
+                                    let p2 = (nx + d2[0], ny + d2[1], nz + d2[2]);
+                                    let pc = (nx + d1[0] + d2[0], ny + d1[1] + d2[1], nz + d1[2] + d2[2]);
+                                    let s1 = is_opaque(hood.get(p1.0, p1.1, p1.2));
+                                    let s2 = is_opaque(hood.get(p2.0, p2.1, p2.2));
+                                    let sc = is_opaque(hood.get(pc.0, pc.1, pc.2));
+                                    let level = if s1 && s2 { 0 } else { 3 - s1 as usize - s2 as usize - sc as usize };
+                                    ao[i] = AO_CURVE[level];
+                                    // Smooth light: average over the non-solid cells touching this corner.
+                                    let (mut sky, mut blk) = hood.lit(nx, ny, nz);
+                                    let mut n_s = 1.0;
+                                    let mut add = |p: (i32, i32, i32)| {
+                                        let (s, b) = hood.lit(p.0, p.1, p.2);
+                                        sky += s;
+                                        blk += b;
+                                        n_s += 1.0;
+                                    };
+                                    if !s1 {
+                                        add(p1);
+                                    }
+                                    if !s2 {
+                                        add(p2);
+                                    }
+                                    if !(sc || s1 && s2) {
+                                        add(pc);
+                                    }
+                                    v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade + wet, sky / n_s, blk / n_s]);
                                 }
+                                // Faces wait to be merged with their like (see `merge_flats`).
                                 let tint = corners.map(|c| tint_at(id, f, wx + c[0], wz + c[2]));
                                 flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light), tint };
-                                continue;
                             }
-                            for i in 0..4 {
-                                let c = corners[i];
-                                let mut d1 = [0i32; 3];
-                                let mut d2 = [0i32; 3];
-                                d1[t1] = if c[t1] > 0.5 { 1 } else { -1 };
-                                d2[t2] = if c[t2] > 0.5 { 1 } else { -1 };
-                                let p1 = (nx + d1[0], ny + d1[1], nz + d1[2]);
-                                let p2 = (nx + d2[0], ny + d2[1], nz + d2[2]);
-                                let pc = (nx + d1[0] + d2[0], ny + d1[1] + d2[1], nz + d1[2] + d2[2]);
-                                let s1 = is_opaque(hood.get(p1.0, p1.1, p1.2));
-                                let s2 = is_opaque(hood.get(p2.0, p2.1, p2.2));
-                                let sc = is_opaque(hood.get(pc.0, pc.1, pc.2));
-                                let level = if s1 && s2 { 0 } else { 3 - s1 as usize - s2 as usize - sc as usize };
-                                ao[i] = AO_CURVE[level];
-                                // Smooth light: average over the non-solid cells touching this corner.
-                                let (mut sky, mut blk) = hood.lit(nx, ny, nz);
-                                let mut n_s = 1.0;
-                                let mut add = |p: (i32, i32, i32)| {
-                                    let (s, b) = hood.lit(p.0, p.1, p.2);
-                                    sky += s;
-                                    blk += b;
-                                    n_s += 1.0;
-                                };
-                                if !s1 {
-                                    add(p1);
-                                }
-                                if !s2 {
-                                    add(p2);
-                                }
-                                if !(sc || s1 && s2) {
-                                    add(pc);
-                                }
-                                v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade + wet, sky / n_s, blk / n_s]);
-                            }
-                            // Faces wait to be merged with their like (see `merge_flats`).
-                            let tint = corners.map(|c| tint_at(id, f, wx + c[0], wz + c[2]));
-                            flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light), tint };
                         }
                     }
                 }

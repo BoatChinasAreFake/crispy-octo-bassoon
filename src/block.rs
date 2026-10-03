@@ -313,7 +313,9 @@ pub const LEAF_LITTER: Id = 484;
 pub const WILDFLOWERS: Id = 485;
 /// Put it next to water and it slowly wakes into a baby Floaty (see floaty.rs).
 pub const DRIED_FLOATY: Id = 486;
-pub const NUM_BLOCKS: Id = 487;
+/// Mangrove roots standing in water (drawn with the water in them).
+pub const MANGROVE_ROOTS_WET: Id = 487;
+pub const NUM_BLOCKS: Id = 488;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -2068,6 +2070,10 @@ impl Registry {
         dried.see_through = true;
         dried.shape = Shape::Table;
         blocks.push(dried);
+        let mut wet = def("mangrove_roots_wet", "Mangrove Roots (Waterlogged)", Cube, true, false, [T_MANGROVE_ROOTS; 3], 0.7, 0, false, MANGROVE_ROOTS, 0.0, S_WOOD);
+        wet.see_through = true;
+        wet.creative = false;
+        blocks.push(wet);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2836,6 +2842,7 @@ mod id_order_tests {
             (FIREFLY_BUSH, "firefly_bush"),
             (WILDFLOWERS, "wildflowers"),
             (DRIED_FLOATY, "dried_floaty"),
+            (MANGROVE_ROOTS_WET, "mangrove_roots_wet"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }

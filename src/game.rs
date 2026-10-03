@@ -965,8 +965,8 @@ impl Game {
         // The far-off land, kept up with where we are.
         if self.distant_terrain && !self.in_scorch() && !self.in_hollow() {
             let generator = self.world.generator.clone();
-            if let Some((_, mesh)) = self.lod.tick(&generator, center, radius) {
-                renderer.set_far(ctx, Some(&mesh));
+            if let Some(land) = self.lod.tick(&generator, &self.map_colors, center, radius) {
+                renderer.set_far(ctx, Some(&land));
             }
         } else if renderer.has_far() {
             renderer.set_far(ctx, None);
