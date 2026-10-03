@@ -27,6 +27,8 @@ pub struct Peer {
     pub flags: u8,
     /// What they're wearing (see `Inventory::armor_look`).
     pub armor: u16,
+    /// Their armour trims (see `trims::look`).
+    pub trims: u32,
     pub anim: f32,
     /// Game clock time each rate-limited action was last allowed (see `peer_rate_ok`).
     last: HashMap<&'static str, f32>,
@@ -50,7 +52,7 @@ pub struct Peer {
 
 impl Peer {
     pub(crate) fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -549,7 +551,7 @@ impl Game {
                         }
                     }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, .. } => {
+            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, trims, .. } => {
                 self.set_peer_held(from, held, held_ench);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // Just died: their experience spills (items come separately, see `drop_everything`).
@@ -572,7 +574,8 @@ impl Game {
                 p.pitch = pitch.clamp(-1.6, 1.6);
                 p.flags = flags;
                 p.armor = armor;
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor });
+                p.trims = trims;
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor, trims });
             }
             Msg::Attack { mob, dmg, .. } => {
                 // Hits come from where the player actually is, within reach, at a human pace.
@@ -992,13 +995,14 @@ impl Game {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, armor, .. } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, armor, trims, .. } => {
                 if let Some(p) = self.peers.get_mut(&id) {
                     p.target = pos;
                     p.yaw = yaw;
                     p.pitch = pitch;
                     p.flags = flags;
                     p.armor = armor;
+                    p.trims = trims;
                 }
             }
             Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
@@ -1280,7 +1284,7 @@ impl Game {
             if p.gliding {
                 flags |= FLAG_GLIDE;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look() };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) };
             self.net_send_msg(m);
         }
         if self.is_host() {
@@ -1644,7 +1648,7 @@ mod tests {
 
         // Teleporting across the map is refused and the client is put back.
         // (NaN positions never get this far: the decoder drops the connection.)
-        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0 });
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0, trims: 0 });
         for _ in 0..20 {
             host.update(0.016, &idle());
             std::thread::sleep(Duration::from_millis(4));

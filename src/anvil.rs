@@ -84,7 +84,7 @@ pub fn plan(item: Id, full_wear: Wear, other: Stack, other_wear: Wear) -> Option
         if added == 0 {
             return None;
         }
-        return Some(Repair { wear: (full_wear & 0xFFFF) | merged, cost: added.max(1), used: 1, combine: false, book: true });
+        return Some(Repair { wear: (full_wear & crate::inventory::NOT_ENCHANTS) | merged, cost: added.max(1), used: 1, combine: false, book: true });
     }
     let max = durability(item)?;
     let (wear, other_uses) = (uses(full_wear), uses(other_wear));

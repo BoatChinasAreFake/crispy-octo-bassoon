@@ -3354,7 +3354,7 @@ impl Game {
             let gliding = p.flags & crate::net::FLAG_GLIDE != 0;
             let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding);
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
-            crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky, gliding);
+            crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
         }
         // The player, in third person
         if self.third_person && !self.menu && !self.spectator {
@@ -3364,7 +3364,7 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding);
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
-            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), p.bob * 2.0, sky, p.gliding);
+            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), crate::trims::look(&self.inv.armor, &self.inv.armor_wear), p.bob * 2.0, sky, p.gliding);
         }
         // Primed TNT
         for t in &self.tnts {

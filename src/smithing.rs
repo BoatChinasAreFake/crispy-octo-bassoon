@@ -86,7 +86,7 @@ pub fn plan(bench: Bench, slots: &[Stack], wear: &[Wear]) -> Option<(Id, Wear, u
                         return None;
                     }
                     let out = if id == ENCHANTED_BOOK { BOOK } else { id };
-                    let keep = if id == ENCHANTED_BOOK { 0 } else { w & 0xFFFF };
+                    let keep = if id == ENCHANTED_BOOK { 0 } else { w & crate::inventory::NOT_ENCHANTS };
                     Some((out, keep, grind_xp(w)))
                 }
                 (Some((x, _)), Some((y, _))) if x == y => {
@@ -100,6 +100,10 @@ pub fn plan(bench: Bench, slots: &[Stack], wear: &[Wear]) -> Option<(Id, Wear, u
         }
         Bench::Smithing => {
             let (Some((t, _)), Some((item, _)), Some((ingot, _))) = (slots[0], slots[1], slots[2]) else { return None };
+            if crate::trims::is_template(t) {
+                // A trim (see trims.rs).
+                return Some((item, crate::trims::trimmed(t, item, wear[1], ingot)?, 0));
+            }
             if t != UPGRADE_TEMPLATE || ingot != SCORCHITE_INGOT {
                 return None;
             }
@@ -154,8 +158,8 @@ impl Game {
         let Some(ui) = &mut self.bench else { return };
         let Some((id, _)) = self.inv.slots[inv_slot] else { return };
         let want = match ui.bench {
-            Bench::Smithing if id == UPGRADE_TEMPLATE => Some(0),
-            Bench::Smithing if id == SCORCHITE_INGOT => Some(2),
+            Bench::Smithing if id == UPGRADE_TEMPLATE || crate::trims::is_template(id) => Some(0),
+            Bench::Smithing if id == SCORCHITE_INGOT || crate::trims::material_index(id).is_some() => Some(2),
             Bench::Smithing => Some(1),
             Bench::Grindstone => ui.slots[..2].iter().position(|s| s.is_none()),
         };
@@ -178,6 +182,7 @@ impl Game {
         }
         let Some(ui) = &mut self.bench else { return };
         let (pos, bench) = (ui.pos, ui.bench);
+        let trim = ui.slots[0].map(|s| s.0).filter(|&t| bench == Bench::Smithing && crate::trims::is_template(t)).zip(ui.slots[2].map(|s| s.0));
         let used: Vec<(Id, u16)> = ui.slots.iter().zip(ui.wear).map(|(s, w)| s.map(|(id, _)| (id, enchants(w))).unwrap_or((AIR, 0))).collect();
         for i in 0..bench.slots() {
             ui.slots[i] = match ui.slots[i] {
@@ -199,6 +204,10 @@ impl Game {
                 }
                 self.advance("clean_slate");
             }
+            Bench::Smithing if trim.is_some() => {
+                self.sfx(Sfx::Place(Mat::Glass), Some(at));
+                self.advance("dressed_up");
+            }
             Bench::Smithing => {
                 self.sfx(Sfx::Break(Mat::Stone), Some(at));
                 self.advance("scorchite");
@@ -207,7 +216,12 @@ impl Game {
         if self.is_client() {
             // Grinding: the two things ground; smithing: the gear (the template and ingot are implied).
             let pick = |i: usize| used.get(i).copied().unwrap_or((AIR, 0));
-            let (a, b) = if bench == Bench::Grindstone { (pick(0), pick(1)) } else { (pick(1), (AIR, 0)) };
+            // (A trim: `b` is the template, and its "enchantments" the material.)
+            let (a, b) = match trim {
+                _ if bench == Bench::Grindstone => (pick(0), pick(1)),
+                Some((template, material)) => (pick(1), (template, material)),
+                None => (pick(1), (AIR, 0)),
+            };
             self.net_send_msg(Msg::Smith { x: pos.x, y: pos.y, z: pos.z, grind: bench == Bench::Grindstone, a: a.0, a_ench: a.1, b: b.0, b_ench: b.1 });
         }
     }
@@ -243,6 +257,14 @@ impl Game {
                 let at = pos.as_vec3() + Vec3::new(0.5, 1.1, 0.5);
                 self.spawn_orbs(at, xp);
             }
+        } else if crate::trims::is_template(b) {
+            // A trim: the template and material are used up; the armour stays (trimmed).
+            let material = b_ench;
+            if crate::trims::material_index(material).is_none() || armor_of(a).is_none() || !l.bag.has(a) || !l.bag.has(b) || !l.bag.has(material) {
+                return;
+            }
+            l.bag.take(b, 1);
+            l.bag.take(material, 1);
         } else {
             // a: the Dimond gear; the template and ingot must be there too.
             let Some(up) = upgraded(a) else { return };

@@ -2385,6 +2385,9 @@ impl Registry {
         recipes.push(r(&[(STICK, 3), (STRING, 2), (IRON, 1)], (CROSSBOW, 1)));
         recipes.push(r(&[(SCORCHITE_SCRAP, 4), (GOLD_INGOT, 4)], (SCORCHITE_INGOT, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
+        for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
+            recipes.push(r(&[(DIAMOND, 7), (t, 1), (TUFF_BRICKS, 1)], (t, 2)));
+        }
 
         // Minecraft's amounts: 5 for a helmet, 8 chestplate, 7 leggings, 4 boots.
         for (t, material) in [WOOL, IRON, GOLD_INGOT, DIAMOND].into_iter().enumerate() {

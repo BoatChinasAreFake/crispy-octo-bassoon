@@ -85,6 +85,7 @@ mod sound;
 mod stats;
 mod texture;
 mod tools;
+mod trims;
 mod ui;
 mod weather;
 mod wiring;
@@ -3934,6 +3935,9 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     } else if enchant::is_enchanted(wear) {
         s += &format!(" [{}]", enchant::describe(wear));
     }
+    if let Some(t) = trims::describe(wear).filter(|_| armor_of(id).is_some()) {
+        s += &format!(" [{t}]");
+    }
     if let Some(max) = inventory::max_uses(id, wear) {
         s += &format!(" ({}/{max} uses left)", max.saturating_sub(inventory::uses(wear) as u32));
     }
@@ -4792,6 +4796,8 @@ async fn game_main() {
                     for slot in 0..4 {
                         let tier = [3, 1, 2, 0][slot];
                         app.game.inv.armor[slot] = Some((block::ARMOR_FIRST + tier * 4 + slot as u16, 1));
+                        // Each piece trimmed differently (see trims.rs).
+                        app.game.inv.armor_wear[slot] = trims::with_trim(0, slot, [1, 2, 3, 0][slot]);
                     }
                     app.game.third_person = true;
                     app.game.player.health = 15.0;

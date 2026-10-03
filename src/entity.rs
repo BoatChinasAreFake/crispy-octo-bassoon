@@ -2556,7 +2556,7 @@ type ArmorPiece = ([f32; 3], [f32; 3], [f32; 3], Limb);
 
 /// Worn armour over the player model (`look` from `Inventory::armor_look`):
 /// slightly larger boxes that follow the same limbs.
-pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, anim: f32, sky: f32, gliding: bool) {
+pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f32, sky: f32, gliding: bool) {
     if look == 0 {
         return;
     }
@@ -2572,6 +2572,26 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, anim: f32, sky: f32,
         };
         for &(min, size, pivot, limb) in list {
             parts.push(part(min, size, pivot, limb, [tile; 6]));
+        }
+        // Its trim, picked out over the top (see trims.rs).
+        let t = (trims >> (slot * 5)) & 0x1F;
+        if t > 0 {
+            let (pattern, material) = ((t as usize - 1) / 4, (t as usize - 1) % 4);
+            let tile = crate::trims::MATERIAL_TILES[material];
+            for &(min, size, pivot, limb) in list {
+                let e = 0.015;
+                let band = |y: f32, h: f32| part([min[0] - e, min[1] + y, min[2] - e], [size[0] + 2.0 * e, h, size[2] + 2.0 * e], pivot, limb, [tile; 6]);
+                let h = (size[1] * 0.18).max(0.05);
+                match pattern {
+                    0 => parts.push(band(size[1] * 0.45, h)),
+                    1 => parts.push(band(0.0, h)),
+                    2 => {
+                        parts.push(band(0.0, h * 0.7));
+                        parts.push(band(size[1] - h * 0.7, h * 0.7));
+                    }
+                    _ => parts.push(part([min[0] + size[0] * 0.4, min[1], min[2] - 2.0 * e], [size[0] * 0.2, size[1], 2.0 * e], pivot, limb, [tile; 6])),
+                }
+            }
         }
     };
     let arm = [0.0, 1.4, 0.0];

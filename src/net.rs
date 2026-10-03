@@ -97,7 +97,7 @@ pub enum Msg {
     /// Both directions; the host fills in `id` when relaying.
     /// `held` is the item in hand (the host only believes it if the player owns one).
     /// `held_ench`: its enchantments (believed only if the host knows they have them).
-    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16 },
+    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16, trims: u32 },
     /// Mobs, primed TNT, arrows in flight, falling blocks and fireballs.
     Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<ArrowSnap>, falling: Vec<(Vec3, f32, Id)>, fireballs: Vec<(Vec3, Vec3, bool)> },
     /// client -> host
@@ -394,7 +394,7 @@ impl Msg {
                 w.u8(6);
                 w.u32(*id);
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, held, held_ench, armor } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held, held_ench, armor, trims } => {
                 w.u8(7);
                 w.u32(*id);
                 w.v3(*pos);
@@ -404,6 +404,7 @@ impl Msg {
                 w.u16(*held);
                 w.u16(*held_ench);
                 w.u16(*armor);
+                w.u32(*trims);
             }
             Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
                 w.u8(8);
@@ -870,7 +871,7 @@ impl Msg {
             }
             5 => Msg::PlayerJoin { id: r.u32()?, name: r.str()? },
             6 => Msg::PlayerLeave { id: r.u32()? },
-            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()? },
+            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()?, trims: r.u32()? },
             8 => {
                 let n = r.count(32)?;
                 let mut mobs = Vec::with_capacity(n);
@@ -1517,7 +1518,7 @@ mod tests {
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0), keep_inventory: true },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
-            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102 },
+            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102, trims: 0x2A },
             Msg::Craft { recipe: 12, times: 64 },
             Msg::Consume { item: 0x8005, n: 1 },
             Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },

@@ -201,7 +201,7 @@ impl Game {
                 l.remove_enchanted(item, ench);
                 wear
             }
-            _ => wear & 0xFFFF,
+            _ => wear & crate::inventory::NOT_ENCHANTS,
         }
     }
 
