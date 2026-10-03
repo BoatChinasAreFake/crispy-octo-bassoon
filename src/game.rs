@@ -110,6 +110,8 @@ pub struct Game {
     /// Trial Spawners' fights, and how often they look around (see trial.rs).
     pub trials: HashMap<IVec3, crate::trial::Trial>,
     pub trial_timer: f32,
+    /// How often Creaking Hearts look around (see creaking.rs).
+    pub creak_timer: f32,
     /// Regeneration's heartbeat.
     pub regen_clock: f32,
     /// Raids (see raids.rs): the one on now, who has Bad Omen or is a Hero (by player id, seconds left),
@@ -340,6 +342,23 @@ pub struct Game {
     pub last_death: Option<Vec3>,
     /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
     pub lodestone: Option<IVec3>,
+    /// A joined player's view of their Bundles (the host's word), and the one just used.
+    pub bundle_mirror: HashMap<u16, Vec<(Id, u8)>>,
+    pub bundle_pending: Option<usize>,
+    /// Written books' words and lecterns' books (see books.rs); the book open on screen,
+    /// one we're waiting on the host for (tag, our writable slot, lectern), and one just written.
+    pub books: HashMap<u16, crate::books::Book>,
+    pub lecterns: HashMap<IVec3, (Id, u16)>,
+    /// Banners that are up (design, facing), the Loom we're at, and our shield's banner (see banners.rs).
+    pub banners: HashMap<IVec3, (u16, u8)>,
+    pub loom: Option<IVec3>,
+    pub shield_banner: u16,
+    /// The held map's zoom (see `navigation::ZOOMS`), and the map colours of blocks (for maps in frames).
+    pub map_zoom: u8,
+    pub map_colors: Vec<[u8; 3]>,
+    pub reading: Option<crate::books::BookView>,
+    pub book_waiting: Option<(u16, Option<usize>, Option<IVec3>)>,
+    pub book_pending: Option<usize>,
     pub spyglass: bool,
 }
 
@@ -371,6 +390,7 @@ impl Game {
             cage_timer: 0.0,
             trials: HashMap::new(),
             trial_timer: 0.0,
+            creak_timer: 0.0,
             regen_clock: 0.0,
             raid: None,
             omens: HashMap::new(),
@@ -519,6 +539,18 @@ impl Game {
             bench: None,
             last_death: None,
             lodestone: None,
+            bundle_mirror: HashMap::new(),
+            bundle_pending: None,
+            books: HashMap::new(),
+            lecterns: HashMap::new(),
+            banners: HashMap::new(),
+            loom: None,
+            shield_banner: 0,
+            map_zoom: 0,
+            map_colors: Vec::new(),
+            reading: None,
+            book_waiting: None,
+            book_pending: None,
             spyglass: false,
         }
     }
@@ -569,7 +601,7 @@ impl Game {
         g.player.health = d.health.max(1.0);
         g.spawn = Vec3::from_array(d.spawn);
         g.inv.slots = [None; 36];
-        for (i, s) in d.slots.into_iter().take(40).enumerate() {
+        for (i, s) in d.slots.into_iter().take(41).enumerate() {
             let s = match (s, &remap) {
                 (Some((id, n)), Some(r)) => Some((r[id as usize], n)).filter(|(id, _)| *id != AIR),
                 (s, _) => s,
@@ -579,6 +611,10 @@ impl Game {
             if i < 36 {
                 g.inv.slots[i] = s;
                 g.inv.wear[i] = wear;
+            } else if i == 40 {
+                // (The other hand comes last.)
+                g.inv.offhand = s;
+                g.inv.offhand_wear = wear;
             } else if s.is_some_and(|(id, _)| armor_of(id).map(|(slot, _)| slot) == Some(i - 36)) {
                 g.inv.armor[i - 36] = s;
                 g.inv.armor_wear[i - 36] = wear;
@@ -660,7 +696,7 @@ impl Game {
             health: self.player.health,
             spawn: self.spawn.to_array(),
             // The four worn armour slots go after the 36 inventory slots.
-            slots: self.inv.slots.iter().chain(self.inv.armor.iter()).copied().collect(),
+            slots: self.inv.slots.iter().chain(self.inv.armor.iter()).chain(std::iter::once(&self.inv.offhand)).copied().collect(),
             // With region files, edits, soil, containers and decor are written there instead (`flush_regions`).
             mods: if self.world.regions.is_some() { HashMap::new() } else { self.world.mods.clone() },
             palette: mod_palette(reg()),
@@ -670,7 +706,7 @@ impl Game {
             fish_log: self.fish_log.encode(),
             containers: if self.world.regions.is_some() { Vec::new() } else { crate::containers::encode(&self.world.containers) },
             drops: crate::drops::encode(&self.drops),
-            wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).copied().collect(),
+            wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).chain(std::iter::once(&self.inv.offhand_wear)).copied().collect(),
             food: self.player.hunger.food,
             saturation: self.player.hunger.saturation,
             keep_inventory: self.rules.keep_inventory,
@@ -700,6 +736,9 @@ impl Game {
         let mut v = vec![
             ("known".to_string(), crate::crafting::encode_known(&self.known).into_bytes()),
             ("hives".to_string(), crate::bees::encode(&self.hives)),
+            ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
+            ("banners".to_string(), crate::banners::encode(&self.banners)),
+            ("stashes".to_string(), crate::stash::encode(&self.world.stashes)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
         ];
@@ -724,6 +763,15 @@ impl Game {
         if let Some(b) = extra("pinned").and_then(|b| b.get(..4)) {
             let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
             self.pinned = (p < recipes().len()).then_some(p);
+        }
+        if let Some(b) = extra("stashes") {
+            self.world.stashes = crate::stash::decode(b);
+        }
+        if let Some(b) = extra("banners") {
+            self.banners = crate::banners::decode(b);
+        }
+        if let Some(b) = extra("books") {
+            (self.books, self.lecterns) = crate::books::decode(b);
         }
         if let Some(b) = extra("hives") {
             self.hives = crate::bees::decode(b);
@@ -790,7 +838,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
-            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG => "getting_wood",
+            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
             DIAMOND => "dimonds",
@@ -1075,7 +1123,8 @@ impl Game {
         self.attack_cd = (self.attack_cd - dt).max(0.0);
         self.since_attack += dt;
         // Shields go up while right-click is held.
-        self.blocking = c.use_held && self.inv.held() == SHIELD;
+        // A shield blocks from either hand (from the other one, while this one holds a weapon or tool, or nothing).
+        self.blocking = c.use_held && (self.inv.held() == SHIELD || (self.inv.offhand.map(|s| s.0) == Some(SHIELD) && offhand_first(self.inv.held())));
         let looking = c.use_held && self.inv.held() == SPYGLASS;
         if looking && !self.spyglass {
             self.advance("bird_plane");
@@ -1778,7 +1827,17 @@ impl Game {
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
                     let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
-                    let dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    let mut dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    // A Mace swung on the way down: the fall goes into the blow (and not into you).
+                    let fall = self.player.fall_start - self.player.body.pos.y;
+                    let smash = held == MACE && fall > crate::combat::SMASH_MIN && !self.player.body.on_ground;
+                    if smash {
+                        dmg += crate::combat::smash_bonus(fall);
+                        self.player.fall_start = self.player.body.pos.y;
+                        self.player.body.vel.y = self.player.body.vel.y.max(4.0);
+                        self.sfx(Sfx::Thud, None);
+                        self.advance("smash");
+                    }
                     self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
@@ -1797,6 +1856,11 @@ impl Game {
                         self.net_send_msg(Msg::Attack { mob, dmg, from });
                         self.mobs[i].hurt = 0.5;
                     } else {
+                        if smash {
+                            let at = self.mobs[i].body.pos;
+                            let me = self.my_id;
+                            self.smash_around(at, i, me);
+                        }
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
@@ -1871,7 +1935,15 @@ impl Game {
 
         if (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
             self.use_cd = 0.25;
-            self.use_item();
+            // With a weapon or tool in hand, a block (torches, say) in the other hand gets placed.
+            let other = self.inv.offhand.map(|s| s.0).unwrap_or(AIR);
+            if other != AIR && other != SHIELD && is_block_item(other) && offhand_first(self.inv.held()) && matches!(self.target, Some(Target::Block(_))) {
+                self.inv.swap_hands();
+                self.use_item();
+                self.inv.swap_hands();
+            } else {
+                self.use_item();
+            }
         }
         if !c.use_held {
             self.use_cd = 0.0;
@@ -1944,8 +2016,20 @@ impl Game {
                 self.ring_bell(pos);
                 return;
             }
-            if id == VAULT {
+            if id == VAULT || id == VAULT_OMINOUS {
                 self.use_vault(pos);
+                return;
+            }
+            if id == LOOM {
+                self.use_loom(pos);
+                return;
+            }
+            if id == PERSONAL_CHEST {
+                self.open_stash(pos);
+                return;
+            }
+            if crate::books::is_lectern(id) {
+                self.use_lectern(pos, held);
                 return;
             }
             if id == LODESTONE && held == COMPASS {
@@ -1963,8 +2047,12 @@ impl Game {
                 self.use_restoration(pos);
                 return;
             }
-            if held == TORCHFLOWER_SEEDS && matches!(id, GRASS | DIRT | FARMLAND | FARMLAND_WET | MUD) && self.world.get_v(pos + IVec3::Y) == AIR {
-                self.world.set_v(pos + IVec3::Y, TORCHFLOWER_SPROUT);
+            if let Some(sprout) = crate::sniffers::sprout_of(held)
+                && matches!(id, GRASS | DIRT | FARMLAND | FARMLAND_WET | MUD | PALE_MOSS)
+                && self.world.get_v(pos + IVec3::Y) == AIR
+            {
+                self.world.set_v(pos + IVec3::Y, sprout);
+                self.advance("ancient_seeds");
                 self.sfx(Sfx::Place(crate::sound::Mat::Grass), Some(pos.as_vec3() + Vec3::splat(0.5)));
                 self.player.swing = 1.0;
                 if !self.creative {
@@ -2074,12 +2162,35 @@ impl Game {
             self.blow_horn();
             return;
         }
+        if held == OMINOUS_BOTTLE {
+            // A Bad Omen: raids in villages, ominous trials in Trial Chambers.
+            if !self.is_client() {
+                let me = self.my_id;
+                self.give_effect_to(me, crate::potions::Potion::BadOmen, crate::raids::OMEN_SECS);
+            }
+            self.sfx(Sfx::Eat, None);
+            self.msg("You feel a Bad Omen. Something's going to go wrong (on purpose).");
+            if !self.creative {
+                self.use_up_held();
+            }
+            return;
+        }
         if held == SPYGLASS {
             // Held down to look through (see gadgets.rs).
             return;
         }
         if held == BUNDLE {
             self.tip_bundle();
+            return;
+        }
+        if crate::books::is_book(held) {
+            self.open_held_book();
+            return;
+        }
+        if held == MAP {
+            // Zoom out (and back in).
+            self.map_zoom = (self.map_zoom + 1) % crate::navigation::ZOOMS.len() as u8;
+            self.msg(format!("Map: one pixel for every {} block(s).", crate::navigation::ZOOMS[self.map_zoom as usize]));
             return;
         }
         if held == BOTTLE {
@@ -2256,6 +2367,11 @@ impl Game {
             let wear = self.inv.wear[self.inv.selected];
             self.unpack_box(place, wear);
         }
+        if held == BANNER && !self.is_client() {
+            let design = crate::enchant::enchants(self.inv.wear[self.inv.selected]);
+            let facing = crate::banners::facing_from_yaw(self.player.yaw);
+            self.put_up_banner(place, design, facing);
+        }
         if held == SIGN_FIRST {
             // Something to write on it.
             self.editing_sign = Some(place);
@@ -2296,6 +2412,8 @@ impl Game {
         if !self.is_client() {
             self.spill_container(pos);
             self.spill_frame(pos);
+            self.spill_lectern(pos);
+            self.spill_banner(pos);
             self.block_gone(pos, id);
         }
         self.world.set_v(pos, AIR);
@@ -2733,6 +2851,7 @@ impl Game {
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
+        self.creaking_tick(dt);
         self.snouts_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
@@ -2782,7 +2901,8 @@ impl Game {
                     MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Rampager => noises.push((Sfx::Roar, m.body.pos)),
                     MobKind::Goat => noises.push((Sfx::Bleat, m.body.pos)),
-                    MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel => {}
+                    MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel | MobKind::Creaking => {}
+                    MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -2894,7 +3014,8 @@ impl Game {
                             MobKind::Weeper => self.advance("dry_your_eyes"),
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Breeze => self.advance("breeze_through"),
-                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel => {}
+                            MobKind::Creaking => self.advance("heartbreak"),
+                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
@@ -3415,6 +3536,7 @@ impl Game {
         self.draw_vehicles(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
+        self.draw_banners(&mut g, eye, (render_distance * 16) as f32);
         // Items on the ground, and experience
         self.draw_drops(&mut g, eye, 48.0);
         self.draw_orbs(&mut g, eye, 48.0);
@@ -3525,6 +3647,11 @@ impl Game {
                 basis * local * Mat4::from_translation(Vec3::new(0.0, 0.08, 0.0)) * Mat4::from_rotation_y(-0.5) * Mat4::from_rotation_z(0.2)
             };
             extruded_sprite(g, &m, tile, if tool { 0.46 } else { 0.3 }, sky);
+            // Our banner, painted on the shield (see banners.rs).
+            if held == SHIELD && self.shield_banner != 0 {
+                let cloth = m * Mat4::from_translation(Vec3::new(-0.12, -0.17, 0.03)) * Mat4::from_scale(Vec3::new(0.24, 0.34, 1.0));
+                crate::banners::draw_cloth(g, &cloth, crate::banners::Design::from_bits(self.shield_banner), sky, Pass::Overlay);
+            }
         }
     }
 
@@ -3569,6 +3696,11 @@ fn cloud_face(g: &mut DynGeo, f: usize, lo: Vec3, hi: Vec3) {
 /// A sprite given one pixel of thickness, like Minecraft's held items: its
 /// face front and back, and a thin side wherever a solid pixel meets a clear
 /// one. `m` places the sprite (centred, `size` across, facing +z).
+/// While this is in hand, the other hand gets used instead (a shield blocks, a block is placed).
+pub fn offhand_first(held: Id) -> bool {
+    held == AIR || is_sword(held) || held == MACE || pick_tier(held) > 0 || crate::tools::tool_uses(held).is_some()
+}
+
 fn extruded_sprite(g: &mut DynGeo, m: &Mat4, tile: u16, size: f32, sky: f32) {
     use crate::texture::{solid, TILE};
     let px = size / TILE as f32;
@@ -5327,7 +5459,7 @@ looks_like = diamond
 
         // The map shows the floor we're standing on; the compass points home.
         let colors = vec![[10, 20, 30]; reg().blocks.len()];
-        let px = crate::navigation::map_pixels(&g.world, g.player.body.pos, &colors);
+        let px = crate::navigation::map_pixels(&g.world, g.player.body.pos, &colors, 1);
         assert_eq!(px.len(), crate::navigation::MAP_SIZE * crate::navigation::MAP_SIZE * 4);
         let mid = (crate::navigation::MAP_SIZE / 2 * crate::navigation::MAP_SIZE + crate::navigation::MAP_SIZE / 2) * 4;
         // Our colour, maybe shaded by the lie of the land.

@@ -24,9 +24,10 @@ pub enum Action {
     Command,
     Perspective,
     Screenshot,
+    SwapHands,
 }
 
-pub const ACTIONS: [Action; 16] = [
+pub const ACTIONS: [Action; 17] = [
     Action::Forward,
     Action::Back,
     Action::Left,
@@ -43,6 +44,7 @@ pub const ACTIONS: [Action; 16] = [
     Action::Command,
     Action::Perspective,
     Action::Screenshot,
+    Action::SwapHands,
 ];
 
 impl Action {
@@ -65,6 +67,7 @@ impl Action {
             Action::Command => "command",
             Action::Perspective => "perspective",
             Action::Screenshot => "screenshot",
+            Action::SwapHands => "swap_hands",
         }
     }
 
@@ -86,6 +89,7 @@ impl Action {
             Action::Command => "Command",
             Action::Perspective => "Third Person",
             Action::Screenshot => "Screenshot",
+            Action::SwapHands => "Swap Hands",
         }
     }
 
@@ -109,6 +113,7 @@ impl Action {
             Action::Command => [k(KeyCode::Slash), None],
             Action::Perspective => [k(KeyCode::F5), None],
             Action::Screenshot => [k(KeyCode::F2), None],
+            Action::SwapHands => [k(KeyCode::F), None],
         }
     }
 }

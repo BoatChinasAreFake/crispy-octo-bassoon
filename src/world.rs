@@ -81,10 +81,12 @@ pub enum Biome {
     Cherry,
     /// Warm coastal mudflats: mangroves standing on their roots in the shallows.
     Mangrove,
+    /// A grey, still forest of pale oaks; something in the trunks wakes at night.
+    PaleGarden,
 }
 
 impl Biome {
-    pub const ALL: [Biome; 11] = [Biome::Plains, Biome::Forest, Biome::Desert, Biome::Snowy, Biome::Ocean, Biome::Swamp, Biome::Jungle, Biome::Badlands, Biome::Taiga, Biome::Cherry, Biome::Mangrove];
+    pub const ALL: [Biome; 12] = [Biome::Plains, Biome::Forest, Biome::Desert, Biome::Snowy, Biome::Ocean, Biome::Swamp, Biome::Jungle, Biome::Badlands, Biome::Taiga, Biome::Cherry, Biome::Mangrove, Biome::PaleGarden];
 
     /// For /locate: "plains", "snowy", "badlands"...
     pub fn from_name(s: &str) -> Option<Biome> {
@@ -105,6 +107,7 @@ impl Biome {
             Biome::Taiga => "Taiga (Pointy Trees)",
             Biome::Cherry => "Cherry Grove (Aggressively Pink)",
             Biome::Mangrove => "Mangrove Swamp (Rooty)",
+            Biome::PaleGarden => "Pale Garden (Don't Look Away)",
         }
     }
 
@@ -121,6 +124,7 @@ impl Biome {
             Biome::Swamp => TreeKind::Swamp,
             Biome::Cherry => TreeKind::Cherry,
             Biome::Mangrove => TreeKind::Mangrove,
+            Biome::PaleGarden => TreeKind::PaleOak,
             _ => TreeKind::Oak,
         }
     }
@@ -139,6 +143,8 @@ pub enum TreeKind {
     Cherry,
     /// Up on a tangle of roots, with a leafy crown.
     Mangrove,
+    /// A thick trunk under a broad, flat, pale crown hung with moss.
+    PaleOak,
 }
 
 impl TreeKind {
@@ -148,6 +154,7 @@ impl TreeKind {
             TreeKind::Jungle => JUNGLE_LOG,
             TreeKind::Cherry => CHERRY_LOG,
             TreeKind::Mangrove => MANGROVE_LOG,
+            TreeKind::PaleOak => PALE_OAK_LOG,
             _ => LOG,
         }
     }
@@ -157,6 +164,7 @@ impl TreeKind {
             TreeKind::Jungle => JUNGLE_LEAVES,
             TreeKind::Cherry => CHERRY_LEAVES,
             TreeKind::Mangrove => MANGROVE_LEAVES,
+            TreeKind::PaleOak => PALE_OAK_LEAVES,
             _ => LEAVES,
         }
     }
@@ -169,6 +177,7 @@ impl TreeKind {
             TreeKind::Swamp => (4, 3.0),
             TreeKind::Cherry => (4, 2.0),
             TreeKind::Mangrove => (6, 3.0),
+            TreeKind::PaleOak => (6, 3.0),
         };
         lo + (roll * span) as i32
     }
@@ -259,6 +268,38 @@ impl TreeKind {
                     let o = ivec3(dx, top - 2, dz);
                     if roll(o) < 0.5 {
                         leaf(o, &mut out);
+                    }
+                }
+            }
+            TreeKind::PaleOak => {
+                // A thick trunk (two by two), one with a Creaking Heart in it now and then.
+                for (dx, dz) in [(1, 0), (0, 1), (1, 1)] {
+                    for y in 1..=top {
+                        out.push((ivec3(dx, y, dz), log, true));
+                    }
+                }
+                if roll(ivec3(0, -64, 0)) < 0.12 {
+                    out.push((ivec3(0, 3, 0), CREAKING_HEART, true));
+                }
+                // A broad, flat crown.
+                for dy in -1..=1 {
+                    let rad: i32 = if dy == 1 { 2 } else { 3 };
+                    for dz in -rad..=rad + 1 {
+                        for dx in -rad..=rad + 1 {
+                            let (ex, ez) = (if dx > 0 { dx - 1 } else { dx }, if dz > 0 { dz - 1 } else { dz });
+                            let o = ivec3(dx, top + dy, dz);
+                            if ex * ex + ez * ez > rad * rad || (ex * ex + ez * ez == rad * rad && roll(o) < 0.5) {
+                                continue;
+                            }
+                            leaf(o, &mut out);
+                        }
+                    }
+                }
+                // Pale moss hanging from its underside.
+                for (dx, dz) in [(3, 0), (-3, 1), (1, 3), (0, -3), (2, 2), (-2, -2), (3, 2), (-2, 3)] {
+                    let o = ivec3(dx, top - 2, dz);
+                    if roll(o) < 0.6 {
+                        out.push((o, PALE_HANGING_MOSS, false));
                     }
                 }
             }
@@ -403,6 +444,9 @@ impl Generator {
         } else if t > 0.0 && t < 0.2 && m > -0.02 && m < 0.1 && h > SEA + 5 {
             // Mild, slightly damp hills: cherry groves.
             Biome::Cherry
+        } else if (-0.12..-0.02).contains(&t) && m > 0.14 {
+            // Cool and damp: the pale forest.
+            Biome::PaleGarden
         } else if m > 0.08 {
             Biome::Forest
         } else {
@@ -418,6 +462,22 @@ impl Generator {
         self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
     }
 
+    /// Where the generator put Creaking Hearts in chunk (cx, cz)'s pale oaks.
+    pub fn creaking_hearts(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        let s = self.seed;
+        let mut v = Vec::new();
+        for tz in cz * CW..cz * CW + CW {
+            for tx in cx * CW..cx * CW + CW {
+                if let Some((h, _, TreeKind::PaleOak)) = self.tree_at(tx, tz)
+                    && hash3(s ^ 0x1EA, tx, h - 64, tz) < 0.12
+                {
+                    v.push(ivec3(tx, h + 3, tz));
+                }
+            }
+        }
+        v
+    }
+
     /// A tree rooted at this column: ground height, trunk height and kind.
     pub fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32, TreeKind)> {
         let (h, biome) = self.column(x, z);
@@ -430,6 +490,7 @@ impl Generator {
             Biome::Swamp => 0.012,
             Biome::Cherry => 0.02,
             Biome::Mangrove => 0.016,
+            Biome::PaleGarden => 0.04,
             _ => 0.0,
         };
         // Swamp trees and mangroves stand in the shallows too.
@@ -643,6 +704,9 @@ impl Generator {
                     } else if biome == Biome::Cherry && r < 0.4 {
                         // Petals everywhere under the cherry trees.
                         b[idx(lx, top, lz)] = PINK_PETALS;
+                    } else if biome == Biome::PaleGarden && r < 0.6 {
+                        // A grey carpet of pale moss.
+                        b[idx(lx, h, lz)] = PALE_MOSS;
                     } else if r < 0.11 {
                         b[idx(lx, top, lz)] = TALL_GRASS;
                     } else if r < 0.1125 && biome == Biome::Plains {
@@ -715,7 +779,7 @@ impl Generator {
                         continue;
                     }
                     let i = idx(lx, p.y, lz);
-                    if force || matches!(b[i], AIR | TALL_GRASS | FLOWER | LILY_PAD | PINK_PETALS) {
+                    if force || matches!(b[i], AIR | TALL_GRASS | FLOWER | LILY_PAD | PINK_PETALS | PALE_HANGING_MOSS) {
                         b[i] = id;
                     }
                 }
@@ -781,6 +845,8 @@ pub struct World {
     pub farm: HashMap<IVec3, Soil>,
     /// What's inside every chest and furnace (see containers.rs); kept in step with the blocks.
     pub containers: HashMap<IVec3, Container>,
+    /// Each player's Personal Chest storage, by `stash::stash_key` (see stash.rs).
+    pub stashes: HashMap<i32, Container>,
     /// Fill structure chests when their chunks first arrive (off for joined
     /// players: the host has the real contents).
     pub structure_loot: bool,
@@ -852,6 +918,7 @@ impl World {
             dirty: HashSet::new(),
             farm: HashMap::new(),
             containers: HashMap::new(),
+            stashes: HashMap::new(),
             structure_loot: true,
             liquid_dirty: HashSet::new(),
             fall_dirty: HashSet::new(),

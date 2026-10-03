@@ -223,7 +223,7 @@ impl Game {
     pub fn drop_everything(&mut self) {
         let inv = &mut self.inv;
         let mut stacks: Vec<(Id, u8, crate::inventory::Wear)> = Vec::new();
-        for (s, w) in inv.slots.iter_mut().zip(inv.wear.iter_mut()).chain(inv.armor.iter_mut().zip(inv.armor_wear.iter_mut())).chain(std::iter::once((&mut inv.cursor, &mut inv.cursor_wear))) {
+        for (s, w) in inv.slots.iter_mut().zip(inv.wear.iter_mut()).chain(inv.armor.iter_mut().zip(inv.armor_wear.iter_mut())).chain(std::iter::once((&mut inv.cursor, &mut inv.cursor_wear))).chain(std::iter::once((&mut inv.offhand, &mut inv.offhand_wear))) {
             if let Some((id, n)) = s.take() {
                 stacks.push((id, n, *w));
             }

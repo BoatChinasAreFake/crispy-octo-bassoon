@@ -227,6 +227,11 @@ pub enum MobKind {
     Axolotl,
     /// Tall desert beasts: saddle one and ride it, with room for a friend (see horses.rs).
     Camel,
+    /// Woken by a Creaking Heart in the Pale Garden: moves only while nobody's
+    /// looking, and can't be hurt; break its heart instead (see creaking.rs).
+    Creaking,
+    /// Huge, gentle and ancient: sniffs out old seeds (see sniffers.rs).
+    Sniffer,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -242,7 +247,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 37] = [
+    pub const ALL: [MobKind; 39] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -281,6 +286,8 @@ impl MobKind {
         MobKind::Goat,
         MobKind::Axolotl,
         MobKind::Camel,
+        MobKind::Creaking,
+        MobKind::Sniffer,
     ];
 
     pub fn index(self) -> u8 {
@@ -362,6 +369,8 @@ impl MobKind {
             "goat" => Some(MobKind::Goat),
             "axolotl" => Some(MobKind::Axolotl),
             "camel" => Some(MobKind::Camel),
+            "creaking" => Some(MobKind::Creaking),
+            "sniffer" => Some(MobKind::Sniffer),
             _ => None,
         }
     }
@@ -407,6 +416,8 @@ impl MobKind {
             MobKind::Goat => "Goat",
             MobKind::Axolotl => "Axolotl",
             MobKind::Camel => "Camel",
+            MobKind::Creaking => "Creaking",
+            MobKind::Sniffer => "Sniffer",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -451,6 +462,8 @@ impl MobKind {
             MobKind::Goat => (0.35, 1.2),
             MobKind::Axolotl => (0.3, 0.42),
             MobKind::Camel => (0.7, 2.35),
+            MobKind::Creaking => (0.4, 2.7),
+            MobKind::Sniffer => (0.9, 1.75),
             MobKind::Modded(_) => (0.4, 0.9),
         }
     }
@@ -496,6 +509,8 @@ impl MobKind {
             MobKind::Goat => 10.0,
             MobKind::Axolotl => 14.0,
             MobKind::Camel => 32.0,
+            MobKind::Creaking => 1.0,
+            MobKind::Sniffer => 28.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -523,7 +538,7 @@ impl MobKind {
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer)
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
@@ -550,6 +565,7 @@ impl MobKind {
             MobKind::Galloper => &[APPLE],
             MobKind::Goat => &[WHEAT],
             MobKind::Camel => &[CACTUS],
+            MobKind::Sniffer => &[TORCHFLOWER_SEEDS],
             MobKind::Axolotl => &[TROPICAL],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             MobKind::Modded(_) => self.mod_def().and_then(|d| d.breed_item.as_ref()).map(std::slice::from_ref).unwrap_or(&[]),
@@ -637,6 +653,58 @@ pub struct Mob {
     pub rider: u32,
     /// A Camel's second seat, behind the driver: 0 nobody, else player id + 1.
     pub passenger: u32,
+    /// Which colouring it has (Gallopers, Woofers, Mooers, Axolotls; see `variant_tint`).
+    pub variant: u8,
+}
+
+/// How many colourings a kind comes in (1: just the one).
+pub fn variants(kind: MobKind) -> u8 {
+    match kind {
+        MobKind::Galloper => 5,
+        MobKind::Woofer => 4,
+        MobKind::Mooer => 3,
+        MobKind::Axolotl => 5,
+        _ => 1,
+    }
+}
+
+/// The rare blue Axolotl.
+pub const BLUE_AXOLOTL: u8 = 4;
+
+/// A colouring, as a multiplier on the kind's own skin.
+pub fn variant_tint(kind: MobKind, v: u8) -> [f32; 3] {
+    match (kind, v) {
+        // Chestnut (as drawn), white, black, grey, cream.
+        (MobKind::Galloper, 1) => [1.7, 1.7, 1.75],
+        (MobKind::Galloper, 2) => [0.35, 0.33, 0.33],
+        (MobKind::Galloper, 3) => [1.05, 1.15, 1.25],
+        (MobKind::Galloper, 4) => [1.45, 1.35, 1.1],
+        // Grey (as drawn), black, rusty, snowy.
+        (MobKind::Woofer, 1) => [0.4, 0.4, 0.42],
+        (MobKind::Woofer, 2) => [1.25, 0.85, 0.6],
+        (MobKind::Woofer, 3) => [1.3, 1.3, 1.35],
+        // Brown (as drawn), black, red.
+        (MobKind::Mooer, 1) => [0.45, 0.42, 0.42],
+        (MobKind::Mooer, 2) => [1.35, 0.7, 0.6],
+        // Pink (as drawn), gold, cyan, brown, and blue.
+        (MobKind::Axolotl, 1) => [1.15, 1.05, 0.45],
+        (MobKind::Axolotl, 2) => [0.65, 1.15, 1.25],
+        (MobKind::Axolotl, 3) => [0.75, 0.55, 0.45],
+        (MobKind::Axolotl, BLUE_AXOLOTL) => [0.4, 0.6, 1.6],
+        _ => [1.0; 3],
+    }
+}
+
+/// A fresh colouring (the blue Axolotl is very rare).
+pub fn roll_variant(kind: MobKind, rng: &mut Rng) -> u8 {
+    let n = variants(kind);
+    if n <= 1 {
+        return 0;
+    }
+    if kind == MobKind::Axolotl {
+        return if rng.chance(0.02) { BLUE_AXOLOTL } else { rng.int(0, 3) as u8 };
+    }
+    rng.int(0, n as i32 - 1) as u8
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -729,10 +797,10 @@ impl Mob {
             burning: false,
             on_fire: 0.0,
             angry: false,
-            // A Goat waits a while before its first charge.
-            warp_cd: if kind == MobKind::Goat { rng.range(10.0, 30.0) } else { 0.0 },
+            // A Goat waits a while before its first charge, a Sniffer before its first dig.
+            warp_cd: if matches!(kind, MobKind::Goat | MobKind::Sniffer) { rng.range(10.0, 30.0) } else { 0.0 },
             size: 1.0,
-            hop_cd: if kind == MobKind::Goat { 0.0 } else { rng.range(0.5, 2.0) },
+            hop_cd: if matches!(kind, MobKind::Goat | MobKind::Sniffer) { 0.0 } else { rng.range(0.5, 2.0) },
             love: 0.0,
             breed_cd: 0.0,
             baby: 0.0,
@@ -751,6 +819,7 @@ impl Mob {
             temper: 0,
             rider: 0,
             passenger: 0,
+            variant: if variants(kind) > 1 { roll_variant(kind, rng) } else { 0 },
         }
     }
 
@@ -802,6 +871,11 @@ impl Mob {
 
     pub fn damage(&mut self, amount: f32, from: Vec3) {
         if self.hurt > 0.25 {
+            return;
+        }
+        // A Creaking shrugs everything off (only breaking its heart works).
+        if self.kind == MobKind::Creaking {
+            self.hurt = 0.5;
             return;
         }
         // A curled-up Rollo is mostly shell.
@@ -1455,6 +1529,51 @@ impl Mob {
                     }
                 }
             }
+            MobKind::Creaking => {
+                // Frozen while anyone watches it (see creaking.rs).
+                may_wander = false;
+                if self.sitting {
+                    self.body.vel.x = 0.0;
+                    self.body.vel.z = 0.0;
+                    self.knock = Vec3::ZERO;
+                } else if let Some(g) = self.goal.filter(|g| g.distance(self.body.pos) > crate::creaking::LEASH) {
+                    // Too far from its heart: back it goes.
+                    let d = g - self.body.pos;
+                    want = Some((d.x.atan2(-d.z), 3.0));
+                } else if player_visible && dist < 32.0 {
+                    want = Some((face, 3.8));
+                    if flat.length() < 1.4 && to_player.y.abs() < 2.2 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(3.0, "was caught by a Creaking. Should have kept looking"));
+                        self.attack_cd = 1.2;
+                    }
+                }
+            }
+            MobKind::Sniffer => {
+                // Now and then it stops, sniffs, and digs something up (see sniffers.rs).
+                self.warp_cd = (self.warp_cd - dt).max(0.0);
+                if self.flee > 0.0 {
+                    want = Some(((-flat.x).atan2(flat.z), 2.6));
+                } else if self.hop_cd > 0.0 {
+                    may_wander = false;
+                    self.hop_cd -= dt;
+                    if self.hop_cd <= 0.0 && self.baby <= 0.0 {
+                        let under = (self.body.pos - Vec3::Y * 0.5).floor().as_ivec3();
+                        if crate::sniffers::diggable(world.get_v(under)) {
+                            ev.push(MobEvent::DropItem(self.body.pos + Vec3::Y * 0.4, crate::sniffers::dig_up(rng)));
+                        }
+                        self.warp_cd = rng.range(40.0, 90.0);
+                    }
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 1.6 {
+                        want = Some((d.x.atan2(-d.z), 1.4));
+                    } else {
+                        may_wander = false;
+                    }
+                } else if self.warp_cd <= 0.0 && self.body.on_ground && rng.chance(dt * 0.2) {
+                    self.hop_cd = 4.0;
+                }
+            }
             MobKind::Breeze => {
                 self.hop_cd = (self.hop_cd - dt).max(0.0);
                 let fd = flat.length();
@@ -1864,6 +1983,8 @@ impl Mob {
             p.z += (self.anim * 29.0).cos() * 0.03;
         }
         let sky = world.sky_shade(p.x.floor() as i32, (p.y + 0.5).floor() as i32, p.z.floor() as i32);
+        let v = variant_tint(self.kind, self.variant);
+        let tint = [tint[0] * v[0], tint[1] * v[1], tint[2] * v[2], tint[3]];
         geo.begin(Pass::Opaque, tint, false);
         let swell = if self.kind == MobKind::Hisser { 1.0 + self.fuse * 0.08 } else { 1.0 };
         let mut scale = Vec3::splat(swell * self.size * if self.baby > 0.0 { 0.55 } else { 1.0 });
@@ -1903,6 +2024,7 @@ impl Mob {
             MobKind::Rollo if self.fuse > 0.0 => &ROLLO_BALL[..],
             MobKind::Soggy if self.seed == 1 => &SOGGY_ARMED[..],
             MobKind::Weeper if self.angry => &WEEPER_ANGRY[..],
+            MobKind::Creaking if self.sitting => &CREAKING_STILL[..],
             MobKind::Invoicer if self.fuse > 0.0 => &INVOICER_CASTING[..],
             MobKind::Strutter if !is_lava(world.get(p.x.floor() as i32, (p.y - 0.3).floor() as i32, p.z.floor() as i32)) && !self.body.in_lava => &STRUTTER_COLD[..],
             k => model(k),
@@ -2392,6 +2514,33 @@ static AXOLOTL: [Part; 9] = [
     part([-0.26, 0.0, 0.08], [0.1, 0.1, 0.1], [0.0, 0.1, 0.1], Limb::Swing(-1.0), [AX; 6]),
     part([0.16, 0.0, 0.08], [0.1, 0.1, 0.1], [0.0, 0.1, 0.1], Limb::Swing(1.0), [AX; 6]),
 ];
+const CRK: u16 = T_CREAKING;
+/// A Creaking: tall and spindly, bark for skin; its eyes glow while it moves.
+const fn creaking(face: u16) -> [Part; 6] {
+    [
+        part([-0.2, 0.0, -0.1], [0.18, 1.25, 0.2], [0.0, 1.25, 0.0], Limb::Swing(1.0), [CRK; 6]),
+        part([0.02, 0.0, -0.1], [0.18, 1.25, 0.2], [0.0, 1.25, 0.0], Limb::Swing(-1.0), [CRK; 6]),
+        part([-0.24, 1.25, -0.14], [0.48, 0.9, 0.28], [0.0; 3], Limb::Fixed, [CRK; 6]),
+        part([-0.42, 0.85, -0.08], [0.16, 1.25, 0.16], [0.0, 2.05, 0.0], Limb::Forward, [CRK; 6]),
+        part([0.26, 0.85, -0.08], [0.16, 1.25, 0.16], [0.0, 2.05, 0.0], Limb::Forward, [CRK; 6]),
+        part([-0.24, 2.15, -0.24], [0.48, 0.55, 0.48], [0.0; 3], Limb::Fixed, [CRK, CRK, CRK, CRK, CRK, face]),
+    ]
+}
+static CREAKING: [Part; 6] = creaking(T_CREAKING_FACE_ON);
+static CREAKING_STILL: [Part; 6] = creaking(T_CREAKING_FACE);
+const SN: u16 = T_SNIFFER;
+static SNIFFER: [Part; 9] = [
+    part([-0.55, 0.55, -0.85], [1.1, 1.0, 1.7], [0.0; 3], Limb::Fixed, [SN; 6]),
+    part([-0.35, 0.7, -1.35], [0.7, 0.6, 0.55], [0.0; 3], Limb::Fixed, [SN, SN, SN, SN, SN, T_SNIFFER_FACE]),
+    // A big nose, and moss on its back.
+    part([-0.25, 0.55, -1.6], [0.5, 0.3, 0.3], [0.0, 0.7, -1.35], Limb::Bob(1.0), [T_SNIFFER_FACE; 6]),
+    part([-0.5, 1.5, -0.7], [1.0, 0.1, 1.4], [0.0; 3], Limb::Fixed, [T_PALE_MOSS; 6]),
+    part([-0.5, 0.0, -0.6], [0.3, 0.6, 0.3], [0.0, 0.6, -0.45], Limb::Swing(0.8), [SN; 6]),
+    part([0.2, 0.0, -0.6], [0.3, 0.6, 0.3], [0.0, 0.6, -0.45], Limb::Swing(-0.8), [SN; 6]),
+    part([-0.5, 0.0, 0.0], [0.3, 0.6, 0.3], [0.0, 0.6, 0.15], Limb::Swing(-0.8), [SN; 6]),
+    part([0.2, 0.0, 0.0], [0.3, 0.6, 0.3], [0.0, 0.6, 0.15], Limb::Swing(0.8), [SN; 6]),
+    part([-0.5, 0.0, 0.5], [1.0, 0.6, 0.3], [0.0, 0.6, 0.6], Limb::Swing(0.4), [SN; 6]),
+];
 const CM: u16 = T_CAMEL;
 /// Where a Camel's neck leans from.
 const CAMEL_NECK: [f32; 3] = [0.0, 1.5, -0.8];
@@ -2452,6 +2601,8 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Goat => &GOAT,
         MobKind::Axolotl => &AXOLOTL,
         MobKind::Camel => &CAMEL,
+        MobKind::Creaking => &CREAKING,
+        MobKind::Sniffer => &SNIFFER,
         // Modded mobs are drawn from a runtime-built, textured copy of a base
         // template (see `modded_parts`); this static fallback keeps `model`
         // total and is used only where the texture doesn't matter (e.g. the

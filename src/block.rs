@@ -273,7 +273,32 @@ pub const VAULT: Id = 457;
 pub const VAULT_OPEN: Id = 458;
 /// Point a compass at it (see navigation.rs).
 pub const LODESTONE: Id = 459;
-pub const NUM_BLOCKS: Id = 460;
+/// Ominous Trials (see trial.rs): a spawner woken by someone with Bad Omen, its vaults, and their prize.
+pub const TRIAL_SPAWNER_OMINOUS: Id = 460;
+pub const VAULT_OMINOUS: Id = 461;
+pub const HEAVY_CORE: Id = 462;
+/// The Pale Garden (see world.rs and creaking.rs).
+pub const PALE_OAK_LOG: Id = 463;
+pub const PALE_OAK_LEAVES: Id = 464;
+pub const PALE_OAK_PLANKS: Id = 465;
+pub const PALE_MOSS: Id = 466;
+pub const PALE_HANGING_MOSS: Id = 467;
+/// In a pale oak's trunk: wakes at night and calls up a Creaking.
+pub const CREAKING_HEART: Id = 468;
+pub const CREAKING_HEART_AWAKE: Id = 469;
+/// Sniffers (see sniffers.rs): an egg that hatches, and a Pitcher plant growing up.
+pub const SNIFFER_EGG: Id = 470;
+pub const PITCHER_CROP: Id = 471;
+pub const PITCHER_PLANT: Id = 472;
+/// Read books on it (see books.rs); with a book on it.
+pub const LECTERN: Id = 473;
+pub const LECTERN_BOOK: Id = 474;
+/// A banner on a pole (drawn live, see banners.rs), and the Loom that patterns them.
+pub const BANNER: Id = 475;
+pub const LOOM: Id = 476;
+/// Opens to your own storage, wherever it is (see stash.rs).
+pub const PERSONAL_CHEST: Id = 477;
+pub const NUM_BLOCKS: Id = 478;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -450,7 +475,18 @@ pub const TRIMS: usize = 4;
 pub const SPYGLASS: Id = FIRST_ITEM + 220;
 /// Holds a mix of small stacks in one slot (see bundle.rs).
 pub const BUNDLE: Id = FIRST_ITEM + 221;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 222;
+/// Opens an Ominous Vault (see trial.rs).
+pub const OMINOUS_TRIAL_KEY: Id = FIRST_ITEM + 222;
+/// Hits harder the further you fell first.
+pub const MACE: Id = FIRST_ITEM + 223;
+/// Drink it for a Bad Omen.
+pub const OMINOUS_BOTTLE: Id = FIRST_ITEM + 224;
+/// A seed a Sniffer dug up: plant it for a Pitcher plant.
+pub const PITCHER_POD: Id = FIRST_ITEM + 225;
+/// Write in it; sign it and it's a Written Book (see books.rs).
+pub const BOOK_AND_QUILL: Id = FIRST_ITEM + 226;
+pub const WRITTEN_BOOK: Id = FIRST_ITEM + 227;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 228;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -1950,6 +1986,43 @@ impl Registry {
             blocks.push(d);
         }
         blocks.push(def("lodestone", "Lodestone (Magnetic Personality)", Cube, true, true, [T_LODESTONE_TOP, T_LODESTONE_SIDE, T_LODESTONE_TOP], 3.5, 1, true, LODESTONE, 0.0, S_STONE));
+        let mut ominous = def("ominous_trial_spawner", "Trial Spawner (Ominous)", Cube, true, false, [T_TRIAL_SPAWNER_TOP, T_OMINOUS_SPAWNER, T_TRIAL_SPAWNER_TOP], 50.0, 2, true, AIR, 6.0, S_STONE);
+        ominous.see_through = true;
+        ominous.creative = false;
+        blocks.push(ominous);
+        let mut ov = def("ominous_vault", "Vault (Ominous, Locked)", Cube, true, true, [T_VAULT_TOP, T_VAULT_OMINOUS, T_VAULT_TOP], 50.0, 2, true, AIR, 6.0, S_STONE);
+        ov.creative = false;
+        blocks.push(ov);
+        blocks.push(def("heavy_core", "Heavy Core (Surprisingly Dense)", Cube, true, true, [T_HEAVY_CORE; 3], 10.0, 1, true, HEAVY_CORE, 0.0, S_STONE));
+        // The Pale Garden.
+        blocks.push(def("pale_oak_log", "Pale Oak Log (Washed Out)", Cube, true, true, [T_PALE_LOG_TOP, T_PALE_LOG_SIDE, T_PALE_LOG_TOP], 2.0, 0, false, PALE_OAK_LOG, 0.0, S_WOOD));
+        blocks.push(def("pale_oak_leaves", "Pale Oak Leaves (Ghostly)", Cube, true, false, [T_PALE_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("pale_oak_planks", "Pale Oak Planks (Off-White)", Cube, true, true, [T_PALE_PLANKS; 3], 2.0, 0, false, PALE_OAK_PLANKS, 0.0, S_WOOD));
+        blocks.push(def("pale_moss", "Pale Moss (Grey Carpet)", Cube, true, true, [T_PALE_MOSS, T_PALE_MOSS, T_DIRT], 0.1, 0, false, PALE_MOSS, 0.0, S_GRASS));
+        blocks.push(def("pale_hanging_moss", "Pale Hanging Moss (Dangly)", Cross, false, false, [T_PALE_HANGING_MOSS; 3], 0.0, 0, false, PALE_HANGING_MOSS, 0.0, S_GRASS));
+        blocks.push(def("creaking_heart", "Creaking Heart (Asleep)", Cube, true, true, [T_PALE_LOG_TOP, T_CREAKING_HEART, T_PALE_LOG_TOP], 10.0, 0, false, CREAKING_HEART, 0.0, S_WOOD));
+        let mut awake = def("creaking_heart_awake", "Creaking Heart (Awake)", Cube, true, true, [T_PALE_LOG_TOP, T_CREAKING_HEART_ON, T_PALE_LOG_TOP], 10.0, 0, false, CREAKING_HEART, 6.0, S_WOOD);
+        awake.creative = false;
+        blocks.push(awake);
+        // Sniffers.
+        let mut egg = def("sniffer_egg", "Sniffer Egg (Ancient, Still Warm)", Shaped, true, false, [T_SNIFFER_EGG; 3], 0.5, 0, false, SNIFFER_EGG, 0.0, S_WOOD);
+        egg.see_through = true;
+        egg.shape = Shape::Table;
+        blocks.push(egg);
+        let mut crop = def("pitcher_crop", "Pitcher Sprout (Taking Its Time)", Cross, false, false, [T_PITCHER_CROP; 3], 0.0, 0, false, PITCHER_POD, 0.0, S_GRASS);
+        crop.creative = false;
+        blocks.push(crop);
+        blocks.push(def("pitcher_plant", "Pitcher Plant (Ancient, Teal)", Cross, false, false, [T_PITCHER_PLANT; 3], 0.0, 0, false, PITCHER_PLANT, 0.0, S_GRASS));
+        let mut lectern = def("lectern", "Lectern (Reading Stand)", Shaped, true, false, [T_LECTERN_TOP, T_LECTERN_SIDE, T_PLANKS], 2.5, 0, false, LECTERN, 0.0, S_WOOD);
+        lectern.shape = Shape::Table;
+        blocks.push(lectern);
+        let mut with_book = def("lectern_book", "Lectern (With a Book)", Shaped, true, false, [T_LECTERN_BOOK_TOP, T_LECTERN_SIDE, T_PLANKS], 2.5, 0, false, LECTERN, 0.0, S_WOOD);
+        with_book.shape = Shape::Table;
+        with_book.creative = false;
+        blocks.push(with_book);
+        blocks.push(def("banner", "Banner (Flag-Adjacent)", Empty, false, false, [T_BANNER_ICON; 3], 1.0, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("loom", "Loom (Pattern Machine)", Cube, true, true, [T_LOOM_TOP, T_LOOM_SIDE, T_PLANKS], 2.5, 0, false, LOOM, 0.0, S_WOOD));
+        blocks.push(def("personal_chest", "Personal Chest (Yours Alone)", Cube, true, true, [T_PERSONAL_CHEST_TOP, T_PERSONAL_CHEST_SIDE, T_PERSONAL_CHEST_TOP], 22.0, 1, true, PERSONAL_CHEST, 7.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2178,6 +2251,12 @@ impl Registry {
         }
         items.push(ItemDef { stack: 1, consume: false, ..item("spyglass", "Spyglass (Pirate Approved)", T_SPYGLASS) });
         items.push(ItemDef { stack: 1, consume: false, ..item("bundle", "Bundle (Bag of Bits)", T_BUNDLE) });
+        items.push(item("ominous_trial_key", "Ominous Trial Key (Opens an Ominous Vault)", T_OMINOUS_KEY));
+        items.push(ItemDef { stack: 1, damage: 6.0, durability: Some(500), ..item("mace", "Mace (Gravity Assisted)", T_MACE) });
+        items.push(ItemDef { stack: 16, ..item("ominous_bottle", "Ominous Bottle (Tastes Foreboding)", T_OMINOUS_BOTTLE) });
+        items.push(item("pitcher_pod", "Pitcher Pod (Very Old Seed)", T_PITCHER_POD));
+        items.push(ItemDef { stack: 1, consume: false, ..item("writable_book", "Book and Quill (Blank, Full of Promise)", T_BOOK_QUILL) });
+        items.push(ItemDef { stack: 1, consume: false, ..item("written_book", "Written Book (Signed and Everything)", T_WRITTEN_BOOK) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2186,6 +2265,8 @@ impl Registry {
             r(&[(SPRUCE_LOG, 1)], (PLANKS, 4)),
             r(&[(JUNGLE_LOG, 1)], (PLANKS, 4)),
             r(&[(CHERRY_LOG, 1)], (CHERRY_PLANKS, 4)),
+            r(&[(PALE_OAK_LOG, 1)], (PALE_OAK_PLANKS, 4)),
+            r(&[(PALE_OAK_PLANKS, 1)], (PLANKS, 1)),
             r(&[(MANGROVE_LOG, 1)], (MANGROVE_PLANKS, 4)),
             // The new woods do anything plain planks do, once you've made them plain.
             r(&[(CHERRY_PLANKS, 1)], (PLANKS, 1)),
@@ -2286,6 +2367,12 @@ impl Registry {
             r(&[(BREEZE_ROD, 1)], (WIND_CHARGE, 4)),
             r(&[(STONE_BRICKS, 8), (IRON, 1)], (LODESTONE, 1)),
             r(&[(GLASS, 1), (COPPER_INGOT, 2)], (SPYGLASS, 1)),
+            r(&[(HEAVY_CORE, 1), (BREEZE_ROD, 1)], (MACE, 1)),
+            r(&[(BOOK, 1), (FEATHER, 1), (COAL, 1)], (BOOK_AND_QUILL, 1)),
+            r(&[(PLANKS, 4), (BOOKSHELF, 1)], (LECTERN, 1)),
+            r(&[(WOOL, 6), (STICK, 1)], (BANNER, 1)),
+            r(&[(PLANKS, 2), (STRING, 2)], (LOOM, 1)),
+            r(&[(OBSIDIAN, 8), (STARING_EYE, 1)], (PERSONAL_CHEST, 1)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
@@ -2464,12 +2551,12 @@ pub fn dapples_sky(id: Id) -> bool {
 /// Any kind of tree trunk.
 #[inline]
 pub fn is_log(id: Id) -> bool {
-    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG)
+    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG)
 }
 /// Any kind of leaves.
 #[inline]
 pub fn is_leaves(id: Id) -> bool {
-    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES)
+    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES | PALE_OAK_LEAVES)
 }
 /// Can the player point at it (and break it)?
 #[inline]
@@ -2503,7 +2590,8 @@ pub fn item_tile(id: Id) -> u16 {
 
 pub fn max_stack(id: Id) -> u8 {
     // Each Hollow Box carries its own contents.
-    if id == HOLLOW_BOX {
+    // (So does each Banner its design.)
+    if id == HOLLOW_BOX || id == BANNER {
         return 1;
     }
     item_def(id).map(|i| i.stack.clamp(1, 64)).unwrap_or(64)
@@ -2643,6 +2731,47 @@ mod id_order_tests {
         }
         assert_eq!(reg().blocks.len(), NUM_BLOCKS as usize);
         for (id, key) in [(MELON_SLICE, "melon_slice"), (CHEST_MINECART, "chest_minecart"), (HOPPER_MINECART, "hopper_minecart"), (NAME_TAG, "name_tag")] {
+            assert_eq!(reg().key_of(id), key, "item {id}");
+        }
+        // The newest blocks and items, where their ids say.
+        for (id, key) in [
+            (OBSERVER_FIRST, "observer"),
+            (COPPER_BULB, "copper_bulb"),
+            (TUFF_BRICKS, "tuff_bricks"),
+            (TRIAL_SPAWNER, "trial_spawner"),
+            (VAULT, "vault"),
+            (LODESTONE, "lodestone"),
+            (TRIAL_SPAWNER_OMINOUS, "ominous_trial_spawner"),
+            (VAULT_OMINOUS, "ominous_vault"),
+            (HEAVY_CORE, "heavy_core"),
+            (PALE_OAK_LOG, "pale_oak_log"),
+            (PALE_HANGING_MOSS, "pale_hanging_moss"),
+            (CREAKING_HEART, "creaking_heart"),
+            (CREAKING_HEART_AWAKE, "creaking_heart_awake"),
+            (SNIFFER_EGG, "sniffer_egg"),
+            (PITCHER_CROP, "pitcher_crop"),
+            (PITCHER_PLANT, "pitcher_plant"),
+            (LECTERN, "lectern"),
+            (LECTERN_BOOK, "lectern_book"),
+            (BANNER, "banner"),
+            (LOOM, "loom"),
+            (PERSONAL_CHEST, "personal_chest"),
+        ] {
+            assert_eq!(block(id).key, key, "id {id}");
+        }
+        for (id, key) in [
+            (TRIAL_KEY, "trial_key"),
+            (WIND_CHARGE, "wind_charge"),
+            (TRIM_FIRST, "coast_trim"),
+            (SPYGLASS, "spyglass"),
+            (BUNDLE, "bundle"),
+            (OMINOUS_TRIAL_KEY, "ominous_trial_key"),
+            (MACE, "mace"),
+            (OMINOUS_BOTTLE, "ominous_bottle"),
+            (PITCHER_POD, "pitcher_pod"),
+            (BOOK_AND_QUILL, "writable_book"),
+            (WRITTEN_BOOK, "written_book"),
+        ] {
             assert_eq!(reg().key_of(id), key, "item {id}");
         }
     }

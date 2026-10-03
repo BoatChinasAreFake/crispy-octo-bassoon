@@ -28,7 +28,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v19: modded projectile appearance in authoritative arrow snapshots.
 /// v20: timed effects carry bounded amplifier levels.
 /// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
-pub const PROTOCOL: u32 = 21;
+/// v22: bundles, books and banners through the host; chest sorting.
+pub const PROTOCOL: u32 = 22;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -110,6 +111,25 @@ pub enum Msg {
     /// `wear`: how used it is, for tools and armour.
     Give { item: Id, n: u8, wear: u32 },
     Explosion { at: Vec3, r: f32 },
+    /// client -> host: put `n` of `item` into the Bundle tagged `tag` (0: an
+    /// empty one), or (`put` false) take its last stack out. See gadgets.rs.
+    BundleUse { tag: u16, item: Id, n: u8, put: bool },
+    /// host -> client: the Bundle tagged `old` is now tagged `new` and holds this.
+    BundleState { old: u16, new: u16, contents: Vec<(Id, u8)> },
+    /// client -> host: the words in one of my books (0: a new one), and whether I signed it.
+    BookWrite { tag: u16, title: String, pages: Vec<String>, sign: bool },
+    /// host -> client: a book's words (`old` -> `new` retags one of yours; `open`: show it).
+    BookState { old: u16, new: u16, signed: bool, open: bool, title: String, author: String, pages: Vec<String> },
+    /// client -> host: what does this book say? (By its tag, or `y` != i32::MIN: the lectern's.)
+    BookAsk { tag: u16, x: i32, y: i32, z: i32 },
+    /// client -> host: I'll take the book off this lectern.
+    LecternTake { x: i32, y: i32, z: i32 },
+    /// host -> client: a banner went up (`up`) or came down here (see banners.rs).
+    Banner { x: i32, y: i32, z: i32, design: u16, facing: u8, up: bool },
+    /// client -> host: I patterned the banner I'm holding into `design` with this dye.
+    Loom { design: u16, dye: Id },
+    /// client -> host: tidy the chest I have open.
+    SortContainer { x: i32, y: i32, z: i32 },
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -692,6 +712,77 @@ impl Msg {
                 w.u8(*waves);
                 w.u16(*left);
             }
+            Msg::BookWrite { tag, title, pages, sign } => {
+                w.u8(75);
+                w.u16(*tag);
+                w.str(title);
+                w.u8(pages.len().min(crate::books::MAX_PAGES) as u8);
+                for p in pages.iter().take(crate::books::MAX_PAGES) {
+                    w.str(p);
+                }
+                w.u8(*sign as u8);
+            }
+            Msg::BookState { old, new, signed, open, title, author, pages } => {
+                w.u8(76);
+                w.u16(*old);
+                w.u16(*new);
+                w.u8(*signed as u8 | (*open as u8) << 1);
+                w.str(title);
+                w.str(author);
+                w.u8(pages.len().min(crate::books::MAX_PAGES) as u8);
+                for p in pages.iter().take(crate::books::MAX_PAGES) {
+                    w.str(p);
+                }
+            }
+            Msg::BookAsk { tag, x, y, z } => {
+                w.u8(77);
+                w.u16(*tag);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::Banner { x, y, z, design, facing, up } => {
+                w.u8(79);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*design);
+                w.u8(*facing | (*up as u8) << 4);
+            }
+            Msg::Loom { design, dye } => {
+                w.u8(80);
+                w.u16(*design);
+                w.u16(*dye);
+            }
+            Msg::SortContainer { x, y, z } => {
+                w.u8(81);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::LecternTake { x, y, z } => {
+                w.u8(78);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::BundleUse { tag, item, n, put } => {
+                w.u8(73);
+                w.u16(*tag);
+                w.u16(*item);
+                w.u8(*n);
+                w.u8(*put as u8);
+            }
+            Msg::BundleState { old, new, contents } => {
+                w.u8(74);
+                w.u16(*old);
+                w.u16(*new);
+                w.u8(contents.len() as u8);
+                for &(id, n) in contents {
+                    w.u16(id);
+                    w.u8(n);
+                }
+            }
             Msg::Firework { at, colour } => {
                 w.u8(72);
                 w.v3(*at);
@@ -992,6 +1083,44 @@ impl Msg {
             69 => Msg::Deflect { at: r.v3()?, dir: r.v3()? },
             70 => Msg::Raid { state: r.u8()?, wave: r.u8()?, waves: r.u8()?, left: r.u16()? },
             72 => Msg::Firework { at: r.v3()?, colour: r.u8()? },
+            75 => {
+                let tag = r.u16()?;
+                let title = r.str()?;
+                let n = (r.u8()? as usize).min(crate::books::MAX_PAGES);
+                let mut pages = Vec::with_capacity(n);
+                for _ in 0..n {
+                    pages.push(r.str()?);
+                }
+                Msg::BookWrite { tag, title, pages, sign: r.u8()? != 0 }
+            }
+            76 => {
+                let (old, new, flags) = (r.u16()?, r.u16()?, r.u8()?);
+                let (title, author) = (r.str()?, r.str()?);
+                let n = (r.u8()? as usize).min(crate::books::MAX_PAGES);
+                let mut pages = Vec::with_capacity(n);
+                for _ in 0..n {
+                    pages.push(r.str()?);
+                }
+                Msg::BookState { old, new, signed: flags & 1 != 0, open: flags & 2 != 0, title, author, pages }
+            }
+            77 => Msg::BookAsk { tag: r.u16()?, x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            79 => {
+                let (x, y, z, design, f) = (r.i32()?, r.i32()?, r.i32()?, r.u16()?, r.u8()?);
+                Msg::Banner { x, y, z, design, facing: f & 3, up: f & 16 != 0 }
+            }
+            80 => Msg::Loom { design: r.u16()?, dye: r.u16()? },
+            81 => Msg::SortContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
+            74 => {
+                let (old, new) = (r.u16()?, r.u16()?);
+                let n = (r.u8()? as usize).min(27);
+                let mut contents = Vec::with_capacity(n);
+                for _ in 0..n {
+                    contents.push((r.u16()?, r.u8()?));
+                }
+                Msg::BundleState { old, new, contents }
+            }
             71 => Msg::TimedEffect { effect: r.u8()?, secs: r.f32()?, amplifier: r.u8()?.min(3) },
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
@@ -1559,6 +1688,15 @@ mod tests {
             Msg::PotionEffect { item: 0x8065 },
             Msg::MountMob { mob: 42 },
             Msg::Firework { at: Vec3::new(1.0, 90.0, -3.0), colour: 5 },
+            Msg::BundleUse { tag: 7, item: 0x8010, n: 12, put: true },
+            Msg::BookWrite { tag: 3, title: "Hi".into(), pages: vec!["one".into(), "two\nlines".into()], sign: true },
+            Msg::BookState { old: 0, new: 3, signed: true, open: false, title: "Hi".into(), author: "Ann".into(), pages: vec!["one".into()] },
+            Msg::BookAsk { tag: 0, x: 1, y: 60, z: -2 },
+            Msg::LecternTake { x: 1, y: 60, z: -2 },
+            Msg::Banner { x: 1, y: 60, z: -2, design: 0x1234, facing: 3, up: true },
+            Msg::Loom { design: 0x0042, dye: 0x805c },
+            Msg::SortContainer { x: 1, y: -4097, z: -2 },
+            Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },
             Msg::BeaconEffect { item: 0x8066 },

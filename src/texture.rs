@@ -533,6 +533,45 @@ pub const T_CAMEL_HUMP: u16 = 671;
 pub const T_SPARK_FIRST: u16 = 672;
 /// Armour trim colours, one per material (see trims.rs).
 pub const T_TRIM_FIRST: u16 = 680;
+/// Ominous Trials and the Mace.
+pub const T_OMINOUS_SPAWNER: u16 = 686;
+pub const T_VAULT_OMINOUS: u16 = 687;
+pub const T_HEAVY_CORE: u16 = 688;
+pub const T_OMINOUS_KEY: u16 = 689;
+pub const T_MACE: u16 = 690;
+pub const T_OMINOUS_BOTTLE: u16 = 691;
+/// The Pale Garden and the Creaking.
+pub const T_PALE_LOG_SIDE: u16 = 692;
+pub const T_PALE_LOG_TOP: u16 = 693;
+pub const T_PALE_LEAVES: u16 = 694;
+pub const T_PALE_PLANKS: u16 = 695;
+pub const T_PALE_MOSS: u16 = 696;
+pub const T_PALE_HANGING_MOSS: u16 = 697;
+pub const T_CREAKING_HEART: u16 = 698;
+pub const T_CREAKING_HEART_ON: u16 = 699;
+pub const T_CREAKING: u16 = 700;
+pub const T_CREAKING_FACE: u16 = 701;
+pub const T_CREAKING_FACE_ON: u16 = 702;
+/// Sniffers and their finds.
+pub const T_SNIFFER: u16 = 703;
+pub const T_SNIFFER_FACE: u16 = 704;
+pub const T_SNIFFER_EGG: u16 = 705;
+pub const T_PITCHER_POD: u16 = 706;
+pub const T_PITCHER_CROP: u16 = 707;
+pub const T_PITCHER_PLANT: u16 = 708;
+/// Books and lecterns.
+pub const T_BOOK_QUILL: u16 = 709;
+pub const T_WRITTEN_BOOK: u16 = 710;
+pub const T_LECTERN_TOP: u16 = 711;
+pub const T_LECTERN_SIDE: u16 = 712;
+pub const T_LECTERN_BOOK_TOP: u16 = 713;
+/// Looms and banners.
+pub const T_LOOM_TOP: u16 = 714;
+pub const T_LOOM_SIDE: u16 = 715;
+pub const T_BANNER_ICON: u16 = 716;
+/// Personal Chests.
+pub const T_PERSONAL_CHEST_TOP: u16 = 717;
+pub const T_PERSONAL_CHEST_SIDE: u16 = 718;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2699,6 +2738,87 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         });
     }
     bark(&mut a, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP, [90, 55, 40], [150, 60, 50]);
+    bark(&mut a, T_PALE_LOG_SIDE, T_PALE_LOG_TOP, [175, 170, 165], [225, 215, 210]);
+    a.each(T_PALE_LEAVES, |_, _, r, _| if r.chance(0.15) { [180, 185, 175, 0] } else { shade(rgb(165, 172, 162), r.range(0.78, 1.12)) });
+    a.each(T_PALE_PLANKS, |x, y, r, _| {
+        let board = y / 4;
+        let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
+        if seam { rgb(170, 160, 155) } else { shade(rgb(230, 222, 215), r.range(0.92, 1.06)) }
+    });
+    a.each(T_PALE_MOSS, |_, _, r, _| shade(rgb(150, 158, 145), r.range(0.8, 1.12)));
+    a.each(T_PALE_HANGING_MOSS, |x, y, r, _| {
+        // Strands hanging down, longer in the middle.
+        let len = 6 + (x * 7) % 5 + if (5..11).contains(&x) { 4 } else { 0 };
+        if x % 3 != 1 && y < len { shade(rgb(150, 158, 145), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    for (t, eye) in [(T_CREAKING_HEART, rgb(70, 60, 55)), (T_CREAKING_HEART_ON, rgb(255, 150, 40))] {
+        a.each(t, |x, y, r, _| {
+            let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+            if d < 3.0 { shade(eye, r.range(0.85, 1.1)) } else if d < 4.0 { rgb(60, 50, 45) } else { shade(rgb(175, 170, 165), r.range(0.85, 1.05)) }
+        });
+    }
+    a.sprite(T_BOOK_QUILL, &ORB_SPRITE, &[('#', rgb(60, 35, 20)), ('h', rgb(240, 235, 220)), ('b', rgb(150, 90, 50)), ('d', rgb(110, 65, 35))]);
+    a.sprite(T_WRITTEN_BOOK, &ORB_SPRITE, &[('#', rgb(50, 25, 15)), ('h', rgb(230, 200, 90)), ('b', rgb(130, 55, 35)), ('d', rgb(95, 35, 25))]);
+    let plank = |x: usize, y: usize, r: &mut Rng| {
+        let seam = y % 4 == 3 || (x + (y / 4) * 5).is_multiple_of(16);
+        if seam { rgb(110, 80, 45) } else { shade(rgb(170, 130, 80), r.range(0.9, 1.07)) }
+    };
+    a.each(T_LECTERN_SIDE, |x, y, r, _| if (5..11).contains(&x) && y > 3 { shade(rgb(130, 95, 55), r.range(0.9, 1.05)) } else { plank(x, y, r) });
+    a.each(T_LECTERN_TOP, |x, y, r, _| plank(x, y, r));
+    a.each(T_LECTERN_BOOK_TOP, |x, y, r, _| {
+        let page = (2..14).contains(&x) && (3..13).contains(&y);
+        if page && x != 7 && x != 8 { if y % 2 == 0 && (3..12).contains(&x) && x != 6 && x != 9 { rgb(150, 145, 130) } else { rgb(240, 235, 220) } } else if page { rgb(120, 60, 35) } else { plank(x, y, r) }
+    });
+    a.each(T_LOOM_TOP, |x, y, r, _| if (2..14).contains(&x) && y % 3 == 1 { rgb(235, 230, 215) } else { plank(x, y, r) });
+    a.each(T_LOOM_SIDE, |x, y, r, _| if (3..13).contains(&x) && (2..8).contains(&y) && x % 2 == 0 { rgb(235, 230, 215) } else { plank(x, y, r) });
+    a.each(T_BANNER_ICON, |x, y, r, _| {
+        let pole = x == 7 || x == 8;
+        let bar = y == 1 && (3..13).contains(&x);
+        let cloth = (4..12).contains(&x) && (2..13).contains(&y);
+        if bar || (pole && !cloth) { rgb(150, 110, 60) } else if cloth { shade(rgb(235, 235, 230), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_PERSONAL_CHEST_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        shade(if rim { rgb(30, 25, 45) } else { rgb(45, 60, 55) }, r.range(0.85, 1.1))
+    });
+    a.each(T_PERSONAL_CHEST_SIDE, |x, y, r, _| {
+        let rim = !(2..=13).contains(&x) || y > 13 || y == 6;
+        let eye = (6..10).contains(&x) && (4..9).contains(&y);
+        if eye { shade(rgb(80, 220, 170), r.range(0.85, 1.1)) } else { shade(if rim { rgb(30, 25, 45) } else { rgb(45, 60, 55) }, r.range(0.85, 1.1)) }
+    });
+    a.each(T_SNIFFER, |x, y, r, _| {
+        let tuft = (x * 5 + y * 3) % 9 == 0;
+        shade(if tuft { rgb(90, 160, 80) } else { rgb(170, 70, 55) }, r.range(0.82, 1.1))
+    });
+    a.each(T_SNIFFER_FACE, |x, y, r, _| {
+        let eye = (y == 5 || y == 6) && (x == 3 || x == 12);
+        if eye { rgb(30, 25, 20) } else { shade(rgb(200, 150, 70), r.range(0.85, 1.08)) }
+    });
+    a.each(T_SNIFFER_EGG, |x, y, r, _| {
+        let spot = (x * 7 + y * 5) % 11 < 2;
+        shade(if spot { rgb(60, 110, 70) } else { rgb(170, 70, 55) }, r.range(0.85, 1.1))
+    });
+    a.sprite(T_PITCHER_POD, &ORB_SPRITE, &[('#', rgb(40, 60, 50)), ('h', rgb(130, 210, 190)), ('b', rgb(70, 150, 130)), ('d', rgb(50, 110, 95))]);
+    a.each(T_PITCHER_CROP, |x, y, r, _| {
+        let stem = (7..9).contains(&x) && y > 6;
+        let leaf = y > 9 && (x as i32 - 7).abs() < (y as i32 - 8);
+        if stem || leaf { shade(rgb(70, 140, 110), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_PITCHER_PLANT, |x, y, r, _| {
+        let cup = (4..12).contains(&x) && (2..9).contains(&y) && !((6..10).contains(&x) && y < 4);
+        let stem = (7..9).contains(&x) && y >= 9;
+        if cup { shade(if y < 4 { rgb(170, 110, 220) } else { rgb(80, 175, 160) }, r.range(0.85, 1.1)) } else if stem { rgb(60, 120, 90) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_CREAKING, |x, y, r, _| {
+        let crack = (x * 3 + y) % 7 == 0;
+        shade(if crack { rgb(55, 45, 40) } else { rgb(120, 105, 95) }, r.range(0.8, 1.1))
+    });
+    for (t, eye) in [(T_CREAKING_FACE, rgb(60, 50, 45)), (T_CREAKING_FACE_ON, rgb(255, 150, 40))] {
+        a.each(t, |x, y, r, _| {
+            let e = ((3..6).contains(&x) || (10..13).contains(&x)) && (5..8).contains(&y);
+            if e { eye } else { shade(rgb(120, 105, 95), r.range(0.82, 1.08)) }
+        });
+    }
     a.each(T_CHERRY_LEAVES, |x, y, r, _| {
         if r.chance(0.13) { return [240, 170, 200, 0]; }
         let blossom = (x * 7 + y * 3) % 5 == 0;
@@ -4710,6 +4830,43 @@ fn paint_scorch_and_raids(a: &mut Atlas) {
 }
 
 /// Trial Chambers, the new animals, fireworks, trims and tools.
+const MACE_SPRITE: [&str; 16] = [
+    "................",
+    "..........####..",
+    ".........#hhhh#.",
+    "........#hbhhbh#",
+    "........#hhbbhh#",
+    "........#hbhhbh#",
+    ".........#hhhh#.",
+    "........#s####..",
+    ".......#s#......",
+    "......#s#.......",
+    ".....#s#........",
+    "....#s#.........",
+    "...#s#..........",
+    "..#s#...........",
+    "..##............",
+    "................",
+];
+const OMINOUS_BOTTLE_SPRITE: [&str; 16] = [
+    "................",
+    "......####......",
+    "......#cc#......",
+    "......#gg#......",
+    ".....#gggg#.....",
+    "....#gkkkkg#....",
+    "...#gkkkkkkg#...",
+    "...#gkkggkkg#...",
+    "...#gkgkkgkg#...",
+    "...#gkkggkkg#...",
+    "...#gkkkkkkg#...",
+    "....#gkkkkg#....",
+    ".....######.....",
+    "................",
+    "................",
+    "................",
+];
+
 fn paint_trials_and_friends(a: &mut Atlas) {
     let tuff = rgb(95, 100, 92);
     a.each(T_TUFF_BRICKS, |x, y, r, _| {
@@ -4756,6 +4913,25 @@ fn paint_trials_and_friends(a: &mut Atlas) {
         shade(if d < 3.0 { rgb(70, 70, 75) } else if d < 4.5 { rgb(200, 200, 205) } else { rgb(110, 110, 115) }, r.range(0.9, 1.06))
     });
     a.sprite(T_TRIAL_KEY, &KEY_SPRITE, &[('#', rgb(70, 40, 20)), ('h', rgb(255, 220, 120)), ('b', rgb(220, 160, 60))]);
+    a.sprite(T_OMINOUS_KEY, &KEY_SPRITE, &[('#', rgb(25, 30, 45)), ('h', rgb(120, 220, 230)), ('b', rgb(60, 130, 160))]);
+    a.each(T_OMINOUS_SPAWNER, |x, y, r, _| {
+        let bar = x % 5 == 0 || y % 5 == 0 || x == 15 || y == 15;
+        if bar { shade(rgb(35, 40, 55), r.range(0.85, 1.1)) } else if (6..10).contains(&x) && (6..10).contains(&y) { shade(rgb(90, 200, 230), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_VAULT_OMINOUS, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        if (6..10).contains(&x) && (5..11).contains(&y) {
+            shade(rgb(110, 220, 235), r.range(0.85, 1.1))
+        } else {
+            shade(if rim { rgb(60, 95, 120) } else { rgb(40, 44, 55) }, r.range(0.88, 1.08))
+        }
+    });
+    a.each(T_HEAVY_CORE, |x, y, r, _| {
+        let d = (x as f32 - 7.5).abs().max((y as f32 - 7.5).abs());
+        shade(if d < 3.0 { rgb(80, 85, 95) } else if d < 5.0 { rgb(45, 48, 55) } else { rgb(120, 125, 135) }, r.range(0.85, 1.1))
+    });
+    a.sprite(T_MACE, &MACE_SPRITE, &[('#', rgb(30, 30, 35)), ('h', rgb(170, 175, 185)), ('b', rgb(95, 100, 110)), ('s', rgb(150, 170, 230))]);
+    a.sprite(T_OMINOUS_BOTTLE, &OMINOUS_BOTTLE_SPRITE, &[('#', rgb(25, 25, 30)), ('g', rgb(200, 220, 230)), ('k', rgb(60, 130, 160)), ('c', rgb(140, 100, 60))]);
     a.sprite(T_WIND_CHARGE, &ORB_SPRITE, &[('#', rgb(90, 110, 160)), ('h', rgb(240, 245, 255)), ('b', rgb(180, 200, 245)), ('d', rgb(130, 150, 210))]);
     a.sprite(T_BREEZE_ROD, &ROD_SPRITE, &[('#', rgb(60, 70, 110)), ('h', rgb(220, 230, 255)), ('b', rgb(150, 170, 230))]);
     a.sprite(T_GOAT_HORN, &HORN_SPRITE, &[('#', rgb(70, 60, 45)), ('h', rgb(240, 230, 205)), ('b', rgb(200, 185, 150))]);

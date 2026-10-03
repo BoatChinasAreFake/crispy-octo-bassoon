@@ -435,6 +435,7 @@ impl Game {
             // Words on signs and things in frames.
             roster.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
             roster.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+            roster.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -523,6 +524,8 @@ impl Game {
                     }
                     if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
                         self.spill_frame(IVec3::new(x, y, z));
+                        self.spill_lectern(IVec3::new(x, y, z));
+                        self.spill_banner(IVec3::new(x, y, z));
                     }
                     // Hives, pots and sculk notice (and the Deep Dark hears it).
                     if old != id && crate::ledger::is_break(old, id) {
@@ -534,6 +537,11 @@ impl Game {
                     self.world.set(x, y, z, id);
                     if packed != 0 {
                         self.unpack_box(IVec3::new(x, y, z), packed);
+                    }
+                    if id == BANNER && old != BANNER {
+                        let design = if self.verified_held(from) == BANNER { self.verified_ench(from) } else { 0 };
+                        let facing = self.peers.get(&from).map(|p| crate::banners::facing_from_yaw(p.yaw)).unwrap_or(0);
+                        self.put_up_banner(IVec3::new(x, y, z), design, facing);
                     }
                     // Half a door takes the other half with it.
                     if is_door(old) && !is_door(id) {
@@ -587,7 +595,10 @@ impl Game {
                 let sharpness = crate::enchant::level((self.verified_ench(from) as u32) << 16, crate::enchant::Enchant::Sharpness);
                 // (Strength is drunk on their own machine; the host saw the bottle go.)
                 let strength = self.strong.get(&from).map_or(0.0, |&(_, amplifier)| crate::potions::strength_bonus(amplifier));
-                let dmg = dmg.clamp(0.0, (attack_damage_with(self.verified_held(from), sharpness) + strength) * 1.5);
+                let held = self.verified_held(from);
+                // (A Mace adds whatever their fall was worth; the host can't see falls, so it allows a long one.)
+                let smash = if held == MACE { crate::combat::smash_bonus(40.0) } else { 0.0 };
+                let dmg = dmg.clamp(0.0, (attack_damage_with(held, sharpness) + strength) * 1.5 + smash);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
                     m.damage(dmg, eye);
                     m.last_attacker = from;
@@ -670,12 +681,22 @@ impl Game {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
                 }
+                if item == BUNDLE {
+                    self.host_bundle_tip(from);
+                    return;
+                }
                 if item == ROCKET && self.peer_rate_ok(from, "rocket", 0.25) {
                     self.host_rocket(from);
                     return;
                 }
                 if item == CROSSBOW && self.peer_rate_ok(from, "crossbow", 1.0) && self.peer_has(from, CROSSBOW) {
                     self.host_crossbow(from);
+                    return;
+                }
+                if item == OMINOUS_BOTTLE && self.peer_rate_ok(from, "bottle", 1.0) {
+                    if self.peer_take(from, OMINOUS_BOTTLE, 1) {
+                        self.give_effect_to(from, crate::potions::Potion::BadOmen, crate::raids::OMEN_SECS);
+                    }
                     return;
                 }
                 if item == GOAT_HORN && self.peer_rate_ok(from, "horn", 5.0) && self.peer_has(from, GOAT_HORN) {
@@ -713,6 +734,18 @@ impl Game {
                     }
                 }
             }
+            Msg::BundleUse { tag, item, n, put } => self.host_bundle_use(from, tag, item, n, put),
+            Msg::BookWrite { tag, title, pages, sign } => self.host_book_write(from, tag, title, pages, sign),
+            Msg::BookAsk { tag, x, y, z } => self.host_book_ask(from, tag, IVec3::new(x, y, z)),
+            Msg::LecternTake { x, y, z } => self.host_lectern_take(from, IVec3::new(x, y, z)),
+            Msg::Loom { design, dye } => self.host_loom(from, design, dye),
+            Msg::SortContainer { x, y, z } => self.host_sort(from, IVec3::new(x, y, z)),
+            Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
+                let p = IVec3::new(x, y, z);
+                if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
+                    self.host_lectern_put(from, p, item);
+                }
+            }
             Msg::Shoot { pos, dir } => {
                 // Only from roughly where they are, in a real direction, at a bow's pace.
                 let Some(p) = self.peers.get(&from) else { return };
@@ -723,7 +756,7 @@ impl Game {
                     self.host_wear(from, BOW, 1);
                 }
             }
-            Msg::Interact { x, y, z, item: TRIAL_KEY } if self.world.get(x, y, z) == VAULT => {
+            Msg::Interact { x, y, z, item: TRIAL_KEY | OMINOUS_TRIAL_KEY } if matches!(self.world.get(x, y, z), VAULT | VAULT_OMINOUS) => {
                 let p = IVec3::new(x, y, z);
                 let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
                 if near && self.peer_rate_ok(from, "vault", 0.5) {
@@ -1058,6 +1091,9 @@ impl Game {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
             }
+            Msg::BundleState { old, new, contents } => self.bundle_state(old, new, contents),
+            Msg::BookState { old, new, signed, open, title, author, pages } => self.book_state(old, new, signed, open, title, author, pages),
+            Msg::Banner { x, y, z, design, facing, up } => self.banner_msg(IVec3::new(x, y, z), design, facing, up),
             Msg::Firework { at, colour } => {
                 if at.is_finite() {
                     self.firework_sparks(at, colour);
@@ -1127,7 +1163,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } => {}
         }
     }
 
@@ -1140,13 +1176,14 @@ impl Game {
             let mut m = match old.iter().position(|m| m.id == s.id) {
                 Some(i) => old.swap_remove(i),
                 None => {
-                    let mut m = Mob::new(kind, s.pos, &mut self.rng).with_size(s.size);
+                    let mut m = Mob::new(kind, s.pos, &mut self.rng).with_size(s.size & 15);
                     m.id = s.id;
                     m
                 }
             };
             m.net_pos = s.pos;
             m.yaw = s.yaw;
+            m.variant = s.size >> 4;
             // Starers (and Weepers) reuse the fuse field for "angry".
             m.angry = matches!(kind, MobKind::Starer | MobKind::Weeper) && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
@@ -1304,7 +1341,8 @@ impl Game {
                         fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
-                        size: m.size as u8,
+                        // Its size (low half) and colouring (high half).
+                        size: (m.size as u8).min(15) | (m.variant & 15) << 4,
                         flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((matches!(m.kind, MobKind::Soggy | MobKind::Pilferer | MobKind::Snout) && m.seed == 1) as u8 * MOB_ARMED),
                     })
                     .collect();
@@ -2490,6 +2528,56 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(host.world.containers[&pos].slots[5], Some((DIAMOND, 2)));
+    }
+
+    #[test]
+    fn joined_players_pack_bundles_through_the_host() {
+        let mut host = Game::new(785, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Packer", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).is_some_and(|p| p.target.distance(spawn) < 1.0)));
+        host.give_peer(id, BUNDLE, 1);
+        host.give_peer(id, COBBLE, 40);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BUNDLE) == 1 && c.inv.count(COBBLE) == 40));
+        let b = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == BUNDLE)).unwrap();
+        let c = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == COBBLE)).unwrap();
+        client.inv.click(c);
+        assert!(client.bundle_click(b, true, false));
+        assert!(pump(&mut host, &mut client, |_, c| crate::boxes::box_id(c.inv.wear[b]) != 0));
+        let tag = crate::boxes::box_id(client.inv.wear[b]);
+        assert_eq!(client.bundle_contents(client.inv.wear[b]), vec![(COBBLE, 40)]);
+        assert_eq!(host.peers[&id].ledger.bag.count(COBBLE), 0, "the host took the cobble");
+        assert!(host.peers[&id].ledger.owns_enchanted(BUNDLE, tag));
+        // Out again: it lands in the inventory.
+        assert!(client.bundle_click(b, false, true));
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(COBBLE) == 40 && c.inv.wear[b] == 0));
+        assert_eq!(host.peers[&id].ledger.bag.count(COBBLE), 40);
+        assert!(!host.boxes.contains_key(&tag));
+    }
+
+    #[test]
+    fn joined_players_write_and_sign_books_through_the_host() {
+        let mut host = Game::new(786, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Writer", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).is_some_and(|p| p.target.distance(spawn) < 1.0)));
+        host.give_peer(id, BOOK_AND_QUILL, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BOOK_AND_QUILL) == 1));
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == BOOK_AND_QUILL)).unwrap();
+        client.finish_writing(slot, vec!["Dear diary".into()], Some("Diary".into()));
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.slots[slot] == Some((WRITTEN_BOOK, 1))));
+        let tag = crate::boxes::box_id(client.inv.wear[slot]);
+        assert_eq!(host.books.get(&tag).map(|b| (b.title.as_str(), b.author.as_str())), Some(("Diary", "Writer")));
+        assert!(host.peers[&id].ledger.owns_enchanted(WRITTEN_BOOK, tag));
+        assert_eq!(host.peers[&id].ledger.bag.count(BOOK_AND_QUILL), 0);
     }
 
 }

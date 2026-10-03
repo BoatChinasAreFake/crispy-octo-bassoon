@@ -47,6 +47,7 @@ pub fn grass(b: Biome) -> [f32; 3] {
         Biome::Taiga => [0.8, 0.95, 0.92],
         Biome::Cherry => [1.05, 1.08, 0.85],
         Biome::Mangrove => [0.78, 0.9, 0.55],
+        Biome::PaleGarden => [0.72, 0.78, 0.72],
     }
 }
 
@@ -57,6 +58,7 @@ pub fn water(b: Biome) -> [f32; 3] {
         Biome::Swamp => [0.6, 0.92, 0.42],
         Biome::Mangrove => [0.65, 0.95, 0.55],
         Biome::Cherry => [0.95, 1.0, 1.1],
+        Biome::PaleGarden => [0.7, 0.78, 0.8],
         Biome::Jungle => [0.8, 1.08, 0.95],
         Biome::Snowy => [0.85, 0.95, 1.18],
         Biome::Taiga => [0.85, 0.98, 1.1],

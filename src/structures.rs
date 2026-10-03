@@ -701,6 +701,12 @@ impl World {
 
     /// A chunk just arrived: fill any structure chests in it that have never been filled.
     pub fn fill_structure_chests(&mut self, cx: i32, cz: i32) {
+        // Creaking Hearts grow in pale oaks (see creaking.rs).
+        for p in self.generator.creaking_hearts(cx, cz) {
+            if crate::creaking::is_heart(self.get_v(p)) {
+                self.cages.insert(p);
+            }
+        }
         for p in self.generator.structure_cages(cx, cz) {
             if crate::fortress::is_cage(self.get_v(p)) {
                 self.cages.insert(p);

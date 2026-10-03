@@ -66,7 +66,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         BOOT => COOKED_BOOT,
         SAND => GLASS,
         COBBLE => STONE,
-        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG => COAL, // charcoal, legally distinct
+        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,
         COBBLED_DEEPSLATE => DEEPSLATE,
         // Mod recipes.
@@ -78,7 +78,7 @@ pub fn smelt(id: Id) -> Option<Id> {
 pub fn fuel_secs(id: Id) -> Option<f32> {
     Some(match id {
         COAL => 80.0,
-        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PLANKS | CHERRY_PLANKS | MANGROVE_PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
+        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | PLANKS | CHERRY_PLANKS | MANGROVE_PLANKS | PALE_OAK_PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
         HAY => 45.0,
         STICK | WHEAT => 5.0,
         DOOR => 10.0,
@@ -210,6 +210,52 @@ impl Container {
 }
 
 /// The item moves that turn slot `before` into `after`: (item, count, into the container?).
+/// Tidies slots: plain stacks of the same thing merge, then everything is
+/// ordered by item (worn, enchanted or labelled items keep their own slot),
+/// with the gaps at the end. Nothing is gained or lost.
+pub fn sort_slots(slots: &mut [Stack], wear: &mut [Wear]) {
+    let mut items: Vec<(Id, u8, Wear)> = Vec::new();
+    for (s, w) in slots.iter().zip(wear.iter()) {
+        let Some((id, mut n)) = *s else { continue };
+        if *w == 0 {
+            for it in items.iter_mut().filter(|it| it.0 == id && it.2 == 0) {
+                let room = max_stack(id).saturating_sub(it.1).min(n);
+                it.1 += room;
+                n -= room;
+            }
+        }
+        if n > 0 {
+            items.push((id, n, *w));
+        }
+    }
+    items.sort_by_key(|&(id, n, w)| (id, w, std::cmp::Reverse(n)));
+    for i in 0..slots.len() {
+        let it = items.get(i);
+        slots[i] = it.map(|&(id, n, _)| (id, n));
+        wear[i] = it.map(|it| it.2).unwrap_or(0);
+    }
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use super::*;
+
+    #[test]
+    fn sorting_merges_plain_stacks_and_keeps_worn_ones_apart() {
+        let mut slots: Vec<Stack> = vec![Some((DIRT, 40)), None, Some((STONE, 3)), Some((DIRT, 40)), Some((STONE, 1)), None];
+        let mut wear: Vec<Wear> = vec![0, 0, 0, 0, 7, 0];
+        let before: u32 = slots.iter().flatten().map(|s| s.1 as u32).sum();
+        sort_slots(&mut slots, &mut wear);
+        let after: u32 = slots.iter().flatten().map(|s| s.1 as u32).sum();
+        assert_eq!(before, after);
+        let mut want = vec![(DIRT, 64, 0), (DIRT, 16, 0), (STONE, 3, 0), (STONE, 1, 7)];
+        want.sort_by_key(|&(id, n, w)| (id, w, std::cmp::Reverse(n)));
+        let got: Vec<(Id, u8, Wear)> = slots.iter().zip(&wear).filter_map(|(s, w)| s.map(|(id, n)| (id, n, *w))).collect();
+        assert_eq!(got, want);
+        assert!(slots[4..].iter().all(|s| s.is_none()));
+    }
+}
+
 pub fn moves(before: Stack, after: Stack) -> Vec<(Id, u8, bool)> {
     match (before, after) {
         (Some((a, an)), Some((b, bn))) if a == b => {
@@ -310,6 +356,9 @@ const REACH: f32 = 10.0;
 
 /// The container at `p` (a block's, or a cart's).
 pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a mut Container> {
+    if let Some(k) = crate::stash::stash_of_key(p) {
+        return world.stashes.get_mut(&k);
+    }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter_mut().find(|v| v.id == id)?.contents.as_mut(),
         None => world.containers.get_mut(&p),
@@ -317,6 +366,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
 }
 
 pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a Container> {
+    if let Some(k) = crate::stash::stash_of_key(p) {
+        return world.stashes.get(&k);
+    }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter().find(|v| v.id == id)?.contents.as_ref(),
         None => world.containers.get(&p),
@@ -325,6 +377,9 @@ pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle],
 
 /// The block a container behaves like (a cart's: a chest's or a hopper's).
 pub fn store_kind(world: &World, vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Id {
+    if crate::stash::stash_of_key(p).is_some() {
+        return PERSONAL_CHEST;
+    }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter().find(|v| v.id == id && v.contents.is_some()).map(|v| v.container_block()).unwrap_or(AIR),
         None => world.get_v(p),
@@ -490,9 +545,42 @@ impl Game {
         }
     }
 
+    /// The Sort button: tidy the open chest.
+    pub fn sort_container(&mut self) {
+        let Some(pos) = self.open else { return };
+        if is_three_slot(store_kind(&self.world, &self.vehicles, pos)) {
+            return;
+        }
+        if let Some(c) = store(&mut self.world, &mut self.vehicles, pos) {
+            sort_slots(&mut c.slots, &mut c.wear);
+        }
+        self.dirty_containers.insert(pos);
+        if self.is_client() {
+            self.net_send_msg(Msg::SortContainer { x: pos.x, y: pos.y, z: pos.z });
+        }
+    }
+
+    pub fn host_sort(&mut self, from: u32, p: IVec3) {
+        let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
+        if !open || !self.peer_near(from, p) || is_three_slot(store_kind(&self.world, &self.vehicles, p)) {
+            return;
+        }
+        if let Some(c) = store(&mut self.world, &mut self.vehicles, p) {
+            sort_slots(&mut c.slots, &mut c.wear);
+            self.dirty_containers.insert(p);
+        }
+    }
+
     /// Joined players: close the screen if the container vanished under us.
     pub fn container_still_there(&self) -> bool {
-        self.open.map(|p| is_container(store_kind(&self.world, &self.vehicles, p)) && (crate::vehicles::cart_of_key(p).is_none() || store_centre(&self.vehicles, p).distance(self.player.eye()) < REACH)).unwrap_or(false)
+        self.open
+            .map(|p| {
+                if crate::stash::stash_of_key(p).is_some() {
+                    return crate::stash::near_personal_chest(&self.world, self.player.eye());
+                }
+                is_container(store_kind(&self.world, &self.vehicles, p)) && (crate::vehicles::cart_of_key(p).is_none() || store_centre(&self.vehicles, p).distance(self.player.eye()) < REACH)
+            })
+            .unwrap_or(false)
     }
 
     /// Breaking a container spills what was inside onto the ground.
@@ -560,12 +648,20 @@ impl Game {
     }
 
     pub fn peer_near(&self, from: u32, p: IVec3) -> bool {
+        // Someone's own Personal Chest storage: only theirs, and only by a Personal Chest.
+        if crate::stash::stash_of_key(p).is_some() {
+            return self.peers.get(&from).is_some_and(|q| crate::stash::stash_key(&q.name) == p && crate::stash::near_personal_chest(&self.world, q.target + Vec3::Y * 1.6));
+        }
         self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(store_centre(&self.vehicles, p)) <= REACH).unwrap_or(false)
     }
 
     pub fn host_open(&mut self, from: u32, p: IVec3) {
-        if !self.peer_near(from, p) || !is_container(store_kind(&self.world, &self.vehicles, p)) {
+        let kind = store_kind(&self.world, &self.vehicles, p);
+        if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST) {
             return;
+        }
+        if let Some(k) = crate::stash::stash_of_key(p) {
+            self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST));
         }
         self.ensure_container(p);
         self.viewers.entry(p).or_default().insert(from);
@@ -655,7 +751,9 @@ impl Game {
 
     /// Joined players: the host's copy of what's in a container.
     pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, Wear)>, burn: f32, cook: f32) {
-        let c = if crate::vehicles::cart_of_key(p).is_some() {
+        let c = if let Some(k) = crate::stash::stash_of_key(p) {
+            self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST))
+        } else if crate::vehicles::cart_of_key(p).is_some() {
             let Some(c) = store(&mut self.world, &mut self.vehicles, p) else { return };
             c
         } else {

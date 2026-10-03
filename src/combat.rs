@@ -49,6 +49,16 @@ pub fn shield_blocks(look: Vec3, me: Vec3, from: Option<Vec3>) -> bool {
     flat_to.dot(flat_look) > 0.25
 }
 
+/// A Mace needs this much of a fall behind it to smash.
+pub const SMASH_MIN: f32 = 1.5;
+
+/// Extra Mace damage for a fall of `fall` blocks: four a block for the first
+/// three, two a block for the next five, one a block after that.
+pub fn smash_bonus(fall: f32) -> f32 {
+    let f = fall.max(0.0);
+    4.0 * f.min(3.0) + 2.0 * (f - 3.0).clamp(0.0, 5.0) + (f - 8.0).max(0.0)
+}
+
 impl Game {
     /// 0..1: how ready the held weapon is.
     pub fn attack_charge(&self) -> f32 {
@@ -69,6 +79,19 @@ impl Game {
             return;
         }
         self.hurt_player_armored(amount, cause);
+    }
+
+    /// A Mace smash also knocks everything else near the one hit away (where the world lives).
+    pub fn smash_around(&mut self, at: Vec3, hit: usize, who: u32) {
+        for (j, m) in self.mobs.iter_mut().enumerate() {
+            let d = m.body.pos.distance(at);
+            if j != hit && d < 3.5 {
+                let push = (m.body.pos - at).normalize_or(Vec3::Y) * (7.0 - d) + Vec3::Y * 4.0;
+                m.body.vel += push;
+                m.last_attacker = who;
+            }
+        }
+        self.smoke(at + Vec3::Y * 0.2, 12, 1.2);
     }
 
     /// Knockback after armour's steadiness.

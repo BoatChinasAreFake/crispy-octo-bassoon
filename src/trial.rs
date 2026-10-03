@@ -45,10 +45,34 @@ pub struct Trial {
     pub next: f32,
     /// Resting after a win: seconds until it wakes again.
     pub rest: f32,
+    /// Woken by someone with Bad Omen: tougher, with an Ominous Trial Key at the end.
+    pub ominous: bool,
 }
 
 pub fn is_trial_spawner(id: Id) -> bool {
-    id == TRIAL_SPAWNER || id == TRIAL_SPAWNER_SPENT
+    matches!(id, TRIAL_SPAWNER | TRIAL_SPAWNER_SPENT | TRIAL_SPAWNER_OMINOUS)
+}
+
+/// Bad Omen turns a Trial Spawner ominous when it wakes; Ominous Vaults
+/// within this distance of it turn too.
+pub const OMINOUS_REACH: i32 = 24;
+/// Ominous monsters are tougher by this much.
+pub const OMINOUS_TOUGHNESS: f32 = 1.5;
+
+/// What tumbles out of an Ominous Vault: better, and sometimes a Heavy Core (for a Mace).
+pub fn ominous_loot(rng: &mut crate::noise::Rng) -> Vec<(Id, u8)> {
+    let mut v = vec![if rng.chance(0.35) { (HEAVY_CORE, 1) } else { (DIAMOND, rng.int(2, 3) as u8) }];
+    for _ in 0..rng.int(2, 3) {
+        v.push(match rng.int(0, 5) {
+            0 => (OMINOUS_BOTTLE, 1),
+            1 => (GOLDEN_CHOP, 1),
+            2 => (WIND_CHARGE, rng.int(4, 8) as u8),
+            3 => (TRIM_FIRST + rng.int(0, TRIMS as i32 - 1) as Id, 1),
+            4 => (DIAMOND, 1),
+            _ => (BREEZE_ROD, rng.int(1, 2) as u8),
+        });
+    }
+    v
 }
 
 /// What a Trial Spawner sends out: fixed per spawner.
@@ -314,7 +338,12 @@ impl Game {
                 // A fresh challenge: bigger for more people.
                 state.to_come = (4 + 2 * (near as u8 - 1)).min(10);
                 state.next = 1.0;
+                // Someone brought a Bad Omen: it's an Ominous Trial now.
+                if self.take_omen_near(centre) {
+                    self.make_ominous(p);
+                }
             }
+            let state = self.trials.get_mut(&p).expect("just made");
             let alive: Vec<u32> = state.out.iter().copied().filter(|id| self.mobs.iter().any(|m| m.id == *id && m.health > 0.0)).collect();
             let state = self.trials.get_mut(&p).expect("just made");
             state.out = alive;
@@ -324,9 +353,13 @@ impl Game {
                 let spot = centre + Vec3::new(self.rng.range(-2.5, 2.5), 0.0, self.rng.range(-2.5, 2.5));
                 let clear = (0..2).all(|h| self.world.get_v((spot + Vec3::Y * h as f32).floor().as_ivec3()) == AIR);
                 if clear {
+                    let ominous = state.ominous;
                     let mob = self.alloc_mob(trial_kind(p), spot);
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
                         m.persistent = true;
+                        if ominous {
+                            m.health *= OMINOUS_TOUGHNESS;
+                        }
                     }
                     let state = self.trials.get_mut(&p).expect("still there");
                     state.out.push(mob);
@@ -339,51 +372,104 @@ impl Game {
             if state.to_come == 0 && state.out.is_empty() {
                 // Wave beaten: pay out, then rest.
                 state.rest = REST_SECS;
+                let ominous = std::mem::take(&mut state.ominous);
                 self.world.set_v(p, TRIAL_SPAWNER_SPENT);
-                self.pop_drop(centre, TRIAL_KEY, 1);
+                self.pop_drop(centre, if ominous { OMINOUS_TRIAL_KEY } else { TRIAL_KEY }, 1);
                 let (item, n) = spoils(&mut self.rng);
                 self.pop_drop(centre, item, n);
+                if ominous {
+                    let (item, n) = spoils(&mut self.rng);
+                    self.pop_drop(centre, item, n);
+                    if self.rng.chance(0.3) {
+                        self.pop_drop(centre, OMINOUS_BOTTLE, 1);
+                    }
+                }
                 self.sfx(Sfx::Fanfare, Some(centre));
             }
         }
     }
 
+    /// A player near `at` has Bad Omen: it's used up (true). Where the world lives.
+    pub fn take_omen_near(&mut self, at: Vec3) -> bool {
+        let who = self.player_spots_by_id().into_iter().find(|(id, pos)| pos.distance(at) < WAKE_RANGE && self.omens.contains_key(id)).map(|(id, _)| id);
+        let Some(id) = who else { return false };
+        self.omens.remove(&id);
+        if id == self.my_id {
+            self.effects.retain(|e| e.kind != crate::potions::Potion::BadOmen);
+        } else {
+            self.net_send_to(id, Msg::TimedEffect { effect: crate::potions::Potion::BadOmen.effect_index(), secs: 0.0, amplifier: 0 });
+        }
+        let name = if id == self.my_id { self.player_name.clone() } else { self.peer_name(id) };
+        self.tell(&crate::players::record_key(&name), "The Bad Omen settles on the Trial Spawner. This one's going to be ominous.");
+        true
+    }
+
+    /// Turn a waking spawner (and the vaults around it) ominous.
+    pub fn make_ominous(&mut self, p: IVec3) {
+        if let Some(t) = self.trials.get_mut(&p) {
+            t.ominous = true;
+            t.to_come = (t.to_come as f32 * 1.5).ceil() as u8;
+        }
+        self.world.set_v(p, TRIAL_SPAWNER_OMINOUS);
+        let r = OMINOUS_REACH;
+        for dz in -r..=r {
+            for dy in -4..=4 {
+                for dx in -r..=r {
+                    let q = p + IVec3::new(dx, dy, dz);
+                    if self.world.get_v(q) == VAULT {
+                        self.world.set_v(q, VAULT_OMINOUS);
+                    }
+                }
+            }
+        }
+        self.sfx(Sfx::Shriek, Some(p.as_vec3() + Vec3::splat(0.5)));
+    }
+
     /// Open a Vault with a held Trial Key (clients ask the host).
     pub fn use_vault(&mut self, p: IVec3) {
         self.player.swing = 1.0;
-        if self.inv.held() != TRIAL_KEY {
-            self.msg("The Vault is locked. It wants a Trial Key.");
+        let key = if self.world.get_v(p) == VAULT_OMINOUS { OMINOUS_TRIAL_KEY } else { TRIAL_KEY };
+        if self.inv.held() != key {
+            self.msg(if key == TRIAL_KEY { "The Vault is locked. It wants a Trial Key." } else { "This Vault wants an Ominous Trial Key." });
             return;
         }
         if self.is_client() {
             self.inv.consume_held();
-            self.net_send_msg(Msg::Interact { x: p.x, y: p.y, z: p.z, item: TRIAL_KEY });
-            self.advance("under_lock");
+            self.net_send_msg(Msg::Interact { x: p.x, y: p.y, z: p.z, item: key });
+            self.advance(if key == OMINOUS_TRIAL_KEY { "ominous_vault" } else { "under_lock" });
             return;
         }
         if self.open_vault(p) {
             if !self.creative {
                 self.inv.consume_held();
             }
-            self.advance("under_lock");
+            self.advance(if key == OMINOUS_TRIAL_KEY { "ominous_vault" } else { "under_lock" });
         }
     }
 
     /// A joined player turns a key in a Vault.
     pub fn host_use_vault(&mut self, from: u32, p: IVec3) {
-        if self.world.get_v(p) == VAULT && self.peer_take(from, TRIAL_KEY, 1) {
+        let key = match self.world.get_v(p) {
+            VAULT => TRIAL_KEY,
+            VAULT_OMINOUS => OMINOUS_TRIAL_KEY,
+            _ => return,
+        };
+        if self.peer_take(from, key, 1) {
             self.open_vault(p);
         }
     }
 
     /// Where the world lives: the Vault opens and its treasure tumbles out.
     pub fn open_vault(&mut self, p: IVec3) -> bool {
-        if self.world.get_v(p) != VAULT {
-            return false;
-        }
+        let ominous = match self.world.get_v(p) {
+            VAULT => false,
+            VAULT_OMINOUS => true,
+            _ => return false,
+        };
         self.world.set_v(p, VAULT_OPEN);
         let at = p.as_vec3() + Vec3::new(0.5, 1.1, 0.5);
-        for (item, n) in vault_loot(&mut self.rng) {
+        let loot = if ominous { ominous_loot(&mut self.rng) } else { vault_loot(&mut self.rng) };
+        for (item, n) in loot {
             self.pop_drop(at, item, n);
         }
         self.sfx(Sfx::Fanfare, Some(at));
@@ -452,6 +538,49 @@ mod tests {
         g.trials_tick(REST_SECS + 1.0);
         g.trials_tick(1.0);
         assert_eq!(g.world.get_v(sp), TRIAL_SPAWNER);
+    }
+
+    #[test]
+    fn a_bad_omen_makes_the_trial_ominous() {
+        let mut g = arena(33);
+        let base = g.player.body.pos.floor().as_ivec3();
+        let sp = base + ivec3(4, 0, 0);
+        let vault = base + ivec3(-3, 0, 0);
+        g.world.set_v(sp, TRIAL_SPAWNER);
+        g.world.set_v(vault, VAULT);
+        let me = g.my_id;
+        g.give_effect_to(me, crate::potions::Potion::BadOmen, 600.0);
+        g.trials_tick(0.6);
+        assert_eq!(g.world.get_v(sp), TRIAL_SPAWNER_OMINOUS);
+        assert_eq!(g.world.get_v(vault), VAULT_OMINOUS, "the vaults nearby turn too");
+        assert!(!g.has_effect(crate::potions::Potion::BadOmen), "the omen is used up");
+        for _ in 0..80 {
+            g.mobs.clear();
+            g.trials_tick(2.1);
+            if g.world.get_v(sp) == TRIAL_SPAWNER_SPENT {
+                break;
+            }
+        }
+        assert!(g.drops.iter().any(|d| d.item == OMINOUS_TRIAL_KEY));
+        // An ordinary key won't do; the ominous one opens it.
+        g.inv.slots[g.inv.selected] = Some((TRIAL_KEY, 1));
+        g.use_vault(vault);
+        assert_eq!(g.world.get_v(vault), VAULT_OMINOUS);
+        g.inv.slots[g.inv.selected] = Some((OMINOUS_TRIAL_KEY, 1));
+        g.use_vault(vault);
+        assert_eq!(g.world.get_v(vault), VAULT_OPEN);
+        // Heavy Cores turn up in ominous loot.
+        let mut rng = crate::noise::Rng::new(3);
+        assert!((0..200).any(|_| ominous_loot(&mut rng).iter().any(|l| l.0 == HEAVY_CORE)));
+    }
+
+    #[test]
+    fn maces_hit_harder_the_further_you_fell() {
+        use crate::combat::smash_bonus;
+        assert_eq!(smash_bonus(0.0), 0.0);
+        assert_eq!(smash_bonus(3.0), 12.0);
+        assert_eq!(smash_bonus(8.0), 22.0);
+        assert_eq!(smash_bonus(10.0), 24.0);
     }
 
     #[test]
