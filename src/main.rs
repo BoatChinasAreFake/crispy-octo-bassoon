@@ -34,6 +34,7 @@ mod fortress;
 mod music;
 mod fire;
 mod fireworks;
+mod gadgets;
 mod fishing;
 mod game;
 mod glider;
@@ -585,7 +586,9 @@ impl App {
             && let Some(last) = self.last_mouse {
                 let d = m - last;
                 if d.length() < 400.0 {
-                    let s = 0.0026 * self.settings.sensitivity;
+                    // (Slower through a Spyglass.)
+                    let zoom = if self.game.spyglassing() { 0.25 } else { 1.0 };
+                    let s = 0.0026 * self.settings.sensitivity * zoom;
                     let p = &mut self.game.player;
                     p.yaw = (p.yaw + d.x * s).rem_euclid(std::f32::consts::TAU);
                     p.pitch = (p.pitch - d.y * s).clamp(-1.55, 1.55);
@@ -1661,22 +1664,50 @@ impl App {
 
     /// A compass and a map, while you hold them.
     fn navigation_hud(&mut self, dt: f32) {
-        let (w, _) = (screen_width(), screen_height());
+        let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let held = self.game.inv.held();
+        if self.game.spyglassing() {
+            // Round glass, dark all around it.
+            let r = h * 0.42;
+            let (cx, cy) = (w / 2.0, h / 2.0);
+            let dark = Color::new(0.0, 0.0, 0.0, 0.92);
+            draw_rectangle(0.0, 0.0, cx - r, h, dark);
+            draw_rectangle(cx + r, 0.0, w - cx - r, h, dark);
+            for k in 0..48 {
+                let y0 = cy - r + k as f32 * r * 2.0 / 48.0;
+                let dy = (y0 + r / 48.0 - cy) / r;
+                let half = r * (1.0 - dy * dy).max(0.0).sqrt();
+                draw_rectangle(cx - r, y0, r - half, r * 2.0 / 48.0 + 1.0, dark);
+                draw_rectangle(cx + half, y0, r - half, r * 2.0 / 48.0 + 1.0, dark);
+            }
+            draw_rectangle(cx - r, 0.0, 2.0 * r, cy - r, dark);
+            draw_rectangle(cx - r, cy + r, 2.0 * r, h - cy - r, dark);
+            draw_circle_lines(cx, cy, r, 4.0 * s, Color::new(0.55, 0.32, 0.2, 1.0));
+            return;
+        }
         if held == block::COMPASS {
             let r = 22.0 * s;
             let (cx, cy) = (w / 2.0, 34.0 * s);
             draw_circle(cx, cy, r + 2.0 * s, Color::new(0.2, 0.2, 0.22, 0.9));
             draw_circle(cx, cy, r, Color::new(0.92, 0.9, 0.84, 0.95));
             let g = &self.game;
-            let a = navigation::compass_needle(g.player.body.pos, g.player.yaw, g.spawn, g.clock);
+            // Home, or a Lodestone (spinning if it's been broken; see gadgets.rs).
+            let target = g.compass_target();
+            let a = match target {
+                Some(t) => navigation::compass_needle(g.player.body.pos, g.player.yaw, t, g.clock),
+                None => g.clock * 7.0,
+            };
             let (dx, dy) = (a.sin(), -a.cos());
             draw_line(cx, cy, cx + dx * r * 0.85, cy + dy * r * 0.85, 3.0 * s, Color::new(0.85, 0.1, 0.1, 1.0));
             draw_line(cx, cy, cx - dx * r * 0.5, cy - dy * r * 0.5, 3.0 * s, Color::new(0.3, 0.3, 0.35, 1.0));
             if !scorch::in_scorch(g.player.body.pos.x) {
-                let dist = Vec2::new(g.spawn.x - g.player.body.pos.x, g.spawn.z - g.player.body.pos.z).length();
-                self.ui.text_centered(&format!("Home: {} blocks", dist as i32), cx, cy + r + 12.0 * s, 8.0, WHITE);
+                let what = if g.lodestone.is_some() { "Lodestone" } else { "Home" };
+                let text = match target {
+                    Some(t) => format!("{what}: {} blocks", Vec2::new(t.x - g.player.body.pos.x, t.z - g.player.body.pos.z).length() as i32),
+                    None => "Lodestone: gone".to_string(),
+                };
+                self.ui.text_centered(&text, cx, cy + r + 12.0 * s, 8.0, WHITE);
             }
         }
         if held == block::MAP {
@@ -3342,6 +3373,7 @@ impl App {
             self.game.enchant_quick_put(i);
         } else if l && shift {
             self.game.container_quick_put(i);
+        } else if self.game.bundle_click(i, l, r) {
         } else if l {
             self.game.inv.click(i);
         } else if r {
@@ -3667,6 +3699,9 @@ impl App {
                 if hov {
                     tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
                 }
+                if self.game.bundle_click(i, l, r) {
+                    continue;
+                }
                 if l && !(shift && self.game.inv.equip(i)) {
                     self.game.inv.click(i);
                 }
@@ -3682,6 +3717,9 @@ impl App {
             let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            if self.game.bundle_click(i, l, r) {
+                continue;
             }
             if l {
                 if creative && self.game.inv.cursor.is_none() {
@@ -3928,7 +3966,7 @@ fn install_panic_hook() {
 fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     let (id, _) = stack?;
     let mut s = item_name(id).to_string();
-    if id == HOLLOW_BOX {
+    if id == HOLLOW_BOX || id == BUNDLE {
         if boxes::box_id(wear) != 0 {
             s += " [packed]";
         }

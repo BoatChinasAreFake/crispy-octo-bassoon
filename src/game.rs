@@ -338,6 +338,9 @@ pub struct Game {
     pub bench: Option<crate::smithing::BenchUi>,
     /// Where the local player last died (for the Recovery Compass).
     pub last_death: Option<Vec3>,
+    /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
+    pub lodestone: Option<IVec3>,
+    pub spyglass: bool,
 }
 
 impl Game {
@@ -515,6 +518,8 @@ impl Game {
             step_timer: 0.0,
             bench: None,
             last_death: None,
+            lodestone: None,
+            spyglass: false,
         }
     }
 
@@ -704,6 +709,9 @@ impl Game {
         if let Some(d) = self.last_death {
             v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).collect()));
         }
+        if let Some(p) = self.lodestone {
+            v.push(("lodestone".into(), p.to_array().iter().flat_map(|c| c.to_le_bytes()).collect()));
+        }
         v
     }
 
@@ -730,6 +738,10 @@ impl Game {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
             let p = Vec3::new(f(0), f(4), f(8));
             self.last_death = p.is_finite().then_some(p);
+        }
+        if let Some(b) = extra("lodestone").filter(|b| b.len() >= 12) {
+            let c = |o: usize| i32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+            self.lodestone = Some(IVec3::new(c(0), c(4), c(8)));
         }
     }
 
@@ -951,7 +963,13 @@ impl Game {
                 (eye + bob, dir)
             }
         };
-        let fov = if !self.menu && self.player.sprinting { fov_deg + 8.0 } else { fov_deg };
+        let fov = if self.spyglassing() {
+            crate::gadgets::SPYGLASS_FOV
+        } else if !self.menu && self.player.sprinting {
+            fov_deg + 8.0
+        } else {
+            fov_deg
+        };
         let proj = Mat4::perspective_rh_gl(fov.to_radians(), aspect, 0.05, 1000.0);
         let view = Mat4::look_at_rh(pos, pos + dir, Vec3::Y);
         Camera { pos, dir, view_proj: proj * view }
@@ -1058,6 +1076,11 @@ impl Game {
         self.since_attack += dt;
         // Shields go up while right-click is held.
         self.blocking = c.use_held && self.inv.held() == SHIELD;
+        let looking = c.use_held && self.inv.held() == SPYGLASS;
+        if looking && !self.spyglass {
+            self.advance("bird_plane");
+        }
+        self.spyglass = looking;
         self.player.blocking = self.blocking;
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
@@ -1925,6 +1948,10 @@ impl Game {
                 self.use_vault(pos);
                 return;
             }
+            if id == LODESTONE && held == COMPASS {
+                self.link_lodestone(pos);
+                return;
+            }
             if crate::music::is_jukebox(id) && self.use_jukebox(pos, held) {
                 return;
             }
@@ -2048,7 +2075,11 @@ impl Game {
             return;
         }
         if held == SPYGLASS {
-            // Held down to look (see `spyglass_zoom`); a tap just says so.
+            // Held down to look through (see gadgets.rs).
+            return;
+        }
+        if held == BUNDLE {
+            self.tip_bundle();
             return;
         }
         if held == BOTTLE {

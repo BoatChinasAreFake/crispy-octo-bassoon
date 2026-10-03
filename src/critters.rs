@@ -193,6 +193,7 @@ impl Game {
             let at = self.mobs[i].body.pos;
             self.mobs[i].attack_cd = 1.0;
             let was = self.mobs[j].health;
+            self.mobs[j].hurt = 0.0;
             self.mobs[j].damage(2.0, at);
             // A win: everyone fighting alongside is patched up a bit.
             if was > 0.0 && self.mobs[j].health <= 0.0 {
@@ -219,6 +220,40 @@ impl Game {
 mod tests {
     use super::*;
     use crate::noise::Rng;
+
+    #[test]
+    fn axolotls_hunt_soggies_and_patch_you_up() {
+        let mut g = crate::game::tests::arena(94);
+        let base = g.player.body.pos.floor().as_ivec3();
+        // A pool beside the player.
+        for x in 1..6 {
+            for z in -2..3 {
+                for y in -3..0 {
+                    g.world.set_v(base + macroquad::math::IVec3::new(x, y, z), WATER);
+                }
+            }
+        }
+        let a = g.alloc_mob(MobKind::Axolotl, base.as_vec3() + Vec3::new(2.5, -2.5, 0.5));
+        let s = g.alloc_mob(MobKind::Soggy, base.as_vec3() + Vec3::new(3.5, -2.5, 0.5));
+        for m in g.mobs.iter_mut() {
+            m.body.in_water = true;
+        }
+        let mut won = false;
+        for _ in 0..200 {
+            for m in g.mobs.iter_mut() {
+                m.body.in_water = true;
+                m.attack_cd = 0.0;
+            }
+            g.critters_tick(0.1);
+            if !g.mobs.iter().any(|m| m.id == s && m.health > 0.0) {
+                won = true;
+                break;
+            }
+        }
+        assert!(won, "the Axolotl saw it off");
+        assert!(g.mobs.iter().any(|m| m.id == a));
+        assert!(g.has_effect(crate::potions::Potion::Regeneration), "and we feel better");
+    }
 
     #[test]
     fn woofer_armour_soaks_hits() {

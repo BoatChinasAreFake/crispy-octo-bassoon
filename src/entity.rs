@@ -2825,6 +2825,7 @@ pub struct PrimedTnt {
 mod tests {
     use super::*;
     use crate::noise::Rng;
+    use macroquad::math::IVec3;
 
     #[test]
     fn base_mob_indices_round_trip() {
@@ -2982,6 +2983,49 @@ mod tests {
             }
         }
         (n, dmg)
+    }
+
+    #[test]
+    fn goats_charge_and_lose_horns_on_walls() {
+        let mut rng = Rng::new(5);
+        let mut world = World::new(1);
+        world.load_now(0, 0);
+        let floor = world.surface_y(8, 8);
+        let at = Vec3::new(8.5, floor as f32 + 1.0, 8.5);
+        let mut g = Mob::new(MobKind::Goat, at, &mut rng);
+        g.warp_cd = 0.0;
+        g.yaw = 0.0;
+        // Someone 6 blocks away: it lowers its head, then charges.
+        let player = at + Vec3::new(0.0, 0.0, -6.0);
+        let mut bleat = false;
+        let mut rammed = false;
+        for _ in 0..120 {
+            for e in g.update(0.05, &world, player, true, 1.0, &mut rng) {
+                match e {
+                    MobEvent::Bleat(_) => bleat = true,
+                    MobEvent::HurtPlayer(_, cause) => rammed |= cause.contains("Goat"),
+                    _ => {}
+                }
+            }
+        }
+        assert!(bleat && rammed, "bleat {bleat}, rammed {rammed}");
+        assert!(g.warp_cd > 0.0, "and then it rests");
+        // A charge into a wall knocks a horn loose (sometimes).
+        let mut horns = 0;
+        for k in 0..40 {
+            let mut g = Mob::new(MobKind::Goat, at, &mut Rng::new(k));
+            g.hop_cd = 1.0;
+            g.wander_dir = Some(0.0);
+            g.body.hit_wall = true;
+            g.body.vel = Vec3::ZERO;
+            let wall = at.floor().as_ivec3() + IVec3::new(0, 0, -1);
+            world.set_v(wall, STONE);
+            world.set_v(wall + IVec3::Y, STONE);
+            for _ in 0..10 {
+                horns += g.update(0.05, &world, at + Vec3::new(30.0, 0.0, 0.0), false, 1.0, &mut rng).iter().filter(|e| matches!(e, MobEvent::DropItem(_, GOAT_HORN))).count();
+            }
+        }
+        assert!(horns > 5, "{horns} horns from 40 charges");
     }
 
     #[test]

@@ -4718,7 +4718,7 @@ fn paint_trials_and_friends(a: &mut Atlas) {
         shade(if mortar { rgb(60, 64, 58) } else { tuff }, r.range(0.88, 1.08))
     });
     a.each(T_CHISELED_TUFF, |x, y, r, _| {
-        let band = y < 2 || y > 13;
+        let band = !(2..=13).contains(&y);
         let carve = (5..11).contains(&x) && (5..11).contains(&y) && !((6..10).contains(&x) && (6..10).contains(&y));
         shade(if band || carve { rgb(70, 74, 68) } else { tuff }, r.range(0.9, 1.06))
     });

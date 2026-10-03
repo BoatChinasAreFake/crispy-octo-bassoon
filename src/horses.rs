@@ -310,4 +310,43 @@ mod tests {
         let back = crate::animals::decode_mobs(&crate::animals::encode_mobs(&g.mobs, &g.mob_names), &mut g.rng);
         assert!(back[0].saddled && back[0].owner.is_some());
     }
+
+    #[test]
+    fn camels_carry_two_and_dash() {
+        let mut g = crate::game::tests::arena(93);
+        let mut m = Mob::new(MobKind::Camel, Vec3::new(3.5, 50.0, 0.5), &mut g.rng);
+        m.id = 778;
+        g.mobs.push(m);
+        let me = crate::players::record_key(&g.player_name);
+        let at = g.player.body.pos;
+        // No taming: just a saddle.
+        assert_eq!(g.interact_mob(&me, at, 778, SADDLE), Interaction::Ate);
+        let i = 0;
+        // Someone else is driving: we get the back seat.
+        g.mobs[i].rider = 99;
+        assert_eq!(g.interact_mob(&me, at, 778, AIR), Interaction::Mounted(778 | PASSENGER_SEAT));
+        g.mount_mob(778 | PASSENGER_SEAT);
+        assert!(g.passenger_seat && g.mounted == Some(778));
+        g.mobs[i].body.pos = Vec3::new(3.5, 50.0, 0.5);
+        g.ride_tick(1.0 / 60.0, 1.0, 0.0, false, false);
+        assert!(g.mobs[i].body.pos.distance(Vec3::new(3.5, 50.0, 0.5)) < 0.01, "the passenger doesn't steer");
+        assert!(g.player.body.pos.y > g.mobs[i].body.pos.y + 1.5, "up high");
+        g.ride_tick(1.0 / 60.0, 0.0, 0.0, false, true);
+        assert!(g.mounted.is_none() && g.mobs[i].passenger == 0 && g.mobs[i].rider == 99, "the driver stays on");
+        // Now we drive; a dash goes a long way, then needs a rest.
+        g.mobs[i].rider = 0;
+        assert_eq!(g.interact_mob(&me, at, 778, AIR), Interaction::Mounted(778));
+        g.mount_mob(778);
+        g.player.yaw = 0.0;
+        for _ in 0..30 {
+            g.ride_tick(1.0 / 60.0, 0.0, 0.0, false, false);
+        }
+        let start = g.mobs[i].body.pos;
+        g.ride_tick(1.0 / 60.0, 1.0, 0.0, true, false);
+        assert!(g.mobs[i].warp_cd > 2.0, "dashed");
+        for _ in 0..20 {
+            g.ride_tick(1.0 / 60.0, 1.0, 0.0, true, false);
+        }
+        assert!(start.z - g.mobs[i].body.pos.z > 2.5, "went {:?}", g.mobs[i].body.pos - start);
+    }
 }

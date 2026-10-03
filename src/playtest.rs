@@ -290,6 +290,9 @@ fn new_features(host: &mut Game, team: &mut [Bot], report: &mut Report, touched:
     g.player.body.pos.y += 30.0;
     g.player.body.vel = Vec3::new(0.0, -4.0, -6.0);
     g.player.body.on_ground = false;
+    // (Lifted out of wherever it was standing: a pond, say.)
+    g.player.body.in_water = false;
+    g.player.body.in_lava = false;
     g.player.gliding = true;
     let mut seen = false;
     for _ in 0..40 {
