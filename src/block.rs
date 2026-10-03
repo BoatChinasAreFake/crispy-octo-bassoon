@@ -2656,6 +2656,12 @@ pub fn item_tile(id: Id) -> u16 {
     item_def(id).map(|i| i.tile).unwrap_or(T_WHITE)
 }
 
+/// Any spear: the Soggy Spear and the craftable ones. All of them throw, and
+/// hit harder from a moving mount (see combat.rs).
+pub fn is_spear(id: Id) -> bool {
+    id == SPEAR || (SPEAR_FIRST..SPEAR_FIRST + SPEARS as Id).contains(&id)
+}
+
 pub fn max_stack(id: Id) -> u8 {
     // Each Hollow Box carries its own contents.
     // (So does each Banner its design.)

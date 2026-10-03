@@ -1470,15 +1470,15 @@ impl Game {
         }
     }
 
-    /// Throw the held Soggy Spear (the host owns thrown things, so clients ask it to).
-    fn throw_spear(&mut self) {
+    /// Throw the held spear (the host owns thrown things, so clients ask it to).
+    fn throw_spear(&mut self, item: Id) {
         let wear = self.inv.wear[self.inv.selected];
         self.player.swing = 1.0;
         self.use_cd = 0.8;
         self.advance("spear_it");
         if self.is_client() {
             // The host takes it from its ledger and throws it for us.
-            self.net_send_msg(Msg::UseItem { item: SPEAR });
+            self.net_send_msg(Msg::UseItem { item });
             self.inv.consume_held();
             return;
         }
@@ -1487,13 +1487,15 @@ impl Game {
         }
         let dir = self.player.look_dir();
         let me = self.my_id;
-        self.throw_spear_from(self.player.eye() + dir * 0.5, dir, me, crate::inventory::with_uses(wear, crate::inventory::uses(wear).saturating_add(1)));
+        self.throw_spear_from(self.player.eye() + dir * 0.5, dir, me, item, crate::inventory::with_uses(wear, crate::inventory::uses(wear).saturating_add(1)));
     }
 
     /// Launch a spear (host side).
-    pub fn throw_spear_from(&mut self, pos: Vec3, dir: Vec3, shooter: u32, wear: crate::inventory::Wear) {
-        let mut a = Arrow::new(pos, dir * Arrow::SPEED * 1.1, Some(shooter), 8.0);
-        a.spear = Some(wear);
+    pub fn throw_spear_from(&mut self, pos: Vec3, dir: Vec3, shooter: u32, item: Id, wear: crate::inventory::Wear) {
+        // Thrown, it hits about as hard as it stabs.
+        let damage = if item == SPEAR { 8.0 } else { attack_damage_with(item, 0) + 1.0 };
+        let mut a = Arrow::new(pos, dir * Arrow::SPEED * 1.1, Some(shooter), damage);
+        a.spear = Some((item, wear));
         self.arrows.push(a);
         self.sfx(Sfx::Twang, Some(pos));
     }
@@ -1634,10 +1636,10 @@ impl Game {
                 self.sfx(Sfx::Thunk, Some(a.pos));
             }
             // A spear that hits the ground drops, ready to be picked up.
-            if let Some(wear) = a.spear
+            if let Some(spear) = a.spear
                 && (a.stuck || a.life <= 0.0)
             {
-                landed.push((a.pos - a.dir * 0.3, wear));
+                landed.push((a.pos - a.dir * 0.3, spear));
                 return false;
             }
             if a.life <= 0.0 {
@@ -1660,8 +1662,8 @@ impl Game {
                     m.last_attacker = pid;
                     let (kind, at) = (m.kind, m.body.pos);
                     self.sfx(Sfx::hurt_of(kind), Some(at));
-                    if let Some(wear) = a.spear {
-                        landed.push((a.pos - a.dir * 0.5, wear));
+                    if let Some(spear) = a.spear {
+                        landed.push((a.pos - a.dir * 0.5, spear));
                     } else if pid == self.my_id && !self.dedicated {
                         self.advance("robin_hood");
                     }
@@ -1723,8 +1725,8 @@ impl Game {
         for (at, colour, damage, shooter) in bursts {
             self.firework_burst(at, colour, damage, shooter);
         }
-        for (at, wear) in landed {
-            self.spawn_drop(at, SPEAR, 1, wear, Vec3::ZERO, 0.5);
+        for (at, (item, wear)) in landed {
+            self.spawn_drop(at, item, 1, wear, Vec3::ZERO, 0.5);
         }
     }
 
@@ -1842,6 +1844,15 @@ impl Game {
                         self.sfx(Sfx::Thud, None);
                         self.advance("smash");
                     }
+                    // A spear from a moving mount: the charge goes into the blow.
+                    let charge_speed = self.mount_speed();
+                    let lunge = is_spear(held) && charge_speed > 2.0;
+                    if lunge {
+                        dmg += crate::combat::lunge_bonus(charge_speed);
+                        if charge_speed > 6.0 {
+                            self.advance("jousting");
+                        }
+                    }
                     self.stats.damage_dealt += dmg.min(self.mobs[i].health.max(0.0)) as f64;
                     self.since_attack = 0.0;
                     self.use_tool(hit_wear(held));
@@ -1870,7 +1881,10 @@ impl Game {
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
                         self.sfx(Sfx::hurt_of(kind), Some(at));
-                        if charge > 0.9 {
+                        if lunge {
+                            let push = (at - from).normalize_or_zero() * (3.0 + charge_speed * 0.6);
+                            self.mobs[i].body.vel += push + Vec3::Y * 3.0;
+                        } else if charge > 0.9 {
                             if self.player.sprinting {
                                 // A running start sends them flying.
                                 let push = (at - from).normalize_or_zero() * 5.0;
@@ -2155,8 +2169,8 @@ impl Game {
         if self.eat_honey(held) {
             return;
         }
-        if held == SPEAR {
-            self.throw_spear();
+        if is_spear(held) {
+            self.throw_spear(held);
             return;
         }
         if held == WIND_CHARGE {
@@ -3255,6 +3269,8 @@ impl Game {
         }
         let roll = self.rng.f32();
         let kind = match roll {
+            // Rotsteeds wander the open plains at night.
+            r if matches!(biome, Biome::Plains) && r < 0.05 => MobKind::Rotsteed,
             // Swamps are Bloop country; the badlands rattle.
             r if biome == Biome::Swamp && r < 0.35 => MobKind::Bloop,
             r if biome == Biome::Badlands && r < 0.3 => MobKind::Rattler,
@@ -3278,7 +3294,10 @@ impl Game {
             self.alloc_mob_sized(kind, pos, size);
             return;
         }
-        // Caves are always spooky.
+        // Caves are always spooky (but no horses down there).
+        if kind == MobKind::Rotsteed {
+            return;
+        }
         let cy = self.rng.int(4, y.max(5));
         if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 && !torchlit(&self.world, cy) {
             let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);

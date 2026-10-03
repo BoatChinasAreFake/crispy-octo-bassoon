@@ -2954,7 +2954,7 @@ pub struct Arrow {
     pub dir: Vec3,
     /// A thrown Soggy Spear (with its wear) instead of a Pointy Stick: it
     /// drops where it lands, to be picked up again.
-    pub spear: Option<u32>,
+    pub spear: Option<(Id, u32)>,
     /// Fired by a modded mob rather than a base Rattler. Host-side only (never
     /// sent over the wire); only changes the death-message attribution so a
     /// modded slinger's kill isn't blamed on a Rattler.

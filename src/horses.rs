@@ -77,7 +77,7 @@ impl Game {
             if m.temper >= TAME_AT && self.rng.chance(0.5) {
                 m.owner = Some(who.to_string());
                 self.hearts(pos, 7);
-                self.tell(who, "The Galloper is yours. It could use a Saddle.");
+                self.tell(who, &format!("The {} is yours. It could use a Saddle.", self.mobs[i].kind.name()));
                 self.advance_for(who, "giddy_up");
             } else if item == AIR {
                 self.smoke(pos, 5, 0.2);
@@ -136,6 +136,12 @@ impl Game {
             return Interaction::Mounted(m.id | 1 << SEAT_SHIFT);
         }
         Interaction::Nothing
+    }
+
+    /// How fast the mount we're driving is going (0 on foot or in a back seat).
+    pub fn mount_speed(&self) -> f32 {
+        let Some(id) = self.mounted.filter(|_| self.seat_no == 0) else { return 0.0 };
+        self.mobs.iter().find(|m| m.id == id).map(|m| Vec3::new(m.body.vel.x, 0.0, m.body.vel.z).length()).unwrap_or(0.0)
     }
 
     /// Get on the Galloper `id` (the local player; the host has said yes).
@@ -343,6 +349,44 @@ mod tests {
         // Saddle and owner are saved.
         let back = crate::animals::decode_mobs(&crate::animals::encode_mobs(&g.mobs, &g.mob_names), &mut g.rng);
         assert!(back[0].saddled && back[0].owner.is_some());
+    }
+
+    #[test]
+    fn rotsteeds_tame_and_a_spear_from_the_saddle_hits_harder() {
+        let mut g = crate::game::tests::arena(94);
+        let mut m = Mob::new(MobKind::Rotsteed, Vec3::new(3.5, 50.0, 0.5), &mut g.rng);
+        m.id = 779;
+        g.mobs.push(m);
+        let me = crate::players::record_key(&g.player_name);
+        let at = g.player.body.pos;
+        for _ in 0..20 {
+            g.interact_mob(&me, at, 779, APPLE);
+        }
+        assert_eq!(g.mobs[0].owner.as_deref(), Some(me.as_str()), "tamed like a Galloper");
+        assert_eq!(g.interact_mob(&me, at, 779, SADDLE), Interaction::Ate);
+        assert_eq!(g.interact_mob(&me, at, 779, AIR), Interaction::Mounted(779));
+        g.mount_mob(779);
+        g.player.yaw = 0.0;
+        for _ in 0..90 {
+            g.ride_tick(1.0 / 60.0, 1.0, 0.0, false, false);
+        }
+        let speed = g.mount_speed();
+        assert!(speed > 6.0 && speed <= ROTSTEED_SPEED + 0.1, "a gallop: {speed}");
+        assert!(crate::combat::lunge_bonus(speed) > 6.0);
+        assert!(crate::combat::lunge_bonus(100.0) <= crate::combat::LUNGE_MAX);
+        // Spears are spears.
+        assert!(is_spear(SPEAR) && is_spear(SPEAR_FIRST + 3) && !is_spear(STICK));
+        assert_eq!(crate::anvil::repair_material(SPEAR_FIRST + 2), Some(IRON));
+    }
+
+    #[test]
+    fn a_thrown_spear_lands_as_itself() {
+        let mut g = crate::game::tests::arena(95);
+        g.throw_spear_from(Vec3::new(0.5, 52.0, 0.5), Vec3::new(0.0, -0.3, -1.0).normalize(), 0, SPEAR_FIRST + 1, 0);
+        for _ in 0..200 {
+            g.update_entities(0.05);
+        }
+        assert!(g.drops.iter().any(|d| d.item == SPEAR_FIRST + 1), "the stone spear is back on the ground");
     }
 
     #[test]

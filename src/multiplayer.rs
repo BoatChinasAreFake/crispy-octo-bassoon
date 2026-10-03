@@ -601,7 +601,7 @@ impl Game {
                 let strength = self.strong.get(&from).map_or(0.0, |&(_, amplifier)| crate::potions::strength_bonus(amplifier));
                 let held = self.verified_held(from);
                 // (A Mace adds whatever their fall was worth; the host can't see falls, so it allows a long one.)
-                let smash = if held == MACE { crate::combat::smash_bonus(40.0) } else { 0.0 };
+                let smash = if held == MACE { crate::combat::smash_bonus(40.0) } else if is_spear(held) { crate::combat::LUNGE_MAX } else { 0.0 };
                 let dmg = dmg.clamp(0.0, (attack_damage_with(held, sharpness) + strength) * 1.5 + smash);
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(eye) <= REACH) {
                     m.damage(dmg, eye);
@@ -717,13 +717,13 @@ impl Game {
                     return;
                 }
                 // A thrown spear leaves their hands and flies from where they look.
-                if item == SPEAR && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, SPEAR) {
-                    let ench = if self.verified_held(from) == SPEAR { self.verified_ench(from) } else { 0 };
+                if is_spear(item) && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, item) {
+                    let ench = if self.verified_held(from) == item { self.verified_ench(from) } else { 0 };
                     if let Some(p) = self.peers.get(&from) {
                         let dir = Vec3::new(p.yaw.sin() * p.pitch.cos(), p.pitch.sin(), -p.yaw.cos() * p.pitch.cos());
                         let eye = p.target + Vec3::Y * 1.6;
-                        if self.peer_take(from, SPEAR, 1) {
-                            self.throw_spear_from(eye + dir * 0.5, dir, from, (ench as u32) << 16);
+                        if self.peer_take(from, item, 1) {
+                            self.throw_spear_from(eye + dir * 0.5, dir, from, item, (ench as u32) << 16);
                         }
                     }
                     return;
