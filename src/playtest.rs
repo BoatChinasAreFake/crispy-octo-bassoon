@@ -180,6 +180,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     new_features(&mut host, &mut team, &mut report, &mut touched);
     latest_features(&mut host, &mut team, &mut report, &mut touched);
     batch_two(&mut host, &mut team, &mut report, &mut touched);
+    batch_three(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -802,6 +803,97 @@ fn check(host: &Game, team: &[Bot], touched: &HashSet<IVec3>, chest: IVec3, repo
     }
 }
 
+/// Campfires, Llama packs and Armour Stands, end to end.
+fn batch_three(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    let n = team.len();
+    let ledger = |host: &Game, id: u32, item: Id| host.peers.get(&id).map(|p| p.ledger.bag.count(item)).unwrap_or(0);
+    revive(host, team);
+
+    // 16. A bot puts a porkchop on a campfire; it cooks where the world lives.
+    let k = 0;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let fire = feet + IVec3::X * 2;
+    host.world.set_v(fire, CAMPFIRE);
+    touched.insert(fire);
+    host.give_peer(id, PORKCHOP, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == PORKCHOP)) {
+        g.inv.selected = slot;
+        g.use_campfire(fire);
+    }
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("campfire");
+    let on_fire = host.drops.iter().any(|d| d.item == PORKCHOP && d.body.pos.distance(fire.as_vec3() + macroquad::math::Vec3::splat(0.5)) < 1.2);
+    if !on_fire || ledger(host, id, PORKCHOP) != 0 {
+        report.problems.push(format!("the host didn't see {} put a porkchop on the campfire", team[k].name));
+    }
+    host.drops.retain(|d| d.item != PORKCHOP);
+    host.world.set_v(fire, AIR);
+
+    // 17. A bot's own Llama: it can open the pack; another bot can't.
+    let k = 1 % n;
+    ground(host, team, k);
+    let at = team[k].game.player.body.pos + macroquad::math::Vec3::X * 1.5;
+    let llama = host.alloc_mob(crate::entity::MobKind::Llama, at);
+    let owner = crate::players::record_key(&team[k].name);
+    if let Some(m) = host.mobs.iter_mut().find(|m| m.id == llama) {
+        m.owner = Some(owner);
+        m.saddled = true;
+        m.sitting = true;
+        m.persistent = true;
+    }
+    let mut pack = crate::containers::Container::for_block(CHEST);
+    pack.slots[0] = Some((DIAMOND, 3));
+    host.world.packs.insert(llama, pack);
+    pump(host, team, 1.0, |_| idle());
+    let key = crate::wildlife::pack_key(llama);
+    team[k].game.open_container(key);
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("llama");
+    if team[k].game.world.packs.get(&llama).and_then(|c| c.slots[0]) != Some((DIAMOND, 3)) {
+        report.problems.push(format!("{} couldn't see into its own Llama's pack", team[k].name));
+    }
+    team[k].game.close_container();
+    if n > 1 {
+        let j = (k + 1) % n;
+        let other = team[j].game.my_id;
+        team[j].game.player.body.pos = at - macroquad::math::Vec3::X * 1.5;
+        team[j].game.open_container(key);
+        pump(host, team, 1.0, |_| idle());
+        if host.viewers.get(&key).is_some_and(|v| v.contains(&other)) {
+            report.problems.push(format!("{} got into someone else's Llama's pack", team[j].name));
+        }
+        team[j].game.close_container();
+    }
+    host.mobs.retain(|m| m.id != llama);
+    host.world.packs.remove(&llama);
+
+    // 18. An Armour Stand dressed by the host: everyone sees what it wears.
+    let k = 2 % n;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let stand = feet + IVec3::Z * 2;
+    host.world.set_v(stand, ARMOUR_STAND_FIRST);
+    touched.insert(stand);
+    host.ensure_container(stand);
+    if let Some(c) = host.world.containers.get_mut(&stand) {
+        c.slots[0] = Some((TURTLE_SHELL, 1));
+    }
+    host.dirty_containers.insert(stand);
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("armour stand");
+    for b in team.iter() {
+        if b.game.world.containers.get(&stand).and_then(|c| c.slots[0]) != Some((TURTLE_SHELL, 1)) {
+            report.problems.push(format!("{} never saw the armour stand's Turtle Shell", b.name));
+        }
+    }
+}
+
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f64>().ok());
@@ -842,7 +934,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }
