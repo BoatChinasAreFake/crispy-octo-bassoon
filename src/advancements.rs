@@ -59,6 +59,8 @@ pub const ALL: &[Advancement] = &[
     adv("butterfingers", "Butterfingers", "Throw something on the floor with Q. On purpose, surely."),
     adv("follow_the_fin", "Follow the Fin", "Feed a Dolphin a fish and let it show you the way."),
     adv("llama_drama", "Llama Drama", "Tame a Llama. It still might spit."),
+    adv("zombie_doctor", "Zombie Doctor", "Cure a Zombie Hmmer with a Golden Chop."),
+    adv("passing_trade", "Passing Trade", "Buy something from a Wanderer before it wanders off."),
     adv("ahoy", "Ahoy!", "Open a chest in a shipwreck. Finders keepers."),
     adv("x_marks_the_spot", "X Marks the Spot", "Dig up buried treasure. The map wasn't lying."),
     adv("hot_stuff", "Hot Stuff", "Get a bucket of lava. Or get into lava. One of those is a good idea."),

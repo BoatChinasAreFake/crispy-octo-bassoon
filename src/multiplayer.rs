@@ -1201,7 +1201,7 @@ impl Game {
             // Starers (and Weepers) reuse the fuse field for "angry".
             m.angry = matches!(kind, MobKind::Starer | MobKind::Weeper) && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
-            if matches!(kind, MobKind::Hmmer | MobKind::Sneaker | MobKind::CopperGolem) {
+            if matches!(kind, MobKind::Hmmer | MobKind::Wanderer | MobKind::Sneaker | MobKind::CopperGolem) {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
@@ -1352,7 +1352,7 @@ impl Game {
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
                         // (Bosses send their health, for the boss bar.)
-                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker | MobKind::CopperGolem) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
+                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Wanderer | MobKind::Sneaker | MobKind::CopperGolem) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         // Its size (low half) and colouring (high half).

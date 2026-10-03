@@ -3481,7 +3481,7 @@ fn home_tiles(a: &mut Atlas) {
     for t in [T_BLAST_SIDE, T_BLAST_LIT] {
         for y in 0..16 {
             for x in 0..16 {
-                if y < 3 || y > 13 || x < 2 || x > 13 {
+                if !(3..=13).contains(&y) || !(2..=13).contains(&x) {
                     let c = if y % 4 == 0 { rgb(70, 72, 78) } else { rgb(130, 132, 138) };
                     a.set(t, x, y, shade(c, 0.9 + ((x * 3 + y) % 5) as f32 * 0.04));
                 }

@@ -154,6 +154,9 @@ impl Game {
         if let Some(r) = self.wildlife_interact(who, i, item) {
             return r;
         }
+        if let Some(r) = self.hmmer_interact(who, i, item) {
+            return r;
+        }
         if let Some(r) = self.modded_interact(who, i, item, pos) {
             return r;
         }

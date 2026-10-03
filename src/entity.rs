@@ -742,6 +742,8 @@ pub fn variants(kind: MobKind) -> u8 {
         MobKind::Woofer => 4,
         MobKind::Mooer => 3,
         MobKind::Axolotl => 5,
+        // (A Hmmer's "colouring" is its job: see villagers.rs.)
+        MobKind::Hmmer => 9,
         _ => 1,
     }
 }
@@ -769,6 +771,11 @@ pub fn variant_tint(kind: MobKind, v: u8) -> [f32; 3] {
         (MobKind::Axolotl, 2) => [0.65, 1.15, 1.25],
         (MobKind::Axolotl, 3) => [0.75, 0.55, 0.45],
         (MobKind::Axolotl, BLUE_AXOLOTL) => [0.4, 0.6, 1.6],
+        // The newer jobs dress a little differently: Clerics, Armourers, Cartographers, Butchers.
+        (MobKind::Hmmer, 5) => [0.95, 0.75, 1.2],
+        (MobKind::Hmmer, 6) => [0.8, 0.85, 0.9],
+        (MobKind::Hmmer, 7) => [1.15, 1.12, 1.05],
+        (MobKind::Hmmer, 8) => [1.15, 0.8, 0.8],
         _ => [1.0; 3],
     }
 }
@@ -776,7 +783,7 @@ pub fn variant_tint(kind: MobKind, v: u8) -> [f32; 3] {
 /// A fresh colouring (the blue Axolotl is very rare).
 pub fn roll_variant(kind: MobKind, rng: &mut Rng) -> u8 {
     let n = variants(kind);
-    if n <= 1 {
+    if n <= 1 || kind == MobKind::Hmmer {
         return 0;
     }
     if kind == MobKind::Axolotl {

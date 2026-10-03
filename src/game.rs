@@ -267,6 +267,8 @@ pub struct Game {
     pub firefly_acc: f32,
     /// Seconds since campfire smoke was last puffed (see home.rs).
     pub smoke_acc: f32,
+    /// Seconds until a Wanderer might turn up (see villagers.rs).
+    pub wanderer_timer: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
     pub lod: crate::lod::Lod,
@@ -504,6 +506,7 @@ impl Game {
             seat_no: 0,
             firefly_acc: 0.0,
             smoke_acc: 0.0,
+            wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -2930,6 +2933,7 @@ impl Game {
         self.snouts_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
+        self.zombie_hmmers_tick(dt);
         self.free_riderless();
         self.tidy_mob_names();
         for m in self.mobs.iter_mut() {

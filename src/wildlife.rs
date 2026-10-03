@@ -143,10 +143,10 @@ pub fn update(m: &mut Mob, dt: f32, world: &World, player: Vec3, visible: bool, 
                 }
             } else if m.flee > 0.0 && m.baby > 0.0 {
                 *want = Some((away, 3.0));
-            } else if let Some(g) = m.goal {
-                if Vec3::new(g.x - m.body.pos.x, 0.0, g.z - m.body.pos.z).length() > 1.5 {
-                    *want = Some((toward(g, m.body.pos), 1.8));
-                }
+            } else if let Some(g) = m.goal
+                && Vec3::new(g.x - m.body.pos.x, 0.0, g.z - m.body.pos.z).length() > 1.5
+            {
+                *want = Some((toward(g, m.body.pos), 1.8));
             }
             if m.body.in_water {
                 *swim_vy = Some(0.6);
