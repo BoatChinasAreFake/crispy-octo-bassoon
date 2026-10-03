@@ -739,6 +739,7 @@ impl Game {
             Msg::BookAsk { tag, x, y, z } => self.host_book_ask(from, tag, IVec3::new(x, y, z)),
             Msg::LecternTake { x, y, z } => self.host_lectern_take(from, IVec3::new(x, y, z)),
             Msg::Loom { design, dye } => self.host_loom(from, design, dye),
+            Msg::SortContainer { x, y, z } => self.host_sort(from, IVec3::new(x, y, z)),
             Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
                 let p = IVec3::new(x, y, z);
                 if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
@@ -1162,7 +1163,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } => {}
         }
     }
 
@@ -2555,7 +2556,7 @@ mod tests {
         assert!(client.bundle_click(b, false, true));
         assert!(pump(&mut host, &mut client, |_, c| c.inv.count(COBBLE) == 40 && c.inv.wear[b] == 0));
         assert_eq!(host.peers[&id].ledger.bag.count(COBBLE), 40);
-        assert!(host.boxes.get(&tag).is_none());
+        assert!(!host.boxes.contains_key(&tag));
     }
 
     #[test]

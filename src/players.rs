@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 /// Seconds between a joined player's reports.
 pub const REPORT_SECS: f32 = 5.0;
 /// Inventory, then armour.
-pub const SLOTS: usize = 40;
+pub const SLOTS: usize = 41;
 
 /// What a joined player last said about themselves.
 #[derive(Clone, Debug, PartialEq)]
@@ -259,7 +259,7 @@ impl Game {
 
     pub fn report_msg(&self) -> Msg {
         let inv = &self.inv;
-        let slots = inv.slots.iter().zip(inv.wear.iter()).chain(inv.armor.iter().zip(inv.armor_wear.iter())).map(|(s, w)| s.map(|(id, n)| (id, n, *w)).unwrap_or((AIR, 0, 0))).collect();
+        let slots = inv.slots.iter().zip(inv.wear.iter()).chain(inv.armor.iter().zip(inv.armor_wear.iter())).chain(std::iter::once((&inv.offhand, &inv.offhand_wear))).map(|(s, w)| s.map(|(id, n)| (id, n, *w)).unwrap_or((AIR, 0, 0))).collect();
         let h = &self.player.hunger;
         Msg::PlayerData { slots, health: self.player.health, food: h.food, saturation: h.saturation }
     }
@@ -326,6 +326,8 @@ impl Game {
         self.inv.wear = [0; 36];
         self.inv.armor = [None; 4];
         self.inv.armor_wear = [0; 4];
+        self.inv.offhand = None;
+        self.inv.offhand_wear = 0;
         for (i, (id, n, w)) in slots.into_iter().enumerate() {
             if id == AIR {
                 continue;
@@ -333,6 +335,9 @@ impl Game {
             if i < 36 {
                 self.inv.slots[i] = Some((id, n));
                 self.inv.wear[i] = w;
+            } else if i == 40 {
+                self.inv.offhand = Some((id, n));
+                self.inv.offhand_wear = w;
             } else if armor_of(id).map(|(s, _)| s) == Some(i - 36) {
                 self.inv.armor[i - 36] = Some((id, 1));
                 self.inv.armor_wear[i - 36] = w;

@@ -70,11 +70,14 @@ pub struct Inventory {
     pub wear: [Wear; 36],
     pub armor_wear: [Wear; 4],
     pub cursor_wear: Wear,
+    /// The other hand: a shield, torches, rockets... (swap with Swap Hands).
+    pub offhand: Stack,
+    pub offhand_wear: Wear,
 }
 
 impl Inventory {
     pub fn new() -> Self {
-        Inventory { slots: [None; 36], selected: 0, cursor: None, armor: [None; 4], wear: [0; 36], armor_wear: [0; 4], cursor_wear: 0 }
+        Inventory { slots: [None; 36], selected: 0, cursor: None, armor: [None; 4], wear: [0; 36], armor_wear: [0; 4], cursor_wear: 0, offhand: None, offhand_wear: 0 }
     }
 
     pub fn held(&self) -> Id {
@@ -171,14 +174,26 @@ impl Inventory {
     }
 
     pub fn count(&self, item: Id) -> u32 {
-        self.slots.iter().flatten().filter(|s| s.0 == item).map(|s| s.1 as u32).sum()
+        self.slots.iter().chain(std::iter::once(&self.offhand)).flatten().filter(|s| s.0 == item).map(|s| s.1 as u32).sum()
+    }
+
+    /// The Sort button: tidies the backpack (the hotbar stays as it is).
+    pub fn sort_backpack(&mut self) {
+        crate::containers::sort_slots(&mut self.slots[9..36], &mut self.wear[9..36]);
+    }
+
+    /// Swap what's in the hand for what's in the other hand.
+    pub fn swap_hands(&mut self) {
+        let i = self.selected;
+        std::mem::swap(&mut self.slots[i], &mut self.offhand);
+        std::mem::swap(&mut self.wear[i], &mut self.offhand_wear);
     }
 
     /// Take items away: from the inventory first, then (for the host's
     /// corrections and scripts) from what's worn.
     pub fn remove(&mut self, item: Id, mut count: u32) {
-        let wear = self.wear.iter_mut().rev().chain(self.armor_wear.iter_mut());
-        for (s, w) in self.slots.iter_mut().rev().chain(self.armor.iter_mut()).zip(wear) {
+        let wear = self.wear.iter_mut().rev().chain(std::iter::once(&mut self.offhand_wear)).chain(self.armor_wear.iter_mut());
+        for (s, w) in self.slots.iter_mut().rev().chain(std::iter::once(&mut self.offhand)).chain(self.armor.iter_mut()).zip(wear) {
             if let Some((id, n)) = s
                 && *id == item {
                     let take = (count.min(*n as u32)) as u8;
@@ -243,7 +258,7 @@ impl Inventory {
     /// How many of each item (the cursor included). Slot layout doesn't matter to the host.
     pub fn counts(&self) -> BTreeMap<Id, u32> {
         let mut c = BTreeMap::new();
-        for (id, n) in self.slots.iter().chain(std::iter::once(&self.cursor)).chain(self.armor.iter()).flatten() {
+        for (id, n) in self.slots.iter().chain(std::iter::once(&self.cursor)).chain(self.armor.iter()).chain(std::iter::once(&self.offhand)).flatten() {
             *c.entry(*id).or_insert(0) += *n as u32;
         }
         c
@@ -289,6 +304,17 @@ impl Inventory {
     }
 
     /// Clicked armour slot `slot`: only the right kind of armour goes in.
+    /// Clicked the other hand's slot: swap with (or merge into) the cursor.
+    pub fn click_offhand(&mut self, right: bool) {
+        let before = (self.offhand, self.cursor);
+        if right {
+            right_click_stack(&mut self.offhand, &mut self.cursor);
+        } else {
+            click_stack(&mut self.offhand, &mut self.cursor);
+        }
+        wear_follow(before, (self.offhand, self.cursor), &mut self.offhand_wear, &mut self.cursor_wear);
+    }
+
     pub fn click_armor(&mut self, slot: usize) {
         if self.cursor.is_some_and(|(id, _)| armor_of(id).map(|(s, _)| s) != Some(slot)) {
             return;

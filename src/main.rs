@@ -787,6 +787,10 @@ impl App {
                 if self.settings.binds.pressed(keybinds::Action::Perspective) || self.pad_frame.perspective {
                     self.game.third_person = !self.game.third_person;
                 }
+                if self.settings.binds.pressed(keybinds::Action::SwapHands) {
+                    self.game.inv.swap_hands();
+                    self.game.held_name = 2.0;
+                }
             }
             Screen::Inventory if self.book_focus => {
                 // Typing in the recipe book's search box.
@@ -1698,10 +1702,10 @@ impl App {
                 lines.push(chunk.iter().collect());
             }
         }
-        if writing && (get_time() * 2.0) as i64 % 2 == 0 {
-            if let Some(last) = lines.last_mut() {
-                last.push('_');
-            }
+        if writing && (get_time() * 2.0) as i64 % 2 == 0
+            && let Some(last) = lines.last_mut()
+        {
+            last.push('_');
         }
         for (i, l) in lines.iter().take(14).enumerate() {
             self.ui.text(l, x0 + 12.0 * s, y0 + 34.0 * s + i as f32 * 15.0 * s, 9.5, ink);
@@ -2238,6 +2242,13 @@ impl App {
             }
             let sel = x0 + g.inv.selected as f32 * slot;
             draw_rectangle_lines(sel - s, y0 - s, slot + 2.0 * s, slot + 2.0 * s, 2.0 * s, WHITE);
+            // The other hand, off to the left.
+            if g.inv.offhand.is_some() {
+                let ox = x0 - slot - 8.0 * s;
+                draw_rectangle(ox - 2.0 * s, y0 - 2.0 * s, slot + 4.0 * s, slot + 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+                draw_rectangle_lines(ox, y0, slot, slot, s, Color::new(0.6, 0.6, 0.6, 0.6));
+                self.ui.stack_worn(g.inv.offhand, g.inv.offhand_wear, ox, y0, slot, !g.creative);
+            }
             if !g.creative {
                 // Experience bar just above the hotbar, with the level in the middle.
                 let (level, progress) = g.level();
@@ -3262,6 +3273,10 @@ impl App {
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         let mut tooltip: Option<String> = None;
         self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
+        let sort = Rect::new(x0 + panel_w - 42.0 * s, y0 + 3.0 * s, 36.0 * s, 13.0 * s);
+        if !containers::is_three_slot(kind) && self.ui.button(sort, "Sort", true) {
+            self.game.sort_container();
+        }
         let top = y0 + 18.0 * s;
         // (slot index, x, y) for the container's own slots.
         let spots: Vec<(usize, f32, f32)> = if containers::is_three_slot(kind) {
@@ -3898,7 +3913,7 @@ impl App {
 
         // Armour: four slots, each taking only its own kind.
         let ax = x0 - armor_w - 6.0 * s;
-        let armor_h = 18.0 * s + slot * 4.0 + 24.0 * s;
+        let armor_h = 18.0 * s + slot * 4.0 + 24.0 * s + 12.0 * s + slot + 4.0 * s;
         draw_rectangle(ax, y0, armor_w, armor_h, ui::PANEL);
         draw_rectangle_lines(ax, y0, armor_w, armor_h, s, WHITE);
         self.ui.text("Armour", ax + 4.0 * s, y0 + 12.0 * s, 8.0, WHITE);
@@ -3925,6 +3940,16 @@ impl App {
         let cut = (points as f32 * 4.0).min(80.0);
         self.ui.text(&format!("{points} pts"), ax + 4.0 * s, y0 + 18.0 * s + slot * 4.0 + 9.0 * s, 7.0, GRAY);
         self.ui.text(&format!("-{cut:.0}% dmg"), ax + 4.0 * s, y0 + 18.0 * s + slot * 4.0 + 18.0 * s, 7.0, GRAY);
+        // The other hand (Swap Hands puts what you're holding there).
+        let oy = y0 + 18.0 * s + slot * 4.0 + 24.0 * s;
+        self.ui.text("Other hand", ax + 4.0 * s, oy + 8.0 * s, 7.0, WHITE);
+        let (l, r, hov) = self.ui.slot_worn(self.game.inv.offhand, self.game.inv.offhand_wear, ax + 6.0 * s, oy + 12.0 * s, slot, false);
+        if hov {
+            tooltip = Some(label(self.game.inv.offhand, self.game.inv.offhand_wear).unwrap_or_else(|| "Other hand (a shield, torches...)".into()));
+        }
+        if l || r {
+            self.game.inv.click_offhand(r);
+        }
 
         let sx = x0 + 6.0 * s;
         let inv_top = y0 + 18.0 * s;
@@ -3969,6 +3994,9 @@ impl App {
             }
         } else {
             self.ui.text("Inventory", sx, y0 + 12.0 * s, 10.0, WHITE);
+            if self.ui.button(Rect::new(x0 + left_w - 42.0 * s, y0 + 3.0 * s, 36.0 * s, 13.0 * s), "Sort", self.game.inv.cursor.is_none()) {
+                self.game.inv.sort_backpack();
+            }
             for i in 9..36 {
                 let j = i - 9;
                 let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_top + (j / 9) as f32 * slot);

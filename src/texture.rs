@@ -2748,7 +2748,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.each(T_PALE_MOSS, |_, _, r, _| shade(rgb(150, 158, 145), r.range(0.8, 1.12)));
     a.each(T_PALE_HANGING_MOSS, |x, y, r, _| {
         // Strands hanging down, longer in the middle.
-        let len = 6 + ((x * 7) % 5) as usize + if (5..11).contains(&x) { 4 } else { 0 };
+        let len = 6 + (x * 7) % 5 + if (5..11).contains(&x) { 4 } else { 0 };
         if x % 3 != 1 && y < len { shade(rgb(150, 158, 145), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
     });
     for (t, eye) in [(T_CREAKING_HEART, rgb(70, 60, 55)), (T_CREAKING_HEART_ON, rgb(255, 150, 40))] {
@@ -2760,7 +2760,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     a.sprite(T_BOOK_QUILL, &ORB_SPRITE, &[('#', rgb(60, 35, 20)), ('h', rgb(240, 235, 220)), ('b', rgb(150, 90, 50)), ('d', rgb(110, 65, 35))]);
     a.sprite(T_WRITTEN_BOOK, &ORB_SPRITE, &[('#', rgb(50, 25, 15)), ('h', rgb(230, 200, 90)), ('b', rgb(130, 55, 35)), ('d', rgb(95, 35, 25))]);
     let plank = |x: usize, y: usize, r: &mut Rng| {
-        let seam = y % 4 == 3 || (x + (y / 4) * 5) % 16 == 0;
+        let seam = y % 4 == 3 || (x + (y / 4) * 5).is_multiple_of(16);
         if seam { rgb(110, 80, 45) } else { shade(rgb(170, 130, 80), r.range(0.9, 1.07)) }
     };
     a.each(T_LECTERN_SIDE, |x, y, r, _| if (5..11).contains(&x) && y > 3 { shade(rgb(130, 95, 55), r.range(0.9, 1.05)) } else { plank(x, y, r) });
@@ -2782,7 +2782,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         shade(if rim { rgb(30, 25, 45) } else { rgb(45, 60, 55) }, r.range(0.85, 1.1))
     });
     a.each(T_PERSONAL_CHEST_SIDE, |x, y, r, _| {
-        let rim = x < 2 || x > 13 || y > 13 || y == 6;
+        let rim = !(2..=13).contains(&x) || y > 13 || y == 6;
         let eye = (6..10).contains(&x) && (4..9).contains(&y);
         if eye { shade(rgb(80, 220, 170), r.range(0.85, 1.1)) } else { shade(if rim { rgb(30, 25, 45) } else { rgb(45, 60, 55) }, r.range(0.85, 1.1)) }
     });

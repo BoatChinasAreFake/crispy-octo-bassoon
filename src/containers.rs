@@ -210,6 +210,52 @@ impl Container {
 }
 
 /// The item moves that turn slot `before` into `after`: (item, count, into the container?).
+/// Tidies slots: plain stacks of the same thing merge, then everything is
+/// ordered by item (worn, enchanted or labelled items keep their own slot),
+/// with the gaps at the end. Nothing is gained or lost.
+pub fn sort_slots(slots: &mut [Stack], wear: &mut [Wear]) {
+    let mut items: Vec<(Id, u8, Wear)> = Vec::new();
+    for (s, w) in slots.iter().zip(wear.iter()) {
+        let Some((id, mut n)) = *s else { continue };
+        if *w == 0 {
+            for it in items.iter_mut().filter(|it| it.0 == id && it.2 == 0) {
+                let room = max_stack(id).saturating_sub(it.1).min(n);
+                it.1 += room;
+                n -= room;
+            }
+        }
+        if n > 0 {
+            items.push((id, n, *w));
+        }
+    }
+    items.sort_by_key(|&(id, n, w)| (id, w, std::cmp::Reverse(n)));
+    for i in 0..slots.len() {
+        let it = items.get(i);
+        slots[i] = it.map(|&(id, n, _)| (id, n));
+        wear[i] = it.map(|it| it.2).unwrap_or(0);
+    }
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use super::*;
+
+    #[test]
+    fn sorting_merges_plain_stacks_and_keeps_worn_ones_apart() {
+        let mut slots: Vec<Stack> = vec![Some((DIRT, 40)), None, Some((STONE, 3)), Some((DIRT, 40)), Some((STONE, 1)), None];
+        let mut wear: Vec<Wear> = vec![0, 0, 0, 0, 7, 0];
+        let before: u32 = slots.iter().flatten().map(|s| s.1 as u32).sum();
+        sort_slots(&mut slots, &mut wear);
+        let after: u32 = slots.iter().flatten().map(|s| s.1 as u32).sum();
+        assert_eq!(before, after);
+        let mut want = vec![(DIRT, 64, 0), (DIRT, 16, 0), (STONE, 3, 0), (STONE, 1, 7)];
+        want.sort_by_key(|&(id, n, w)| (id, w, std::cmp::Reverse(n)));
+        let got: Vec<(Id, u8, Wear)> = slots.iter().zip(&wear).filter_map(|(s, w)| s.map(|(id, n)| (id, n, *w))).collect();
+        assert_eq!(got, want);
+        assert!(slots[4..].iter().all(|s| s.is_none()));
+    }
+}
+
 pub fn moves(before: Stack, after: Stack) -> Vec<(Id, u8, bool)> {
     match (before, after) {
         (Some((a, an)), Some((b, bn))) if a == b => {
@@ -496,6 +542,32 @@ impl Game {
                     self.net_send_msg(Msg::ContainerMove { x: pos.x, y: pos.y, z: pos.z, slot: i as u8, item, n, put, wear });
                 }
             }
+        }
+    }
+
+    /// The Sort button: tidy the open chest.
+    pub fn sort_container(&mut self) {
+        let Some(pos) = self.open else { return };
+        if is_three_slot(store_kind(&self.world, &self.vehicles, pos)) {
+            return;
+        }
+        if let Some(c) = store(&mut self.world, &mut self.vehicles, pos) {
+            sort_slots(&mut c.slots, &mut c.wear);
+        }
+        self.dirty_containers.insert(pos);
+        if self.is_client() {
+            self.net_send_msg(Msg::SortContainer { x: pos.x, y: pos.y, z: pos.z });
+        }
+    }
+
+    pub fn host_sort(&mut self, from: u32, p: IVec3) {
+        let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
+        if !open || !self.peer_near(from, p) || is_three_slot(store_kind(&self.world, &self.vehicles, p)) {
+            return;
+        }
+        if let Some(c) = store(&mut self.world, &mut self.vehicles, p) {
+            sort_slots(&mut c.slots, &mut c.wear);
+            self.dirty_containers.insert(p);
         }
     }
 

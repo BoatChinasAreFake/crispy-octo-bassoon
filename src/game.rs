@@ -601,7 +601,7 @@ impl Game {
         g.player.health = d.health.max(1.0);
         g.spawn = Vec3::from_array(d.spawn);
         g.inv.slots = [None; 36];
-        for (i, s) in d.slots.into_iter().take(40).enumerate() {
+        for (i, s) in d.slots.into_iter().take(41).enumerate() {
             let s = match (s, &remap) {
                 (Some((id, n)), Some(r)) => Some((r[id as usize], n)).filter(|(id, _)| *id != AIR),
                 (s, _) => s,
@@ -611,6 +611,10 @@ impl Game {
             if i < 36 {
                 g.inv.slots[i] = s;
                 g.inv.wear[i] = wear;
+            } else if i == 40 {
+                // (The other hand comes last.)
+                g.inv.offhand = s;
+                g.inv.offhand_wear = wear;
             } else if s.is_some_and(|(id, _)| armor_of(id).map(|(slot, _)| slot) == Some(i - 36)) {
                 g.inv.armor[i - 36] = s;
                 g.inv.armor_wear[i - 36] = wear;
@@ -692,7 +696,7 @@ impl Game {
             health: self.player.health,
             spawn: self.spawn.to_array(),
             // The four worn armour slots go after the 36 inventory slots.
-            slots: self.inv.slots.iter().chain(self.inv.armor.iter()).copied().collect(),
+            slots: self.inv.slots.iter().chain(self.inv.armor.iter()).chain(std::iter::once(&self.inv.offhand)).copied().collect(),
             // With region files, edits, soil, containers and decor are written there instead (`flush_regions`).
             mods: if self.world.regions.is_some() { HashMap::new() } else { self.world.mods.clone() },
             palette: mod_palette(reg()),
@@ -702,7 +706,7 @@ impl Game {
             fish_log: self.fish_log.encode(),
             containers: if self.world.regions.is_some() { Vec::new() } else { crate::containers::encode(&self.world.containers) },
             drops: crate::drops::encode(&self.drops),
-            wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).copied().collect(),
+            wear: self.inv.wear.iter().chain(self.inv.armor_wear.iter()).chain(std::iter::once(&self.inv.offhand_wear)).copied().collect(),
             food: self.player.hunger.food,
             saturation: self.player.hunger.saturation,
             keep_inventory: self.rules.keep_inventory,
@@ -1119,7 +1123,8 @@ impl Game {
         self.attack_cd = (self.attack_cd - dt).max(0.0);
         self.since_attack += dt;
         // Shields go up while right-click is held.
-        self.blocking = c.use_held && self.inv.held() == SHIELD;
+        // A shield blocks from either hand (from the other one, while this one holds a weapon or tool, or nothing).
+        self.blocking = c.use_held && (self.inv.held() == SHIELD || (self.inv.offhand.map(|s| s.0) == Some(SHIELD) && offhand_first(self.inv.held())));
         let looking = c.use_held && self.inv.held() == SPYGLASS;
         if looking && !self.spyglass {
             self.advance("bird_plane");
@@ -1930,7 +1935,15 @@ impl Game {
 
         if (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
             self.use_cd = 0.25;
-            self.use_item();
+            // With a weapon or tool in hand, a block (torches, say) in the other hand gets placed.
+            let other = self.inv.offhand.map(|s| s.0).unwrap_or(AIR);
+            if other != AIR && other != SHIELD && is_block_item(other) && offhand_first(self.inv.held()) && matches!(self.target, Some(Target::Block(_))) {
+                self.inv.swap_hands();
+                self.use_item();
+                self.inv.swap_hands();
+            } else {
+                self.use_item();
+            }
         }
         if !c.use_held {
             self.use_cd = 0.0;
@@ -3683,6 +3696,11 @@ fn cloud_face(g: &mut DynGeo, f: usize, lo: Vec3, hi: Vec3) {
 /// A sprite given one pixel of thickness, like Minecraft's held items: its
 /// face front and back, and a thin side wherever a solid pixel meets a clear
 /// one. `m` places the sprite (centred, `size` across, facing +z).
+/// While this is in hand, the other hand gets used instead (a shield blocks, a block is placed).
+pub fn offhand_first(held: Id) -> bool {
+    held == AIR || is_sword(held) || held == MACE || pick_tier(held) > 0 || crate::tools::tool_uses(held).is_some()
+}
+
 fn extruded_sprite(g: &mut DynGeo, m: &Mat4, tile: u16, size: f32, sky: f32) {
     use crate::texture::{solid, TILE};
     let px = size / TILE as f32;
