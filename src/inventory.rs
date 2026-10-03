@@ -12,14 +12,22 @@ pub type Stack = Option<(Id, u8)>;
 /// wherever it goes: slots, the cursor, chests, the ground, saves.
 pub type Wear = u32;
 
-/// Uses so far.
+/// Everything in a wear but its enchantments (uses, and an armour trim).
+pub const NOT_ENCHANTS: Wear = 0x8000_FFFF;
+
+/// Uses so far (a trimmed piece of armour keeps its trim in the top of
+/// the low half; see trims.rs).
 pub fn uses(w: Wear) -> u16 {
-    w as u16
+    if w & crate::trims::TRIMMED != 0 { (w & 0xFFF) as u16 } else { w as u16 }
 }
 
-/// The same item with a different number of uses (enchantments kept).
+/// The same item with a different number of uses (enchantments and trim kept).
 pub fn with_uses(w: Wear, uses: u16) -> Wear {
-    (w & 0xFFFF_0000) | uses as u32
+    if w & crate::trims::TRIMMED != 0 {
+        (w & !0xFFF) | uses.min(0xFFF) as u32
+    } else {
+        (w & 0xFFFF_0000) | uses as u32
+    }
 }
 
 /// Uses before `item` (with these enchantments) breaks.
@@ -36,7 +44,7 @@ pub fn keeps_wear(item: Id) -> bool {
 /// number (see boxes.rs), a queen's temperament (bees.rs), a find's condition
 /// (archaeology.rs), a book's enchantment.
 pub fn tagged(item: Id) -> bool {
-    item == ENCHANTED_BOOK || item == HOLLOW_BOX || item == QUEEN_BEE || crate::archaeology::is_find(item)
+    item == ENCHANTED_BOOK || item == HOLLOW_BOX || item == BUNDLE || item == QUEEN_BEE || crate::archaeology::is_find(item)
 }
 
 /// Keep only what makes sense for `item` (saves and other players can't be trusted).

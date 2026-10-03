@@ -107,6 +107,9 @@ pub struct Game {
     /// Fireballs in flight (see fortress.rs), and how often cages look around.
     pub fireballs: Vec<crate::fortress::Fireball>,
     pub cage_timer: f32,
+    /// Trial Spawners' fights, and how often they look around (see trial.rs).
+    pub trials: HashMap<IVec3, crate::trial::Trial>,
+    pub trial_timer: f32,
     /// Regeneration's heartbeat.
     pub regen_clock: f32,
     /// Raids (see raids.rs): the one on now, who has Bad Omen or is a Hero (by player id, seconds left),
@@ -137,7 +140,7 @@ pub struct Game {
     pub breaking: Option<(IVec3, f32)>,
     pub rng: Rng,
     attack_cd: f32,
-    use_cd: f32,
+    pub(crate) use_cd: f32,
     pub spawn: Vec3,
     pub shake: f32,
     /// Title-screen panorama: no player simulation.
@@ -248,10 +251,15 @@ pub struct Game {
     pub effects: Vec<crate::potions::ActiveEffect>,
     /// Dispensers that were powered last time we looked (they fire on the change).
     pub dispensers_on: std::collections::HashSet<IVec3>,
+    /// What each observer last saw in front of it, and pulses still going.
+    pub observed: HashMap<IVec3, Id>,
+    pub observer_pulses: HashMap<IVec3, f32>,
     /// Hopper clock (see hoppers.rs).
     pub hopper_timer: f32,
     /// The Galloper we're riding, and when we last told the host (see horses.rs).
     pub mounted: Option<u32>,
+    /// Sitting behind a Camel's driver (just along for the ride).
+    pub passenger_seat: bool,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -330,6 +338,9 @@ pub struct Game {
     pub bench: Option<crate::smithing::BenchUi>,
     /// Where the local player last died (for the Recovery Compass).
     pub last_death: Option<Vec3>,
+    /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
+    pub lodestone: Option<IVec3>,
+    pub spyglass: bool,
 }
 
 impl Game {
@@ -358,6 +369,8 @@ impl Game {
             powered_notes: HashSet::new(),
             fireballs: Vec::new(),
             cage_timer: 0.0,
+            trials: HashMap::new(),
+            trial_timer: 0.0,
             regen_clock: 0.0,
             raid: None,
             omens: HashMap::new(),
@@ -452,8 +465,11 @@ impl Game {
             fire_timer: 0.0,
             effects: Vec::new(),
             dispensers_on: Default::default(),
+            observed: HashMap::new(),
+            observer_pulses: HashMap::new(),
             hopper_timer: 0.0,
             mounted: None,
+            passenger_seat: false,
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -502,6 +518,8 @@ impl Game {
             step_timer: 0.0,
             bench: None,
             last_death: None,
+            lodestone: None,
+            spyglass: false,
         }
     }
 
@@ -691,6 +709,9 @@ impl Game {
         if let Some(d) = self.last_death {
             v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).collect()));
         }
+        if let Some(p) = self.lodestone {
+            v.push(("lodestone".into(), p.to_array().iter().flat_map(|c| c.to_le_bytes()).collect()));
+        }
         v
     }
 
@@ -717,6 +738,10 @@ impl Game {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
             let p = Vec3::new(f(0), f(4), f(8));
             self.last_death = p.is_finite().then_some(p);
+        }
+        if let Some(b) = extra("lodestone").filter(|b| b.len() >= 12) {
+            let c = |o: usize| i32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+            self.lodestone = Some(IVec3::new(c(0), c(4), c(8)));
         }
     }
 
@@ -765,7 +790,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
-            LOG | SPRUCE_LOG | JUNGLE_LOG => "getting_wood",
+            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
             DIAMOND => "dimonds",
@@ -938,7 +963,13 @@ impl Game {
                 (eye + bob, dir)
             }
         };
-        let fov = if !self.menu && self.player.sprinting { fov_deg + 8.0 } else { fov_deg };
+        let fov = if self.spyglassing() {
+            crate::gadgets::SPYGLASS_FOV
+        } else if !self.menu && self.player.sprinting {
+            fov_deg + 8.0
+        } else {
+            fov_deg
+        };
         let proj = Mat4::perspective_rh_gl(fov.to_radians(), aspect, 0.05, 1000.0);
         let view = Mat4::look_at_rh(pos, pos + dir, Vec3::Y);
         Camera { pos, dir, view_proj: proj * view }
@@ -1045,6 +1076,11 @@ impl Game {
         self.since_attack += dt;
         // Shields go up while right-click is held.
         self.blocking = c.use_held && self.inv.held() == SHIELD;
+        let looking = c.use_held && self.inv.held() == SPYGLASS;
+        if looking && !self.spyglass {
+            self.advance("bird_plane");
+        }
+        self.spyglass = looking;
         self.player.blocking = self.blocking;
         self.use_cd = (self.use_cd - dt).max(0.0);
         self.handle_actions(dt, c);
@@ -1493,16 +1529,49 @@ impl Game {
     }
 
     /// Move arrows and see what they hit (host / single player only).
-    fn update_arrows(&mut self, dt: f32) {
+    pub(crate) fn update_arrows(&mut self, dt: f32) {
         let mut arrows = std::mem::take(&mut self.arrows);
         let mut landed = Vec::new();
         let mut blasts: Vec<(Vec3, f32, f32, Option<crate::block::ProjectileEffect>)> = Vec::new();
+        let mut winds: Vec<(Vec3, Option<u32>)> = Vec::new();
+        let mut bursts: Vec<(Vec3, u8, f32, Option<u32>)> = Vec::new();
         let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
             if a.homing > 0.0 && !a.stuck {
                 steer(a, &targets, dt);
             }
+            if a.firework > 0 && a.damage <= 0.0 {
+                // Off the ground: it speeds up as it climbs.
+                a.vel.y += 12.0 * dt;
+            }
             let thunk = a.fly(dt, &self.world);
+            if a.firework > 0 {
+                // A crossbow's rocket goes off on the first thing it touches.
+                let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
+                let touched = a.damage > 0.0
+                    && (self.mobs.iter().any(|m| near(m.body.pos + Vec3::Y * m.body.height * 0.5, m.body.half + m.body.height * 0.5 + 0.2))
+                        || (Some(self.my_id) != a.shooter && !self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1))
+                        || self.peers.iter().any(|(id, p)| Some(*id) != a.shooter && p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)));
+                if thunk || touched || a.life <= 0.0 {
+                    bursts.push((a.pos - a.dir * 0.3, a.firework - 1, a.damage, a.shooter));
+                    return false;
+                }
+                return true;
+            }
+            if a.wind {
+                // A wind charge bursts on the first thing it meets: a wall, or
+                // a mob (a player's) or a player (a Breeze's).
+                let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
+                let touched = match a.shooter {
+                    Some(_) => self.mobs.iter().any(|m| m.kind != MobKind::Breeze && near(m.body.pos + Vec3::Y * m.body.height * 0.5, m.body.half + m.body.height * 0.5 + 0.2)),
+                    None => (!self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1)) || self.peers.values().any(|p| p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)),
+                };
+                if thunk || touched || a.life <= 0.0 {
+                    winds.push((a.pos - a.dir * 0.3, a.shooter));
+                    return false;
+                }
+                return true;
+            }
             // A blast shot goes off where it lands (or fizzles at the end of its life).
             if a.blast > 0.0 && (thunk || a.life <= 0.0) {
                 blasts.push((a.pos - a.dir * 0.3, a.blast, a.damage, a.effect));
@@ -1594,6 +1663,12 @@ impl Game {
         self.arrows = arrows;
         for (at, r, damage, effect) in blasts {
             self.projectile_blast(at, r, damage, effect);
+        }
+        for (at, shooter) in winds {
+            self.wind_burst(at, shooter);
+        }
+        for (at, colour, damage, shooter) in bursts {
+            self.firework_burst(at, colour, damage, shooter);
         }
         for (at, wear) in landed {
             self.spawn_drop(at, SPEAR, 1, wear, Vec3::ZERO, 0.5);
@@ -1869,6 +1944,14 @@ impl Game {
                 self.ring_bell(pos);
                 return;
             }
+            if id == VAULT {
+                self.use_vault(pos);
+                return;
+            }
+            if id == LODESTONE && held == COMPASS {
+                self.link_lodestone(pos);
+                return;
+            }
             if crate::music::is_jukebox(id) && self.use_jukebox(pos, held) {
                 return;
             }
@@ -1983,6 +2066,22 @@ impl Game {
             self.throw_spear();
             return;
         }
+        if held == WIND_CHARGE {
+            self.throw_wind_charge();
+            return;
+        }
+        if held == GOAT_HORN {
+            self.blow_horn();
+            return;
+        }
+        if held == SPYGLASS {
+            // Held down to look through (see gadgets.rs).
+            return;
+        }
+        if held == BUNDLE {
+            self.tip_bundle();
+            return;
+        }
         if held == BOTTLE {
             let m = crate::fishing::BOTTLE_MESSAGES[self.rng.int(0, crate::fishing::BOTTLE_MESSAGES.len() as i32 - 1) as usize];
             self.msg(format!("The message reads: {m}"));
@@ -2047,6 +2146,10 @@ impl Game {
         }
         if held == BOW {
             self.shoot_bow();
+            return;
+        }
+        if held == CROSSBOW {
+            self.shoot_crossbow();
             return;
         }
         if held == ROD {
@@ -2629,6 +2732,7 @@ impl Game {
         self.animals_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
+        self.trials_tick(dt);
         self.snouts_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
@@ -2637,7 +2741,7 @@ impl Game {
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             // Ridden Gallopers go where their rider steers (see horses.rs).
-            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 {
+            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 || m.passenger != 0 {
                 continue;
             }
             let fuse_before = m.fuse;
@@ -2677,7 +2781,8 @@ impl Game {
                     MobKind::Snout | MobKind::Strutter => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Rampager => noises.push((Sfx::Roar, m.body.pos)),
-                    MobKind::Sizzler | MobKind::Fee => {}
+                    MobKind::Goat => noises.push((Sfx::Bleat, m.body.pos)),
+                    MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -2745,6 +2850,9 @@ impl Game {
                 MobEvent::Summon(at) => self.summon_fees(at),
                 MobEvent::SummonMod(at, kind, n) => self.boss_summon(at, kind, n),
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
+                MobEvent::WindCharge(from, vel) => self.spawn_wind_charge(from, vel, None),
+                MobEvent::DropItem(at, item) => self.pop_drop(at, item, 1),
+                MobEvent::Bleat(at) => self.sfx(Sfx::Bleat, Some(at)),
             }
         }
         self.update_arrows(dt);
@@ -2785,6 +2893,8 @@ impl Game {
                             MobKind::Sizzler => self.advance("too_hot"),
                             MobKind::Weeper => self.advance("dry_your_eyes"),
                             MobKind::Rampager => self.advance("rampage_over"),
+                            MobKind::Breeze => self.advance("breeze_through"),
+                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
@@ -2945,6 +3055,14 @@ impl Game {
         if is_water(top) {
             let depth = (0..y).take_while(|d| is_water(self.world.get(x, y - d, z))).count() as i32;
             let fish = self.mobs.iter().filter(|m| m.kind == MobKind::Fishy).count();
+            // Axolotls in warm, weedy water.
+            let axolotls = self.mobs.iter().filter(|m| m.kind == MobKind::Axolotl).count();
+            if axolotls < 6 && depth >= 2 && matches!(biome, Biome::Jungle | Biome::Mangrove | Biome::Swamp) && self.rng.chance(0.35) {
+                for i in 0..self.rng.int(1, 2) {
+                    self.alloc_mob(MobKind::Axolotl, Vec3::new(x as f32 + 0.5 + i as f32 * 0.6, (y - depth / 2) as f32, z as f32 + 0.5));
+                }
+                return;
+            }
             if fish < 12 && depth >= 2 && self.rng.chance(0.6) {
                 let n = self.rng.int(2, 4);
                 for i in 0..n {
@@ -2966,12 +3084,17 @@ impl Game {
         }
         // Rollos in the dry lands.
         if !self.is_night() && passive < 8 && matches!(top, SAND | RED_SAND) && matches!(biome, Biome::Desert | Biome::Badlands) && clear(&self.world, y + 1) && self.rng.chance(0.3) {
-            self.alloc_mob(MobKind::Rollo, Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5));
+            // (Camels, now and then, in the desert proper.)
+            let kind = if biome == Biome::Desert && self.rng.chance(0.3) { MobKind::Camel } else { MobKind::Rollo };
+            self.alloc_mob(kind, Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5));
             return;
         }
         if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS | MUD) && clear(&self.world, y + 1) {
             let kind = if woofy && self.rng.chance(if biome == Biome::Taiga { 0.4 } else { 0.25 }) {
                 MobKind::Woofer
+            } else if matches!(biome, Biome::Taiga | Biome::Snowy) && (y > crate::world::SEA + 22 || self.rng.chance(0.12)) {
+                // Goats like it high up and cold.
+                MobKind::Goat
             } else if matches!(biome, Biome::Taiga | Biome::Snowy) && self.rng.chance(0.35) {
                 MobKind::Sneaker
             } else if biome == Biome::Swamp && self.rng.chance(0.5) {
@@ -3262,7 +3385,7 @@ impl Game {
             let gliding = p.flags & crate::net::FLAG_GLIDE != 0;
             let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding);
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
-            crate::entity::draw_armor(&mut g, &root, p.armor, p.anim, sky, gliding);
+            crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
         }
         // The player, in third person
         if self.third_person && !self.menu && !self.spectator {
@@ -3272,7 +3395,7 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding);
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
-            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), p.bob * 2.0, sky, p.gliding);
+            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), crate::trims::look(&self.inv.armor, &self.inv.armor_wear), p.bob * 2.0, sky, p.gliding);
         }
         // Primed TNT
         for t in &self.tnts {
@@ -3297,8 +3420,14 @@ impl Game {
         self.draw_orbs(&mut g, eye, 48.0);
         // Particles
         g.begin(Pass::Opaque, [1.0; 4], false);
-        for p in &self.particles {
+        let spark = |p: &&crate::entity::Particle| (crate::texture::T_SPARK_FIRST..crate::texture::T_SPARK_FIRST + crate::fireworks::COLOURS as u16).contains(&p.tile);
+        for p in self.particles.iter().filter(|p| !spark(p)) {
             p.draw(&mut g, &self.world);
+        }
+        // Firework sparks glow, day or night.
+        g.begin(Pass::Opaque, [2.2, 2.2, 2.2, 1.0], false);
+        for p in self.particles.iter().filter(spark) {
+            p.draw_lit(&mut g);
         }
 
         if self.menu || self.dead.is_some() {
@@ -5639,6 +5768,66 @@ looks_like = diamond
             g.update_entities(0.05);
             assert!(g.chat_log.iter().any(|l| l == "The Cheese King has been defeated!"), "{:?}", g.chat_log);
         });
+    }
+
+    #[test]
+    fn observers_pulse_bulbs_toggle_and_crafters_craft() {
+        use crate::contraptions::{observer, observer_state};
+        let zap = |g: &mut Game, secs: f32| {
+            for _ in 0..(secs / 0.05) as usize {
+                g.zap_tick(0.05);
+            }
+        };
+        // An observer looking east at (2, 50, 0), a lamp behind it.
+        let mut g = arena(61);
+        let (obs, front, lamp) = (IVec3::new(1, 50, 0), IVec3::new(2, 50, 0), IVec3::new(0, 50, 0));
+        g.world.set_v(lamp, LAMP);
+        g.world.set_v(obs, observer(crate::contraptions::facing_of(IVec3::X), false));
+        zap(&mut g, 0.3);
+        assert_eq!(g.world.get_v(lamp), LAMP, "nothing changed yet");
+        g.world.set_v(front, STONE);
+        let mut lit = false;
+        for _ in 0..10 {
+            g.zap_tick(0.05);
+            lit |= g.world.get_v(lamp) == LAMP_ON && observer_state(g.world.get_v(obs)).1;
+        }
+        assert!(lit, "a change in front sends a pulse out of the back");
+        zap(&mut g, 0.6);
+        assert_eq!(g.world.get_v(lamp), LAMP, "and the pulse ends");
+        assert!(!observer_state(g.world.get_v(obs)).1);
+
+        // A copper bulb flips each time power arrives.
+        let mut g = arena(62);
+        let (bulb, lever) = (IVec3::new(0, 50, 0), IVec3::new(1, 50, 0));
+        g.world.set_v(bulb, COPPER_BULB);
+        g.world.set_v(lever, LEVER);
+        zap(&mut g, 0.2);
+        let mut states = Vec::new();
+        for on in [true, false, true, false] {
+            g.world.set_v(lever, if on { LEVER_ON } else { LEVER });
+            zap(&mut g, 0.3);
+            states.push(g.world.get_v(bulb) == COPPER_BULB_ON);
+        }
+        assert_eq!(states, [true, true, false, false], "on, stays on, off, stays off");
+        assert!(block(COPPER_BULB_ON).light > 10.0);
+
+        // A crafter makes the recipe its grid adds up to when powered.
+        let mut g = arena(63);
+        let (crafter, lever) = (IVec3::new(0, 50, 0), IVec3::new(0, 50, 1));
+        g.world.set_v(crafter, CRAFTER_FIRST + crate::contraptions::facing_of(IVec3::X) as Id);
+        g.world.set_v(lever, LEVER);
+        if let Some(c) = g.world.containers.get_mut(&crafter) {
+            c.slots[0] = Some((PLANKS, 1));
+            c.slots[4] = Some((PLANKS, 1));
+        }
+        zap(&mut g, 0.2);
+        g.world.set_v(lever, LEVER_ON);
+        zap(&mut g, 0.3);
+        assert!(g.drops.iter().any(|d| d.item == STICK && d.n == 4), "planks into sticks");
+        assert!(g.world.containers[&crafter].slots.iter().all(|s| s.is_none()), "the grid is used up");
+        // Spare ingredients: no recipe, nothing made.
+        assert!(crate::contraptions::crafter_recipe(&[Some((PLANKS, 2)), Some((DIRT, 1))]).is_none());
+        assert!(crate::contraptions::crafter_recipe(&[None; 9]).is_none());
     }
 
     #[test]

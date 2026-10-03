@@ -106,7 +106,7 @@ pub fn with_level(w: Wear, e: Enchant, lvl: u8) -> Wear {
 }
 
 pub fn is_enchanted(w: Wear) -> bool {
-    w >> 16 != 0
+    (w >> 16) & 0x7FFF != 0
 }
 
 /// Total levels of all its enchantments.
@@ -118,7 +118,7 @@ pub fn total_levels(w: Wear) -> u32 {
 /// both have goes up by one (to its maximum), otherwise the higher wins.
 /// Only the enchantment bits are returned.
 pub fn merge(item: Id, a: Wear, b: Wear) -> Wear {
-    let mut w = a & 0xFFFF_0000;
+    let mut w = a & 0x7FFF_0000;
     for e in Enchant::ALL {
         let (la, lb) = (level(a, e), level(b, e));
         if lb == 0 || !e.fits(item) {
@@ -146,7 +146,8 @@ pub const MAX_SHELVES: u32 = 15;
 
 /// An item's enchantments on their own (for the network and the ledger).
 pub fn enchants(w: Wear) -> u16 {
-    (w >> 16) as u16
+    // (Bit 31 is an armour trim's, not an enchantment; see trims.rs.)
+    ((w >> 16) & 0x7FFF) as u16
 }
 
 /// Can the table do anything with this?
@@ -323,7 +324,7 @@ impl Game {
         let creative = self.creative;
         let Some(ui) = &mut self.enchanting else { return };
         let Some((item, _)) = ui.item else { return };
-        ui.wear = (ui.wear & 0xFFFF) | bits;
+        ui.wear = (ui.wear & crate::inventory::NOT_ENCHANTS) | bits;
         ui.item = Some((enchanted_form(item), 1));
         ui.predicted = Some((enchanted_form(item), enchants(bits)));
         if !creative {
@@ -394,7 +395,7 @@ impl Game {
         // We guessed differently (the host saw other shelves, or refused): trust it.
         let fix = |w: &mut Wear| {
             if enchants(*w) == guess {
-                *w = (*w & 0xFFFF) | ((ench as u32) << 16);
+                *w = (*w & crate::inventory::NOT_ENCHANTS) | ((ench as u32) << 16);
                 true
             } else {
                 false

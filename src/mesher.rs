@@ -17,11 +17,13 @@ pub struct Vertex {
     pub light: [f32; 3],
     /// Where a repeating tile starts in the atlas (x below zero: `uv` is plain).
     pub tile: [f32; 2],
+    /// Biome colour the texture is multiplied by (128 = as painted; see tint.rs).
+    pub tint: [u8; 4],
 }
 
 impl Default for Vertex {
     fn default() -> Self {
-        Vertex { pos: [0.0; 3], uv: [0.0; 2], light: [0.0, 0.0, -1.0], tile: [-1.0; 2] }
+        Vertex { pos: [0.0; 3], uv: [0.0; 2], light: [0.0, 0.0, -1.0], tile: [-1.0; 2], tint: crate::tint::NEUTRAL }
     }
 }
 
@@ -154,7 +156,7 @@ fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 3]) -> Vertex {
     let v = v0 + UV_EPS + uv[1] * (s - 2.0 * UV_EPS);
     // The tile's corner rides along (as -corner - 2, below the -1 that means
     // "no tile") so the shader can keep samples inside it (see render.rs).
-    Vertex { pos, uv: [u, v], light, tile: [-u0 - 2.0, -v0 - 2.0] }
+    Vertex { pos, uv: [u, v], light, tile: [-u0 - 2.0, -v0 - 2.0], tint: crate::tint::NEUTRAL }
 }
 
 /// A face of a plain cube waiting to be merged with its like: its tile and the
@@ -163,9 +165,11 @@ fn vert(pos: [f32; 3], tile: u16, uv: [f32; 2], light: [f32; 3]) -> Vertex {
 struct Flat {
     tile: u16,
     light: [[f32; 3]; 4],
+    /// Biome colour at each corner.
+    tint: [[u8; 4]; 4],
 }
 
-const NO_FLAT: Flat = Flat { tile: u16::MAX, light: [[0.0; 3]; 4] };
+const NO_FLAT: Flat = Flat { tile: u16::MAX, light: [[0.0; 3]; 4], tint: [crate::tint::NEUTRAL; 4] };
 
 /// Greedy meshing: cube faces with the same tile and light join into big
 /// rectangles (the shader repeats the tile across them). Faces only join
@@ -186,7 +190,7 @@ fn merge_flats(flats: &[Flat], dims: [i32; 3], origin: [f32; 3], out: &mut MeshD
         let (u_axis, v_axis) = (differs(0, 1), differs(1, 2));
         // Light that doesn't change along an axis: each corner matches the one across from it.
         let across = |axis: usize, i: usize| (0..4).find(|&j| (0..3).all(|k| (corners[i][k] != corners[j][k]) == (k == axis))).unwrap_or(i);
-        let steady = |key: &Flat, axis: usize| (0..4).all(|i| key.light[i] == key.light[across(axis, i)]);
+        let steady = |key: &Flat, axis: usize| (0..4).all(|i| key.light[i] == key.light[across(axis, i)] && key.tint[i] == key.tint[across(axis, i)]);
         for layer in 0..dims[a] {
             for q in 0..dims[t2] {
                 for pp in 0..dims[t1] {
@@ -239,7 +243,7 @@ fn merge_flats(flats: &[Flat], dims: [i32; 3], origin: [f32; 3], out: &mut MeshD
                         let grow = |k: usize| if k == t1 || k == t2 { (c[k] * 2.0 - 1.0) * SEAM } else { 0.0 };
                         let pos = [0, 1, 2].map(|k| origin[k] + p[k] as f32 + c[k] * ext[k] + grow(k));
                         let uv = [CORNER_UV[i][0] * ext[u_axis], CORNER_UV[i][1] * ext[v_axis]];
-                        v[i] = Vertex { pos, uv, light: key.light[i], tile: [u0, v0] };
+                        v[i] = Vertex { pos, uv, light: key.light[i], tile: [u0, v0], tint: key.tint[i] };
                     }
                     // Flip the diagonal so shading gradients don't crease.
                     let l = key.light.map(|l| l[0]);
@@ -262,6 +266,12 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
     hood.own = vec![AIR; (CW * CW * CH) as usize];
     me.blocks.decode_into(&mut hood.own);
     let (bx, bz) = ((cx * CW) as f32, (cz * CW) as f32);
+    // Biome colours for grass, leaves and water (see tint.rs).
+    let field = crate::tint::Field::of(world, cx, cz);
+    let tint_at = |id: Id, f: usize, x: f32, z: f32| match (&field, crate::tint::kind_of(id, f)) {
+        (Some(field), Some(kind)) => field.at(kind, (x - bx).round() as i32, (z - bz).round() as i32),
+        _ => crate::tint::NEUTRAL,
+    };
 
     // Only walk the vertical span that contains anything.
     let mut max_y = 0;
@@ -303,10 +313,11 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         let hanging = id == POINTY_ROCK && is_solid(hood.get(lx, y + 1, lz)) && !is_solid(hood.get(lx, y - 1, lz));
                         let uv = if hanging { [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] } else { CORNER_UV };
                         for d in diag {
-                            let v = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]);
+                            let tint = tint_at(id, 0, wx + 0.5, wz + 0.5);
+                            let v = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
                             out.opaque.quad([v(0), v(1), v(2), v(3)], false);
                             // Back side with reversed winding.
-                            let w = |i: usize| vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]);
+                            let w = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
                             out.opaque.quad([w(1), w(0), w(3), w(2)], false);
                         }
                     }
@@ -379,6 +390,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 let c = corners[i];
                                 let cy = if c[1] > 0.5 { tops[c[2] as usize][c[0] as usize] } else { 0.0 };
                                 v[i] = vert([wx + c[0], wy + cy, wz + c[2]], tile, CORNER_UV[i], light);
+                                v[i].tint = tint_at(id, f, wx + c[0], wz + c[2]);
                             }
                             if lava {
                                 out.opaque.quad(v, false);
@@ -447,7 +459,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                     let c = corners[i];
                                     v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [shade * 1.0 + wet, sky, blk]);
                                 }
-                                flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light) };
+                                let tint = corners.map(|c| tint_at(id, f, wx + c[0], wz + c[2]));
+                                flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light), tint };
                                 continue;
                             }
                             for i in 0..4 {
@@ -485,7 +498,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 v[i] = vert([wx + c[0], wy + c[1], wz + c[2]], tile, CORNER_UV[i], [ao[i] * shade + wet, sky / n_s, blk / n_s]);
                             }
                             // Faces wait to be merged with their like (see `merge_flats`).
-                            flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light) };
+                            let tint = corners.map(|c| tint_at(id, f, wx + c[0], wz + c[2]));
+                            flats[flat_at(f, lx, y, lz)] = Flat { tile, light: v.map(|x| x.light), tint };
                         }
                     }
                 }
@@ -507,7 +521,7 @@ mod tests {
             for x in 0..dims[0] {
                 if let Some(tile) = fill(x, z) {
                     // Face 2 is the top, at y 0.
-                    flats[((2 * dims[1]) * dims[2] + z) as usize * dims[0] as usize + x as usize] = Flat { tile, light: [[1.0, 1.0, 0.0]; 4] };
+                    flats[((2 * dims[1]) * dims[2] + z) as usize * dims[0] as usize + x as usize] = Flat { tile, light: [[1.0, 1.0, 0.0]; 4], tint: [crate::tint::NEUTRAL; 4] };
                 }
             }
         }

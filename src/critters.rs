@@ -64,6 +64,7 @@ impl Game {
         let mut grabs: Vec<(usize, usize)> = Vec::new();
         let mut gifts: Vec<(usize, Vec3)> = Vec::new();
         let mut scutes: Vec<Vec3> = Vec::new();
+        let mut nips: Vec<(usize, usize)> = Vec::new();
         for i in 0..n {
             let (kind, pos) = (self.mobs[i].kind, self.mobs[i].body.pos);
             match kind {
@@ -115,6 +116,20 @@ impl Game {
                         if at.distance(pos) < 2.6 && self.mobs[i].attack_cd <= 0.0 {
                             eaten.push((i, j));
                         }
+                    }
+                }
+                MobKind::Axolotl if self.mobs[i].body.in_water && self.mobs[i].baby <= 0.0 => {
+                    // Hunts Soggy Groaners (and fish) in the water: help it out and it helps you.
+                    let prey = self.mobs.iter().enumerate().filter(|(_, c)| matches!(c.kind, MobKind::Soggy | MobKind::Fishy) && c.health > 0.0 && c.body.in_water && c.body.pos.distance(pos) < 10.0).min_by(|a, b| a.1.body.pos.distance(pos).total_cmp(&b.1.body.pos.distance(pos))).map(|(j, c)| (j, c.id, c.body.pos + Vec3::Y * c.body.height * 0.4));
+                    match prey {
+                        Some((j, id, at)) => {
+                            self.mobs[i].prey = Some(id);
+                            self.mobs[i].goal = Some(at);
+                            if at.distance(pos) < 1.6 && self.mobs[i].attack_cd <= 0.0 {
+                                nips.push((i, j));
+                            }
+                        }
+                        None => self.mobs[i].prey = None,
                     }
                 }
                 MobKind::Rollo => {
@@ -174,6 +189,30 @@ impl Game {
         for at in scutes {
             self.pop_drop(at + Vec3::Y * 0.3, SCUTE, 1);
         }
+        for (i, j) in nips {
+            let at = self.mobs[i].body.pos;
+            self.mobs[i].attack_cd = 1.0;
+            let was = self.mobs[j].health;
+            self.mobs[j].hurt = 0.0;
+            self.mobs[j].damage(2.0, at);
+            // A win: everyone fighting alongside is patched up a bit.
+            if was > 0.0 && self.mobs[j].health <= 0.0 {
+                self.axolotl_win(at);
+            }
+        }
+    }
+}
+
+impl Game {
+    /// An Axolotl's prey is beaten: players nearby get a little Regeneration.
+    pub fn axolotl_win(&mut self, at: Vec3) {
+        if !self.dedicated && self.dead.is_none() && self.player.body.pos.distance(at) < 12.0 {
+            self.timed_effect(crate::potions::Potion::Regeneration, 6.0);
+        }
+        let near: Vec<u32> = self.peers.iter().filter(|(_, p)| p.alive() && p.target.distance(at) < 12.0).map(|(&id, _)| id).collect();
+        for id in near {
+            self.send_timed_effect(id, crate::potions::Potion::Regeneration, 6.0, 0);
+        }
     }
 }
 
@@ -181,6 +220,40 @@ impl Game {
 mod tests {
     use super::*;
     use crate::noise::Rng;
+
+    #[test]
+    fn axolotls_hunt_soggies_and_patch_you_up() {
+        let mut g = crate::game::tests::arena(94);
+        let base = g.player.body.pos.floor().as_ivec3();
+        // A pool beside the player.
+        for x in 1..6 {
+            for z in -2..3 {
+                for y in -3..0 {
+                    g.world.set_v(base + macroquad::math::IVec3::new(x, y, z), WATER);
+                }
+            }
+        }
+        let a = g.alloc_mob(MobKind::Axolotl, base.as_vec3() + Vec3::new(2.5, -2.5, 0.5));
+        let s = g.alloc_mob(MobKind::Soggy, base.as_vec3() + Vec3::new(3.5, -2.5, 0.5));
+        for m in g.mobs.iter_mut() {
+            m.body.in_water = true;
+        }
+        let mut won = false;
+        for _ in 0..200 {
+            for m in g.mobs.iter_mut() {
+                m.body.in_water = true;
+                m.attack_cd = 0.0;
+            }
+            g.critters_tick(0.1);
+            if !g.mobs.iter().any(|m| m.id == s && m.health > 0.0) {
+                won = true;
+                break;
+            }
+        }
+        assert!(won, "the Axolotl saw it off");
+        assert!(g.mobs.iter().any(|m| m.id == a));
+        assert!(g.has_effect(crate::potions::Potion::Regeneration), "and we feel better");
+    }
 
     #[test]
     fn woofer_armour_soaks_hits() {

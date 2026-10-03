@@ -246,7 +246,34 @@ pub const GILDED_SCORCHROCK: Id = 421;
 pub const BELL: Id = 422;
 /// A dungeon's monster cage (see fortress.rs, where the Sizzler Cages live too).
 pub const SPAWNER: Id = 423;
-pub const NUM_BLOCKS: Id = 424;
+/// Cherry Groves and Mangrove Swamps (see world.rs).
+pub const CHERRY_LOG: Id = 424;
+pub const CHERRY_LEAVES: Id = 425;
+pub const PINK_PETALS: Id = 426;
+pub const CHERRY_PLANKS: Id = 427;
+pub const MANGROVE_LOG: Id = 428;
+pub const MANGROVE_LEAVES: Id = 429;
+pub const MANGROVE_ROOTS: Id = 430;
+pub const MANGROVE_PLANKS: Id = 431;
+/// Observers: `OBSERVER_FIRST + facing * 2 + on` (facing: the way it looks; see contraptions.rs).
+pub const OBSERVER_FIRST: Id = 432;
+/// Crafters: `CRAFTER_FIRST + facing` (facing: where its results come out).
+pub const CRAFTER_FIRST: Id = 444;
+/// A copper lamp that flips on or off each time power arrives.
+pub const COPPER_BULB: Id = 450;
+pub const COPPER_BULB_ON: Id = 451;
+/// Trial Chambers (see trial.rs).
+pub const TUFF_BRICKS: Id = 452;
+pub const CHISELED_TUFF: Id = 453;
+pub const COPPER_GRATE: Id = 454;
+pub const TRIAL_SPAWNER: Id = 455;
+/// A trial spawner that's been beaten and is cooling down.
+pub const TRIAL_SPAWNER_SPENT: Id = 456;
+pub const VAULT: Id = 457;
+pub const VAULT_OPEN: Id = 458;
+/// Point a compass at it (see navigation.rs).
+pub const LODESTONE: Id = 459;
+pub const NUM_BLOCKS: Id = 460;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -409,7 +436,21 @@ pub const SPLASH_EXTRA_FIRST: Id = FIRST_ITEM + 207;
 pub const CROSSBOW: Id = FIRST_ITEM + 209;
 pub const TOTEM: Id = FIRST_ITEM + 210;
 pub const OMINOUS_BANNER: Id = FIRST_ITEM + 211;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 212;
+/// Opens a Vault (see trial.rs).
+pub const TRIAL_KEY: Id = FIRST_ITEM + 212;
+/// Thrown: a burst of wind that knocks things back (see trial.rs).
+pub const WIND_CHARGE: Id = FIRST_ITEM + 213;
+pub const BREEZE_ROD: Id = FIRST_ITEM + 214;
+/// Blow it (see critters.rs).
+pub const GOAT_HORN: Id = FIRST_ITEM + 215;
+/// Armour trim templates: `TRIM_FIRST + pattern` (see trims.rs).
+pub const TRIM_FIRST: Id = FIRST_ITEM + 216;
+pub const TRIMS: usize = 4;
+/// Look through it to zoom in.
+pub const SPYGLASS: Id = FIRST_ITEM + 220;
+/// Holds a mix of small stacks in one slot (see bundle.rs).
+pub const BUNDLE: Id = FIRST_ITEM + 221;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 222;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -423,7 +464,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -1859,6 +1900,56 @@ impl Registry {
         let mut spawner = def("monster_cage", "Monster Cage (Still Occupied)", Cube, true, false, [T_SPAWNER; 3], 5.0, 1, true, AIR, 2.0, S_STONE);
         spawner.see_through = true;
         blocks.push(spawner);
+        // Cherry Groves and Mangrove Swamps.
+        blocks.push(def("cherry_log", "Cherry Log (Pink Inside)", Cube, true, true, [T_CHERRY_LOG_TOP, T_CHERRY_LOG_SIDE, T_CHERRY_LOG_TOP], 2.0, 0, false, CHERRY_LOG, 0.0, S_WOOD));
+        blocks.push(def("cherry_leaves", "Cherry Blossom (Extremely Pink)", Cube, true, false, [T_CHERRY_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        let mut petals = def("pink_petals", "Pink Petals (Ground Confetti)", Shaped, false, false, [T_PINK_PETALS; 3], 0.0, 0, false, PINK_PETALS, 0.0, S_GRASS);
+        petals.shape = Shape::Dust;
+        blocks.push(petals);
+        blocks.push(def("cherry_planks", "Cherry Planks (Blush)", Cube, true, true, [T_CHERRY_PLANKS; 3], 2.0, 0, false, CHERRY_PLANKS, 0.0, S_WOOD));
+        blocks.push(def("mangrove_log", "Mangrove Log (Damp Tree Chunk)", Cube, true, true, [T_MANGROVE_LOG_TOP, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP], 2.0, 0, false, MANGROVE_LOG, 0.0, S_WOOD));
+        blocks.push(def("mangrove_leaves", "Mangrove Leaves (Salty)", Cube, true, false, [T_MANGROVE_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        let mut roots = def("mangrove_roots", "Mangrove Roots (Tangled)", Cube, true, false, [T_MANGROVE_ROOTS; 3], 0.7, 0, false, MANGROVE_ROOTS, 0.0, S_WOOD);
+        roots.see_through = true;
+        blocks.push(roots);
+        blocks.push(def("mangrove_planks", "Mangrove Planks (Reddish)", Cube, true, true, [T_MANGROVE_PLANKS; 3], 2.0, 0, false, MANGROVE_PLANKS, 0.0, S_WOOD));
+        // Automation (see contraptions.rs).
+        for facing in 0..6u8 {
+            for on in [false, true] {
+                let key = format!("observer{}{}", ["", "_east", "_south", "_west", "_up", "_down"][facing as usize], if on { "_on" } else { "" });
+                let mut d = def(leak(&key), "Observer (Nosy)", Cube, true, true, [T_OBSERVER_SIDE; 3], 3.0, 1, true, OBSERVER_FIRST, 0.0, S_STONE);
+                d.creative = facing == 0 && !on;
+                blocks.push(d);
+            }
+        }
+        for facing in 0..6u8 {
+            let key = format!("crafter{}", ["", "_east", "_south", "_west", "_up", "_down"][facing as usize]);
+            let mut d = def(leak(&key), "Crafter (Crafts Unsupervised)", Cube, true, true, [T_CRAFTER_TOP, T_CRAFTER_SIDE, T_CRAFTER_SIDE], 3.5, 1, true, CRAFTER_FIRST, 0.0, S_STONE);
+            d.creative = facing == 0;
+            blocks.push(d);
+        }
+        blocks.push(def("copper_bulb", "Copper Bulb (Off, For Now)", Cube, true, true, [T_COPPER_BULB; 3], 3.0, 1, true, COPPER_BULB, 0.0, S_STONE));
+        let mut lit = def("copper_bulb_on", "Copper Bulb (On, For Now)", Cube, true, true, [T_COPPER_BULB_ON; 3], 3.0, 1, true, COPPER_BULB, 15.0, S_STONE);
+        lit.creative = false;
+        blocks.push(lit);
+        // Trial Chambers.
+        blocks.push(def("tuff_bricks", "Tuff Bricks (Grey, Proud)", Cube, true, true, [T_TUFF_BRICKS; 3], 1.5, 1, true, TUFF_BRICKS, 0.0, S_STONE));
+        blocks.push(def("chiseled_tuff", "Chiseled Tuff (Fancy Grey)", Cube, true, true, [T_CHISELED_TUFF_TOP, T_CHISELED_TUFF, T_CHISELED_TUFF_TOP], 1.5, 1, true, CHISELED_TUFF, 0.0, S_STONE));
+        let mut grate = def("copper_grate", "Copper Grate (Holey)", Cube, true, false, [T_COPPER_GRATE; 3], 3.0, 1, true, COPPER_GRATE, 0.0, S_STONE);
+        grate.see_through = true;
+        blocks.push(grate);
+        for (key, name, tile, light) in [("trial_spawner", "Trial Spawner (Testing You)", T_TRIAL_SPAWNER, 4.0), ("trial_spawner_spent", "Trial Spawner (Resting)", T_TRIAL_SPAWNER_SPENT, 0.0)] {
+            let mut d = def(key, name, Cube, true, false, [T_TRIAL_SPAWNER_TOP, tile, T_TRIAL_SPAWNER_TOP], 50.0, 2, true, AIR, light, S_STONE);
+            d.see_through = true;
+            d.creative = key == "trial_spawner";
+            blocks.push(d);
+        }
+        for (key, name, front) in [("vault", "Vault (Locked)", T_VAULT_FRONT), ("vault_open", "Vault (Emptied)", T_VAULT_OPEN)] {
+            let mut d = def(key, name, Cube, true, true, [T_VAULT_TOP, front, T_VAULT_TOP], 50.0, 2, true, AIR, if key == "vault" { 6.0 } else { 0.0 }, S_STONE);
+            d.creative = key == "vault";
+            blocks.push(d);
+        }
+        blocks.push(def("lodestone", "Lodestone (Magnetic Personality)", Cube, true, true, [T_LODESTONE_TOP, T_LODESTONE_SIDE, T_LODESTONE_TOP], 3.5, 1, true, LODESTONE, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2078,6 +2169,15 @@ impl Registry {
         items.push(ItemDef { stack: 1, damage: 3.0, ..item("crossbow", "Crossbow (Pre-Loaded Opinions)", T_CROSSBOW) });
         items.push(ItemDef { stack: 1, ..item("totem_of_undying", "Totem of Not Dying (Once)", T_TOTEM) });
         items.push(item("ominous_banner", "Ominous Banner (Looks Important)", T_BANNER));
+        items.push(item("trial_key", "Trial Key (Opens Exactly One Vault)", T_TRIAL_KEY));
+        items.push(ItemDef { stack: 16, ..item("wind_charge", "Wind Charge (Bottled Gust)", T_WIND_CHARGE) });
+        items.push(item("breeze_rod", "Breeze Rod (Whooshy Stick)", T_BREEZE_ROD));
+        items.push(ItemDef { stack: 1, consume: false, ..item("goat_horn", "Goat Horn (Very Loud)", T_GOAT_HORN) });
+        for (key, name) in [("coast_trim", "Coast Trim Template"), ("wild_trim", "Wild Trim Template"), ("ward_trim", "Ward Trim Template"), ("spire_trim", "Spire Trim Template")] {
+            items.push(item(key, name, T_TRIM_TEMPLATE));
+        }
+        items.push(ItemDef { stack: 1, consume: false, ..item("spyglass", "Spyglass (Pirate Approved)", T_SPYGLASS) });
+        items.push(ItemDef { stack: 1, consume: false, ..item("bundle", "Bundle (Bag of Bits)", T_BUNDLE) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2085,6 +2185,11 @@ impl Registry {
             r(&[(LOG, 1)], (PLANKS, 4)),
             r(&[(SPRUCE_LOG, 1)], (PLANKS, 4)),
             r(&[(JUNGLE_LOG, 1)], (PLANKS, 4)),
+            r(&[(CHERRY_LOG, 1)], (CHERRY_PLANKS, 4)),
+            r(&[(MANGROVE_LOG, 1)], (MANGROVE_PLANKS, 4)),
+            // The new woods do anything plain planks do, once you've made them plain.
+            r(&[(CHERRY_PLANKS, 1)], (PLANKS, 1)),
+            r(&[(MANGROVE_PLANKS, 1)], (PLANKS, 1)),
             r(&[(MELON_SLICE, 9)], (MELON, 1)),
             r(&[(MINECART, 1), (CHEST, 1)], (CHEST_MINECART, 1)),
             r(&[(MINECART, 1), (HOPPER_FIRST, 1)], (HOPPER_MINECART, 1)),
@@ -2172,6 +2277,16 @@ impl Registry {
             r(&[(PLANKS, 3), (COBBLE, 4), (IRON, 1), (ZAP_DUST, 1)], (PISTON_FIRST, 1)),
             r(&[(PISTON_FIRST, 1), (GOO, 1)], (STICKY_FIRST, 1)),
             r(&[(COBBLE, 7), (BOW, 1), (ZAP_DUST, 1)], (DISPENSER_FIRST, 1)),
+            r(&[(COBBLE, 6), (ZAP_DUST, 2), (GLASS, 1)], (OBSERVER_FIRST, 1)),
+            r(&[(IRON, 5), (TABLE, 1), (ZAP_DUST, 2), (DISPENSER_FIRST, 1)], (CRAFTER_FIRST, 1)),
+            r(&[(COPPER_INGOT, 4), (ZAP_DUST, 1), (TORCH, 1)], (COPPER_BULB, 1)),
+            r(&[(COPPER_INGOT, 4)], (COPPER_GRATE, 4)),
+            r(&[(STONE_BRICKS, 4), (COBBLE, 1)], (TUFF_BRICKS, 4)),
+            r(&[(TUFF_BRICKS, 2)], (CHISELED_TUFF, 1)),
+            r(&[(BREEZE_ROD, 1)], (WIND_CHARGE, 4)),
+            r(&[(STONE_BRICKS, 8), (IRON, 1)], (LODESTONE, 1)),
+            r(&[(GLASS, 1), (COPPER_INGOT, 2)], (SPYGLASS, 1)),
+            r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
             r(&[(PEARL, 1), (EMBER_SHROOM, 1)], (STARING_EYE, 1)),
@@ -2270,6 +2385,9 @@ impl Registry {
         recipes.push(r(&[(STICK, 3), (STRING, 2), (IRON, 1)], (CROSSBOW, 1)));
         recipes.push(r(&[(SCORCHITE_SCRAP, 4), (GOLD_INGOT, 4)], (SCORCHITE_INGOT, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
+        for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
+            recipes.push(r(&[(DIAMOND, 7), (t, 1), (TUFF_BRICKS, 1)], (t, 2)));
+        }
 
         // Minecraft's amounts: 5 for a helmet, 8 chestplate, 7 leggings, 4 boots.
         for (t, material) in [WOOL, IRON, GOLD_INGOT, DIAMOND].into_iter().enumerate() {
@@ -2346,12 +2464,12 @@ pub fn dapples_sky(id: Id) -> bool {
 /// Any kind of tree trunk.
 #[inline]
 pub fn is_log(id: Id) -> bool {
-    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG)
+    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG)
 }
 /// Any kind of leaves.
 #[inline]
 pub fn is_leaves(id: Id) -> bool {
-    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES)
+    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES)
 }
 /// Can the player point at it (and break it)?
 #[inline]

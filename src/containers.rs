@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::hoppers::is_hopper(id)
+    matches!(id, CHEST | FURNACE | FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -66,7 +66,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         BOOT => COOKED_BOOT,
         SAND => GLASS,
         COBBLE => STONE,
-        LOG | SPRUCE_LOG | JUNGLE_LOG => COAL, // charcoal, legally distinct
+        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,
         COBBLED_DEEPSLATE => DEEPSLATE,
         // Mod recipes.
@@ -78,7 +78,7 @@ pub fn smelt(id: Id) -> Option<Id> {
 pub fn fuel_secs(id: Id) -> Option<f32> {
     Some(match id {
         COAL => 80.0,
-        LOG | SPRUCE_LOG | JUNGLE_LOG | PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
+        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PLANKS | CHERRY_PLANKS | MANGROVE_PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
         HAY => 45.0,
         STICK | WHEAT => 5.0,
         DOOR => 10.0,
@@ -99,7 +99,7 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
             _ => false,
         };
     }
-    if crate::contraptions::is_dispenser(kind) {
+    if crate::contraptions::is_dispenser(kind) || crate::contraptions::is_crafter(kind) {
         return slot < DISPENSER_SLOTS;
     }
     if crate::hoppers::is_hopper(kind) {
@@ -119,7 +119,7 @@ impl Container {
     pub fn for_block(id: Id) -> Container {
         let n = if is_three_slot(id) {
             3
-        } else if crate::contraptions::is_dispenser(id) {
+        } else if crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) {
             DISPENSER_SLOTS
         } else if crate::hoppers::is_hopper(id) {
             crate::hoppers::SLOTS

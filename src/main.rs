@@ -33,6 +33,8 @@ mod farming;
 mod fortress;
 mod music;
 mod fire;
+mod fireworks;
+mod gadgets;
 mod fishing;
 mod game;
 mod glider;
@@ -57,6 +59,8 @@ mod noise;
 mod pad;
 mod palette;
 mod paths;
+mod tint;
+mod trial;
 mod updates;
 mod player;
 mod playtest;
@@ -82,6 +86,7 @@ mod sound;
 mod stats;
 mod texture;
 mod tools;
+mod trims;
 mod ui;
 mod weather;
 mod wiring;
@@ -581,7 +586,9 @@ impl App {
             && let Some(last) = self.last_mouse {
                 let d = m - last;
                 if d.length() < 400.0 {
-                    let s = 0.0026 * self.settings.sensitivity;
+                    // (Slower through a Spyglass.)
+                    let zoom = if self.game.spyglassing() { 0.25 } else { 1.0 };
+                    let s = 0.0026 * self.settings.sensitivity * zoom;
                     let p = &mut self.game.player;
                     p.yaw = (p.yaw + d.x * s).rem_euclid(std::f32::consts::TAU);
                     p.pitch = (p.pitch - d.y * s).clamp(-1.55, 1.55);
@@ -1657,22 +1664,50 @@ impl App {
 
     /// A compass and a map, while you hold them.
     fn navigation_hud(&mut self, dt: f32) {
-        let (w, _) = (screen_width(), screen_height());
+        let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let held = self.game.inv.held();
+        if self.game.spyglassing() {
+            // Round glass, dark all around it.
+            let r = h * 0.42;
+            let (cx, cy) = (w / 2.0, h / 2.0);
+            let dark = Color::new(0.0, 0.0, 0.0, 0.92);
+            draw_rectangle(0.0, 0.0, cx - r, h, dark);
+            draw_rectangle(cx + r, 0.0, w - cx - r, h, dark);
+            for k in 0..48 {
+                let y0 = cy - r + k as f32 * r * 2.0 / 48.0;
+                let dy = (y0 + r / 48.0 - cy) / r;
+                let half = r * (1.0 - dy * dy).max(0.0).sqrt();
+                draw_rectangle(cx - r, y0, r - half, r * 2.0 / 48.0 + 1.0, dark);
+                draw_rectangle(cx + half, y0, r - half, r * 2.0 / 48.0 + 1.0, dark);
+            }
+            draw_rectangle(cx - r, 0.0, 2.0 * r, cy - r, dark);
+            draw_rectangle(cx - r, cy + r, 2.0 * r, h - cy - r, dark);
+            draw_circle_lines(cx, cy, r, 4.0 * s, Color::new(0.55, 0.32, 0.2, 1.0));
+            return;
+        }
         if held == block::COMPASS {
             let r = 22.0 * s;
             let (cx, cy) = (w / 2.0, 34.0 * s);
             draw_circle(cx, cy, r + 2.0 * s, Color::new(0.2, 0.2, 0.22, 0.9));
             draw_circle(cx, cy, r, Color::new(0.92, 0.9, 0.84, 0.95));
             let g = &self.game;
-            let a = navigation::compass_needle(g.player.body.pos, g.player.yaw, g.spawn, g.clock);
+            // Home, or a Lodestone (spinning if it's been broken; see gadgets.rs).
+            let target = g.compass_target();
+            let a = match target {
+                Some(t) => navigation::compass_needle(g.player.body.pos, g.player.yaw, t, g.clock),
+                None => g.clock * 7.0,
+            };
             let (dx, dy) = (a.sin(), -a.cos());
             draw_line(cx, cy, cx + dx * r * 0.85, cy + dy * r * 0.85, 3.0 * s, Color::new(0.85, 0.1, 0.1, 1.0));
             draw_line(cx, cy, cx - dx * r * 0.5, cy - dy * r * 0.5, 3.0 * s, Color::new(0.3, 0.3, 0.35, 1.0));
             if !scorch::in_scorch(g.player.body.pos.x) {
-                let dist = Vec2::new(g.spawn.x - g.player.body.pos.x, g.spawn.z - g.player.body.pos.z).length();
-                self.ui.text_centered(&format!("Home: {} blocks", dist as i32), cx, cy + r + 12.0 * s, 8.0, WHITE);
+                let what = if g.lodestone.is_some() { "Lodestone" } else { "Home" };
+                let text = match target {
+                    Some(t) => format!("{what}: {} blocks", Vec2::new(t.x - g.player.body.pos.x, t.z - g.player.body.pos.z).length() as i32),
+                    None => "Lodestone: gone".to_string(),
+                };
+                self.ui.text_centered(&text, cx, cy + r + 12.0 * s, 8.0, WHITE);
             }
         }
         if held == block::MAP {
@@ -3338,6 +3373,7 @@ impl App {
             self.game.enchant_quick_put(i);
         } else if l && shift {
             self.game.container_quick_put(i);
+        } else if self.game.bundle_click(i, l, r) {
         } else if l {
             self.game.inv.click(i);
         } else if r {
@@ -3663,6 +3699,9 @@ impl App {
                 if hov {
                     tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
                 }
+                if self.game.bundle_click(i, l, r) {
+                    continue;
+                }
                 if l && !(shift && self.game.inv.equip(i)) {
                     self.game.inv.click(i);
                 }
@@ -3678,6 +3717,9 @@ impl App {
             let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
+            }
+            if self.game.bundle_click(i, l, r) {
+                continue;
             }
             if l {
                 if creative && self.game.inv.cursor.is_none() {
@@ -3734,6 +3776,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
     let (cx0, cz0) = if matches!(mode, "fortress" | "camp") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
     let kind = match mode {
         "outpost" => Kind::Outpost,
+        "trials" => Kind::TrialChambers,
         "fortress" => Kind::Fortress,
         "camp" => Kind::SnoutCamp,
         "raid" => Kind::Village,
@@ -3781,11 +3824,13 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
-        "swamp" | "jungle" | "badlands" | "taiga" => {
+        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" => {
             let want = match mode {
                 "swamp" => world::Biome::Swamp,
                 "jungle" => world::Biome::Jungle,
                 "badlands" => world::Biome::Badlands,
+                "cherry" => world::Biome::Cherry,
+                "mangrove" => world::Biome::Mangrove,
                 _ => world::Biome::Taiga,
             };
             // Somewhere well inside the biome (all nine columns around agree), looking across it.
@@ -3850,6 +3895,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Fortress => look(o + Vec3::new(-22.0, 22.0, -26.0), o + Vec3::new(0.0, 0.0, -4.0)),
                 Kind::SnoutCamp => look(o + Vec3::new(-9.0, 6.0, -10.0), o + Vec3::Y * 1.5),
                 Kind::Outpost => look(o + Vec3::new(-14.0, 10.0, -14.0), o + Vec3::Y * 7.0),
+                Kind::TrialChambers => look(o + Vec3::new(-5.5, 5.5, -5.5), o + Vec3::new(2.0, 1.0, 2.0)),
                 Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
@@ -3920,12 +3966,15 @@ fn install_panic_hook() {
 fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     let (id, _) = stack?;
     let mut s = item_name(id).to_string();
-    if id == HOLLOW_BOX {
+    if id == HOLLOW_BOX || id == BUNDLE {
         if boxes::box_id(wear) != 0 {
             s += " [packed]";
         }
     } else if enchant::is_enchanted(wear) {
         s += &format!(" [{}]", enchant::describe(wear));
+    }
+    if let Some(t) = trims::describe(wear).filter(|_| armor_of(id).is_some()) {
+        s += &format!(" [{t}]");
     }
     if let Some(max) = inventory::max_uses(id, wear) {
         s += &format!(" ({}/{max} uses left)", max.saturating_sub(inventory::uses(wear) as u32));
@@ -4167,7 +4216,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
@@ -4785,6 +4834,8 @@ async fn game_main() {
                     for slot in 0..4 {
                         let tier = [3, 1, 2, 0][slot];
                         app.game.inv.armor[slot] = Some((block::ARMOR_FIRST + tier * 4 + slot as u16, 1));
+                        // Each piece trimmed differently (see trims.rs).
+                        app.game.inv.armor_wear[slot] = trims::with_trim(0, slot, [1, 2, 3, 0][slot]);
                     }
                     app.game.third_person = true;
                     app.game.player.health = 15.0;
@@ -5182,24 +5233,24 @@ async fn game_main() {
                 }
             }
             if s.mode == "newmobs" && frames == 150 {
-                // This batch's mobs: the Scorchlands' up front, raiders behind, a Weeper over it all.
+                // This batch's mobs (a Camel with both seats, an Axolotl in a puddle), under fireworks.
                 use entity::MobKind as K;
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
                 let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
                 let mut rng = noise::Rng::new(9);
-                let line = [(K::Sizzler, 6.0, -3.0), (K::Strutter, 6.0, -1.0), (K::Snout, 6.0, 1.0), (K::Fee, 6.0, 3.0), (K::Pilferer, 10.0, -4.5), (K::Hackler, 10.0, -2.5), (K::Invoicer, 10.0, -0.5), (K::Rampager, 10.5, 2.5), (K::Weeper, 19.0, 0.0)];
+                let line = [(K::Axolotl, 4.0, -2.0), (K::Goat, 5.0, -0.3), (K::Breeze, 5.0, 2.0), (K::Camel, 8.5, -1.2)];
+                for (x, y, z) in [(-8.0, 14.0, 22.0), (4.0, 17.0, 26.0), (12.0, 12.0, 20.0)] {
+                    let colour = (x as i32).rem_euclid(8) as u8;
+                    app.game.firework_sparks(p + right * x + Vec3::Y * y + fwd * z, colour);
+                }
                 for (i, (kind, f, r)) in line.into_iter().enumerate() {
-                    let up = if kind == K::Weeper { 4.0 } else if kind == K::Sizzler || kind == K::Fee { 1.2 } else { 0.0 };
+                    let up = 0.0;
                     let mut m = entity::Mob::new(kind, p + fwd * f + right * r + Vec3::Y * (2.0 + up), &mut rng);
                     m.yaw = s.yaw + std::f32::consts::PI;
                     m.id = 2000 + i as u32;
                     // A captain with its banner, a Snout admiring gold, an Invoicer casting.
-                    m.seed = matches!(kind, K::Pilferer | K::Snout) as u32;
-                    m.angry = kind == K::Weeper;
-                    if kind == K::Invoicer {
-                        m.fuse = 1.0;
-                    }
+                    m.saddled = kind == K::Camel;
                     app.game.mobs.push(m);
                 }
             }

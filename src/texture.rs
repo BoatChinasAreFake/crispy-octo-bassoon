@@ -481,6 +481,58 @@ pub const T_RAMPAGER: u16 = 620;
 pub const T_RAMPAGER_FACE: u16 = 621;
 pub const T_BANNER_WORN: u16 = 622;
 pub const T_SPAWNER: u16 = 623;
+pub const T_CHERRY_LOG_SIDE: u16 = 624;
+pub const T_CHERRY_LOG_TOP: u16 = 625;
+pub const T_CHERRY_LEAVES: u16 = 626;
+pub const T_PINK_PETALS: u16 = 627;
+pub const T_CHERRY_PLANKS: u16 = 628;
+pub const T_MANGROVE_LOG_SIDE: u16 = 629;
+pub const T_MANGROVE_LOG_TOP: u16 = 630;
+pub const T_MANGROVE_LEAVES: u16 = 631;
+pub const T_MANGROVE_ROOTS: u16 = 632;
+pub const T_MANGROVE_PLANKS: u16 = 633;
+pub const T_OBSERVER_FACE: u16 = 634;
+pub const T_OBSERVER_SIDE: u16 = 635;
+pub const T_OBSERVER_BACK: u16 = 636;
+pub const T_OBSERVER_BACK_ON: u16 = 637;
+pub const T_CRAFTER_TOP: u16 = 638;
+pub const T_CRAFTER_SIDE: u16 = 639;
+pub const T_CRAFTER_FACE: u16 = 640;
+pub const T_COPPER_BULB: u16 = 641;
+pub const T_COPPER_BULB_ON: u16 = 642;
+pub const T_TUFF_BRICKS: u16 = 643;
+pub const T_CHISELED_TUFF: u16 = 644;
+pub const T_CHISELED_TUFF_TOP: u16 = 645;
+pub const T_COPPER_GRATE: u16 = 646;
+pub const T_TRIAL_SPAWNER: u16 = 647;
+pub const T_TRIAL_SPAWNER_SPENT: u16 = 648;
+pub const T_TRIAL_SPAWNER_TOP: u16 = 649;
+pub const T_VAULT_FRONT: u16 = 650;
+pub const T_VAULT_OPEN: u16 = 651;
+pub const T_VAULT_TOP: u16 = 652;
+pub const T_LODESTONE_TOP: u16 = 653;
+pub const T_LODESTONE_SIDE: u16 = 654;
+pub const T_TRIAL_KEY: u16 = 655;
+pub const T_WIND_CHARGE: u16 = 656;
+pub const T_BREEZE_ROD: u16 = 657;
+pub const T_GOAT_HORN: u16 = 658;
+pub const T_TRIM_TEMPLATE: u16 = 659;
+pub const T_SPYGLASS: u16 = 660;
+pub const T_BUNDLE: u16 = 661;
+pub const T_BREEZE: u16 = 662;
+pub const T_BREEZE_FACE: u16 = 663;
+pub const T_GOAT: u16 = 664;
+pub const T_GOAT_FACE: u16 = 665;
+pub const T_AXOLOTL: u16 = 666;
+pub const T_AXOLOTL_FACE: u16 = 667;
+pub const T_AXOLOTL_GILL: u16 = 668;
+pub const T_CAMEL: u16 = 669;
+pub const T_CAMEL_FACE: u16 = 670;
+pub const T_CAMEL_HUMP: u16 = 671;
+/// Firework sparks, one per colour (see fireworks.rs).
+pub const T_SPARK_FIRST: u16 = 672;
+/// Armour trim colours, one per material (see trims.rs).
+pub const T_TRIM_FIRST: u16 = 680;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2617,6 +2669,59 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     };
     bark(&mut a, T_SPRUCE_LOG_SIDE, T_SPRUCE_LOG_TOP, [70, 50, 32], [140, 105, 65]);
     bark(&mut a, T_JUNGLE_LOG_SIDE, T_JUNGLE_LOG_TOP, [110, 90, 45], [175, 130, 80]);
+    bark(&mut a, T_CHERRY_LOG_SIDE, T_CHERRY_LOG_TOP, [60, 30, 38], [215, 150, 150]);
+    // Observers: a stone box with a face (two eyes) and a back that lights up.
+    let stone_box = |x: usize, y: usize, r: &mut Rng| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if rim { rgb(70, 70, 74) } else { rgb(120, 120, 125) }, r.range(0.9, 1.08))
+    };
+    a.each(T_OBSERVER_SIDE, |x, y, r, _| if (3..13).contains(&x) && y % 4 == 1 { shade(rgb(85, 85, 90), r.range(0.9, 1.05)) } else { stone_box(x, y, r) });
+    a.each(T_OBSERVER_FACE, |x, y, r, _| {
+        let eye = (4..7).contains(&x) && (5..9).contains(&y) || (9..12).contains(&x) && (5..9).contains(&y);
+        if eye { rgb(20, 20, 24) } else if (3..13).contains(&x) && (11..13).contains(&y) { rgb(45, 45, 50) } else { stone_box(x, y, r) }
+    });
+    for (t, dot) in [(T_OBSERVER_BACK, rgb(70, 20, 20)), (T_OBSERVER_BACK_ON, rgb(255, 60, 40))] {
+        a.each(t, |x, y, r, _| if (6..10).contains(&x) && (6..10).contains(&y) { dot } else { stone_box(x, y, r) });
+    }
+    // Crafters: an iron box with a crafting grid on top and a mouth in front.
+    let iron_box = |x: usize, y: usize, r: &mut Rng| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if rim { rgb(90, 90, 96) } else { rgb(160, 160, 166) }, r.range(0.92, 1.06))
+    };
+    a.each(T_CRAFTER_TOP, |x, y, r, _| if (x % 5 == 0 || y % 5 == 0) && (1..15).contains(&x) && (1..15).contains(&y) { rgb(60, 45, 30) } else { iron_box(x, y, r) });
+    a.each(T_CRAFTER_SIDE, |x, y, r, _| if y < 3 { shade(rgb(150, 115, 70), r.range(0.9, 1.05)) } else { iron_box(x, y, r) });
+    a.each(T_CRAFTER_FACE, |x, y, r, _| if (5..11).contains(&x) && (6..11).contains(&y) { rgb(25, 22, 20) } else if y < 3 { shade(rgb(150, 115, 70), r.range(0.9, 1.05)) } else { iron_box(x, y, r) });
+    // Copper Bulbs: copper casing round a glass lamp, dark or glowing.
+    for (t, inner) in [(T_COPPER_BULB, rgb(90, 60, 40)), (T_COPPER_BULB_ON, rgb(255, 225, 150))] {
+        a.each(t, |x, y, r, _| {
+            let frame = x < 3 || y < 3 || x > 12 || y > 12 || x == 7 || x == 8;
+            if frame { shade(rgb(195, 110, 75), r.range(0.85, 1.1)) } else { shade(inner, r.range(0.9, 1.08)) }
+        });
+    }
+    bark(&mut a, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP, [90, 55, 40], [150, 60, 50]);
+    a.each(T_CHERRY_LEAVES, |x, y, r, _| {
+        if r.chance(0.13) { return [240, 170, 200, 0]; }
+        let blossom = (x * 7 + y * 3) % 5 == 0;
+        shade(if blossom { rgb(255, 215, 230) } else { rgb(240, 160, 195) }, r.range(0.82, 1.1))
+    });
+    a.each(T_PINK_PETALS, |x, y, r, _| {
+        // Little scattered petals on the ground; the gaps show the grass.
+        let petal = (x * 5 + y * 11) % 7 < 2 && r.chance(0.8);
+        if petal { shade(rgb(245, 170, 205), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_MANGROVE_LEAVES, |_, _, r, _| if r.chance(0.14) { [60, 140, 40, 0] } else { shade(rgb(70, 145, 45), r.range(0.72, 1.15)) });
+    a.each(T_MANGROVE_ROOTS, |x, y, r, _| {
+        // A tangle: diagonal roots with gaps between.
+        let root = (x + y) % 5 < 2 || (x + 16 - y) % 6 < 2;
+        if root { shade(rgb(95, 75, 55), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    for (t, light, dark) in [(T_CHERRY_PLANKS, rgb(225, 175, 170), rgb(150, 95, 100)), (T_MANGROVE_PLANKS, rgb(150, 70, 60), rgb(95, 40, 35))] {
+        a.each(t, |x, y, r, _| {
+            let board = y / 4;
+            let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
+            if seam { dark } else { shade(light, r.range(0.9, 1.08)) }
+        });
+    }
     a.each(T_SPRUCE_LEAVES, |x, y, r, _| {
         // Needles: darker, bluer, in little diagonal strokes.
         if r.chance(0.2) { return [40, 80, 55, 0]; }
@@ -3038,6 +3143,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     paint_ancient(&mut a);
     paint_music(&mut a);
     paint_scorch_and_raids(&mut a);
+    paint_trials_and_friends(&mut a);
 
     // Sky & misc
     a.each(T_WHITE, |_, _, _, _| rgb(255, 255, 255));
@@ -4602,6 +4708,211 @@ fn paint_scorch_and_raids(a: &mut Atlas) {
         shade(if mark { rgb(40, 40, 45) } else { rgb(235, 235, 230) }, r.range(0.94, 1.04))
     });
 }
+
+/// Trial Chambers, the new animals, fireworks, trims and tools.
+fn paint_trials_and_friends(a: &mut Atlas) {
+    let tuff = rgb(95, 100, 92);
+    a.each(T_TUFF_BRICKS, |x, y, r, _| {
+        let row = y / 4;
+        let mortar = y % 4 == 3 || (x + if row % 2 == 1 { 4 } else { 0 }) % 8 == 7;
+        shade(if mortar { rgb(60, 64, 58) } else { tuff }, r.range(0.88, 1.08))
+    });
+    a.each(T_CHISELED_TUFF, |x, y, r, _| {
+        let band = !(2..=13).contains(&y);
+        let carve = (5..11).contains(&x) && (5..11).contains(&y) && !((6..10).contains(&x) && (6..10).contains(&y));
+        shade(if band || carve { rgb(70, 74, 68) } else { tuff }, r.range(0.9, 1.06))
+    });
+    a.each(T_CHISELED_TUFF_TOP, |x, y, r, _| {
+        let ring = (x == 3 || x == 12 || y == 3 || y == 12) && (3..13).contains(&x) && (3..13).contains(&y);
+        shade(if ring { rgb(70, 74, 68) } else { tuff }, r.range(0.9, 1.06))
+    });
+    a.each(T_COPPER_GRATE, |x, y, r, _| {
+        let bar = x % 4 == 0 || y % 4 == 0 || x == 15 || y == 15;
+        if bar { shade(rgb(200, 115, 75), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    for (t, core) in [(T_TRIAL_SPAWNER, rgb(255, 160, 60)), (T_TRIAL_SPAWNER_SPENT, rgb(60, 60, 70))] {
+        a.each(t, |x, y, r, _| {
+            let bar = x % 5 == 0 || y % 5 == 0 || x == 15 || y == 15;
+            if bar { shade(rgb(45, 50, 55), r.range(0.85, 1.1)) } else if (6..10).contains(&x) && (6..10).contains(&y) { shade(core, r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+        });
+    }
+    a.each(T_TRIAL_SPAWNER_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        shade(if rim { rgb(200, 115, 75) } else { rgb(45, 50, 55) }, r.range(0.85, 1.1))
+    });
+    let vault_box = |x: usize, y: usize, r: &mut Rng| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        shade(if rim { rgb(200, 115, 75) } else { rgb(55, 60, 66) }, r.range(0.88, 1.08))
+    };
+    a.each(T_VAULT_FRONT, |x, y, r, _| if (6..10).contains(&x) && (5..11).contains(&y) { shade(rgb(255, 210, 90), r.range(0.85, 1.1)) } else { vault_box(x, y, r) });
+    a.each(T_VAULT_OPEN, |x, y, r, _| if (6..10).contains(&x) && (5..11).contains(&y) { rgb(20, 20, 24) } else { vault_box(x, y, r) });
+    a.each(T_VAULT_TOP, |x, y, r, _| vault_box(x, y, r));
+    a.each(T_LODESTONE_SIDE, |x, y, r, _| {
+        let stripe = (x + y) % 6 < 2;
+        shade(if stripe { rgb(150, 150, 155) } else { rgb(105, 105, 110) }, r.range(0.9, 1.06))
+    });
+    a.each(T_LODESTONE_TOP, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        shade(if d < 3.0 { rgb(70, 70, 75) } else if d < 4.5 { rgb(200, 200, 205) } else { rgb(110, 110, 115) }, r.range(0.9, 1.06))
+    });
+    a.sprite(T_TRIAL_KEY, &KEY_SPRITE, &[('#', rgb(70, 40, 20)), ('h', rgb(255, 220, 120)), ('b', rgb(220, 160, 60))]);
+    a.sprite(T_WIND_CHARGE, &ORB_SPRITE, &[('#', rgb(90, 110, 160)), ('h', rgb(240, 245, 255)), ('b', rgb(180, 200, 245)), ('d', rgb(130, 150, 210))]);
+    a.sprite(T_BREEZE_ROD, &ROD_SPRITE, &[('#', rgb(60, 70, 110)), ('h', rgb(220, 230, 255)), ('b', rgb(150, 170, 230))]);
+    a.sprite(T_GOAT_HORN, &HORN_SPRITE, &[('#', rgb(70, 60, 45)), ('h', rgb(240, 230, 205)), ('b', rgb(200, 185, 150))]);
+    a.sprite(T_TRIM_TEMPLATE, &TRIM_SPRITE, &[('#', rgb(40, 40, 45)), ('h', rgb(230, 230, 235)), ('b', rgb(150, 150, 160)), ('g', rgb(80, 180, 160))]);
+    a.sprite(T_SPYGLASS, &SPYGLASS_SPRITE, &[('#', rgb(70, 40, 20)), ('c', rgb(205, 120, 80)), ('d', rgb(150, 80, 50)), ('g', rgb(200, 230, 255))]);
+    a.sprite(T_BUNDLE, &BUNDLE_SPRITE, &[('#', rgb(70, 45, 25)), ('h', rgb(210, 160, 100)), ('b', rgb(165, 115, 65)), ('s', rgb(230, 220, 200))]);
+    // Mob skins.
+    a.each(T_BREEZE, |x, y, r, _| {
+        let swirl = (x + y * 2) % 7 < 2;
+        shade(if swirl { rgb(220, 230, 255) } else { rgb(150, 170, 230) }, r.range(0.85, 1.1))
+    });
+    a.each(T_BREEZE_FACE, |x, y, r, _| {
+        let eye = (3..6).contains(&x) && (5..8).contains(&y) || (10..13).contains(&x) && (5..8).contains(&y);
+        if eye { rgb(30, 40, 80) } else { shade(rgb(150, 170, 230), r.range(0.9, 1.08)) }
+    });
+    a.speckle(T_GOAT, rgb(225, 220, 205), 0.08);
+    a.each(T_GOAT_FACE, |x, y, r, _| {
+        let eye = (y == 6 || y == 7) && (x == 3 || x == 4 || x == 11 || x == 12);
+        let beard = y > 12 && (6..10).contains(&x);
+        if eye { rgb(60, 45, 20) } else if beard { rgb(250, 248, 240) } else { shade(rgb(225, 220, 205), r.range(0.9, 1.06)) }
+    });
+    a.speckle(T_AXOLOTL, rgb(240, 150, 190), 0.06);
+    a.each(T_AXOLOTL_FACE, |x, y, r, _| {
+        let eye = (y == 5 || y == 6) && (x == 2 || x == 13);
+        let mouth = y == 11 && (5..11).contains(&x);
+        if eye { rgb(20, 20, 20) } else if mouth { rgb(170, 70, 110) } else { shade(rgb(240, 150, 190), r.range(0.92, 1.06)) }
+    });
+    a.speckle(T_AXOLOTL_GILL, rgb(210, 60, 120), 0.1);
+    a.speckle(T_CAMEL, rgb(210, 170, 110), 0.07);
+    a.each(T_CAMEL_FACE, |x, y, r, _| {
+        let eye = (y == 4 || y == 5) && (x == 3 || x == 12);
+        let nose = y > 11 && (x == 5 || x == 10);
+        if eye || nose { rgb(50, 35, 20) } else { shade(rgb(210, 170, 110), r.range(0.92, 1.06)) }
+    });
+    a.speckle(T_CAMEL_HUMP, rgb(190, 145, 90), 0.08);
+    // Firework sparks: a bright dot, one colour each.
+    let colours = [rgb(255, 70, 60), rgb(255, 170, 40), rgb(255, 240, 80), rgb(80, 230, 90), rgb(70, 200, 255), rgb(90, 110, 255), rgb(220, 90, 255), rgb(255, 255, 255)];
+    for (i, c) in colours.into_iter().enumerate() {
+        a.each(T_SPARK_FIRST + i as u16, |x, y, _, _| {
+            let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+            if d < 3.0 { rgb(255, 255, 255) } else if d < 7.5 { c } else { [0, 0, 0, 0] }
+        });
+    }
+    // Trim colours: iron, gold, diamond, copper, emerald-ish green (Zappy red too).
+    for (i, c) in [rgb(215, 215, 220), rgb(250, 210, 60), rgb(100, 230, 220), rgb(220, 120, 80), rgb(80, 200, 110), rgb(220, 40, 40)].into_iter().enumerate() {
+        a.speckle(T_TRIM_FIRST + i as u16, c, 0.06);
+    }
+}
+
+const KEY_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "....####........",
+    "...#hhhh#.......",
+    "..#hb##bh#......",
+    "..#h#..#h#......",
+    "..#hb##bh#......",
+    "...#hbbb#####...",
+    "....####hhhhh#..",
+    ".........#b#b#..",
+    ".........#b#b#..",
+    "..........#.#...",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+const ORB_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "......####......",
+    "....##hhbb##....",
+    "...#hhbbbbdd#...",
+    "...#hbbhbbbd#...",
+    "..#hbbhhbbbdd#..",
+    "..#hbbbhbbbdd#..",
+    "..#bbbbbhbbdd#..",
+    "..#bbbbbbhddd#..",
+    "...#bbbbbbdd#...",
+    "...#dbbbbddd#...",
+    "....##dddd##....",
+    "......####......",
+    "................",
+    "................",
+];
+const HORN_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "............##..",
+    "...........#hh#.",
+    "..........#hb#..",
+    ".........#hb#...",
+    "........#hhb#...",
+    ".......#hhb#....",
+    "......#hhbb#....",
+    ".....#hhbb#.....",
+    "....#hhbb#......",
+    "...#hhbbb#......",
+    "..#hhbbb#.......",
+    "..#bbbb#........",
+    "...####.........",
+    "................",
+];
+const TRIM_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "...##########...",
+    "...#hhhhhhhh#...",
+    "...#hbbbbbbh#...",
+    "...#hbggggbh#...",
+    "...#hbgbbgbh#...",
+    "...#hbggggbh#...",
+    "...#hbbbbbbh#...",
+    "...#hbggggbh#...",
+    "...#hbgbbgbh#...",
+    "...#hbbbbbbh#...",
+    "...#hhhhhhhh#...",
+    "...##########...",
+    "................",
+    "................",
+];
+const SPYGLASS_SPRITE: [&str; 16] = [
+    "................",
+    "..........###...",
+    ".........#ggg#..",
+    "........#cgggc#.",
+    ".......#ccgccc#.",
+    "......#cccccd#..",
+    ".....#cccccd#...",
+    "....#dcccd##....",
+    "...#ddccd#......",
+    "..#dddcd#.......",
+    ".#dddd#.........",
+    ".#ddd#..........",
+    "..###...........",
+    "................",
+    "................",
+    "................",
+];
+const BUNDLE_SPRITE: [&str; 16] = [
+    "................",
+    "................",
+    "......#ss#......",
+    ".....#s##s#.....",
+    "......####......",
+    ".....#hhhh#.....",
+    "....#hhhhhh#....",
+    "...#hhbhhbhh#...",
+    "..#hhhhhhhhhh#..",
+    "..#hbhhhhhhbh#..",
+    "..#hhhhhhhhhh#..",
+    "..#bhhhhhhhhb#..",
+    "...#bbhhhhbb#...",
+    "....##bbbb##....",
+    "......####......",
+    "................",
+];
 
 #[cfg(test)]
 mod tests {

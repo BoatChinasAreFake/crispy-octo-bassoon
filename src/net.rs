@@ -27,7 +27,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v16: game modes (GameMode, spectators in PlayerState flags) and hardcore (Rules).
 /// v19: modded projectile appearance in authoritative arrow snapshots.
 /// v20: timed effects carry bounded amplifier levels.
-pub const PROTOCOL: u32 = 20;
+/// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
+pub const PROTOCOL: u32 = 21;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -96,7 +97,7 @@ pub enum Msg {
     /// Both directions; the host fills in `id` when relaying.
     /// `held` is the item in hand (the host only believes it if the player owns one).
     /// `held_ench`: its enchantments (believed only if the host knows they have them).
-    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16 },
+    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16, trims: u32 },
     /// Mobs, primed TNT, arrows in flight, falling blocks and fireballs.
     Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<ArrowSnap>, falling: Vec<(Vec3, f32, Id)>, fireballs: Vec<(Vec3, Vec3, bool)> },
     /// client -> host
@@ -109,6 +110,8 @@ pub enum Msg {
     /// `wear`: how used it is, for tools and armour.
     Give { item: Id, n: u8, wear: u32 },
     Explosion { at: Vec3, r: f32 },
+    /// host -> client: a firework burst, in one of the spark colours.
+    Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
     Time(f32),
     Chat { from: u32, text: String },
@@ -391,7 +394,7 @@ impl Msg {
                 w.u8(6);
                 w.u32(*id);
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, held, held_ench, armor } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held, held_ench, armor, trims } => {
                 w.u8(7);
                 w.u32(*id);
                 w.v3(*pos);
@@ -401,6 +404,7 @@ impl Msg {
                 w.u16(*held);
                 w.u16(*held_ench);
                 w.u16(*armor);
+                w.u32(*trims);
             }
             Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
                 w.u8(8);
@@ -688,6 +692,11 @@ impl Msg {
                 w.u8(*waves);
                 w.u16(*left);
             }
+            Msg::Firework { at, colour } => {
+                w.u8(72);
+                w.v3(*at);
+                w.u8(*colour);
+            }
             Msg::TimedEffect { effect, secs, amplifier } => {
                 w.u8(71);
                 w.u8(*effect);
@@ -862,7 +871,7 @@ impl Msg {
             }
             5 => Msg::PlayerJoin { id: r.u32()?, name: r.str()? },
             6 => Msg::PlayerLeave { id: r.u32()? },
-            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()? },
+            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()?, trims: r.u32()? },
             8 => {
                 let n = r.count(32)?;
                 let mut mobs = Vec::with_capacity(n);
@@ -982,6 +991,7 @@ impl Msg {
             68 => Msg::Died { cause: r.str()? },
             69 => Msg::Deflect { at: r.v3()?, dir: r.v3()? },
             70 => Msg::Raid { state: r.u8()?, wave: r.u8()?, waves: r.u8()?, left: r.u16()? },
+            72 => Msg::Firework { at: r.v3()?, colour: r.u8()? },
             71 => Msg::TimedEffect { effect: r.u8()?, secs: r.f32()?, amplifier: r.u8()?.min(3) },
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
@@ -1508,7 +1518,7 @@ mod tests {
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0), keep_inventory: true },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
-            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102 },
+            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102, trims: 0x2A },
             Msg::Craft { recipe: 12, times: 64 },
             Msg::Consume { item: 0x8005, n: 1 },
             Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },
@@ -1548,6 +1558,7 @@ mod tests {
             Msg::Splash { item: 0x8070, at: Vec3::new(1.0, 2.0, 3.0) },
             Msg::PotionEffect { item: 0x8065 },
             Msg::MountMob { mob: 42 },
+            Msg::Firework { at: Vec3::new(1.0, 90.0, -3.0), colour: 5 },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },
             Msg::BeaconEffect { item: 0x8066 },

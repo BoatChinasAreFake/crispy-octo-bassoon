@@ -49,6 +49,9 @@ impl Game {
             PISTON_FIRST => return crate::contraptions::piston(self.facing6(), false, false),
             STICKY_FIRST => return crate::contraptions::piston(self.facing6(), false, true),
             DISPENSER_FIRST => return DISPENSER_FIRST + self.facing6() as Id,
+            CRAFTER_FIRST => return CRAFTER_FIRST + self.facing6() as Id,
+            // An observer looks the way you're looking (at what you placed it against).
+            OBSERVER_FIRST => return crate::contraptions::observer(crate::contraptions::facing_of(-crate::contraptions::dir6(self.facing6())), false),
             REPEATER_FIRST => return crate::contraptions::repeater(self.facing(), false),
             COMPARATOR_FIRST => return crate::contraptions::comparator(self.facing(), false, false),
             HOPPER_FIRST => return Game::hopper_facing(normal),

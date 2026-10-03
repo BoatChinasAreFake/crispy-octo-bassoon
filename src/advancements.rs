@@ -129,6 +129,14 @@ pub const ALL: &[Advancement] = &[
     adv("hero_village", "Hero of the Village", "See off a raid. The Hmmers are very grateful (and give discounts)."),
     adv("rampage_over", "Rampage Over", "Defeat a Rampager. Large and in charge, until now."),
     adv("totem_saved", "Postponed", "Cheat death with a Totem of Not Dying."),
+    adv("breeze_through", "Breeze Through", "Defeat a Breeze. It was full of hot air."),
+    adv("under_lock", "Under Lock and Key", "Open a Vault with a Trial Key."),
+    adv("wind_jump", "Up, Up and Away", "Launch yourself with a Wind Charge."),
+    adv("toot_toot", "Toot Toot", "Get a Goat Horn the hard way: from a Goat that missed."),
+    adv("bird_plane", "Is It a Bird?", "Look through a Spyglass."),
+    adv("light_show", "Light Show", "Set off a firework from the ground."),
+    adv("dressed_up", "Crafting a New Look", "Put a trim on some armour at a Smithing Table."),
+    adv("homing_in", "Country Lode, Take Me Home", "Point a compass at a Lodestone."),
 ];
 
 pub fn find(key: &str) -> Option<&'static Advancement> {

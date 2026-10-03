@@ -275,6 +275,9 @@ pub fn climate(b: Biome) -> f32 {
     match b {
         Biome::Jungle => 1.15,
         Biome::Plains | Biome::Forest => 1.0,
+        // Bees adore cherry blossom.
+        Biome::Cherry => 1.2,
+        Biome::Mangrove => 0.95,
         Biome::Swamp => 0.9,
         Biome::Taiga => 0.7,
         Biome::Desert | Biome::Badlands => 0.6,

@@ -106,6 +106,11 @@ impl Game {
 
     /// Using a rocket: a push while gliding, a harmless bang otherwise.
     pub fn use_rocket(&mut self) {
+        if !self.player.gliding {
+            // On foot: it's a firework (see fireworks.rs).
+            self.set_off_firework();
+            return;
+        }
         let at = self.player.eye() + self.player.look_dir() * 0.8;
         self.sfx(Sfx::Explode, Some(at));
         for _ in 0..12 {

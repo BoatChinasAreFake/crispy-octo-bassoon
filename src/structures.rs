@@ -39,6 +39,8 @@ pub enum Kind {
     SnoutCamp,
     /// A Pilferer lookout tower (see raids.rs).
     Outpost,
+    /// Copper-and-tuff halls deep underground (see trial.rs).
+    TrialChambers,
 }
 
 impl Kind {
@@ -57,6 +59,7 @@ impl Kind {
             Kind::Fortress => "Scorch Fortress (Bring Fire Resistance)",
             Kind::SnoutCamp => "Snout Camp (Gold Accepted)",
             Kind::Outpost => "Pilferer Outpost (Keep Out)",
+            Kind::TrialChambers => "Trial Chambers (Bring Keys Back)",
         }
     }
 
@@ -75,13 +78,14 @@ impl Kind {
             "fortress" | "scorch_fortress" | "nether_fortress" => Kind::Fortress,
             "snout_camp" | "camp" | "bastion" | "bastion_remnant" => Kind::SnoutCamp,
             "outpost" | "pilferer_outpost" | "pillager_outpost" => Kind::Outpost,
+            "trial_chambers" | "trial_chamber" | "trials" => Kind::TrialChambers,
             _ => return None,
         })
     }
 
     /// Wide enough that it reaches two chunks out.
     fn wide(self) -> bool {
-        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress)
+        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers)
     }
 }
 
@@ -109,7 +113,9 @@ impl Generator {
         let village_spot = cx == rx * 6 + 2 + (hash2(s ^ 0xA11, rx, rz) * 2.0) as i32 % 2 && cz == rz * 6 + 2 + (hash2(s ^ 0xA12, rx, rz) * 2.0) as i32 % 2 && hash2(s ^ 0x7111, rx, rz) < 0.85;
         // (Villages and the rarer sites roll on their own, below; the rest only here.)
         let common = r < 0.10;
-        if !common && !village_spot && hash2(s ^ 0x0B0, cx, cz) >= 0.01 && hash2(s ^ 0xC17, cx, cz) >= 0.035 {
+        // Trial Chambers: rare, deep, wherever (but never two in reach of each other).
+        let trial_spot = (cx.rem_euclid(5), cz.rem_euclid(5)) == (2, 2) && hash2(s ^ 0x7A1, cx.div_euclid(5), cz.div_euclid(5)) < 0.3;
+        if !common && !village_spot && !trial_spot && hash2(s ^ 0x0B0, cx, cz) >= 0.01 && hash2(s ^ 0xC17, cx, cz) >= 0.035 {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -132,6 +138,9 @@ impl Generator {
         // Pilferers build lookouts on open, flat ground.
         if hash2(s ^ 0x0B0, cx, cz) < 0.01 && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() {
             return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
+        }
+        if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
+            return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
         }
         // The Hushed Ones built rarely, and only in the Deep Dark.
         if hash2(s ^ 0xC17, cx, cz) < 0.035 && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
@@ -195,6 +204,7 @@ impl Generator {
             Kind::Fortress => return crate::fortress::fortress_blocks(site),
             Kind::SnoutCamp => return crate::fortress::camp_blocks(site),
             Kind::Outpost => return crate::raids::outpost_blocks(site),
+            Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -609,6 +619,18 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (ENCHANTED_BOOK, 1, 0.25),
             (SPRUCE_LOG, 8, 0.4),
             (BOTTLE, 2, 0.3),
+        ],
+        Kind::TrialChambers => &[
+            (WIND_CHARGE, 4, 0.5),
+            (ARROW, 10, 0.5),
+            (BREAD, 4, 0.5),
+            (IRON, 4, 0.4),
+            (COPPER_INGOT, 6, 0.5),
+            (TRIAL_KEY, 1, 0.25),
+            (TRIM_FIRST, 1, 0.12),
+            (TRIM_FIRST + 1, 1, 0.12),
+            (CROSSBOW, 1, 0.2),
+            (GOLDEN_CHOP, 1, 0.08),
         ],
         Kind::SnoutCamp => &[
             (GOLD_INGOT, 9, 0.8),

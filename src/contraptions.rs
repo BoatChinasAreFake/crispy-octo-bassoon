@@ -18,6 +18,15 @@
 //!   fires out one thing: arrows fly, buckets pour or scoop, TNT lights,
 //!   splash potions burst, Bone Dust fertilises, anything else is spat out.
 //!
+//! - An **Observer** watches the block in front of it and, whenever that
+//!   block changes, sends a short pulse out of its back: the heart of
+//!   automatic farms.
+//! - A **Crafter** holds a 3x3 grid of ingredients and, each time power
+//!   reaches it, makes whatever recipe they add up to exactly, spitting the
+//!   result out of its front.
+//! - A **Copper Bulb** flips on or off each time power arrives (a memory
+//!   cell), shining bright while on.
+//!
 //! Pistons and dispensers face whoever placed them (up and down too).
 //! Everything runs where the world lives, like the rest of the wiring.
 
@@ -101,10 +110,44 @@ pub fn head(facing: u8, sticky: bool) -> Id {
 pub fn is_dispenser(id: Id) -> bool {
     (DISPENSER_FIRST..DISPENSER_FIRST + 6).contains(&id)
 }
+pub fn is_observer(id: Id) -> bool {
+    (OBSERVER_FIRST..OBSERVER_FIRST + 12).contains(&id)
+}
+/// (facing: the way it looks, on)
+pub fn observer_state(id: Id) -> (u8, bool) {
+    let k = id - OBSERVER_FIRST;
+    ((k / 2) as u8, k % 2 == 1)
+}
+pub fn observer(facing: u8, on: bool) -> Id {
+    OBSERVER_FIRST + (facing % 6) as Id * 2 + on as Id
+}
+pub fn is_crafter(id: Id) -> bool {
+    (CRAFTER_FIRST..CRAFTER_FIRST + 6).contains(&id)
+}
+/// How long an observer's pulse lasts, in seconds.
+pub const OBSERVER_PULSE: f32 = 0.2;
+
+/// The recipe a crafter's contents make, exactly (no spare ingredients).
+pub fn crafter_recipe(slots: &[Option<(Id, u8)>]) -> Option<&'static Recipe> {
+    let mut have: std::collections::BTreeMap<Id, u32> = std::collections::BTreeMap::new();
+    for &(id, n) in slots.iter().flatten() {
+        *have.entry(id).or_default() += n as u32;
+    }
+    if have.is_empty() {
+        return None;
+    }
+    recipes().iter().find(|r| {
+        let mut want: std::collections::BTreeMap<Id, u32> = std::collections::BTreeMap::new();
+        for &(id, n) in &r.inputs {
+            *want.entry(id).or_default() += n as u32;
+        }
+        want == have
+    })
+}
 
 /// Everything in this module, for the wiring's "is this zappy?" check.
 pub fn is_contraption(id: Id) -> bool {
-    (ZTORCH_ON..DISPENSER_FIRST + 6).contains(&id) || is_comparator(id)
+    (ZTORCH_ON..DISPENSER_FIRST + 6).contains(&id) || is_comparator(id) || is_observer(id) || is_crafter(id) || matches!(id, COPPER_BULB | COPPER_BULB_ON)
 }
 
 /// The item a family member is placed from (and drops as).
@@ -121,6 +164,10 @@ pub fn family(id: Id) -> Option<Id> {
         Some(DISPENSER_FIRST)
     } else if is_comparator(id) {
         Some(COMPARATOR_FIRST)
+    } else if is_observer(id) {
+        Some(OBSERVER_FIRST)
+    } else if is_crafter(id) {
+        Some(CRAFTER_FIRST)
     } else {
         None
     }
@@ -138,6 +185,16 @@ pub fn face_tile(id: Id, face: usize) -> Option<u16> {
         (f, if sticky { T_STICKY_FACE } else { T_PISTON_FACE }, T_PISTON_SIDE)
     } else if is_dispenser(id) {
         ((id - DISPENSER_FIRST) as u8, T_DISPENSER_FACE, T_COBBLE)
+    } else if is_observer(id) {
+        let (f, on) = observer_state(id);
+        (f, T_OBSERVER_FACE, if on { T_OBSERVER_BACK_ON } else { T_OBSERVER_BACK })
+    } else if is_crafter(id) {
+        let f = (id - CRAFTER_FIRST) as u8;
+        // The grid is always on top, whichever way it faces.
+        if face == 2 {
+            return Some(T_CRAFTER_TOP);
+        }
+        (f, T_CRAFTER_FACE, T_CRAFTER_SIDE)
     } else {
         return None;
     };
@@ -149,6 +206,10 @@ pub fn face_tile(id: Id, face: usize) -> Option<u16> {
         back
     } else if is_dispenser(id) {
         T_COBBLE
+    } else if is_observer(id) {
+        T_OBSERVER_SIDE
+    } else if is_crafter(id) {
+        T_CRAFTER_SIDE
     } else {
         T_PISTON_SIDE
     })
@@ -156,7 +217,7 @@ pub fn face_tile(id: Id, face: usize) -> Option<u16> {
 
 /// Can a piston move this block?
 pub fn movable(id: Id) -> bool {
-    let fixed = block(id).hardness < 0.0 || matches!(id, OBSIDIAN | BEDROCK) || crate::containers::is_container(id) || is_door(id) || is_head(id) || is_dispenser(id) || crate::scorch::is_portal(id);
+    let fixed = block(id).hardness < 0.0 || matches!(id, OBSIDIAN | BEDROCK) || crate::containers::is_container(id) || is_door(id) || is_head(id) || is_dispenser(id) || is_crafter(id) || crate::scorch::is_portal(id);
     if fixed {
         return false;
     }
@@ -178,6 +239,11 @@ pub fn powers(world: &World, from: IVec3, to: IVec3) -> bool {
     if is_comparator(id) {
         let (f, _, on) = comparator_state(id);
         return on && from + dir4(f) == to;
+    }
+    if is_observer(id) {
+        // Out of its back only.
+        let (f, on) = observer_state(id);
+        return on && from - dir6(f) == to;
     }
     false
 }
@@ -217,16 +283,70 @@ impl Game {
             } else if !on && extended {
                 self.piston_pull(p, f, sticky);
             }
-        } else if is_dispenser(id) {
+        } else if is_dispenser(id) || is_crafter(id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) {
+            // These act when power arrives (not while it stays).
             let on = crate::wiring::powered(&self.world, p);
             let was = self.dispensers_on.contains(&p);
             if on && !was {
                 self.dispensers_on.insert(p);
-                self.dispense(p, (id - DISPENSER_FIRST) as u8);
+                if is_dispenser(id) {
+                    self.dispense(p, (id - DISPENSER_FIRST) as u8);
+                } else if is_crafter(id) {
+                    self.craft_at(p, (id - CRAFTER_FIRST) as u8);
+                } else {
+                    let flip = if id == COPPER_BULB { COPPER_BULB_ON } else { COPPER_BULB };
+                    self.world.set_v(p, flip);
+                    self.sfx(Sfx::Click, Some(p.as_vec3() + Vec3::splat(0.5)));
+                }
             } else if !on && was {
                 self.dispensers_on.remove(&p);
             }
+        } else if is_observer(id) {
+            // Something changed in front of it: a pulse out of the back.
+            let (f, on) = observer_state(id);
+            let front = self.world.get_v(p + dir6(f));
+            let seen = self.observed.insert(p, front);
+            if seen.is_some_and(|s| s != front) && !on {
+                self.world.set_v(p, observer(f, true));
+                self.observer_pulses.insert(p, OBSERVER_PULSE);
+            }
         }
+    }
+
+    /// Observers' pulses end, and they look again.
+    pub fn observers_tick(&mut self, dt: f32) {
+        let mut done = Vec::new();
+        for (p, t) in self.observer_pulses.iter_mut() {
+            *t -= dt;
+            if *t <= 0.0 {
+                done.push(*p);
+            }
+        }
+        for p in done {
+            self.observer_pulses.remove(&p);
+            let id = self.world.get_v(p);
+            if is_observer(id) {
+                self.world.set_v(p, observer(observer_state(id).0, false));
+            }
+        }
+    }
+
+    /// A crafter got power: make its recipe, if its grid holds exactly one.
+    fn craft_at(&mut self, p: IVec3, f: u8) {
+        let mouth = p.as_vec3() + Vec3::splat(0.5) + dir6(f).as_vec3() * 0.7;
+        let Some(c) = self.world.containers.get(&p) else { return };
+        let Some(r) = crafter_recipe(&c.slots) else {
+            self.sfx(Sfx::Click, Some(mouth));
+            return;
+        };
+        let (out, n) = r.output;
+        if let Some(c) = self.world.containers.get_mut(&p) {
+            c.slots.iter_mut().for_each(|s| *s = None);
+            c.wear.iter_mut().for_each(|w| *w = 0);
+        }
+        self.dirty_containers.insert(p);
+        self.spawn_drop(mouth - Vec3::Y * 0.125, out, n, 0, dir6(f).as_vec3() * 4.0 + Vec3::Y, 0.5);
+        self.sfx(Sfx::Craft, Some(mouth));
     }
 
     fn piston_push(&mut self, p: IVec3, f: u8, sticky: bool) {
@@ -319,6 +439,11 @@ impl Game {
                 keep(self, None);
                 self.spawn_arrow(mouth, d.as_vec3() * crate::entity::Arrow::SPEED, None);
                 self.sfx(Sfx::Twang, Some(mouth));
+            }
+            ROCKET => {
+                keep(self, None);
+                let colour = self.rng.int(0, crate::fireworks::COLOURS as i32 - 1) as u8;
+                self.launch_firework(mouth, d.as_vec3() * 14.0 + Vec3::Y * 2.0, colour, None, false);
             }
             WATER_BUCKET | LAVA_BUCKET if replaceable(self.world.get_v(front)) => {
                 keep(self, Some(BUCKET));

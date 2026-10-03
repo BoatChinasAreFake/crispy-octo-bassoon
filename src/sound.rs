@@ -81,6 +81,8 @@ impl Sfx {
             crate::entity::MobKind::Sneaker => Sfx::Yip,
             crate::entity::MobKind::Ribbit => Sfx::Croak,
             crate::entity::MobKind::Rollo => Sfx::Scuttle,
+            crate::entity::MobKind::Goat => Sfx::Bleat,
+            crate::entity::MobKind::Breeze => Sfx::Gust,
             crate::entity::MobKind::Hush => Sfx::Roar,
             _ => Sfx::MobHurt,
         }
@@ -156,6 +158,14 @@ pub enum Sfx {
     Croak,
     /// A Rollo (armadillo) scuttling or rolling up.
     Scuttle,
+    /// A gust of wind (a Breeze's charge bursting).
+    Gust,
+    /// A Goat's bleat.
+    Bleat,
+    /// A firework bursting.
+    Firework,
+    /// A Goat Horn's long call.
+    Horn,
     /// A note block: (instrument, pitch); see songs.rs.
     Note(u8, u8),
 }
@@ -593,6 +603,37 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             burst(&mut v, 0.25, 0.05, 60.0, 300.0, 2500.0, 0.9, rng);
             finish(v, 0.9)
         }
+        Sfx::Gust => {
+            // A rushing whoosh.
+            let mut v = vec![0.0; samples(0.7)];
+            burst(&mut v, 0.0, 0.65, 4.0, 150.0, 1800.0, 1.0, rng);
+            burst(&mut v, 0.05, 0.4, 6.0, 900.0, 4000.0, 0.4, rng);
+            finish(v, 1.0)
+        }
+        Sfx::Bleat => {
+            // A wavering "mehhh".
+            let mut v = vec![0.0; samples(0.7)];
+            let p = rng.range(0.9, 1.2);
+            voice(&mut v, 0.0, 0.6, 420.0 * p, 380.0 * p, 2200.0, 0.12, 1.0, rng);
+            finish(v, 1.0)
+        }
+        Sfx::Firework => {
+            // A thump, then crackles.
+            let mut v = vec![0.0; samples(1.3)];
+            burst(&mut v, 0.0, 0.3, 8.0, 60.0, 900.0, 1.0, rng);
+            for k in 0..14 {
+                let t = 0.25 + k as f32 * 0.065 + rng.range(0.0, 0.04);
+                burst(&mut v, t, 0.02, 150.0, 2500.0, 8000.0, 0.35, rng);
+            }
+            finish(v, 1.0)
+        }
+        Sfx::Horn => {
+            // A long, mournful call.
+            let mut v = vec![0.0; samples(2.0)];
+            tone(&mut v, 0.0, 1.9, 220.0, 200.0, 0.8, 0.8, &[1.0, 0.6, 0.35, 0.2]);
+            tone(&mut v, 0.0, 1.9, 330.0, 300.0, 0.8, 0.25, &[1.0, 0.4]);
+            finish(v, 1.0)
+        }
         Sfx::Note(i, p) => crate::songs::synth_note(crate::songs::Instrument::from_index(i).unwrap_or(crate::songs::Instrument::Harp), p),
         Sfx::Woof => {
             // Two short barks.
@@ -963,6 +1004,10 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Yip,
         Sfx::Croak,
         Sfx::Scuttle,
+        Sfx::Gust,
+        Sfx::Bleat,
+        Sfx::Firework,
+        Sfx::Horn,
     ]);
     v
 }
@@ -1168,7 +1213,7 @@ impl Audio {
             Sfx::Pop => 0.45,
             Sfx::Explode | Sfx::Thunder => 1.0,
             // Voices are dense; keep them level with the percussive sounds.
-            Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck | Sfx::Squawk | Sfx::Yip | Sfx::Croak => 0.4,
+            Sfx::Groan | Sfx::Oink | Sfx::Baa | Sfx::Moo | Sfx::Cluck | Sfx::Squawk | Sfx::Yip | Sfx::Croak | Sfx::Bleat => 0.4,
             Sfx::Buzz => 0.3,
             Sfx::Fanfare => 0.5,
             Sfx::Hurt | Sfx::MobHurt => 0.5,
@@ -1181,7 +1226,7 @@ impl Audio {
         if !self.alive() {
             return;
         }
-        let range = if s == Sfx::Explode { 64.0 } else { 24.0 };
+        let range = if matches!(s, Sfx::Explode | Sfx::Firework | Sfx::Horn) { 64.0 } else { 24.0 };
         let atten = match at {
             Some(p) => (1.0 - p.distance(listener) / range).clamp(0.0, 1.0).powf(1.5),
             None => 1.0,

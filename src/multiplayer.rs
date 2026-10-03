@@ -27,6 +27,8 @@ pub struct Peer {
     pub flags: u8,
     /// What they're wearing (see `Inventory::armor_look`).
     pub armor: u16,
+    /// Their armour trims (see `trims::look`).
+    pub trims: u32,
     pub anim: f32,
     /// Game clock time each rate-limited action was last allowed (see `peer_rate_ok`).
     last: HashMap<&'static str, f32>,
@@ -50,7 +52,7 @@ pub struct Peer {
 
 impl Peer {
     pub(crate) fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -64,7 +66,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk)
+    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -549,7 +551,7 @@ impl Game {
                         }
                     }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, .. } => {
+            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, trims, .. } => {
                 self.set_peer_held(from, held, held_ench);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // Just died: their experience spills (items come separately, see `drop_everything`).
@@ -572,7 +574,8 @@ impl Game {
                 p.pitch = pitch.clamp(-1.6, 1.6);
                 p.flags = flags;
                 p.armor = armor;
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor });
+                p.trims = trims;
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor, trims });
             }
             Msg::Attack { mob, dmg, .. } => {
                 // Hits come from where the player actually is, within reach, at a human pace.
@@ -667,6 +670,24 @@ impl Game {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
                 }
+                if item == ROCKET && self.peer_rate_ok(from, "rocket", 0.25) {
+                    self.host_rocket(from);
+                    return;
+                }
+                if item == CROSSBOW && self.peer_rate_ok(from, "crossbow", 1.0) && self.peer_has(from, CROSSBOW) {
+                    self.host_crossbow(from);
+                    return;
+                }
+                if item == GOAT_HORN && self.peer_rate_ok(from, "horn", 5.0) && self.peer_has(from, GOAT_HORN) {
+                    if let Some(at) = self.peers.get(&from).map(|p| p.target + Vec3::Y * 1.6) {
+                        self.sfx(Sfx::Horn, Some(at));
+                    }
+                    return;
+                }
+                if item == WIND_CHARGE && self.peer_rate_ok(from, "wind", 0.4) {
+                    self.host_throw_wind_charge(from);
+                    return;
+                }
                 // A thrown spear leaves their hands and flies from where they look.
                 if item == SPEAR && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, SPEAR) {
                     let ench = if self.verified_held(from) == SPEAR { self.verified_ench(from) } else { 0 };
@@ -700,6 +721,13 @@ impl Game {
                 if near && armed && dir.is_finite() && dir.length() > 0.5 && self.peer_rate_ok(from, "shoot", 0.4) && self.peer_take(from, ARROW, 1) {
                     self.spawn_arrow(pos, dir.normalize() * Arrow::SPEED * 1.2, Some(from));
                     self.host_wear(from, BOW, 1);
+                }
+            }
+            Msg::Interact { x, y, z, item: TRIAL_KEY } if self.world.get(x, y, z) == VAULT => {
+                let p = IVec3::new(x, y, z);
+                let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
+                if near && self.peer_rate_ok(from, "vault", 0.5) {
+                    self.host_use_vault(from, p);
                 }
             }
             Msg::Interact { x, y, z, .. } if self.world.get(x, y, z) == BELL => {
@@ -967,13 +995,14 @@ impl Game {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, armor, .. } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, armor, trims, .. } => {
                 if let Some(p) = self.peers.get_mut(&id) {
                     p.target = pos;
                     p.yaw = yaw;
                     p.pitch = pitch;
                     p.flags = flags;
                     p.armor = armor;
+                    p.trims = trims;
                 }
             }
             Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
@@ -982,11 +1011,14 @@ impl Game {
                 self.sync_mobs(mobs, tnts, arrows)
             }
             Msg::HurtYou { dmg, cause, knock } => {
-                self.player.hurt = 0.0;
                 // Whatever hit us came from the opposite way to the knock.
                 let flat = Vec3::new(knock.x, 0.0, knock.z);
                 let from = (flat.length() > 0.01).then(|| self.player.body.pos + Vec3::Y * 0.9 - flat.normalize() * 2.0);
-                self.hurt_player_from(dmg, &cause, from, false);
+                // (A gust of wind only pushes.)
+                if dmg > 0.0 {
+                    self.player.hurt = 0.0;
+                    self.hurt_player_from(dmg, &cause, from, false);
+                }
                 self.player.body.vel += self.steadied(knock);
             }
             Msg::Give { item, n, wear } => {
@@ -1025,6 +1057,11 @@ impl Game {
             Msg::Explosion { at, r } => {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
+            }
+            Msg::Firework { at, colour } => {
+                if at.is_finite() {
+                    self.firework_sparks(at, colour);
+                }
             }
             Msg::Sound { sfx, at } => {
                 if let Some(s) = Sfx::from_wire(sfx) {
@@ -1117,7 +1154,7 @@ impl Game {
                 m.seed = s.fuse as u32;
                 m.fuse = 0.0;
             }
-            if kind.mod_def().is_some_and(|d| d.boss) {
+            if m.is_boss() {
                 m.health = s.fuse;
                 m.fuse = 0.0;
             }
@@ -1144,7 +1181,8 @@ impl Game {
 
     /// Client-side entity tick: particles plus smoothing the host's mobs.
     pub fn client_entities(&mut self, dt: f32) {
-        let mounted = self.mounted;
+        // (A Camel's passenger lets the host move it.)
+        let mounted = self.mounted.filter(|_| !self.passenger_seat);
         for m in self.mobs.iter_mut() {
             // The Galloper we're riding goes where we steer it.
             if Some(m.id) == mounted {
@@ -1246,7 +1284,7 @@ impl Game {
             if p.gliding {
                 flags |= FLAG_GLIDE;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look() };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) };
             self.net_send_msg(m);
         }
         if self.is_host() {
@@ -1262,8 +1300,8 @@ impl Game {
                         yaw: m.yaw,
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
-                        // (Modded bosses send their health, for the boss bar.)
-                        fuse: if m.kind.mod_def().is_some_and(|d| d.boss) { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
+                        // (Bosses send their health, for the boss bar.)
+                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         size: m.size as u8,
@@ -1610,7 +1648,7 @@ mod tests {
 
         // Teleporting across the map is refused and the client is put back.
         // (NaN positions never get this far: the decoder drops the connection.)
-        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0 });
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0, trims: 0 });
         for _ in 0..20 {
             host.update(0.016, &idle());
             std::thread::sleep(Duration::from_millis(4));
@@ -2157,10 +2195,15 @@ mod tests {
             if let Some(k) = host.mobs.iter_mut().find(|m| m.id == king) {
                 k.health = 20.0;
             }
+            // (The Hollow Wyrm's bar, too.)
+            let wyrm = host.alloc_mob(MobKind::Wyrm, spawn + Vec3::new(0.0, 30.0, 20.0));
+            if let Some(w) = host.mobs.iter_mut().find(|m| m.id == wyrm) {
+                w.health = 77.0;
+            }
             host.give_peer(id, WHEAT, 8);
             assert!(pump(&mut host, &mut client, |_, c| c.inv.count(WHEAT) == 8 && c.mobs.iter().any(|m| m.id == merchant)));
             // The boss bar on a joined player's screen shows the host's health.
-            assert!(pump(&mut host, &mut client, |_, c| c.mobs.iter().any(|m| m.id == king && (m.health - 20.0).abs() < 0.5)));
+            assert!(pump(&mut host, &mut client, |_, c| c.mobs.iter().any(|m| m.id == king && (m.health - 20.0).abs() < 0.5) && c.mobs.iter().any(|m| m.id == wyrm && (m.health - 77.0).abs() < 0.5)));
             client.open_trade(merchant);
             let (title, list) = client.trade_list().expect("talking");
             assert_eq!(title, "Merchant");
