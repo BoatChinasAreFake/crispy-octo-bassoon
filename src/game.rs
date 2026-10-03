@@ -107,6 +107,9 @@ pub struct Game {
     /// Fireballs in flight (see fortress.rs), and how often cages look around.
     pub fireballs: Vec<crate::fortress::Fireball>,
     pub cage_timer: f32,
+    /// Trial Spawners' fights, and how often they look around (see trial.rs).
+    pub trials: HashMap<IVec3, crate::trial::Trial>,
+    pub trial_timer: f32,
     /// Regeneration's heartbeat.
     pub regen_clock: f32,
     /// Raids (see raids.rs): the one on now, who has Bad Omen or is a Hero (by player id, seconds left),
@@ -137,7 +140,7 @@ pub struct Game {
     pub breaking: Option<(IVec3, f32)>,
     pub rng: Rng,
     attack_cd: f32,
-    use_cd: f32,
+    pub(crate) use_cd: f32,
     pub spawn: Vec3,
     pub shake: f32,
     /// Title-screen panorama: no player simulation.
@@ -255,6 +258,8 @@ pub struct Game {
     pub hopper_timer: f32,
     /// The Galloper we're riding, and when we last told the host (see horses.rs).
     pub mounted: Option<u32>,
+    /// Sitting behind a Camel's driver (just along for the ride).
+    pub passenger_seat: bool,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -361,6 +366,8 @@ impl Game {
             powered_notes: HashSet::new(),
             fireballs: Vec::new(),
             cage_timer: 0.0,
+            trials: HashMap::new(),
+            trial_timer: 0.0,
             regen_clock: 0.0,
             raid: None,
             omens: HashMap::new(),
@@ -459,6 +466,7 @@ impl Game {
             observer_pulses: HashMap::new(),
             hopper_timer: 0.0,
             mounted: None,
+            passenger_seat: false,
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -1498,16 +1506,31 @@ impl Game {
     }
 
     /// Move arrows and see what they hit (host / single player only).
-    fn update_arrows(&mut self, dt: f32) {
+    pub(crate) fn update_arrows(&mut self, dt: f32) {
         let mut arrows = std::mem::take(&mut self.arrows);
         let mut landed = Vec::new();
         let mut blasts: Vec<(Vec3, f32, f32, Option<crate::block::ProjectileEffect>)> = Vec::new();
+        let mut winds: Vec<(Vec3, Option<u32>)> = Vec::new();
         let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
             if a.homing > 0.0 && !a.stuck {
                 steer(a, &targets, dt);
             }
             let thunk = a.fly(dt, &self.world);
+            if a.wind {
+                // A wind charge bursts on the first thing it meets: a wall, or
+                // a mob (a player's) or a player (a Breeze's).
+                let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
+                let touched = match a.shooter {
+                    Some(_) => self.mobs.iter().any(|m| m.kind != MobKind::Breeze && near(m.body.pos + Vec3::Y * m.body.height * 0.5, m.body.half + m.body.height * 0.5 + 0.2)),
+                    None => (!self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1)) || self.peers.values().any(|p| p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)),
+                };
+                if thunk || touched || a.life <= 0.0 {
+                    winds.push((a.pos - a.dir * 0.3, a.shooter));
+                    return false;
+                }
+                return true;
+            }
             // A blast shot goes off where it lands (or fizzles at the end of its life).
             if a.blast > 0.0 && (thunk || a.life <= 0.0) {
                 blasts.push((a.pos - a.dir * 0.3, a.blast, a.damage, a.effect));
@@ -1599,6 +1622,9 @@ impl Game {
         self.arrows = arrows;
         for (at, r, damage, effect) in blasts {
             self.projectile_blast(at, r, damage, effect);
+        }
+        for (at, shooter) in winds {
+            self.wind_burst(at, shooter);
         }
         for (at, wear) in landed {
             self.spawn_drop(at, SPEAR, 1, wear, Vec3::ZERO, 0.5);
@@ -1874,6 +1900,10 @@ impl Game {
                 self.ring_bell(pos);
                 return;
             }
+            if id == VAULT {
+                self.use_vault(pos);
+                return;
+            }
             if crate::music::is_jukebox(id) && self.use_jukebox(pos, held) {
                 return;
             }
@@ -1986,6 +2016,18 @@ impl Game {
         }
         if held == SPEAR {
             self.throw_spear();
+            return;
+        }
+        if held == WIND_CHARGE {
+            self.throw_wind_charge();
+            return;
+        }
+        if held == GOAT_HORN {
+            self.blow_horn();
+            return;
+        }
+        if held == SPYGLASS {
+            // Held down to look (see `spyglass_zoom`); a tap just says so.
             return;
         }
         if held == BOTTLE {
@@ -2634,6 +2676,7 @@ impl Game {
         self.animals_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
+        self.trials_tick(dt);
         self.snouts_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
@@ -2642,7 +2685,7 @@ impl Game {
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             // Ridden Gallopers go where their rider steers (see horses.rs).
-            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 {
+            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 || m.passenger != 0 {
                 continue;
             }
             let fuse_before = m.fuse;
@@ -2682,7 +2725,8 @@ impl Game {
                     MobKind::Snout | MobKind::Strutter => noises.push((Sfx::Oink, m.body.pos)),
                     MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Rampager => noises.push((Sfx::Roar, m.body.pos)),
-                    MobKind::Sizzler | MobKind::Fee => {}
+                    MobKind::Goat => noises.push((Sfx::Bleat, m.body.pos)),
+                    MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -2750,6 +2794,9 @@ impl Game {
                 MobEvent::Summon(at) => self.summon_fees(at),
                 MobEvent::SummonMod(at, kind, n) => self.boss_summon(at, kind, n),
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
+                MobEvent::WindCharge(from, vel) => self.spawn_wind_charge(from, vel, None),
+                MobEvent::DropItem(at, item) => self.pop_drop(at, item, 1),
+                MobEvent::Bleat(at) => self.sfx(Sfx::Bleat, Some(at)),
             }
         }
         self.update_arrows(dt);
@@ -2790,6 +2837,8 @@ impl Game {
                             MobKind::Sizzler => self.advance("too_hot"),
                             MobKind::Weeper => self.advance("dry_your_eyes"),
                             MobKind::Rampager => self.advance("rampage_over"),
+                            MobKind::Breeze => self.advance("breeze_through"),
+                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
@@ -2950,6 +2999,14 @@ impl Game {
         if is_water(top) {
             let depth = (0..y).take_while(|d| is_water(self.world.get(x, y - d, z))).count() as i32;
             let fish = self.mobs.iter().filter(|m| m.kind == MobKind::Fishy).count();
+            // Axolotls in warm, weedy water.
+            let axolotls = self.mobs.iter().filter(|m| m.kind == MobKind::Axolotl).count();
+            if axolotls < 6 && depth >= 2 && matches!(biome, Biome::Jungle | Biome::Mangrove | Biome::Swamp) && self.rng.chance(0.35) {
+                for i in 0..self.rng.int(1, 2) {
+                    self.alloc_mob(MobKind::Axolotl, Vec3::new(x as f32 + 0.5 + i as f32 * 0.6, (y - depth / 2) as f32, z as f32 + 0.5));
+                }
+                return;
+            }
             if fish < 12 && depth >= 2 && self.rng.chance(0.6) {
                 let n = self.rng.int(2, 4);
                 for i in 0..n {
@@ -2971,12 +3028,17 @@ impl Game {
         }
         // Rollos in the dry lands.
         if !self.is_night() && passive < 8 && matches!(top, SAND | RED_SAND) && matches!(biome, Biome::Desert | Biome::Badlands) && clear(&self.world, y + 1) && self.rng.chance(0.3) {
-            self.alloc_mob(MobKind::Rollo, Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5));
+            // (Camels, now and then, in the desert proper.)
+            let kind = if biome == Biome::Desert && self.rng.chance(0.3) { MobKind::Camel } else { MobKind::Rollo };
+            self.alloc_mob(kind, Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5));
             return;
         }
         if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS | MUD) && clear(&self.world, y + 1) {
             let kind = if woofy && self.rng.chance(if biome == Biome::Taiga { 0.4 } else { 0.25 }) {
                 MobKind::Woofer
+            } else if matches!(biome, Biome::Taiga | Biome::Snowy) && (y > crate::world::SEA + 22 || self.rng.chance(0.12)) {
+                // Goats like it high up and cold.
+                MobKind::Goat
             } else if matches!(biome, Biome::Taiga | Biome::Snowy) && self.rng.chance(0.35) {
                 MobKind::Sneaker
             } else if biome == Biome::Swamp && self.rng.chance(0.5) {

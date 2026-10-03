@@ -187,8 +187,9 @@ pub fn camp_blocks(site: &Site) -> Vec<(IVec3, Id)> {
 }
 
 /// A cage that spawns things: a fortress's Sizzler Cage or a dungeon's Monster Cage.
+/// Cages, spawners and Trial Spawners (all kept track of in `World::cages`).
 pub fn is_cage(id: Id) -> bool {
-    id == SIZZLER_CAGE || id == SPAWNER
+    id == SIZZLER_CAGE || id == SPAWNER || crate::trial::is_trial_spawner(id)
 }
 
 /// What comes out of the cage at `p`: Sizzlers, or (in a dungeon) one kind of monster, the same each time.
@@ -383,7 +384,7 @@ impl Game {
         }
         self.cage_timer = 1.0;
         let players = self.player_spots();
-        let cages: Vec<IVec3> = self.world.cages.iter().copied().filter(|p| is_cage(self.world.get_v(*p)) && players.iter().any(|(_, at, _)| at.distance(p.as_vec3()) < 16.0)).collect();
+        let cages: Vec<IVec3> = self.world.cages.iter().copied().filter(|p| matches!(self.world.get_v(*p), SIZZLER_CAGE | SPAWNER) && players.iter().any(|(_, at, _)| at.distance(p.as_vec3()) < 16.0)).collect();
         for c in cages {
             let kind = cage_kind(self.world.get_v(c), c);
             let centre = c.as_vec3() + Vec3::splat(0.5);

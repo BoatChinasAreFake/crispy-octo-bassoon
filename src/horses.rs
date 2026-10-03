@@ -16,7 +16,7 @@
 
 use crate::animals::Interaction;
 use crate::block::*;
-use crate::entity::move_body;
+use crate::entity::{MobKind, move_body};
 use crate::game::Game;
 use crate::net::Msg;
 use crate::sound::Sfx;
@@ -29,6 +29,21 @@ pub const RIDE_SPEED: f32 = 9.5;
 pub const RIDE_JUMP: f32 = 11.0;
 /// How often a joined rider tells the host where they are.
 const RIDE_SYNC: f32 = 0.08;
+/// Set on a `Msg::MountMob` id: you're in a Camel's back seat.
+pub const PASSENGER_SEAT: u32 = 1 << 31;
+/// A Camel: slower than a Galloper, but it dashes (Space) every few seconds.
+pub const CAMEL_SPEED: f32 = 6.5;
+pub const CAMEL_DASH: f32 = 14.0;
+pub const DASH_REST: f32 = 2.75;
+
+/// How high a rider sits on `kind`, and how far forward (back seat: behind).
+pub fn seat(kind: MobKind, passenger: bool) -> (f32, f32) {
+    match kind {
+        MobKind::Camel if passenger => (1.85, -0.5),
+        MobKind::Camel => (1.85, 0.35),
+        _ => (1.15, 0.0),
+    }
+}
 
 impl Game {
     /// Right-click on a Galloper by `who` holding `item` (where the world lives).
@@ -80,9 +95,40 @@ impl Game {
         Interaction::Nothing
     }
 
+    /// Saddle, feed or climb onto a Camel (no taming needed; two seats).
+    pub fn camel_interact(&mut self, i: usize, item: Id, rider: u32) -> Interaction {
+        let pos = self.mobs[i].body.pos + Vec3::Y * 2.0;
+        let m = &mut self.mobs[i];
+        if item == SADDLE && !m.saddled && m.baby <= 0.0 {
+            m.saddled = true;
+            m.persistent = true;
+            self.sfx(Sfx::Place(crate::sound::Mat::Wood), Some(pos));
+            return Interaction::Ate;
+        }
+        if m.kind.breed_food().contains(&item) && m.ready_to_breed() {
+            m.love = crate::animals::LOVE_SECS;
+            m.persistent = true;
+            self.hearts(pos, 4);
+            return Interaction::Ate;
+        }
+        if !m.saddled || m.baby > 0.0 || rider == 0 || m.rider == rider || m.passenger == rider {
+            return Interaction::Nothing;
+        }
+        if m.rider == 0 {
+            m.rider = rider;
+            return Interaction::Mounted(m.id);
+        }
+        if m.passenger == 0 {
+            m.passenger = rider;
+            return Interaction::Mounted(m.id | PASSENGER_SEAT);
+        }
+        Interaction::Nothing
+    }
+
     /// Get on the Galloper `id` (the local player; the host has said yes).
     pub fn mount_mob(&mut self, id: u32) {
-        self.mounted = Some(id);
+        self.passenger_seat = id & PASSENGER_SEAT != 0;
+        self.mounted = Some(id & !PASSENGER_SEAT);
         self.sfx(Sfx::Place(crate::sound::Mat::Wood), None);
     }
 
@@ -90,8 +136,13 @@ impl Game {
     pub fn dismount_mob(&mut self) {
         let Some(id) = self.mounted.take() else { return };
         let client = self.is_client();
+        let back = std::mem::take(&mut self.passenger_seat);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else { return };
-        m.rider = 0;
+        if back {
+            m.passenger = 0;
+        } else {
+            m.rider = 0;
+        }
         let side = Vec3::new(m.yaw.cos(), 0.0, m.yaw.sin());
         let (pos, yaw) = (m.body.pos, m.yaw);
         self.player.body.pos = pos + side * 1.3 + Vec3::Y * 0.2;
@@ -113,12 +164,25 @@ impl Game {
             self.mounted = None;
             return;
         };
+        if self.passenger_seat {
+            // Along for the ride: sit in the back seat wherever it goes.
+            let m = &self.mobs[i];
+            let (up, ahead) = seat(m.kind, true);
+            let at = m.body.pos + Vec3::new(m.yaw.sin(), 0.0, -m.yaw.cos()) * ahead + Vec3::Y * up;
+            self.player.body.pos = at;
+            self.player.body.vel = Vec3::ZERO;
+            self.player.fall_start = at.y;
+            return;
+        }
         let yaw = self.player.yaw;
         let fwd = Vec3::new(yaw.sin(), 0.0, -yaw.cos());
         let right = Vec3::new(yaw.cos(), 0.0, yaw.sin());
         // A Strutter only goes where its shroom on a stick says (see fortress.rs), and not as fast.
         let strutter = self.mobs[i].kind == crate::entity::MobKind::Strutter;
-        let speed = if !strutter {
+        let camel = self.mobs[i].kind == MobKind::Camel;
+        let speed = if camel {
+            CAMEL_SPEED
+        } else if !strutter {
             RIDE_SPEED
         } else if self.inv.held() == SHROOM_STICK {
             5.5
@@ -131,7 +195,14 @@ impl Game {
         m.body.vel.x += (wish.x - m.body.vel.x) * k;
         m.body.vel.z += (wish.z - m.body.vel.z) * k;
         m.body.vel.y = (m.body.vel.y - crate::entity::GRAVITY * dt).max(-40.0);
-        if jump && m.body.on_ground {
+        if camel {
+            // No big jumps: a dash forward instead, then a rest.
+            m.warp_cd = (m.warp_cd - dt).max(0.0);
+            if jump && m.body.on_ground && m.warp_cd <= 0.0 {
+                m.body.vel += fwd * CAMEL_DASH + Vec3::Y * 5.0;
+                m.warp_cd = DASH_REST;
+            }
+        } else if jump && m.body.on_ground {
             m.body.vel.y = RIDE_JUMP;
         }
         move_body(&self.world, &mut m.body, dt, false);
@@ -144,7 +215,8 @@ impl Game {
         }
         m.net_pos = m.body.pos;
         m.anim += Vec3::new(m.body.vel.x, 0.0, m.body.vel.z).length() * dt * 2.5;
-        let seat = m.body.pos + Vec3::Y * 1.15;
+        let (up, ahead) = seat(m.kind, false);
+        let seat = m.body.pos + Vec3::new(m.yaw.sin(), 0.0, -m.yaw.cos()) * ahead + Vec3::Y * up;
         let (pos, myaw) = (m.body.pos, m.yaw);
         self.player.body.pos = seat;
         self.player.body.vel = Vec3::ZERO;
@@ -161,6 +233,13 @@ impl Game {
     /// A joined player riding a Galloper says where it is (or that they got off).
     pub fn host_ride_mob(&mut self, from: u32, mob: u32, pos: Vec3, yaw: f32, off: bool) {
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) else { return };
+        if m.passenger == from + 1 {
+            // The back seat only gets off.
+            if off {
+                m.passenger = 0;
+            }
+            return;
+        }
         if m.rider != from + 1 {
             return;
         }
@@ -173,8 +252,9 @@ impl Game {
             m.body.vel = Vec3::ZERO;
             m.yaw = yaw;
         }
+        let up = seat(m.kind, false).0;
         if let Some(p) = self.peers.get_mut(&from) {
-            p.target = pos + Vec3::Y * 1.15;
+            p.target = pos + Vec3::Y * up;
         }
     }
 
@@ -182,10 +262,13 @@ impl Game {
     pub fn free_riderless(&mut self) {
         let me = if self.dedicated { 0 } else { self.my_id + 1 };
         let local = self.mounted;
-        for m in self.mobs.iter_mut().filter(|m| m.rider != 0) {
-            let gone = if m.rider == me { local != Some(m.id) } else { !self.peers.contains_key(&(m.rider - 1)) };
-            if gone {
+        let gone = |who: u32, id: u32| if who == me { local != Some(id) } else { !self.peers.contains_key(&(who - 1)) };
+        for m in self.mobs.iter_mut() {
+            if m.rider != 0 && gone(m.rider, m.id) {
                 m.rider = 0;
+            }
+            if m.passenger != 0 && gone(m.passenger, m.id) {
+                m.passenger = 0;
             }
         }
     }

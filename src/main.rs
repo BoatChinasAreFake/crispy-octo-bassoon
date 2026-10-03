@@ -58,6 +58,7 @@ mod pad;
 mod palette;
 mod paths;
 mod tint;
+mod trial;
 mod updates;
 mod player;
 mod playtest;
@@ -3735,6 +3736,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
     let (cx0, cz0) = if matches!(mode, "fortress" | "camp") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
     let kind = match mode {
         "outpost" => Kind::Outpost,
+        "trials" => Kind::TrialChambers,
         "fortress" => Kind::Fortress,
         "camp" => Kind::SnoutCamp,
         "raid" => Kind::Village,
@@ -3853,6 +3855,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Fortress => look(o + Vec3::new(-22.0, 22.0, -26.0), o + Vec3::new(0.0, 0.0, -4.0)),
                 Kind::SnoutCamp => look(o + Vec3::new(-9.0, 6.0, -10.0), o + Vec3::Y * 1.5),
                 Kind::Outpost => look(o + Vec3::new(-14.0, 10.0, -14.0), o + Vec3::Y * 7.0),
+                Kind::TrialChambers => look(o + Vec3::new(-5.5, 5.5, -5.5), o + Vec3::new(2.0, 1.0, 2.0)),
                 Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
@@ -4170,7 +4173,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);

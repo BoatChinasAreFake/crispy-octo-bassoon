@@ -64,7 +64,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk)
+    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -667,6 +667,16 @@ impl Game {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
                 }
+                if item == GOAT_HORN && self.peer_rate_ok(from, "horn", 5.0) && self.peer_has(from, GOAT_HORN) {
+                    if let Some(at) = self.peers.get(&from).map(|p| p.target + Vec3::Y * 1.6) {
+                        self.sfx(Sfx::Horn, Some(at));
+                    }
+                    return;
+                }
+                if item == WIND_CHARGE && self.peer_rate_ok(from, "wind", 0.4) {
+                    self.host_throw_wind_charge(from);
+                    return;
+                }
                 // A thrown spear leaves their hands and flies from where they look.
                 if item == SPEAR && self.peer_rate_ok(from, "spear", 0.6) && self.peer_has(from, SPEAR) {
                     let ench = if self.verified_held(from) == SPEAR { self.verified_ench(from) } else { 0 };
@@ -700,6 +710,13 @@ impl Game {
                 if near && armed && dir.is_finite() && dir.length() > 0.5 && self.peer_rate_ok(from, "shoot", 0.4) && self.peer_take(from, ARROW, 1) {
                     self.spawn_arrow(pos, dir.normalize() * Arrow::SPEED * 1.2, Some(from));
                     self.host_wear(from, BOW, 1);
+                }
+            }
+            Msg::Interact { x, y, z, item: TRIAL_KEY } if self.world.get(x, y, z) == VAULT => {
+                let p = IVec3::new(x, y, z);
+                let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
+                if near && self.peer_rate_ok(from, "vault", 0.5) {
+                    self.host_use_vault(from, p);
                 }
             }
             Msg::Interact { x, y, z, .. } if self.world.get(x, y, z) == BELL => {
@@ -982,11 +999,14 @@ impl Game {
                 self.sync_mobs(mobs, tnts, arrows)
             }
             Msg::HurtYou { dmg, cause, knock } => {
-                self.player.hurt = 0.0;
                 // Whatever hit us came from the opposite way to the knock.
                 let flat = Vec3::new(knock.x, 0.0, knock.z);
                 let from = (flat.length() > 0.01).then(|| self.player.body.pos + Vec3::Y * 0.9 - flat.normalize() * 2.0);
-                self.hurt_player_from(dmg, &cause, from, false);
+                // (A gust of wind only pushes.)
+                if dmg > 0.0 {
+                    self.player.hurt = 0.0;
+                    self.hurt_player_from(dmg, &cause, from, false);
+                }
                 self.player.body.vel += self.steadied(knock);
             }
             Msg::Give { item, n, wear } => {
@@ -1144,7 +1164,8 @@ impl Game {
 
     /// Client-side entity tick: particles plus smoothing the host's mobs.
     pub fn client_entities(&mut self, dt: f32) {
-        let mounted = self.mounted;
+        // (A Camel's passenger lets the host move it.)
+        let mounted = self.mounted.filter(|_| !self.passenger_seat);
         for m in self.mobs.iter_mut() {
             // The Galloper we're riding goes where we steer it.
             if Some(m.id) == mounted {

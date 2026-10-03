@@ -219,6 +219,14 @@ pub enum MobKind {
     Fee,
     /// Ravager-ish: a big angry beast the raiders bring along (see raids.rs).
     Rampager,
+    /// A whirl of wind from the Trial Chambers: hops about and fires Wind Charges (see trial.rs).
+    Breeze,
+    /// Mountain goats: leap high, and now and then ram you (see critters.rs).
+    Goat,
+    /// Little pink salamanders: hunt Soggy Groaners with you underwater (see critters.rs).
+    Axolotl,
+    /// Tall desert beasts: saddle one and ride it, with room for a friend (see horses.rs).
+    Camel,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -234,7 +242,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 33] = [
+    pub const ALL: [MobKind; 37] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -268,6 +276,11 @@ impl MobKind {
         MobKind::Invoicer,
         MobKind::Fee,
         MobKind::Rampager,
+        // Appended only: the index is the save and wire encoding.
+        MobKind::Breeze,
+        MobKind::Goat,
+        MobKind::Axolotl,
+        MobKind::Camel,
     ];
 
     pub fn index(self) -> u8 {
@@ -345,6 +358,10 @@ impl MobKind {
             "invoicer" | "evoker" => Some(MobKind::Invoicer),
             "fee" | "vex" => Some(MobKind::Fee),
             "rampager" | "ravager" => Some(MobKind::Rampager),
+            "breeze" => Some(MobKind::Breeze),
+            "goat" => Some(MobKind::Goat),
+            "axolotl" => Some(MobKind::Axolotl),
+            "camel" => Some(MobKind::Camel),
             _ => None,
         }
     }
@@ -386,6 +403,10 @@ impl MobKind {
             MobKind::Invoicer => "Invoicer",
             MobKind::Fee => "Fee",
             MobKind::Rampager => "Rampager",
+            MobKind::Breeze => "Breeze",
+            MobKind::Goat => "Goat",
+            MobKind::Axolotl => "Axolotl",
+            MobKind::Camel => "Camel",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -426,6 +447,10 @@ impl MobKind {
             MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => (0.3, 1.95),
             MobKind::Fee => (0.2, 0.8),
             MobKind::Rampager => (0.95, 2.2),
+            MobKind::Breeze => (0.3, 1.6),
+            MobKind::Goat => (0.35, 1.2),
+            MobKind::Axolotl => (0.3, 0.42),
+            MobKind::Camel => (0.7, 2.35),
             MobKind::Modded(_) => (0.4, 0.9),
         }
     }
@@ -467,6 +492,10 @@ impl MobKind {
             MobKind::Invoicer => 24.0,
             MobKind::Fee => 14.0,
             MobKind::Rampager => 100.0,
+            MobKind::Breeze => 30.0,
+            MobKind::Goat => 10.0,
+            MobKind::Axolotl => 14.0,
+            MobKind::Camel => 32.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -494,7 +523,7 @@ impl MobKind {
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel)
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
@@ -519,6 +548,9 @@ impl MobKind {
             MobKind::Rollo => &[DEAD_BUSH],
             MobKind::Strutter => &[EMBER_SHROOM],
             MobKind::Galloper => &[APPLE],
+            MobKind::Goat => &[WHEAT],
+            MobKind::Camel => &[CACTUS],
+            MobKind::Axolotl => &[TROPICAL],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             MobKind::Modded(_) => self.mod_def().and_then(|d| d.breed_item.as_ref()).map(std::slice::from_ref).unwrap_or(&[]),
             _ => &[],
@@ -603,6 +635,8 @@ pub struct Mob {
     pub temper: u8,
     /// Who's riding it: 0 nobody, else player id + 1.
     pub rider: u32,
+    /// A Camel's second seat, behind the driver: 0 nobody, else player id + 1.
+    pub passenger: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -637,6 +671,12 @@ pub enum MobEvent {
     SummonMod(Vec3, u8, u8),
     /// The Hush's shush: a blast of sound from `from` at the player, through walls.
     Shush(Vec3),
+    /// A Breeze's wind charge: (from, velocity).
+    WindCharge(Vec3, Vec3),
+    /// Something knocked loose (a Goat's horn, on a wall): (where, item).
+    DropItem(Vec3, Id),
+    /// A Goat lowers its head to charge.
+    Bleat(Vec3),
 }
 
 /// A spot a Starer can teleport to near `around`: standing room on solid ground.
@@ -689,9 +729,10 @@ impl Mob {
             burning: false,
             on_fire: 0.0,
             angry: false,
-            warp_cd: 0.0,
+            // A Goat waits a while before its first charge.
+            warp_cd: if kind == MobKind::Goat { rng.range(10.0, 30.0) } else { 0.0 },
             size: 1.0,
-            hop_cd: rng.range(0.5, 2.0),
+            hop_cd: if kind == MobKind::Goat { 0.0 } else { rng.range(0.5, 2.0) },
             love: 0.0,
             breed_cd: 0.0,
             baby: 0.0,
@@ -709,6 +750,7 @@ impl Mob {
             saddled: false,
             temper: 0,
             rider: 0,
+            passenger: 0,
         }
     }
 
@@ -842,7 +884,7 @@ impl Mob {
         let face = flat.x.atan2(-flat.z);
         match self.kind {
             // (The Wyrm flies on its own, see hollow.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter | MobKind::Camel => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -1349,6 +1391,100 @@ impl Mob {
                     self.attack_cd = 1.0;
                 }
             }
+            MobKind::Goat => {
+                self.warp_cd = (self.warp_cd - dt).max(0.0);
+                if self.hop_cd > 0.0 {
+                    // Head down, charging in a straight line.
+                    self.hop_cd -= dt;
+                    may_wander = false;
+                    if self.hop_cd < 1.2 {
+                        want = Some((self.wander_dir.unwrap_or(self.yaw), 7.5));
+                    } else {
+                        self.yaw += angle_diff(face, self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        self.wander_dir = Some(face);
+                    }
+                    if flat.length() < self.body.half + 0.9 && to_player.y.abs() < 1.6 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(2.0, "was rammed by a Goat"));
+                        self.attack_cd = 1.0;
+                        self.hop_cd = 0.0;
+                    }
+                } else if self.flee > 0.0 {
+                    want = Some(((-flat.x).atan2(flat.z), 3.5));
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 1.1 {
+                        want = Some((d.x.atan2(-d.z), 1.8));
+                    } else {
+                        may_wander = false;
+                    }
+                } else if self.baby <= 0.0 && player_visible && (4.0..12.0).contains(&flat.length()) && to_player.y.abs() < 2.0 && self.warp_cd <= 0.0 {
+                    // Takes a dislike to you every so often.
+                    self.warp_cd = rng.range(20.0, 50.0);
+                    self.hop_cd = 2.0;
+                    self.wander_dir = Some(face);
+                    ev.push(MobEvent::Bleat(self.body.pos));
+                }
+            }
+            MobKind::Axolotl => {
+                if self.body.in_water {
+                    let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
+                    if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                        self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
+                        self.wander_t = rng.range(1.0, 3.0);
+                    }
+                    if self.flee > 0.0 {
+                        want = Some(((-flat.x).atan2(flat.z), 4.0));
+                    } else if let Some(g) = self.goal {
+                        // After something to eat (see beasts.rs), or someone holding fish.
+                        let d = g - self.body.pos;
+                        if Vec3::new(d.x, 0.0, d.z).length() > 0.8 {
+                            want = Some((d.x.atan2(-d.z), 3.4));
+                        }
+                        swim_vy = Some((d.y * 2.0).clamp(-2.5, 2.5));
+                    }
+                    if swim_vy.is_none() {
+                        let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + 0.6).floor() as i32, self.body.pos.z.floor() as i32);
+                        let drift = (self.wander_t * 1.3 + self.id as f32).sin() * 0.6;
+                        swim_vy = Some(if is_water(above) { drift } else { drift.min(0.0) - 0.3 });
+                    }
+                } else if let Some(g) = self.goal {
+                    // A slow waddle on land.
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 1.0 {
+                        want = Some((d.x.atan2(-d.z), 1.2));
+                    }
+                }
+            }
+            MobKind::Breeze => {
+                self.hop_cd = (self.hop_cd - dt).max(0.0);
+                let fd = flat.length();
+                if player_visible && dist < 24.0 {
+                    may_wander = false;
+                    self.yaw += angle_diff(face, self.yaw).clamp(-8.0 * dt, 8.0 * dt);
+                    // Bounce about, keeping a good throwing distance.
+                    if self.body.on_ground && self.hop_cd <= 0.0 {
+                        let dir = if fd > 10.0 {
+                            face + rng.range(-0.5, 0.5)
+                        } else if fd < 5.0 {
+                            face + std::f32::consts::PI + rng.range(-0.6, 0.6)
+                        } else {
+                            face + std::f32::consts::FRAC_PI_2 * if rng.chance(0.5) { 1.0 } else { -1.0 }
+                        };
+                        self.body.vel.y = rng.range(7.0, 10.0);
+                        self.body.on_ground = false;
+                        self.knock = Vec3::new(dir.sin(), 0.0, -dir.cos()) * 4.5;
+                        self.hop_cd = rng.range(0.9, 2.0);
+                    }
+                    let eye = self.eye();
+                    let aim = player + Vec3::Y * 0.9 - eye;
+                    let clear = world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                    if self.attack_cd <= 0.0 && fd < 18.0 && clear {
+                        let n = aim.normalize_or_zero();
+                        ev.push(MobEvent::WindCharge(eye + n * 0.6, n * 15.0));
+                        self.attack_cd = rng.range(2.0, 3.0);
+                    }
+                }
+            }
             MobKind::Starer => {
                 self.warp_cd = (self.warp_cd - dt).max(0.0);
                 if !player_visible || dist > 48.0 {
@@ -1598,8 +1734,18 @@ impl Mob {
             // Lava is a floor to a Strutter.
             self.body.vel.y = self.body.vel.y.max(3.5);
         }
+        if self.kind == MobKind::Goat && self.hop_cd > 0.0 && self.hop_cd < 1.2 && self.body.hit_wall {
+            // Straight into a wall: that's the end of the charge, and maybe a horn.
+            self.hop_cd = 0.0;
+            if !self.sheared && self.baby <= 0.0 && rng.chance(0.5) {
+                self.sheared = true;
+                ev.push(MobEvent::DropItem(self.body.pos + Vec3::Y * 0.9, GOAT_HORN));
+            }
+        }
         if moving && self.body.hit_wall {
             match self.kind {
+                // Goats are great jumpers.
+                MobKind::Goat if self.body.on_ground || prev_ground => self.body.vel.y = 10.5,
                 // Webbers walk straight up walls.
                 MobKind::Webber => self.body.vel.y = 3.2,
                 MobKind::Bee => self.body.vel.y = 3.0,
@@ -1656,6 +1802,7 @@ impl Mob {
             MobKind::Hackler if rng.chance(0.085) => Some((AXE_FIRST + 3, 1)),
             MobKind::Invoicer => Some((TOTEM, 1)),
             MobKind::Rampager => Some((SADDLE, 1)),
+            MobKind::Breeze => Some((BREEZE_ROD, rng.int(1, 2) as u8)),
             MobKind::Modded(_) => self.kind.mod_def().and_then(|d| d.drop).map(|(id, max)| (id, rng.int(1, max.max(1) as i32) as u8)),
             _ => None,
         }
@@ -1766,6 +1913,8 @@ impl Mob {
         }
         if self.saddled && self.kind == MobKind::Woofer {
             draw_model(geo, &root, &WOOFER_ARMOUR, 0.0, sky, false);
+        } else if self.saddled && self.kind == MobKind::Camel {
+            draw_model(geo, &root, &CAMEL_SADDLE, 0.0, sky, false);
         } else if self.saddled {
             draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
         }
@@ -2206,6 +2355,64 @@ static WOOFER_ARMOUR: [Part; 2] = [
     part([-0.2, 0.55, -0.62], [0.4, 0.28, 0.24], [0.0; 3], Limb::Fixed, [T_WOLF_ARMOR_WORN; 6]),
 ];
 
+const BZ: u16 = T_BREEZE;
+// A Breeze: a head over a whirl of wind, three rods spinning round it.
+static BREEZE: [Part; 6] = [
+    part([-0.25, 1.05, -0.25], [0.5, 0.5, 0.5], [0.0; 3], Limb::Fixed, [BZ, BZ, BZ, BZ, BZ, T_BREEZE_FACE]),
+    part([-0.5, 0.75, -0.05], [0.1, 0.6, 0.1], [0.0; 3], Limb::Spin(3.0), [T_BREEZE_ROD; 6]),
+    part([0.4, 0.55, -0.05], [0.1, 0.6, 0.1], [0.0; 3], Limb::Spin(3.0), [T_BREEZE_ROD; 6]),
+    part([-0.05, 0.65, 0.4], [0.1, 0.6, 0.1], [0.0; 3], Limb::Spin(3.0), [T_BREEZE_ROD; 6]),
+    part([-0.28, 0.45, -0.28], [0.56, 0.45, 0.56], [0.0; 3], Limb::Spin(-5.0), [BZ; 6]),
+    part([-0.16, 0.0, -0.16], [0.32, 0.45, 0.32], [0.0; 3], Limb::Spin(7.0), [BZ; 6]),
+];
+const GT: u16 = T_GOAT;
+static GOAT: [Part; 10] = [
+    part([-0.25, 0.6, -0.45], [0.5, 0.5, 0.9], [0.0; 3], Limb::Fixed, [GT; 6]),
+    part([-0.17, 0.85, -0.82], [0.34, 0.36, 0.42], [0.0; 3], Limb::Fixed, [GT, GT, GT, GT, GT, T_GOAT_FACE]),
+    // Beard and horns.
+    part([-0.05, 0.68, -0.8], [0.1, 0.2, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
+    part([-0.15, 1.2, -0.62], [0.08, 0.28, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
+    part([0.07, 1.2, -0.62], [0.08, 0.28, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
+    part([-0.24, 0.0, -0.4], [0.14, 0.6, 0.14], [0.0, 0.6, -0.33], Limb::Swing(1.0), [GT; 6]),
+    part([0.1, 0.0, -0.4], [0.14, 0.6, 0.14], [0.0, 0.6, -0.33], Limb::Swing(-1.0), [GT; 6]),
+    part([-0.24, 0.0, 0.26], [0.14, 0.6, 0.14], [0.0, 0.6, 0.33], Limb::Swing(-1.0), [GT; 6]),
+    part([0.1, 0.0, 0.26], [0.14, 0.6, 0.14], [0.0, 0.6, 0.33], Limb::Swing(1.0), [GT; 6]),
+    part([-0.05, 0.95, 0.42], [0.1, 0.12, 0.12], [0.0; 3], Limb::Fixed, [GT; 6]),
+];
+const AX: u16 = T_AXOLOTL;
+static AXOLOTL: [Part; 9] = [
+    part([-0.18, 0.08, -0.4], [0.36, 0.24, 0.62], [0.0; 3], Limb::Fixed, [AX; 6]),
+    part([-0.22, 0.06, -0.68], [0.44, 0.28, 0.3], [0.0; 3], Limb::Fixed, [AX, AX, AX, AX, AX, T_AXOLOTL_FACE]),
+    // Frilly gills either side of the head.
+    part([-0.32, 0.12, -0.6], [0.1, 0.3, 0.06], [0.0; 3], Limb::Fixed, [T_AXOLOTL_GILL; 6]),
+    part([0.22, 0.12, -0.6], [0.1, 0.3, 0.06], [0.0; 3], Limb::Fixed, [T_AXOLOTL_GILL; 6]),
+    part([-0.04, 0.06, 0.2], [0.08, 0.26, 0.4], [0.0, 0.2, 0.2], Limb::SwingY(1.6), [AX; 6]),
+    part([-0.26, 0.0, -0.32], [0.1, 0.1, 0.1], [0.0, 0.1, -0.3], Limb::Swing(1.0), [AX; 6]),
+    part([0.16, 0.0, -0.32], [0.1, 0.1, 0.1], [0.0, 0.1, -0.3], Limb::Swing(-1.0), [AX; 6]),
+    part([-0.26, 0.0, 0.08], [0.1, 0.1, 0.1], [0.0, 0.1, 0.1], Limb::Swing(-1.0), [AX; 6]),
+    part([0.16, 0.0, 0.08], [0.1, 0.1, 0.1], [0.0, 0.1, 0.1], Limb::Swing(1.0), [AX; 6]),
+];
+const CM: u16 = T_CAMEL;
+/// Where a Camel's neck leans from.
+const CAMEL_NECK: [f32; 3] = [0.0, 1.5, -0.8];
+static CAMEL: [Part; 10] = [
+    part([-0.42, 1.15, -0.85], [0.84, 0.7, 1.7], [0.0; 3], Limb::Fixed, [CM; 6]),
+    part([-0.3, 1.85, -0.3], [0.6, 0.35, 0.6], [0.0; 3], Limb::Fixed, [T_CAMEL_HUMP; 6]),
+    part([-0.15, 1.4, -1.15], [0.3, 0.75, 0.32], CAMEL_NECK, Limb::Tilt(0.35), [CM; 6]),
+    part([-0.18, 2.0, -1.55], [0.36, 0.34, 0.6], CAMEL_NECK, Limb::Tilt(0.35), [CM, CM, CM, CM, CM, T_CAMEL_FACE]),
+    part([-0.38, 0.0, -0.75], [0.2, 1.15, 0.2], [0.0, 1.15, -0.65], Limb::Swing(0.8), [CM; 6]),
+    part([0.18, 0.0, -0.75], [0.2, 1.15, 0.2], [0.0, 1.15, -0.65], Limb::Swing(-0.8), [CM; 6]),
+    part([-0.38, 0.0, 0.55], [0.2, 1.15, 0.2], [0.0, 1.15, 0.65], Limb::Swing(-0.8), [CM; 6]),
+    part([0.18, 0.0, 0.55], [0.2, 1.15, 0.2], [0.0, 1.15, 0.65], Limb::Swing(0.8), [CM; 6]),
+    part([-0.05, 1.2, 0.85], [0.1, 0.5, 0.1], [0.0, 1.7, 0.88], Limb::SwingY(1.0), [CM; 6]),
+    part([-0.12, 2.32, -1.28], [0.24, 0.08, 0.06], CAMEL_NECK, Limb::Tilt(0.35), [CM; 6]),
+];
+/// A saddle on a Camel, in front of the hump and behind it (two seats).
+pub static CAMEL_SADDLE: [Part; 2] = [
+    part([-0.44, 1.84, -0.75], [0.88, 0.1, 0.45], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6]),
+    part([-0.44, 1.84, 0.3], [0.88, 0.1, 0.45], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6]),
+];
+
 fn model(kind: MobKind) -> &'static [Part] {
     match kind {
         MobKind::Oinker => &OINKER,
@@ -2241,6 +2448,10 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Invoicer => &INVOICER,
         MobKind::Fee => &FEE,
         MobKind::Rampager => &RAMPAGER,
+        MobKind::Breeze => &BREEZE,
+        MobKind::Goat => &GOAT,
+        MobKind::Axolotl => &AXOLOTL,
+        MobKind::Camel => &CAMEL,
         // Modded mobs are drawn from a runtime-built, textured copy of a base
         // template (see `modded_parts`); this static fallback keeps `model`
         // total and is used only where the texture doesn't matter (e.g. the
@@ -2453,6 +2664,8 @@ pub struct Arrow {
     pub homing: f32,
     /// Host-only: blast radius when it lands (0 = a plain hit).
     pub blast: f32,
+    /// Host-only: a wind charge (flies straight; bursts on whatever it meets, see trial.rs).
+    pub wind: bool,
 }
 
 impl Arrow {
@@ -2474,6 +2687,7 @@ impl Arrow {
             effect: None,
             homing: 0.0,
             blast: 0.0,
+            wind: false,
         }
     }
 
@@ -2483,7 +2697,7 @@ impl Arrow {
         if self.stuck {
             return false;
         }
-        if self.homing <= 0.0 {
+        if self.homing <= 0.0 && !self.wind {
             self.vel.y -= Self::GRAVITY * dt;
         }
         self.dir = self.vel.normalize_or(self.dir);
@@ -2524,6 +2738,7 @@ impl Arrow {
             effect: None,
             homing: 0.0,
             blast: 0.0,
+            wind: false,
         }
     }
 

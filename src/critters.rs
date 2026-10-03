@@ -64,6 +64,7 @@ impl Game {
         let mut grabs: Vec<(usize, usize)> = Vec::new();
         let mut gifts: Vec<(usize, Vec3)> = Vec::new();
         let mut scutes: Vec<Vec3> = Vec::new();
+        let mut nips: Vec<(usize, usize)> = Vec::new();
         for i in 0..n {
             let (kind, pos) = (self.mobs[i].kind, self.mobs[i].body.pos);
             match kind {
@@ -115,6 +116,20 @@ impl Game {
                         if at.distance(pos) < 2.6 && self.mobs[i].attack_cd <= 0.0 {
                             eaten.push((i, j));
                         }
+                    }
+                }
+                MobKind::Axolotl if self.mobs[i].body.in_water && self.mobs[i].baby <= 0.0 => {
+                    // Hunts Soggy Groaners (and fish) in the water: help it out and it helps you.
+                    let prey = self.mobs.iter().enumerate().filter(|(_, c)| matches!(c.kind, MobKind::Soggy | MobKind::Fishy) && c.health > 0.0 && c.body.in_water && c.body.pos.distance(pos) < 10.0).min_by(|a, b| a.1.body.pos.distance(pos).total_cmp(&b.1.body.pos.distance(pos))).map(|(j, c)| (j, c.id, c.body.pos + Vec3::Y * c.body.height * 0.4));
+                    match prey {
+                        Some((j, id, at)) => {
+                            self.mobs[i].prey = Some(id);
+                            self.mobs[i].goal = Some(at);
+                            if at.distance(pos) < 1.6 && self.mobs[i].attack_cd <= 0.0 {
+                                nips.push((i, j));
+                            }
+                        }
+                        None => self.mobs[i].prey = None,
                     }
                 }
                 MobKind::Rollo => {
@@ -173,6 +188,29 @@ impl Game {
         }
         for at in scutes {
             self.pop_drop(at + Vec3::Y * 0.3, SCUTE, 1);
+        }
+        for (i, j) in nips {
+            let at = self.mobs[i].body.pos;
+            self.mobs[i].attack_cd = 1.0;
+            let was = self.mobs[j].health;
+            self.mobs[j].damage(2.0, at);
+            // A win: everyone fighting alongside is patched up a bit.
+            if was > 0.0 && self.mobs[j].health <= 0.0 {
+                self.axolotl_win(at);
+            }
+        }
+    }
+}
+
+impl Game {
+    /// An Axolotl's prey is beaten: players nearby get a little Regeneration.
+    pub fn axolotl_win(&mut self, at: Vec3) {
+        if !self.dedicated && self.dead.is_none() && self.player.body.pos.distance(at) < 12.0 {
+            self.timed_effect(crate::potions::Potion::Regeneration, 6.0);
+        }
+        let near: Vec<u32> = self.peers.iter().filter(|(_, p)| p.alive() && p.target.distance(at) < 12.0).map(|(&id, _)| id).collect();
+        for id in near {
+            self.send_timed_effect(id, crate::potions::Potion::Regeneration, 6.0, 0);
         }
     }
 }

@@ -262,7 +262,18 @@ pub const CRAFTER_FIRST: Id = 444;
 /// A copper lamp that flips on or off each time power arrives.
 pub const COPPER_BULB: Id = 450;
 pub const COPPER_BULB_ON: Id = 451;
-pub const NUM_BLOCKS: Id = 452;
+/// Trial Chambers (see trial.rs).
+pub const TUFF_BRICKS: Id = 452;
+pub const CHISELED_TUFF: Id = 453;
+pub const COPPER_GRATE: Id = 454;
+pub const TRIAL_SPAWNER: Id = 455;
+/// A trial spawner that's been beaten and is cooling down.
+pub const TRIAL_SPAWNER_SPENT: Id = 456;
+pub const VAULT: Id = 457;
+pub const VAULT_OPEN: Id = 458;
+/// Point a compass at it (see navigation.rs).
+pub const LODESTONE: Id = 459;
+pub const NUM_BLOCKS: Id = 460;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -425,7 +436,21 @@ pub const SPLASH_EXTRA_FIRST: Id = FIRST_ITEM + 207;
 pub const CROSSBOW: Id = FIRST_ITEM + 209;
 pub const TOTEM: Id = FIRST_ITEM + 210;
 pub const OMINOUS_BANNER: Id = FIRST_ITEM + 211;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 212;
+/// Opens a Vault (see trial.rs).
+pub const TRIAL_KEY: Id = FIRST_ITEM + 212;
+/// Thrown: a burst of wind that knocks things back (see trial.rs).
+pub const WIND_CHARGE: Id = FIRST_ITEM + 213;
+pub const BREEZE_ROD: Id = FIRST_ITEM + 214;
+/// Blow it (see critters.rs).
+pub const GOAT_HORN: Id = FIRST_ITEM + 215;
+/// Armour trim templates: `TRIM_FIRST + pattern` (see trims.rs).
+pub const TRIM_FIRST: Id = FIRST_ITEM + 216;
+pub const TRIMS: usize = 4;
+/// Look through it to zoom in.
+pub const SPYGLASS: Id = FIRST_ITEM + 220;
+/// Holds a mix of small stacks in one slot (see bundle.rs).
+pub const BUNDLE: Id = FIRST_ITEM + 221;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 222;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -1907,6 +1932,24 @@ impl Registry {
         let mut lit = def("copper_bulb_on", "Copper Bulb (On, For Now)", Cube, true, true, [T_COPPER_BULB_ON; 3], 3.0, 1, true, COPPER_BULB, 15.0, S_STONE);
         lit.creative = false;
         blocks.push(lit);
+        // Trial Chambers.
+        blocks.push(def("tuff_bricks", "Tuff Bricks (Grey, Proud)", Cube, true, true, [T_TUFF_BRICKS; 3], 1.5, 1, true, TUFF_BRICKS, 0.0, S_STONE));
+        blocks.push(def("chiseled_tuff", "Chiseled Tuff (Fancy Grey)", Cube, true, true, [T_CHISELED_TUFF_TOP, T_CHISELED_TUFF, T_CHISELED_TUFF_TOP], 1.5, 1, true, CHISELED_TUFF, 0.0, S_STONE));
+        let mut grate = def("copper_grate", "Copper Grate (Holey)", Cube, true, false, [T_COPPER_GRATE; 3], 3.0, 1, true, COPPER_GRATE, 0.0, S_STONE);
+        grate.see_through = true;
+        blocks.push(grate);
+        for (key, name, tile, light) in [("trial_spawner", "Trial Spawner (Testing You)", T_TRIAL_SPAWNER, 4.0), ("trial_spawner_spent", "Trial Spawner (Resting)", T_TRIAL_SPAWNER_SPENT, 0.0)] {
+            let mut d = def(key, name, Cube, true, false, [T_TRIAL_SPAWNER_TOP, tile, T_TRIAL_SPAWNER_TOP], 50.0, 2, true, AIR, light, S_STONE);
+            d.see_through = true;
+            d.creative = key == "trial_spawner";
+            blocks.push(d);
+        }
+        for (key, name, front) in [("vault", "Vault (Locked)", T_VAULT_FRONT), ("vault_open", "Vault (Emptied)", T_VAULT_OPEN)] {
+            let mut d = def(key, name, Cube, true, true, [T_VAULT_TOP, front, T_VAULT_TOP], 50.0, 2, true, AIR, if key == "vault" { 6.0 } else { 0.0 }, S_STONE);
+            d.creative = key == "vault";
+            blocks.push(d);
+        }
+        blocks.push(def("lodestone", "Lodestone (Magnetic Personality)", Cube, true, true, [T_LODESTONE_TOP, T_LODESTONE_SIDE, T_LODESTONE_TOP], 3.5, 1, true, LODESTONE, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2126,6 +2169,15 @@ impl Registry {
         items.push(ItemDef { stack: 1, damage: 3.0, ..item("crossbow", "Crossbow (Pre-Loaded Opinions)", T_CROSSBOW) });
         items.push(ItemDef { stack: 1, ..item("totem_of_undying", "Totem of Not Dying (Once)", T_TOTEM) });
         items.push(item("ominous_banner", "Ominous Banner (Looks Important)", T_BANNER));
+        items.push(item("trial_key", "Trial Key (Opens Exactly One Vault)", T_TRIAL_KEY));
+        items.push(ItemDef { stack: 16, ..item("wind_charge", "Wind Charge (Bottled Gust)", T_WIND_CHARGE) });
+        items.push(item("breeze_rod", "Breeze Rod (Whooshy Stick)", T_BREEZE_ROD));
+        items.push(ItemDef { stack: 1, consume: false, ..item("goat_horn", "Goat Horn (Very Loud)", T_GOAT_HORN) });
+        for (key, name) in [("coast_trim", "Coast Trim Template"), ("wild_trim", "Wild Trim Template"), ("ward_trim", "Ward Trim Template"), ("spire_trim", "Spire Trim Template")] {
+            items.push(item(key, name, T_TRIM_TEMPLATE));
+        }
+        items.push(ItemDef { stack: 1, consume: false, ..item("spyglass", "Spyglass (Pirate Approved)", T_SPYGLASS) });
+        items.push(ItemDef { stack: 1, consume: false, ..item("bundle", "Bundle (Bag of Bits)", T_BUNDLE) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2228,6 +2280,13 @@ impl Registry {
             r(&[(COBBLE, 6), (ZAP_DUST, 2), (GLASS, 1)], (OBSERVER_FIRST, 1)),
             r(&[(IRON, 5), (TABLE, 1), (ZAP_DUST, 2), (DISPENSER_FIRST, 1)], (CRAFTER_FIRST, 1)),
             r(&[(COPPER_INGOT, 4), (ZAP_DUST, 1), (TORCH, 1)], (COPPER_BULB, 1)),
+            r(&[(COPPER_INGOT, 4)], (COPPER_GRATE, 4)),
+            r(&[(STONE_BRICKS, 4), (COBBLE, 1)], (TUFF_BRICKS, 4)),
+            r(&[(TUFF_BRICKS, 2)], (CHISELED_TUFF, 1)),
+            r(&[(BREEZE_ROD, 1)], (WIND_CHARGE, 4)),
+            r(&[(STONE_BRICKS, 8), (IRON, 1)], (LODESTONE, 1)),
+            r(&[(GLASS, 1), (COPPER_INGOT, 2)], (SPYGLASS, 1)),
+            r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),
             r(&[(PEARL, 1), (EMBER_SHROOM, 1)], (STARING_EYE, 1)),
