@@ -15,7 +15,6 @@ use crate::block::*;
 use crate::game::Game;
 use crate::world::{CH, CW};
 use macroquad::math::{ivec3, IVec3};
-use std::collections::HashSet;
 
 /// Random ticks per 16-high slice of a chunk, per second (Minecraft's 3 a tick).
 const PER_SECTION: u32 = 60;
@@ -54,15 +53,18 @@ impl Game {
                 let p = self.player.body.pos;
                 centres.push((p.x.floor() as i32, p.z.floor() as i32));
             }
-            let mut chunks = HashSet::new();
+            let mut chunks = Vec::new();
             for (x, z) in centres {
                 let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
                 for dz in -RADIUS..=RADIUS {
                     for dx in -RADIUS..=RADIUS {
-                        chunks.insert((cx + dx, cz + dz));
+                        chunks.push((cx + dx, cz + dz));
                     }
                 }
             }
+            // (In a fixed order, so a seed plays out the same way every time.)
+            chunks.sort_unstable();
+            chunks.dedup();
             for (cx, cz) in chunks {
                 if !self.world.chunks.contains_key(&(cx, cz)) {
                     continue;
@@ -113,6 +115,11 @@ impl Game {
                     m.persistent = true;
                 }
                 self.sfx(crate::sound::Sfx::Break(crate::sound::Mat::Glass), Some(at));
+            }
+        } else if id == DRIED_FLOATY {
+            // Soaks up the water next to it, and wakes.
+            if crate::floaty::soaked(&self.world, p) && self.rng.chance(crate::floaty::HATCH_CHANCE) {
+                self.hatch_floaty(p);
             }
         } else if id == TORCHFLOWER_SPROUT {
             // Ancient seeds take their time (and want a bit of light).

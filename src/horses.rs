@@ -29,20 +29,33 @@ pub const RIDE_SPEED: f32 = 9.5;
 pub const RIDE_JUMP: f32 = 11.0;
 /// How often a joined rider tells the host where they are.
 const RIDE_SYNC: f32 = 0.08;
-/// Set on a `Msg::MountMob` id: you're in a Camel's back seat.
-pub const PASSENGER_SEAT: u32 = 1 << 31;
+/// A `Msg::MountMob` id carries the seat in its top two bits: 0 the driver,
+/// 1 a Camel's back seat (or a Floaty's second), 2 and 3 a Floaty's others.
+pub const SEAT_SHIFT: u32 = 30;
+pub const SEAT_MASK: u32 = 3 << SEAT_SHIFT;
+/// A Rotsteed: not quite as quick as a living Galloper.
+pub const ROTSTEED_SPEED: f32 = 8.0;
 /// A Camel: slower than a Galloper, but it dashes (Space) every few seconds.
 pub const CAMEL_SPEED: f32 = 6.5;
 pub const CAMEL_DASH: f32 = 14.0;
 pub const DASH_REST: f32 = 2.75;
 
-/// How high a rider sits on `kind`, and how far forward (back seat: behind).
-pub fn seat(kind: MobKind, passenger: bool) -> (f32, f32) {
-    match kind {
-        MobKind::Camel if passenger => (1.85, -0.5),
-        MobKind::Camel => (1.85, 0.35),
-        _ => (1.15, 0.0),
+/// Where seat `n` is on `kind`: (to the right, up, ahead).
+pub fn seat(kind: MobKind, n: u8) -> Vec3 {
+    match (kind, n) {
+        (MobKind::Camel, 0) => Vec3::new(0.0, 1.85, 0.35),
+        (MobKind::Camel, _) => Vec3::new(0.0, 1.85, -0.5),
+        // Four on a Floaty's harness, the driver front left.
+        (MobKind::Floaty, n) => Vec3::new(if n % 2 == 0 { -0.8 } else { 0.8 }, 3.95, if n < 2 { 0.8 } else { -0.8 }),
+        _ => Vec3::new(0.0, 1.15, 0.0),
     }
+}
+
+/// Where seat `n` of a mob at `pos` facing `yaw` is, in the world.
+pub fn seat_at(kind: MobKind, n: u8, pos: Vec3, yaw: f32) -> Vec3 {
+    let s = seat(kind, n);
+    let (fwd, right) = (Vec3::new(yaw.sin(), 0.0, -yaw.cos()), Vec3::new(yaw.cos(), 0.0, yaw.sin()));
+    pos + right * s.x + Vec3::Y * s.y + fwd * s.z
 }
 
 impl Game {
@@ -120,15 +133,15 @@ impl Game {
         }
         if m.passenger == 0 {
             m.passenger = rider;
-            return Interaction::Mounted(m.id | PASSENGER_SEAT);
+            return Interaction::Mounted(m.id | 1 << SEAT_SHIFT);
         }
         Interaction::Nothing
     }
 
     /// Get on the Galloper `id` (the local player; the host has said yes).
     pub fn mount_mob(&mut self, id: u32) {
-        self.passenger_seat = id & PASSENGER_SEAT != 0;
-        self.mounted = Some(id & !PASSENGER_SEAT);
+        self.seat_no = (id >> SEAT_SHIFT) as u8;
+        self.mounted = Some(id & !SEAT_MASK);
         self.sfx(Sfx::Place(crate::sound::Mat::Wood), None);
     }
 
@@ -136,12 +149,12 @@ impl Game {
     pub fn dismount_mob(&mut self) {
         let Some(id) = self.mounted.take() else { return };
         let client = self.is_client();
-        let back = std::mem::take(&mut self.passenger_seat);
+        let seat = std::mem::take(&mut self.seat_no);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else { return };
-        if back {
-            m.passenger = 0;
-        } else {
-            m.rider = 0;
+        match seat {
+            0 => m.rider = 0,
+            1 => m.passenger = 0,
+            n => m.crew[(n as usize - 2).min(1)] = 0,
         }
         let side = Vec3::new(m.yaw.cos(), 0.0, m.yaw.sin());
         let (pos, yaw) = (m.body.pos, m.yaw);
@@ -164,11 +177,10 @@ impl Game {
             self.mounted = None;
             return;
         };
-        if self.passenger_seat {
-            // Along for the ride: sit in the back seat wherever it goes.
+        if self.seat_no != 0 {
+            // Along for the ride: sit in our seat wherever it goes.
             let m = &self.mobs[i];
-            let (up, ahead) = seat(m.kind, true);
-            let at = m.body.pos + Vec3::new(m.yaw.sin(), 0.0, -m.yaw.cos()) * ahead + Vec3::Y * up;
+            let at = seat_at(m.kind, self.seat_no, m.body.pos, m.yaw);
             self.player.body.pos = at;
             self.player.body.vel = Vec3::ZERO;
             self.player.fall_start = at.y;
@@ -180,8 +192,13 @@ impl Game {
         // A Strutter only goes where its shroom on a stick says (see fortress.rs), and not as fast.
         let strutter = self.mobs[i].kind == crate::entity::MobKind::Strutter;
         let camel = self.mobs[i].kind == MobKind::Camel;
+        let floaty = self.mobs[i].kind == MobKind::Floaty;
         let speed = if camel {
             CAMEL_SPEED
+        } else if floaty {
+            crate::floaty::FLY_SPEED
+        } else if self.mobs[i].kind == MobKind::Rotsteed {
+            ROTSTEED_SPEED
         } else if !strutter {
             RIDE_SPEED
         } else if self.inv.held() == SHROOM_STICK {
@@ -190,12 +207,20 @@ impl Game {
             0.0
         };
         let wish = (fwd * forward + right * strafe * 0.6).clamp_length_max(1.0) * speed;
+        let pitch = self.player.pitch;
         let m = &mut self.mobs[i];
         let k = (dt * 4.0).min(1.0);
         m.body.vel.x += (wish.x - m.body.vel.x) * k;
         m.body.vel.z += (wish.z - m.body.vel.z) * k;
-        m.body.vel.y = (m.body.vel.y - crate::entity::GRAVITY * dt).max(-40.0);
-        if camel {
+        if floaty {
+            // No gravity: up with Jump, and along the way we look.
+            let climb = if jump { crate::floaty::CLIMB } else { 0.0 } + pitch.sin() * forward * speed * 0.8;
+            m.body.vel.y += (climb.clamp(-speed, speed) - m.body.vel.y) * k;
+        } else {
+            m.body.vel.y = (m.body.vel.y - crate::entity::GRAVITY * dt).max(-40.0);
+        }
+        if floaty {
+        } else if camel {
             // No big jumps: a dash forward instead, then a rest.
             m.warp_cd = (m.warp_cd - dt).max(0.0);
             if jump && m.body.on_ground && m.warp_cd <= 0.0 {
@@ -215,8 +240,7 @@ impl Game {
         }
         m.net_pos = m.body.pos;
         m.anim += Vec3::new(m.body.vel.x, 0.0, m.body.vel.z).length() * dt * 2.5;
-        let (up, ahead) = seat(m.kind, false);
-        let seat = m.body.pos + Vec3::new(m.yaw.sin(), 0.0, -m.yaw.cos()) * ahead + Vec3::Y * up;
+        let seat = seat_at(m.kind, 0, m.body.pos, m.yaw);
         let (pos, myaw) = (m.body.pos, m.yaw);
         self.player.body.pos = seat;
         self.player.body.vel = Vec3::ZERO;
@@ -233,10 +257,15 @@ impl Game {
     /// A joined player riding a Galloper says where it is (or that they got off).
     pub fn host_ride_mob(&mut self, from: u32, mob: u32, pos: Vec3, yaw: f32, off: bool) {
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) else { return };
-        if m.passenger == from + 1 {
-            // The back seat only gets off.
+        if m.passenger == from + 1 || m.crew.contains(&(from + 1)) {
+            // The other seats only get off.
             if off {
-                m.passenger = 0;
+                if m.passenger == from + 1 {
+                    m.passenger = 0;
+                }
+                for c in m.crew.iter_mut().filter(|c| **c == from + 1) {
+                    *c = 0;
+                }
             }
             return;
         }
@@ -252,9 +281,9 @@ impl Game {
             m.body.vel = Vec3::ZERO;
             m.yaw = yaw;
         }
-        let up = seat(m.kind, false).0;
+        let at = seat_at(m.kind, 0, pos, yaw);
         if let Some(p) = self.peers.get_mut(&from) {
-            p.target = pos + Vec3::Y * up;
+            p.target = at;
         }
     }
 
@@ -269,6 +298,11 @@ impl Game {
             }
             if m.passenger != 0 && gone(m.passenger, m.id) {
                 m.passenger = 0;
+            }
+            for k in 0..2 {
+                if m.crew[k] != 0 && gone(m.crew[k], m.id) {
+                    m.crew[k] = 0;
+                }
             }
         }
     }
@@ -324,9 +358,9 @@ mod tests {
         let i = 0;
         // Someone else is driving: we get the back seat.
         g.mobs[i].rider = 99;
-        assert_eq!(g.interact_mob(&me, at, 778, AIR), Interaction::Mounted(778 | PASSENGER_SEAT));
-        g.mount_mob(778 | PASSENGER_SEAT);
-        assert!(g.passenger_seat && g.mounted == Some(778));
+        assert_eq!(g.interact_mob(&me, at, 778, AIR), Interaction::Mounted(778 | 1 << SEAT_SHIFT));
+        g.mount_mob(778 | 1 << SEAT_SHIFT);
+        assert!(g.seat_no == 1 && g.mounted == Some(778));
         g.mobs[i].body.pos = Vec3::new(3.5, 50.0, 0.5);
         g.ride_tick(1.0 / 60.0, 1.0, 0.0, false, false);
         assert!(g.mobs[i].body.pos.distance(Vec3::new(3.5, 50.0, 0.5)) < 0.01, "the passenger doesn't steer");

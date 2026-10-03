@@ -1223,7 +1223,7 @@ impl Game {
     /// Client-side entity tick: particles plus smoothing the host's mobs.
     pub fn client_entities(&mut self, dt: f32) {
         // (A Camel's passenger lets the host move it.)
-        let mounted = self.mounted.filter(|_| !self.passenger_seat);
+        let mounted = self.mounted.filter(|_| self.seat_no == 0);
         for m in self.mobs.iter_mut() {
             // The Galloper we're riding goes where we steer it.
             if Some(m.id) == mounted {

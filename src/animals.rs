@@ -92,7 +92,7 @@ impl Game {
             self.sfx(Sfx::Snip, Some(pos));
             return Interaction::Sheared;
         }
-        if matches!(self.mobs[i].kind, MobKind::Galloper | MobKind::Strutter | MobKind::Camel) {
+        if matches!(self.mobs[i].kind, MobKind::Galloper | MobKind::Strutter | MobKind::Camel | MobKind::Floaty | MobKind::Rotsteed) {
             let rider = if record_key(&self.player_name) == who && !self.dedicated {
                 self.my_id + 1
             } else {
@@ -103,6 +103,9 @@ impl Game {
             }
             if self.mobs[i].kind == MobKind::Camel {
                 return self.camel_interact(i, item, rider);
+            }
+            if self.mobs[i].kind == MobKind::Floaty {
+                return self.floaty_interact(who, i, item, rider);
             }
             return self.galloper_interact(who, i, item, rider);
         }

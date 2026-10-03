@@ -261,7 +261,8 @@ pub struct Game {
     /// The Galloper we're riding, and when we last told the host (see horses.rs).
     pub mounted: Option<u32>,
     /// Sitting behind a Camel's driver (just along for the ride).
-    pub passenger_seat: bool,
+    /// Which seat we're in (0 drives; see horses.rs).
+    pub seat_no: u8,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
     pub chat_log: std::collections::VecDeque<String>,
@@ -489,7 +490,7 @@ impl Game {
             observer_pulses: HashMap::new(),
             hopper_timer: 0.0,
             mounted: None,
-            passenger_seat: false,
+            seat_no: 0,
             ride_sync: 0.0,
             chat_log: Default::default(),
             mob_names: HashMap::new(),
@@ -2854,6 +2855,7 @@ impl Game {
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
         self.copper_golems_tick(dt);
+        self.floaties_tick();
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
@@ -2866,7 +2868,7 @@ impl Game {
         for m in self.mobs.iter_mut() {
             let p = m.body.pos;
             // Ridden Gallopers go where their rider steers (see horses.rs).
-            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 || m.passenger != 0 {
+            if !self.world.is_loaded(p.x.floor() as i32, p.z.floor() as i32) || m.rider != 0 || m.passenger != 0 || m.crew != [0, 0] {
                 continue;
             }
             let fuse_before = m.fuse;

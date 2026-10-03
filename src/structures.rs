@@ -608,6 +608,7 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (SIZZLE_ROD, 2, 0.3),
             (ARMOR_FIRST + 8 + CHESTPLATE as Id, 1, 0.15),
             (SCORCHITE_SCRAP, 1, 0.08),
+            (DRIED_FLOATY, 1, 0.12),
         ],
         Kind::Outpost => &[
             (CROSSBOW, 1, 0.5),

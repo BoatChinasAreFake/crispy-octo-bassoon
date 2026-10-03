@@ -37,6 +37,7 @@ mod fortress;
 mod music;
 mod fire;
 mod fireworks;
+mod floaty;
 mod gadgets;
 mod fishing;
 mod game;
