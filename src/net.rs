@@ -110,6 +110,11 @@ pub enum Msg {
     /// `wear`: how used it is, for tools and armour.
     Give { item: Id, n: u8, wear: u32 },
     Explosion { at: Vec3, r: f32 },
+    /// client -> host: put `n` of `item` into the Bundle tagged `tag` (0: an
+    /// empty one), or (`put` false) take its last stack out. See gadgets.rs.
+    BundleUse { tag: u16, item: Id, n: u8, put: bool },
+    /// host -> client: the Bundle tagged `old` is now tagged `new` and holds this.
+    BundleState { old: u16, new: u16, contents: Vec<(Id, u8)> },
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -692,6 +697,23 @@ impl Msg {
                 w.u8(*waves);
                 w.u16(*left);
             }
+            Msg::BundleUse { tag, item, n, put } => {
+                w.u8(73);
+                w.u16(*tag);
+                w.u16(*item);
+                w.u8(*n);
+                w.u8(*put as u8);
+            }
+            Msg::BundleState { old, new, contents } => {
+                w.u8(74);
+                w.u16(*old);
+                w.u16(*new);
+                w.u8(contents.len() as u8);
+                for &(id, n) in contents {
+                    w.u16(id);
+                    w.u8(n);
+                }
+            }
             Msg::Firework { at, colour } => {
                 w.u8(72);
                 w.v3(*at);
@@ -992,6 +1014,16 @@ impl Msg {
             69 => Msg::Deflect { at: r.v3()?, dir: r.v3()? },
             70 => Msg::Raid { state: r.u8()?, wave: r.u8()?, waves: r.u8()?, left: r.u16()? },
             72 => Msg::Firework { at: r.v3()?, colour: r.u8()? },
+            73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
+            74 => {
+                let (old, new) = (r.u16()?, r.u16()?);
+                let n = (r.u8()? as usize).min(27);
+                let mut contents = Vec::with_capacity(n);
+                for _ in 0..n {
+                    contents.push((r.u16()?, r.u8()?));
+                }
+                Msg::BundleState { old, new, contents }
+            }
             71 => Msg::TimedEffect { effect: r.u8()?, secs: r.f32()?, amplifier: r.u8()?.min(3) },
             42 => Msg::Weather { kind: r.u8()? },
             43 => Msg::Lightning { at: r.v3()? },
@@ -1559,6 +1591,8 @@ mod tests {
             Msg::PotionEffect { item: 0x8065 },
             Msg::MountMob { mob: 42 },
             Msg::Firework { at: Vec3::new(1.0, 90.0, -3.0), colour: 5 },
+            Msg::BundleUse { tag: 7, item: 0x8010, n: 12, put: true },
+            Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },
             Msg::BeaconEffect { item: 0x8066 },

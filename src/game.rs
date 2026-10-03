@@ -340,6 +340,9 @@ pub struct Game {
     pub last_death: Option<Vec3>,
     /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
     pub lodestone: Option<IVec3>,
+    /// A joined player's view of their Bundles (the host's word), and the one just used.
+    pub bundle_mirror: HashMap<u16, Vec<(Id, u8)>>,
+    pub bundle_pending: Option<usize>,
     pub spyglass: bool,
 }
 
@@ -519,6 +522,8 @@ impl Game {
             bench: None,
             last_death: None,
             lodestone: None,
+            bundle_mirror: HashMap::new(),
+            bundle_pending: None,
             spyglass: false,
         }
     }

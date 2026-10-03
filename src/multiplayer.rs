@@ -673,6 +673,10 @@ impl Game {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
                 }
+                if item == BUNDLE {
+                    self.host_bundle_tip(from);
+                    return;
+                }
                 if item == ROCKET && self.peer_rate_ok(from, "rocket", 0.25) {
                     self.host_rocket(from);
                     return;
@@ -722,6 +726,7 @@ impl Game {
                     }
                 }
             }
+            Msg::BundleUse { tag, item, n, put } => self.host_bundle_use(from, tag, item, n, put),
             Msg::Shoot { pos, dir } => {
                 // Only from roughly where they are, in a real direction, at a bow's pace.
                 let Some(p) = self.peers.get(&from) else { return };
@@ -1067,6 +1072,7 @@ impl Game {
                 self.sfx(Sfx::Explode, Some(at));
                 self.explosion_effects(at, r);
             }
+            Msg::BundleState { old, new, contents } => self.bundle_state(old, new, contents),
             Msg::Firework { at, colour } => {
                 if at.is_finite() {
                     self.firework_sparks(at, colour);
@@ -1136,7 +1142,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } => {}
         }
     }
 
@@ -2499,6 +2505,35 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(host.world.containers[&pos].slots[5], Some((DIAMOND, 2)));
+    }
+
+    #[test]
+    fn joined_players_pack_bundles_through_the_host() {
+        let mut host = Game::new(785, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Packer", "").unwrap();
+        let id = client.my_id;
+        client.player.body.pos = spawn;
+        assert!(pump(&mut host, &mut client, |h, _| h.peers.get(&id).is_some_and(|p| p.target.distance(spawn) < 1.0)));
+        host.give_peer(id, BUNDLE, 1);
+        host.give_peer(id, COBBLE, 40);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(BUNDLE) == 1 && c.inv.count(COBBLE) == 40));
+        let b = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == BUNDLE)).unwrap();
+        let c = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == COBBLE)).unwrap();
+        client.inv.click(c);
+        assert!(client.bundle_click(b, true, false));
+        assert!(pump(&mut host, &mut client, |_, c| crate::boxes::box_id(c.inv.wear[b]) != 0));
+        let tag = crate::boxes::box_id(client.inv.wear[b]);
+        assert_eq!(client.bundle_contents(client.inv.wear[b]), vec![(COBBLE, 40)]);
+        assert_eq!(host.peers[&id].ledger.bag.count(COBBLE), 0, "the host took the cobble");
+        assert!(host.peers[&id].ledger.owns_enchanted(BUNDLE, tag));
+        // Out again: it lands in the inventory.
+        assert!(client.bundle_click(b, false, true));
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(COBBLE) == 40 && c.inv.wear[b] == 0));
+        assert_eq!(host.peers[&id].ledger.bag.count(COBBLE), 40);
+        assert!(host.boxes.get(&tag).is_none());
     }
 
 }

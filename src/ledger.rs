@@ -192,7 +192,7 @@ impl Game {
     /// An item is leaving a joined player (thrown, dropped, put in a chest): its
     /// enchantments go with it only if the host knew about them.
     pub fn launder(&mut self, from: u32, item: Id, wear: crate::inventory::Wear) -> crate::inventory::Wear {
-        let ench = (wear >> 16) as u16;
+        let ench = crate::enchant::enchants(wear);
         if ench == 0 || self.peer_free(from) {
             return wear;
         }
