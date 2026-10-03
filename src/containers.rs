@@ -407,6 +407,7 @@ impl Game {
         if !self.is_client() {
             self.ensure_container(pos);
         }
+        self.treasure_advancements(pos);
         self.open = Some(pos);
         self.sfx(Sfx::Place(Mat::Wood), Some(store_centre(&self.vehicles, pos)));
         if self.is_client() {

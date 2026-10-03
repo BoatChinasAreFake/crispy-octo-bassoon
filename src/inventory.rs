@@ -49,6 +49,10 @@ pub fn tagged(item: Id) -> bool {
 
 /// Keep only what makes sense for `item` (saves and other players can't be trusted).
 pub fn sanitize_wear(item: Id, w: Wear) -> Wear {
+    // A Treasure Map's wear is where its X is (see treasure.rs).
+    if item == TREASURE_MAP {
+        return w;
+    }
     if tagged(item) {
         return w & 0xFFFF_0000;
     }

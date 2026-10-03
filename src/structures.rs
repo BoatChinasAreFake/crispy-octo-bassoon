@@ -41,6 +41,9 @@ pub enum Kind {
     Outpost,
     /// Copper-and-tuff halls deep underground (see trial.rs).
     TrialChambers,
+    /// Wrecks on the sea bed, and chests buried in beaches (see treasure.rs).
+    Shipwreck,
+    BuriedTreasure,
 }
 
 impl Kind {
@@ -60,6 +63,8 @@ impl Kind {
             Kind::SnoutCamp => "Snout Camp (Gold Accepted)",
             Kind::Outpost => "Pilferer Outpost (Keep Out)",
             Kind::TrialChambers => "Trial Chambers (Bring Keys Back)",
+            Kind::Shipwreck => "Shipwreck (Abandoned, Soggy)",
+            Kind::BuriedTreasure => "Buried Treasure (X Marks the Spot)",
         }
     }
 
@@ -79,6 +84,8 @@ impl Kind {
             "snout_camp" | "camp" | "bastion" | "bastion_remnant" => Kind::SnoutCamp,
             "outpost" | "pilferer_outpost" | "pillager_outpost" => Kind::Outpost,
             "trial_chambers" | "trial_chamber" | "trials" => Kind::TrialChambers,
+            "shipwreck" | "wreck" => Kind::Shipwreck,
+            "buried_treasure" | "treasure" => Kind::BuriedTreasure,
             _ => return None,
         })
     }
@@ -115,7 +122,8 @@ impl Generator {
         let common = r < 0.10;
         // Trial Chambers: rare, deep, wherever (but never two in reach of each other).
         let trial_spot = (cx.rem_euclid(5), cz.rem_euclid(5)) == (2, 2) && hash2(s ^ 0x7A1, cx.div_euclid(5), cz.div_euclid(5)) < 0.3;
-        if !common && !village_spot && !trial_spot && hash2(s ^ 0x0B0, cx, cz) >= 0.01 && hash2(s ^ 0xC17, cx, cz) >= 0.035 {
+        let (wreck_roll, treasure_roll) = (hash2(s ^ 0x5419, cx, cz) < 0.035, hash2(s ^ 0x7EA5, cx, cz) < 0.06);
+        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && hash2(s ^ 0x0B0, cx, cz) >= 0.01 && hash2(s ^ 0xC17, cx, cz) >= 0.035 {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -145,6 +153,13 @@ impl Generator {
         // The Hushed Ones built rarely, and only in the Deep Dark.
         if hash2(s ^ 0xC17, cx, cz) < 0.035 && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
             return Some(Site { kind: Kind::HushedCity, origin: ivec3(ox, crate::deepdark::CITY_Y, oz), facing, seed });
+        }
+        // Wrecks lie on the sea bed; treasure is buried in beaches (see treasure.rs).
+        if wreck_roll && biome == Biome::Ocean && h < SEA - 7 && h > 6 {
+            return Some(Site { kind: Kind::Shipwreck, origin: ivec3(ox, h, oz), facing, seed });
+        }
+        if treasure_roll && (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::Mangrove) {
+            return Some(Site { kind: Kind::BuriedTreasure, origin: ivec3(ox, h - 2, oz), facing, seed });
         }
         if !common {
             return None;
@@ -205,6 +220,8 @@ impl Generator {
             Kind::SnoutCamp => return crate::fortress::camp_blocks(site),
             Kind::Outpost => return crate::raids::outpost_blocks(site),
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
+            Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site),
+            Kind::BuriedTreasure => return crate::treasure::treasure_blocks(site),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -633,6 +650,30 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (CROSSBOW, 1, 0.2),
             (GOLDEN_CHOP, 1, 0.08),
         ],
+        Kind::Shipwreck => &[
+            (TREASURE_MAP, 1, 0.6),
+            (BREAD, 3, 0.5),
+            (CARROT, 4, 0.4),
+            (POTATO, 5, 0.4),
+            (COAL, 6, 0.5),
+            (BOOK, 1, 0.3),
+            (IRON, 4, 0.4),
+            (GOLD_INGOT, 3, 0.3),
+            (COMPASS, 1, 0.15),
+            (ARMOR_FIRST + CHESTPLATE as Id, 1, 0.2),
+            (TNT, 2, 0.1),
+        ],
+        Kind::BuriedTreasure => &[
+            (GOLD_INGOT, 8, 1.0),
+            (IRON, 6, 0.8),
+            (DIAMOND, 2, 0.5),
+            (COOKED_COD, 4, 0.6),
+            (TNT, 2, 0.3),
+            (ENCHANTED_BOOK, 1, 0.3),
+            (PEARL, 1, 0.2),
+            (TURTLE_SHELL, 1, 0.12),
+            (SPEAR, 1, 0.1),
+        ],
         Kind::SnoutCamp => &[
             (GOLD_INGOT, 9, 0.8),
             (GOLD_BLOCK, 2, 0.3),
@@ -667,6 +708,19 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         c.slots[slot] = Some((DISC_FIRST + rng.int(0, 6) as Id, 1));
     }
     c
+}
+
+/// Treasure Maps in a freshly filled chest are marked with the nearest
+/// Buried Treasure (or are plain maps if there's none in range).
+pub fn mark_maps(generator: &Generator, at: IVec3, c: &mut Container) {
+    for i in 0..c.slots.len() {
+        if c.slots[i].is_some_and(|s| s.0 == TREASURE_MAP) {
+            match generator.nearest_site(Kind::BuriedTreasure, at.as_vec3(), crate::treasure::MAP_RANGE) {
+                Some(t) => c.wear[i] = crate::treasure::mark(t),
+                None => c.slots[i] = Some((MAP, 1)),
+            }
+        }
+    }
 }
 
 /// Tools and armour in chests are used, and sometimes enchanted.
@@ -715,7 +769,9 @@ impl World {
         }
         for (p, kind, seed) in self.generator.structure_chests(cx, cz) {
             if self.get_v(p) == CHEST && !self.containers.contains_key(&p) {
-                self.containers.insert(p, loot(kind, seed));
+                let mut c = loot(kind, seed);
+                mark_maps(&self.generator, p, &mut c);
+                self.containers.insert(p, c);
                 if kind == Kind::Village {
                     // The Clanker moves in: it stands guard on the square.
                     self.new_clankers.push(p.as_vec3() + macroquad::math::Vec3::new(-1.5, 0.0, -3.5));

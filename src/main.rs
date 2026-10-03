@@ -45,6 +45,7 @@ mod glider;
 mod golems;
 mod hollow;
 mod home;
+mod treasure;
 mod hoppers;
 mod horses;
 mod hunger;
@@ -1643,6 +1644,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "ruins" => Kind::DesertRuins,
         "trailruins" => Kind::TrailRuins,
         "oceanruins" => Kind::OceanRuins,
+        "shipwreck" => Kind::Shipwreck,
         "deepdark" => {
             // Inside a Deep Dark cavern, standing on its floor.
             for r in 0..200 {
@@ -1752,6 +1754,7 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Outpost => look(o + Vec3::new(-14.0, 10.0, -14.0), o + Vec3::Y * 7.0),
                 Kind::TrialChambers => look(o + Vec3::new(-5.5, 5.5, -5.5), o + Vec3::new(2.0, 1.0, 2.0)),
                 Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
+                Kind::Shipwreck => look(o + Vec3::new(-8.0, 3.0, -6.0), o + Vec3::Y * 1.0),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -1827,6 +1830,10 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
     if id == HOLLOW_BOX || id == BUNDLE {
         if boxes::box_id(wear) != 0 {
             s += " [packed]";
+        }
+    } else if id == TREASURE_MAP {
+        if let Some((x, z)) = treasure::marked(wear) {
+            s += &format!(" [X at {x}, {z}]");
         }
     } else if enchant::is_enchanted(wear) {
         s += &format!(" [{}]", enchant::describe(wear));
@@ -2082,7 +2089,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
