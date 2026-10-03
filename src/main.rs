@@ -942,6 +942,9 @@ impl App {
         let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench | Screen::Journal | Screen::Title | Screen::Dead) || self.game.net.is_some();
         let t_tick = std::time::Instant::now();
         if simulate {
+            if self.game.map_colors.len() != self.map_colors.len() {
+                self.game.map_colors = self.map_colors.clone();
+            }
             self.game.update(dt, &controls);
         }
         let tick_ms = t_tick.elapsed().as_secs_f32() * 1000.0;
@@ -1969,7 +1972,8 @@ impl App {
             self.map_timer -= dt;
             if self.map_timer <= 0.0 || self.map_tex.is_none() {
                 self.map_timer = 0.5;
-                let px = navigation::map_pixels(&self.game.world, self.game.player.body.pos, &self.map_colors);
+                let scale = navigation::ZOOMS[self.game.map_zoom as usize % navigation::ZOOMS.len()];
+                let px = navigation::map_pixels(&self.game.world, self.game.player.body.pos, &self.map_colors, scale);
                 let n = navigation::MAP_SIZE as u16;
                 match &self.map_tex {
                     Some(t) => t.update_from_bytes(n as u32, n as u32, &px),
@@ -1990,6 +1994,22 @@ impl App {
                 let yaw = self.game.player.yaw;
                 let (fx, fy) = (yaw.sin(), -yaw.cos());
                 let (rx, ry) = (-fy, fx);
+                // Banners that are up show on the map, in their colours.
+                let scale = navigation::ZOOMS[self.game.map_zoom as usize % navigation::ZOOMS.len()] as f32;
+                let per_px = size / navigation::MAP_SIZE as f32;
+                let me = self.game.player.body.pos;
+                for (p, &(design, _)) in &self.game.banners {
+                    let (dx, dz) = ((p.x as f32 + 0.5 - me.x) / scale, (p.z as f32 + 0.5 - me.z) / scale);
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {
+                        let d = banners::Design::from_bits(design);
+                        let c = carpentry::colour_rgb(d.base as usize);
+                        let (bx, by) = (cx + dx * per_px, cy + dz * per_px);
+                        draw_rectangle(bx - 3.0 * s, by - 5.0 * s, 6.0 * s, 7.0 * s, Color::new(0.1, 0.08, 0.05, 1.0));
+                        draw_rectangle(bx - 2.0 * s, by - 4.0 * s, 4.0 * s, 5.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
+                    }
+                }
+                self.ui.text(&format!("1:{}", scale as i32), x + 4.0 * s, y + size - 4.0 * s, 8.0, Color::new(0.2, 0.15, 0.1, 1.0));
                 let k = 6.0 * s;
                 draw_triangle(vec2(cx + fx * k, cy + fy * k), vec2(cx - fx * k * 0.6 + rx * k * 0.6, cy - fy * k * 0.6 + ry * k * 0.6), vec2(cx - fx * k * 0.6 - rx * k * 0.6, cy - fy * k * 0.6 - ry * k * 0.6), Color::new(0.9, 0.1, 0.1, 1.0));
             }
@@ -4899,6 +4919,17 @@ async fn game_main() {
                 app.game.inv.slots[0] = Some((block::SHIELD, 1));
                 app.game.inv.selected = 0;
                 app.game.shield_banner = designs[1].bits();
+                // A wall of framed maps behind them.
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                if let Some(facing) = decor::frame_facing(-f) {
+                    for (k, up) in [(-1, 1), (0, 1), (-1, 2), (0, 2)] {
+                        let wall = at(8.0, k as f32) + IVec3::Y * up;
+                        app.game.world.set_v(wall, block::STONE_BRICKS);
+                        let frame = wall - f;
+                        app.game.world.set_v(frame, block::FRAME_FIRST + facing as u16);
+                        app.game.world.frames.insert(frame, (block::MAP, 0));
+                    }
+                }
             }
             if s.mode == "farm" && frames == 125 {
                 // A little farm: three crops at every stage, watered down the middle,

@@ -2021,8 +2021,8 @@ impl Registry {
         with_book.creative = false;
         blocks.push(with_book);
         blocks.push(def("banner", "Banner (Flag-Adjacent)", Empty, false, false, [T_BANNER_ICON; 3], 1.0, 0, false, AIR, 0.0, S_GRASS));
-        blocks.push(def("personal_chest", "Personal Chest (Yours Alone)", Cube, true, true, [T_PERSONAL_CHEST_TOP, T_PERSONAL_CHEST_SIDE, T_PERSONAL_CHEST_TOP], 22.0, 1, true, PERSONAL_CHEST, 7.0, S_STONE));
         blocks.push(def("loom", "Loom (Pattern Machine)", Cube, true, true, [T_LOOM_TOP, T_LOOM_SIDE, T_PLANKS], 2.5, 0, false, LOOM, 0.0, S_WOOD));
+        blocks.push(def("personal_chest", "Personal Chest (Yours Alone)", Cube, true, true, [T_PERSONAL_CHEST_TOP, T_PERSONAL_CHEST_SIDE, T_PERSONAL_CHEST_TOP], 22.0, 1, true, PERSONAL_CHEST, 7.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2731,6 +2731,47 @@ mod id_order_tests {
         }
         assert_eq!(reg().blocks.len(), NUM_BLOCKS as usize);
         for (id, key) in [(MELON_SLICE, "melon_slice"), (CHEST_MINECART, "chest_minecart"), (HOPPER_MINECART, "hopper_minecart"), (NAME_TAG, "name_tag")] {
+            assert_eq!(reg().key_of(id), key, "item {id}");
+        }
+        // The newest blocks and items, where their ids say.
+        for (id, key) in [
+            (OBSERVER_FIRST, "observer"),
+            (COPPER_BULB, "copper_bulb"),
+            (TUFF_BRICKS, "tuff_bricks"),
+            (TRIAL_SPAWNER, "trial_spawner"),
+            (VAULT, "vault"),
+            (LODESTONE, "lodestone"),
+            (TRIAL_SPAWNER_OMINOUS, "ominous_trial_spawner"),
+            (VAULT_OMINOUS, "ominous_vault"),
+            (HEAVY_CORE, "heavy_core"),
+            (PALE_OAK_LOG, "pale_oak_log"),
+            (PALE_HANGING_MOSS, "pale_hanging_moss"),
+            (CREAKING_HEART, "creaking_heart"),
+            (CREAKING_HEART_AWAKE, "creaking_heart_awake"),
+            (SNIFFER_EGG, "sniffer_egg"),
+            (PITCHER_CROP, "pitcher_crop"),
+            (PITCHER_PLANT, "pitcher_plant"),
+            (LECTERN, "lectern"),
+            (LECTERN_BOOK, "lectern_book"),
+            (BANNER, "banner"),
+            (LOOM, "loom"),
+            (PERSONAL_CHEST, "personal_chest"),
+        ] {
+            assert_eq!(block(id).key, key, "id {id}");
+        }
+        for (id, key) in [
+            (TRIAL_KEY, "trial_key"),
+            (WIND_CHARGE, "wind_charge"),
+            (TRIM_FIRST, "coast_trim"),
+            (SPYGLASS, "spyglass"),
+            (BUNDLE, "bundle"),
+            (OMINOUS_TRIAL_KEY, "ominous_trial_key"),
+            (MACE, "mace"),
+            (OMINOUS_BOTTLE, "ominous_bottle"),
+            (PITCHER_POD, "pitcher_pod"),
+            (BOOK_AND_QUILL, "writable_book"),
+            (WRITTEN_BOOK, "written_book"),
+        ] {
             assert_eq!(reg().key_of(id), key, "item {id}");
         }
     }

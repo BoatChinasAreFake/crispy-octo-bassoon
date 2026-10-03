@@ -353,6 +353,9 @@ pub struct Game {
     pub banners: HashMap<IVec3, (u16, u8)>,
     pub loom: Option<IVec3>,
     pub shield_banner: u16,
+    /// The held map's zoom (see `navigation::ZOOMS`), and the map colours of blocks (for maps in frames).
+    pub map_zoom: u8,
+    pub map_colors: Vec<[u8; 3]>,
     pub reading: Option<crate::books::BookView>,
     pub book_waiting: Option<(u16, Option<usize>, Option<IVec3>)>,
     pub book_pending: Option<usize>,
@@ -543,6 +546,8 @@ impl Game {
             banners: HashMap::new(),
             loom: None,
             shield_banner: 0,
+            map_zoom: 0,
+            map_colors: Vec::new(),
             reading: None,
             book_waiting: None,
             book_pending: None,
@@ -2167,6 +2172,12 @@ impl Game {
         }
         if crate::books::is_book(held) {
             self.open_held_book();
+            return;
+        }
+        if held == MAP {
+            // Zoom out (and back in).
+            self.map_zoom = (self.map_zoom + 1) % crate::navigation::ZOOMS.len() as u8;
+            self.msg(format!("Map: one pixel for every {} block(s).", crate::navigation::ZOOMS[self.map_zoom as usize]));
             return;
         }
         if held == BOTTLE {
@@ -5430,7 +5441,7 @@ looks_like = diamond
 
         // The map shows the floor we're standing on; the compass points home.
         let colors = vec![[10, 20, 30]; reg().blocks.len()];
-        let px = crate::navigation::map_pixels(&g.world, g.player.body.pos, &colors);
+        let px = crate::navigation::map_pixels(&g.world, g.player.body.pos, &colors, 1);
         assert_eq!(px.len(), crate::navigation::MAP_SIZE * crate::navigation::MAP_SIZE * 4);
         let mid = (crate::navigation::MAP_SIZE / 2 * crate::navigation::MAP_SIZE + crate::navigation::MAP_SIZE / 2) * 4;
         // Our colour, maybe shaded by the lie of the land.

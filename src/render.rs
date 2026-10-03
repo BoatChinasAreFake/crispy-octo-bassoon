@@ -413,6 +413,18 @@ impl DynGeo {
         self.mesh.quad(v, false);
         self.end_batch();
     }
+    /// A quad coloured by `rgb` (multiplying its tile: use a white tile for a flat colour).
+    pub fn quad_tinted(&mut self, c: [Vec3; 4], tile: u16, light: [f32; 2], rgb: [u8; 3]) {
+        let (u0, v0, s) = tile_uv(tile);
+        let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        let tint = [rgb[0] / 2, rgb[1] / 2, rgb[2] / 2, 128];
+        let mut v = [Vertex::default(); 4];
+        for i in 0..4 {
+            v[i] = Vertex { pos: c[i].to_array(), uv: [u0 + uvs[i][0] * s, v0 + uvs[i][1] * s], light: [light[0], light[1], -1.0], tile: [-u0 - 2.0, -v0 - 2.0], tint };
+        }
+        self.mesh.quad(v, false);
+        self.end_batch();
+    }
     /// Oriented box: `m` maps the unit cube [0,1]^3 into world space.
     /// `tiles` order: +x, -x, +y, -y, +z, -z.
     pub fn cube(&mut self, m: &Mat4, tiles: [u16; 6], sky: f32, uv_rect: [f32; 4]) {

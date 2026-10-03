@@ -173,6 +173,12 @@ impl Game {
             let at = center - out * 0.4;
             let yaw = out.x.atan2(out.z);
             let root = Mat4::from_translation(at) * Mat4::from_rotation_y(yaw);
+            if item == MAP && !self.map_colors.is_empty() {
+                // A map of the land round the frame (a wall of them shows the whole area).
+                self.draw_framed_map(g, &root, pos, sky);
+                g.begin(Pass::Opaque, [1.0; 4], false);
+                continue;
+            }
             if is_block_item(item) {
                 let m = root * Mat4::from_translation(Vec3::new(-0.2, -0.2, 0.0)) * Mat4::from_scale(Vec3::new(0.4, 0.4, 0.08));
                 let t = block(item).tex;
@@ -181,6 +187,30 @@ impl Game {
                 let s = 0.3;
                 let c = [Vec3::new(-s, -s, 0.02), Vec3::new(s, -s, 0.02), Vec3::new(s, s, 0.02), Vec3::new(-s, s, 0.02)].map(|p| root.transform_point3(p));
                 g.quad(c, item_tile(item), [0.0, 1.0, 1.0, 0.0], [1.0, sky]);
+            }
+        }
+    }
+}
+
+impl Game {
+    /// A framed map: 16 by 16 cells, four blocks each, of the land around
+    /// the frame, lined up on a 64-block grid so that a wall of framed maps
+    /// fits together into one big map.
+    fn draw_framed_map(&self, g: &mut DynGeo, root: &Mat4, pos: IVec3, sky: f32) {
+        const CELLS: i32 = 16;
+        const STEP: i32 = 4;
+        let span = CELLS * STEP;
+        // Which 64-block square this frame shows.
+        let (ox, oz) = (pos.x.div_euclid(span) * span, pos.z.div_euclid(span) * span);
+        let s = 0.45;
+        let cell = 2.0 * s / CELLS as f32;
+        for row in 0..CELLS {
+            for col in 0..CELLS {
+                let (x, z) = (ox + col * STEP + STEP / 2, oz + row * STEP + STEP / 2);
+                let c = crate::navigation::column_colour(&self.world, x, z, &self.map_colors).unwrap_or([196, 178, 140]);
+                let (x0, y0) = (-s + col as f32 * cell, s - (row + 1) as f32 * cell);
+                let corners = [Vec3::new(x0, y0, 0.03), Vec3::new(x0 + cell, y0, 0.03), Vec3::new(x0 + cell, y0 + cell, 0.03), Vec3::new(x0, y0 + cell, 0.03)].map(|p| root.transform_point3(p));
+                g.quad_tinted(corners, crate::texture::T_WHITE, [1.0, sky], c);
             }
         }
     }

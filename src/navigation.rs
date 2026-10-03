@@ -44,7 +44,8 @@ pub fn block_colors(atlas: &[u8]) -> Vec<[u8; 3]> {
 
 /// The map around `center`, north at the top, as RGBA pixels. Under a roof
 /// (the Scorchlands, a cave) it shows the floor below you instead of the sky's view.
-pub fn map_pixels(world: &World, center: Vec3, colors: &[[u8; 3]]) -> Vec<u8> {
+/// `scale`: blocks per pixel (a zoomed-out map sees further, in less detail).
+pub fn map_pixels(world: &World, center: Vec3, colors: &[[u8; 3]], scale: i32) -> Vec<u8> {
     let (cx, cz) = (center.x.floor() as i32, center.z.floor() as i32);
     let covered = crate::scorch::in_scorch(center.x);
     let start_y = if covered { (center.y as i32 + 2).min(CH - 2) } else { CH - 1 };
@@ -53,7 +54,7 @@ pub fn map_pixels(world: &World, center: Vec3, colors: &[[u8; 3]]) -> Vec<u8> {
     let mut out = vec![0u8; MAP_SIZE * MAP_SIZE * 4];
     for row in 0..MAP_SIZE {
         for col in 0..MAP_SIZE {
-            let (x, z) = (cx - half + col as i32, cz - half + row as i32);
+            let (x, z) = (cx + (col as i32 - half) * scale, cz + (row as i32 - half) * scale);
             let i = row * MAP_SIZE + col;
             if !world.is_loaded(x, z) {
                 // Unexplored: plain parchment.
@@ -81,6 +82,32 @@ pub fn map_pixels(world: &World, center: Vec3, colors: &[[u8; 3]]) -> Vec<u8> {
         }
     }
     out
+}
+
+/// Zoom levels: blocks per map pixel.
+pub const ZOOMS: [i32; 4] = [1, 2, 4, 8];
+
+/// The map colour of the top of column (x, z), shaded by the height to its north;
+/// None where the world isn't loaded.
+pub fn column_colour(world: &World, x: i32, z: i32, colors: &[[u8; 3]]) -> Option<[u8; 3]> {
+    if !world.is_loaded(x, z) {
+        return None;
+    }
+    let top = |x: i32, z: i32| {
+        let mut y = CH - 1;
+        while y > 0 && !is_map_visible(world.get(x, y, z)) {
+            y -= 1;
+        }
+        y
+    };
+    let y = top(x, z);
+    let c = colors.get(world.get(x, y, z) as usize).copied().unwrap_or([128, 128, 128]);
+    let k = match y.cmp(&top(x, z - 1)) {
+        std::cmp::Ordering::Greater => 1.15,
+        std::cmp::Ordering::Less => 0.82,
+        _ => 1.0,
+    };
+    Some(c.map(|v| (v as f32 * k).min(255.0) as u8))
 }
 
 /// Worth drawing on a map (not air, not a flower too small to see).
