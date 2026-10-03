@@ -845,6 +845,8 @@ pub struct World {
     pub farm: HashMap<IVec3, Soil>,
     /// What's inside every chest and furnace (see containers.rs); kept in step with the blocks.
     pub containers: HashMap<IVec3, Container>,
+    /// Each player's Personal Chest storage, by `stash::stash_key` (see stash.rs).
+    pub stashes: HashMap<i32, Container>,
     /// Fill structure chests when their chunks first arrive (off for joined
     /// players: the host has the real contents).
     pub structure_loot: bool,
@@ -916,6 +918,7 @@ impl World {
             dirty: HashSet::new(),
             farm: HashMap::new(),
             containers: HashMap::new(),
+            stashes: HashMap::new(),
             structure_loot: true,
             liquid_dirty: HashSet::new(),
             fall_dirty: HashSet::new(),

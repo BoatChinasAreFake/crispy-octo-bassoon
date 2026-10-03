@@ -310,6 +310,9 @@ const REACH: f32 = 10.0;
 
 /// The container at `p` (a block's, or a cart's).
 pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a mut Container> {
+    if let Some(k) = crate::stash::stash_of_key(p) {
+        return world.stashes.get_mut(&k);
+    }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter_mut().find(|v| v.id == id)?.contents.as_mut(),
         None => world.containers.get_mut(&p),
@@ -317,6 +320,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
 }
 
 pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a Container> {
+    if let Some(k) = crate::stash::stash_of_key(p) {
+        return world.stashes.get(&k);
+    }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter().find(|v| v.id == id)?.contents.as_ref(),
         None => world.containers.get(&p),
@@ -325,6 +331,9 @@ pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle],
 
 /// The block a container behaves like (a cart's: a chest's or a hopper's).
 pub fn store_kind(world: &World, vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Id {
+    if crate::stash::stash_of_key(p).is_some() {
+        return PERSONAL_CHEST;
+    }
     match crate::vehicles::cart_of_key(p) {
         Some(id) => vehicles.iter().find(|v| v.id == id && v.contents.is_some()).map(|v| v.container_block()).unwrap_or(AIR),
         None => world.get_v(p),
@@ -492,7 +501,14 @@ impl Game {
 
     /// Joined players: close the screen if the container vanished under us.
     pub fn container_still_there(&self) -> bool {
-        self.open.map(|p| is_container(store_kind(&self.world, &self.vehicles, p)) && (crate::vehicles::cart_of_key(p).is_none() || store_centre(&self.vehicles, p).distance(self.player.eye()) < REACH)).unwrap_or(false)
+        self.open
+            .map(|p| {
+                if crate::stash::stash_of_key(p).is_some() {
+                    return crate::stash::near_personal_chest(&self.world, self.player.eye());
+                }
+                is_container(store_kind(&self.world, &self.vehicles, p)) && (crate::vehicles::cart_of_key(p).is_none() || store_centre(&self.vehicles, p).distance(self.player.eye()) < REACH)
+            })
+            .unwrap_or(false)
     }
 
     /// Breaking a container spills what was inside onto the ground.
@@ -560,12 +576,20 @@ impl Game {
     }
 
     pub fn peer_near(&self, from: u32, p: IVec3) -> bool {
+        // Someone's own Personal Chest storage: only theirs, and only by a Personal Chest.
+        if crate::stash::stash_of_key(p).is_some() {
+            return self.peers.get(&from).is_some_and(|q| crate::stash::stash_key(&q.name) == p && crate::stash::near_personal_chest(&self.world, q.target + Vec3::Y * 1.6));
+        }
         self.peers.get(&from).map(|q| (q.target + Vec3::Y * 1.6).distance(store_centre(&self.vehicles, p)) <= REACH).unwrap_or(false)
     }
 
     pub fn host_open(&mut self, from: u32, p: IVec3) {
-        if !self.peer_near(from, p) || !is_container(store_kind(&self.world, &self.vehicles, p)) {
+        let kind = store_kind(&self.world, &self.vehicles, p);
+        if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST) {
             return;
+        }
+        if let Some(k) = crate::stash::stash_of_key(p) {
+            self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST));
         }
         self.ensure_container(p);
         self.viewers.entry(p).or_default().insert(from);
@@ -655,7 +679,9 @@ impl Game {
 
     /// Joined players: the host's copy of what's in a container.
     pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, Wear)>, burn: f32, cook: f32) {
-        let c = if crate::vehicles::cart_of_key(p).is_some() {
+        let c = if let Some(k) = crate::stash::stash_of_key(p) {
+            self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST))
+        } else if crate::vehicles::cart_of_key(p).is_some() {
             let Some(c) = store(&mut self.world, &mut self.vehicles, p) else { return };
             c
         } else {

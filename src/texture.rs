@@ -569,6 +569,9 @@ pub const T_LECTERN_BOOK_TOP: u16 = 713;
 pub const T_LOOM_TOP: u16 = 714;
 pub const T_LOOM_SIDE: u16 = 715;
 pub const T_BANNER_ICON: u16 = 716;
+/// Personal Chests.
+pub const T_PERSONAL_CHEST_TOP: u16 = 717;
+pub const T_PERSONAL_CHEST_SIDE: u16 = 718;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2773,6 +2776,15 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let bar = y == 1 && (3..13).contains(&x);
         let cloth = (4..12).contains(&x) && (2..13).contains(&y);
         if bar || (pole && !cloth) { rgb(150, 110, 60) } else if cloth { shade(rgb(235, 235, 230), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_PERSONAL_CHEST_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        shade(if rim { rgb(30, 25, 45) } else { rgb(45, 60, 55) }, r.range(0.85, 1.1))
+    });
+    a.each(T_PERSONAL_CHEST_SIDE, |x, y, r, _| {
+        let rim = x < 2 || x > 13 || y > 13 || y == 6;
+        let eye = (6..10).contains(&x) && (4..9).contains(&y);
+        if eye { shade(rgb(80, 220, 170), r.range(0.85, 1.1)) } else { shade(if rim { rgb(30, 25, 45) } else { rgb(45, 60, 55) }, r.range(0.85, 1.1)) }
     });
     a.each(T_SNIFFER, |x, y, r, _| {
         let tuft = (x * 5 + y * 3) % 9 == 0;

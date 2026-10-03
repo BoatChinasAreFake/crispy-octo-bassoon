@@ -296,7 +296,9 @@ pub const LECTERN_BOOK: Id = 474;
 /// A banner on a pole (drawn live, see banners.rs), and the Loom that patterns them.
 pub const BANNER: Id = 475;
 pub const LOOM: Id = 476;
-pub const NUM_BLOCKS: Id = 477;
+/// Opens to your own storage, wherever it is (see stash.rs).
+pub const PERSONAL_CHEST: Id = 477;
+pub const NUM_BLOCKS: Id = 478;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -2019,6 +2021,7 @@ impl Registry {
         with_book.creative = false;
         blocks.push(with_book);
         blocks.push(def("banner", "Banner (Flag-Adjacent)", Empty, false, false, [T_BANNER_ICON; 3], 1.0, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("personal_chest", "Personal Chest (Yours Alone)", Cube, true, true, [T_PERSONAL_CHEST_TOP, T_PERSONAL_CHEST_SIDE, T_PERSONAL_CHEST_TOP], 22.0, 1, true, PERSONAL_CHEST, 7.0, S_STONE));
         blocks.push(def("loom", "Loom (Pattern Machine)", Cube, true, true, [T_LOOM_TOP, T_LOOM_SIDE, T_PLANKS], 2.5, 0, false, LOOM, 0.0, S_WOOD));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
@@ -2369,6 +2372,7 @@ impl Registry {
             r(&[(PLANKS, 4), (BOOKSHELF, 1)], (LECTERN, 1)),
             r(&[(WOOL, 6), (STICK, 1)], (BANNER, 1)),
             r(&[(PLANKS, 2), (STRING, 2)], (LOOM, 1)),
+            r(&[(OBSIDIAN, 8), (STARING_EYE, 1)], (PERSONAL_CHEST, 1)),
             r(&[(STRING, 2), (WOOL, 1)], (BUNDLE, 1)),
             r(&[(IRON, 5), (CHEST, 1)], (HOPPER_FIRST, 1)),
             r(&[(WOOL, 3), (IRON, 1), (STRING, 2)], (SADDLE, 1)),

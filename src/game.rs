@@ -729,6 +729,7 @@ impl Game {
             ("hives".to_string(), crate::bees::encode(&self.hives)),
             ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
             ("banners".to_string(), crate::banners::encode(&self.banners)),
+            ("stashes".to_string(), crate::stash::encode(&self.world.stashes)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
         ];
@@ -753,6 +754,9 @@ impl Game {
         if let Some(b) = extra("pinned").and_then(|b| b.get(..4)) {
             let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
             self.pinned = (p < recipes().len()).then_some(p);
+        }
+        if let Some(b) = extra("stashes") {
+            self.world.stashes = crate::stash::decode(b);
         }
         if let Some(b) = extra("banners") {
             self.banners = crate::banners::decode(b);
@@ -2000,6 +2004,10 @@ impl Game {
             }
             if id == LOOM {
                 self.use_loom(pos);
+                return;
+            }
+            if id == PERSONAL_CHEST {
+                self.open_stash(pos);
                 return;
             }
             if crate::books::is_lectern(id) {

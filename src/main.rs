@@ -82,6 +82,7 @@ mod trees;
 mod settings;
 mod smithing;
 mod sniffers;
+mod stash;
 mod upnp;
 mod vehicles;
 mod villagers;
