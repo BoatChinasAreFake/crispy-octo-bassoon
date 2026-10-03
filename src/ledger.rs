@@ -341,6 +341,9 @@ impl Game {
         if new == TORCHFLOWER_SPROUT {
             return self.peer_take(from, TORCHFLOWER_SEEDS, 1);
         }
+        if new == PITCHER_CROP {
+            return self.peer_take(from, PITCHER_POD, 1);
+        }
         // Fire comes from a Sparker (which wears a little).
         if new == FIRE {
             let ok = self.peer_has(from, SPARKER);

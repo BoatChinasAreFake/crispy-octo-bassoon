@@ -278,6 +278,8 @@ pub fn climate(b: Biome) -> f32 {
         // Bees adore cherry blossom.
         Biome::Cherry => 1.2,
         Biome::Mangrove => 0.95,
+        // Nothing much flowers in the pale forest.
+        Biome::PaleGarden => 0.5,
         Biome::Swamp => 0.9,
         Biome::Taiga => 0.7,
         Biome::Desert | Biome::Badlands => 0.6,

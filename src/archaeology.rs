@@ -305,6 +305,9 @@ pub fn roll_find(culture: Culture, layer: u8, condition: u8, level: u32, rng: &m
                 Find { item: ENCRUSTED_RELIC, n: 1, wear: tag(0, culture.index() as u8) }
             } else if r < 0.55 + seeds {
                 Find { item: TORCHFLOWER_SEEDS, n: rng.int(1, 2) as u8, wear: 0 }
+            } else if culture == Culture::Trail && r < 0.55 + seeds + 0.08 {
+                // Something big laid this, a long time ago (see sniffers.rs).
+                Find { item: SNIFFER_EGG, n: 1, wear: 0 }
             } else if r < 0.85 {
                 shard(rng)
             } else {

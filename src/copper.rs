@@ -97,6 +97,23 @@ impl Game {
                     self.world.set_v(up, BAMBOO);
                 }
             }
+        } else if id == PITCHER_CROP {
+            if self.rng.chance(0.06) && self.world.sky_light(p.x, p.y, p.z) > 0.3 {
+                self.world.set_v(p, PITCHER_PLANT);
+            }
+        } else if id == SNIFFER_EGG {
+            // Hatches in time (sooner on moss).
+            let moss = matches!(self.world.get_v(p - IVec3::Y), PALE_MOSS | MUD);
+            if self.rng.chance(if moss { crate::sniffers::HATCH_CHANCE_MOSS } else { crate::sniffers::HATCH_CHANCE }) {
+                self.world.set_v(p, AIR);
+                let at = p.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5);
+                let id = self.alloc_mob(crate::entity::MobKind::Sniffer, at);
+                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                    m.set_baby(crate::animals::GROW_SECS);
+                    m.persistent = true;
+                }
+                self.sfx(crate::sound::Sfx::Break(crate::sound::Mat::Glass), Some(at));
+            }
         } else if id == TORCHFLOWER_SPROUT {
             // Ancient seeds take their time (and want a bit of light).
             if self.rng.chance(0.08) && self.world.sky_light(p.x, p.y, p.z) > 0.3 {

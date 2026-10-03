@@ -110,6 +110,8 @@ pub struct Game {
     /// Trial Spawners' fights, and how often they look around (see trial.rs).
     pub trials: HashMap<IVec3, crate::trial::Trial>,
     pub trial_timer: f32,
+    /// How often Creaking Hearts look around (see creaking.rs).
+    pub creak_timer: f32,
     /// Regeneration's heartbeat.
     pub regen_clock: f32,
     /// Raids (see raids.rs): the one on now, who has Bad Omen or is a Hero (by player id, seconds left),
@@ -374,6 +376,7 @@ impl Game {
             cage_timer: 0.0,
             trials: HashMap::new(),
             trial_timer: 0.0,
+            creak_timer: 0.0,
             regen_clock: 0.0,
             raid: None,
             omens: HashMap::new(),
@@ -795,7 +798,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
-            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG => "getting_wood",
+            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
             DIAMOND => "dimonds",
@@ -1983,8 +1986,12 @@ impl Game {
                 self.use_restoration(pos);
                 return;
             }
-            if held == TORCHFLOWER_SEEDS && matches!(id, GRASS | DIRT | FARMLAND | FARMLAND_WET | MUD) && self.world.get_v(pos + IVec3::Y) == AIR {
-                self.world.set_v(pos + IVec3::Y, TORCHFLOWER_SPROUT);
+            if let Some(sprout) = crate::sniffers::sprout_of(held)
+                && matches!(id, GRASS | DIRT | FARMLAND | FARMLAND_WET | MUD | PALE_MOSS)
+                && self.world.get_v(pos + IVec3::Y) == AIR
+            {
+                self.world.set_v(pos + IVec3::Y, sprout);
+                self.advance("ancient_seeds");
                 self.sfx(Sfx::Place(crate::sound::Mat::Grass), Some(pos.as_vec3() + Vec3::splat(0.5)));
                 self.player.swing = 1.0;
                 if !self.creative {
@@ -2766,6 +2773,7 @@ impl Game {
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
+        self.creaking_tick(dt);
         self.snouts_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
@@ -2815,7 +2823,8 @@ impl Game {
                     MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Rampager => noises.push((Sfx::Roar, m.body.pos)),
                     MobKind::Goat => noises.push((Sfx::Bleat, m.body.pos)),
-                    MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel => {}
+                    MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel | MobKind::Creaking => {}
+                    MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -2927,7 +2936,8 @@ impl Game {
                             MobKind::Weeper => self.advance("dry_your_eyes"),
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Breeze => self.advance("breeze_through"),
-                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel => {}
+                            MobKind::Creaking => self.advance("heartbreak"),
+                            MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}

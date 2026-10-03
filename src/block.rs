@@ -277,7 +277,20 @@ pub const LODESTONE: Id = 459;
 pub const TRIAL_SPAWNER_OMINOUS: Id = 460;
 pub const VAULT_OMINOUS: Id = 461;
 pub const HEAVY_CORE: Id = 462;
-pub const NUM_BLOCKS: Id = 463;
+/// The Pale Garden (see world.rs and creaking.rs).
+pub const PALE_OAK_LOG: Id = 463;
+pub const PALE_OAK_LEAVES: Id = 464;
+pub const PALE_OAK_PLANKS: Id = 465;
+pub const PALE_MOSS: Id = 466;
+pub const PALE_HANGING_MOSS: Id = 467;
+/// In a pale oak's trunk: wakes at night and calls up a Creaking.
+pub const CREAKING_HEART: Id = 468;
+pub const CREAKING_HEART_AWAKE: Id = 469;
+/// Sniffers (see sniffers.rs): an egg that hatches, and a Pitcher plant growing up.
+pub const SNIFFER_EGG: Id = 470;
+pub const PITCHER_CROP: Id = 471;
+pub const PITCHER_PLANT: Id = 472;
+pub const NUM_BLOCKS: Id = 473;
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -460,7 +473,9 @@ pub const OMINOUS_TRIAL_KEY: Id = FIRST_ITEM + 222;
 pub const MACE: Id = FIRST_ITEM + 223;
 /// Drink it for a Bad Omen.
 pub const OMINOUS_BOTTLE: Id = FIRST_ITEM + 224;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 225;
+/// A seed a Sniffer dug up: plant it for a Pitcher plant.
+pub const PITCHER_POD: Id = FIRST_ITEM + 225;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 226;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -1968,6 +1983,25 @@ impl Registry {
         ov.creative = false;
         blocks.push(ov);
         blocks.push(def("heavy_core", "Heavy Core (Surprisingly Dense)", Cube, true, true, [T_HEAVY_CORE; 3], 10.0, 1, true, HEAVY_CORE, 0.0, S_STONE));
+        // The Pale Garden.
+        blocks.push(def("pale_oak_log", "Pale Oak Log (Washed Out)", Cube, true, true, [T_PALE_LOG_TOP, T_PALE_LOG_SIDE, T_PALE_LOG_TOP], 2.0, 0, false, PALE_OAK_LOG, 0.0, S_WOOD));
+        blocks.push(def("pale_oak_leaves", "Pale Oak Leaves (Ghostly)", Cube, true, false, [T_PALE_LEAVES; 3], 0.2, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("pale_oak_planks", "Pale Oak Planks (Off-White)", Cube, true, true, [T_PALE_PLANKS; 3], 2.0, 0, false, PALE_OAK_PLANKS, 0.0, S_WOOD));
+        blocks.push(def("pale_moss", "Pale Moss (Grey Carpet)", Cube, true, true, [T_PALE_MOSS, T_PALE_MOSS, T_DIRT], 0.1, 0, false, PALE_MOSS, 0.0, S_GRASS));
+        blocks.push(def("pale_hanging_moss", "Pale Hanging Moss (Dangly)", Cross, false, false, [T_PALE_HANGING_MOSS; 3], 0.0, 0, false, PALE_HANGING_MOSS, 0.0, S_GRASS));
+        blocks.push(def("creaking_heart", "Creaking Heart (Asleep)", Cube, true, true, [T_PALE_LOG_TOP, T_CREAKING_HEART, T_PALE_LOG_TOP], 10.0, 0, false, CREAKING_HEART, 0.0, S_WOOD));
+        let mut awake = def("creaking_heart_awake", "Creaking Heart (Awake)", Cube, true, true, [T_PALE_LOG_TOP, T_CREAKING_HEART_ON, T_PALE_LOG_TOP], 10.0, 0, false, CREAKING_HEART, 6.0, S_WOOD);
+        awake.creative = false;
+        blocks.push(awake);
+        // Sniffers.
+        let mut egg = def("sniffer_egg", "Sniffer Egg (Ancient, Still Warm)", Shaped, true, false, [T_SNIFFER_EGG; 3], 0.5, 0, false, SNIFFER_EGG, 0.0, S_WOOD);
+        egg.see_through = true;
+        egg.shape = Shape::Table;
+        blocks.push(egg);
+        let mut crop = def("pitcher_crop", "Pitcher Sprout (Taking Its Time)", Cross, false, false, [T_PITCHER_CROP; 3], 0.0, 0, false, PITCHER_POD, 0.0, S_GRASS);
+        crop.creative = false;
+        blocks.push(crop);
+        blocks.push(def("pitcher_plant", "Pitcher Plant (Ancient, Teal)", Cross, false, false, [T_PITCHER_PLANT; 3], 0.0, 0, false, PITCHER_PLANT, 0.0, S_GRASS));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2199,6 +2233,7 @@ impl Registry {
         items.push(item("ominous_trial_key", "Ominous Trial Key (Opens an Ominous Vault)", T_OMINOUS_KEY));
         items.push(ItemDef { stack: 1, damage: 6.0, durability: Some(500), ..item("mace", "Mace (Gravity Assisted)", T_MACE) });
         items.push(ItemDef { stack: 16, ..item("ominous_bottle", "Ominous Bottle (Tastes Foreboding)", T_OMINOUS_BOTTLE) });
+        items.push(item("pitcher_pod", "Pitcher Pod (Very Old Seed)", T_PITCHER_POD));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2207,6 +2242,8 @@ impl Registry {
             r(&[(SPRUCE_LOG, 1)], (PLANKS, 4)),
             r(&[(JUNGLE_LOG, 1)], (PLANKS, 4)),
             r(&[(CHERRY_LOG, 1)], (CHERRY_PLANKS, 4)),
+            r(&[(PALE_OAK_LOG, 1)], (PALE_OAK_PLANKS, 4)),
+            r(&[(PALE_OAK_PLANKS, 1)], (PLANKS, 1)),
             r(&[(MANGROVE_LOG, 1)], (MANGROVE_PLANKS, 4)),
             // The new woods do anything plain planks do, once you've made them plain.
             r(&[(CHERRY_PLANKS, 1)], (PLANKS, 1)),
@@ -2486,12 +2523,12 @@ pub fn dapples_sky(id: Id) -> bool {
 /// Any kind of tree trunk.
 #[inline]
 pub fn is_log(id: Id) -> bool {
-    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG)
+    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG)
 }
 /// Any kind of leaves.
 #[inline]
 pub fn is_leaves(id: Id) -> bool {
-    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES)
+    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES | PALE_OAK_LEAVES)
 }
 /// Can the player point at it (and break it)?
 #[inline]

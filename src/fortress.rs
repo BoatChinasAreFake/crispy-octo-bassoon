@@ -189,7 +189,7 @@ pub fn camp_blocks(site: &Site) -> Vec<(IVec3, Id)> {
 /// A cage that spawns things: a fortress's Sizzler Cage or a dungeon's Monster Cage.
 /// Cages, spawners and Trial Spawners (all kept track of in `World::cages`).
 pub fn is_cage(id: Id) -> bool {
-    id == SIZZLER_CAGE || id == SPAWNER || crate::trial::is_trial_spawner(id)
+    id == SIZZLER_CAGE || id == SPAWNER || crate::trial::is_trial_spawner(id) || crate::creaking::is_heart(id)
 }
 
 /// What comes out of the cage at `p`: Sizzlers, or (in a dungeon) one kind of monster, the same each time.

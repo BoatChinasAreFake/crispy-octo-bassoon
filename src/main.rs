@@ -20,6 +20,7 @@ mod cheats;
 mod combat;
 mod containers;
 mod copper;
+mod creaking;
 mod crafting;
 mod critters;
 mod deepdark;
@@ -78,6 +79,7 @@ mod structures;
 mod trees;
 mod settings;
 mod smithing;
+mod sniffers;
 mod upnp;
 mod vehicles;
 mod villagers;
@@ -3824,12 +3826,13 @@ fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
-        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" => {
+        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" => {
             let want = match mode {
                 "swamp" => world::Biome::Swamp,
                 "jungle" => world::Biome::Jungle,
                 "badlands" => world::Biome::Badlands,
                 "cherry" => world::Biome::Cherry,
+                "palegarden" => world::Biome::PaleGarden,
                 "mangrove" => world::Biome::Mangrove,
                 _ => world::Biome::Taiga,
             };
@@ -4216,7 +4219,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "deepdark" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);

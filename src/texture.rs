@@ -540,6 +540,25 @@ pub const T_HEAVY_CORE: u16 = 688;
 pub const T_OMINOUS_KEY: u16 = 689;
 pub const T_MACE: u16 = 690;
 pub const T_OMINOUS_BOTTLE: u16 = 691;
+/// The Pale Garden and the Creaking.
+pub const T_PALE_LOG_SIDE: u16 = 692;
+pub const T_PALE_LOG_TOP: u16 = 693;
+pub const T_PALE_LEAVES: u16 = 694;
+pub const T_PALE_PLANKS: u16 = 695;
+pub const T_PALE_MOSS: u16 = 696;
+pub const T_PALE_HANGING_MOSS: u16 = 697;
+pub const T_CREAKING_HEART: u16 = 698;
+pub const T_CREAKING_HEART_ON: u16 = 699;
+pub const T_CREAKING: u16 = 700;
+pub const T_CREAKING_FACE: u16 = 701;
+pub const T_CREAKING_FACE_ON: u16 = 702;
+/// Sniffers and their finds.
+pub const T_SNIFFER: u16 = 703;
+pub const T_SNIFFER_FACE: u16 = 704;
+pub const T_SNIFFER_EGG: u16 = 705;
+pub const T_PITCHER_POD: u16 = 706;
+pub const T_PITCHER_CROP: u16 = 707;
+pub const T_PITCHER_PLANT: u16 = 708;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2706,6 +2725,58 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         });
     }
     bark(&mut a, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP, [90, 55, 40], [150, 60, 50]);
+    bark(&mut a, T_PALE_LOG_SIDE, T_PALE_LOG_TOP, [175, 170, 165], [225, 215, 210]);
+    a.each(T_PALE_LEAVES, |_, _, r, _| if r.chance(0.15) { [180, 185, 175, 0] } else { shade(rgb(165, 172, 162), r.range(0.78, 1.12)) });
+    a.each(T_PALE_PLANKS, |x, y, r, _| {
+        let board = y / 4;
+        let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
+        if seam { rgb(170, 160, 155) } else { shade(rgb(230, 222, 215), r.range(0.92, 1.06)) }
+    });
+    a.each(T_PALE_MOSS, |_, _, r, _| shade(rgb(150, 158, 145), r.range(0.8, 1.12)));
+    a.each(T_PALE_HANGING_MOSS, |x, y, r, _| {
+        // Strands hanging down, longer in the middle.
+        let len = 6 + ((x * 7) % 5) as usize + if (5..11).contains(&x) { 4 } else { 0 };
+        if x % 3 != 1 && y < len { shade(rgb(150, 158, 145), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    for (t, eye) in [(T_CREAKING_HEART, rgb(70, 60, 55)), (T_CREAKING_HEART_ON, rgb(255, 150, 40))] {
+        a.each(t, |x, y, r, _| {
+            let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+            if d < 3.0 { shade(eye, r.range(0.85, 1.1)) } else if d < 4.0 { rgb(60, 50, 45) } else { shade(rgb(175, 170, 165), r.range(0.85, 1.05)) }
+        });
+    }
+    a.each(T_SNIFFER, |x, y, r, _| {
+        let tuft = (x * 5 + y * 3) % 9 == 0;
+        shade(if tuft { rgb(90, 160, 80) } else { rgb(170, 70, 55) }, r.range(0.82, 1.1))
+    });
+    a.each(T_SNIFFER_FACE, |x, y, r, _| {
+        let eye = (y == 5 || y == 6) && (x == 3 || x == 12);
+        if eye { rgb(30, 25, 20) } else { shade(rgb(200, 150, 70), r.range(0.85, 1.08)) }
+    });
+    a.each(T_SNIFFER_EGG, |x, y, r, _| {
+        let spot = (x * 7 + y * 5) % 11 < 2;
+        shade(if spot { rgb(60, 110, 70) } else { rgb(170, 70, 55) }, r.range(0.85, 1.1))
+    });
+    a.sprite(T_PITCHER_POD, &ORB_SPRITE, &[('#', rgb(40, 60, 50)), ('h', rgb(130, 210, 190)), ('b', rgb(70, 150, 130)), ('d', rgb(50, 110, 95))]);
+    a.each(T_PITCHER_CROP, |x, y, r, _| {
+        let stem = (7..9).contains(&x) && y > 6;
+        let leaf = y > 9 && (x as i32 - 7).abs() < (y as i32 - 8);
+        if stem || leaf { shade(rgb(70, 140, 110), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_PITCHER_PLANT, |x, y, r, _| {
+        let cup = (4..12).contains(&x) && (2..9).contains(&y) && !((6..10).contains(&x) && y < 4);
+        let stem = (7..9).contains(&x) && y >= 9;
+        if cup { shade(if y < 4 { rgb(170, 110, 220) } else { rgb(80, 175, 160) }, r.range(0.85, 1.1)) } else if stem { rgb(60, 120, 90) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_CREAKING, |x, y, r, _| {
+        let crack = (x * 3 + y) % 7 == 0;
+        shade(if crack { rgb(55, 45, 40) } else { rgb(120, 105, 95) }, r.range(0.8, 1.1))
+    });
+    for (t, eye) in [(T_CREAKING_FACE, rgb(60, 50, 45)), (T_CREAKING_FACE_ON, rgb(255, 150, 40))] {
+        a.each(t, |x, y, r, _| {
+            let e = ((3..6).contains(&x) || (10..13).contains(&x)) && (5..8).contains(&y);
+            if e { eye } else { shade(rgb(120, 105, 95), r.range(0.82, 1.08)) }
+        });
+    }
     a.each(T_CHERRY_LEAVES, |x, y, r, _| {
         if r.chance(0.13) { return [240, 170, 200, 0]; }
         let blossom = (x * 7 + y * 3) % 5 == 0;
