@@ -4497,6 +4497,7 @@ async fn game_main() {
                         g.inv.wear[i] = wear;
                     }
                     g.player.hunger.food = 13.0;
+                    g.inv.offhand = Some((block::TORCH, 16));
                 }
                 if let Some(t) = s.time {
                     g.time = t;
