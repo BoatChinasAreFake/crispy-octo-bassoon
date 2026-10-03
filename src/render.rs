@@ -474,8 +474,9 @@ pub struct Renderer {
     dyn_cap_v: usize,
     dyn_cap_i: usize,
     pub chunks: HashMap<(i32, i32), GpuChunk>,
-    /// Distant terrain (see lod.rs), drawn behind the chunks.
+    /// Distant terrain (see lod.rs), and its tiles: (chunk, first index, count).
     far: Option<GpuMesh>,
+    far_tiles: Vec<((i32, i32), i32, i32)>,
 }
 
 fn upload(ctx: &mut dyn RenderingBackend, m: &MeshData) -> Option<GpuMesh> {
@@ -594,7 +595,7 @@ impl Renderer {
         let (dyn_cap_v, dyn_cap_i) = (1 << 16, 3 << 15);
         let dyn_vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<Vertex>(dyn_cap_v));
         let dyn_ib = ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Stream, BufferSource::empty::<u32>(dyn_cap_i));
-        Renderer { opaque, blend, overlay, sky, texture, shadow_tex, shadow_pass, shadow_pipe, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new(), far: None }
+        Renderer { opaque, blend, overlay, sky, texture, shadow_tex, shadow_pass, shadow_pipe, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new(), far: None, far_tiles: Vec::new() }
     }
 
     pub fn set_chunk(&mut self, ctx: &mut dyn RenderingBackend, key: (i32, i32), mesh: ChunkMesh) {
@@ -607,10 +608,11 @@ impl Renderer {
     }
 
     /// Swap in new distant terrain (or none).
-    pub fn set_far(&mut self, ctx: &mut dyn RenderingBackend, mesh: Option<&MeshData>) {
+    pub fn set_far(&mut self, ctx: &mut dyn RenderingBackend, land: Option<&crate::lod::FarLand>) {
         let old = self.far.take();
         free(ctx, old);
-        self.far = mesh.and_then(|m| upload(ctx, m));
+        self.far = land.and_then(|l| upload(ctx, &l.mesh));
+        self.far_tiles = land.map(|l| l.tiles.iter().map(|&(k, s, n)| (k, s as i32, n as i32)).collect()).unwrap_or_default();
     }
 
     pub fn has_far(&self) -> bool {
@@ -777,12 +779,29 @@ impl Renderer {
         // Opaque chunks
         ctx.apply_pipeline(&self.opaque);
         ctx.apply_uniforms(UniformsSource::table(&base));
-        // The far-off land first (it's sunk under the chunks where they meet).
+        // The far-off land: only the tiles whose real chunk isn't drawn, so the
+        // two meet exactly (runs of neighbouring tiles go in one draw).
         if fp.far_land
             && let Some(m) = &self.far
         {
             ctx.apply_bindings(&Bindings { vertex_buffers: vec![m.vb], index_buffer: m.ib, images: images.clone() });
-            ctx.draw(0, m.count, 1);
+            let mut run: Option<(i32, i32)> = None;
+            for &(k, start, count) in &self.far_tiles {
+                if self.chunks.contains_key(&k) {
+                    continue;
+                }
+                run = match run {
+                    Some((s, n)) if s + n == start => Some((s, n + count)),
+                    Some((s, n)) => {
+                        ctx.draw(s, n, 1);
+                        Some((start, count))
+                    }
+                    None => Some((start, count)),
+                };
+            }
+            if let Some((s, n)) = run {
+                ctx.draw(s, n, 1);
+            }
         }
         let mut visible: Vec<((i32, i32), f32)> = Vec::new();
         for (&(cx, cz), c) in &self.chunks {

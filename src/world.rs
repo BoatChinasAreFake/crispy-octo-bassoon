@@ -758,8 +758,8 @@ impl Generator {
                 if swamp && h < SEA && b[idx(lx, SEA, lz)] == WATER && hash2(s ^ 0x111, x, z) < 0.08 {
                     b[idx(lx, SEA + 1, lz)] = LILY_PAD;
                 }
-                // Pokey Plants in the desert (and badlands), 1-3 tall.
-                if biome.dry() && top + 3 < CH && matches!(b[idx(lx, h, lz)], SAND | RED_SAND) && hash2(s ^ 0xCAC, x, z) < 0.005 {
+                // Pokey Plants in the desert (and badlands), 1-3 tall (on dry land only).
+                if biome.dry() && top + 3 < CH && matches!(b[idx(lx, h, lz)], SAND | RED_SAND) && b[idx(lx, top, lz)] == AIR && hash2(s ^ 0xCAC, x, z) < 0.005 {
                     let tall = 1 + (hash2(s ^ 0xCAD, x, z) * 3.0) as i32;
                     for y in top..top + tall.min(3) {
                         b[idx(lx, y, lz)] = CACTUS;
@@ -792,6 +792,12 @@ impl Generator {
                         continue;
                     }
                     let i = idx(lx, p.y, lz);
+                    // Mangrove roots in the water (or at the water's edge) are waterlogged.
+                    let id = if id == MANGROVE_ROOTS && (is_water(b[i]) || (p.y <= SEA && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| self.column(p.x + dx, p.z + dz).0 < p.y))) {
+                        MANGROVE_ROOTS_WET
+                    } else {
+                        id
+                    };
                     if force || matches!(b[i], AIR | TALL_GRASS | FLOWER | LILY_PAD | PINK_PETALS | PALE_HANGING_MOSS | LEAF_LITTER | WILDFLOWERS | EYEBLOSSOM | FIREFLY_BUSH) {
                         b[i] = id;
                     }
@@ -1499,6 +1505,35 @@ mod biome_tests {
         assert!(has(Biome::Cherry, &|id| id == CHERRY_LEAVES || id == PINK_PETALS));
         assert!(has(Biome::Mangrove, &|id| id == MANGROVE_ROOTS || id == MANGROVE_LEAVES));
         assert!(has(Biome::Mangrove, &|id| id == MUD));
+        // Cacti only grow on dry land, and mangrove roots in water are wet.
+        let mut wet = 0;
+        for (name, near) in [(Biome::Desert.name(), 6), (Biome::Badlands.name(), 6), (Biome::Mangrove.name(), 6)] {
+            let (x, z) = seen[name];
+            for cz in -near..=near {
+                for cx in -near..=near {
+                    let (ccx, ccz) = (x.div_euclid(CW) + cx, z.div_euclid(CW) + cz);
+                    let chunk = g.generate(ccx, ccz);
+                    for y in 1..CH - 1 {
+                        for lz in 0..CW {
+                            for lx in 0..CW {
+                                let id = chunk[idx(lx, y, lz)];
+                                if id == CACTUS {
+                                    assert!(y > SEA && !is_water(chunk[idx(lx, y + 1, lz)]), "a cactus in the water at {} {y} {}", ccx * CW + lx, ccz * CW + lz);
+                                }
+                                if id == MANGROVE_ROOTS_WET {
+                                    wet += 1;
+                                }
+                                if id == MANGROVE_ROOTS && (1..CW - 1).contains(&lx) && (1..CW - 1).contains(&lz) {
+                                    let beside = [chunk[idx(lx + 1, y, lz)], chunk[idx(lx - 1, y, lz)], chunk[idx(lx, y, lz + 1)], chunk[idx(lx, y, lz - 1)]];
+                                    assert!(!beside.iter().any(|&b| is_water(b)), "dry roots beside water at {} {y} {}", ccx * CW + lx, ccz * CW + lz);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(wet > 0, "some mangroves stand in water");
         // Not too rare, not everywhere.
         let mut count: HashMap<Biome, usize> = HashMap::new();
         for z in (-6000..6000).step_by(40) {
@@ -1525,4 +1560,3 @@ mod biome_tests {
         }
     }
 }
-
