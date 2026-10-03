@@ -64,6 +64,7 @@ mod net;
 mod noise;
 mod pad;
 mod palette;
+mod pathing;
 mod paths;
 mod tint;
 mod trial;

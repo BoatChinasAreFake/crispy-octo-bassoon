@@ -678,6 +678,8 @@ pub struct Mob {
     pub passenger: u32,
     /// A Floaty's other two seats (see floaty.rs), the same way.
     pub crew: [u32; 2],
+    /// Its way round obstacles to where it's going (see pathing.rs).
+    pub path: Option<Box<crate::pathing::Path>>,
     /// Which colouring it has (Gallopers, Woofers, Mooers, Axolotls; see `variant_tint`).
     pub variant: u8,
 }
@@ -845,6 +847,7 @@ impl Mob {
             rider: 0,
             passenger: 0,
             crew: [0; 2],
+            path: None,
             variant: if variants(kind) > 1 { roll_variant(kind, rng) } else { 0 },
         }
     }
@@ -1877,6 +1880,30 @@ impl Mob {
             want = self.wander_dir.map(|y| (y, 1.2));
         }
 
+        // Heading somewhere (a goal, or the player it's after) on foot: round
+        // whatever's in the way (see pathing.rs). Fleeing and wandering don't bother.
+        if let Some((yaw, speed)) = want
+            && !self.kind.flies()
+            && self.kind != MobKind::Fee
+            && !self.body.in_water
+            && !self.sitting
+        {
+            let toward = |t: Vec3| (t.x - self.body.pos.x).atan2(-(t.z - self.body.pos.z));
+            let target = match self.goal {
+                Some(g) if angle_diff(yaw, toward(g)).abs() < 0.35 => Some(g),
+                _ if dist < 40.0 && speed > 1.5 && angle_diff(yaw, face).abs() < 0.35 => Some(player),
+                _ => None,
+            };
+            match target {
+                Some(t) => {
+                    let stuck = self.body.hit_wall && self.body.on_ground;
+                    if let Some(y) = crate::pathing::steer(world, &mut self.path, self.body.pos, t, self.body.height, stuck, dt) {
+                        want = Some((y, speed));
+                    }
+                }
+                None => self.path = None,
+            }
+        }
         let (target_vel, moving) = match want {
             Some((yaw, speed)) => {
                 let d = angle_diff(yaw, self.yaw);
