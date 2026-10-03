@@ -77,6 +77,7 @@ mod updates;
 mod player;
 mod playtest;
 mod potions;
+mod qol;
 mod players;
 mod regions;
 mod render;
@@ -1250,9 +1251,14 @@ impl App {
         let s = self.ui.s;
         let eye = self.game.player.eye();
         for (pos, lines) in &self.game.world.signs {
+            // Dyed words take the dye's colour; glowing ones show from further off (see qol.rs).
+            let style = self.game.world.sign_styles.get(pos).copied().unwrap_or(0);
+            let glow = style & qol::GLOW != 0;
+            let [r, g, b] = qol::sign_colour(style);
+            let ink = Color::from_rgba(r, g, b, 255);
             let at = pos.as_vec3() + Vec3::new(0.5, 0.78, 0.5);
             let d = at.distance(eye);
-            if d > 16.0 || lines.iter().all(|l| l.is_empty()) {
+            if d > if glow { 32.0 } else { 16.0 } || lines.iter().all(|l| l.is_empty()) {
                 continue;
             }
             let clip = self.last_view_proj * at.extend(1.0);
@@ -1267,7 +1273,15 @@ impl App {
             let top = sy - line_h * 2.0;
             draw_rectangle(sx - wmax / 2.0 - 3.0 * s, top - line_h * 0.8, wmax + 6.0 * s, line_h * 4.0 + 2.0 * s, Color::new(0.35, 0.25, 0.12, 0.55));
             for (i, l) in lines.iter().enumerate() {
-                self.ui.text_centered(l, sx, top + i as f32 * line_h, size, WHITE);
+                let y = top + i as f32 * line_h;
+                if glow {
+                    // A soft halo of the same colour behind the words.
+                    let halo = Color::from_rgba(r, g, b, 90);
+                    for (ox, oy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+                        self.ui.text_centered(l, sx + ox * s, y + oy * s, size, halo);
+                    }
+                }
+                self.ui.text_centered(l, sx, y, size, ink);
             }
         }
     }

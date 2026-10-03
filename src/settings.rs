@@ -60,6 +60,8 @@ pub struct Settings {
     pub distant_terrain: bool,
     /// The banner painted on your shield (a design, see banners.rs; 0: plain).
     pub shield_banner: u16,
+    /// Creative hotbar presets: nine block/item names each, comma-separated ("" for an empty slot).
+    pub hotbars: [String; 3],
 }
 
 /// Max FPS choices (0: unlimited).
@@ -103,6 +105,7 @@ impl Default for Settings {
             fancy_water: true,
             distant_terrain: true,
             shield_banner: 0,
+            hotbars: Default::default(),
         }
     }
 }
@@ -150,7 +153,8 @@ impl Settings {
             self.fancy_water,
             self.distant_terrain,
             self.shield_banner,
-        ) + self.binds.to_text().as_str()
+        ) + self.hotbars.iter().enumerate().map(|(i, h)| format!("hotbar{}={}\n", i + 1, clean(h, 600))).collect::<String>().as_str()
+            + self.binds.to_text().as_str()
     }
 
     pub fn from_text(text: &str) -> Settings {
@@ -197,6 +201,7 @@ impl Settings {
                 "fancy_water" => s.fancy_water = flag(s.fancy_water),
                 "distant_terrain" => s.distant_terrain = flag(s.distant_terrain),
                 "shield_banner" => s.shield_banner = v.parse().unwrap_or(0),
+                "hotbar1" | "hotbar2" | "hotbar3" => s.hotbars[(k.trim().as_bytes()[6] - b'1') as usize] = clean(v, 600),
                 "clouds" => s.clouds = flag(s.clouds),
                 k => {
                     s.binds.read(k, v);
@@ -287,6 +292,7 @@ mod tests {
             fancy_water: false,
             distant_terrain: false,
             shield_banner: 0x0042,
+            hotbars: Default::default(),
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

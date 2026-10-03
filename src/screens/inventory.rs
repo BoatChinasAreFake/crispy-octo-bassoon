@@ -127,6 +127,27 @@ impl App {
         }
         let hot_y = y0 + panel_h - slot - 6.0 * s;
         self.ui.text("Hotbar", sx, hot_y - 3.0 * s, 9.0, GRAY);
+        if creative {
+            // Three saved hotbars (kept in settings.txt): save this one, or swap one in.
+            let bw = 26.0 * s;
+            for k in 0..3 {
+                let bx = sx + slot * 9.0 - (3 - k) as f32 * (bw * 2.0 + 3.0 * s);
+                let by = hot_y - 14.0 * s;
+                if self.ui.button(Rect::new(bx, by, bw, 11.0 * s), &format!("Save {}", k + 1), true) {
+                    self.settings.hotbars[k] = self.game.inv.slots[..9].iter().map(|st| st.map(|(id, _)| reg().key_of(id)).unwrap_or("")).collect::<Vec<_>>().join(",");
+                    self.save_settings();
+                }
+                let has = !self.settings.hotbars[k].is_empty();
+                if self.ui.button(Rect::new(bx + bw + 1.0 * s, by, bw, 11.0 * s), &format!("Load {}", k + 1), has) {
+                    let keys: Vec<String> = self.settings.hotbars[k].split(',').map(str::to_string).collect();
+                    for i in 0..9 {
+                        let id = keys.get(i).and_then(|key| reg().lookup(key)).filter(|&id| id != AIR);
+                        self.game.inv.slots[i] = id.map(|id| (id, max_stack(id)));
+                        self.game.inv.wear[i] = 0;
+                    }
+                }
+            }
+        }
         for i in 0..9 {
             let cx = sx + i as f32 * slot;
             let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, hot_y, slot, i == self.game.inv.selected);

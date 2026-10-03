@@ -141,6 +141,9 @@ pub enum Msg {
     Mend { points: u32 },
     /// client -> host: my Frost Walker boots are by water; freeze it.
     FrostWalk,
+    /// Both ways: a sign's colour and glow (see qol.rs); `item` is what the
+    /// player used (AIR from the host, which just says how it is).
+    SignStyle { x: i32, y: i32, z: i32, style: u8, item: Id },
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -782,6 +785,14 @@ impl Msg {
                 w.u32(*points);
             }
             Msg::FrostWalk => w.u8(86),
+            Msg::SignStyle { x, y, z, style, item } => {
+                w.u8(87);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*style);
+                w.u16(*item);
+            }
             Msg::CampfirePut { x, y, z, item } => {
                 w.u8(84);
                 w.i32(*x);
@@ -1149,6 +1160,7 @@ impl Msg {
             84 => Msg::CampfirePut { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()? },
             85 => Msg::Mend { points: r.u32()? },
             86 => Msg::FrostWalk,
+            87 => Msg::SignStyle { x: r.i32()?, y: r.i32()?, z: r.i32()?, style: r.u8()?, item: r.u16()? },
             78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
             74 => {
@@ -1740,6 +1752,7 @@ mod tests {
             Msg::CampfirePut { x: 1, y: 60, z: -2, item: 0x8028 },
             Msg::Mend { points: 9 },
             Msg::FrostWalk,
+            Msg::SignStyle { x: -4, y: 70, z: 9, style: 19, item: 0x805a },
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },

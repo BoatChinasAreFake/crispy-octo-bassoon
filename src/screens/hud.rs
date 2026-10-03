@@ -329,6 +329,18 @@ impl App {
                         draw_rectangle(bx - 2.0 * s, by - 4.0 * s, 4.0 * s, 5.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
                     }
                 }
+                // Where you last died: a dark cross.
+                if let Some(d) = self.game.last_death.filter(|_| !scorch::in_scorch(me.x)) {
+                    let (dx, dz) = ((d.x - me.x) / scale, (d.z - me.z) / scale);
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {
+                        let (bx, by) = (cx + dx * per_px, cy + dz * per_px);
+                        let k = 4.0 * s;
+                        let ink = Color::new(0.15, 0.05, 0.05, 1.0);
+                        draw_line(bx - k, by - k, bx + k, by + k, 2.5 * s, ink);
+                        draw_line(bx - k, by + k, bx + k, by - k, 2.5 * s, ink);
+                    }
+                }
                 self.ui.text(&format!("1:{}", scale as i32), x + 4.0 * s, y + size - 4.0 * s, 8.0, Color::new(0.2, 0.15, 0.1, 1.0));
                 let k = 6.0 * s;
                 draw_triangle(vec2(cx + fx * k, cy + fy * k), vec2(cx - fx * k * 0.6 + rx * k * 0.6, cy - fy * k * 0.6 + ry * k * 0.6), vec2(cx - fx * k * 0.6 - rx * k * 0.6, cy - fy * k * 0.6 - ry * k * 0.6), Color::new(0.9, 0.1, 0.1, 1.0));

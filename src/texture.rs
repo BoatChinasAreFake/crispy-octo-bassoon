@@ -3625,7 +3625,7 @@ fn masonry_tiles(a: &mut Atlas) {
         if rim { shade(rgb(180, 150, 70), r.range(0.9, 1.05)) } else if slat { shade(rgb(150, 120, 55), r.range(0.9, 1.05)) } else { shade(rgb(205, 175, 90), r.range(0.9, 1.05)) }
     });
     a.each(T_SCAFFOLD_SIDE, |x, y, r, _| {
-        let frame = x < 2 || x > 13 || y < 2;
+        let frame = !(2..=13).contains(&x) || y < 2;
         let brace = (x as i32 - y as i32).abs() < 2;
         if frame || brace { shade(rgb(185, 155, 75), r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
     });

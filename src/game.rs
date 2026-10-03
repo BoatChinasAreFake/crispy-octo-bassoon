@@ -276,6 +276,8 @@ pub struct Game {
     pub shooting: Vec<crate::skies::ShootingStar>,
     pub rainbow: f32,
     pub was_wet: bool,
+    /// Seconds until the world border speaks up again (see qol.rs).
+    pub border_note: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
     pub lod: crate::lod::Lod,
@@ -519,6 +521,7 @@ impl Game {
             shooting: Vec::new(),
             rainbow: 0.0,
             was_wet: false,
+            border_note: 0.0,
             distant_terrain: true,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -781,6 +784,7 @@ impl Game {
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
             ("day".to_string(), self.day.to_le_bytes().to_vec()),
             ("packs".to_string(), self.encode_packs()),
+            ("sign_styles".to_string(), crate::qol::encode_styles(&self.world.sign_styles)),
             ("rules2".to_string(), [&[self.rules.seasons as u8][..], &self.rules.border.to_le_bytes()].concat()),
         ];
         if let Some(p) = self.pinned {
@@ -807,6 +811,9 @@ impl Game {
         }
         if let Some(b) = extra("stashes") {
             self.world.stashes = crate::stash::decode(b);
+        }
+        if let Some(b) = extra("sign_styles") {
+            self.world.sign_styles = crate::qol::decode_styles(b);
         }
         if let Some(b) = extra("rules2").filter(|b| b.len() >= 5) {
             self.rules.seasons = b[0] != 0;
@@ -1208,6 +1215,7 @@ impl Game {
         self.report_tick(dt);
         self.campfire_smoke(dt);
         self.skies_tick(dt);
+        self.border_tick(dt);
         self.frost_walk(dt);
         self.update_entities(dt);
         self.script_tick(dt);
@@ -2366,6 +2374,10 @@ impl Game {
         }
         // Campfires take raw food to cook.
         if hit_id == CAMPFIRE && self.use_campfire(hit_pos) {
+            return;
+        }
+        // Signs take a dye's colour, or a Glowshroom's glow.
+        if crate::decor::is_sign(hit_id) && !self.player.sneaking && self.style_sign(hit_pos) {
             return;
         }
         // Candles light and go out.
@@ -3531,6 +3543,7 @@ impl Game {
             sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, crate::texture::T_MOON_PHASES + self.moon_phase() as u16);
         }
         self.draw_skies(&mut g, eye, sun_dir);
+        self.draw_border(&mut g, eye);
 
         // Clouds: a scrolling blocky layer.
         let cloud_y = 112.0;

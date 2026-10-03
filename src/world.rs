@@ -879,6 +879,8 @@ pub struct World {
     pub zap_dirty: HashSet<IVec3>,
     /// What's written on every sign, and what hangs in every item frame (see decor.rs).
     pub signs: HashMap<IVec3, [String; 4]>,
+    /// Signs' colours and glow (see qol.rs).
+    pub sign_styles: HashMap<IVec3, u8>,
     pub frames: HashMap<IVec3, (Id, crate::inventory::Wear)>,
     /// Huts whose chests were just filled for the first time: a Hmmer should
     /// move in (where to stand, and its seed; see villagers.rs).
@@ -955,6 +957,7 @@ impl World {
             beacons: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
+            sign_styles: HashMap::new(),
             frames: HashMap::new(),
             simulate_liquids: true,
             pending: HashSet::new(),
@@ -1231,6 +1234,7 @@ impl World {
         // Signs lose their words and frames their contents with the block (spill first).
         if crate::decor::is_sign(old) && !crate::decor::is_sign(id) {
             self.signs.remove(&p);
+            self.sign_styles.remove(&p);
         }
         if crate::decor::is_frame(old) && !crate::decor::is_frame(id) {
             self.frames.remove(&p);

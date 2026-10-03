@@ -434,6 +434,7 @@ impl Game {
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
             // Words on signs and things in frames.
             roster.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
+            roster.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
             roster.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
             roster.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
             let Some(Net::Host(server)) = &mut self.net else { return };
@@ -754,6 +755,7 @@ impl Game {
             Msg::CampfirePut { x, y, z, item } => self.host_campfire_put(from, IVec3::new(x, y, z), item),
             Msg::Mend { points } => self.host_mend(from, points),
             Msg::FrostWalk => self.host_frost_walk(from),
+            Msg::SignStyle { x, y, z, item, .. } => self.host_sign_style(from, IVec3::new(x, y, z), item),
             Msg::Interact { x, y, z, item } if self.world.get(x, y, z) == LECTERN && crate::books::is_book(item) => {
                 let p = IVec3::new(x, y, z);
                 if self.peers.get(&from).is_some_and(|q| q.target.distance(p.as_vec3()) < 8.0) {
@@ -1108,6 +1110,7 @@ impl Game {
             Msg::BundleState { old, new, contents } => self.bundle_state(old, new, contents),
             Msg::BookState { old, new, signed, open, title, author, pages } => self.book_state(old, new, signed, open, title, author, pages),
             Msg::Regular { mob, trades } => self.regular_state(mob, trades),
+            Msg::SignStyle { x, y, z, style, .. } => self.apply_sign_style(IVec3::new(x, y, z), style),
             Msg::Banner { x, y, z, design, facing, up } => self.banner_msg(IVec3::new(x, y, z), design, facing, up),
             Msg::Firework { at, colour } => {
                 if at.is_finite() {
@@ -1310,6 +1313,7 @@ impl Game {
             let inside = |p: &IVec3| chunks.contains(&(p.x.div_euclid(16), p.z.div_euclid(16)));
             let mut out: Vec<Msg> = self.world.signs.iter().filter(|(p, _)| inside(p)).map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }).collect();
             out.extend(self.world.frames.iter().filter(|(p, _)| inside(p)).map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+            out.extend(self.world.sign_styles.iter().filter(|(p, _)| inside(p)).map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
             for m in out {
                 self.net_send_msg(m);
             }
