@@ -363,7 +363,7 @@ impl Game {
     pub fn animals_tick(&mut self, dt: f32) {
         let players = self.player_spots();
         let n = self.mobs.len();
-        let mut babies: Vec<(MobKind, Vec3, Option<String>)> = Vec::new();
+        let mut babies: Vec<(MobKind, Vec3, Option<String>, u8)> = Vec::new();
         let mut bites: Vec<(usize, u32)> = Vec::new();
         for i in 0..n {
             let kind = self.mobs[i].kind;
@@ -413,7 +413,10 @@ impl Game {
                     let other = self.mobs[j].body.pos;
                     goal = Some(other);
                     if other.distance(pos) < 1.6 && i < j {
-                        babies.push((kind, (pos + other) * 0.5, me.owner.clone()));
+                        // Babies take after one parent or the other (and now and then, neither).
+                        let pick = if self.rng.chance(0.5) { me.variant } else { self.mobs[j].variant };
+                        let variant = if self.rng.chance(0.1) { crate::entity::roll_variant(kind, &mut self.rng) } else { pick };
+                        babies.push((kind, (pos + other) * 0.5, me.owner.clone(), variant));
                         for k in [i, j] {
                             let m = &mut self.mobs[k];
                             m.love = 0.0;
@@ -473,8 +476,9 @@ impl Game {
                 }
             }
         }
-        for (kind, at, owner) in babies {
+        for (kind, at, owner, variant) in babies {
             let mut b = Mob::new(kind, at, &mut self.rng);
+            b.variant = variant;
             b.id = self.next_mob_id;
             self.next_mob_id += 1;
             b.set_baby(GROW_SECS);
@@ -530,7 +534,8 @@ pub fn encode_mobs(mobs: &[Mob], names: &std::collections::HashMap<u32, String>)
         let name = names.get(&m.id).map(String::as_str).unwrap_or("");
         let name = &name.as_bytes()[..name.len().min(64)];
         out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2 | (m.saddled as u8) << 3 | (!name.is_empty() as u8) << 4);
-        out.extend_from_slice(&m.seed.to_le_bytes());
+        // (A seed's top byte is free: it carries the colouring.)
+        out.extend_from_slice(&((m.seed & 0xFF_FFFF) | (m.variant as u32) << 24).to_le_bytes());
         let home = m.home.unwrap_or(Vec3::ZERO);
         for v in [home.x, home.y, home.z] {
             out.extend_from_slice(&v.to_le_bytes());
@@ -605,6 +610,7 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
         m.saddled = flags & 8 != 0;
         m.owner = (!owner.is_empty()).then_some(owner);
         m.seed = seed & 0xFF_FFFF;
+        m.variant = ((seed >> 24) as u8).min(crate::entity::variants(kind).saturating_sub(1));
         m.home = (flags & 4 != 0 && home.iter().all(|v| v.is_finite())).then(|| Vec3::new(home[0], home[1], home[2]));
         m.persistent = true;
         v.push((m, name));
@@ -617,6 +623,19 @@ mod tests {
     use super::*;
     use crate::noise::Rng;
     use std::collections::HashMap;
+
+    #[test]
+    fn colourings_are_saved_and_rare_blues_turn_up() {
+        let mut rng = Rng::new(4);
+        let mut m = Mob::new(MobKind::Galloper, Vec3::new(1.0, 60.0, 1.0), &mut rng);
+        m.variant = 3;
+        m.persistent = true;
+        let back = decode_mobs(&encode_mobs(&[m], &HashMap::new()), &mut rng);
+        assert_eq!(back[0].variant, 3);
+        let blues = (0..5000).filter(|_| crate::entity::roll_variant(MobKind::Axolotl, &mut rng) == crate::entity::BLUE_AXOLOTL).count();
+        assert!((20..250).contains(&blues), "{blues} blues in 5000");
+        assert_eq!(crate::entity::roll_variant(MobKind::Oinker, &mut rng), 0);
+    }
 
     /// A saved modded mob comes back while its mod is loaded, and is dropped
     /// gracefully (not scrambled into some other kind) once the mod is gone.

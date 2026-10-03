@@ -1175,13 +1175,14 @@ impl Game {
             let mut m = match old.iter().position(|m| m.id == s.id) {
                 Some(i) => old.swap_remove(i),
                 None => {
-                    let mut m = Mob::new(kind, s.pos, &mut self.rng).with_size(s.size);
+                    let mut m = Mob::new(kind, s.pos, &mut self.rng).with_size(s.size & 15);
                     m.id = s.id;
                     m
                 }
             };
             m.net_pos = s.pos;
             m.yaw = s.yaw;
+            m.variant = s.size >> 4;
             // Starers (and Weepers) reuse the fuse field for "angry".
             m.angry = matches!(kind, MobKind::Starer | MobKind::Weeper) && s.fuse > 0.0;
             m.fuse = if m.angry { 0.0 } else { s.fuse };
@@ -1339,7 +1340,8 @@ impl Game {
                         fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Sneaker) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
-                        size: m.size as u8,
+                        // Its size (low half) and colouring (high half).
+                        size: (m.size as u8).min(15) | (m.variant & 15) << 4,
                         flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((matches!(m.kind, MobKind::Soggy | MobKind::Pilferer | MobKind::Snout) && m.seed == 1) as u8 * MOB_ARMED),
                     })
                     .collect();

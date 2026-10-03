@@ -653,6 +653,58 @@ pub struct Mob {
     pub rider: u32,
     /// A Camel's second seat, behind the driver: 0 nobody, else player id + 1.
     pub passenger: u32,
+    /// Which colouring it has (Gallopers, Woofers, Mooers, Axolotls; see `variant_tint`).
+    pub variant: u8,
+}
+
+/// How many colourings a kind comes in (1: just the one).
+pub fn variants(kind: MobKind) -> u8 {
+    match kind {
+        MobKind::Galloper => 5,
+        MobKind::Woofer => 4,
+        MobKind::Mooer => 3,
+        MobKind::Axolotl => 5,
+        _ => 1,
+    }
+}
+
+/// The rare blue Axolotl.
+pub const BLUE_AXOLOTL: u8 = 4;
+
+/// A colouring, as a multiplier on the kind's own skin.
+pub fn variant_tint(kind: MobKind, v: u8) -> [f32; 3] {
+    match (kind, v) {
+        // Chestnut (as drawn), white, black, grey, cream.
+        (MobKind::Galloper, 1) => [1.7, 1.7, 1.75],
+        (MobKind::Galloper, 2) => [0.35, 0.33, 0.33],
+        (MobKind::Galloper, 3) => [1.05, 1.15, 1.25],
+        (MobKind::Galloper, 4) => [1.45, 1.35, 1.1],
+        // Grey (as drawn), black, rusty, snowy.
+        (MobKind::Woofer, 1) => [0.4, 0.4, 0.42],
+        (MobKind::Woofer, 2) => [1.25, 0.85, 0.6],
+        (MobKind::Woofer, 3) => [1.3, 1.3, 1.35],
+        // Brown (as drawn), black, red.
+        (MobKind::Mooer, 1) => [0.45, 0.42, 0.42],
+        (MobKind::Mooer, 2) => [1.35, 0.7, 0.6],
+        // Pink (as drawn), gold, cyan, brown, and blue.
+        (MobKind::Axolotl, 1) => [1.15, 1.05, 0.45],
+        (MobKind::Axolotl, 2) => [0.65, 1.15, 1.25],
+        (MobKind::Axolotl, 3) => [0.75, 0.55, 0.45],
+        (MobKind::Axolotl, BLUE_AXOLOTL) => [0.4, 0.6, 1.6],
+        _ => [1.0; 3],
+    }
+}
+
+/// A fresh colouring (the blue Axolotl is very rare).
+pub fn roll_variant(kind: MobKind, rng: &mut Rng) -> u8 {
+    let n = variants(kind);
+    if n <= 1 {
+        return 0;
+    }
+    if kind == MobKind::Axolotl {
+        return if rng.chance(0.02) { BLUE_AXOLOTL } else { rng.int(0, 3) as u8 };
+    }
+    rng.int(0, n as i32 - 1) as u8
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -767,6 +819,7 @@ impl Mob {
             temper: 0,
             rider: 0,
             passenger: 0,
+            variant: if variants(kind) > 1 { roll_variant(kind, rng) } else { 0 },
         }
     }
 
@@ -1930,6 +1983,8 @@ impl Mob {
             p.z += (self.anim * 29.0).cos() * 0.03;
         }
         let sky = world.sky_shade(p.x.floor() as i32, (p.y + 0.5).floor() as i32, p.z.floor() as i32);
+        let v = variant_tint(self.kind, self.variant);
+        let tint = [tint[0] * v[0], tint[1] * v[1], tint[2] * v[2], tint[3]];
         geo.begin(Pass::Opaque, tint, false);
         let swell = if self.kind == MobKind::Hisser { 1.0 + self.fuse * 0.08 } else { 1.0 };
         let mut scale = Vec3::splat(swell * self.size * if self.baby > 0.0 { 0.55 } else { 1.0 });
