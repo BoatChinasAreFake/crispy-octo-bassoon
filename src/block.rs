@@ -352,7 +352,9 @@ pub const SNOW_LAYERS: Id = 4;
 pub const IRON_CHEST: Id = 540;
 pub const GOLD_CHEST: Id = 541;
 pub const DIAMOND_CHEST: Id = 542;
-pub const NUM_BLOCKS: Id = 543;
+/// Beds facing east, south and west (`BED` faces north; see beds.rs).
+pub const BED_FACING_FIRST: Id = 543;
+pub const NUM_BLOCKS: Id = 546;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -562,7 +564,11 @@ pub const TREASURE_MAP: Id = FIRST_ITEM + 235;
 pub const TURTLE_SCUTE: Id = FIRST_ITEM + 236;
 /// A helmet: you see much further underwater.
 pub const TURTLE_SHELL: Id = FIRST_ITEM + 237;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 238;
+/// Backpacks (see backpacks.rs).
+pub const BACKPACK: Id = FIRST_ITEM + 238;
+pub const BIG_BACKPACK: Id = FIRST_ITEM + 239;
+pub const HUGE_BACKPACK: Id = FIRST_ITEM + 240;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 241;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -783,6 +789,8 @@ pub enum Shape {
     Layer { eighths: u8 },
     /// A chest: a body and its lid (see chests.rs).
     Chest,
+    /// A bed: mattress, headboard and footboard, its head toward `facing` (see beds.rs).
+    Bed { facing: u8 },
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -858,6 +866,7 @@ impl Shape {
             Shape::Anvil => ([([0.125, 0.0, 0.125], [0.875, 0.25, 0.875]), ([0.25, 0.25, 0.3125], [0.75, 0.625, 0.6875]), ([0.0, 0.625, 0.1875], [1.0, 1.0, 0.8125])], 3),
             Shape::Table => ([([0.0; 3], [1.0, 0.75, 1.0]), full, full], 1),
             Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
+            Shape::Bed { facing } => (crate::beds::boxes(facing), 3),
             Shape::Chest => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, 10.0 / 16.0, 15.0 / 16.0]), ([1.0 / 16.0, 10.0 / 16.0, 1.0 / 16.0], [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0]), full], 2),
             Shape::Layer { eighths } => ([([0.0; 3], [1.0, eighths as f32 / 8.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
@@ -1054,6 +1063,9 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if is_wall_torch(id) {
         return Some(TORCH);
+    }
+    if crate::beds::is_bed(id) {
+        return Some(BED);
     }
     if crate::hoppers::is_hopper(id) {
         return Some(HOPPER_FIRST);
@@ -1602,7 +1614,11 @@ impl Registry {
             def("cactus", "Pokey Plant (Do Not Hug)", Cube, true, true, [T_CACTUS_TOP, T_CACTUS_SIDE, T_CACTUS_TOP], 0.4, 0, false, CACTUS, 0.0, S_GRASS),
             def("ice", "Ice (Nature's Floor Wax)", Cube, true, true, [T_ICE; 3], 0.5, 0, false, AIR, 0.0, S_GLASS),
             def("bouncy_goo", "Bouncy Goo Block", Cube, true, true, [T_BOUNCY; 3], 0.3, 0, false, BOUNCY, 0.0, S_GRASS),
-            def("bed", "Bed (One Block, Budget Cuts)", Cube, true, true, [T_BED_TOP, T_BED_SIDE, T_PLANKS], 0.4, 0, false, BED, 0.0, S_WOOD),
+            {
+                let mut b = def("bed", "Bed (One Block, Budget Cuts)", Shaped, true, false, [T_BED_TOP, T_BED_SIDE, T_PLANKS], 0.4, 0, false, BED, 0.0, S_WOOD);
+                b.shape = Shape::Bed { facing: 0 };
+                b
+            },
             def("cake", "Cake (Not a Lie)", Cube, true, true, [T_CAKE_TOP, T_CAKE_SIDE, T_CAKE_SIDE], 0.5, 0, false, AIR, 0.0, S_GRASS),
             def("sponge", "Sponge (Very Thirsty)", Cube, true, true, [T_SPONGE; 3], 0.6, 0, false, SPONGE, 0.0, S_GRASS),
             def("wool", "Wool (Ethically Sheared)", Cube, true, true, [T_WOOL; 3], 0.8, 0, false, WOOL, 0.0, S_GRASS),
@@ -2276,6 +2292,12 @@ impl Registry {
             d.shape = Shape::Chest;
             blocks.push(d);
         }
+        for (f, key, top) in [(1u8, "bed_east", T_BED_TOP_E), (2, "bed_south", T_BED_TOP_S), (3, "bed_west", T_BED_TOP_W)] {
+            let mut b = def(key, "Bed (One Block, Budget Cuts)", Shaped, true, false, [top, T_BED_SIDE, T_PLANKS], 0.4, 0, false, BED, 0.0, S_WOOD);
+            b.shape = Shape::Bed { facing: f };
+            b.creative = false;
+            blocks.push(b);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2527,6 +2549,9 @@ impl Registry {
         items.push(ItemDef { stack: 1, consume: false, ..item("treasure_map", "Treasure Map (X Marks the Spot)", T_TREASURE_MAP) });
         items.push(item("turtle_scute", "Turtle Scute (Shell Shard)", T_TURTLE_SCUTE));
         items.push(ItemDef { stack: 1, durability: Some(275), armor: Some(ModArmor { slot: 0, points: 2, looks_like: TURTLE_TIER as u8 }), repair: TURTLE_SCUTE, ..item("turtle_shell", "Turtle Shell (Clear Sight Underwater)", T_TURTLE_SHELL) });
+        items.push(ItemDef { stack: 1, ..item("backpack", "Backpack (Right-Click: Your Pack, 27 Slots)", T_BACKPACK) });
+        items.push(ItemDef { stack: 1, ..item("big_backpack", "Big Backpack (45 Slots of Your Pack)", T_BIG_BACKPACK) });
+        items.push(ItemDef { stack: 1, ..item("huge_backpack", "Huge Backpack (All 72 Slots of Your Pack)", T_HUGE_BACKPACK) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2648,6 +2673,10 @@ impl Registry {
             r(&[(CHEST, 1), (IRON, 8)], (IRON_CHEST, 1)),
             r(&[(IRON_CHEST, 1), (GOLD_INGOT, 8)], (GOLD_CHEST, 1)),
             r(&[(GOLD_CHEST, 1), (DIAMOND, 4)], (DIAMOND_CHEST, 1)),
+            // Backpacks (see backpacks.rs).
+            r(&[(BUNDLE, 1), (WOOL, 4), (STRING, 2)], (BACKPACK, 1)),
+            r(&[(BACKPACK, 1), (IRON, 4), (WOOL, 2)], (BIG_BACKPACK, 1)),
+            r(&[(BIG_BACKPACK, 1), (GOLD_INGOT, 4), (DIAMOND, 2)], (HUGE_BACKPACK, 1)),
             r(&[(RESIN_CLUMP, 9)], (RESIN_BLOCK, 1)),
             r(&[(RESIN_BLOCK, 1)], (RESIN_CLUMP, 9)),
             r(&[(RESIN_BRICK, 4)], (RESIN_BRICKS, 1)),
@@ -3079,6 +3108,7 @@ mod id_order_tests {
             (WALL_TORCH_FIRST + 3, "wall_torch_west"),
             (SNOW_LAYER_FIRST + 3, "snow_layer_4"),
             (DIAMOND_CHEST, "diamond_chest"),
+            (BED_FACING_FIRST + 2, "bed_west"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }

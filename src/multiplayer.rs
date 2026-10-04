@@ -1352,6 +1352,9 @@ impl Game {
             if p.gliding {
                 flags |= FLAG_GLIDE;
             }
+            if self.sleeping.is_some() {
+                flags |= crate::net::FLAG_SLEEP;
+            }
             let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) };
             self.net_send_msg(m);
         }

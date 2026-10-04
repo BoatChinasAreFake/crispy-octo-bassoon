@@ -373,6 +373,8 @@ pub struct Game {
     pub waypoints: Vec<crate::waypoints::Waypoint>,
     /// Chest lids swinging open or shut (see chests.rs).
     pub lids: std::collections::HashMap<IVec3, crate::chests::Lid>,
+    /// Asleep in a bed (see beds.rs).
+    pub sleeping: Option<crate::beds::Sleep>,
     /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
     pub lodestone: Option<IVec3>,
     /// A joined player's view of their Bundles (the host's word), and the one just used.
@@ -593,6 +595,7 @@ impl Game {
             last_death: None,
             waypoints: Vec::new(),
             lids: Default::default(),
+            sleeping: None,
             lodestone: None,
             bundle_mirror: HashMap::new(),
             bundle_pending: None,
@@ -800,6 +803,7 @@ impl Game {
             ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
             ("banners".to_string(), crate::banners::encode(&self.banners)),
             ("stashes".to_string(), crate::stash::encode(&self.world.stashes)),
+            ("backpacks".to_string(), crate::backpacks::encode(&self.world.backpacks)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
@@ -835,6 +839,9 @@ impl Game {
         if let Some(b) = extra("pinned").and_then(|b| b.get(..4)) {
             let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
             self.pinned = (p < recipes().len()).then_some(p);
+        }
+        if let Some(b) = extra("backpacks") {
+            self.world.backpacks = crate::backpacks::decode(b);
         }
         if let Some(b) = extra("stashes") {
             self.world.stashes = crate::stash::decode(b);
@@ -1093,6 +1100,9 @@ impl Game {
             let t = self.clock * 0.04;
             let dir = Vec3::new(t.sin() * 0.97, -0.22, -t.cos() * 0.97).normalize();
             (self.spawn + Vec3::Y * 14.0, dir)
+        } else if let Some(view) = self.sleep_view().filter(|_| !self.third_person) {
+            // In bed: on the pillow, looking up.
+            view
         } else {
             let dir = self.player.look_dir();
             let mut eye = self.player.eye();
@@ -1178,7 +1188,15 @@ impl Game {
         let before = self.player.body.pos;
         self.player.jumped = false;
         self.player.glider_on = self.wearing_glider();
-        let mut fall = if self.riding.is_none() && self.mounted.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
+        let mut fall = if self.sleeping.is_some() {
+            // In bed: no walking about (jumping or sneaking gets you up).
+            self.sleep_tick(dt, c.input.jump_pressed || c.input.sneak);
+            0.0
+        } else if self.riding.is_none() && self.mounted.is_none() {
+            self.player.update(dt, &c.input, &self.world, self.creative)
+        } else {
+            0.0
+        };
         if self.player.jumped {
             self.stats.jumps += 1;
         }
@@ -1502,10 +1520,12 @@ impl Game {
             self.msg("You may not rest now, there are monsters nearby. They're very loud sleepers.");
             return;
         }
-        if self.is_client() {
-            self.msg("Spawn point set. Only the host's bed controls time. Democracy!");
-            return;
-        }
+        self.lie_down(bed);
+    }
+
+    /// The night is over (the sleeper stayed in bed long enough; see beds.rs).
+    pub fn finish_night(&mut self) {
+        let me = self.player.body.pos;
         self.time = 0.01;
         // Sleeping through the night clears the weather too.
         if self.weather.kind.wet() {
@@ -1513,7 +1533,7 @@ impl Game {
         }
         self.net_broadcast(self.time_msg());
         self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
-        self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set.");
+        self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set. Your back hurts.");
         self.advance("sweet_dreams");
     }
 
@@ -2264,6 +2284,9 @@ impl Game {
             }
             return;
         }
+        if self.open_backpack() {
+            return;
+        }
         if held == ROCKET {
             self.use_rocket();
             return;
@@ -2436,7 +2459,7 @@ impl Game {
             return;
         }
         // Sneak to place blocks against beds and cakes instead of using them.
-        if hit_id == BED && !self.player.sneaking {
+        if crate::beds::is_bed(hit_id) && !self.player.sneaking {
             self.sleep(hit_pos);
             return;
         }
@@ -3763,7 +3786,14 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
             let gliding = p.flags & crate::net::FLAG_GLIDE != 0;
-            let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding);
+            // Asleep: lying in the bed they're on.
+            let bed = p.pos.floor().as_ivec3();
+            let asleep = p.flags & crate::net::FLAG_SLEEP != 0 && crate::beds::is_bed(self.world.get_v(bed));
+            let root = if asleep {
+                crate::beds::pose(bed, crate::beds::facing(self.world.get_v(bed)))
+            } else {
+                Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding)
+            };
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
             crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
         }
@@ -3773,7 +3803,10 @@ impl Game {
             let sky = self.world.sky_shade(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
-            let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding);
+            let root = match self.sleeping {
+                Some(s) => crate::beds::pose(s.bed, crate::beds::facing(self.world.get_v(s.bed))),
+                None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding),
+            };
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
             crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), crate::trims::look(&self.inv.armor, &self.inv.armor_wear), p.bob * 2.0, sky, p.gliding);
         }
@@ -4352,6 +4385,10 @@ pub(crate) mod tests {
         assert_eq!(g.time, 0.25);
         g.time = 0.7;
         g.sleep(base);
+        // (It takes a few seconds in bed.)
+        for _ in 0..100 {
+            g.sleep_tick(0.05, false);
+        }
         assert!(g.time < 0.05 && !g.is_night());
         assert!(g.advancements.has("sweet_dreams"));
         assert_eq!(g.spawn, base.as_vec3() + Vec3::new(0.5, 1.0, 0.5));

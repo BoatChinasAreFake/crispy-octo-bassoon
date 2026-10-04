@@ -20,6 +20,11 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let g = &self.game;
+        // Asleep: the world fades to dark.
+        let fade = g.sleep_fade();
+        if fade > 0.0 {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(0.02, 0.02, 0.06, fade * 0.92));
+        }
         if !g.menu && g.player.head_in_water(&g.world) {
             draw_rectangle(0.0, 0.0, w, h, Color::new(0.1, 0.2, 0.6, 0.35));
         }

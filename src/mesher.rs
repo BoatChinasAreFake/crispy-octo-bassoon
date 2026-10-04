@@ -426,7 +426,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             let (boxes, n) = def.shape.boxes();
                             // A chest that's open has its lid drawn swinging (see chests.rs).
                             let n = if crate::chests::is_chest(id) && crate::chests::lid_lifted(macroquad::math::IVec3::new(wx as i32, y, wz as i32)) { 1 } else { n };
-                            for &(bmin, bmax) in &boxes[..n] {
+                            for (bi, &(bmin, bmax)) in boxes[..n].iter().enumerate() {
                                 for (f, (nrm, corners, shade)) in FACES.iter().enumerate() {
                                     let axis = if nrm[0] != 0 { 0 } else if nrm[1] != 0 { 1 } else { 2 };
                                     let flush = if nrm[axis] > 0 { bmax[axis] >= 1.0 } else { bmin[axis] <= 0.0 };
@@ -434,7 +434,14 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                         continue;
                                     }
                                     // Each painting's picture depends on where it hangs (see home.rs).
-                                    let tile = if crate::home::is_painting(id) { crate::home::painting_tile(wx as i32, y, wz as i32) } else { face_tile(id, f) };
+                                    let tile = if crate::home::is_painting(id) {
+                                        crate::home::painting_tile(wx as i32, y, wz as i32)
+                                    } else if bi > 0 && crate::beds::is_bed(id) {
+                                        // A bed's head- and footboards are plain wood.
+                                        crate::texture::T_PLANKS
+                                    } else {
+                                        face_tile(id, f)
+                                    };
                                     let mut v = [Vertex::default(); 4];
                                     for i in 0..4 {
                                         let c = corners[i];

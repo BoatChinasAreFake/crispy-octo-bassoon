@@ -279,6 +279,8 @@ pub const FLAG_HURT: u8 = 8;
 pub const FLAG_GHOST: u8 = 16;
 /// Gliding: drawn lying flat, wings out.
 pub const FLAG_GLIDE: u8 = 32;
+/// Asleep in a bed (see beds.rs).
+pub const FLAG_SLEEP: u8 = 64;
 
 // ------------------------------------------------------------------ encoding
 

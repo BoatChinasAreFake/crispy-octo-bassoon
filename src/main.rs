@@ -80,6 +80,8 @@ mod potions;
 mod qol;
 mod waypoints;
 mod chests;
+mod beds;
+mod backpacks;
 mod players;
 mod regions;
 mod render;
@@ -2301,7 +2303,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.set_screen(Screen::Advancements);
             }
-            "portrait" => {
+            "portrait" | "beds" => {
                 // Mobs (--mob a,b,c) on a plain stone floor, close up, for checking their looks.
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.25);
@@ -2689,6 +2691,18 @@ async fn game_main() {
                 app.game.inv.slots[0] = Some((block::TREASURE_MAP, 1));
                 app.game.inv.wear[0] = treasure::mark(at(40.0, 10.0));
                 app.game.inv.selected = 0;
+            }
+            if s.mode == "beds" && frames >= 60 {
+                // Four beds, every way round, and us asleep in one (seen from outside).
+                let back = 5.0;
+                let o = s.pos.unwrap_or_default() - Vec3::new(0.3 * back, 0.3 * back - 1.62, -back);
+                let base = o.floor().as_ivec3();
+                for f in 0..4u8 {
+                    app.game.world.set_v(base + IVec3::new(f as i32 * 2 - 3, 0, 0), beds::bed(f));
+                }
+                let b = base + IVec3::new(-1, 0, 0);
+                app.game.sleeping = Some(beds::Sleep { bed: b, secs: 0.5 });
+                app.game.third_person = true;
             }
             if s.mode == "portrait" && frames + 3 == s.frames {
                 // The mobs, side by side, facing the camera.

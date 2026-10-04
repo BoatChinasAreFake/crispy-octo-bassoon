@@ -454,6 +454,10 @@ impl App {
     /// Craft recipe `ri` once, or as many times as possible with shift.
     pub(crate) fn craft_recipe(&mut self, ri: usize, many: bool) {
         let r = &recipes()[ri];
+        if r.inputs.iter().any(|i| i.0 == BUNDLE) && !self.game.bundles_empty() {
+            self.game.msg("Empty your Bundles first: a Backpack is made from an empty one.");
+            return;
+        }
         let times = if many { 64 } else { 1 };
         let mut made = 0u8;
         for _ in 0..times {
@@ -512,8 +516,10 @@ impl App {
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let slot = 20.0 * s;
         // Bigger chests have more rows (and the biggest is wider; see chests.rs).
-        let cols = if containers::is_three_slot(kind) { 9 } else { chests::columns(c.slots.len()) };
-        let rows = if containers::is_three_slot(kind) { 3 } else { c.slots.len().div_ceil(cols).max(1) };
+        // (A backpack's pack shows only as much as the backpack reaches.)
+        let shown = if chests::is_chest(kind) { c.slots.len().min(chests::slots(kind)) } else { c.slots.len() };
+        let cols = if containers::is_three_slot(kind) { 9 } else { chests::columns(shown) };
+        let rows = if containers::is_three_slot(kind) { 3 } else { shown.div_ceil(cols).max(1) };
         let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * rows as f32 };
         let panel_w = slot * cols as f32 + 12.0 * s;
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
@@ -526,7 +532,8 @@ impl App {
         let isx = x0 + (panel_w - slot * 9.0) / 2.0;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         let mut tooltip: Option<String> = None;
-        self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
+        let title = if backpacks::pack_of_key(pos).is_some() { item_name(self.game.inv.held()) } else { block(kind).name };
+        self.ui.text(title, sx, y0 + 12.0 * s, 10.0, WHITE);
         let sort = Rect::new(x0 + panel_w - 42.0 * s, y0 + 3.0 * s, 36.0 * s, 13.0 * s);
         if !containers::is_three_slot(kind) && self.ui.button(sort, "Sort", true) {
             self.game.sort_container();
@@ -537,7 +544,7 @@ impl App {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
         } else {
-            (0..c.slots.len()).map(|i| (i, sx + (i % cols) as f32 * slot, top + (i / cols) as f32 * slot)).collect()
+            (0..shown).map(|i| (i, sx + (i % cols) as f32 * slot, top + (i / cols) as f32 * slot)).collect()
         };
         for &(i, x, y) in &spots {
             let (l, r, hov) = self.ui.slot_worn(c.slots[i], c.wear[i], x, y, slot, false);

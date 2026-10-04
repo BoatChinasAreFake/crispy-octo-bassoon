@@ -368,6 +368,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get_mut(&k);
     }
+    if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
+        return world.backpacks.get_mut(&k);
+    }
     if let Some(id) = crate::wildlife::pack_of_key(p) {
         return world.packs.get_mut(&id);
     }
@@ -380,6 +383,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
 pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a Container> {
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get(&k);
+    }
+    if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
+        return world.backpacks.get(&k);
     }
     if let Some(id) = crate::wildlife::pack_of_key(p) {
         return world.packs.get(&id);
@@ -394,6 +400,10 @@ pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle],
 pub fn store_kind(world: &World, vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Id {
     if crate::stash::stash_of_key(p).is_some() {
         return PERSONAL_CHEST;
+    }
+    // A pack works like a chest as big as the backpack it's opened with.
+    if let Some((_, t)) = crate::backpacks::pack_of_key(p) {
+        return crate::backpacks::chest_of(t);
     }
     // A Llama's pack works like a chest (see wildlife.rs).
     if crate::wildlife::pack_of_key(p).is_some() {
@@ -598,6 +608,9 @@ impl Game {
                 if crate::stash::stash_of_key(p).is_some() {
                     return crate::stash::near_personal_chest(&self.world, self.player.eye());
                 }
+                if crate::backpacks::pack_of_key(p).is_some() {
+                    return self.backpack_held(p);
+                }
                 if let Some(id) = crate::wildlife::pack_of_key(p) {
                     return self.pack_near(id, self.player.eye(), None);
                 }
@@ -677,6 +690,10 @@ impl Game {
         if crate::stash::stash_of_key(p).is_some() {
             return self.peers.get(&from).is_some_and(|q| crate::stash::stash_key(&q.name) == p && crate::stash::near_personal_chest(&self.world, q.target + Vec3::Y * 1.6));
         }
+        // Someone's backpack pack: only theirs, and only with a backpack in hand.
+        if crate::backpacks::pack_of_key(p).is_some() {
+            return self.peer_backpack(from, p);
+        }
         // A Llama's pack: only its owner's, and only beside it.
         if let Some(id) = crate::wildlife::pack_of_key(p) {
             return self.peers.get(&from).is_some_and(|q| self.pack_near(id, q.target + Vec3::Y * 1.6, Some(&crate::players::record_key(&q.name))));
@@ -691,6 +708,9 @@ impl Game {
         }
         if let Some(k) = crate::stash::stash_of_key(p) {
             self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST));
+        }
+        if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
+            self.world.backpacks.entry(k).or_insert_with(crate::backpacks::fresh);
         }
         self.ensure_container(p);
         self.viewers.entry(p).or_default().insert(from);
@@ -782,6 +802,8 @@ impl Game {
     pub fn apply_container(&mut self, p: IVec3, slots: Vec<(Id, u8, Wear)>, burn: f32, cook: f32) {
         let c = if let Some(k) = crate::stash::stash_of_key(p) {
             self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST))
+        } else if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
+            self.world.backpacks.entry(k).or_insert_with(crate::backpacks::fresh)
         } else if let Some(id) = crate::wildlife::pack_of_key(p) {
             self.world.packs.entry(id).or_insert_with(|| Container::for_block(CHEST))
         } else if crate::vehicles::cart_of_key(p).is_some() {

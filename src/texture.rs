@@ -648,6 +648,14 @@ pub const T_GOLD_CHEST_TOP: u16 = 820;
 pub const T_GOLD_CHEST_SIDE: u16 = 821;
 pub const T_DIAMOND_CHEST_TOP: u16 = 822;
 pub const T_DIAMOND_CHEST_SIDE: u16 = 823;
+/// A bed's top turned to face east, south and west (the pillow at the head).
+pub const T_BED_TOP_E: u16 = 824;
+pub const T_BED_TOP_S: u16 = 825;
+pub const T_BED_TOP_W: u16 = 826;
+/// Backpacks.
+pub const T_BACKPACK: u16 = 827;
+pub const T_BIG_BACKPACK: u16 = 828;
+pub const T_HUGE_BACKPACK: u16 = 829;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2128,10 +2136,27 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             shade(rgb(180, 30, 35), r.range(0.88, 1.05) * if (x + y) % 6 == 0 { 0.85 } else { 1.0 })
         }
     });
+    // Turned copies for beds facing the other ways (the top's +y is north).
+    for (t, turn) in [(T_BED_TOP_E, 1), (T_BED_TOP_S, 2), (T_BED_TOP_W, 3)] {
+        for y in 0..16usize {
+            for x in 0..16usize {
+                // The pixel this one comes from in the north-facing top.
+                let (sx, sy) = match turn {
+                    1 => (y, 15 - x),
+                    2 => (15 - x, 15 - y),
+                    _ => (15 - y, x),
+                };
+                let c = a.get(T_BED_TOP, sx, sy);
+                a.set(t, x, y, c);
+            }
+        }
+    }
+    // The side: the mattress's part (rows 7 to 13) is a white sheet under a
+    // red blanket; the rest is the wooden frame.
     a.copy(T_PLANKS, T_BED_SIDE);
-    for y in 0..9 {
+    for y in 7..13 {
         for x in 0..16 {
-            let c = if y < 3 { shade(rgb(240, 240, 240), a.rng.range(0.94, 1.02)) } else { shade(rgb(180, 30, 35), a.rng.range(0.88, 1.05)) };
+            let c = if y == 12 { shade(rgb(240, 240, 240), a.rng.range(0.94, 1.02)) } else { shade(rgb(180, 30, 35), a.rng.range(0.88, 1.05) * if y == 7 { 0.85 } else { 1.0 }) };
             a.set(T_BED_SIDE, x, y, c);
         }
     }
@@ -3603,6 +3628,10 @@ fn home_tiles(a: &mut Atlas) {
         });
     }
     a.sprite(T_TREASURE_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(215, 190, 140)), ('g', rgb(190, 160, 110)), ('b', rgb(80, 120, 210)), ('r', rgb(220, 30, 30))]);
+    // Backpacks: the same bag in leather, iron-trimmed and gold-trimmed.
+    for (t, trim) in [(T_BACKPACK, rgb(110, 70, 40)), (T_BIG_BACKPACK, rgb(190, 190, 200)), (T_HUGE_BACKPACK, rgb(240, 200, 60))] {
+        a.sprite(t, &BACKPACK_SPRITE, &[('#', rgb(60, 35, 20)), ('b', rgb(150, 95, 55)), ('d', rgb(115, 70, 40)), ('t', trim), ('k', rgb(30, 20, 15))]);
+    }
     a.sprite(T_TURTLE_SCUTE, &SCUTE_SPRITE, &[('#', rgb(40, 90, 40)), ('b', rgb(80, 160, 70)), ('h', rgb(130, 200, 110)), ('d', rgb(55, 120, 50))]);
     a.each(T_TURTLE_SHELL, |x, y, r, _| {
         let dome = ((x as f32 - 7.5) / 7.0).powi(2) + ((y as f32 - 9.0) / 6.0).powi(2) < 1.0 && y < 13;
@@ -5099,6 +5128,24 @@ const CROSSBOW_SPRITE: [&str; 16] = [
     "#ww#.........s..",
     "##............s.",
     "................",
+    "................",
+];
+const BACKPACK_SPRITE: [&str; 16] = [
+    "................",
+    "......####......",
+    ".....#....#.....",
+    ".....#....#.....",
+    "...##########...",
+    "..#bbbbbbbbbb#..",
+    "..#bttttttttb#..",
+    "..#bbbbkkbbbb#..",
+    "..#bbbbbbbbbb#..",
+    "..#dbbbbbbbbd#..",
+    "..#d#######bd#..",
+    "..#d#bbbbb#bd#..",
+    "..#d#bbbbb#bd#..",
+    "..#dd#####ddd#..",
+    "...##########...",
     "................",
 ];
 const TOTEM_SPRITE: [&str; 16] = [

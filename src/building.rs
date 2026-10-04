@@ -57,6 +57,10 @@ impl Game {
             HOPPER_FIRST => return Game::hopper_facing(normal),
             _ => {}
         }
+        // A bed's head goes the way you're looking (you climb in from the foot).
+        if held == BED {
+            return crate::beds::bed(self.facing());
+        }
         // A lantern put on the underside of a block hangs from it.
         if held == LANTERN && normal == IVec3::NEG_Y {
             return LANTERN_HANGING;
