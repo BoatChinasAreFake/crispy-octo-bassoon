@@ -48,6 +48,12 @@ Originals:
 - Cooking, over-engineered (like fishing and farming): a cooking pot on a campfire. Ingredients combine into dishes with a quality grade; freshness, seasoning and cooking time matter; a Cookbook fills in as dishes are discovered; good meals give small buffs.
 - Hot springs: steaming pools in snowy mountains. Bathing slowly heals and gets rid of the chill of a long night out.
 
+Parts:
+- Part 1: items 1 and 2.
+- Part 2: items 3 and 4.
+- Part 3: items 5, 6 and 7.
+- Part 4: the two originals (this is the last part).
+
 ## v0.4: Together and tinkering
 
 1. Encrypted multiplayer: a key exchange and an encrypted stream for all traffic, using only the standard library (as now).
