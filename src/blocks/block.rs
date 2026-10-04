@@ -511,7 +511,7 @@ pub const SWORD_SCORCHITE: Id = FIRST_ITEM + 186;
 pub const AXE_SCORCHITE: Id = FIRST_ITEM + 187;
 pub const SHOVEL_SCORCHITE: Id = FIRST_ITEM + 188;
 pub const SCORCHITE_ARMOR_FIRST: Id = FIRST_ITEM + 189;
-/// Music discs (see songs.rs for what's on them).
+/// Music discs (see music.rs for what's on them).
 pub const DISC_FIRST: Id = FIRST_ITEM + 193;
 /// The Scorchlands' spoils (see fortress.rs).
 pub const SIZZLE_ROD: Id = FIRST_ITEM + 201;
@@ -2073,7 +2073,7 @@ impl Registry {
         blocks.push(def("smithing_table", "Smithing Table (Hammer Time)", Cube, true, true, [T_SMITHING_TOP, T_SMITHING_SIDE, T_PLANKS], 2.5, 0, false, SMITHING_TABLE, 0.0, S_WOOD));
         blocks.push(def("old_debris", "Old Debris (Ancient, Stubborn)", Cube, true, true, [T_OLD_DEBRIS_TOP, T_OLD_DEBRIS_SIDE, T_OLD_DEBRIS_TOP], 15.0, 3, true, OLD_DEBRIS, 0.0, S_STONE));
         // Music (see music.rs): a note block per pitch, a jukebox per disc.
-        for p in 0..crate::songs::PITCHES as u16 {
+        for p in 0..crate::music::PITCHES as u16 {
             let key = if p == 0 { "note_block".to_string() } else { format!("note_block_{p}") };
             let name = if p == 0 { "Note Block (Plinky)".to_string() } else { format!("Note Block (Plinky, Note {p})") };
             let mut d = def(leak(&key), leak(&name), Cube, true, true, [T_NOTE_BLOCK; 3], 0.8, 0, false, NOTE_BLOCK, 0.0, S_WOOD);
@@ -2081,7 +2081,7 @@ impl Registry {
             blocks.push(d);
         }
         blocks.push(def("jukebox", "Jukebox (Plays Your Jams)", Cube, true, true, [T_JUKEBOX_TOP, T_JUKEBOX_SIDE, T_JUKEBOX_SIDE], 2.0, 0, false, JUKEBOX, 0.0, S_WOOD));
-        for (key, title) in crate::songs::DISCS {
+        for (key, title) in crate::music::DISCS {
             let mut d = def(leak(&format!("jukebox_{}", &key[11..])), leak(&format!("Jukebox (Playing {title})")), Cube, true, true, [T_JUKEBOX_TOP, T_JUKEBOX_SIDE, T_JUKEBOX_SIDE], 2.0, 0, false, JUKEBOX, 0.0, S_WOOD);
             d.creative = false;
             blocks.push(d);
@@ -2501,7 +2501,7 @@ impl Registry {
             let key = ["scorchite_helmet", "scorchite_chestplate", "scorchite_leggings", "scorchite_boots"][slot];
             items.push(ItemDef { stack: 1, ..item(key, name, T_SCORCHITE_ARMOR_ITEMS + slot as u16) });
         }
-        for (i, (key, title)) in crate::songs::DISCS.into_iter().enumerate() {
+        for (i, (key, title)) in crate::music::DISCS.into_iter().enumerate() {
             items.push(ItemDef { stack: 1, ..item(key, leak(&format!("Music Disc ({title})")), T_DISC_FIRST + i as u16) });
         }
         items.push(item("sizzle_rod", "Sizzle Rod (Still Warm)", T_SIZZLE_ROD));

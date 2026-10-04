@@ -328,7 +328,7 @@ impl Game {
 
     /// A Turtle Egg's random tick: at night (more so under a full moon) it hatches.
     pub fn turtle_egg_tick(&mut self, p: IVec3) {
-        let chance = 0.05 * crate::moon::hatch_scale(self.moon_phase());
+        let chance = 0.05 * crate::skies::hatch_scale(self.moon_phase());
         if !self.is_night() || !self.rng.chance(chance) {
             return;
         }

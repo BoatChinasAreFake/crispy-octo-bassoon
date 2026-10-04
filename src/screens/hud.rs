@@ -205,7 +205,7 @@ impl App {
                     )
                 },
                 format!("Mobs: {}  Particles: {}", g.mobs.len(), g.particles.len()),
-                format!("Time: {:02}:00  Daylight: {:.2}  Day {} ({}){}", hours, g.daylight(), g.day + 1, moon::NAMES[g.moon_phase() as usize], g.season().map(|s| format!(", {}", s.name())).unwrap_or_default()),
+                format!("Time: {:02}:00  Daylight: {:.2}  Day {} ({}){}", hours, g.daylight(), g.day + 1, skies::NAMES[g.moon_phase() as usize], g.season().map(|s| format!(", {}", s.name())).unwrap_or_default()),
                 format!("Seed: {}  Mode: {}{}", g.world.seed(), g.mode().name(), if g.rules.hardcore { " (hardcore)" } else { "" }),
                 match &g.net {
                     None => "Network: single player".to_string(),
@@ -502,7 +502,7 @@ impl App {
         for (wp, c) in self.game.waypoints_here() {
             let at = wp.pos + Vec3::Y * 1.5;
             let dist = at.distance(eye);
-            if !(2.0..=crate::waypoints::SHOW_RANGE).contains(&dist) {
+            if !(2.0..=crate::qol::SHOW_RANGE).contains(&dist) {
                 continue;
             }
             let clip = self.last_view_proj * at.extend(1.0);

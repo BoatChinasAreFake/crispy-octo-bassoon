@@ -269,10 +269,22 @@ mod tests {
     fn every_advancement_the_game_awards_exists() {
         // Scan the source for advance("key") and advance_for(who, "key"): a typo would
         // otherwise just never award anything.
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        // (Every .rs file under src/, folders and all.)
+        let mut files = Vec::new();
+        let mut dirs = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(d) = dirs.pop() {
+            for entry in std::fs::read_dir(d).unwrap().flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|e| e == "rs") {
+                    files.push(p);
+                }
+            }
+        }
         let mut used = Vec::new();
-        for entry in std::fs::read_dir(dir).unwrap().flatten() {
-            let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+        for path in files {
+            let text = std::fs::read_to_string(path).unwrap_or_default();
             for pat in ["advance(\"", "advance_for(who, \""] {
                 for (at, _) in text.match_indices(pat) {
                     let rest = &text[at + pat.len()..];

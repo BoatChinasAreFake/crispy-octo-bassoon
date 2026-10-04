@@ -52,15 +52,15 @@ impl Sfx {
     /// Wire encoding for multiplayer (notes past the end of the list).
     pub fn to_wire(self) -> u16 {
         match self {
-            Sfx::Note(i, p) => NOTE_WIRE + i as u16 * crate::songs::PITCHES as u16 + p as u16,
+            Sfx::Note(i, p) => NOTE_WIRE + i as u16 * crate::music::PITCHES as u16 + p as u16,
             _ => all_sfx().iter().position(|s| *s == self).unwrap_or(0) as u16,
         }
     }
     pub fn from_wire(v: u16) -> Option<Sfx> {
         if v >= NOTE_WIRE {
             let n = v - NOTE_WIRE;
-            let (i, p) = ((n / crate::songs::PITCHES as u16) as u8, (n % crate::songs::PITCHES as u16) as u8);
-            return crate::songs::Instrument::from_index(i).map(|_| Sfx::Note(i, p));
+            let (i, p) = ((n / crate::music::PITCHES as u16) as u8, (n % crate::music::PITCHES as u16) as u8);
+            return crate::music::Instrument::from_index(i).map(|_| Sfx::Note(i, p));
         }
         all_sfx().get(v as usize).copied()
     }
@@ -168,7 +168,7 @@ pub enum Sfx {
     Firework,
     /// A Goat Horn's long call.
     Horn,
-    /// A note block: (instrument, pitch); see songs.rs.
+    /// A note block: (instrument, pitch); see music.rs.
     Note(u8, u8),
     /// Bubbles: running out of air underwater.
     Bubbles,
@@ -653,7 +653,7 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             tone(&mut v, 0.0, 1.9, 330.0, 300.0, 0.8, 0.25, &[1.0, 0.4]);
             finish(v, 1.0)
         }
-        Sfx::Note(i, p) => crate::songs::synth_note(crate::songs::Instrument::from_index(i).unwrap_or(crate::songs::Instrument::Harp), p),
+        Sfx::Note(i, p) => crate::music::synth_note(crate::music::Instrument::from_index(i).unwrap_or(crate::music::Instrument::Harp), p),
         Sfx::Woof => {
             // Two short barks.
             let mut v = vec![0.0; samples(0.5)];
@@ -1037,7 +1037,7 @@ pub struct Audio {
     /// Music discs: made the first time one is wanted (with its length in seconds).
     discs: Vec<Option<(Sound, f32)>>,
     discs_pending: Vec<std::sync::mpsc::Receiver<(usize, Vec<u8>, f32)>>,
-    discs_asked: [bool; crate::songs::DISCS.len()],
+    discs_asked: [bool; crate::music::DISCS.len()],
     /// The jukebox playing now (where, which disc, seconds left), and one that's finished.
     juke: Option<(macroquad::math::IVec3, u8, f32)>,
     juke_done: Option<(macroquad::math::IVec3, u8)>,
@@ -1155,10 +1155,10 @@ impl Audio {
         let notes_pending = (!dead).then(|| {
             let (tx, rx) = std::sync::mpsc::channel();
             let _ = std::thread::Builder::new().name("notes".into()).spawn(move || {
-                for inst in crate::songs::INSTRUMENTS {
-                    for p in 0..crate::songs::PITCHES {
-                        let i = inst.index() as usize * crate::songs::PITCHES as usize + p as usize;
-                        if tx.send((i, wav(&crate::songs::synth_note(inst, p)))).is_err() {
+                for inst in crate::music::INSTRUMENTS {
+                    for p in 0..crate::music::PITCHES {
+                        let i = inst.index() as usize * crate::music::PITCHES as usize + p as usize;
+                        if tx.send((i, wav(&crate::music::synth_note(inst, p)))).is_err() {
                             return;
                         }
                     }
@@ -1186,11 +1186,11 @@ impl Audio {
             rng,
             volume: 0.8,
             music_on: true,
-            notes: (0..crate::songs::INSTRUMENTS.len() * crate::songs::PITCHES as usize).map(|_| None).collect(),
+            notes: (0..crate::music::INSTRUMENTS.len() * crate::music::PITCHES as usize).map(|_| None).collect(),
             notes_pending,
-            discs: (0..crate::songs::DISCS.len()).map(|_| None).collect(),
+            discs: (0..crate::music::DISCS.len()).map(|_| None).collect(),
             discs_pending: Vec::new(),
-            discs_asked: [false; crate::songs::DISCS.len()],
+            discs_asked: [false; crate::music::DISCS.len()],
             juke: None,
             juke_done: None,
         }
@@ -1288,12 +1288,12 @@ impl Audio {
                 play_sound(snd, PlaySoundParams { looped: false, volume: vol(p, self.volume) });
                 self.juke = Some((p, d, *secs));
             }
-            None if !self.discs_asked[d as usize % crate::songs::DISCS.len()] => {
-                self.discs_asked[d as usize % crate::songs::DISCS.len()] = true;
+            None if !self.discs_asked[d as usize % crate::music::DISCS.len()] => {
+                self.discs_asked[d as usize % crate::music::DISCS.len()] = true;
                 let (tx, rx) = std::sync::mpsc::channel();
                 let n = d as usize;
                 let _ = std::thread::Builder::new().name("disc".into()).spawn(move || {
-                    let v = crate::songs::synth_disc(n);
+                    let v = crate::music::synth_disc(n);
                     let secs = v.len() as f32 / SR as f32;
                     let _ = tx.send((n, wav(&v), secs));
                 });
@@ -1339,7 +1339,7 @@ impl Audio {
             return;
         }
         if let Sfx::Note(i, p) = s {
-            let k = i as usize * crate::songs::PITCHES as usize + p as usize;
+            let k = i as usize * crate::music::PITCHES as usize + p as usize;
             if let Some(Some(snd)) = self.notes.get(k) {
                 play_sound(snd, PlaySoundParams { looped: false, volume });
             }

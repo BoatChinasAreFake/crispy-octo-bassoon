@@ -596,7 +596,7 @@ pub const T_SPEAR_FIRST: u16 = 736;
 pub const T_ROTSTEED: u16 = 740;
 pub const T_ROTSTEED_FACE: u16 = 741;
 pub const T_HARNESS_WORN: u16 = 742;
-/// The moon in each of its eight phases, full first (see moon.rs).
+/// The moon in each of its eight phases, full first (see skies.rs).
 pub const T_MOON_PHASES: u16 = 743;
 /// v0.1.20: home blocks, treasure, new animals and Hmmers.
 pub const T_CAMPFIRE_TOP: u16 = 751;
@@ -3497,8 +3497,8 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let d = ((x as f32 - 7.5).abs()).max((y as f32 - 7.5).abs());
         if d < 5.0 { shade(rgb(225, 225, 235), r.range(0.8, 1.0)) } else { [0, 0, 0, 0] }
     });
-    for p in 0..crate::moon::PHASES {
-        let f = crate::moon::brightness(p);
+    for p in 0..crate::skies::PHASES {
+        let f = crate::skies::brightness(p);
         a.each(T_MOON_PHASES + p as u16, |x, y, r, _| {
             let d = ((x as f32 - 7.5).abs()).max((y as f32 - 7.5).abs());
             if d >= 5.0 {
@@ -3506,7 +3506,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             }
             // Waning, the dark creeps in from the right; waxing, it leaves from the left.
             let u = (x as f32 - 7.5) / 5.0;
-            let lit = if p == 0 { true } else if p < crate::moon::PHASES / 2 { u < 2.0 * f - 1.0 } else { u > 1.0 - 2.0 * f };
+            let lit = if p == 0 { true } else if p < crate::skies::PHASES / 2 { u < 2.0 * f - 1.0 } else { u > 1.0 - 2.0 * f };
             if lit { shade(rgb(225, 225, 235), r.range(0.8, 1.0)) } else { shade(rgb(45, 45, 60), r.range(0.8, 1.0)) }
         });
     }

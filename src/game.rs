@@ -289,7 +289,7 @@ pub struct Game {
     pub lod: crate::lod::Lod,
     /// Trades made with each Hmmer, by each player (see villagers.rs).
     pub regulars: HashMap<(u32, String), u16>,
-    /// Days gone by (for the moon's phase; see moon.rs).
+    /// Days gone by (for the moon's phase; see skies.rs).
     pub day: u32,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
@@ -369,8 +369,8 @@ pub struct Game {
     pub bench: Option<crate::smithing::BenchUi>,
     /// Where the local player last died (for the Recovery Compass).
     pub last_death: Option<Vec3>,
-    /// Places you've named (see waypoints.rs).
-    pub waypoints: Vec<crate::waypoints::Waypoint>,
+    /// Places you've named (see qol.rs).
+    pub waypoints: Vec<crate::qol::Waypoint>,
     /// Chest lids swinging open or shut (see chests.rs).
     pub lids: std::collections::HashMap<IVec3, crate::chests::Lid>,
     /// Asleep in a bed (see beds.rs).
@@ -819,7 +819,7 @@ impl Game {
             v.push(("gen".into(), self.world.generator.opts.pack().to_le_bytes().to_vec()));
         }
         if !self.waypoints.is_empty() {
-            v.push(("waypoints".into(), crate::waypoints::encode(&self.waypoints)));
+            v.push(("waypoints".into(), crate::qol::encode(&self.waypoints)));
         }
         if let Some(d) = self.last_death {
             v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).collect()));
@@ -875,7 +875,7 @@ impl Game {
             self.journal = crate::archaeology::Journal::decode(b);
         }
         if let Some(b) = extra("waypoints") {
-            self.waypoints = crate::waypoints::decode(b);
+            self.waypoints = crate::qol::decode(b);
         }
         if let Some(b) = extra("last_death").filter(|b| b.len() >= 12) {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
@@ -3508,7 +3508,7 @@ impl Game {
             }
             return;
         }
-        let cap = ((12 + 4 * self.peers.len()) as f32 * crate::moon::monster_scale(self.moon_phase())) as usize;
+        let cap = ((12 + 4 * self.peers.len()) as f32 * crate::skies::monster_scale(self.moon_phase())) as usize;
         if hostile >= cap || !self.rules.difficulty.monsters() {
             return;
         }

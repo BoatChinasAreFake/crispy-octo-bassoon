@@ -215,7 +215,7 @@ impl Game {
             return;
         }
         // Waypoints are your own business.
-        if crate::waypoints::is_command(&text) {
+        if crate::qol::is_command(&text) {
             for l in self.waypoint_command(&text) {
                 self.msg(l);
             }
@@ -1131,7 +1131,7 @@ impl Game {
                 }
             }
             Msg::Time(t) => {
-                // The day count rides in front of the time of day (see moon.rs).
+                // The day count rides in front of the time of day (see skies.rs).
                 self.time = t.rem_euclid(1.0);
                 self.day = t.floor().max(0.0) as u32;
             }
