@@ -65,7 +65,7 @@ impl Game {
         if held == LANTERN && normal == IVec3::NEG_Y {
             return LANTERN_HANGING;
         }
-        if held == FRAME_FIRST || held == PAINTING_FIRST {
+        if held == FRAME_FIRST || held == PAINTING_FIRST || held == TRIPWIRE_HOOK_FIRST {
             return held + crate::decor::frame_facing(normal).unwrap_or(0) as Id;
         }
         // An armour stand faces whoever put it down.

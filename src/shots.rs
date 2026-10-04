@@ -70,6 +70,10 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "trailruins" => Kind::TrailRuins,
         "oceanruins" => Kind::OceanRuins,
         "shipwreck" => Kind::Shipwreck,
+        "pyramid" => Kind::DesertPyramid,
+        "jungletemple" => Kind::JungleTemple,
+        "mineshaft" => Kind::Mineshaft,
+        "igloo" => Kind::Igloo,
         "dripstone" | "lush" => {
             // Standing in a roomy cave in that cave biome, looking along it.
             let (want, ground) = if mode == "dripstone" { (caves::CaveBiome::Dripstone, DRIPSTONE_BLOCK) } else { (caves::CaveBiome::Lush, MOSS_BLOCK) };
@@ -223,6 +227,10 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::TrialChambers => look(o + Vec3::new(-5.5, 5.5, -5.5), o + Vec3::new(2.0, 1.0, 2.0)),
                 Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
                 Kind::Shipwreck => look(o + Vec3::new(-8.0, 3.0, -6.0), o + Vec3::Y * 1.0),
+                Kind::DesertPyramid => look(o + Vec3::new(-15.0, 9.0, 17.0), o + Vec3::Y * 3.0),
+                Kind::JungleTemple => look(o + Vec3::new(-6.0, 15.0, 11.0), o + Vec3::Y * 3.0),
+                Kind::Mineshaft => look(o + Vec3::new(0.5, 2.6, 0.5), o + Vec3::new(0.5, 2.2, -14.0)),
+                Kind::Igloo => look(o + Vec3::new(-7.0, 5.0, 9.0), o + Vec3::Y * 2.0),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -290,7 +298,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });

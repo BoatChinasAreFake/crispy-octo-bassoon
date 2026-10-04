@@ -240,6 +240,13 @@ impl Player {
                 }
             }
         }
+        // Cobwebs: everything slows to a crawl.
+        if crate::temples::in_cobweb(world, b.min(), b.max()) {
+            b.vel.x *= 0.25;
+            b.vel.z *= 0.25;
+            b.vel.y = b.vel.y.clamp(-1.0, 1.0);
+            self.fall_start = b.pos.y;
+        }
         let was_ground = b.on_ground;
         let falling_speed = -b.vel.y;
         let before = b.pos;

@@ -15,6 +15,7 @@ pub(crate) mod scorch;
 pub(crate) mod seasons;
 pub(crate) mod skies;
 pub(crate) mod structures;
+pub(crate) mod temples;
 pub(crate) mod treasure;
 pub(crate) mod trees;
 pub(crate) mod trial;

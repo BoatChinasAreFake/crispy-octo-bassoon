@@ -162,6 +162,12 @@ pub const ALL: &[Advancement] = &[
     adv("glow_up", "Glow Up", "Pick Glow Berries off a cave vine. Snack and nightlight in one."),
     adv("mind_your_head", "Mind Your Head", "Get hit by a falling Pointy Rock. It was on the label."),
     adv("crystal_clear", "Crystal Clear", "Get an Amethyst Shard out of a geode."),
+    adv("stalac_tight", "Stalac-tight", "Find a dripstone cave. Look up. Then move."),
+    adv("lush_life", "Lush Life", "Find a lush cave, where the moss is greener."),
+    adv("pyramid_scheme", "Pyramid Scheme", "Find a desert pyramid. Watch your step."),
+    adv("temple_run", "Temple Run", "Find a jungle temple. Watch your feet."),
+    adv("off_the_rails", "Off the Rails", "Find an abandoned mineshaft. Watch out for webs."),
+    adv("cold_feet", "Cold Feet", "Find an igloo. Watch the floor."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).

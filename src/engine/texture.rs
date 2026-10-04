@@ -672,6 +672,13 @@ pub const T_AMETHYST_CLUSTER: u16 = 841;
 pub const T_TINTED_GLASS: u16 = 842;
 pub const T_GLOW_BERRIES: u16 = 843;
 pub const T_AMETHYST_SHARD: u16 = 844;
+// Temples, mineshafts and igloos.
+pub const T_COBWEB: u16 = 845;
+pub const T_TRIPWIRE: u16 = 846;
+pub const T_TRIPWIRE_EW: u16 = 847;
+pub const T_TRIPWIRE_HOOK: u16 = 848;
+pub const T_TRIPWIRE_HOOK_ON: u16 = 849;
+pub const T_CHISELED_SANDSTONE: u16 = 850;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3658,6 +3665,45 @@ fn home_tiles(a: &mut Atlas) {
     mob_tiles(a);
     masonry_tiles(a);
     cave_tiles(a);
+    temple_tiles(a);
+}
+
+/// v0.2's temples, mineshafts and igloos.
+fn temple_tiles(a: &mut Atlas) {
+    // A web: spokes from the middle and rings round it.
+    a.each(T_COBWEB, |x, y, _, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let spoke = dx.abs() < 0.6 || dy.abs() < 0.6 || (dx.abs() - dy.abs()).abs() < 0.7;
+        let ring = (d % 3.2) < 0.6 && d > 1.5;
+        if (spoke || ring) && d < 8.0 { [235, 235, 240, 220] } else { [0, 0, 0, 0] }
+    });
+    // Tripwire: a thin taut string along the block (north-south, then east-west).
+    a.each(T_TRIPWIRE, |x, _, _, _| if x == 7 { [220, 220, 215, 255] } else { [0, 0, 0, 0] });
+    a.each(T_TRIPWIRE_EW, |_, y, _, _| if y == 7 { [220, 220, 215, 255] } else { [0, 0, 0, 0] });
+    // A hook: a wooden plank on the wall with a metal ring (red when tripped).
+    for (t, on) in [(T_TRIPWIRE_HOOK, false), (T_TRIPWIRE_HOOK_ON, true)] {
+        a.each(t, move |x, y, r, _| {
+            let plank = (6..10).contains(&x) && (2..14).contains(&y);
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 9.0);
+            let ring = ((dx * dx + dy * dy).sqrt() - 2.5).abs() < 0.8;
+            if ring {
+                if on { rgb(220, 60, 50) } else { rgb(170, 170, 175) }
+            } else if plank {
+                shade(rgb(150, 110, 65), r.range(0.88, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    // Chiseled sandstone: a carved face in a frame.
+    a.each(T_CHISELED_SANDSTONE, |x, y, r, _| {
+        let frame = x == 0 || x == 15 || y == 1 || y == 14;
+        let eye = (y == 6 || y == 7) && (x == 5 || x == 10);
+        let mouth = y == 10 && (5..11).contains(&x);
+        let base = shade(rgb(220, 205, 150), r.range(0.92, 1.04));
+        if frame || eye || mouth { shade(base, 0.75) } else { base }
+    });
 }
 
 /// v0.2's cave biomes: dripstone, lush caves and amethyst geodes.

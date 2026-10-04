@@ -931,6 +931,25 @@ impl Game {
         if near_village {
             self.advance("village_people");
         }
+        // Cave biomes, well under the ground (see caves.rs).
+        if p.y < (self.world.generator.column(x, z).0 - 8) as f32 && p.y > 4.0 {
+            match self.world.generator.cave_biome(x, z) {
+                crate::caves::CaveBiome::Dripstone => self.advance("stalac_tight"),
+                crate::caves::CaveBiome::Lush => self.advance("lush_life"),
+                crate::caves::CaveBiome::Plain => {}
+            }
+        }
+        // Temples, mineshafts and igloos (see temples.rs).
+        use crate::structures::Kind;
+        if let Some(kind) = self.world.generator.site_near(p, 14.0) {
+            match kind {
+                Kind::DesertPyramid => self.advance("pyramid_scheme"),
+                Kind::JungleTemple => self.advance("temple_run"),
+                Kind::Mineshaft => self.advance("off_the_rails"),
+                Kind::Igloo => self.advance("cold_feet"),
+                _ => {}
+            }
+        }
     }
 
     /// Advancements for getting hold of an item.
@@ -2525,6 +2544,19 @@ impl Game {
             self.place_dust(hit_pos, normal, hit_id);
             return;
         }
+        // String on a floor is tripwire, running the way you're facing (see tripwire.rs).
+        if held == STRING && normal == IVec3::Y && is_solid(hit_id) {
+            let place = hit_pos + IVec3::Y;
+            if place.y < CH && replaceable(self.world.get_v(place)) {
+                self.world.set_v(place, crate::tripwire::tripwire(self.facing() % 2, false));
+                self.sfx(Sfx::Place(crate::sound::Mat::Grass), Some(place.as_vec3() + Vec3::splat(0.5)));
+                self.player.swing = 1.0;
+                if !self.creative {
+                    self.inv.consume_held();
+                }
+            }
+            return;
+        }
         if !is_block_item(held) {
             return;
         }
@@ -2542,7 +2574,7 @@ impl Game {
             TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
             LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
-            FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
+            FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST | TRIPWIRE_HOOK_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -3097,6 +3129,7 @@ impl Game {
             self.advance("dont_blink");
         }
         self.house_hmmers();
+        self.move_in_temples();
         self.house_clankers();
         self.clankers_tick(dt);
         self.beacons_tick(dt);

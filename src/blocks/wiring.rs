@@ -35,12 +35,12 @@ pub fn is_wire(id: Id) -> bool {
 
 /// A switch that's on (or the block that always is).
 pub fn source_on(id: Id) -> bool {
-    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK | SCULK_SENSOR_ACTIVE) || crate::vehicles::detector_on(id)
+    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK | SCULK_SENSOR_ACTIVE) || crate::vehicles::detector_on(id) || crate::tripwire::tripped(id)
 }
 
 /// Things that sit on the floor and fall off when it goes.
 pub fn needs_floor(id: Id) -> bool {
-    is_wire(id) || matches!(id, LEVER | LEVER_ON | BUTTON | BUTTON_ON | PLATE | PLATE_ON) || crate::vehicles::is_rail(id)
+    is_wire(id) || matches!(id, LEVER | LEVER_ON | BUTTON | BUTTON_ON | PLATE | PLATE_ON) || crate::vehicles::is_rail(id) || crate::tripwire::is_tripwire(id)
 }
 
 /// Dust next to this dust: along the floor, and one step up or down.
@@ -266,12 +266,22 @@ impl Game {
         feet.extend(self.mobs.iter().map(|m| m.body.pos));
         feet.extend(self.drops.iter().map(|d| d.body.pos));
         let mut pressed = HashSet::new();
+        let mut trips = Vec::new();
         for f in feet {
             let p = IVec3::new(f.x.floor() as i32, (f.y + 0.05).floor() as i32, f.z.floor() as i32);
             let id = self.world.get_v(p);
             if id == PLATE || id == PLATE_ON {
                 pressed.insert(p);
             }
+            if crate::tripwire::is_tripwire(id) || crate::tripwire::is_hook(id) {
+                trips.push(p);
+                pressed.insert(p);
+            }
+        }
+        // Tripwire trips its whole line (see tripwire.rs).
+        self.trip(&trips);
+        for q in trips.iter().flat_map(|&p| crate::tripwire::line(&self.world, p)) {
+            pressed.insert(q);
         }
         for &p in &pressed {
             self.plates.insert(p, 0.5);
@@ -291,9 +301,12 @@ impl Game {
         }
         for p in up {
             self.plates.remove(&p);
-            if self.world.get_v(p) == PLATE_ON {
+            let id = self.world.get_v(p);
+            if id == PLATE_ON {
                 self.world.set_v(p, PLATE);
                 self.sfx(Sfx::Click, Some(p.as_vec3() + Vec3::splat(0.5)));
+            } else if crate::tripwire::tripped(id) {
+                self.world.set_v(p, crate::tripwire::with_tripped(id, false));
             }
         }
     }

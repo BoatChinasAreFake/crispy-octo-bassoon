@@ -970,6 +970,9 @@ pub struct World {
     pub new_huts: Vec<(Vec3, u32)>,
     /// Villages whose square chest was just filled: a Clanker should move in (where).
     pub new_clankers: Vec<Vec3>,
+    /// Mineshafts' loot carts, and who lives in igloo basements, waiting to move in (see temples.rs).
+    pub new_carts: Vec<(Vec3, crate::containers::Container)>,
+    pub new_residents: Vec<(Vec3, crate::entity::MobKind)>,
     /// Every sapling in loaded or edited chunks, and leaves that should check
     /// whether they still hang on to a tree (see trees.rs).
     pub saplings: HashSet<IVec3>,
@@ -1041,6 +1044,8 @@ impl World {
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
             new_clankers: Vec::new(),
+            new_carts: Vec::new(),
+            new_residents: Vec::new(),
             saplings: HashSet::new(),
             fires: HashSet::new(),
             comparators: HashSet::new(),

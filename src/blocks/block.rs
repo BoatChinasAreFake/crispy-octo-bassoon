@@ -372,7 +372,18 @@ pub const AMETHYST_BUD_LARGE: Id = 557;
 pub const AMETHYST_CLUSTER: Id = 558;
 /// Glass that lets no light through.
 pub const TINTED_GLASS: Id = 559;
-pub const NUM_BLOCKS: Id = 560;
+/// Temples, mineshafts and igloos (see temples.rs).
+pub const SNOW_BLOCK: Id = 560;
+/// Slows anything caught in it to a crawl.
+pub const COBWEB: Id = 561;
+pub const CHISELED_SANDSTONE: Id = 562;
+/// String laid across a floor: `TRIPWIRE_FIRST + axis * 2 + tripped` (axis 0
+/// north-south, 1 east-west; see tripwire.rs).
+pub const TRIPWIRE_FIRST: Id = 563;
+/// The hooks at a tripwire's ends: `+ facing` (the wall they're on), then the tripped ones.
+pub const TRIPWIRE_HOOK_FIRST: Id = 567;
+pub const TRIPWIRE_HOOK_ON_FIRST: Id = 571;
+pub const NUM_BLOCKS: Id = 575;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -604,7 +615,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) || crate::tripwire::is_tripwire(id) || crate::tripwire::is_hook(id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -1086,6 +1097,13 @@ pub fn placing_item(id: Id) -> Option<Id> {
     // Vines are planted from glow berries.
     if crate::caves::is_cave_vine(id) {
         return Some(GLOW_BERRIES);
+    }
+    // Tripwire is laid from string; hooks come in eight forms, all one item.
+    if crate::tripwire::is_tripwire(id) {
+        return Some(STRING);
+    }
+    if crate::tripwire::is_hook(id) {
+        return Some(TRIPWIRE_HOOK_FIRST);
     }
     if is_wall_torch(id) {
         return Some(TORCH);
@@ -2354,6 +2372,26 @@ impl Registry {
         let mut tinted = def("tinted_glass", "Tinted Glass (Sunglasses for Houses)", Cube, true, false, [T_TINTED_GLASS; 3], 0.3, 0, false, TINTED_GLASS, 0.0, S_GLASS);
         tinted.see_through = true;
         blocks.push(tinted);
+        // Temples, mineshafts and igloos (see temples.rs and tripwire.rs).
+        blocks.push(def("snow_block", "Snow Block (Packed, Chilly)", Cube, true, true, [T_SNOW; 3], 0.4, 0, false, SNOW_BLOCK, 0.0, S_SAND));
+        blocks.push(def("cobweb", "Cobweb (Sticky Situation)", Cross, false, false, [T_COBWEB; 3], 4.0, 0, false, STRING, 0.0, S_GRASS));
+        blocks.push(def("chiseled_sandstone", "Chiseled Sandstone (Ancient Doodles)", Cube, true, true, [T_SANDSTONE, T_CHISELED_SANDSTONE, T_SANDSTONE], 0.8, 1, true, CHISELED_SANDSTONE, 0.0, S_STONE));
+        for (k, key) in ["tripwire", "tripwire_on", "tripwire_ew", "tripwire_ew_on"].into_iter().enumerate() {
+            let tile = if k < 2 { T_TRIPWIRE } else { T_TRIPWIRE_EW };
+            let mut d = def(key, "Tripwire (Trippy)", Shaped, false, false, [tile; 3], 0.0, 0, false, STRING, 0.0, S_GRASS);
+            d.shape = Shape::Dust;
+            d.creative = false;
+            blocks.push(d);
+        }
+        for on in [false, true] {
+            for facing in 0..4u8 {
+                let key = leak(&format!("tripwire_hook{}{}", ["", "_east", "_south", "_west"][facing as usize], if on { "_on" } else { "" }));
+                let mut d = def(key, "Tripwire Hook (Gotcha)", Shaped, false, false, [if on { T_TRIPWIRE_HOOK_ON } else { T_TRIPWIRE_HOOK }; 3], 0.5, 0, false, TRIPWIRE_HOOK_FIRST, 0.0, S_WOOD);
+                d.shape = Shape::Frame { facing };
+                d.creative = !on && facing == 0;
+                blocks.push(d);
+            }
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2857,6 +2895,9 @@ impl Registry {
         recipes.push(r(&[(MOSS_BLOCK, 2)], (MOSS_CARPET, 3)));
         recipes.push(r(&[(AMETHYST_SHARD, 4)], (AMETHYST_BLOCK, 1)));
         recipes.push(r(&[(AMETHYST_SHARD, 4), (GLASS, 1)], (TINTED_GLASS, 2)));
+        // Temples and friends.
+        recipes.push(r(&[(IRON, 1), (STICK, 1), (PLANKS, 1)], (TRIPWIRE_HOOK_FIRST, 2)));
+        recipes.push(r(&[(SANDSTONE, 2)], (CHISELED_SANDSTONE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
             recipes.push(r(&[(DIAMOND, 7), (t, 1), (TUFF_BRICKS, 1)], (t, 2)));
