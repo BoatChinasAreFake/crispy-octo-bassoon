@@ -31,7 +31,7 @@ Originals:
 - Spelunker's Rope: throw it down a shaft and climb it. Ropes stay put and show on maps.
 
 Parts:
-- Part 1: items 1 to 5 and 9.
+- Part 1: items 1 to 5 and 9. **(released)**
 - Part 2: item 8 and the two originals (this is the last part).
 
 ## v0.3: A wider world
