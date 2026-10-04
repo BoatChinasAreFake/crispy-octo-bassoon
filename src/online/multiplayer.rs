@@ -1217,7 +1217,8 @@ impl Game {
         let mut old: Vec<Mob> = std::mem::take(&mut self.mobs);
         for s in snaps {
             let Some(kind) = MobKind::from_index(s.kind) else { continue };
-            let mut m = match old.iter().position(|m| m.id == s.id) {
+            // (A mob that changed kind, like a sheared Mushmooer, is made afresh.)
+            let mut m = match old.iter().position(|m| m.id == s.id && m.kind == kind) {
                 Some(i) => old.swap_remove(i),
                 None => {
                     let mut m = Mob::new(kind, s.pos, &mut self.rng).with_size(s.size & 15);

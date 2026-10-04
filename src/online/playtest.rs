@@ -183,6 +183,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     batch_three(&mut host, &mut team, &mut report, &mut touched);
     underground(&mut host, &mut team, &mut report, &mut touched);
     deeper(&mut host, &mut team, &mut report, &mut touched);
+    wider(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -1129,6 +1130,126 @@ fn deeper(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut 
     }
 }
 
+/// v0.3 part 1: wood doors, new boats, Mushmooers and kelp.
+fn wider(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    let n = team.len();
+    let ledger = |host: &Game, id: u32, item: Id| host.peers.get(&id).map(|p| p.ledger.bag.count(item)).unwrap_or(0);
+    revive(host, team);
+
+    // 27. A bot opens a birch door: the host and everyone see it open.
+    let k = 0;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let door = feet + IVec3::new(2, 0, 0);
+    let base = crate::block::door_base(crate::woods::id(1, crate::woods::part::DOOR)).expect("a birch door");
+    host.world.set_v(door, door_of(base, 0, false, false));
+    host.world.set_v(door + IVec3::Y, door_of(base, 0, false, true));
+    touched.extend([door, door + IVec3::Y]);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.toggle_door(door);
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("birch door");
+    let open = |w: &crate::world::World| door_state(w.get_v(door)).is_some_and(|(_, o, _)| o) && door_state(w.get_v(door + IVec3::Y)).is_some_and(|(_, o, _)| o);
+    if !open(&host.world) {
+        report.problems.push(format!("{} opened a birch door and the host's stayed shut", team[k].name));
+    } else {
+        for b in team.iter() {
+            if !open(&b.game.world) {
+                report.problems.push(format!("{} never saw the birch door open", b.name));
+            }
+        }
+    }
+
+    // 28. A bot puts down an acacia boat: the host takes the boat, and everyone sees it.
+    let k = 1 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    host.give_peer(id, ACACIA_BOAT, 1);
+    pump(host, team, 1.0, |_| idle());
+    let before = host.vehicles.len();
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == ACACIA_BOAT)) {
+        g.inv.selected = slot;
+        g.player.pitch = -1.2;
+        g.place_vehicle(ACACIA_BOAT);
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("acacia boat");
+    let kind = crate::vehicles::kind_of_item(ACACIA_BOAT);
+    match host.vehicles.iter().find(|v| Some(v.kind) == kind).map(|v| v.id) {
+        Some(v) if host.vehicles.len() > before && ledger(host, id, ACACIA_BOAT) == 0 => {
+            for b in team.iter() {
+                if !b.game.vehicles.iter().any(|w| w.id == v && Some(w.kind) == kind) {
+                    report.problems.push(format!("{} never saw the acacia boat", b.name));
+                }
+            }
+            host.vehicles.retain(|w| w.id != v);
+        }
+        _ => report.problems.push(format!("{} put down an acacia boat and the host didn't take it", team[k].name)),
+    }
+
+    // 29. A bot shears a Mushmooer: it's a plain Mooer for everyone, and mushrooms drop.
+    let k = 2 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let moo = host.alloc_mob(crate::entity::MobKind::Mushmooer, team[k].game.player.body.pos + Vec3::new(1.5, 0.5, 0.0));
+    host.give_peer(id, SHEARS, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let (Some(slot), Some(i)) = (g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == SHEARS)), g.mobs.iter().position(|m| m.id == moo)) {
+        g.inv.selected = slot;
+        g.use_on_mob(i);
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("mushmooer");
+    let plain = |mobs: &[crate::entity::Mob]| mobs.iter().any(|m| m.id == moo && m.kind == crate::entity::MobKind::Mooer);
+    let mushrooms = host.drops.iter().any(|d| d.item == MUSHROOM) || host.peers.values().any(|p| p.ledger.bag.count(MUSHROOM) > 0);
+    if !plain(&host.mobs) || !mushrooms {
+        report.problems.push(format!("{} sheared a Mushmooer and the host didn't see it (Mooer {}, mushrooms {mushrooms})", team[k].name, plain(&host.mobs)));
+    } else {
+        for b in team.iter() {
+            if !plain(&b.game.mobs) {
+                report.problems.push(format!("{} never saw the Mushmooer sheared", b.name));
+            }
+        }
+    }
+    host.mobs.retain(|m| m.id != moo);
+    host.drops.retain(|d| d.item != MUSHROOM);
+
+    // 30. A bot breaks the foot of a kelp column: it all comes away, and the water stays, for everyone.
+    let k = 3 % n;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    let foot = feet + IVec3::new(2, -6, 0);
+    for y in -1..=6 {
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let p = foot + IVec3::new(dx, y, dz);
+                let inside = dx == 0 && dz == 0 && y >= 0;
+                host.world.set_v(p, if !inside { STONE } else if y < 4 { KELP } else { WATER });
+                touched.insert(p);
+            }
+        }
+    }
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.break_block(foot, true);
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("kelp");
+    let wet = |w: &crate::world::World| (0..4).all(|y| w.get_v(foot + IVec3::Y * y) == WATER);
+    if !wet(&host.world) {
+        report.problems.push(format!("{} broke kelp and the host's column didn't come away into water ({:?})", team[k].name, (0..4).map(|y| host.world.get_v(foot + IVec3::Y * y)).collect::<Vec<_>>()));
+    } else {
+        for b in team.iter() {
+            if !wet(&b.game.world) {
+                report.problems.push(format!("{} never saw the kelp come away", b.name));
+            }
+        }
+    }
+}
+
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f64>().ok());
@@ -1169,7 +1290,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

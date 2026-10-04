@@ -1236,6 +1236,9 @@ impl Game {
             return;
         }
 
+        if (0..crate::woods::WOODS.len()).all(|w| self.inv.count(crate::woods::id(w, crate::woods::part::LOG)) > 0) {
+            self.advance("branching_out");
+        }
         if self.inv.armor_points() > 0 {
             self.advance("suit_up");
             if self.inv.armor.iter().all(|s| s.and_then(|(id, _)| armor_of(id)).is_some_and(|(_, tier)| tier == 3)) {

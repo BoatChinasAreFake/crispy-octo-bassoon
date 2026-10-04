@@ -90,14 +90,21 @@ Everything here is legally distinct, and most of it is a little sillier than you
 
 ### Worlds
 
-- **Infinite procedural terrain.** Seeded Perlin noise makes oceans, beaches, plains, forests, deserts, snowy land, swamps, jungles, badlands and taigas, ridged mountains, spaghetti caves, big caverns (the deepest ones flooded), ravines, ore veins (gold included, for all the good it'll do you), lava lakes and frozen seas. The sea is shallow by the shore and drops away to 10–25 blocks deep further out. Chunks generate and light themselves on background threads.
+- **Infinite procedural terrain.** Seeded Perlin noise makes oceans, beaches, plains, forests, deserts, snowy land, swamps, jungles, badlands, taigas, savannas, birch and dark forests, meadows, ridged mountains, spaghetti caves, big caverns (the deepest ones flooded), ravines, ore veins (gold included, for all the good it'll do you), lava lakes and four kinds of sea. The sea is shallow by the shore and drops away to 10–25 blocks deep further out. Chunks generate and light themselves on background threads.
 - **Biomes.**
   - **Swamps** sink to just around sea level: pools with lily pads, mud, and wide oaks trailing leaves. **Mangrove Swamps** are warmer, with trees standing on tangled roots over the water.
   - **Jungles** grow very tall trees, thick undergrowth, **Melons** and **Bamboo**.
   - **Badlands** rise into banded **Terracotta** under **Red Sand**, with dead bushes, cacti, more gold higher up, and no rain.
   - **Taigas** are cool spruce forests; snowy places grow spruce too.
+  - **Savannas** are dry and yellow, dotted with flat-topped **Acacias**, and roamed by Gallopers.
+  - **Birch Forests** are pale and tidy; **Dark Forests** are so thick with wide **Dark Oaks** and giant mushrooms that it's dim at noon.
+  - **Meadows** are lush high grassland full of flowers, and the highest mountains turn to bare **Stony Peaks**.
+  - **Ice Spikes** stand in the snow: tall pillars of **Packed Ice**.
+  - **Mushroom Islands** rise out of the open sea, covered in **Mycelium** and giant red and brown mushrooms. Nothing hostile spawns there, only **Mushmooers**.
+  - **Seas** come in four temperatures. **Warm oceans** are clear turquoise, full of coral and glowing **Sea Pickles**; **lukewarm** ones have some coral and plenty of **Seagrass**; ordinary seas grow tall **Kelp** forests; **frozen** ones are iced over and dotted with **icebergs**. Kelp grows taller over time, and breaking it brings down everything above; dry it in a furnace for **Dried Kelp**. You swim through sea plants, and breaking one leaves the water behind.
   - **Cherry Groves** cover gentle hills in pink-leaved trees and **Pink Petals**.
   - **The Pale Garden** is a grey, quiet forest of huge **Pale Oaks** on a carpet of **Pale Moss**, with moss hanging from the branches and **Eyeblossoms** that open and glow at night (see Creatures for what lives in the trunks).
+  - **Acacia**, **Birch** and **Dark Oak** join the woods, each with the full set: planks, slabs, stairs, fences, gates, doors and boats.
   - Every kind of wood makes its own planks, and saplings grow into whatever tree suits where they're planted.
   - Grass, leaves and water take their colour from the biome and blend smoothly across borders.
   - **Firefly Bushes** blink in swamps at night, **Leaf Litter** drifts under forest trees, and **Wildflowers** fill the meadows.
@@ -147,7 +154,7 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 - **Beds and sleep.** A bed faces away from whoever put it down. Right-click it at night to lie down; the screen fades, and if nobody gets you up the night is skipped and you step out beside the bed. Jumping, sneaking or getting hurt gets you up early. It refuses if monsters are nearby, sets where you come back after dying, and clears a storm. (Don't try it in the Scorchlands or the Hollow.)
 - **Death.** Dying drops your things where you fell (they wait five minutes), and everyone is told how you died ("Bot5 was struck down by a command. Harsh."). Held maps and the **Recovery Compass** show where.
 - **Game modes.** Survival, Creative (flight, instant breaking, infinite blocks) and **Spectator** (fly through everything, touch nothing). **Hardcore** is one life on Hard; die and you can only spectate.
-- **Advancements** (170 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
+- **Advancements** (182 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
 
 ### Building
 
@@ -176,7 +183,7 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 
 ### Creatures
 
-- **Animals.** Oinkers, Fluffers (shear them), Mooers, Clucksters, Squawkers, Sneakers (foxes that steal), Ribbits (frogs that leap out of the water to snatch small Bloops and leave **Froglights**), Rollos (armadillos), Goats, Axolotls, Turtles, Dolphins (feed one a fish and it leads you to a shipwreck), Pandas, Polar Bears, Llamas (pack animals), Bees, Fishies and **Sniffers** (hatched from eggs found at dig sites; they dig up ancient seeds). Most come in a few colourings, and babies take after a parent.
+- **Animals.** Oinkers, Fluffers (shear them), Mooers, **Mushmooers** (red-spotted; shear one for five mushrooms and a plain Mooer), Clucksters, Squawkers, Sneakers (foxes that steal), Ribbits (frogs that leap out of the water to snatch small Bloops and leave **Froglights**), Rollos (armadillos), Goats, Axolotls, Turtles, Dolphins (feed one a fish and it leads you to a shipwreck), Pandas, Polar Bears, Llamas (pack animals), Bees, Fishies and **Sniffers** (hatched from eggs found at dig sites; they dig up ancient seeds). Most come in a few colourings, and babies take after a parent.
 - **Breeding and taming.** Feed animals their favourite food and they make babies. Tame **Woofers** with bones: they follow you, fight for you and wear **Woofer Armour**. Mobs find their way round walls and through doors.
 - **Things to ride.** **Gallopers**, **Camels** (with a seat for a friend and a dash) and **Rotsteeds** with a saddle; **Strutters** over lava; and **Floaties**, big gentle fliers grown from a Dried Floaty, with a **Harness** and four seats.
 - **Monsters.** **Groaners** (and **Soggy Groaners** in the sea, some throwing spears), **Rattlers** (bony archers), **Hissers** (they explode), **Webbers** (they climb walls), **Bloops** (they split), **Starers** (don't look them in the eye), the **Creaking** (it only moves when nobody's looking; break its heart in a Pale Oak to be rid of it), **Witches** (they throw Slowness, Poison and Weakness potions and drink their own to heal), **desert Groaners** that make you hungry, **snowy Rattlers** whose arrows slow you, and the Scorchlands' lot.
@@ -201,7 +208,7 @@ Legally distinct redstone, simplified. Power comes from levers, buttons, pressur
 
 ### Getting around
 
-- **Boats**, **Minecarts** (plain, chest and hopper) on **Rails**, **Powered Rails** and **Detector Rails**.
+- **Boats** (one for each wood), **Minecarts** (plain, chest and hopper) on **Rails**, **Powered Rails** and **Detector Rails**.
 - **Gliders**: wear one, jump off something high and press Jump again; use a **Boom Rocket** for a push.
 - **Compass** (points home, or to a **Lodestone**), **Maps** (zoom out, shade slopes, mark banners and where you died), **Spyglass**, and **Treasure Maps**.
 - **Waypoints.** `/wp add <name>` marks where you stand; each one shows as a coloured label with its distance, and on held maps. `/wp list` and `/wp remove <name>` do what they say.

@@ -183,6 +183,7 @@ pub const ALL: &[Advancement] = &[
     adv("propped_up", "Propped Up", "Stop a creaking ceiling from coming down."),
     adv("sinking_feeling", "That Sinking Feeling", "Be under a ceiling when it comes down."),
     adv("rope_a_dope", "Rope-a-Dope", "Throw a Spelunker's Rope down a hole."),
+    adv("branching_out", "Branching Out", "Carry acacia, birch and dark oak logs at once."),
     adv("flat_tops", "Flat Tops", "Find a savanna, where the trees had a haircut."),
     adv("birch_please", "Birch, Please", "Find a birch forest."),
     adv("lights_out", "Lights Out", "Find a dark forest. Bring a torch."),
@@ -201,6 +202,7 @@ pub const TABS: [&str; 5] = ["All", "Getting Started", "Creatures", "Home and Cr
 const STARTED: &[&str] = &[
     "getting_wood", "benchmarking", "stone_age", "tool_time", "iron_will", "dimonds", "fools_gold", "golden_boy", "boing", "ouch", "zoomies", "sweet_dreams", "cake", "spooky", "thirsty",
     "kaboom", "centurion", "why_cross", "suit_up", "cover_me", "open_door_policy", "butterfingers", "hot_stuff", "not_today",
+    "branching_out",
 ];
 const CREATURES: &[&str] = &[
     "bacon", "hiss_tory", "groan_up", "fluffed", "dont_blink", "staring_champ", "rude_teleport", "udderly", "bone_zone", "arachno", "split_decision", "robin_hood", "good_boy",

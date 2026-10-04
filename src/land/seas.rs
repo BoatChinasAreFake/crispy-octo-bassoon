@@ -100,7 +100,9 @@ impl Game {
     /// Water back into broken waterlogged blocks (a tick later, once they're gone).
     pub fn refill_tick(&mut self) {
         for p in std::mem::take(&mut self.refill) {
-            if self.world.get_v(p) == AIR {
+            // (Running water may have got there first.)
+            let here = self.world.get_v(p);
+            if here == AIR || (is_water(here) && here != WATER) {
                 self.world.set_v(p, WATER);
             }
         }
@@ -172,6 +174,17 @@ mod tests {
         crate::entity::move_body(&g.world, &mut g.player.body, 0.05, false);
         assert!(g.player.body.in_water, "seagrass is wet");
         assert!(is_wet(SEA_PICKLE) && !is_wet(STONE));
+    }
+
+    #[test]
+    fn running_water_leaves_sea_plants_be_and_they_feed_it() {
+        let p = ivec3(0, 50, 0);
+        // A seagrass under water, with air beside it: it stays put (it isn't washed out).
+        let get = |q: IVec3| if q == p { SEAGRASS } else if q.y > p.y { WATER } else if q.y < p.y { STONE } else { AIR };
+        assert_eq!(crate::liquids::settle(&get, p), None);
+        // A gap between two kelp on the floor fills with a new source, as between two waters.
+        let get = |q: IVec3| if q.y < p.y { STONE } else if q == p { AIR } else if q.y == p.y && (q.x - p.x).abs() == 1 && q.z == p.z { KELP } else { AIR };
+        assert_eq!(crate::liquids::settle(&get, p), Some(WATER));
     }
 
     #[test]

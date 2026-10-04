@@ -30,9 +30,10 @@ const MAX_PER_STEP: usize = 4096;
 
 const SIDES: [IVec3; 4] = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z];
 
-/// Cells a liquid simply runs into: air, plants, torches.
+/// Cells a liquid simply runs into: air, plants, torches (but not kelp and
+/// the like, which are full of water already).
 pub fn open(id: Id) -> bool {
-    id == AIR || block(id).model == Model::Cross
+    id == AIR || (block(id).model == Model::Cross && !waterlogged(id))
 }
 
 /// Can liquid fall from above into a cell holding `below`?
@@ -43,7 +44,8 @@ fn falls_into(below: Id) -> bool {
 /// How strong a liquid of this kind would be at `p`, fed by its neighbours
 /// (Some(0): a new source). None: nothing of this kind reaches it.
 fn feed(get: &impl Fn(IVec3) -> Id, p: IVec3, lava: bool) -> Option<u8> {
-    let same = |id: Id| if lava { is_lava(id) } else { is_water(id) };
+    // (Waterlogged blocks count as water sources.)
+    let same = |id: Id| if lava { is_lava(id) } else { is_wet(id) };
     let reach = if lava { LAVA_REACH } else { WATER_REACH };
     if same(get(p + IVec3::Y)) {
         return Some(1);
@@ -68,7 +70,7 @@ fn feed(get: &impl Fn(IVec3) -> Id, p: IVec3, lava: bool) -> Option<u8> {
     }
     if !lava && sources >= 2 {
         let below = get(p - IVec3::Y);
-        if is_solid(below) || below == WATER {
+        if is_solid(below) || below == WATER || waterlogged(below) {
             return Some(0);
         }
     }
@@ -78,10 +80,12 @@ fn feed(get: &impl Fn(IVec3) -> Id, p: IVec3, lava: bool) -> Option<u8> {
 /// What cell `p` should become now (None: leave it). Pure, for testing.
 pub fn settle(get: &impl Fn(IVec3) -> Id, p: IVec3) -> Option<Id> {
     let cur = get(p);
-    let touches_water = || SIDES.iter().chain([IVec3::Y].iter()).any(|d| is_water(get(p + *d)));
+    let touches_water = || SIDES.iter().chain([IVec3::Y].iter()).any(|d| is_wet(get(p + *d)));
     match cur {
         // Sources stay put, unless the other liquid gets to them.
         WATER => return is_lava(get(p + IVec3::Y)).then_some(STONE),
+        // Kelp and the like hold their water, like a source.
+        _ if waterlogged(cur) => return None,
         LAVA => return touches_water().then_some(OBSIDIAN),
         _ if !(open(cur) || is_liquid(cur)) => return None,
         _ => {}

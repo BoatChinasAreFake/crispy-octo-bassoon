@@ -182,6 +182,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn carrying_all_three_logs_is_branching_out() {
+        let mut g = crate::game::tests::arena(711);
+        let idle = crate::game::Controls::default();
+        g.inv.add(id(0, part::LOG), 1);
+        g.inv.add(id(1, part::LOG), 1);
+        g.update(0.05, &idle);
+        assert!(!g.advancements.has("branching_out"), "two woods aren't enough");
+        g.inv.add(id(2, part::LOG), 1);
+        g.update(0.05, &idle);
+        assert!(g.advancements.has("branching_out"));
+    }
+
+    #[test]
     fn every_wood_has_its_whole_set_in_order() {
         for (w, wood) in WOODS.iter().enumerate() {
             assert_eq!(block(id(w, part::LOG)).key, format!("{}_log", wood.key));
