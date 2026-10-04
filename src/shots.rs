@@ -291,7 +291,7 @@ impl App {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks" | "glider" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "newblocks" | "glider" => {
                 let mut g = Game::new(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -716,7 +716,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1232,6 +1232,43 @@ impl App {
                 app.game.world.set_v(at(3, -5, 1), block::HOPPER_FIRST);
                 app.game.world.set_v(at(3, -5, 2), block::CHEST);
                 app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
+            }
+            if s.mode == "underworks" && frames == 125 {
+                // v0.2 part 2: a Wilter's T (one skull short), a Starred Beacon, a rope down a hole.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                for k in -1..=1 {
+                    app.game.world.set_v(at(7, k - 2, 1), block::SORROW_SAND);
+                }
+                app.game.world.set_v(at(7, -2, 0), block::SORROW_SAND);
+                for k in [-1, 0] {
+                    app.game.world.set_v(at(7, k - 2, 2), block::CHARRED_SKULL);
+                }
+                let top = at(12, -7, 3);
+                for k in 1..=3 {
+                    for dx in -k..=k {
+                        for dz in -k..=k {
+                            app.game.world.set_v(top + IVec3::new(dx, -k, dz), block::OBSIDIAN);
+                        }
+                    }
+                }
+                app.game.world.set_v(top, block::STARRED_BEACON_FIRST + 1);
+                // A hole with a rope down it, and one hanging off a post.
+                for d in 0..6 {
+                    app.game.world.set_v(at(4, -3, -d - 1), block::AIR);
+                }
+                app.game.world.set_v(at(4, -3, 0), block::ROPE);
+                app.game.unroll(at(4, -3, 0));
+                for d in 0..4 {
+                    app.game.world.set_v(at(5, -4, d), block::STONE);
+                }
+                app.game.world.set_v(at(4, -4, 3), block::ROPE);
+                app.game.unroll(at(4, -4, 3));
+                app.game.inv.slots[app.game.inv.selected] = Some((block::SUPPORT_GAUGE, 1));
             }
             if s.mode == "machines" && frames == 125 {
                 // A beacon on its pyramid; a detector rail under a cart lighting a lamp;

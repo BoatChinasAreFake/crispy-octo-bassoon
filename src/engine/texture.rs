@@ -713,6 +713,18 @@ pub const T_BAT_WING: u16 = 879;
 pub const T_ALLAY: u16 = 880;
 pub const T_ALLAY_FACE: u16 = 881;
 pub const T_ALLAY_WING: u16 = 882;
+/// v0.2 part 2: the Wilter and what makes it, its star's beacons, rope and the Support Gauge.
+pub const T_SORROW_SAND: u16 = 883;
+pub const T_CHARRED_SKULL: u16 = 884;
+pub const T_CHARRED_SKULL_FACE: u16 = 885;
+pub const T_STARRED_BEACON: u16 = 886;
+pub const T_ROPE: u16 = 887;
+pub const T_WILTER_STAR: u16 = 888;
+pub const T_SUPPORT_GAUGE: u16 = 889;
+pub const T_CHARRED_BONE: u16 = 890;
+pub const T_CHARRED_FACE: u16 = 891;
+pub const T_WILTER: u16 = 892;
+pub const T_WILTER_FACE: u16 = 893;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3702,6 +3714,7 @@ fn home_tiles(a: &mut Atlas) {
     temple_tiles(a);
     monument_tiles(a);
     night_tiles(a);
+    wilter_tiles(a);
 }
 
 /// v0.2's night threats and small creatures.
@@ -3753,6 +3766,57 @@ fn night_tiles(a: &mut Atlas) {
         if eye { if y == 6 { rgb(255, 255, 255) } else { rgb(20, 40, 90) } } else { shade(rgb(110, 205, 250), r.range(0.92, 1.06)) }
     });
     a.each(T_ALLAY_WING, |x, y, _, _| if (x + y) % 3 == 0 { [235, 250, 255, 220] } else { [190, 230, 255, 170] });
+}
+
+/// v0.2 part 2: the Wilter, its makings and its star; rope and the Support Gauge.
+fn wilter_tiles(a: &mut Atlas) {
+    // Sorrow Sand: dark brown sand with faint faces in it.
+    a.each(T_SORROW_SAND, |x, y, r, _| {
+        let face = (x % 8 == 2 || x % 8 == 5) && y % 8 == 3 || (y % 8 == 6 && (2..6).contains(&(x % 8)));
+        shade(if face { rgb(60, 45, 35) } else { rgb(95, 75, 60) }, r.range(0.85, 1.08))
+    });
+    // A Charred Skull: sooty bone, and a grim face on its sides.
+    a.each(T_CHARRED_SKULL, |x, y, r, _| shade(if (x * 3 + y) % 7 == 0 { rgb(35, 35, 38) } else { rgb(55, 55, 58) }, r.range(0.88, 1.06)));
+    a.each(T_CHARRED_SKULL_FACE, |x, y, r, _| {
+        let eye = (5..8).contains(&y) && ((3..6).contains(&x) || (10..13).contains(&x));
+        let teeth = y == 11 && (4..12).contains(&x) && x % 2 == 0;
+        if eye || teeth { rgb(15, 12, 12) } else { shade(rgb(55, 55, 58), r.range(0.88, 1.06)) }
+    });
+    // A Starred Beacon: the beacon's glass, with a white star in it.
+    a.each(T_STARRED_BEACON, |x, y, r, _| {
+        let (dx, dy) = ((x as i32 - 8).abs(), (y as i32 - 8).abs());
+        let star = dx + dy < 4 || (dx < 1 && dy < 6) || (dy < 1 && dx < 6);
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        if star { rgb(255, 250, 220) } else if edge { rgb(200, 240, 245) } else { shade(rgb(90, 200, 210), r.range(0.9, 1.05)) }
+    });
+    // Rope: twisted fibres, see-through either side.
+    a.each(T_ROPE, |x, y, r, _| if (6..10).contains(&x) { shade(if (x + y) % 3 == 0 { rgb(120, 90, 55) } else { rgb(170, 135, 85) }, r.range(0.9, 1.05)) } else { [0, 0, 0, 0] });
+    // The Wilter Star: a pale four-pointed star.
+    a.each(T_WILTER_STAR, |x, y, _, _| {
+        let (dx, dy) = ((x as f32 - 7.5).abs(), (y as f32 - 7.5).abs());
+        let star = dx * dy < 3.0 && dx + dy < 9.0;
+        if star { if dx + dy < 3.0 { rgb(255, 255, 255) } else { rgb(225, 225, 245) } } else { [0, 0, 0, 0] }
+    });
+    // The Support Gauge: a copper dial with a needle.
+    a.each(T_SUPPORT_GAUGE, |x, y, _, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let needle = dy < 0.0 && (dx + dy * 0.5).abs() < 0.8 && d < 5.5;
+        if d > 6.5 { [0, 0, 0, 0] } else if d > 5.5 { rgb(190, 110, 70) } else if needle { rgb(200, 40, 30) } else if dy > 2.0 { rgb(60, 60, 60) } else { rgb(235, 225, 200) }
+    });
+    // A Charred Rattler: sooty black bones.
+    a.each(T_CHARRED_BONE, |x, y, r, _| shade(if (x * 3 + y) % 7 == 0 { rgb(30, 30, 32) } else { rgb(50, 50, 54) }, r.range(0.88, 1.06)));
+    a.each(T_CHARRED_FACE, |x, y, r, _| {
+        let eye = (5..8).contains(&y) && ((3..6).contains(&x) || (10..13).contains(&x));
+        if eye { rgb(10, 8, 8) } else { shade(rgb(50, 50, 54), r.range(0.88, 1.06)) }
+    });
+    // The Wilter: ashen bones, three grim faces.
+    a.each(T_WILTER, |x, y, r, _| shade(if (x + y * 2) % 5 == 0 { rgb(25, 25, 28) } else { rgb(42, 42, 46) }, r.range(0.85, 1.06)));
+    a.each(T_WILTER_FACE, |x, y, r, _| {
+        let eye = (5..8).contains(&y) && ((3..6).contains(&x) || (10..13).contains(&x));
+        let mouth = (10..12).contains(&y) && (4..12).contains(&x);
+        if eye { rgb(230, 220, 255) } else if mouth { rgb(12, 10, 12) } else { shade(rgb(42, 42, 46), r.range(0.85, 1.06)) }
+    });
 }
 
 /// v0.2's Ocean Monument: prismarine, its lights and treasures, and Guardians.

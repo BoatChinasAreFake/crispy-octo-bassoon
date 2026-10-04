@@ -351,6 +351,7 @@ impl Game {
             LEVER_ON => LEVER,
             BUTTON => BUTTON_ON,
             BUTTON_ON => return true,
+            b if crate::beacon::is_beacon(b) && self.inv.held() == WILTER_STAR && !crate::beacon::starred(b) => return self.star_beacon(pos),
             b if crate::beacon::is_beacon(b) => {
                 let next = crate::beacon::next_effect(b);
                 self.msg(format!("The beacon will give: {}.", crate::beacon::effect_of(next).name()));

@@ -101,6 +101,8 @@ Everything here is legally distinct, and most of it is a little sillier than you
   - Every kind of wood makes its own planks, and saplings grow into whatever tree suits where they're planted.
   - Grass, leaves and water take their colour from the biome and blend smoothly across borders.
   - **Firefly Bushes** blink in swamps at night, **Leaf Litter** drifts under forest trees, and **Wildflowers** fill the meadows.
+- **Cave-ins** (not in Minecraft). Dig out too big a room underground and the ceiling creaks, drops dust, and after a few seconds comes down as rubble. A ceiling stays up within five blocks of a wall or a pillar, or within three of a wooden beam (a log in the ceiling), so prop big rooms up. The **Support Gauge** (copper, Zappy Dust and a stick) reads the room you're in. Natural caves have had ages to settle; only your digging can fall.
+- **Spelunker's Rope** (not in Minecraft; six string and a stick make two). Click the top of a ledge and it goes over the edge and unrolls down the hole (up to 32 blocks); against a wall it hangs straight down. Climb it like a ladder. It stays put, maps mark it, and breaking any part takes the whole rope back.
 - **Cave biomes.**
   - **Dripstone caves** bristle with **Pointy Rock**. Stalactites drop when you break what holds them (or stand under a loose one too long), and landing on a stalagmite hurts twice as much.
   - **Lush caves** have **Moss** floors, **Azaleas**, and **Cave Vines** hanging with **Glow Berries** that light the place up. Pick and eat the berries, plant them under a ceiling for a new vine, and climb the vines like ladders. Bone Dust on moss spreads it.
@@ -122,7 +124,8 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 - **Dig sites** of four lost cultures (see Archaeology).
 - **Trial Chambers**: copper-and-tuff halls whose **Trial Spawners** wake as you come close and send out a wave; beat it for a **Trial Key** to open a **Vault**. **Breezes** bounce around throwing **Wind Charges**. Drink an **Ominous Bottle** first for bigger waves, **Ominous Vaults** and a chance at a **Heavy Core** (which makes the **Mace**: fall on something from a height and it lands harder the further you fell).
 - **The Deep Dark.** Wide deepslate caverns near the bottom of the world, carpeted in **sculk** that listens. **Sculk Sensors** hear footsteps (sneak to walk silently) and give off Zappy power; they wake **Sculk Shriekers**, and the fourth shriek summons **The Hush**, blind and enormous, which goes wherever it last heard something. **Hushed Cities** stand deep in the caverns, with chests of Echo Shards, templates and enchanted books.
-- **The Scorchlands.** A second, hotter world under a bedrock sky. Build an obsidian frame (at least 4 wide and 5 tall), light it with a **Sparker** and stand in the portal. Every block there is eight here. It has a lava sea, **Grumblers** (hit one and the whole crowd comes), Scorch Brick **Fortresses** with **Sizzlers** that throw fireballs, **Weepers** that cry explosive ones (hit a fireball to send it back), **Strutters** you can ride across the lava with an **Ember Shroom on a Stick**, and **Snouts** who trade for gold you throw them.
+- **The Scorchlands.** A second, hotter world under a bedrock sky. Build an obsidian frame (at least 4 wide and 5 tall), light it with a **Sparker** and stand in the portal. Every block there is eight here. It has a lava sea, **Grumblers** (hit one and the whole crowd comes), Scorch Brick **Fortresses** with **Sizzlers** that throw fireballs, **Weepers** that cry explosive ones (hit a fireball to send it back), **Strutters** you can ride across the lava with an **Ember Shroom on a Stick**, and **Snouts** who trade for gold you throw them. The fortresses' halls are walked by tall, sooty **Charred Rattlers**, whose blades leave you **Wilting** (health drains, all the way down), and patches of **Sorrow Sand** (slow going) lie on the higher floors.
+- **The Wilter.** A second boss, built rather than found: four Sorrow Sand in a T with a **Charred Skull** (a Charred Rattler drops one now and then) on each of the top three. It gathers itself for a few seconds, bursts out, and flies about throwing wilting skulls; past half health it throws three at a time and dives at you. Beat it for the **Wilter Star**.
 - **The Hollow.** The endgame. Throw **Staring Eyes** to find a buried **Crypt**, fill its twelve **Eye Frames**, and drop through to a floating island circled by the **Hollow Wyrm**. Break the **Wyrm Crystals** that heal it, then beat it for experience, the **Wyrm Egg** and a portal home. The outer islands have spires with **Gliders**, **Boom Rockets** and **Hollow Boxes**.
 
 ### Weather and skies
@@ -144,7 +147,7 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 - **Beds and sleep.** A bed faces away from whoever put it down. Right-click it at night to lie down; the screen fades, and if nobody gets you up the night is skipped and you step out beside the bed. Jumping, sneaking or getting hurt gets you up early. It refuses if monsters are nearby, sets where you come back after dying, and clears a storm. (Don't try it in the Scorchlands or the Hollow.)
 - **Death.** Dying drops your things where you fell (they wait five minutes), and everyone is told how you died ("Bot5 was struck down by a command. Harsh."). Held maps and the **Recovery Compass** show where.
 - **Game modes.** Survival, Creative (flight, instant breaking, infinite blocks) and **Spectator** (fly through everything, touch nothing). **Hardcore** is one life on Hard; die and you can only spectate.
-- **Advancements** (116 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
+- **Advancements** (170 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
 
 ### Building
 
@@ -162,7 +165,7 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 - **Anvils** mend tools with their material and merge two of a thing (or a tool and a book). Each use may chip the anvil. The **Grindstone** strips enchantments.
 - **Smithing.** The **Smithing Table** upgrades Dimond gear to **Scorchite** (with a template from the Hushed Cities and scrap from the Scorchlands) and adds **armour trims** everyone can see.
 - **Brewing.** Fill bottles at water and brew Healing, Speed, Fire Resistance, Night Vision, Leaping, Strength and Regeneration, then splash versions you throw.
-- **Beacons.** The Wyrm Egg makes a **Beacon**: on an obsidian pyramid it gives everyone nearby an effect of your choice.
+- **Beacons.** The Wyrm Egg makes a **Beacon**: on an obsidian pyramid it gives everyone nearby an effect of your choice. Use a **Wilter Star** on one with all three layers for a **Starred Beacon**: the effect at level II, Regeneration too, and half as far again.
 
 ### Storage
 

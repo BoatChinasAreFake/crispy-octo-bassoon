@@ -337,6 +337,10 @@ impl Game {
             return true;
         }
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
+            // A Wilter Star going in: theirs, and only on a full pyramid.
+            if crate::beacon::starred(new) && !crate::beacon::starred(old) {
+                return crate::beacon::tier(&self.world, at) == 3 && self.peer_take(from, WILTER_STAR, 1);
+            }
             return true;
         }
         // Glow berries picked off a vine land at their feet.

@@ -1001,6 +1001,11 @@ pub struct World {
     pub beacons: HashSet<IVec3>,
     /// Conduits in loaded chunks (see monument.rs).
     pub conduits: HashSet<IVec3>,
+    /// Every cell of Spelunker's Rope (see rope.rs), for maps.
+    pub ropes: HashSet<IVec3>,
+    /// Underground cells players have dug out (see caveins.rs). Not saved:
+    /// a room left alone long enough to reload has settled.
+    pub dug: HashSet<IVec3>,
     pub leaf_checks: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
@@ -1064,6 +1069,8 @@ impl World {
             comparators: HashSet::new(),
             beacons: HashSet::new(),
             conduits: HashSet::new(),
+            ropes: HashSet::new(),
+            dug: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
             sign_styles: HashMap::new(),
@@ -1136,7 +1143,7 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE || id == CONDUIT || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
+                    if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
@@ -1144,6 +1151,7 @@ impl World {
                             SAPLING => self.saplings.insert(p),
                             FIRE => self.fires.insert(p),
                             CONDUIT => self.conduits.insert(p),
+                            ROPE => self.ropes.insert(p),
                             b if crate::beacon::is_beacon(b) => self.beacons.insert(p),
                             b if crate::music::is_jukebox(b) => self.jukeboxes.insert(p),
                             _ => self.comparators.insert(p),
@@ -1375,6 +1383,11 @@ impl World {
             self.conduits.insert(p);
         } else if old == CONDUIT {
             self.conduits.remove(&p);
+        }
+        if id == ROPE {
+            self.ropes.insert(p);
+        } else if old == ROPE {
+            self.ropes.remove(&p);
         }
         if crate::fortress::is_cage(id) {
             self.cages.insert(p);

@@ -59,6 +59,8 @@ pub enum Potion {
     Poison,
     /// From desert Groaners: you get hungry faster.
     Hunger,
+    /// From the Wilter and Charred Rattlers: health drains, all the way down.
+    Wilting,
 }
 
 /// The first five, which beacons give (and whose items come first).
@@ -66,7 +68,7 @@ pub const ALL: [Potion; 5] = [Potion::Healing, Potion::Speed, Potion::FireResist
 /// Everything a brewing stand makes.
 pub const BREWABLE: [Potion; 7] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping, Potion::Strength, Potion::Regeneration];
 /// Every effect, in wire order.
-pub const EFFECTS: [Potion; 15] = [
+pub const EFFECTS: [Potion; 16] = [
     Potion::Healing,
     Potion::Speed,
     Potion::FireResistance,
@@ -82,6 +84,7 @@ pub const EFFECTS: [Potion; 15] = [
     Potion::Weakness,
     Potion::Poison,
     Potion::Hunger,
+    Potion::Wilting,
 ];
 /// Extra melee damage with Strength, and seconds per heart-half with Regeneration.
 pub const STRENGTH_BONUS: f32 = 3.0;
@@ -89,6 +92,8 @@ pub const REGEN_EVERY: f32 = 2.5;
 /// Seconds per half-heart lost to Poison, damage taken off by Weakness, and
 /// exhaustion a second from Hunger (per level).
 pub const POISON_EVERY: f32 = 1.25;
+/// Seconds per half-heart lost to Wilting (per level).
+pub const WILT_EVERY: f32 = 2.0;
 pub const WEAKNESS_PENALTY: f32 = 3.0;
 pub const HUNGER_PER_SEC: f32 = 0.5;
 
@@ -149,6 +154,7 @@ impl Potion {
             Potion::Weakness => "Weakness",
             Potion::Poison => "Poison",
             Potion::Hunger => "Hunger",
+            Potion::Wilting => "Wilting",
         }
     }
     pub fn key(self) -> &'static str {
@@ -168,6 +174,7 @@ impl Potion {
             Potion::Weakness => "weakness",
             Potion::Poison => "poison",
             Potion::Hunger => "hunger",
+            Potion::Wilting => "wilting",
         }
     }
     pub fn colour(self) -> [u8; 3] {
@@ -187,6 +194,7 @@ impl Potion {
             Potion::Weakness => [70, 70, 80],
             Potion::Poison => [80, 150, 40],
             Potion::Hunger => [90, 110, 60],
+            Potion::Wilting => [55, 40, 45],
         }
     }
     /// What goes in to make it.
@@ -199,7 +207,7 @@ impl Potion {
             Potion::Leaping => FEATHER,
             Potion::Strength => SIZZLE_POWDER,
             Potion::Regeneration => WEEPER_TEAR,
-            Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower | Potion::Slowness | Potion::Weakness | Potion::Poison | Potion::Hunger => AIR,
+            Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower | Potion::Slowness | Potion::Weakness | Potion::Poison | Potion::Hunger | Potion::Wilting => AIR,
         }
     }
     /// Over at once (healing) rather than lasting.
@@ -330,6 +338,23 @@ impl Game {
                     self.player.health = (self.player.health - 1.0).max(1.0);
                     self.player.hurt = 0.3;
                     self.sfx(Sfx::Hurt, None);
+                }
+            }
+        }
+        // Wilting drains health too, and doesn't stop.
+        let wilting = self.effect_level(Potion::Wilting) as f32;
+        if wilting > 0.0 && self.dead.is_none() {
+            self.wilt_clock += dt;
+            if self.wilt_clock >= WILT_EVERY / wilting {
+                self.wilt_clock = 0.0;
+                if self.player.health > 1.0 {
+                    self.player.health -= 1.0;
+                    self.player.hurt = 0.3;
+                    self.sfx(Sfx::Hurt, None);
+                } else {
+                    // The last of it: this one's through the usual door.
+                    self.player.hurt = 0.0;
+                    self.hurt_player(1.0, "wilted away");
                 }
             }
         }

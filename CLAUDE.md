@@ -16,7 +16,7 @@ The plan below runs from v0.2 to v1.0.0. Stick to it:
 - **Originals.** Each version from v0.2 to v0.8 also has two additions that aren't in Minecraft, listed under it as "Originals". They're as much a part of the version as the rest of its list.
 - **When a part or a version is released,** mark it **(released)** here and leave its list in place so it's clear what each one contained.
 
-## v0.2: Underground and ruins
+## v0.2: Underground and ruins (released)
 
 1. Cave biomes: dripstone caves (falling stalactites), lush caves (glow berries, moss), amethyst geodes.
 2. Temples and mineshafts: desert pyramids (TNT trap), jungle temples (tripwires), abandoned mineshafts (rails, cobwebs, cart chests), igloos with a hidden basement.
@@ -32,7 +32,7 @@ Originals:
 
 Parts:
 - Part 1: items 1 to 5 and 9. **(released)**
-- Part 2: item 8 and the two originals (this is the last part).
+- Part 2: item 8 and the two originals (this is the last part). **(released)**
 
 ## v0.3: A wider world
 

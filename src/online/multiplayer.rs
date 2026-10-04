@@ -66,7 +66,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn)
+    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn | Sfx::Thud)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -553,6 +553,13 @@ impl Game {
                         let who = self.peer_name(from);
                         self.try_build_copper_golem(IVec3::new(x, y, z), &crate::players::record_key(&who));
                     }
+                    if id == ROPE && old != id {
+                        self.unroll(IVec3::new(x, y, z));
+                    }
+                    if id == CHARRED_SKULL && old != id {
+                        let who = self.peer_name(from);
+                        self.try_build_wilter(IVec3::new(x, y, z), &crate::players::record_key(&who));
+                    }
                     if id == BANNER && old != BANNER {
                         let design = if self.verified_held(from) == BANNER { self.verified_ench(from) } else { 0 };
                         let facing = self.peers.get(&from).map(|p| crate::banners::facing_from_yaw(p.yaw)).unwrap_or(0);
@@ -990,9 +997,9 @@ impl Game {
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON) | (CANDLE, CANDLE_LIT) | (CANDLE_LIT, CANDLE) | (CAVE_VINES_LIT, CAVE_VINES)) {
             return true;
         }
-        // Beacons switch effect.
+        // Beacons switch effect (and take a star, but never give one back).
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
-            return true;
+            return !crate::beacon::starred(old) || crate::beacon::starred(new);
         }
         // Note blocks retune; jukeboxes take a disc and give it back (the ledger checks the disc).
         if (crate::music::is_note_block(old) && crate::music::is_note_block(new)) || (crate::music::is_jukebox(old) && crate::music::is_jukebox(new)) {

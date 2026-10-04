@@ -103,6 +103,10 @@ impl Generator {
                     if b[i] == AIR && below == SCORCHROCK && y < LAVA_SEA + 6 && self.scorch.noise3(x as f32 / 9.0, 7.0, z as f32 / 9.0) > 0.15 {
                         b[crate::world::idx(lx, y - 1, lz)] = EMBERSAND;
                     }
+                    // Sorrow Sand in patches on the higher floors (half of what builds a Wilter).
+                    if b[i] == AIR && below == SCORCHROCK && y >= LAVA_SEA + 6 && self.scorch.noise3(x as f32 / 14.0, 23.0, z as f32 / 14.0) > 0.38 {
+                        b[crate::world::idx(lx, y - 1, lz)] = SORROW_SAND;
+                    }
                     let above = b[crate::world::idx(lx, y + 1, lz)];
                     if b[i] == AIR && above == SCORCHROCK && hash3(s ^ 3, x >> 2, y >> 1, z >> 2) < 0.06 && hash3(s ^ 4, x, y, z) < 0.6 {
                         b[i] = GLOWROCK;
