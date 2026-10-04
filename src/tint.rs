@@ -50,7 +50,8 @@ pub fn grass(b: Biome) -> [f32; 3] {
         Biome::Taiga => [0.8, 0.95, 0.92],
         Biome::Cherry => [1.05, 1.08, 0.85],
         Biome::Mangrove => [0.78, 0.9, 0.55],
-        Biome::PaleGarden => [0.72, 0.78, 0.72],
+        // Grey-green at most (any grass at its edges fades to grey).
+        Biome::PaleGarden => [1.3, 0.88, 1.7],
     }
 }
 

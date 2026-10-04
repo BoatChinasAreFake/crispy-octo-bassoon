@@ -767,7 +767,7 @@ pub fn variant_tint(kind: MobKind, v: u8) -> [f32; 3] {
         (MobKind::Galloper, 4) => [1.45, 1.35, 1.1],
         // Grey (as drawn), black, rusty, snowy.
         (MobKind::Woofer, 1) => [0.4, 0.4, 0.42],
-        (MobKind::Woofer, 2) => [1.25, 0.85, 0.6],
+        (MobKind::Woofer, 2) => [0.95, 0.7, 0.48],
         (MobKind::Woofer, 3) => [1.3, 1.3, 1.35],
         // Brown (as drawn), black, red.
         (MobKind::Mooer, 1) => [0.45, 0.42, 0.42],
@@ -777,13 +777,17 @@ pub fn variant_tint(kind: MobKind, v: u8) -> [f32; 3] {
         (MobKind::Axolotl, 2) => [0.65, 1.15, 1.25],
         (MobKind::Axolotl, 3) => [0.75, 0.55, 0.45],
         (MobKind::Axolotl, BLUE_AXOLOTL) => [0.4, 0.6, 1.6],
-        // The newer jobs dress a little differently: Clerics, Armourers, Cartographers, Butchers.
-        (MobKind::Hmmer, 5) => [0.95, 0.75, 1.2],
-        (MobKind::Hmmer, 6) => [0.8, 0.85, 0.9],
-        (MobKind::Hmmer, 7) => [1.15, 1.12, 1.05],
-        (MobKind::Hmmer, 8) => [1.15, 0.8, 0.8],
+        // (Hmmers keep their own skin: a job colours only the robe, see `job_robe`.)
         _ => [1.0; 3],
     }
+}
+
+/// The colour of a Hmmer's robe for its job (as a multiplier on the brown robe):
+/// Farmer straw, Librarian red, Smith charcoal, Fisher teal, Cleric purple,
+/// Armourer steel blue, Cartographer cream, Butcher white.
+pub fn job_robe(job: u8) -> [f32; 3] {
+    const ROBES: [[f32; 3]; 8] = [[1.25, 1.12, 0.6], [1.45, 0.55, 0.5], [0.5, 0.5, 0.55], [0.5, 1.0, 1.1], [1.05, 0.55, 1.4], [0.65, 0.8, 1.15], [1.5, 1.42, 1.15], [1.75, 1.75, 1.75]];
+    ROBES[job as usize % ROBES.len()]
 }
 
 /// A fresh colouring (the blue Axolotl is very rare).
@@ -2223,7 +2227,17 @@ impl Mob {
             MobKind::Strutter if !is_lava(world.get(p.x.floor() as i32, (p.y - 0.3).floor() as i32, p.z.floor() as i32)) && !self.body.in_lava => &STRUTTER_COLD[..],
             k => model(k),
         };
-        draw_posed(geo, &root, parts, if self.sitting { 0.0 } else { self.anim }, self.flap, sky);
+        let pose = if self.sitting { 0.0 } else { self.anim };
+        if self.kind == MobKind::Hmmer {
+            // The robe in the colours of its job; face and hands as they are.
+            let robe = job_robe(crate::villagers::Job::of_mob(self).index());
+            geo.begin(Pass::Opaque, [tint[0] * robe[0], tint[1] * robe[1], tint[2] * robe[2], tint[3]], false);
+            draw_posed(geo, &root, &parts[..5], pose, self.flap, sky);
+            geo.begin(Pass::Opaque, tint, false);
+            draw_posed(geo, &root, &parts[5..], pose, self.flap, sky);
+        } else {
+            draw_posed(geo, &root, parts, pose, self.flap, sky);
+        }
         if self.owner.is_some() && self.kind == MobKind::Woofer {
             draw_model(geo, &root, &WOOFER_COLLAR, 0.0, sky, false);
         }
@@ -2241,9 +2255,12 @@ impl Mob {
         if self.kind == MobKind::Pilferer && self.seed == 1 {
             draw_model(geo, &root, &BANNER_BACK, 0.0, sky, false);
         }
-        // What raiders and Snouts carry: a crossbow, an axe, some gold being admired.
+        // A Pilferer's crossbow, held out in front (with a bolt in it once loaded).
+        if self.kind == MobKind::Pilferer {
+            draw_model(geo, &root, if self.fuse > 0.0 { &CROSSBOW_LOADED[..] } else { &CROSSBOW_HELD[..4] }, 0.0, sky, false);
+        }
+        // What raiders and Snouts carry: an axe, some gold being admired.
         let carried = match self.kind {
-            MobKind::Pilferer => Some(if self.fuse > 0.0 { T_CROSSBOW_LOADED } else { T_CROSSBOW }),
             MobKind::Hackler => Some(item_tile(AXE_FIRST + 3)),
             MobKind::Snout if self.seed == 1 => Some(item_tile(GOLD_INGOT)),
             MobKind::CopperGolem if self.seed != 0 => Some(item_tile((self.seed & 0xFFFF) as Id)),
@@ -2379,14 +2396,18 @@ static CLUCKSTER: [Part; 7] = [
 
 // Upright, with a long tail and a big beak.
 const SQ: u16 = T_SQUAWK;
-static SQUAWKER: [Part; 7] = [
-    part([-0.16, 0.25, -0.18], [0.32, 0.45, 0.36], [0.0; 3], Limb::Fixed, [SQ; 6]),
-    part([-0.13, 0.66, -0.3], [0.26, 0.26, 0.26], [0.0; 3], Limb::Fixed, [SQ, SQ, SQ, SQ, SQ, T_SQUAWK_FACE]),
+static SQUAWKER: [Part; 10] = [
+    // Upright, with a hooked beak, a crest and a long tail.
+    part([-0.15, 0.25, -0.17], [0.3, 0.45, 0.32], [0.0; 3], Limb::Fixed, [SQ; 6]),
+    part([-0.13, 0.66, -0.28], [0.26, 0.26, 0.26], [0.0; 3], Limb::Fixed, [SQ, SQ, SQ, SQ, SQ, T_SQUAWK_FACE]),
+    part([-0.04, 0.7, -0.39], [0.08, 0.13, 0.11], [0.0; 3], Limb::Fixed, [CL; 6]),
+    part([-0.04, 0.62, -0.36], [0.08, 0.08, 0.06], [0.0; 3], Limb::Fixed, [CL; 6]),
+    part([-0.03, 0.92, -0.2], [0.06, 0.1, 0.16], [0.0; 3], Limb::Fixed, [SQ; 6]),
     part([-0.09, 0.0, -0.02], [0.06, 0.25, 0.06], [0.0, 0.25, 0.0], Limb::Swing(1.0), [CL; 6]),
     part([0.03, 0.0, -0.02], [0.06, 0.25, 0.06], [0.0, 0.25, 0.0], Limb::Swing(-1.0), [CL; 6]),
-    part([-0.21, 0.3, -0.14], [0.05, 0.36, 0.3], [-0.18, 0.66, 0.0], Limb::Flap(-1.0), [T_SQUAWK_WING; 6]),
-    part([0.16, 0.3, -0.14], [0.05, 0.36, 0.3], [0.18, 0.66, 0.0], Limb::Flap(1.0), [T_SQUAWK_WING; 6]),
-    part([-0.07, 0.12, 0.16], [0.14, 0.2, 0.3], [0.0; 3], Limb::Fixed, [T_SQUAWK_WING; 6]),
+    part([-0.2, 0.3, -0.13], [0.05, 0.38, 0.28], [-0.18, 0.66, 0.0], Limb::Flap(-1.0), [T_SQUAWK_WING; 6]),
+    part([0.15, 0.3, -0.13], [0.05, 0.38, 0.28], [0.18, 0.66, 0.0], Limb::Flap(1.0), [T_SQUAWK_WING; 6]),
+    part([-0.07, 0.02, 0.12], [0.14, 0.3, 0.12], [0.0; 3], Limb::Fixed, [T_SQUAWK_WING; 6]),
 ];
 
 // Broad shoulders, long arms, a small head and a big nose.
@@ -2398,7 +2419,7 @@ static CLANKER: [Part; 7] = [
     part([-0.96, 0.55, -0.2], [0.3, 1.6, 0.4], [0.0, 2.15, 0.0], Limb::Swing(-0.5), [CK; 6]),
     part([0.66, 0.55, -0.2], [0.3, 1.6, 0.4], [0.0, 2.15, 0.0], Limb::Swing(0.5), [CK; 6]),
     part([-0.28, 2.2, -0.36], [0.56, 0.5, 0.56], [0.0; 3], Limb::Fixed, [CK, CK, CK, CK, CK, T_CLANK_FACE]),
-    part([-0.07, 2.2, -0.5], [0.14, 0.3, 0.14], [0.0; 3], Limb::Fixed, [T_CLANK_FACE; 6]),
+    part([-0.07, 2.2, -0.5], [0.14, 0.3, 0.14], [0.0; 3], Limb::Fixed, [CK; 6]),
 ];
 
 const MS: u16 = T_MOO_SKIN;
@@ -2467,15 +2488,19 @@ const BL: u16 = T_BLOOP;
 static BLOOP: [Part; 1] = [part([-0.26, 0.0, -0.26], [0.52, 0.52, 0.52], [0.0; 3], Limb::Fixed, [BL, BL, BL, BL, BL, T_BLOOP_FACE])];
 
 const WF: u16 = T_WOOF_SKIN;
-static WOOFER: [Part; 8] = [
-    part([-0.2, 0.42, -0.4], [0.4, 0.32, 0.8], [0.0; 3], Limb::Fixed, [WF; 6]),
-    part([-0.2, 0.55, -0.72], [0.4, 0.36, 0.34], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_FACE]),
-    part([-0.08, 0.55, -0.9], [0.16, 0.14, 0.2], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_NOSE]),
-    part([-0.18, 0.0, -0.36], [0.12, 0.44, 0.12], [0.0, 0.44, -0.3], Limb::Swing(1.0), [WF; 6]),
-    part([0.06, 0.0, -0.36], [0.12, 0.44, 0.12], [0.0, 0.44, -0.3], Limb::Swing(-1.0), [WF; 6]),
-    part([-0.18, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(-1.0), [WF; 6]),
-    part([0.06, 0.0, 0.24], [0.12, 0.44, 0.12], [0.0, 0.44, 0.3], Limb::Swing(1.0), [WF; 6]),
-    part([-0.05, 0.55, 0.38], [0.1, 0.1, 0.4], [0.0, 0.6, 0.38], Limb::SwingY(1.5), [WF; 6]),
+static WOOFER: [Part; 11] = [
+    // A shaggy ruff over the shoulders, a leaner back, a long snout, pricked ears.
+    part([-0.17, 0.44, -0.08], [0.34, 0.28, 0.5], [0.0; 3], Limb::Fixed, [WF; 6]),
+    part([-0.22, 0.4, -0.45], [0.44, 0.4, 0.4], [0.0; 3], Limb::Fixed, [WF; 6]),
+    part([-0.17, 0.55, -0.74], [0.34, 0.3, 0.3], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_FACE]),
+    part([-0.08, 0.56, -0.92], [0.16, 0.13, 0.18], [0.0; 3], Limb::Fixed, [WF, WF, WF, WF, WF, T_WOOF_NOSE]),
+    part([-0.15, 0.85, -0.66], [0.09, 0.11, 0.06], [0.0; 3], Limb::Fixed, [WF; 6]),
+    part([0.06, 0.85, -0.66], [0.09, 0.11, 0.06], [0.0; 3], Limb::Fixed, [WF; 6]),
+    part([-0.16, 0.0, -0.36], [0.1, 0.44, 0.1], [0.0, 0.44, -0.3], Limb::Swing(1.0), [WF; 6]),
+    part([0.06, 0.0, -0.36], [0.1, 0.44, 0.1], [0.0, 0.44, -0.3], Limb::Swing(-1.0), [WF; 6]),
+    part([-0.16, 0.0, 0.26], [0.1, 0.44, 0.1], [0.0, 0.44, 0.3], Limb::Swing(-1.0), [WF; 6]),
+    part([0.06, 0.0, 0.26], [0.1, 0.44, 0.1], [0.0, 0.44, 0.3], Limb::Swing(1.0), [WF; 6]),
+    part([-0.05, 0.55, 0.4], [0.1, 0.1, 0.38], [0.0, 0.6, 0.4], Limb::SwingY(1.5), [WF; 6]),
 ];
 const WY: u16 = T_WYRM_SKIN;
 static WYRM: [Part; 8] = [
@@ -2697,6 +2722,15 @@ const fn illager(coat: u16, arms: Limb) -> [Part; 7] {
     [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.06, 1.55, -0.38], [0.12, 0.22, 0.14], [0.0; 3], Limb::Fixed, [T_ILLAGER; 6])]
 }
 static PILFERER: [Part; 7] = illager(T_PILFERER_COAT, Limb::Forward);
+/// A crossbow in a Pilferer's hands: stock, bow, string, and a bolt when loaded.
+static CROSSBOW_HELD: [Part; 5] = [
+    part([-0.05, 1.3, -1.2], [0.1, 0.09, 0.62], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
+    part([-0.38, 1.32, -1.16], [0.76, 0.07, 0.08], [0.0; 3], Limb::Fixed, [T_PLANKS; 6]),
+    part([-0.36, 1.34, -1.0], [0.72, 0.025, 0.025], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
+    part([-0.04, 1.2, -0.72], [0.08, 0.12, 0.08], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
+    part([-0.02, 1.39, -1.35], [0.04, 0.04, 0.6], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
+];
+static CROSSBOW_LOADED: [Part; 5] = CROSSBOW_HELD;
 static HACKLER: [Part; 7] = illager(T_HACKLER_COAT, Limb::Swing(-1.0));
 static INVOICER: [Part; 7] = illager(T_INVOICER_ROBE, Limb::Fixed);
 /// The Invoicer casting: arms up.
@@ -2861,7 +2895,7 @@ static SNIFFER: [Part; 9] = [
     part([-0.55, 0.55, -0.85], [1.1, 1.0, 1.7], [0.0; 3], Limb::Fixed, [SN; 6]),
     part([-0.35, 0.7, -1.35], [0.7, 0.6, 0.55], [0.0; 3], Limb::Fixed, [SN, SN, SN, SN, SN, T_SNIFFER_FACE]),
     // A big nose, and moss on its back.
-    part([-0.25, 0.55, -1.6], [0.5, 0.3, 0.3], [0.0, 0.7, -1.35], Limb::Bob(1.0), [T_SNIFFER_FACE; 6]),
+    part([-0.25, 0.55, -1.6], [0.5, 0.3, 0.3], [0.0, 0.7, -1.35], Limb::Bob(1.0), [SN; 6]),
     part([-0.5, 1.5, -0.7], [1.0, 0.1, 1.4], [0.0; 3], Limb::Fixed, [T_PALE_MOSS; 6]),
     part([-0.5, 0.0, -0.6], [0.3, 0.6, 0.3], [0.0, 0.6, -0.45], Limb::Swing(0.8), [SN; 6]),
     part([0.2, 0.0, -0.6], [0.3, 0.6, 0.3], [0.0, 0.6, -0.45], Limb::Swing(-0.8), [SN; 6]),
@@ -2872,17 +2906,22 @@ static SNIFFER: [Part; 9] = [
 const CM: u16 = T_CAMEL;
 /// Where a Camel's neck leans from.
 const CAMEL_NECK: [f32; 3] = [0.0, 1.5, -0.8];
-static CAMEL: [Part; 10] = [
+static CAMEL: [Part; 13] = [
     part([-0.42, 1.15, -0.85], [0.84, 0.7, 1.7], [0.0; 3], Limb::Fixed, [CM; 6]),
-    part([-0.3, 1.85, -0.3], [0.6, 0.35, 0.6], [0.0; 3], Limb::Fixed, [T_CAMEL_HUMP; 6]),
-    part([-0.15, 1.4, -1.15], [0.3, 0.75, 0.32], CAMEL_NECK, Limb::Tilt(0.35), [CM; 6]),
-    part([-0.18, 2.0, -1.55], [0.36, 0.34, 0.6], CAMEL_NECK, Limb::Tilt(0.35), [CM, CM, CM, CM, CM, T_CAMEL_FACE]),
-    part([-0.38, 0.0, -0.75], [0.2, 1.15, 0.2], [0.0, 1.15, -0.65], Limb::Swing(0.8), [CM; 6]),
-    part([0.18, 0.0, -0.75], [0.2, 1.15, 0.2], [0.0, 1.15, -0.65], Limb::Swing(-0.8), [CM; 6]),
-    part([-0.38, 0.0, 0.55], [0.2, 1.15, 0.2], [0.0, 1.15, 0.65], Limb::Swing(-0.8), [CM; 6]),
-    part([0.18, 0.0, 0.55], [0.2, 1.15, 0.2], [0.0, 1.15, 0.65], Limb::Swing(0.8), [CM; 6]),
+    // A rounded hump: wide at the bottom, narrower on top.
+    part([-0.34, 1.85, -0.4], [0.68, 0.22, 0.8], [0.0; 3], Limb::Fixed, [T_CAMEL_HUMP; 6]),
+    part([-0.24, 2.07, -0.26], [0.48, 0.16, 0.52], [0.0; 3], Limb::Fixed, [T_CAMEL_HUMP; 6]),
+    // The neck curves forward, then up to a long head.
+    part([-0.15, 1.35, -1.3], [0.3, 0.36, 0.5], CAMEL_NECK, Limb::Tilt(0.0), [CM; 6]),
+    part([-0.14, 1.6, -1.45], [0.28, 0.7, 0.28], CAMEL_NECK, Limb::Tilt(0.0), [CM; 6]),
+    part([-0.17, 2.15, -1.75], [0.34, 0.32, 0.56], CAMEL_NECK, Limb::Tilt(0.0), [CM, CM, CM, CM, CM, T_CAMEL_FACE]),
+    part([-0.15, 2.47, -1.3], [0.07, 0.1, 0.06], CAMEL_NECK, Limb::Tilt(0.0), [CM; 6]),
+    part([0.08, 2.47, -1.3], [0.07, 0.1, 0.06], CAMEL_NECK, Limb::Tilt(0.0), [CM; 6]),
+    part([-0.36, 0.0, -0.75], [0.18, 1.15, 0.18], [0.0, 1.15, -0.65], Limb::Swing(0.8), [CM; 6]),
+    part([0.18, 0.0, -0.75], [0.18, 1.15, 0.18], [0.0, 1.15, -0.65], Limb::Swing(-0.8), [CM; 6]),
+    part([-0.36, 0.0, 0.57], [0.18, 1.15, 0.18], [0.0, 1.15, 0.65], Limb::Swing(-0.8), [CM; 6]),
+    part([0.18, 0.0, 0.57], [0.18, 1.15, 0.18], [0.0, 1.15, 0.65], Limb::Swing(0.8), [CM; 6]),
     part([-0.05, 1.2, 0.85], [0.1, 0.5, 0.1], [0.0, 1.7, 0.88], Limb::SwingY(1.0), [CM; 6]),
-    part([-0.12, 2.32, -1.28], [0.24, 0.08, 0.06], CAMEL_NECK, Limb::Tilt(0.35), [CM; 6]),
 ];
 /// A saddle on a Camel, in front of the hump and behind it (two seats).
 pub static CAMEL_SADDLE: [Part; 2] = [

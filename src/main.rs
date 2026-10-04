@@ -2297,6 +2297,36 @@ async fn game_main() {
                 app.start_game(g);
                 app.set_screen(Screen::Advancements);
             }
+            "portrait" => {
+                // Mobs (--mob a,b,c) on a plain stone floor, close up, for checking their looks.
+                let mut g = Game::new(424242, true, false);
+                g.time = s.time.unwrap_or(0.25);
+                let base = g.spawn.floor().as_ivec3();
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        g.world.load_now(base.x.div_euclid(16) + dx, base.z.div_euclid(16) + dz);
+                    }
+                }
+                let ground = g.world.surface_y(base.x, base.z);
+                for z in -14..=14 {
+                    for x in -14..=14 {
+                        for y in ground + 1..ground + 14 {
+                            g.world.set(base.x + x, y, base.z + z, AIR);
+                        }
+                        g.world.set(base.x + x, ground, base.z + z, STONE);
+                    }
+                }
+                g.mobs.clear();
+                let o = Vec3::new(base.x as f32 + 0.5, ground as f32 + 1.0, base.z as f32 + 0.5);
+                let back = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--back").and_then(|w| w[1].parse::<f32>().ok()).unwrap_or(5.0);
+                // (`from` is where the feet go; the eye is 1.62 above.)
+                let from = o + Vec3::new(0.3 * back, 0.3 * back - 1.62, -back);
+                let d = o + Vec3::Y * (0.5 + 0.1 * back) - (from + Vec3::Y * 1.62);
+                (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                g.player.flying = true;
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "shadowtest" => {
                 // A floating platform over flat ground: its shadow should land just beside it.
                 let mut g = Game::new(424242, true, false);
@@ -2655,6 +2685,24 @@ async fn game_main() {
                 app.game.inv.slots[0] = Some((block::TREASURE_MAP, 1));
                 app.game.inv.wear[0] = treasure::mark(at(40.0, 10.0));
                 app.game.inv.selected = 0;
+            }
+            if s.mode == "portrait" && frames + 3 == s.frames {
+                // The mobs, side by side, facing the camera.
+                let names = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--mob").map(|w| w[1].clone()).unwrap_or_else(|| "hmmer".into());
+                let kinds: Vec<entity::MobKind> = names.split(',').filter_map(entity::MobKind::from_name).collect();
+                let back = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--back").and_then(|w| w[1].parse::<f32>().ok()).unwrap_or(5.0);
+                let o = s.pos.unwrap_or_default() - Vec3::new(0.3 * back, 0.3 * back - 1.62, -back);
+                let mut rng = noise::Rng::new(5);
+                for (i, kind) in kinds.iter().enumerate() {
+                    let x = (i as f32 - (kinds.len() as f32 - 1.0) / 2.0) * 2.2;
+                    let mut m = entity::Mob::new(*kind, o + Vec3::new(x, 0.0, 0.0), &mut rng);
+                    m.id = 3000 + i as u32;
+                    m.yaw = -0.8;
+                    if let Some(v) = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--variant").and_then(|w| w[1].parse::<u8>().ok()) {
+                        m.variant = v;
+                    }
+                    app.game.mobs.push(m);
+                }
             }
             if s.mode == "chat" && frames == 60 {
                 // A long chat, open and scrolled back a little.

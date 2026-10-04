@@ -699,7 +699,14 @@ impl Generator {
                     let r = hash2(s ^ 0xF10, x, z);
                     // Meadows: patches of plains and forest thick with flowers (bees love them).
                     let meadow = matches!(biome, Biome::Plains | Biome::Forest) && hash2(s ^ 0xF12, x >> 4, z >> 4) < 0.15;
-                    if r < 0.012 || (meadow && r < 0.07) {
+                    if biome == Biome::PaleGarden {
+                        // All grey: pale moss everywhere, nothing green or bright on
+                        // it but the odd Eyeblossom (open at night).
+                        b[idx(lx, h, lz)] = PALE_MOSS;
+                        if r < 0.03 {
+                            b[idx(lx, top, lz)] = EYEBLOSSOM;
+                        }
+                    } else if r < 0.012 || (meadow && r < 0.07) {
                         b[idx(lx, top, lz)] = flower_for(biome, hash2(s ^ 0xF11, x >> 1, z >> 1));
                     } else if meadow && r < 0.16 {
                         // Wildflowers between the flowers.
@@ -707,16 +714,9 @@ impl Generator {
                     } else if matches!(biome, Biome::Swamp | Biome::Mangrove) && r < 0.02 {
                         // Where the fireflies live.
                         b[idx(lx, top, lz)] = FIREFLY_BUSH;
-                    } else if biome == Biome::PaleGarden && r < 0.03 {
-                        // Eyeblossoms in the moss (open at night).
-                        b[idx(lx, h, lz)] = PALE_MOSS;
-                        b[idx(lx, top, lz)] = EYEBLOSSOM;
                     } else if biome == Biome::Cherry && r < 0.4 {
                         // Petals everywhere under the cherry trees.
                         b[idx(lx, top, lz)] = PINK_PETALS;
-                    } else if biome == Biome::PaleGarden && r < 0.6 {
-                        // A grey carpet of pale moss.
-                        b[idx(lx, h, lz)] = PALE_MOSS;
                     } else if r < 0.11 {
                         b[idx(lx, top, lz)] = TALL_GRASS;
                     } else if r < 0.1125 && biome == Biome::Plains {

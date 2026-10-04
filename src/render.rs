@@ -221,12 +221,25 @@ void main() {
     if (params3.z > 0.5 && water && params2.x < 0.5) {
         if (abs(surface.y) > 0.7 * length(surface)) {
             vec3 view = normalize(v_wpos - cam_pos.xyz);
-            float fresnel = pow(1.0 - abs(view.y), 3.0);
-            // (A murky swamp reflects murkily: the biome's water colour tints it too.)
-            col = mix(col, fog_color.rgb * (0.55 + 0.45 * params.x) * mix(vec3(1.0), v_tint, 0.6), clamp(0.12 + fresnel * 0.7, 0.0, 0.8));
+            // Small crossing waves tilt the surface this way and that.
             float t = params3.x;
-            float ripple = sin(v_wpos.x * 3.1 + t * 1.7 + sin(v_wpos.z * 1.3)) * sin(v_wpos.z * 2.7 - t * 1.3 + sin(v_wpos.x * 1.1));
-            col += vec3(pow(max(ripple, 0.0), 20.0) * 0.6 * params.x);
+            vec2 p = v_wpos.xz;
+            float dx = cos(p.x * 1.7 + p.y * 0.4 + t * 1.3) * 0.6 + cos(p.x * 3.9 - p.y * 1.1 + t * 2.1) * 0.3 + cos((p.x + p.y) * 6.3 + t * 3.0) * 0.12;
+            float dz = cos(p.y * 1.9 + p.x * 0.3 - t * 1.1) * 0.6 + cos(p.y * 4.3 + p.x * 0.9 - t * 1.7) * 0.3 + cos((p.y - p.x) * 5.7 - t * 2.6) * 0.12;
+            vec3 wn = normalize(vec3(-dx * 0.07, 1.0, -dz * 0.07));
+            vec3 r = reflect(view, wn);
+            // Schlick's Fresnel: a mirror at a glancing angle, see-through looking down.
+            float fres = 0.02 + 0.98 * pow(1.0 - max(dot(-view, wn), 0.0), 5.0);
+            // The sky it reflects: the horizon's colour, bluer overhead.
+            // (A murky swamp reflects murkily: the biome's water colour tints it too.)
+            vec3 skyc = mix(fog_color.rgb, fog_color.rgb * vec3(0.55, 0.72, 1.05), clamp(r.y * 1.6, 0.0, 1.0));
+            skyc *= (0.5 + 0.5 * params.x) * mix(vec3(1.0), v_tint, 0.5);
+            col = mix(col, skyc, clamp(0.1 + fres * 0.85, 0.0, 0.88));
+            c.a = mix(c.a, 1.0, clamp(fres * 0.7, 0.0, 0.7));
+            // The sun's glint: a hot pinpoint and a softer glow round it.
+            float sd = max(dot(r, normalize(sun.xyz)), 0.0);
+            float glint = pow(sd, 400.0) * 3.0 + pow(sd, 40.0) * 0.22;
+            col += vec3(1.0, 0.93, 0.78) * glint * clamp(sun.y * 4.0, 0.0, 1.0) * params.x;
         }
     }
 #endif
