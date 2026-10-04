@@ -176,6 +176,10 @@ pub const ALL: &[Advancement] = &[
     adv("which_witch", "Which Witch?", "Defeat a Witch. Mind the bottles."),
     adv("local_flavour", "Local Flavour", "Defeat a desert Groaner or a snowy Rattler."),
     adv("fetch", "Fetch!", "Give an Allay something to fetch."),
+    adv("char_broiled", "Char-Broiled", "Defeat a Charred Rattler."),
+    adv("wilter_built", "Wilting Heights", "Build the Wilter. Why would you do that?"),
+    adv("wilt_under_pressure", "Wilt Under Pressure", "Defeat the Wilter."),
+    adv("star_power", "Star Power", "Set a Wilter Star in a beacon."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -188,13 +192,13 @@ const CREATURES: &[&str] = &[
     "bacon", "hiss_tory", "groan_up", "fluffed", "dont_blink", "staring_champ", "rude_teleport", "udderly", "bone_zone", "arachno", "split_decision", "robin_hood", "good_boy",
     "the_birds_and_the_bees", "giddy_up", "hello_my_name_is", "pretty_polly", "soggy", "spear_it", "fishy_business", "sly_friend", "special_delivery", "tongue_tied", "scute_cute",
     "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
-    "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch",
+    "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch", "char_broiled",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
-    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up",
+    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power",
 ];
 
 /// Which tab (1..) an advancement is on.

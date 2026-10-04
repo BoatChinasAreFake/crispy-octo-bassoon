@@ -171,6 +171,7 @@ pub struct Game {
     pub zap_acc: f32,
     /// Seconds towards Poison's next sting (see potions.rs).
     pub poison_clock: f32,
+    pub wilt_clock: f32,
     /// What's packed inside broken Hollow Boxes, by number (see boxes.rs).
     pub boxes: HashMap<u16, crate::containers::Container>,
     /// Sound effects requested this frame (effect, world position if positional).
@@ -480,6 +481,7 @@ impl Game {
             curse_acc: 0.0,
             zap_acc: 0.0,
             poison_clock: 0.0,
+            wilt_clock: 0.0,
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -2655,6 +2657,10 @@ impl Game {
             let me = crate::players::record_key(&self.player_name);
             self.try_build_copper_golem(place, &me);
         }
+        if held == CHARRED_SKULL && !self.is_client() {
+            let me = crate::players::record_key(&self.player_name);
+            self.try_build_wilter(place, &me);
+        }
     }
 
     pub fn break_block(&mut self, pos: IVec3, drops: bool) {
@@ -3236,7 +3242,8 @@ impl Game {
                     MobKind::Guardian | MobKind::ElderGuardian | MobKind::GlowSquid => noises.push((Sfx::Bubbles, m.body.pos)),
                     MobKind::Witch => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::DesertGroaner => noises.push((Sfx::Groan, m.body.pos)),
-                    MobKind::SnowyRattler => noises.push((Sfx::Rattle, m.body.pos)),
+                    MobKind::SnowyRattler | MobKind::CharredRattler => noises.push((Sfx::Rattle, m.body.pos)),
+                    MobKind::Wilter => noises.push((Sfx::Roar, m.body.pos)),
                     MobKind::Bat => noises.push((Sfx::Squawk, m.body.pos)),
                     MobKind::Allay => noises.push((Sfx::Chime, m.body.pos)),
                     MobKind::CopperGolem | MobKind::Floaty => {}
@@ -3328,6 +3335,8 @@ impl Game {
                 MobEvent::ThrowPotion(from, vel, p) => self.throw_witch_potion(from, vel, p),
                 MobEvent::Ink(at) => self.ink_cloud(at),
                 MobEvent::Bleat(at) => self.sfx(Sfx::Bleat, Some(at)),
+                MobEvent::WiltSkull(from, vel) => self.throw_wilt_skull(from, vel),
+                MobEvent::WilterWakes(at) => self.wilter_wakes(at),
             }
         }
         self.update_arrows(dt);
@@ -3351,6 +3360,9 @@ impl Game {
                     self.fire("on_mob_death", args);
                     if m.kind == MobKind::Wyrm {
                         self.wyrm_defeated(at);
+                    }
+                    if m.kind == MobKind::Wilter {
+                        self.wilter_defeated(at);
                     }
                     let remote = m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker);
                     if m.last_attacker == self.my_id && !self.dedicated {
@@ -3377,7 +3389,8 @@ impl Game {
                             MobKind::ElderGuardian => self.advance("elder_statesman"),
                             MobKind::Witch => self.advance("which_witch"),
                             MobKind::DesertGroaner | MobKind::SnowyRattler => self.advance("local_flavour"),
-                            MobKind::GlowSquid | MobKind::Bat | MobKind::Allay => {}
+                            MobKind::CharredRattler => self.advance("char_broiled"),
+                            MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Wilter => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
@@ -3709,11 +3722,16 @@ impl Game {
         for y in y0..y0 + 12 {
             let floor = self.world.get(x, y - 1, z);
             let clear = (0..3).all(|h| self.world.get(x, y + h, z) == AIR);
-            if matches!(floor, SCORCHROCK | EMBERSAND | GILDED_SCORCHROCK | SCORCH_BRICKS) && clear {
+            if matches!(floor, SCORCHROCK | EMBERSAND | GILDED_SCORCHROCK | SCORCH_BRICKS | SORROW_SAND) && clear {
                 let at = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
                 // Snouts keep near their camps.
                 let camp = self.world.generator.nearest_site(crate::structures::Kind::SnoutCamp, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0);
                 let roll = self.rng.f32();
+                // Charred Rattlers walk the fortresses' halls.
+                if floor == SCORCH_BRICKS && roll < 0.5 {
+                    self.alloc_mob(MobKind::CharredRattler, at);
+                    return;
+                }
                 if camp && roll < 0.7 {
                     for i in 0..self.rng.int(1, 3) {
                         self.alloc_mob(MobKind::Snout, at + Vec3::new(i as f32 * 0.7, 0.0, 0.0));

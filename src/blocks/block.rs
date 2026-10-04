@@ -390,7 +390,15 @@ pub const DARK_PRISMARINE: Id = 577;
 pub const SEA_LANTERN: Id = 578;
 /// Lets you breathe underwater, inside a frame of prismarine.
 pub const CONDUIT: Id = 579;
-pub const NUM_BLOCKS: Id = 580;
+/// The Wilter (see wilter.rs) is built from four Sorrow Sand (slow going, in
+/// the Scorchlands) and three Charred Skulls (Charred Rattlers' heads).
+pub const SORROW_SAND: Id = 580;
+pub const CHARRED_SKULL: Id = 581;
+/// A beacon with a Wilter Star set in it: `+` the effect, like `BEACON_FIRST`.
+pub const STARRED_BEACON_FIRST: Id = 582;
+/// Spelunker's Rope, hanging down a shaft (see rope.rs).
+pub const ROPE: Id = 587;
+pub const NUM_BLOCKS: Id = 588;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -616,7 +624,11 @@ pub const NAUTILUS_SHELL: Id = FIRST_ITEM + 245;
 pub const HEART_OF_THE_SEA: Id = FIRST_ITEM + 246;
 /// From Glow Squid: makes a sign's words glow.
 pub const GLOW_INK_SAC: Id = FIRST_ITEM + 247;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 248;
+/// What the Wilter leaves: set in a beacon, it shines brighter (see wilter.rs).
+pub const WILTER_STAR: Id = FIRST_ITEM + 248;
+/// Tells you how well the room you're in is held up (see caveins.rs).
+pub const SUPPORT_GAUGE: Id = FIRST_ITEM + 249;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 250;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -841,6 +853,8 @@ pub enum Shape {
     Bed { facing: u8 },
     /// A small cube in the middle of its cell (the Conduit).
     Core,
+    /// A head-sized cube sitting on the floor (a Charred Skull).
+    Skull,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -918,6 +932,7 @@ impl Shape {
             Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
             Shape::Bed { facing } => (crate::beds::boxes(facing), 3),
             Shape::Core => ([([0.3125; 3], [0.6875; 3]), full, full], 1),
+            Shape::Skull => ([([0.25, 0.0, 0.25], [0.75, 0.5, 0.75]), full, full], 1),
             Shape::Chest => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, 10.0 / 16.0, 15.0 / 16.0]), ([1.0 / 16.0, 10.0 / 16.0, 1.0 / 16.0], [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0]), full], 2),
             Shape::Layer { eighths } => ([([0.0; 3], [1.0, eighths as f32 / 8.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
@@ -2418,6 +2433,23 @@ impl Registry {
         let mut conduit = def("conduit", "Conduit (Breathe Easy, Literally)", Shaped, false, false, [T_CONDUIT; 3], 3.0, 0, true, CONDUIT, 10.0, S_GLASS);
         conduit.shape = Shape::Core;
         blocks.push(conduit);
+        // The Wilter's makings (see wilter.rs), its star's beacons, and rope (see rope.rs).
+        let mut sorrow = def("sorrow_sand", "Sorrow Sand (Sighs Underfoot)", Cube, true, true, [T_SORROW_SAND; 3], 0.5, 0, false, SORROW_SAND, 0.0, S_SAND);
+        sorrow.speed = 0.45;
+        blocks.push(sorrow);
+        let mut skull = def("charred_skull", "Charred Skull (Grins Darkly)", Shaped, true, false, [T_CHARRED_SKULL, T_CHARRED_SKULL_FACE, T_CHARRED_SKULL], 1.0, 0, false, CHARRED_SKULL, 0.0, S_STONE);
+        skull.shape = Shape::Skull;
+        blocks.push(skull);
+        for (k, p) in crate::potions::ALL.iter().enumerate() {
+            let key = if k == 0 { "starred_beacon".to_string() } else { format!("starred_beacon_{}", p.key()) };
+            let mut d = def(leak(&key), "Starred Beacon (Twice the Lighthouse)", Cube, true, false, [T_STARRED_BEACON; 3], 3.0, 0, false, STARRED_BEACON_FIRST, 15.0, S_GLASS);
+            d.see_through = true;
+            d.creative = k == 0;
+            blocks.push(d);
+        }
+        let mut rope = def("rope", "Spelunker's Rope (Throw It Down a Hole)", Shaped, false, false, [T_ROPE; 3], 0.2, 0, false, ROPE, 0.0, S_GRASS);
+        rope.shape = Shape::Chain;
+        blocks.push(rope);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2679,6 +2711,8 @@ impl Registry {
         items.push(item("nautilus_shell", "Nautilus Shell (Spiral, Spiralling)", T_NAUTILUS_SHELL));
         items.push(ItemDef { stack: 1, ..item("heart_of_the_sea", "Heart of the Sea (Beats Faintly)", T_HEART_OF_THE_SEA) });
         items.push(item("glow_ink_sac", "Glow Ink Sac (Squid Highlighter)", T_GLOW_INK_SAC));
+        items.push(item("wilter_star", "Wilter Star (Still Warm)", T_WILTER_STAR));
+        items.push(ItemDef { stack: 1, ..item("support_gauge", "Support Gauge (Is It Going to Hold?)", T_SUPPORT_GAUGE) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2935,6 +2969,8 @@ impl Registry {
         recipes.push(r(&[(PRISMARINE_SHARD, 8), (DYE_FIRST + 1, 1)], (DARK_PRISMARINE, 1)));
         recipes.push(r(&[(PRISMARINE_SHARD, 4), (PRISMARINE_CRYSTALS, 5)], (SEA_LANTERN, 1)));
         recipes.push(r(&[(HEART_OF_THE_SEA, 1), (NAUTILUS_SHELL, 8)], (CONDUIT, 1)));
+        recipes.push(r(&[(STRING, 6), (STICK, 1)], (ROPE, 2)));
+        recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
             recipes.push(r(&[(DIAMOND, 7), (t, 1), (TUFF_BRICKS, 1)], (t, 2)));

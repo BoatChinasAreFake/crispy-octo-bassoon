@@ -275,6 +275,12 @@ pub enum MobKind {
     GlowSquid,
     Bat,
     Allay,
+    /// Tall, sooty Rattlers of the Scorchlands' fortresses, whose blades
+    /// wilt you; now and then one drops its Charred Skull.
+    CharredRattler,
+    /// The second boss (see wilter.rs): built from Sorrow Sand and three
+    /// Charred Skulls, it flies, throws wilting skulls, and leaves a star.
+    Wilter,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -290,7 +296,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 57] = [
+    pub const ALL: [MobKind; 59] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -349,6 +355,8 @@ impl MobKind {
         MobKind::GlowSquid,
         MobKind::Bat,
         MobKind::Allay,
+        MobKind::CharredRattler,
+        MobKind::Wilter,
     ];
 
     pub fn index(self) -> u8 {
@@ -445,6 +453,8 @@ impl MobKind {
             "guardian" => Some(MobKind::Guardian),
             "elder guardian" | "elder_guardian" | "elderguardian" | "elder" => Some(MobKind::ElderGuardian),
             "witch" => Some(MobKind::Witch),
+            "charred rattler" | "charred_rattler" | "wither_skeleton" => Some(MobKind::CharredRattler),
+            "wilter" | "the wilter" | "wither" => Some(MobKind::Wilter),
             "desert groaner" | "desert_groaner" | "husk" => Some(MobKind::DesertGroaner),
             "snowy rattler" | "snowy_rattler" | "stray" => Some(MobKind::SnowyRattler),
             "glow squid" | "glow_squid" | "glowsquid" => Some(MobKind::GlowSquid),
@@ -515,6 +525,8 @@ impl MobKind {
             MobKind::GlowSquid => "Glow Squid",
             MobKind::Bat => "Bat",
             MobKind::Allay => "Allay",
+            MobKind::CharredRattler => "Charred Rattler",
+            MobKind::Wilter => "Wilter",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -576,6 +588,8 @@ impl MobKind {
             MobKind::GlowSquid => (0.4, 0.8),
             MobKind::Bat => (0.25, 0.5),
             MobKind::Allay => (0.18, 0.6),
+            MobKind::CharredRattler => (0.35, 2.4),
+            MobKind::Wilter => (0.6, 2.7),
             MobKind::Modded(_) => (0.4, 0.9),
         }
     }
@@ -640,6 +654,8 @@ impl MobKind {
             MobKind::GlowSquid => 10.0,
             MobKind::Bat => 6.0,
             MobKind::Allay => 20.0,
+            MobKind::CharredRattler => 20.0,
+            MobKind::Wilter => crate::wilter::HEALTH,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -651,6 +667,7 @@ impl MobKind {
         match self {
             MobKind::Bloop => size as u32,
             MobKind::ElderGuardian => 10,
+            MobKind::Wilter => 50,
             k if !k.hostile() => rng.int(1, 3) as u32,
             _ => 5,
         }
@@ -672,11 +689,11 @@ impl MobKind {
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
-        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee | MobKind::Floaty | MobKind::Bat | MobKind::Allay) || self.mod_def().is_some_and(|d| d.flying)
+        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee | MobKind::Floaty | MobKind::Bat | MobKind::Allay | MobKind::Wilter) || self.mod_def().is_some_and(|d| d.flying)
     }
     /// Lava and fire don't bother it.
     pub fn fireproof(self) -> bool {
-        matches!(self, MobKind::Grumbler | MobKind::Sizzler | MobKind::Weeper | MobKind::Strutter | MobKind::Wyrm)
+        matches!(self, MobKind::Grumbler | MobKind::Sizzler | MobKind::Weeper | MobKind::Strutter | MobKind::Wyrm | MobKind::CharredRattler | MobKind::Wilter)
     }
     /// Part of a raid (see raids.rs).
     pub fn raider(self) -> bool {
@@ -901,6 +918,10 @@ pub enum MobEvent {
     Ink(Vec3),
     /// A Goat lowers its head to charge.
     Bleat(Vec3),
+    /// One of the Wilter's skulls: (from, velocity).
+    WiltSkull(Vec3, Vec3),
+    /// The Wilter bursts out of its waking.
+    WilterWakes(Vec3),
 }
 
 /// A spot a Starer can teleport to near `around`: standing room on solid ground.
@@ -995,7 +1016,7 @@ impl Mob {
     /// (a tamed modded monster is left alone by beds, golems and Peaceful).
     /// Has a health bar across the top of the screen (the Wyrm, or a modded boss).
     pub fn is_boss(&self) -> bool {
-        self.kind == MobKind::Wyrm || self.kind.mod_def().is_some_and(|d| d.boss)
+        matches!(self.kind, MobKind::Wyrm | MobKind::Wilter) || self.kind.mod_def().is_some_and(|d| d.boss)
     }
 
     pub fn menacing(&self) -> bool {
@@ -1031,8 +1052,9 @@ impl Mob {
         if self.hurt > 0.25 {
             return;
         }
-        // A Creaking shrugs everything off (only breaking its heart works).
-        if self.kind == MobKind::Creaking {
+        // A Creaking shrugs everything off (only breaking its heart works), as
+        // does a Wilter that's still waking.
+        if self.kind == MobKind::Creaking || crate::wilter::waking(self) {
             self.hurt = 0.5;
             return;
         }
@@ -1111,6 +1133,10 @@ impl Mob {
             crate::hollow::wyrm_update(self, dt, player, player_visible, &mut ev);
             return ev;
         }
+        if self.kind == MobKind::Wilter {
+            crate::wilter::update(self, dt, world, player, player_visible, rng, &mut ev);
+            return ev;
+        }
         let to_player = player - self.body.pos;
         let dist = to_player.length();
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
@@ -1123,8 +1149,8 @@ impl Mob {
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
         match self.kind {
-            // (The Wyrm flies on its own, see hollow.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer => {
+            // (The Wyrm and the Wilter fly on their own, see hollow.rs and wilter.rs.)
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Wilter | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -1652,6 +1678,17 @@ impl Mob {
             }
             MobKind::Turtle | MobKind::Dolphin | MobKind::PolarBear | MobKind::Llama => {
                 crate::wildlife::update(self, dt, world, player, player_visible, rng, &mut want, &mut swim_vy, &mut may_wander, &mut ev);
+            }
+            MobKind::CharredRattler => {
+                // Up close with a sooty blade: it hits hard, and wilts you.
+                if player_visible && dist < 20.0 {
+                    want = Some((face, 2.6));
+                    if flat.length() < 1.5 && to_player.y.abs() < 2.0 && self.attack_cd <= 0.0 {
+                        ev.push(MobEvent::HurtPlayer(5.0, "was cut down by a Charred Rattler"));
+                        ev.push(MobEvent::Afflict(crate::potions::Potion::Wilting, 10.0));
+                        self.attack_cd = 1.2;
+                    }
+                }
             }
             MobKind::Rattler | MobKind::SnowyRattler => {
                 let fd = flat.length();
@@ -2255,6 +2292,8 @@ impl Mob {
             MobKind::DesertGroaner if n > 0 => Some((GOO, n)),
             MobKind::SnowyRattler if n > 0 => Some((BONE, n)),
             MobKind::GlowSquid => Some((GLOW_INK_SAC, n.max(1))),
+            MobKind::CharredRattler if n > 0 => Some(([BONE, COAL][rng.int(0, 1) as usize], n)),
+            MobKind::Wilter => Some((WILTER_STAR, 1)),
             // An Allay drops whatever it was holding.
             MobKind::Allay if self.seed != 0 => Some((self.seed as Id, 1 + self.temper)),
             MobKind::Modded(_) => self.kind.mod_def().and_then(|d| d.drop).map(|(id, max)| (id, rng.int(1, max.max(1) as i32) as u8)),
@@ -2283,6 +2322,7 @@ impl Mob {
             MobKind::Witch if rng.chance(0.15) => Some((crate::potions::potion_item(crate::potions::Potion::Healing, false), 1)),
             MobKind::DesertGroaner if rng.chance(0.3) => Some((SAND, 1)),
             MobKind::SnowyRattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
+            MobKind::CharredRattler if rng.chance(crate::wilter::SKULL_CHANCE) => Some((CHARRED_SKULL, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -2642,6 +2682,21 @@ static WITCH: [Part; 11] = {
 };
 static DESERT_GROANER: [Part; 6] = humanoid(T_DESERT_SKIN, T_DESERT_FACE, T_DESERT_CLOTH, T_DESERT_CLOTH, Limb::Forward, Limb::Forward);
 static SNOWY_RATTLER: [Part; 6] = humanoid(T_STRAY_BONE, T_STRAY_FACE, T_STRAY_CLOTH, T_STRAY_BONE, Limb::Forward, Limb::Forward);
+/// A Charred Rattler: a Rattler gone sooty.
+static CHARRED_RATTLER: [Part; 6] = humanoid(T_CHARRED_BONE, T_CHARRED_FACE, T_CHARRED_BONE, T_CHARRED_BONE, Limb::Forward, Limb::Swing(1.0));
+/// The Wilter: a floating spine and ribcage under a bar with three skulls on it.
+static WILTER: [Part; 6] = {
+    const W: u16 = T_WILTER;
+    const F: [u16; 6] = [W, W, W, W, W, T_WILTER_FACE];
+    [
+        part([-0.1, 0.3, -0.1], [0.2, 1.4, 0.2], [0.0; 3], Limb::Fixed, [W; 6]),
+        part([-0.4, 1.0, -0.15], [0.8, 0.7, 0.3], [0.0; 3], Limb::Fixed, [W; 6]),
+        part([-1.0, 1.75, -0.12], [2.0, 0.25, 0.25], [0.0; 3], Limb::Fixed, [W; 6]),
+        part([-0.3, 2.0, -0.3], [0.6, 0.6, 0.6], [0.0; 3], Limb::Fixed, F),
+        part([-1.05, 1.95, -0.22], [0.44, 0.44, 0.44], [0.0; 3], Limb::Fixed, F),
+        part([0.61, 1.95, -0.22], [0.44, 0.44, 0.44], [0.0; 3], Limb::Fixed, F),
+    ]
+};
 /// A Glow Squid: a body and eight tentacles, waving.
 static GLOW_SQUID: [Part; 9] = {
     const G: u16 = T_GLOW_SQUID;
@@ -3226,6 +3281,8 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::GlowSquid => &GLOW_SQUID,
         MobKind::Bat => &BAT,
         MobKind::Allay => &ALLAY,
+        MobKind::CharredRattler => &CHARRED_RATTLER,
+        MobKind::Wilter => &WILTER,
         // Modded mobs are drawn from a runtime-built, textured copy of a base
         // template (see `modded_parts`); this static fallback keeps `model`
         // total and is used only where the texture doesn't matter (e.g. the
