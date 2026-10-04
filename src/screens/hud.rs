@@ -109,6 +109,12 @@ impl App {
                     self.ui.air_bar(g.player.air, max_air, x0 + slot * 9.0, y0 - 29.0 * s);
                 }
             }
+            // The Support Gauge, in hand, says how the room's held up (see caveins.rs).
+            if let Some(r) = g.gauge_reading {
+                let text = if r < 0 { "Support: open sky (nothing to hold up)".to_string() } else { format!("Support: {r}% ({})", crate::caveins::gauge_words(r)) };
+                let c = if !(0..60).contains(&r) { Color::new(0.6, 1.0, 0.6, 1.0) } else if r >= 20 { Color::new(1.0, 0.85, 0.4, 1.0) } else { Color::new(1.0, 0.45, 0.4, 1.0) };
+                self.ui.text_centered(&text, w / 2.0, y0 - if g.creative { 18.0 } else { 40.0 } * s, 10.0, c);
+            }
             if g.held_name > 0.0 {
                 let held = g.inv.held();
                 if held != AIR {
@@ -383,6 +389,16 @@ impl App {
                         draw_triangle(vec2(bx, by + k + s), vec2(bx - k - s, by), vec2(bx + k + s, by), ink);
                         draw_triangle(vec2(bx, by - k), vec2(bx - k, by), vec2(bx + k, by), fill);
                         draw_triangle(vec2(bx, by + k), vec2(bx - k, by), vec2(bx + k, by), fill);
+                    }
+                }
+                // Ropes hanging down holes: little brown coils.
+                for p in self.game.rope_tops_near(me, navigation::MAP_SIZE as f32 * scale) {
+                    let (dx, dz) = ((p.x as f32 + 0.5 - me.x) / scale, (p.z as f32 + 0.5 - me.z) / scale);
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {
+                        let (bx, by) = (cx + dx * per_px, cy + dz * per_px);
+                        draw_circle(bx, by, 3.5 * s, Color::new(0.1, 0.08, 0.05, 1.0));
+                        draw_circle(bx, by, 2.5 * s, Color::from_rgba(170, 130, 80, 255));
                     }
                 }
                 // Where you last died: a dark cross.

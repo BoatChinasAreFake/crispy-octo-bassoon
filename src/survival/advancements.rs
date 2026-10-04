@@ -180,6 +180,9 @@ pub const ALL: &[Advancement] = &[
     adv("wilter_built", "Wilting Heights", "Build the Wilter. Why would you do that?"),
     adv("wilt_under_pressure", "Wilt Under Pressure", "Defeat the Wilter."),
     adv("star_power", "Star Power", "Set a Wilter Star in a beacon."),
+    adv("propped_up", "Propped Up", "Stop a creaking ceiling from coming down."),
+    adv("sinking_feeling", "That Sinking Feeling", "Be under a ceiling when it comes down."),
+    adv("rope_a_dope", "Rope-a-Dope", "Throw a Spelunker's Rope down a hole."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).

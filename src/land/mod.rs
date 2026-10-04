@@ -2,6 +2,7 @@
 //! seasons, and the places in it (cave biomes, structures, the Scorchlands, the Hollow, the Deep Dark).
 
 pub(crate) mod archaeology;
+pub(crate) mod caveins;
 pub(crate) mod caves;
 pub(crate) mod copper;
 pub(crate) mod deepdark;
@@ -12,6 +13,7 @@ pub(crate) mod hollow;
 pub(crate) mod liquids;
 pub(crate) mod monument;
 pub(crate) mod nature;
+pub(crate) mod rope;
 pub(crate) mod scorch;
 pub(crate) mod seasons;
 pub(crate) mod skies;

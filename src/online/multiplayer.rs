@@ -66,7 +66,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn)
+    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn | Sfx::Thud)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -552,6 +552,9 @@ impl Game {
                     if matches!(id, PUMPKIN | JACK) && old != id {
                         let who = self.peer_name(from);
                         self.try_build_copper_golem(IVec3::new(x, y, z), &crate::players::record_key(&who));
+                    }
+                    if id == ROPE && old != id {
+                        self.unroll(IVec3::new(x, y, z));
                     }
                     if id == CHARRED_SKULL && old != id {
                         let who = self.peer_name(from);

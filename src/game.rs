@@ -177,6 +177,12 @@ pub struct Game {
     /// Sound effects requested this frame (effect, world position if positional).
     pub sounds: Vec<(Sfx, Option<Vec3>)>,
     dig_tick: f32,
+    /// Blocks dug out since the last tick, and ceilings creaking (see caveins.rs).
+    pub dig_queue: Vec<IVec3>,
+    pub cave_ins: Vec<crate::caveins::CaveIn>,
+    /// The Support Gauge's reading, while it's held (-1: nothing overhead).
+    pub gauge_reading: Option<i32>,
+    pub gauge_acc: f32,
     step_dist: f32,
     was_in_water: bool,
     /// Seconds since we were last in water (bobbing at the surface doesn't splash).
@@ -484,6 +490,10 @@ impl Game {
             wilt_clock: 0.0,
             sounds: Vec::new(),
             dig_tick: 0.0,
+            dig_queue: Vec::new(),
+            cave_ins: Vec::new(),
+            gauge_reading: None,
+            gauge_acc: 0.0,
             step_dist: 0.0,
             was_in_water: false,
             dry_for: 10.0,
@@ -2590,6 +2600,11 @@ impl Game {
             }
             return;
         }
+        // Rope goes over ledges and unrolls down (see rope.rs).
+        if held == ROPE {
+            self.throw_rope(hit_pos, normal);
+            return;
+        }
         if !is_block_item(held) {
             return;
         }
@@ -2789,6 +2804,10 @@ impl Game {
     /// A block broke where the world lives (by anyone): hives, pots and sculk react, and it's heard.
     pub fn block_gone(&mut self, pos: IVec3, old: Id) {
         self.jukebox_broken(pos, old);
+        self.dug_out(pos);
+        if old == ROPE {
+            self.rope_broken(pos);
+        }
         self.gold_taken(pos, old);
         if crate::bees::is_hive(old) {
             self.hive_broken(pos, old);
@@ -3457,6 +3476,8 @@ impl Game {
             t.fuse -= dt;
         }
         self.falling_tick(dt);
+        self.caveins_tick(dt);
+        self.gauge_tick(dt);
         self.stalactite_tick(dt);
         self.fireballs_tick(dt);
         let boom: Vec<Vec3> = self.tnts.iter().filter(|t| t.fuse <= 0.0).map(|t| t.pos + Vec3::splat(0.5)).collect();

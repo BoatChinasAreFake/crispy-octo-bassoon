@@ -182,6 +182,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     batch_two(&mut host, &mut team, &mut report, &mut touched);
     batch_three(&mut host, &mut team, &mut report, &mut touched);
     underground(&mut host, &mut team, &mut report, &mut touched);
+    deeper(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -983,6 +984,151 @@ fn underground(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: 
     }
 }
 
+/// v0.2 part 2: rope, the Wilter, a Starred Beacon and a cave-in.
+fn deeper(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    let n = team.len();
+    let ledger = |host: &Game, id: u32, item: Id| host.peers.get(&id).map(|p| p.ledger.bag.count(item)).unwrap_or(0);
+    revive(host, team);
+
+    // 23. A bot hangs a rope on a wall: the host unrolls it, and everyone sees all of it.
+    let k = 0;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    // A wall to hang it on, with a clear drop beside it to the floor.
+    let wall = feet + IVec3::new(2, 4, 0);
+    host.world.set_v(wall, STONE);
+    for d in 0..=5 {
+        host.world.set_v(feet + IVec3::new(1, d, 0), AIR);
+    }
+    touched.extend((0..=5).map(|d| feet + IVec3::new(1, d, 0)));
+    touched.insert(wall);
+    host.give_peer(id, ROPE, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == ROPE)) {
+        g.inv.selected = slot;
+        g.throw_rope(wall, IVec3::NEG_X);
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("rope");
+    let hung = |w: &crate::world::World| (0..=4).all(|d| w.get_v(feet + IVec3::new(1, d, 0)) == ROPE);
+    if !hung(&host.world) || ledger(host, id, ROPE) != 0 {
+        report.problems.push(format!("the host didn't unroll {}'s rope", team[k].name));
+    } else {
+        for b in team.iter() {
+            if !hung(&b.game.world) {
+                report.problems.push(format!("{} never saw the whole rope", b.name));
+            }
+        }
+    }
+    for d in 0..=4 {
+        host.world.set_v(feet + IVec3::new(1, d, 0), AIR);
+    }
+
+    // 24. A bot puts the last skull on a Wilter's T: the host wakes it, and everyone sees it.
+    let k = 1 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let mid = feet + IVec3::new(0, 2, 3);
+    for x in -1..=1 {
+        host.world.set_v(mid + IVec3::new(x, -1, 0), SORROW_SAND);
+    }
+    host.world.set_v(mid - IVec3::Y * 2, SORROW_SAND);
+    host.world.set_v(mid - IVec3::X, CHARRED_SKULL);
+    host.world.set_v(mid, CHARRED_SKULL);
+    touched.extend([mid - IVec3::X, mid, mid + IVec3::X, mid - IVec3::Y - IVec3::X, mid - IVec3::Y, mid - IVec3::Y + IVec3::X, mid - IVec3::Y * 2]);
+    host.give_peer(id, CHARRED_SKULL, 1);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.world.set_v(mid + IVec3::X, CHARRED_SKULL);
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("wilter");
+    let wilter = host.mobs.iter().find(|m| m.kind == crate::entity::MobKind::Wilter).map(|m| m.id);
+    match wilter {
+        None => report.problems.push(format!("{} finished a Wilter's T and nothing woke", team[k].name)),
+        Some(w) => {
+            for b in team.iter() {
+                if !b.game.mobs.iter().any(|m| m.id == w && m.kind == crate::entity::MobKind::Wilter) {
+                    report.problems.push(format!("{} never saw the Wilter", b.name));
+                }
+            }
+        }
+    }
+    host.mobs.retain(|m| m.kind != crate::entity::MobKind::Wilter);
+    host.arrows.clear();
+
+    // 25. A bot sets a Wilter Star in a full beacon: the host takes the star and stars it.
+    let k = 2 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    let top = feet + IVec3::new(3, 3, 0);
+    for d in 1..=3 {
+        for dx in -d..=d {
+            for dz in -d..=d {
+                let p = top + IVec3::new(dx, -d, dz);
+                host.world.set_v(p, OBSIDIAN);
+                touched.insert(p);
+            }
+        }
+    }
+    for y in top.y + 1..top.y + 40 {
+        host.world.set_v(IVec3::new(top.x, y, top.z), AIR);
+    }
+    host.world.set_v(top, BEACON_FIRST);
+    touched.insert(top);
+    team[k].game.player.body.pos = (top + IVec3::new(-1, 1, 0)).as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5);
+    host.give_peer(id, WILTER_STAR, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == WILTER_STAR)) {
+        g.inv.selected = slot;
+        let b = g.world.get_v(top);
+        g.use_switch(top, b);
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("starred beacon");
+    if !crate::beacon::starred(host.world.get_v(top)) || ledger(host, id, WILTER_STAR) != 0 {
+        report.problems.push(format!("{} set a Wilter Star in a beacon, and the host didn't star it", team[k].name));
+    }
+
+    // 26. A cave-in where the world lives: everyone sees the ceiling come down.
+    // (Well under spawn, clear of the chest and anything the bots built.)
+    let floor = host.spawn.floor().as_ivec3() - IVec3::Y * 18;
+    for y in 0..9 {
+        for dz in -9..=9 {
+            for dx in -9..=9 {
+                let p = floor + IVec3::new(dx, y, dz);
+                let inside = dx.abs() <= 7 && dz.abs() <= 7 && (1..4).contains(&y);
+                host.world.set_v(p, if inside { AIR } else { STONE });
+                touched.insert(p);
+            }
+        }
+    }
+    for y in 1..4 {
+        for dz in -7..=7 {
+            for dx in -7..=7 {
+                host.dug_out(floor + IVec3::new(dx, y, dz));
+            }
+        }
+    }
+    let roof = floor + IVec3::Y * 4;
+    pump(host, team, crate::caveins::WARN_SECS + 3.0, |_| idle());
+    report.features.push("cave-in");
+    if host.world.get_v(roof) == STONE {
+        report.problems.push("a cave-in never came down on the host".into());
+    } else {
+        for b in team.iter() {
+            if b.game.world.get_v(roof) == STONE {
+                report.problems.push(format!("{} never saw the cave-in", b.name));
+            }
+        }
+    }
+}
+
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f64>().ok());
@@ -1023,7 +1169,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }
