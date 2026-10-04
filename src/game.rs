@@ -23,6 +23,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 1200.0;
+/// Lines of chat kept to scroll back through.
+pub const CHAT_KEEP: usize = 500;
 
 fn projectile_fan(center: Vec3, count: u8, spread: f32) -> Vec<Vec3> {
     let count = count.clamp(1, 5) as usize;
@@ -168,6 +170,8 @@ pub struct Game {
     dig_tick: f32,
     step_dist: f32,
     was_in_water: bool,
+    /// Seconds since we were last in water (bobbing at the surface doesn't splash).
+    dry_for: f32,
     // ---- multiplayer (see multiplayer.rs)
     pub net: Option<Net>,
     /// Other players, keyed by id (0 is the host).
@@ -269,12 +273,23 @@ pub struct Game {
     pub smoke_acc: f32,
     /// Seconds until a Wanderer might turn up (see villagers.rs).
     pub wanderer_timer: f32,
+    /// Frost Walker: seconds since boots last looked for water, and frozen water melting back (see enchant.rs).
+    pub frost_acc: f32,
+    pub frosted: Vec<(IVec3, f32)>,
+    /// The sky (see skies.rs): shooting stars, seconds of rainbow left, and whether it was raining.
+    pub shooting: Vec<crate::skies::ShootingStar>,
+    pub rainbow: f32,
+    pub was_wet: bool,
+    /// Seconds until the world border speaks up again (see qol.rs).
+    pub border_note: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
+    /// Distant terrain as smooth rolling land rather than blocky terraces.
+    pub smooth_far: bool,
     pub lod: crate::lod::Lod,
     /// Trades made with each Hmmer, by each player (see villagers.rs).
     pub regulars: HashMap<(u32, String), u16>,
-    /// Days gone by (for the moon's phase; see moon.rs).
+    /// Days gone by (for the moon's phase; see skies.rs).
     pub day: u32,
     pub ride_sync: f32,
     /// The last hundred messages (see `msg`).
@@ -354,6 +369,12 @@ pub struct Game {
     pub bench: Option<crate::smithing::BenchUi>,
     /// Where the local player last died (for the Recovery Compass).
     pub last_death: Option<Vec3>,
+    /// Places you've named (see qol.rs).
+    pub waypoints: Vec<crate::qol::Waypoint>,
+    /// Chest lids swinging open or shut (see chests.rs).
+    pub lids: std::collections::HashMap<IVec3, crate::chests::Lid>,
+    /// Asleep in a bed (see beds.rs).
+    pub sleeping: Option<crate::beds::Sleep>,
     /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
     pub lodestone: Option<IVec3>,
     /// A joined player's view of their Bundles (the host's word), and the one just used.
@@ -378,7 +399,12 @@ pub struct Game {
 
 impl Game {
     pub fn new(seed: u32, creative: bool, menu: bool) -> Self {
-        let world = World::new(seed);
+        Game::new_with(seed, creative, menu, crate::world::GenOptions::LEGACY)
+    }
+
+    /// A game in a world made with these generation options.
+    pub fn new_with(seed: u32, creative: bool, menu: bool, worldgen: crate::world::GenOptions) -> Self {
+        let world = World::with_options(seed, worldgen);
         let spawn = world.find_spawn();
         let mut rng = Rng::new(seed as u64 ^ 0xC0FFEE);
         let stars = (0..350)
@@ -445,6 +471,7 @@ impl Game {
             dig_tick: 0.0,
             step_dist: 0.0,
             was_in_water: false,
+            dry_for: 10.0,
             net: None,
             peers: BTreeMap::new(),
             my_id: 0,
@@ -507,7 +534,14 @@ impl Game {
             firefly_acc: 0.0,
             smoke_acc: 0.0,
             wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
+            frost_acc: 0.0,
+            frosted: Vec::new(),
+            shooting: Vec::new(),
+            rainbow: 0.0,
+            was_wet: false,
+            border_note: 0.0,
             distant_terrain: true,
+            smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
             day: 0,
@@ -559,6 +593,9 @@ impl Game {
             step_timer: 0.0,
             bench: None,
             last_death: None,
+            waypoints: Vec::new(),
+            lids: Default::default(),
+            sleeping: None,
             lodestone: None,
             bundle_mirror: HashMap::new(),
             bundle_pending: None,
@@ -578,7 +615,9 @@ impl Game {
 
     pub fn from_save(d: SaveData) -> Self {
         let extras = d.extras.clone();
-        let mut g = Game::new(d.seed, d.creative, false);
+        // How the world was generated (worlds from before there were options: as they always were).
+        let worldgen = extras.iter().find(|(k, _)| k == "gen").and_then(|(_, b)| b.get(..4)).map(|b| crate::world::GenOptions::unpack(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))).unwrap_or(crate::world::GenOptions::LEGACY);
+        let mut g = Game::new_with(d.seed, d.creative, false, worldgen);
         g.saved_script_vars = d.script_vars.clone();
         g.advancements = Progress::from_keys(&d.advancements);
         g.world.farm = crate::farming::decode(&d.farm);
@@ -662,7 +701,7 @@ impl Game {
                 rec.enchanted.retain(|e| e.0 != AIR);
             }
         }
-        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle, hardcore: d.hardcore };
+        g.rules = crate::rules::WorldRules { keep_inventory: d.keep_inventory, difficulty: crate::rules::Difficulty::from_index(d.difficulty), daylight_cycle: d.daylight_cycle, weather_cycle: d.weather_cycle, hardcore: d.hardcore, seasons: false, border: 0 };
         g.enchant_count = d.enchant_count;
         g.rules.hardcore = d.hardcore;
         g.stats = crate::stats::Stats::decode(&d.stats);
@@ -764,14 +803,23 @@ impl Game {
             ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
             ("banners".to_string(), crate::banners::encode(&self.banners)),
             ("stashes".to_string(), crate::stash::encode(&self.world.stashes)),
+            ("backpacks".to_string(), crate::backpacks::encode(&self.world.backpacks)),
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
             ("day".to_string(), self.day.to_le_bytes().to_vec()),
             ("packs".to_string(), self.encode_packs()),
+            ("sign_styles".to_string(), crate::qol::encode_styles(&self.world.sign_styles)),
+            ("rules2".to_string(), [&[self.rules.seasons as u8][..], &self.rules.border.to_le_bytes()].concat()),
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
+        }
+        if self.world.generator.opts != crate::world::GenOptions::LEGACY {
+            v.push(("gen".into(), self.world.generator.opts.pack().to_le_bytes().to_vec()));
+        }
+        if !self.waypoints.is_empty() {
+            v.push(("waypoints".into(), crate::qol::encode(&self.waypoints)));
         }
         if let Some(d) = self.last_death {
             v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).collect()));
@@ -792,8 +840,18 @@ impl Game {
             let p = u32::from_le_bytes(b.try_into().unwrap()) as usize;
             self.pinned = (p < recipes().len()).then_some(p);
         }
+        if let Some(b) = extra("backpacks") {
+            self.world.backpacks = crate::backpacks::decode(b);
+        }
         if let Some(b) = extra("stashes") {
             self.world.stashes = crate::stash::decode(b);
+        }
+        if let Some(b) = extra("sign_styles") {
+            self.world.sign_styles = crate::qol::decode_styles(b);
+        }
+        if let Some(b) = extra("rules2").filter(|b| b.len() >= 5) {
+            self.rules.seasons = b[0] != 0;
+            self.rules.border = u32::from_le_bytes([b[1], b[2], b[3], b[4]]);
         }
         if let Some(b) = extra("banners") {
             self.banners = crate::banners::decode(b);
@@ -815,6 +873,9 @@ impl Game {
         }
         if let Some(b) = extra("journal") {
             self.journal = crate::archaeology::Journal::decode(b);
+        }
+        if let Some(b) = extra("waypoints") {
+            self.waypoints = crate::qol::decode(b);
         }
         if let Some(b) = extra("last_death").filter(|b| b.len() >= 12) {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
@@ -906,7 +967,7 @@ impl Game {
         }
         // Everything said is kept a while, to scroll back through with chat open.
         self.chat_log.push_back(s.clone());
-        if self.chat_log.len() > 100 {
+        if self.chat_log.len() > CHAT_KEEP {
             self.chat_log.pop_front();
         }
         self.messages.push((s, 7.0));
@@ -983,7 +1044,7 @@ impl Game {
         // The far-off land, kept up with where we are.
         if self.distant_terrain && !self.in_scorch() && !self.in_hollow() {
             let generator = self.world.generator.clone();
-            if let Some(land) = self.lod.tick(&generator, &self.map_colors, center, radius) {
+            if let Some(land) = self.lod.tick(&generator, &self.map_colors, center, radius, self.smooth_far) {
                 renderer.set_far(ctx, Some(&land));
             }
         } else if renderer.has_far() {
@@ -1039,6 +1100,9 @@ impl Game {
             let t = self.clock * 0.04;
             let dir = Vec3::new(t.sin() * 0.97, -0.22, -t.cos() * 0.97).normalize();
             (self.spawn + Vec3::Y * 14.0, dir)
+        } else if let Some(view) = self.sleep_view().filter(|_| !self.third_person) {
+            // In bed: on the pillow, looking up.
+            view
         } else {
             let dir = self.player.look_dir();
             let mut eye = self.player.eye();
@@ -1124,7 +1188,15 @@ impl Game {
         let before = self.player.body.pos;
         self.player.jumped = false;
         self.player.glider_on = self.wearing_glider();
-        let mut fall = if self.riding.is_none() && self.mounted.is_none() { self.player.update(dt, &c.input, &self.world, self.creative) } else { 0.0 };
+        let mut fall = if self.sleeping.is_some() {
+            // In bed: no walking about (jumping or sneaking gets you up).
+            self.sleep_tick(dt, c.input.jump_pressed || c.input.sneak);
+            0.0
+        } else if self.riding.is_none() && self.mounted.is_none() {
+            self.player.update(dt, &c.input, &self.world, self.creative)
+        } else {
+            0.0
+        };
         if self.player.jumped {
             self.stats.jumps += 1;
         }
@@ -1138,6 +1210,8 @@ impl Game {
             self.player.body.vel += push * dt * if self.player.body.in_lava { 2.0 } else { 9.0 };
         }
         self.hunger_tick(dt);
+        self.breath_tick(dt);
+        self.lids_tick(dt);
         let landed = self.player.landed.take();
         let feet = self.player.body.pos - Vec3::Y * 0.05;
         let under = ivec3(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
@@ -1190,6 +1264,9 @@ impl Game {
         self.recipe_news = (self.recipe_news - dt).max(0.0);
         self.report_tick(dt);
         self.campfire_smoke(dt);
+        self.skies_tick(dt);
+        self.border_tick(dt);
+        self.frost_walk(dt);
         self.update_entities(dt);
         self.script_tick(dt);
     }
@@ -1370,9 +1447,11 @@ impl Game {
 
     fn footsteps(&mut self, dt: f32) {
         let in_water = self.player.body.in_water;
-        if in_water && !self.was_in_water {
+        // A splash for jumping or falling in, not for every bob at the surface.
+        if in_water && !self.was_in_water && self.dry_for > 1.0 {
             self.sfx(Sfx::Splash, None);
         }
+        self.dry_for = if in_water { 0.0 } else { self.dry_for + dt };
         self.was_in_water = in_water;
         let b = &self.player.body;
         if !b.on_ground || in_water || self.player.flying {
@@ -1441,10 +1520,12 @@ impl Game {
             self.msg("You may not rest now, there are monsters nearby. They're very loud sleepers.");
             return;
         }
-        if self.is_client() {
-            self.msg("Spawn point set. Only the host's bed controls time. Democracy!");
-            return;
-        }
+        self.lie_down(bed);
+    }
+
+    /// The night is over (the sleeper stayed in bed long enough; see beds.rs).
+    pub fn finish_night(&mut self) {
+        let me = self.player.body.pos;
         self.time = 0.01;
         // Sleeping through the night clears the weather too.
         if self.weather.kind.wet() {
@@ -1452,7 +1533,7 @@ impl Game {
         }
         self.net_broadcast(self.time_msg());
         self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
-        self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set.");
+        self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set. Your back hurts.");
         self.advance("sweet_dreams");
     }
 
@@ -1516,6 +1597,10 @@ impl Game {
     /// Throw the held spear (the host owns thrown things, so clients ask it to).
     fn throw_spear(&mut self, item: Id) {
         let wear = self.inv.wear[self.inv.selected];
+        // Riptide: in water or rain, the spear takes you with it instead.
+        if self.riptide(wear) {
+            return;
+        }
         self.player.swing = 1.0;
         self.use_cd = 0.8;
         self.advance("spear_it");
@@ -2049,6 +2134,14 @@ impl Game {
         if matches!(held, BOAT | MINECART | CHEST_MINECART | HOPPER_MINECART) && self.place_vehicle(held) {
             return;
         }
+        // Sneak-right-clicking a chest with iron, gold or diamonds upgrades it.
+        if let Some(Target::Block(h)) = &self.target
+            && self.player.sneaking
+            && crate::chests::is_chest(self.world.get_v(h.pos))
+            && self.upgrade_chest(h.pos)
+        {
+            return;
+        }
         // Chests, furnaces and anvils open (sneak to place against them instead).
         if let Some(Target::Block(h)) = &self.target
             && !self.player.sneaking
@@ -2189,6 +2282,9 @@ impl Game {
                 self.player.health = (self.player.health + heal).min(MAX_HEALTH);
                 self.msg(format!("The stew was surprisingly fine. +{heal} health."));
             }
+            return;
+        }
+        if self.open_backpack() {
             return;
         }
         if held == ROCKET {
@@ -2345,6 +2441,14 @@ impl Game {
         if hit_id == CAMPFIRE && self.use_campfire(hit_pos) {
             return;
         }
+        // Signs take a dye's colour, or a Glowshroom's glow.
+        if crate::decor::is_sign(hit_id) && !self.player.sneaking && self.style_sign(hit_pos) {
+            return;
+        }
+        // Candles light and go out.
+        if matches!(hit_id, CANDLE | CANDLE_LIT) && self.use_candle(hit_pos) {
+            return;
+        }
         // Gates and trapdoors swing (sneak to place against them instead).
         if !self.player.sneaking && self.toggle_hinged(hit_pos) {
             return;
@@ -2355,7 +2459,7 @@ impl Game {
             return;
         }
         // Sneak to place blocks against beds and cakes instead of using them.
-        if hit_id == BED && !self.player.sneaking {
+        if crate::beds::is_bed(hit_id) && !self.player.sneaking {
             self.sleep(hit_pos);
             return;
         }
@@ -2413,7 +2517,9 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            // Torches go on walls too.
+            TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
+            LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
             FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
@@ -2427,7 +2533,14 @@ impl Game {
                 return;
             }
         }
-        let oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
+        let mut oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
+        if held == TORCH
+            && is_solid(hit_id)
+            && !replaceable(hit_id)
+            && let Some(f) = crate::decor::frame_facing(normal)
+        {
+            oriented = WALL_TORCH_FIRST + f as Id;
+        }
         self.world.set_v(place, oriented);
         if held == HOLLOW_BOX && !self.is_client() {
             let wear = self.inv.wear[self.inv.selected];
@@ -2451,6 +2564,7 @@ impl Game {
         match held {
             SPONGE => self.soak(place),
             JACK => self.advance("spooky"),
+            p if crate::masonry::is_powder(p) && !self.is_client() => self.harden_powder(place),
             _ => {}
         }
         if matches!(held, PUMPKIN | JACK) && !self.is_client() {
@@ -2512,12 +2626,15 @@ impl Game {
             if !self.is_client() {
                 let center = pos.as_vec3() + Vec3::splat(0.5);
                 let d = block(id).drop;
-                if d != AIR {
+                let silk = self.held_level(Enchant::SilkTouch) > 0 && (crate::enchant::Enchant::SilkTouch).fits(self.inv.held());
+                if let Some(whole) = crate::enchant::silk_drop(id).filter(|_| silk) {
+                    self.pop_drop(center, whole, 1);
+                } else if d != AIR {
                     let roll = self.rng.range(0.0, 1.0);
                     let n = fortune_count(id, self.held_level(Enchant::Fortune), roll);
                     self.pop_drop(center, d, n);
                 }
-                for (item, n) in crate::farming::random_drops(id, &mut self.rng) {
+                for (item, n) in crate::farming::random_drops(id, &mut self.rng).into_iter().filter(|_| !silk) {
                     match item {
                         COAL => self.msg("Found coal in the gravel. Don't ask."),
                         BAIT => self.msg("You found a Wiggly Worm. The fish will love it."),
@@ -2533,13 +2650,23 @@ impl Game {
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
-        if block(a).model == Model::Cross || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
+        if (block(a).model == Model::Cross && !is_wall_torch(a)) || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
             self.world.set_v(above, AIR);
             if is_door(a) {
                 self.world.set_v(above + IVec3::Y, AIR);
             }
             if !self.creative && !self.is_client() && block(a).drop != AIR {
                 self.pop_drop(above.as_vec3() + Vec3::splat(0.5), block(a).drop, 1);
+            }
+        }
+        // Torches on its sides fall off too.
+        for f in 0..4u8 {
+            let side = pos + crate::decor::outward(f).as_ivec3();
+            if self.world.get_v(side) == WALL_TORCH_FIRST + f as Id {
+                self.world.set_v(side, AIR);
+                if !self.creative && !self.is_client() {
+                    self.pop_drop(side.as_vec3() + Vec3::splat(0.5), TORCH, 1);
+                }
             }
         }
         // Bamboo: the whole stalk above comes down.
@@ -2561,7 +2688,7 @@ impl Game {
         } else {
             self.system_message(None, &line);
             self.chat_log.push_back(line);
-            while self.chat_log.len() > 100 {
+            while self.chat_log.len() > CHAT_KEEP {
                 self.chat_log.pop_front();
             }
         }
@@ -2683,6 +2810,37 @@ impl Game {
                 gravity: -1.0,
             });
         }
+    }
+
+    /// How long we can hold our breath (longer in a Turtle Shell).
+    pub fn max_air(&self) -> f32 {
+        let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
+        crate::player::MAX_AIR + if shell { crate::player::SHELL_AIR } else { 0.0 }
+    }
+
+    /// Breath underwater: it runs down with your head under, then you drown
+    /// (a heart a second, with bubbles), and it comes back fast in the air.
+    pub fn breath_tick(&mut self, dt: f32) {
+        let max = self.max_air();
+        let under = self.player.head_in_water(&self.world) && !self.creative && !self.spectator && self.dead.is_none();
+        if !under {
+            self.player.air = (self.player.air + dt * max / 2.0).min(max);
+            return;
+        }
+        let before = self.player.air;
+        self.player.air -= dt;
+        if self.player.air > 0.0 {
+            // A warning as the last bit runs out.
+            if before > 3.0 && self.player.air <= 3.0 {
+                self.sfx(Sfx::Bubbles, None);
+            }
+            return;
+        }
+        // Out of air: a heart's worth each second.
+        self.player.air = (self.player.air + 1.0).max(0.01);
+        self.sfx(Sfx::Bubbles, None);
+        self.player.hurt = 0.0;
+        self.hurt_player(2.0, "drowned. Turns out you do need air");
     }
 
     /// Hunger over time: healing when well fed, starving when empty.
@@ -2926,6 +3084,7 @@ impl Game {
         self.floaties_tick();
         self.fireflies_tick(dt);
         self.campfires_tick(dt);
+        self.frost_tick(dt);
         self.critters_tick(dt);
         self.cages_tick(dt);
         self.trials_tick(dt);
@@ -3128,7 +3287,16 @@ impl Game {
                         self.system_message(None, &t);
                         self.sfx(Sfx::Fanfare, Some(at));
                     }
-                    let drops = [m.loot(&mut self.rng), m.extra_loot(&mut self.rng)];
+                    // Looting on whatever killed it: a little more of each.
+                    let looting = if m.last_attacker == self.my_id && !self.dedicated {
+                        if Enchant::Looting.fits(self.inv.held()) { self.held_level(Enchant::Looting) } else { 0 }
+                    } else if self.peers.contains_key(&m.last_attacker) && Enchant::Looting.fits(self.verified_held(m.last_attacker)) {
+                        crate::enchant::level((self.verified_ench(m.last_attacker) as u32) << 16, Enchant::Looting)
+                    } else {
+                        0
+                    };
+                    let extra = if looting > 0 { self.rng.int(0, looting as i32) as u8 } else { 0 };
+                    let drops = [m.loot(&mut self.rng).map(|(i, n)| (i, n.saturating_add(extra))), m.extra_loot(&mut self.rng)];
                     for (item, n) in drops.into_iter().flatten() {
                         if !self.creative {
                             self.pop_drop(m.body.pos + Vec3::Y * 0.5, item, n);
@@ -3340,7 +3508,7 @@ impl Game {
             }
             return;
         }
-        let cap = ((12 + 4 * self.peers.len()) as f32 * crate::moon::monster_scale(self.moon_phase())) as usize;
+        let cap = ((12 + 4 * self.peers.len()) as f32 * crate::skies::monster_scale(self.moon_phase())) as usize;
         if hostile >= cap || !self.rules.difficulty.monsters() {
             return;
         }
@@ -3489,6 +3657,9 @@ impl Game {
             sky_quad(&mut g, eye + sun_dir * 150.0, sun_dir, 16.0, T_SUN);
             sky_quad(&mut g, eye - sun_dir * 150.0, -sun_dir, 11.0, crate::texture::T_MOON_PHASES + self.moon_phase() as u16);
         }
+        self.draw_skies(&mut g, eye, sun_dir);
+        self.draw_border(&mut g, eye);
+        self.draw_lids(&mut g);
 
         // Clouds: a scrolling blocky layer.
         let cloud_y = 112.0;
@@ -3615,7 +3786,14 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
             let gliding = p.flags & crate::net::FLAG_GLIDE != 0;
-            let root = Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding);
+            // Asleep: lying in the bed they're on.
+            let bed = p.pos.floor().as_ivec3();
+            let asleep = p.flags & crate::net::FLAG_SLEEP != 0 && crate::beds::is_bed(self.world.get_v(bed));
+            let root = if asleep {
+                crate::beds::pose(bed, crate::beds::facing(self.world.get_v(bed)))
+            } else {
+                Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding)
+            };
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
             crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
         }
@@ -3625,7 +3803,10 @@ impl Game {
             let sky = self.world.sky_shade(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
-            let root = Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding);
+            let root = match self.sleeping {
+                Some(s) => crate::beds::pose(s.bed, crate::beds::facing(self.world.get_v(s.bed))),
+                None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding),
+            };
             draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
             crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), crate::trims::look(&self.inv.armor, &self.inv.armor_wear), p.bob * 2.0, sky, p.gliding);
         }
@@ -3683,8 +3864,10 @@ impl Game {
                 (h.pos.as_vec3(), h.pos.as_vec3() + Vec3::ONE)
             };
             g.begin(Pass::Blend, [0.0, 0.0, 0.0, 0.55], true);
-            // Edges sit entirely outside the block so the (now depth-tested) outline never z-fights.
-            outline(&mut g, min - Vec3::splat(0.014), max + Vec3::splat(0.014), 0.012);
+            // The edges straddle the block's surface: their outer faces sit just
+            // outside it (so they never z-fight) and their inner faces just inside
+            // it (so there's no gap between outline and block).
+            outline(&mut g, min - Vec3::splat(0.009), max + Vec3::splat(0.009), 0.012);
             if let Some((bp, prog)) = self.breaking
                 && bp == h.pos {
                     let stage = ((prog * 5.0) as u16).min(4);
@@ -3736,7 +3919,7 @@ impl Game {
             let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
             g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
-        } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) {
+        } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) && !matches!(block(held).shape, Shape::Dust) {
             let tiles = {
                 let t = block(held).tex;
                 [t[1], t[1], t[0], t[2], t[1], t[1]]
@@ -3798,7 +3981,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = self.sun_angle(); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = sun_step(self.sun_angle()); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
     }
 }
 
@@ -3910,6 +4093,14 @@ fn outline(g: &mut DynGeo, min: Vec3, max: Vec3, t: f32) {
         let m = Mat4::from_translation(min + o) * Mat4::from_scale(sz);
         g.cube(&m, [T_WHITE; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
     }
+}
+
+/// The sun's angle in small steps (a second or so of daytime apart): if the
+/// sun's camera turned a little every frame, every shadow edge would shimmer
+/// as the shadow map's texels slid across the world.
+pub fn sun_step(a: f32) -> f32 {
+    const STEP: f32 = TAU / 1200.0;
+    (a / STEP).round() * STEP
 }
 
 /// Slab-method ray/AABB test; returns entry distance.
@@ -4194,6 +4385,10 @@ pub(crate) mod tests {
         assert_eq!(g.time, 0.25);
         g.time = 0.7;
         g.sleep(base);
+        // (It takes a few seconds in bed.)
+        for _ in 0..100 {
+            g.sleep_tick(0.05, false);
+        }
         assert!(g.time < 0.05 && !g.is_night());
         assert!(g.advancements.has("sweet_dreams"));
         assert_eq!(g.spawn, base.as_vec3() + Vec3::new(0.5, 1.0, 0.5));
@@ -4833,7 +5028,7 @@ looks_like = diamond
         assert!(g.dead.is_some());
         // A frozen sun, and all of it saved.
         let mut g = arena(69);
-        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false, weather_cycle: false, hardcore: false };
+        g.rules = WorldRules { keep_inventory: true, difficulty: Difficulty::Easy, daylight_cycle: false, weather_cycle: false, hardcore: false, seasons: false, border: 0 };
         let t = g.time;
         let idle = Controls { input: Input { forward: 0.0, strafe: 0.0, jump: false, jump_pressed: false, sneak: false, sprint: false }, attack_held: false, attack_pressed: false, use_held: false, use_pressed: false, pick: false, drop: false, drop_all: false };
         for _ in 0..20 {
@@ -6448,5 +6643,113 @@ looks_like = diamond
         assert!(!back.creative);
         std::fs::remove_dir_all(&dir).ok();
     }
-}
 
+    #[test]
+    fn you_drown_without_air_and_a_turtle_shell_helps() {
+        let mut g = arena(231);
+        let p = ivec3(2, 50, 2);
+        for y in 0..3 {
+            g.world.set_v(p + IVec3::Y * y, WATER);
+        }
+        g.player.body.pos = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+        let full = g.player.health;
+        // Fifteen seconds of breath, then a heart a second.
+        for _ in 0..(14.0 / 0.05) as i32 {
+            g.breath_tick(0.05);
+        }
+        assert_eq!(g.player.health, full, "still holding it");
+        for _ in 0..(3.0 / 0.05) as i32 {
+            g.breath_tick(0.05);
+        }
+        assert!(g.player.health <= full - 2.0 && g.player.health >= full - 6.0, "{}", g.player.health);
+        // Back in the air it comes back quickly.
+        g.world.set_v(p + IVec3::Y, AIR);
+        g.world.set_v(p + IVec3::Y * 2, AIR);
+        for _ in 0..(2.0 / 0.05) as i32 {
+            g.breath_tick(0.05);
+        }
+        assert!(g.player.air >= crate::player::MAX_AIR - 0.01);
+        g.inv.armor[0] = Some((TURTLE_SHELL, 1));
+        assert_eq!(g.max_air(), crate::player::MAX_AIR + crate::player::SHELL_AIR);
+        // Creative players don't need air.
+        g.creative = true;
+        g.world.set_v(p + IVec3::Y, WATER);
+        g.player.air = 0.5;
+        let h = g.player.health;
+        for _ in 0..40 {
+            g.breath_tick(0.05);
+        }
+        assert_eq!(g.player.health, h);
+    }
+
+    #[test]
+    fn frogs_climb_out_of_ponds_and_lily_pads_hold_you_up() {
+        let mut g = arena(232);
+        // A pond two deep, its banks a block above the water.
+        for x in -2..=2 {
+            for z in -2..=2 {
+                g.world.set(x, 47, z, STONE);
+                g.world.set(x, 48, z, WATER);
+                g.world.set(x, 49, z, WATER);
+            }
+        }
+        g.world.set(0, 50, 2, LILY_PAD);
+        let frog = g.alloc_mob(MobKind::Ribbit, Vec3::new(0.5, 48.2, 0.5));
+        let mut out = false;
+        for _ in 0..1200 {
+            let world = &g.world;
+            for m in g.mobs.iter_mut() {
+                m.update(0.05, world, Vec3::new(0.0, 50.0, -30.0), false, 0.3, &mut g.rng);
+            }
+            let f = g.mobs.iter().find(|m| m.id == frog).unwrap();
+            if f.body.pos.y >= 50.0 && !f.body.in_water && f.body.on_ground {
+                out = true;
+                break;
+            }
+        }
+        assert!(out, "the frog got out");
+        // Something dropped onto the lily pad stands on it...
+        let mut b = crate::entity::Body::new(Vec3::new(0.5, 51.5, 2.5), 0.3, 1.8);
+        for _ in 0..40 {
+            b.vel.y -= crate::entity::GRAVITY * 0.05;
+            crate::entity::move_body(&g.world, &mut b, 0.05, false);
+        }
+        assert!(b.on_ground && (b.pos.y - 50.0625).abs() < 0.01, "{}", b.pos.y);
+        // ...but a swimmer comes up through it.
+        let mut s = crate::entity::Body::new(Vec3::new(0.5, 48.5, 2.5), 0.3, 1.8);
+        s.vel.y = 4.0;
+        crate::entity::move_body(&g.world, &mut s, 0.3, false);
+        assert!(s.pos.y > 49.5, "{}", s.pos.y);
+    }
+
+    #[test]
+    fn torches_go_on_walls_and_fall_off_with_them() {
+        let mut g = arena(233);
+        let wall = ivec3(3, 51, 3);
+        g.world.set_v(wall, STONE);
+        // Facing +x out from the wall's east side.
+        let f = crate::decor::frame_facing(IVec3::X).unwrap();
+        let torch = wall + IVec3::X;
+        g.world.set_v(torch, WALL_TORCH_FIRST + f as Id);
+        assert_eq!(crate::decor::outward(f).as_ivec3(), IVec3::X);
+        assert_eq!(placing_item(WALL_TORCH_FIRST + f as Id), Some(TORCH));
+        assert_eq!(crate::light::emission(WALL_TORCH_FIRST + f as Id), crate::light::emission(TORCH));
+        // Breaking the block under it leaves it be; breaking its wall drops it.
+        g.break_block(torch - IVec3::Y, false);
+        assert_eq!(g.world.get_v(torch), WALL_TORCH_FIRST + f as Id);
+        g.break_block(wall, false);
+        assert_eq!(g.world.get_v(torch), AIR);
+    }
+
+    #[test]
+    fn a_worlds_generation_options_are_kept() {
+        use crate::world::GenOptions;
+        let opts = GenOptions { version: 1, structures: 1, biome_size: 3, terrain: 2 };
+        let mut g = Game::new_with(236, false, false, opts);
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.world.generator.opts, opts);
+        // Old worlds (no options saved) keep the old rules.
+        let mut old = Game::new(237, false, false);
+        assert_eq!(Game::from_save(old.to_save()).world.generator.opts, GenOptions::LEGACY);
+    }
+}

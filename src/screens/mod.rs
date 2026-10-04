@@ -5,4 +5,4 @@ mod settings;
 mod inventory;
 mod stations;
 mod logs;
-mod hud;
+pub(crate) mod hud;

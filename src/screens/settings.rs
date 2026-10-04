@@ -159,13 +159,30 @@ impl App {
             self.settings.fancy_water = !st.fancy_water;
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Distant Terrain", st.distant_terrain), true) {
-            self.settings.distant_terrain = !st.distant_terrain;
+        let far = match (st.distant_terrain, st.smooth_far) {
+            (false, _) => "Distant Land: OFF",
+            (true, false) => "Distant Land: Blocky",
+            (true, true) => "Distant Land: Smooth",
+        };
+        if self.ui.button(Rect::new(left, y, half, bh), far, true) {
+            // Off, blocky, smooth, off...
+            (self.settings.distant_terrain, self.settings.smooth_far) = match (st.distant_terrain, st.smooth_far) {
+                (false, _) => (true, false),
+                (true, false) => (true, true),
+                (true, true) => (false, false),
+            };
+        }
+        let (size, name) = crate::render::SHADOW_SIZES[st.shadow_quality as usize % crate::render::SHADOW_SIZES.len()];
+        let short = if st.shadow_quality as usize == crate::render::SHADOW_SIZES.len() - 1 { "Why" } else { name };
+        if self.ui.button(Rect::new(right, y, half, bh), &format!("Shadow Map: {short} ({size})"), st.shadows) {
+            self.settings.shadow_quality = (st.shadow_quality + 1) % crate::render::SHADOW_SIZES.len() as u8;
         }
         y += bh + 4.0 * s;
         // VSync and anti-aliasing are set when the window opens.
         if (self.settings.vsync, self.settings.msaa) != self.video_at_start {
             self.ui.text_centered("VSync and anti-aliasing change next time the game starts.", w / 2.0, y + 9.0 * s, 8.0, GOLD);
+        } else if st.shadows && st.shadow_quality as usize == crate::render::SHADOW_SIZES.len() - 1 {
+            self.ui.text_centered(&format!("{size} shadows? {name}"), w / 2.0, y + 9.0 * s, 8.0, GOLD);
         }
         y += 16.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
@@ -281,6 +298,16 @@ impl App {
         if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), now, owner) {
             let next = Weather::from_index((self.game.weather.kind.index() + 1) % 3);
             self.game.set_weather(next);
+        }
+        y += bh + 5.0 * s;
+        let seasons = if rules.seasons { "Seasons: ON (eight days each)" } else { "Seasons: OFF" };
+        if self.ui.button(Rect::new(x, y, half, bh), seasons, owner) {
+            rules.seasons = !rules.seasons;
+        }
+        let border = if rules.border == 0 { "World Border: None".to_string() } else { format!("World Border: {} blocks", rules.border) };
+        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), &border, owner) {
+            let i = rules::BORDERS.iter().position(|b| *b == rules.border).unwrap_or(0);
+            rules.border = rules::BORDERS[(i + 1) % rules::BORDERS.len()];
         }
         if rules != self.game.rules {
             self.game.set_rules(rules);

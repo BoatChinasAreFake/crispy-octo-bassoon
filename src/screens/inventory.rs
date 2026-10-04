@@ -2,6 +2,50 @@
 
 use crate::*;
 
+/// The kinds of things in the creative palette.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreativeTab {
+    All,
+    Blocks,
+    Plants,
+    Tools,
+    Food,
+    Other,
+}
+
+impl CreativeTab {
+    pub(crate) const ALL: [CreativeTab; 6] = [CreativeTab::All, CreativeTab::Blocks, CreativeTab::Plants, CreativeTab::Tools, CreativeTab::Food, CreativeTab::Other];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            CreativeTab::All => "Everything",
+            CreativeTab::Blocks => "Building Blocks",
+            CreativeTab::Plants => "Plants and Nature",
+            CreativeTab::Tools => "Tools and Armour",
+            CreativeTab::Food => "Food",
+            CreativeTab::Other => "Everything Else",
+        }
+    }
+
+    fn plant(id: Id) -> bool {
+        is_block_item(id) && (matches!(block(id).model, Model::Cross) || is_leaves(id) || is_log(id) || matches!(id, GRASS | DIRT | SAND | GRAVEL | SNOW_GRASS | MUD | LILY_PAD | LEAF_LITTER | PINK_PETALS | WILDFLOWERS))
+    }
+
+    pub(crate) fn holds(self, id: Id) -> bool {
+        let tool = durability(id).is_some() || armor_points(id) > 0;
+        let food = food_value(id).is_some();
+        let plant = Self::plant(id);
+        match self {
+            CreativeTab::All => true,
+            CreativeTab::Blocks => is_block_item(id) && !plant,
+            CreativeTab::Plants => plant,
+            CreativeTab::Tools => tool,
+            CreativeTab::Food => food,
+            CreativeTab::Other => !is_block_item(id) && !tool && !food,
+        }
+    }
+}
+
 impl App {
     pub(crate) fn inventory_screen(&mut self) {
         let (w, h) = (screen_width(), screen_height());
@@ -63,9 +107,17 @@ impl App {
 
         let sx = x0 + 6.0 * s;
         let inv_top = y0 + 18.0 * s;
+        // Creative: the palette, or your own inventory (the button at the top switches).
         if creative {
-            self.ui.text("Creative Palette (click to grab 64, scroll for more)", sx, y0 + 12.0 * s, 9.0, WHITE);
-            let items = creative_items();
+            let label = if self.creative_backpack { "Palette" } else { "Inventory" };
+            if self.ui.button(Rect::new(x0 + left_w - 56.0 * s, y0 + 3.0 * s, 50.0 * s, 13.0 * s), label, true) {
+                self.creative_backpack = !self.creative_backpack;
+            }
+        }
+        if creative && !self.creative_backpack {
+            self.ui.text("Palette", sx, y0 + 12.0 * s, 10.0, WHITE);
+            let search = self.book_search.to_lowercase();
+            let items: Vec<Id> = creative_items().into_iter().filter(|&id| CreativeTab::ALL[self.creative_tab as usize % CreativeTab::ALL.len()].holds(id) && (search.is_empty() || item_name(id).to_lowercase().contains(&search))).collect();
             // Only the rows that fit above the hotbar; the wheel scrolls through the rest.
             let hot_top = y0 + panel_h - slot - 6.0 * s - 12.0 * s;
             let visible = (((hot_top - inv_top) / slot).floor() as usize).max(1);
@@ -104,7 +156,8 @@ impl App {
             }
         } else {
             self.ui.text("Inventory", sx, y0 + 12.0 * s, 10.0, WHITE);
-            if self.ui.button(Rect::new(x0 + left_w - 42.0 * s, y0 + 3.0 * s, 36.0 * s, 13.0 * s), "Sort", self.game.inv.cursor.is_none()) {
+            let sort_x = if creative { x0 + left_w - 98.0 * s } else { x0 + left_w - 42.0 * s };
+            if self.ui.button(Rect::new(sort_x, y0 + 3.0 * s, 36.0 * s, 13.0 * s), "Sort", self.game.inv.cursor.is_none()) {
                 self.game.inv.sort_backpack();
             }
             for i in 9..36 {
@@ -127,6 +180,27 @@ impl App {
         }
         let hot_y = y0 + panel_h - slot - 6.0 * s;
         self.ui.text("Hotbar", sx, hot_y - 3.0 * s, 9.0, GRAY);
+        if creative {
+            // Three saved hotbars (kept in settings.txt): save this one, or swap one in.
+            let bw = 26.0 * s;
+            for k in 0..3 {
+                let bx = sx + slot * 9.0 - (3 - k) as f32 * (bw * 2.0 + 3.0 * s);
+                let by = hot_y - 14.0 * s;
+                if self.ui.button(Rect::new(bx, by, bw, 11.0 * s), &format!("Save {}", k + 1), true) {
+                    self.settings.hotbars[k] = self.game.inv.slots[..9].iter().map(|st| st.map(|(id, _)| reg().key_of(id)).unwrap_or("")).collect::<Vec<_>>().join(",");
+                    self.save_settings();
+                }
+                let has = !self.settings.hotbars[k].is_empty();
+                if self.ui.button(Rect::new(bx + bw + 1.0 * s, by, bw, 11.0 * s), &format!("Load {}", k + 1), has) {
+                    let keys: Vec<String> = self.settings.hotbars[k].split(',').map(str::to_string).collect();
+                    for i in 0..9 {
+                        let id = keys.get(i).and_then(|key| reg().lookup(key)).filter(|&id| id != AIR);
+                        self.game.inv.slots[i] = id.map(|id| (id, max_stack(id)));
+                        self.game.inv.wear[i] = 0;
+                    }
+                }
+            }
+        }
         for i in 0..9 {
             let cx = sx + i as f32 * slot;
             let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, hot_y, slot, i == self.game.inv.selected);
@@ -160,12 +234,14 @@ impl App {
             }
         }
 
-        // The recipe book (see crafting.rs).
+        // The recipe book (see crafting.rs), or in creative the palette's search and kinds.
+        let rx = x0 + left_w + 8.0 * s;
         if !creative {
-            let rx = x0 + left_w + 8.0 * s;
             if let Some(t) = self.recipe_book(rx, y0, right_w, panel_h) {
                 tooltip = Some(t);
             }
+        } else {
+            self.creative_side(rx, y0, right_w, panel_h);
         }
 
         if let Some(c) = self.game.inv.cursor {
@@ -173,6 +249,43 @@ impl App {
             self.ui.stack_worn(Some(c), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
         } else if let Some(t) = tooltip {
             self.ui.tooltip(&t);
+        }
+    }
+
+    /// Creative's side panel: a search box and the palette's kinds of things.
+    fn creative_side(&mut self, rx: f32, y0: f32, right_w: f32, panel_h: f32) {
+        let s = self.ui.s;
+        draw_rectangle(rx, y0, right_w, panel_h, ui::PANEL);
+        draw_rectangle_lines(rx, y0, right_w, panel_h, s, WHITE);
+        self.ui.text("Find things", rx + 5.0 * s, y0 + 11.0 * s, 8.0, WHITE);
+        let sb = Rect::new(rx + 4.0 * s, y0 + 15.0 * s, right_w - 8.0 * s, 12.0 * s);
+        let hov_box = self.ui.hovered(sb);
+        draw_rectangle(sb.x, sb.y, sb.w, sb.h, Color::new(0.05, 0.05, 0.06, 0.95));
+        draw_rectangle_lines(sb.x, sb.y, sb.w, sb.h, s, if self.book_focus { Color::new(1.0, 1.0, 0.6, 1.0) } else if hov_box { WHITE } else { GRAY });
+        if self.ui.clicked {
+            self.book_focus = hov_box;
+            if hov_box {
+                drain_chars();
+                self.creative_backpack = false;
+            }
+        }
+        let caret = if self.book_focus && (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
+        if self.book_search.is_empty() && !self.book_focus {
+            self.ui.text("Search...", sb.x + 3.0 * s, sb.y + 9.0 * s, 7.0, GRAY);
+        } else {
+            self.ui.text(&format!("{}{caret}", self.book_search), sb.x + 3.0 * s, sb.y + 9.0 * s, 7.0, WHITE);
+        }
+        self.ui.text("Click: a stack. Right-click: one.", rx + 5.0 * s, sb.y + sb.h + 10.0 * s, 7.0, GRAY);
+        let mut y = sb.y + sb.h + 16.0 * s;
+        for (i, tab) in CreativeTab::ALL.iter().enumerate() {
+            let on = self.creative_tab as usize == i && !self.creative_backpack;
+            let label = if on { format!("> {}", tab.name()) } else { tab.name().to_string() };
+            if self.ui.button(Rect::new(rx + 4.0 * s, y, right_w - 8.0 * s, 13.0 * s), &label, true) {
+                self.creative_tab = i as u8;
+                self.creative_backpack = false;
+                self.palette_scroll = 0;
+            }
+            y += 15.0 * s;
         }
     }
 
@@ -341,6 +454,10 @@ impl App {
     /// Craft recipe `ri` once, or as many times as possible with shift.
     pub(crate) fn craft_recipe(&mut self, ri: usize, many: bool) {
         let r = &recipes()[ri];
+        if r.inputs.iter().any(|i| i.0 == BUNDLE) && !self.game.bundles_empty() {
+            self.game.msg("Empty your Bundles first: a Backpack is made from an empty one.");
+            return;
+        }
         let times = if many { 64 } else { 1 };
         let mut made = 0u8;
         for _ in 0..times {
@@ -398,17 +515,25 @@ impl App {
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let slot = 20.0 * s;
-        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * 3.0 };
-        let panel_w = slot * 9.0 + 12.0 * s;
+        // Bigger chests have more rows (and the biggest is wider; see chests.rs).
+        // (A backpack's pack shows only as much as the backpack reaches.)
+        let shown = if chests::is_chest(kind) { c.slots.len().min(chests::slots(kind)) } else { c.slots.len() };
+        let cols = if containers::is_three_slot(kind) { 9 } else { chests::columns(shown) };
+        let rows = if containers::is_three_slot(kind) { 3 } else { shown.div_ceil(cols).max(1) };
+        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * rows as f32 };
+        let panel_w = slot * cols as f32 + 12.0 * s;
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
         draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
+        // Your own slots, centred under a wide chest.
+        let isx = x0 + (panel_w - slot * 9.0) / 2.0;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         let mut tooltip: Option<String> = None;
-        self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
+        let title = if backpacks::pack_of_key(pos).is_some() { item_name(self.game.inv.held()) } else { block(kind).name };
+        self.ui.text(title, sx, y0 + 12.0 * s, 10.0, WHITE);
         let sort = Rect::new(x0 + panel_w - 42.0 * s, y0 + 3.0 * s, 36.0 * s, 13.0 * s);
         if !containers::is_three_slot(kind) && self.ui.button(sort, "Sort", true) {
             self.game.sort_container();
@@ -419,7 +544,7 @@ impl App {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
         } else {
-            (0..c.slots.len()).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
+            (0..shown).map(|i| (i, sx + (i % cols) as f32 * slot, top + (i / cols) as f32 * slot)).collect()
         };
         for &(i, x, y) in &spots {
             let (l, r, hov) = self.ui.slot_worn(c.slots[i], c.wear[i], x, y, slot, false);
@@ -464,10 +589,10 @@ impl App {
             self.ui.text(&hint, sx + slot * 5.0, top + slot * 2.9, 7.0, GRAY);
         }
         let inv_y = top + top_h + 14.0 * s;
-        self.ui.text("Inventory (shift-click to move stacks)", sx, inv_y - 4.0 * s, 8.0, GRAY);
+        self.ui.text("Inventory (shift-click to move stacks)", isx, inv_y - 4.0 * s, 8.0, GRAY);
         for i in 9..36 {
             let j = i - 9;
-            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (cx, cy) = (isx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
             let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
@@ -476,7 +601,7 @@ impl App {
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], isx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
