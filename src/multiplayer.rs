@@ -214,6 +214,13 @@ impl Game {
         if text.is_empty() {
             return;
         }
+        // Waypoints are your own business.
+        if crate::waypoints::is_command(&text) {
+            for l in self.waypoint_command(&text) {
+                self.msg(l);
+            }
+            return;
+        }
         let me = self.peer_name(self.my_id);
         if self.is_client() {
             // The host runs the scripts; commands aren't echoed as chat.

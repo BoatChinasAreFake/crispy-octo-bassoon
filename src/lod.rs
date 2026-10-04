@@ -8,6 +8,12 @@
 //! sea, with forests darkened toward their leaves. It reaches about two and a
 //! half times the render distance.
 //!
+//! It comes in two looks (Video Settings): **blocky** terraces, as above, or
+//! **smooth** rolling land, one sloped surface through the samples with the
+//! colours blended between them. Smooth tiles share the heights along their
+//! edges, and every edge hangs a skirt down out of sight, so no crack opens
+//! between tiles of different detail or where they meet the loaded world.
+//!
 //! It's made of chunk-sized tiles, and each frame only the tiles whose real
 //! chunk isn't on screen are drawn (see `Renderer::draw`), so the two meet
 //! exactly however the loaded area is shaped, and still-loading chunks show
@@ -109,6 +115,69 @@ fn colour(h: i32, biome: Biome, colours: &[[u8; 3]]) -> [u8; 3] {
     c.map(|v| v.clamp(0.0, 255.0) as u8)
 }
 
+/// How far a smooth tile's edge skirts hang down (blocks).
+const SKIRT: f32 = 12.0;
+
+/// One face with its own shade and colour at each corner.
+fn face_blend(mesh: &mut MeshData, corners: [Vec3; 4], shade: [f32; 4], c: [[u8; 3]; 4]) {
+    let (u0, v0, s) = crate::texture::tile_uv(T_WHITE);
+    let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+    let mut v = [Vertex::default(); 4];
+    for k in 0..4 {
+        let tint = [c[k][0] / 2, c[k][1] / 2, c[k][2] / 2, 128];
+        v[k] = Vertex { pos: corners[k].to_array(), uv: [u0 + uvs[k][0] * s, v0 + uvs[k][1] * s], light: [shade[k], 1.0, 0.0], tile: [-u0 - 2.0, -v0 - 2.0], tint };
+    }
+    mesh.quad(v, false);
+}
+
+/// One smooth tile: a surface through the samples on its corners (shared
+/// with its neighbours), shaded by slope, with skirts round its edges.
+fn smooth_tile(mesh: &mut MeshData, generator: &Generator, colours: &[[u8; 3]], cx: i32, cz: i32, step: i32) {
+    let n = (CW / step) as usize;
+    let (x0, z0) = (cx * CW, cz * CW);
+    // Heights and colours at every sample point, one ring wider for slopes.
+    let w = n + 3;
+    let mut hs = vec![0.0f32; w * w];
+    let mut cs = vec![[0u8; 3]; w * w];
+    for j in 0..w {
+        for i in 0..w {
+            let (x, z) = (x0 + (i as i32 - 1) * step, z0 + (j as i32 - 1) * step);
+            let (h, biome) = generator.column(x, z);
+            hs[j * w + i] = (h.max(SEA - 1) + 1) as f32;
+            cs[j * w + i] = colour(h, biome, colours);
+        }
+    }
+    let at = |i: usize, j: usize| -> (Vec3, f32, [u8; 3]) {
+        let k = (j + 1) * w + i + 1;
+        let (dx, dz) = (hs[k + 1] - hs[k - 1], hs[k + w] - hs[k - w]);
+        let normal = Vec3::new(-dx, 2.0 * step as f32, -dz).normalize();
+        let shade = 0.62 + 0.38 * normal.y.powi(2) + 0.1 * normal.x.max(0.0);
+        (Vec3::new((x0 + i as i32 * step) as f32, hs[k], (z0 + j as i32 * step) as f32), shade.min(1.0), cs[k])
+    };
+    for j in 0..n {
+        for i in 0..n {
+            let q = [at(i, j + 1), at(i + 1, j + 1), at(i + 1, j), at(i, j)];
+            face_blend(mesh, q.map(|p| p.0), q.map(|p| p.1), q.map(|p| p.2));
+        }
+    }
+    // Skirts: each edge segment hangs a wall straight down (both sides drawn).
+    let dark = |c: [u8; 3]| c.map(|v| (v as f32 * 0.8) as u8);
+    let mut skirt = |a: (Vec3, f32, [u8; 3]), b: (Vec3, f32, [u8; 3])| {
+        let down = Vec3::Y * SKIRT;
+        let corners = [a.0 - down, b.0 - down, b.0, a.0];
+        let shade = [0.6; 4];
+        let col = [dark(a.2), dark(b.2), dark(b.2), dark(a.2)];
+        face_blend(mesh, corners, shade, col);
+        face_blend(mesh, [corners[1], corners[0], corners[3], corners[2]], shade, [col[1], col[0], col[3], col[2]]);
+    };
+    for k in 0..n {
+        skirt(at(k, 0), at(k + 1, 0));
+        skirt(at(k + 1, n), at(k, n));
+        skirt(at(0, k + 1), at(0, k));
+        skirt(at(n, k), at(n, k + 1));
+    }
+}
+
 /// One flat face for the far mesh.
 fn face(mesh: &mut MeshData, corners: [Vec3; 4], shade: f32, c: [u8; 3]) {
     let (u0, v0, s) = crate::texture::tile_uv(T_WHITE);
@@ -123,7 +192,8 @@ fn face(mesh: &mut MeshData, corners: [Vec3; 4], shade: f32, c: [u8; 3]) {
 
 /// The far-off land around chunk (`pcx`, `pcz`), as tiles out to `outer`
 /// chunks; tiles closer than `skip` chunks are left out (they're always loaded).
-pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, skip: i32, near: i32, outer: i32) -> FarLand {
+#[allow(clippy::too_many_arguments)]
+pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, skip: i32, near: i32, outer: i32, smooth: bool) -> FarLand {
     let mut land = FarLand::default();
     // The top face of a column, from far off (the sea's surface over water).
     let top = |x: i32, z: i32| {
@@ -143,6 +213,12 @@ pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, ski
             }
             let step = if d2 <= near * near { NEAR_STEP } else { FAR_STEP };
             let start = land.mesh.idx.len() as u32;
+            if smooth {
+                smooth_tile(&mut land.mesh, generator, colours, cx, cz, step);
+                let end = land.mesh.idx.len() as u32;
+                land.tiles.push(((cx, cz), start, end - start));
+                continue;
+            }
             let n = CW / step;
             for j in 0..n {
                 for i in 0..n {
@@ -179,20 +255,23 @@ pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, ski
     land
 }
 
+/// What the far land was built for: (x, z, render distance, smooth).
+pub type BuildKey = (i32, i32, i32, bool);
+
 /// Keeps the far land up to date as we move (see `Game::stream`).
 #[derive(Default)]
 pub struct Lod {
-    /// Where the current land was built: (x, z, render distance).
-    pub built: Option<(i32, i32, i32)>,
-    pending: Option<((i32, i32, i32), Receiver<FarLand>)>,
+    /// Where the current land was built: (x, z, render distance, smooth).
+    pub built: Option<BuildKey>,
+    pending: Option<(BuildKey, Receiver<FarLand>)>,
 }
 
 impl Lod {
     /// Start a rebuild if we've moved far enough (or the distance changed);
     /// returns the finished land, if it's ready.
-    pub fn tick(&mut self, generator: &Arc<Generator>, colours: &[[u8; 3]], at: Vec3, chunks: i32) -> Option<FarLand> {
+    pub fn tick(&mut self, generator: &Arc<Generator>, colours: &[[u8; 3]], at: Vec3, chunks: i32, smooth: bool) -> Option<FarLand> {
         let snap = |v: f32| (v.floor() as i32).div_euclid(REBUILD) * REBUILD;
-        let want = (snap(at.x), snap(at.z), chunks);
+        let want = (snap(at.x), snap(at.z), chunks, smooth);
         if let Some((key, rx)) = &self.pending {
             if let Ok(land) = rx.try_recv() {
                 self.built = Some(*key);
@@ -214,7 +293,7 @@ impl Lod {
         let near = chunks + NEAR_RING;
         let outer = far_for(chunks) / CW;
         let _ = std::thread::Builder::new().name("distant".into()).spawn(move || {
-            let _ = tx.send(build(&generator, &colours, pcx, pcz, skip, near, outer));
+            let _ = tx.send(build(&generator, &colours, pcx, pcz, skip, near, outer, smooth));
         });
         self.pending = Some((want, rx));
         None
@@ -228,7 +307,7 @@ mod tests {
     #[test]
     fn the_far_land_is_tiles_round_the_loaded_chunks() {
         let g = Generator::new(424242);
-        let land = build(&g, &[], 0, 0, 4, 8, 12);
+        let land = build(&g, &[], 0, 0, 4, 8, 12, false);
         assert!(!land.mesh.idx.is_empty());
         // One tile per chunk, none inside `skip`, none past `outer`, and the
         // index ranges laid end to end.
@@ -249,6 +328,23 @@ mod tests {
         }
         assert_eq!(far_for(8), 320);
         assert_eq!(far_for(32), MAX_FAR);
+        // Smooth land: the same tiles, and neighbours of the same detail agree
+        // on the heights along the edge they share.
+        let smooth = build(&g, &[], 0, 0, 4, 8, 12, true);
+        assert_eq!(smooth.tiles.iter().map(|t| t.0).collect::<Vec<_>>(), land.tiles.iter().map(|t| t.0).collect::<Vec<_>>());
+        let tops = |t: &((i32, i32), u32, u32)| -> std::collections::HashMap<(i32, i32), i32> {
+            smooth.mesh.idx[t.1 as usize..(t.1 + t.2) as usize].iter().map(|&i| smooth.mesh.verts[i as usize].pos).map(|p| ((p[0] as i32, p[2] as i32), p[1] as i32)).fold(std::collections::HashMap::new(), |mut m, (k, y)| {
+                let e = m.entry(k).or_insert(y);
+                *e = (*e).max(y);
+                m
+            })
+        };
+        let a = smooth.tiles.iter().find(|t| t.0 == (8, 0)).unwrap();
+        let b = smooth.tiles.iter().find(|t| t.0 == (9, 0)).unwrap();
+        let (ta, tb) = (tops(a), tops(b));
+        for z in (0..=16).step_by(FAR_STEP as usize) {
+            assert_eq!(ta[&(144, z)], tb[&(144, z)], "the edge at z={z}");
+        }
         // Sea looks like water, deserts like sand.
         assert_eq!(surface(SEA - 10, Biome::Ocean).0, WATER);
         assert_eq!(surface(SEA + 10, Biome::Desert).0, SAND);

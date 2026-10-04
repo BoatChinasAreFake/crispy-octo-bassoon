@@ -71,6 +71,15 @@ pub fn dimming(kind: Weather, strength: f32) -> f32 {
 pub const LIGHTNING_DAMAGE: f32 = 5.0;
 const LIGHTNING_RADIUS: f32 = 3.0;
 
+/// Columns tried per second round each player for snow, and how far out.
+const SNOW_RATE: f32 = 20.0;
+const SNOW_REACH: f32 = 40.0;
+
+/// Can snow settle on top of this?
+fn takes_snow(id: Id) -> bool {
+    is_opaque(id) && is_solid(id) && block(id).model == Model::Cube && !matches!(id, ICE) && !is_liquid(id)
+}
+
 impl Game {
     /// Is it raining (or snowing) right here, on this spot under the open sky?
     pub fn rained_on(&self, x: i32, y: i32, z: i32) -> bool {
@@ -123,11 +132,55 @@ impl Game {
                 self.set_weather(next);
             }
         }
+        self.snow_tick(dt);
         if self.weather.kind == Weather::Thunder {
             self.weather.lightning -= dt;
             if self.weather.lightning <= 0.0 {
                 self.weather.lightning = self.rng.range(4.0, 14.0);
                 self.random_lightning();
+            }
+        }
+    }
+
+    /// Where the world lives: snow piles up while it snows (up to half a
+    /// block deep), on open ground near players; where it isn't snowing it
+    /// slowly melts away again.
+    pub fn snow_tick(&mut self, dt: f32) {
+        let mut near: Vec<Vec3> = self.peers.values().filter(|p| p.alive()).map(|p| p.target).collect();
+        if !self.dedicated && !self.menu {
+            near.push(self.player.body.pos);
+        }
+        let snowing = self.weather.kind.wet() && self.weather.strength > 0.5;
+        let season = self.season();
+        for c in near {
+            if crate::hollow::in_hollow(c.x) || crate::scorch::in_scorch(c.x) {
+                continue;
+            }
+            // A few columns a second round each player.
+            let mut tries = dt * SNOW_RATE;
+            while tries > 0.0 {
+                if tries < 1.0 && !self.rng.chance(tries) {
+                    break;
+                }
+                tries -= 1.0;
+                let (x, z) = ((c.x + self.rng.range(-SNOW_REACH, SNOW_REACH)).floor() as i32, (c.z + self.rng.range(-SNOW_REACH, SNOW_REACH)).floor() as i32);
+                if !self.world.is_loaded(x, z) {
+                    continue;
+                }
+                let y = self.world.surface_y(x, z);
+                let top = self.world.get(x, y, z);
+                let snows_here = snowing && crate::seasons::snows(self.world.generator.column(x, z).1, season) && self.world.sky_light(x, y + 1, z) >= 1.0;
+                if snows_here {
+                    if is_snow_layer(top) {
+                        if top < SNOW_LAYER_FIRST + SNOW_LAYERS - 1 {
+                            self.world.set(x, y, z, top + 1);
+                        }
+                    } else if y + 1 < crate::world::CH && takes_snow(top) && self.world.get(x, y + 1, z) == AIR {
+                        self.world.set(x, y + 1, z, SNOW_LAYER_FIRST);
+                    }
+                } else if is_snow_layer(top) && !snowing && !crate::seasons::snows(self.world.generator.column(x, z).1, season) {
+                    self.world.set(x, y, z, if top == SNOW_LAYER_FIRST { AIR } else { top - 1 });
+                }
             }
         }
     }
@@ -269,5 +322,39 @@ mod tests {
         for w in [Weather::Clear, Weather::Rain, Weather::Thunder] {
             assert_eq!(Weather::from_index(w.index()), w);
         }
+    }
+
+    #[test]
+    fn snow_piles_up_in_winter_and_melts_after() {
+        let mut g = crate::game::tests::arena(235);
+        g.rules.seasons = true;
+        g.day = crate::seasons::SEASON_DAYS * 3; // winter
+        let biome = g.world.generator.column(0, 0).1;
+        assert!(crate::seasons::snows(biome, g.season()), "{biome:?}");
+        g.weather.kind = Weather::Rain;
+        g.weather.strength = 1.0;
+        let count = |g: &Game| {
+            let mut n = 0;
+            for x in -12..12 {
+                for z in -12..12 {
+                    n += is_snow_layer(g.world.get(x, 50, z)) as u32;
+                }
+            }
+            n
+        };
+        for _ in 0..600 {
+            g.snow_tick(0.5);
+        }
+        let deep = (-12..12).flat_map(|x| (-12..12).map(move |z| (x, z))).filter(|&(x, z)| g.world.get(x, 50, z) > SNOW_LAYER_FIRST).count();
+        assert!(count(&g) > 100 && deep > 10, "{} {deep}", count(&g));
+        assert!((-12..12).all(|x| g.world.get(x, 50, 0) < SNOW_LAYER_FIRST + SNOW_LAYERS || !is_snow_layer(g.world.get(x, 50, 0))));
+        // Spring: it melts.
+        g.day = 0;
+        g.weather.kind = Weather::Clear;
+        let before = count(&g);
+        for _ in 0..4000 {
+            g.snow_tick(0.5);
+        }
+        assert!(count(&g) < before / 4, "{before} -> {}", count(&g));
     }
 }

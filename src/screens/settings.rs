@@ -159,8 +159,18 @@ impl App {
             self.settings.fancy_water = !st.fancy_water;
         }
         y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Distant Terrain", st.distant_terrain), true) {
-            self.settings.distant_terrain = !st.distant_terrain;
+        let far = match (st.distant_terrain, st.smooth_far) {
+            (false, _) => "Distant Land: OFF",
+            (true, false) => "Distant Land: Blocky",
+            (true, true) => "Distant Land: Smooth",
+        };
+        if self.ui.button(Rect::new(left, y, half, bh), far, true) {
+            // Off, blocky, smooth, off...
+            (self.settings.distant_terrain, self.settings.smooth_far) = match (st.distant_terrain, st.smooth_far) {
+                (false, _) => (true, false),
+                (true, false) => (true, true),
+                (true, true) => (false, false),
+            };
         }
         let (size, name) = crate::render::SHADOW_SIZES[st.shadow_quality as usize % crate::render::SHADOW_SIZES.len()];
         let short = if st.shadow_quality as usize == crate::render::SHADOW_SIZES.len() - 1 { "Why" } else { name };

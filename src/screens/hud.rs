@@ -2,6 +2,19 @@
 
 use crate::*;
 
+/// Lines of the chat log shown at once while typing.
+pub(crate) const CHAT_LINES: usize = 14;
+
+/// Where the chat log sits while typing: the bottom line's baseline, and
+/// the scrollbar (x, top, width, height) just right of the widest line.
+pub(crate) fn chat_layout(w: f32, h: f32, s: f32, widest: f32) -> (f32, (f32, f32, f32, f32)) {
+    let base = h - 44.0 * s;
+    let bottom = base + 2.0 * s;
+    let top = bottom - CHAT_LINES as f32 * 11.0 * s;
+    let x = (widest + 14.0 * s).clamp(160.0 * s, w * 0.7);
+    (base, (x, top, 5.0 * s, bottom - top))
+}
+
 impl App {
     pub(crate) fn hud(&mut self) {
         let (w, h) = (screen_width(), screen_height());
@@ -105,18 +118,37 @@ impl App {
         let lines: Vec<(&str, f32)> = if typing {
             let n = g.chat_log.len();
             let end = n.saturating_sub(self.chat_scroll);
-            g.chat_log.iter().take(end).rev().take(14).map(|m| (m.as_str(), 1.0)).collect()
+            // A backing panel and a scrollbar (drag it, or use the wheel or Page Up/Down).
+            let widest = g.chat_log.iter().take(end).rev().take(CHAT_LINES).map(|m| self.ui.text_width(m, 9.0)).fold(0.0, f32::max);
+            let (_, bar) = chat_layout(w, h, s, widest);
+            self.chat_bar = bar;
+            let (bx, top, bw, bh) = bar;
+            draw_rectangle(4.0 * s, top, bx + bw - 4.0 * s, bh, Color::new(0.0, 0.0, 0.0, 0.3));
+            if n > CHAT_LINES {
+                draw_rectangle(bx, top, bw, bh, Color::new(0.0, 0.0, 0.0, 0.5));
+                let shown = CHAT_LINES as f32 / n as f32;
+                let thumb = (bh * shown).max(8.0 * s);
+                let back = self.chat_scroll as f32 / (n - CHAT_LINES) as f32;
+                draw_rectangle(bx, top + (bh - thumb) * (1.0 - back), bw, thumb, Color::new(0.85, 0.85, 0.85, 0.9));
+            }
+            g.chat_log.iter().take(end).rev().take(CHAT_LINES).map(|m| (m.as_str(), 1.0)).collect()
         } else {
             g.messages.iter().rev().map(|(m, t)| (m.as_str(), t.min(1.0))).collect()
         };
+        let base = if typing { chat_layout(w, h, s, 0.0).0 } else { h - 40.0 * s };
         for (i, (m, a)) in lines.into_iter().enumerate() {
-            let y = h - 40.0 * s - i as f32 * 11.0 * s;
+            let y = base - i as f32 * 11.0 * s;
             let tw = self.ui.text_width(m, 9.0);
             draw_rectangle(4.0 * s, y - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4 * a));
             self.ui.text(m, 7.0 * s, y, 9.0, Color::new(1.0, 1.0, 1.0, a));
         }
-        if typing && self.chat_scroll > 0 {
-            self.ui.text(&format!("(scrolled back {} lines: Page Down to return)", self.chat_scroll), 7.0 * s, h - 40.0 * s - 14.5 * 11.0 * s, 8.0, GRAY);
+        if typing {
+            let hint = if self.chat_scroll > 0 { format!("(scrolled back {} lines: Page Down or the wheel to return)", self.chat_scroll) } else if g.chat_log.len() > CHAT_LINES { "(mouse wheel, Page Up or the scrollbar to read back)".to_string() } else { String::new() };
+            if !hint.is_empty() {
+                let y = base - (CHAT_LINES as f32 - 0.1) * 11.0 * s;
+                draw_rectangle(4.0 * s, y - 8.0 * s, self.ui.text_width(&hint, 8.0) + 6.0 * s, 10.0 * s, Color::new(0.0, 0.0, 0.0, 0.55));
+                self.ui.text(&hint, 7.0 * s, y, 8.0, LIGHTGRAY);
+            }
         }
 
         if let Some(line) = &self.chat {
@@ -333,6 +365,21 @@ impl App {
                         draw_rectangle(bx - 2.0 * s, by - 4.0 * s, 4.0 * s, 5.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
                     }
                 }
+                // Waypoints: coloured diamonds.
+                for (wp, c) in self.game.waypoints_here() {
+                    let (dx, dz) = ((wp.pos.x - me.x) / scale, (wp.pos.z - me.z) / scale);
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {
+                        let (bx, by) = (cx + dx * per_px, cy + dz * per_px);
+                        let k = 4.0 * s;
+                        let ink = Color::new(0.1, 0.08, 0.05, 1.0);
+                        let fill = Color::from_rgba(c[0], c[1], c[2], 255);
+                        draw_triangle(vec2(bx, by - k - s), vec2(bx - k - s, by), vec2(bx + k + s, by), ink);
+                        draw_triangle(vec2(bx, by + k + s), vec2(bx - k - s, by), vec2(bx + k + s, by), ink);
+                        draw_triangle(vec2(bx, by - k), vec2(bx - k, by), vec2(bx + k, by), fill);
+                        draw_triangle(vec2(bx, by + k), vec2(bx - k, by), vec2(bx + k, by), fill);
+                    }
+                }
                 // Where you last died: a dark cross.
                 if let Some(d) = self.game.last_death.filter(|_| !scorch::in_scorch(me.x)) {
                     let (dx, dz) = ((d.x - me.x) / scale, (d.z - me.z) / scale);
@@ -445,6 +492,28 @@ impl App {
             let tw = self.ui.text_width(&p.name, 9.0);
             draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 10.0 * s, tw + 6.0 * s, 12.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
             self.ui.text_centered(&p.name, sx, sy, 9.0, WHITE);
+        }
+        // Waypoints: their names over the spot, and how far.
+        for (wp, c) in self.game.waypoints_here() {
+            let at = wp.pos + Vec3::Y * 1.5;
+            let dist = at.distance(eye);
+            if !(2.0..=crate::waypoints::SHOW_RANGE).contains(&dist) {
+                continue;
+            }
+            let clip = self.last_view_proj * at.extend(1.0);
+            if clip.w < 0.1 {
+                continue;
+            }
+            let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
+            if !(0.0..w).contains(&sx) || !(0.0..h).contains(&sy) {
+                continue;
+            }
+            let label = format!("{} ({:.0}m)", wp.name, dist);
+            let tw = self.ui.text_width(&label, 8.0);
+            let col = Color::from_rgba(c[0], c[1], c[2], 255);
+            draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+            draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy + 2.0 * s, tw + 6.0 * s, 1.5 * s, col);
+            self.ui.text_centered(&label, sx, sy, 8.0, col);
         }
         // Mobs with Name Tags.
         for m in &self.game.mobs {

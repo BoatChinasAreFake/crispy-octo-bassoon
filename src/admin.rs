@@ -174,6 +174,9 @@ impl Game {
                 } else {
                     out.push("Commands: list, seed, help. Operators can do more.".into());
                 }
+                if !matches!(who, Caller::Console) {
+                    out.push("Waypoints: /wp add <name>, /wp remove <name>, /wp list.".into());
+                }
             }
             ("list", _) => {
                 let mut names: Vec<String> = self.peers.values().map(|p| p.name.clone()).collect();

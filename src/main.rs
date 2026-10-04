@@ -78,6 +78,7 @@ mod player;
 mod playtest;
 mod potions;
 mod qol;
+mod waypoints;
 mod players;
 mod regions;
 mod render;
@@ -215,6 +216,10 @@ struct App {
     recipe_scroll: f32,
     /// Rows scrolled down the creative palette.
     palette_scroll: usize,
+    /// Creative inventory: which kind of thing the palette shows, and
+    /// whether your own 27 slots are showing instead.
+    creative_tab: u8,
+    creative_backpack: bool,
     /// The recipe book: search text (and whether it's being typed in), tab, "craftable only".
     book_search: String,
     book_focus: bool,
@@ -247,6 +252,8 @@ struct App {
     captions: access::Captions,
     chat_pick: Option<usize>,
     chat_scroll: usize,
+    /// Where the chat log's scrollbar was last drawn (see screens/hud.rs).
+    chat_bar: (f32, f32, f32, f32),
     last_view_proj: Mat4,
     lan_addr: Option<String>,
     /// Password for joining, and for hosting if set.
@@ -680,10 +687,25 @@ impl App {
                 }
             }
             let wheel = mouse_wheel().1;
-            if is_key_pressed(KeyCode::PageUp) || wheel > 0.1 {
-                self.chat_scroll = (self.chat_scroll + 3).min(self.game.chat_log.len().saturating_sub(1));
-            } else if is_key_pressed(KeyCode::PageDown) || wheel < -0.1 {
+            let most = self.game.chat_log.len().saturating_sub(screens::hud::CHAT_LINES);
+            if is_key_pressed(KeyCode::PageUp) {
+                self.chat_scroll = (self.chat_scroll + screens::hud::CHAT_LINES - 1).min(most);
+            } else if is_key_pressed(KeyCode::PageDown) {
+                self.chat_scroll = self.chat_scroll.saturating_sub(screens::hud::CHAT_LINES - 1);
+            } else if wheel > 0.01 {
+                self.chat_scroll = (self.chat_scroll + 3).min(most);
+            } else if wheel < -0.01 {
                 self.chat_scroll = self.chat_scroll.saturating_sub(3);
+            }
+            // Dragging the scrollbar.
+            if is_mouse_button_down(MouseButton::Left) && most > 0 {
+                let s = self.ui.s;
+                let (bx, top, bw, bh) = self.chat_bar;
+                let (mx, my) = mouse_position();
+                if (bx - 6.0 * s..bx + bw + 6.0 * s).contains(&mx) && (top..top + bh).contains(&my) {
+                    let up = 1.0 - (my - top) / bh;
+                    self.chat_scroll = ((up * most as f32).round() as usize).min(most);
+                }
             }
             if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
                 let text = line.clone();
@@ -1415,6 +1437,7 @@ impl App {
         self.game.shadows = self.settings.shadows;
         self.game.fancy_water = self.settings.fancy_water;
         self.game.distant_terrain = self.settings.distant_terrain;
+        self.game.smooth_far = self.settings.smooth_far;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
             mesher::set_smooth(self.settings.smooth_lighting);
@@ -1953,6 +1976,8 @@ async fn game_main() {
         show_debug: false,
         recipe_scroll: 0.0,
         palette_scroll: 0,
+        creative_tab: 0,
+        creative_backpack: false,
         book_search: String::new(),
         book_focus: false,
         book_tab: crafting::Tab::All,
@@ -1974,6 +1999,7 @@ async fn game_main() {
         captions: Default::default(),
         chat_pick: None,
         chat_scroll: 0,
+        chat_bar: (0.0, 0.0, 0.0, 0.0),
         last_view_proj: Mat4::IDENTITY,
         lan_addr: None,
         mp_password: String::new(),
@@ -2050,6 +2076,7 @@ async fn game_main() {
         }
         app.settings.fancy_clouds = !flag("--fast-clouds");
         app.settings.shadows = !flag("--no-shadows");
+        app.settings.smooth_far = flag("--smooth-far");
         app.settings.fancy_water = !flag("--simple-water");
         // Show the "new version" button as if one were out (for screenshots).
         if let Some(tag) = arg("--pretend-update") {
@@ -2255,7 +2282,7 @@ async fn game_main() {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" | "golems" | "homestead" => {
+            "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" | "golems" | "homestead" | "chat" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
@@ -2628,6 +2655,14 @@ async fn game_main() {
                 app.game.inv.slots[0] = Some((block::TREASURE_MAP, 1));
                 app.game.inv.wear[0] = treasure::mark(at(40.0, 10.0));
                 app.game.inv.selected = 0;
+            }
+            if s.mode == "chat" && frames == 60 {
+                // A long chat, open and scrolled back a little.
+                for i in 0..40 {
+                    app.game.msg(format!("<Player{}> chat line number {i}", i % 3));
+                }
+                app.chat = Some("hello".into());
+                app.chat_scroll = 6;
             }
             if s.mode == "homestead" && frames == 150 {
                 use entity::MobKind as K;

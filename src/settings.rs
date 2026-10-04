@@ -60,6 +60,8 @@ pub struct Settings {
     pub fancy_water: bool,
     /// Low-detail land past the render distance (see lod.rs).
     pub distant_terrain: bool,
+    /// ...drawn smooth instead of blocky (see lod.rs).
+    pub smooth_far: bool,
     /// The banner painted on your shield (a design, see banners.rs; 0: plain).
     pub shield_banner: u16,
     /// Creative hotbar presets: nine block/item names each, comma-separated ("" for an empty slot).
@@ -107,6 +109,7 @@ impl Default for Settings {
             shadow_quality: 1,
             fancy_water: true,
             distant_terrain: true,
+            smooth_far: false,
             shield_banner: 0,
             hotbars: Default::default(),
         }
@@ -126,7 +129,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nshield_banner={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -156,6 +159,7 @@ impl Settings {
             self.shadow_quality,
             self.fancy_water,
             self.distant_terrain,
+            self.smooth_far,
             self.shield_banner,
         ) + self.hotbars.iter().enumerate().map(|(i, h)| format!("hotbar{}={}\n", i + 1, clean(h, 600))).collect::<String>().as_str()
             + self.binds.to_text().as_str()
@@ -205,6 +209,7 @@ impl Settings {
                 "shadow_quality" => s.shadow_quality = v.parse::<u8>().unwrap_or(s.shadow_quality).min(crate::render::SHADOW_SIZES.len() as u8 - 1),
                 "fancy_water" => s.fancy_water = flag(s.fancy_water),
                 "distant_terrain" => s.distant_terrain = flag(s.distant_terrain),
+                "smooth_far" => s.smooth_far = flag(s.smooth_far),
                 "shield_banner" => s.shield_banner = v.parse().unwrap_or(0),
                 "hotbar1" | "hotbar2" | "hotbar3" => s.hotbars[(k.trim().as_bytes()[6] - b'1') as usize] = clean(v, 600),
                 "clouds" => s.clouds = flag(s.clouds),
@@ -297,6 +302,7 @@ mod tests {
             shadow_quality: 3,
             fancy_water: false,
             distant_terrain: false,
+            smooth_far: true,
             shield_banner: 0x0042,
             hotbars: Default::default(),
         };

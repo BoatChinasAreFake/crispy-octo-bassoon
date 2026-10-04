@@ -345,7 +345,14 @@ pub const SCAFFOLDING: Id = 530;
 pub const LANTERN_HANGING: Id = 531;
 /// Torches on a wall, leaning out on the side they face (0 north .. 3 west, as frames).
 pub const WALL_TORCH_FIRST: Id = 532;
-pub const NUM_BLOCKS: Id = 536;
+/// Snow piled up by snowfall: one to four eighths of a block deep.
+pub const SNOW_LAYER_FIRST: Id = 536;
+pub const SNOW_LAYERS: Id = 4;
+pub const NUM_BLOCKS: Id = 540;
+
+pub fn is_snow_layer(id: Id) -> bool {
+    (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
+}
 
 pub fn is_wall_torch(id: Id) -> bool {
     (WALL_TORCH_FIRST..WALL_TORCH_FIRST + 4).contains(&id)
@@ -768,6 +775,8 @@ pub enum Shape {
     Scaffold,
     /// A lantern hanging from the block above.
     Hanging,
+    /// A flat layer on the floor, `eighths` of a block deep (snow).
+    Layer { eighths: u8 },
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -843,6 +852,7 @@ impl Shape {
             Shape::Anvil => ([([0.125, 0.0, 0.125], [0.875, 0.25, 0.875]), ([0.25, 0.25, 0.3125], [0.75, 0.625, 0.6875]), ([0.0, 0.625, 0.1875], [1.0, 1.0, 0.8125])], 3),
             Shape::Table => ([([0.0; 3], [1.0, 0.75, 1.0]), full, full], 1),
             Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
+            Shape::Layer { eighths } => ([([0.0; 3], [1.0, eighths as f32 / 8.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
             Shape::Button { down } => ([([5.0 / 16.0, 0.0, 6.0 / 16.0], [11.0 / 16.0, if down { 1.0 / 16.0 } else { 2.0 / 16.0 }, 10.0 / 16.0]), full, full], 1),
             Shape::Portal { x_axis: true } => ([([0.0, 0.0, 0.375], [1.0, 1.0, 0.625]), full, full], 1),
@@ -2239,6 +2249,13 @@ impl Registry {
             t.creative = false;
             blocks.push(t);
         }
+        for (k, key) in ["snow_layer_1", "snow_layer_2", "snow_layer_3", "snow_layer_4"].into_iter().enumerate() {
+            let mut d = def(key, "Snow (Fresh)", Shaped, true, false, [T_SNOW; 3], 0.1, 0, false, AIR, 0.0, S_SAND);
+            d.shape = Shape::Layer { eighths: k as u8 + 1 };
+            d.see_through = true;
+            d.creative = false;
+            blocks.push(d);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2819,7 +2836,7 @@ pub fn targetable(id: Id) -> bool {
 /// Placing into this cell simply replaces it.
 #[inline]
 pub fn replaceable(id: Id) -> bool {
-    matches!(id, AIR | TALL_GRASS | WEEDS) || is_liquid(id)
+    matches!(id, AIR | TALL_GRASS | WEEDS) || is_liquid(id) || is_snow_layer(id)
 }
 
 pub fn is_block_item(id: Id) -> bool {
@@ -3036,6 +3053,7 @@ mod id_order_tests {
             (SCAFFOLDING, "scaffolding"),
             (LANTERN_HANGING, "lantern_hanging"),
             (WALL_TORCH_FIRST + 3, "wall_torch_west"),
+            (SNOW_LAYER_FIRST + 3, "snow_layer_4"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }

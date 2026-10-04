@@ -23,6 +23,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f32::consts::{PI, TAU};
 
 pub const DAY_SECONDS: f32 = 1200.0;
+/// Lines of chat kept to scroll back through.
+pub const CHAT_KEEP: usize = 500;
 
 fn projectile_fan(center: Vec3, count: u8, spread: f32) -> Vec<Vec3> {
     let count = count.clamp(1, 5) as usize;
@@ -282,6 +284,8 @@ pub struct Game {
     pub border_note: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
+    /// Distant terrain as smooth rolling land rather than blocky terraces.
+    pub smooth_far: bool,
     pub lod: crate::lod::Lod,
     /// Trades made with each Hmmer, by each player (see villagers.rs).
     pub regulars: HashMap<(u32, String), u16>,
@@ -365,6 +369,8 @@ pub struct Game {
     pub bench: Option<crate::smithing::BenchUi>,
     /// Where the local player last died (for the Recovery Compass).
     pub last_death: Option<Vec3>,
+    /// Places you've named (see waypoints.rs).
+    pub waypoints: Vec<crate::waypoints::Waypoint>,
     /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
     pub lodestone: Option<IVec3>,
     /// A joined player's view of their Bundles (the host's word), and the one just used.
@@ -526,6 +532,7 @@ impl Game {
             was_wet: false,
             border_note: 0.0,
             distant_terrain: true,
+            smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
             day: 0,
@@ -577,6 +584,7 @@ impl Game {
             step_timer: 0.0,
             bench: None,
             last_death: None,
+            waypoints: Vec::new(),
             lodestone: None,
             bundle_mirror: HashMap::new(),
             bundle_pending: None,
@@ -793,6 +801,9 @@ impl Game {
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
         }
+        if !self.waypoints.is_empty() {
+            v.push(("waypoints".into(), crate::waypoints::encode(&self.waypoints)));
+        }
         if let Some(d) = self.last_death {
             v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).collect()));
         }
@@ -842,6 +853,9 @@ impl Game {
         }
         if let Some(b) = extra("journal") {
             self.journal = crate::archaeology::Journal::decode(b);
+        }
+        if let Some(b) = extra("waypoints") {
+            self.waypoints = crate::waypoints::decode(b);
         }
         if let Some(b) = extra("last_death").filter(|b| b.len() >= 12) {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
@@ -933,7 +947,7 @@ impl Game {
         }
         // Everything said is kept a while, to scroll back through with chat open.
         self.chat_log.push_back(s.clone());
-        if self.chat_log.len() > 100 {
+        if self.chat_log.len() > CHAT_KEEP {
             self.chat_log.pop_front();
         }
         self.messages.push((s, 7.0));
@@ -1010,7 +1024,7 @@ impl Game {
         // The far-off land, kept up with where we are.
         if self.distant_terrain && !self.in_scorch() && !self.in_hollow() {
             let generator = self.world.generator.clone();
-            if let Some(land) = self.lod.tick(&generator, &self.map_colors, center, radius) {
+            if let Some(land) = self.lod.tick(&generator, &self.map_colors, center, radius, self.smooth_far) {
                 renderer.set_far(ctx, Some(&land));
             }
         } else if renderer.has_far() {
@@ -2629,7 +2643,7 @@ impl Game {
         } else {
             self.system_message(None, &line);
             self.chat_log.push_back(line);
-            while self.chat_log.len() > 100 {
+            while self.chat_log.len() > CHAT_KEEP {
                 self.chat_log.pop_front();
             }
         }
