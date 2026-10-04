@@ -163,6 +163,8 @@ pub struct Game {
     pub glide_wear: f32,
     /// Time owed to random block ticks (see copper.rs).
     pub random_tick_acc: f32,
+    /// Seconds towards the next look for loose Pointy Rocks (see caves.rs).
+    pub shake_acc: f32,
     /// What's packed inside broken Hollow Boxes, by number (see boxes.rs).
     pub boxes: HashMap<u16, crate::containers::Container>,
     /// Sound effects requested this frame (effect, world position if positional).
@@ -467,6 +469,7 @@ impl Game {
             glide_wear: 0.0,
             boxes: HashMap::new(),
             random_tick_acc: 0.0,
+            shake_acc: 0.0,
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -943,6 +946,7 @@ impl Game {
             MOO_STEAK => "udderly",
             PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND | PICK_COPPER => "tool_time",
             BAMBOO => "bamboozled",
+            AMETHYST_SHARD => "crystal_clear",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
             _ => return,
         };
@@ -1222,6 +1226,11 @@ impl Game {
                 if height > 5.0 {
                     self.advance("hay_there");
                 }
+            }
+            // Landing on an upright Pointy Rock: twice the fall damage (and then some).
+            let spike = [under, under + IVec3::Y].into_iter().any(|p| self.world.get_v(p) == POINTY_ROCK && !crate::caves::hangs(|y| self.world.get(p.x, y, p.z), p.y));
+            if spike && height >= 2.0 {
+                fall = fall * 2.0 + 2.0;
             }
             self.trample(under, height);
         }
@@ -2202,6 +2211,18 @@ impl Game {
                 self.use_restoration(pos);
                 return;
             }
+            // Glow berries: pick them off a vine; plant them under a ceiling.
+            if id == CAVE_VINES_LIT && self.pick_berries(pos) {
+                return;
+            }
+            if held == GLOW_BERRIES
+                && let Some(Target::Block(h)) = &self.target
+            {
+                let (normal, hit) = (h.normal, h.pos);
+                if self.plant_berries(hit, normal, id) {
+                    return;
+                }
+            }
             if let Some(sprout) = crate::sniffers::sprout_of(held)
                 && matches!(id, GRASS | DIRT | FARMLAND | FARMLAND_WET | MUD | PALE_MOSS)
                 && self.world.get_v(pos + IVec3::Y) == AIR
@@ -2647,6 +2668,8 @@ impl Game {
             }
             self.farm_break_effects(pos, id);
         }
+        // Vines and buds hanging from it come down.
+        self.drop_hangers(pos);
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
@@ -3327,6 +3350,7 @@ impl Game {
             t.fuse -= dt;
         }
         self.falling_tick(dt);
+        self.stalactite_tick(dt);
         self.fireballs_tick(dt);
         let boom: Vec<Vec3> = self.tnts.iter().filter(|t| t.fuse <= 0.0).map(|t| t.pos + Vec3::splat(0.5)).collect();
         self.tnts.retain(|t| t.fuse > 0.0);

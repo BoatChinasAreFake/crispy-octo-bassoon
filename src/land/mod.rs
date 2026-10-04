@@ -1,7 +1,8 @@
 //! The land: the world and how it's generated, its biomes, weather, skies and
-//! seasons, and the places in it (structures, the Scorchlands, the Hollow, the Deep Dark).
+//! seasons, and the places in it (cave biomes, structures, the Scorchlands, the Hollow, the Deep Dark).
 
 pub(crate) mod archaeology;
+pub(crate) mod caves;
 pub(crate) mod copper;
 pub(crate) mod deepdark;
 pub(crate) mod falling;

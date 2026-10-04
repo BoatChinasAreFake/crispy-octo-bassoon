@@ -640,6 +640,7 @@ impl Generator {
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
+        let geodes = self.geodes_for_chunk(cx, cz);
         for lz in 0..CW {
             for lx in 0..CW {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
@@ -749,6 +750,12 @@ impl Generator {
                             }
                         }
                     }
+                }
+                // Cave biomes and geodes (see caves.rs), above the Deep Dark.
+                let deep = h > crate::deepdark::DEEP_TOP + 6 && self.deep_dark(x, z);
+                self.cave_column(&mut b, (lx, lz), (x, z), h, if deep { crate::deepdark::DEEP_TOP + 2 } else { 3 });
+                if !geodes.is_empty() {
+                    self.geode_column(&mut b, lx, lz, x, z, &geodes);
                 }
                 // Cave decorations: glowing mushrooms and pointy rocks on floors, pointy rocks on ceilings.
                 for y in 3..(h - 4).max(3) {
@@ -1369,8 +1376,13 @@ impl World {
                 self.fall_dirty.insert(p);
             }
             let above = p + IVec3::Y;
-            if crate::falling::is_gravity(self.get_v(above)) {
+            if crate::falling::is_gravity(self.get_v(above)) || self.get_v(above) == POINTY_ROCK {
                 self.fall_dirty.insert(above);
+            }
+            // A Pointy Rock hanging from here may have lost what it hangs from.
+            let below = p - IVec3::Y;
+            if below.y >= 0 && self.get_v(below) == POINTY_ROCK {
+                self.fall_dirty.insert(below);
             }
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
             self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));

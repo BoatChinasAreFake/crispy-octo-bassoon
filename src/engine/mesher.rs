@@ -313,8 +313,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                 [[a, 0., a], [b, 0., b], [b, 1., b], [a, 1., a]],
                                 [[b, 0., a], [a, 0., b], [a, 1., b], [b, 1., a]],
                             ];
-                            // A pointy rock hanging from a ceiling points down (a stalactite).
-                            let hanging = id == POINTY_ROCK && is_solid(hood.get(lx, y + 1, lz)) && !is_solid(hood.get(lx, y - 1, lz));
+                            // A pointy rock (or amethyst bud) hanging from a ceiling points down (a stalactite).
+                            let hanging = crate::caves::can_hang(id) && crate::caves::hangs(|k| hood.get(lx, k, lz), y);
                             let uv = if hanging { [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] } else { CORNER_UV };
                             // A torch on a wall leans out from it.
                             let lean = is_wall_torch(id).then(|| crate::decor::outward((id - WALL_TORCH_FIRST) as u8));

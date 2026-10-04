@@ -656,6 +656,22 @@ pub const T_BED_TOP_W: u16 = 826;
 pub const T_BACKPACK: u16 = 827;
 pub const T_BIG_BACKPACK: u16 = 828;
 pub const T_HUGE_BACKPACK: u16 = 829;
+// Cave biomes.
+pub const T_DRIPSTONE: u16 = 830;
+pub const T_MOSS: u16 = 831;
+pub const T_CAVE_VINES: u16 = 832;
+pub const T_CAVE_VINES_LIT: u16 = 833;
+pub const T_AZALEA: u16 = 834;
+pub const T_CALCITE: u16 = 835;
+pub const T_SMOOTH_BASALT: u16 = 836;
+pub const T_AMETHYST: u16 = 837;
+pub const T_BUDDING_AMETHYST: u16 = 838;
+pub const T_AMETHYST_BUD_SMALL: u16 = 839;
+pub const T_AMETHYST_BUD_LARGE: u16 = 840;
+pub const T_AMETHYST_CLUSTER: u16 = 841;
+pub const T_TINTED_GLASS: u16 = 842;
+pub const T_GLOW_BERRIES: u16 = 843;
+pub const T_AMETHYST_SHARD: u16 = 844;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3641,6 +3657,105 @@ fn home_tiles(a: &mut Atlas) {
     a.each(T_TURTLE_WORN, |x, y, r, _| shade(if (x + y * 2) % 5 == 0 { rgb(60, 120, 50) } else { rgb(90, 170, 70) }, r.range(0.88, 1.05)));
     mob_tiles(a);
     masonry_tiles(a);
+    cave_tiles(a);
+}
+
+/// v0.2's cave biomes: dripstone, lush caves and amethyst geodes.
+fn cave_tiles(a: &mut Atlas) {
+    // Dripstone: tan stone in wavy vertical streaks, where water ran down it.
+    a.each(T_DRIPSTONE, |x, y, r, p| {
+        let streak = (p.noise2(x as f32 / 3.0, y as f32 / 14.0) * 3.0 + x as f32 * 1.3).sin();
+        let line = if streak > 0.8 { 0.86 } else if streak < -0.7 { 1.08 } else { 1.0 };
+        let blotch = 1.0 + p.noise2(x as f32 / 4.0 + 30.0, y as f32 / 4.0) * 0.12;
+        shade(rgb(150, 116, 92), line * blotch * r.range(0.9, 1.08))
+    });
+    a.each(T_MOSS, |x, y, r, p| {
+        let clump = p.noise2(x as f32 / 4.0 + 7.0, y as f32 / 4.0);
+        shade(rgb(90, 125, 45), (1.0 + clump * 0.25) * r.range(0.82, 1.12))
+    });
+    // Cave vines: a stem hanging down with leaves either side; the lit ones carry berries.
+    for (t, berries) in [(T_CAVE_VINES, false), (T_CAVE_VINES_LIT, true)] {
+        a.each(t, move |x, y, r, _| {
+            let stem = (7..9).contains(&x);
+            let leaf = (y % 5 == 1 && (4..7).contains(&x)) || (y % 5 == 3 && (9..12).contains(&x));
+            let berry = berries && ((y % 6 == 4 && (4..7).contains(&x) && y > 3) || (y % 6 == 1 && (9..12).contains(&x) && y > 6));
+            if berry {
+                if (x + y) % 3 == 0 { rgb(255, 245, 170) } else { rgb(255, 175, 40) }
+            } else if stem || leaf {
+                shade(rgb(80, 120, 40), r.range(0.85, 1.12))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    // Azalea: a round green bush on a little trunk, with pink flowers.
+    a.each(T_AZALEA, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.0);
+        let bush = dx * dx / 42.0 + dy * dy / 30.0 < 1.0 && y < 12;
+        let trunk = (7..9).contains(&x) && y >= 11;
+        if bush {
+            if (x * 5 + y * 3) % 11 == 0 { rgb(230, 120, 200) } else { shade(rgb(95, 135, 50), r.range(0.8, 1.12)) }
+        } else if trunk {
+            rgb(110, 85, 60)
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_CALCITE, |_, _, r, _| shade(rgb(222, 222, 215), r.range(0.92, 1.05)));
+    a.each(T_SMOOTH_BASALT, |x, y, r, p| shade(rgb(72, 72, 78), (1.0 + p.noise2(x as f32 / 5.0, y as f32 / 5.0) * 0.12) * r.range(0.94, 1.04)));
+    // Amethyst: purple facets.
+    let facet = |x: usize, y: usize, r: &mut Rng| {
+        // Crystal faces: diagonal bands crossing, lighter where they meet.
+        let a = (x + y) / 3 % 3;
+        let b = (x + 16 - y) / 4 % 3;
+        shade(rgb(140, 95, 200), [0.78, 0.95, 1.12][a] * [0.92, 1.0, 1.1][b] * r.range(0.95, 1.04))
+    };
+    a.each(T_AMETHYST, |x, y, r, _| facet(x, y, r));
+    a.each(T_BUDDING_AMETHYST, move |x, y, r, _| {
+        // Budding: darker, with little bright crosses where buds start.
+        let spot = (x % 6 == 2 && (1..4).contains(&(y % 6))) || (y % 6 == 2 && (1..4).contains(&(x % 6)));
+        if spot { rgb(230, 190, 255) } else { shade(facet(x, y, r), 0.82) }
+    });
+    // Buds and the cluster: crystals pointing up (flipped when they hang).
+    for (t, tall, wide) in [(T_AMETHYST_BUD_SMALL, 5, 2), (T_AMETHYST_BUD_LARGE, 9, 3), (T_AMETHYST_CLUSTER, 13, 4)] {
+        a.each(t, move |x, y, r, _| {
+            let h = 15 - y as i32;
+            let crystals = [(7i32, tall), (7 - wide, tall * 2 / 3), (8 + wide, tall * 3 / 4)];
+            for (cx, ch) in crystals {
+                let half = 1 + (ch - h).max(0) / 4;
+                if h < ch && (x as i32 - cx).abs() <= half.min(2) {
+                    let tip = h > ch - 3;
+                    return shade(if tip { rgb(235, 200, 255) } else { rgb(165, 110, 225) }, r.range(0.9, 1.08));
+                }
+            }
+            [0, 0, 0, 0]
+        });
+    }
+    // Tinted glass: dark smoky panes with a pale rim.
+    a.each(T_TINTED_GLASS, |x, y, _, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        if edge { [70, 55, 85, 255] } else if (x + y) % 7 == 0 { [90, 80, 105, 200] } else { [40, 32, 50, 190] }
+    });
+    a.each(T_GLOW_BERRIES, |x, y, _, _| {
+        let berry = |cx: f32, cy: f32| (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2) < 9.0;
+        let stem = x == 8 && y < 5;
+        if berry(5.5, 9.5) || berry(10.5, 10.5) || berry(8.0, 6.5) {
+            if (x + y) % 4 == 0 { rgb(255, 250, 190) } else { rgb(255, 170, 40) }
+        } else if stem {
+            rgb(80, 120, 40)
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_AMETHYST_SHARD, |x, y, r, _| {
+        // A long crystal, corner to corner.
+        let d = (x as i32 - (15 - y as i32)).abs();
+        if d <= 2 && (2..14).contains(&y) {
+            shade(if d == 0 { rgb(235, 200, 255) } else { rgb(160, 105, 220) }, r.range(0.9, 1.06))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
 }
 
 /// v0.1.21's building blocks.

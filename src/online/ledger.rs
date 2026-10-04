@@ -339,6 +339,11 @@ impl Game {
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
             return true;
         }
+        // Glow berries picked off a vine land at their feet.
+        if old == CAVE_VINES_LIT && new == CAVE_VINES {
+            self.pop_drop(at.as_vec3() + macroquad::math::Vec3::new(0.5, 0.2, 0.5), GLOW_BERRIES, 1);
+            return true;
+        }
         // Goo waxes copper.
         if crate::copper::waxed(old) == Some(new) {
             return self.peer_take(from, GOO, 1) || self.peer_take(from, HONEYCOMB, 1);

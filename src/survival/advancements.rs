@@ -159,6 +159,9 @@ pub const ALL: &[Advancement] = &[
     adv("jousting", "Jousting Champion", "Hit something with a spear from a galloping mount."),
     adv("the_usual", "The Usual, Please", "Trade fifteen times with the same Hmmer. They know your order now."),
     adv("trading_hall", "Trading Hall", "Trade with a Farmer, a Librarian, a Smith and a Fisher."),
+    adv("glow_up", "Glow Up", "Pick Glow Berries off a cave vine. Snack and nightlight in one."),
+    adv("mind_your_head", "Mind Your Head", "Get hit by a falling Pointy Rock. It was on the label."),
+    adv("crystal_clear", "Crystal Clear", "Get an Amethyst Shard out of a geode."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -177,7 +180,7 @@ const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
-    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane",
+    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up",
 ];
 
 /// Which tab (1..) an advancement is on.

@@ -354,7 +354,25 @@ pub const GOLD_CHEST: Id = 541;
 pub const DIAMOND_CHEST: Id = 542;
 /// Beds facing east, south and west (`BED` faces north; see beds.rs).
 pub const BED_FACING_FIRST: Id = 543;
-pub const NUM_BLOCKS: Id = 546;
+/// Cave biomes (see caves.rs): dripstone caves, lush caves and amethyst geodes.
+pub const DRIPSTONE_BLOCK: Id = 546;
+pub const MOSS_BLOCK: Id = 547;
+pub const MOSS_CARPET: Id = 548;
+/// Hanging from cave ceilings; the lit ones have glow berries on.
+pub const CAVE_VINES: Id = 549;
+pub const CAVE_VINES_LIT: Id = 550;
+pub const AZALEA: Id = 551;
+pub const CALCITE: Id = 552;
+pub const SMOOTH_BASALT: Id = 553;
+pub const AMETHYST_BLOCK: Id = 554;
+/// Grows buds on its top and bottom, which grow into clusters.
+pub const BUDDING_AMETHYST: Id = 555;
+pub const AMETHYST_BUD_SMALL: Id = 556;
+pub const AMETHYST_BUD_LARGE: Id = 557;
+pub const AMETHYST_CLUSTER: Id = 558;
+/// Glass that lets no light through.
+pub const TINTED_GLASS: Id = 559;
+pub const NUM_BLOCKS: Id = 560;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -568,7 +586,11 @@ pub const TURTLE_SHELL: Id = FIRST_ITEM + 237;
 pub const BACKPACK: Id = FIRST_ITEM + 238;
 pub const BIG_BACKPACK: Id = FIRST_ITEM + 239;
 pub const HUGE_BACKPACK: Id = FIRST_ITEM + 240;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 241;
+/// Picked off lit cave vines: a snack, and plant one under a ceiling for a new vine.
+pub const GLOW_BERRIES: Id = FIRST_ITEM + 241;
+/// From amethyst clusters.
+pub const AMETHYST_SHARD: Id = FIRST_ITEM + 242;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 243;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -1060,6 +1082,10 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if id == LANTERN_HANGING {
         return Some(LANTERN);
+    }
+    // Vines are planted from glow berries.
+    if crate::caves::is_cave_vine(id) {
+        return Some(GLOW_BERRIES);
     }
     if is_wall_torch(id) {
         return Some(TORCH);
@@ -2298,6 +2324,36 @@ impl Registry {
             b.creative = false;
             blocks.push(b);
         }
+        // Cave biomes (see caves.rs).
+        blocks.push(def("dripstone_block", "Dripstone Block (Drippy Stone)", Cube, true, true, [T_DRIPSTONE; 3], 1.5, 1, true, DRIPSTONE_BLOCK, 0.0, S_STONE));
+        blocks.push(def("moss_block", "Moss Block (Soft, Green, Suspicious)", Cube, true, true, [T_MOSS; 3], 0.1, 0, false, MOSS_BLOCK, 0.0, S_GRASS));
+        let mut carpet = def("moss_carpet", "Moss Carpet (Rug of the Earth)", Shaped, true, false, [T_MOSS; 3], 0.1, 0, false, MOSS_CARPET, 0.0, S_GRASS);
+        carpet.shape = Shape::Layer { eighths: 1 };
+        carpet.see_through = true;
+        blocks.push(carpet);
+        let mut vines = def("cave_vines", "Cave Vines (Dangly)", Cross, false, false, [T_CAVE_VINES; 3], 0.0, 0, false, AIR, 0.0, S_GRASS);
+        vines.creative = false;
+        blocks.push(vines);
+        let mut lit = def("cave_vines_lit", "Cave Vines (With Glow Berries)", Cross, false, false, [T_CAVE_VINES_LIT; 3], 0.0, 0, false, GLOW_BERRIES, 8.0, S_GRASS);
+        lit.creative = false;
+        blocks.push(lit);
+        blocks.push(def("azalea", "Azalea (Shrub With Ambitions)", Cross, false, false, [T_AZALEA; 3], 0.0, 0, false, AZALEA, 0.0, S_GRASS));
+        blocks.push(def("calcite", "Calcite (Chalky)", Cube, true, true, [T_CALCITE; 3], 0.75, 1, true, CALCITE, 0.0, S_STONE));
+        blocks.push(def("smooth_basalt", "Smooth Basalt (Geode Rind)", Cube, true, true, [T_SMOOTH_BASALT; 3], 1.25, 1, true, SMOOTH_BASALT, 0.0, S_STONE));
+        blocks.push(def("amethyst_block", "Amethyst Block (Chimes When Touched)", Cube, true, true, [T_AMETHYST; 3], 1.5, 1, true, AMETHYST_BLOCK, 0.0, S_GLASS));
+        let mut budding = def("budding_amethyst", "Budding Amethyst (Grows Gems, Won't Move)", Cube, true, true, [T_BUDDING_AMETHYST; 3], 1.5, 1, true, AIR, 0.0, S_GLASS);
+        budding.creative = false;
+        blocks.push(budding);
+        for (key, name, tex, light, drop) in [
+            ("small_amethyst_bud", "Small Amethyst Bud (Patience)", T_AMETHYST_BUD_SMALL, 1.0, AIR),
+            ("large_amethyst_bud", "Large Amethyst Bud (Nearly)", T_AMETHYST_BUD_LARGE, 3.0, AIR),
+            ("amethyst_cluster", "Amethyst Cluster (Ready!)", T_AMETHYST_CLUSTER, 5.0, AMETHYST_SHARD),
+        ] {
+            blocks.push(def(key, name, Cross, false, false, [tex; 3], 1.5, 1, true, drop, light, S_GLASS));
+        }
+        let mut tinted = def("tinted_glass", "Tinted Glass (Sunglasses for Houses)", Cube, true, false, [T_TINTED_GLASS; 3], 0.3, 0, false, TINTED_GLASS, 0.0, S_GLASS);
+        tinted.see_through = true;
+        blocks.push(tinted);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2552,6 +2608,8 @@ impl Registry {
         items.push(ItemDef { stack: 1, ..item("backpack", "Backpack (Right-Click: Your Pack, 27 Slots)", T_BACKPACK) });
         items.push(ItemDef { stack: 1, ..item("big_backpack", "Big Backpack (45 Slots of Your Pack)", T_BIG_BACKPACK) });
         items.push(ItemDef { stack: 1, ..item("huge_backpack", "Huge Backpack (All 72 Slots of Your Pack)", T_HUGE_BACKPACK) });
+        items.push(ItemDef { food: Some(2.0), ..item("glow_berries", "Glow Berries (Nightlight Snack)", T_GLOW_BERRIES) });
+        items.push(item("amethyst_shard", "Amethyst Shard (Pointy, Pretty)", T_AMETHYST_SHARD));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2794,6 +2852,11 @@ impl Registry {
         recipes.push(r(&[(GOLD_BLOCK, 1), (STICK, 2)], (BELL, 1)));
         recipes.push(r(&[(STICK, 3), (STRING, 2), (IRON, 1)], (CROSSBOW, 1)));
         recipes.push(r(&[(SCORCHITE_SCRAP, 4), (GOLD_INGOT, 4)], (SCORCHITE_INGOT, 1)));
+        // Cave biomes.
+        recipes.push(r(&[(POINTY_ROCK, 4)], (DRIPSTONE_BLOCK, 1)));
+        recipes.push(r(&[(MOSS_BLOCK, 2)], (MOSS_CARPET, 3)));
+        recipes.push(r(&[(AMETHYST_SHARD, 4)], (AMETHYST_BLOCK, 1)));
+        recipes.push(r(&[(AMETHYST_SHARD, 4), (GLASS, 1)], (TINTED_GLASS, 2)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
             recipes.push(r(&[(DIAMOND, 7), (t, 1), (TUFF_BRICKS, 1)], (t, 2)));
@@ -2864,7 +2927,7 @@ pub fn is_solid(id: Id) -> bool {
 #[inline]
 pub fn blocks_sky(id: Id) -> bool {
     let b = block(id);
-    !matches!(b.model, Empty | Cross) && !b.see_through && !dapples_sky(id) && !is_door(id)
+    id == TINTED_GLASS || (!matches!(b.model, Empty | Cross) && !b.see_through && !dapples_sky(id) && !is_door(id))
 }
 /// Foliage: lets dappled sunlight through instead of blocking it (see `world::exposure`).
 #[inline]
@@ -3109,6 +3172,10 @@ mod id_order_tests {
             (SNOW_LAYER_FIRST + 3, "snow_layer_4"),
             (DIAMOND_CHEST, "diamond_chest"),
             (BED_FACING_FIRST + 2, "bed_west"),
+            (DRIPSTONE_BLOCK, "dripstone_block"),
+            (CAVE_VINES_LIT, "cave_vines_lit"),
+            (AMETHYST_CLUSTER, "amethyst_cluster"),
+            (TINTED_GLASS, "tinted_glass"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }
@@ -3130,6 +3197,8 @@ mod id_order_tests {
             (SPEAR_FIRST + 3, "dimond_spear"),
             (TREASURE_MAP, "treasure_map"),
             (TURTLE_SHELL, "turtle_shell"),
+            (GLOW_BERRIES, "glow_berries"),
+            (AMETHYST_SHARD, "amethyst_shard"),
         ] {
             assert_eq!(reg().key_of(id), key, "item {id}");
         }

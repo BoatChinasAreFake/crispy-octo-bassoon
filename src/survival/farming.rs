@@ -525,6 +525,19 @@ impl Game {
             }
             return true;
         }
+        // Bone Dust on moss spreads it (see caves.rs).
+        if held == BONE_DUST && id == MOSS_BLOCK {
+            self.player.swing = 1.0;
+            if !self.creative {
+                self.inv.consume_held();
+            }
+            if self.is_client() {
+                self.net_send_msg(crate::net::Msg::Interact { x: pos.x, y: pos.y, z: pos.z, item: held });
+            } else {
+                self.grow_moss(pos);
+            }
+            return true;
+        }
         let soily = is_farmland(id) || (Crop::of_block(id).is_some() && is_farmland(self.world.get_v(pos - IVec3::Y))) || (id == SAPLING && held == BONE_DUST);
         if matches!(held, BONE_DUST | COMPOST | WOOD_ASH | SOIL_PROBE) && soily {
             self.player.swing = 1.0;

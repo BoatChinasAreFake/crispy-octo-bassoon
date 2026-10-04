@@ -179,7 +179,8 @@ pub fn on_ladder(world: &World, min: Vec3, max: Vec3) -> bool {
     let (x0, x1) = (min.x.floor() as i32, (max.x - 1e-3).floor() as i32);
     let (z0, z1) = (min.z.floor() as i32, (max.z - 1e-3).floor() as i32);
     let (y0, y1) = (min.y.floor() as i32, (min.y + 1.0).floor() as i32);
-    (y0..=y1).any(|y| (z0..=z1).any(|z| (x0..=x1).any(|x| is_ladder(world.get(x, y, z)))))
+    // (Cave vines climb like ladders too.)
+    (y0..=y1).any(|y| (z0..=z1).any(|z| (x0..=x1).any(|x| is_ladder(world.get(x, y, z)) || crate::caves::is_cave_vine(world.get(x, y, z)))))
 }
 
 #[cfg(test)]

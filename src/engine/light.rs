@@ -85,7 +85,7 @@ pub enum Pass {
 }
 
 pub fn pass(id: Id) -> Pass {
-    if is_opaque(id) {
+    if is_opaque(id) || id == TINTED_GLASS {
         Pass::Solid
     } else if dapples_sky(id) {
         Pass::Dim(1)
