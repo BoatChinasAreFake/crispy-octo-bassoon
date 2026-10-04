@@ -106,7 +106,7 @@ impl Player {
 
     pub fn head_in_water(&self, world: &World) -> bool {
         let e = self.eye();
-        is_water(world.get(e.x.floor() as i32, (e.y + 0.05).floor() as i32, e.z.floor() as i32))
+        is_wet(world.get(e.x.floor() as i32, (e.y + 0.05).floor() as i32, e.z.floor() as i32))
     }
 
     /// Advance physics. Returns fall damage taken, if any.

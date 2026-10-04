@@ -168,7 +168,7 @@ impl Generator {
             let a = k as f32 * std::f32::consts::FRAC_PI_4;
             let (dx, dz) = ((a.cos() * 15.0) as i32, (a.sin() * 15.0) as i32);
             let (hh, b) = self.column(ox + dx, oz + dz);
-            (hh - h).abs() <= 4 && b != Biome::Ocean
+            (hh - h).abs() <= 4 && !b.is_ocean()
         });
         if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
@@ -180,18 +180,18 @@ impl Generator {
         if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
             return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
         }
-        if monument_spot && biome == Biome::Ocean && h <= SEA - crate::monument::DEPTH {
+        if monument_spot && biome.is_ocean() && h <= SEA - crate::monument::DEPTH {
             // Deep, open sea all round (it levels its own basin; see monument.rs).
             let r = crate::monument::BASIN;
             let open = [(-r, -r), (r, -r), (-r, r), (r, r), (0, r), (0, -r), (r, 0), (-r, 0)].iter().all(|&(dx, dz)| {
                 let (hh, b) = self.column(ox + dx, oz + dz);
-                b == Biome::Ocean && hh < SEA - 2 && hh >= h - crate::monument::FILL
+                b.is_ocean() && hh < SEA - 2 && hh >= h - crate::monument::FILL
             });
             if open {
                 return Some(Site { kind: Kind::Monument, origin: ivec3(ox, h, oz), facing, seed });
             }
         }
-        if shaft_spot && h > 50 && biome != Biome::Ocean {
+        if shaft_spot && h > 50 && !biome.is_ocean() {
             let y = 20 + (hash2(s ^ 0x5AF8, cx, cz) * (h - 45).clamp(1, 20) as f32) as i32;
             return Some(Site { kind: Kind::Mineshaft, origin: ivec3(ox, y, oz), facing, seed });
         }
@@ -200,7 +200,7 @@ impl Generator {
             return Some(Site { kind: Kind::HushedCity, origin: ivec3(ox, crate::deepdark::CITY_Y, oz), facing, seed });
         }
         // Wrecks lie on the sea bed; treasure is buried in beaches (see treasure.rs).
-        if wreck_roll && biome == Biome::Ocean && h < SEA - 7 && h > 6 {
+        if wreck_roll && biome.is_ocean() && h < SEA - 7 && h > 6 {
             return Some(Site { kind: Kind::Shipwreck, origin: ivec3(ox, h, oz), facing, seed });
         }
         if treasure_roll && (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::Mangrove) {
@@ -210,7 +210,7 @@ impl Generator {
             return None;
         }
         let kind = if r < 0.055 {
-            if h < 30 || biome == Biome::Ocean {
+            if h < 30 || biome.is_ocean() {
                 return None;
             }
             Kind::Dungeon
@@ -232,7 +232,7 @@ impl Generator {
             Kind::Well
         } else if matches!(biome, Biome::Forest | Biome::Taiga | Biome::Jungle | Biome::Plains) && h > SEA + 1 && r >= 0.085 && flat() {
             Kind::TrailRuins
-        } else if biome == Biome::Ocean && h < SEA - 4 && h > 8 && r < 0.09 {
+        } else if biome.is_ocean() && h < SEA - 4 && h > 8 && r < 0.09 {
             Kind::OceanRuins
         } else {
             return None;
@@ -1102,7 +1102,7 @@ mod tests {
                 let v: Vec<_> = (0..6000).step_by(4).map(|x| g.column(x, z).1).collect();
                 let mut run = 1.0f32;
                 for w in v.windows(2) {
-                    if w[0] == crate::world::Biome::Ocean {
+                    if w[0].is_ocean() {
                         run = 1.0;
                     } else if w[0] == w[1] {
                         run += 1.0;

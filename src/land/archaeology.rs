@@ -237,7 +237,7 @@ pub fn culture_at(g: &Generator, p: IVec3) -> Culture {
     }
     match g.column(p.x, p.z).1 {
         Biome::Desert | Biome::Badlands => Culture::Sunken,
-        Biome::Ocean => Culture::Drowned,
+        Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean | Biome::FrozenOcean => Culture::Drowned,
         _ => Culture::Trail,
     }
 }

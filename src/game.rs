@@ -183,6 +183,8 @@ pub struct Game {
     /// The Support Gauge's reading, while it's held (-1: nothing overhead).
     pub gauge_reading: Option<i32>,
     pub gauge_acc: f32,
+    /// Waterlogged blocks just broken: water goes back in next tick (see seas.rs).
+    pub refill: Vec<IVec3>,
     step_dist: f32,
     was_in_water: bool,
     /// Seconds since we were last in water (bobbing at the surface doesn't splash).
@@ -494,6 +496,7 @@ impl Game {
             cave_ins: Vec::new(),
             gauge_reading: None,
             gauge_acc: 0.0,
+            refill: Vec::new(),
             step_dist: 0.0,
             was_in_water: false,
             dry_for: 10.0,
@@ -951,6 +954,8 @@ impl Game {
             Biome::IceSpikes => Some("point_taken"),
             Biome::Meadow => Some("hay_fever"),
             Biome::StonyPeaks => Some("peak_performance"),
+            Biome::WarmOcean => Some("warm_welcome"),
+            Biome::FrozenOcean => Some("brr"),
             _ => None,
         };
         if let Some(k) = key {
@@ -2628,6 +2633,8 @@ impl Game {
             // Torches go on walls too.
             TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
             LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            // Kelp and seagrass only grow in water, on the floor (or on kelp).
+            KELP | SEAGRASS if !(is_water(self.world.get_v(place)) && (is_solid(below) || below == KELP)) => return,
             // Frames and ladders go on walls.
             FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST | TRIPWIRE_HOOK_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
@@ -2815,6 +2822,7 @@ impl Game {
         if old == ROPE {
             self.rope_broken(pos);
         }
+        self.sea_block_gone(pos, old);
         self.gold_taken(pos, old);
         if crate::bees::is_hive(old) {
             self.hive_broken(pos, old);
@@ -3484,6 +3492,7 @@ impl Game {
         }
         self.falling_tick(dt);
         self.caveins_tick(dt);
+        self.refill_tick();
         self.gauge_tick(dt);
         self.stalactite_tick(dt);
         self.fireballs_tick(dt);
@@ -3605,7 +3614,7 @@ impl Game {
             }
             // Dolphins in the open sea, in little pods.
             let dolphins = self.mobs.iter().filter(|m| m.kind == MobKind::Dolphin).count();
-            if dolphins < 6 && depth >= 5 && biome == Biome::Ocean && !self.is_night() && self.rng.chance(0.15) {
+            if dolphins < 6 && depth >= 5 && matches!(biome, Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean) && !self.is_night() && self.rng.chance(0.15) {
                 for i in 0..self.rng.int(1, 3) {
                     self.alloc_mob(MobKind::Dolphin, Vec3::new(x as f32 + 0.5 + i as f32 * 1.2, (y - 2) as f32, z as f32 + 0.5));
                 }

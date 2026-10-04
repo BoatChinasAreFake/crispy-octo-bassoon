@@ -99,10 +99,15 @@ pub enum Biome {
     Meadow,
     /// Bare stone mountaintops.
     StonyPeaks,
+    /// Seas by temperature (`Ocean` is the ordinary, cool one; see seas.rs):
+    /// clear warm water and coral, lukewarm seagrass, frozen ice and icebergs.
+    WarmOcean,
+    LukewarmOcean,
+    FrozenOcean,
 }
 
 impl Biome {
-    pub const ALL: [Biome; 19] = [
+    pub const ALL: [Biome; 22] = [
         Biome::Plains,
         Biome::Forest,
         Biome::Desert,
@@ -122,7 +127,15 @@ impl Biome {
         Biome::IceSpikes,
         Biome::Meadow,
         Biome::StonyPeaks,
+        Biome::WarmOcean,
+        Biome::LukewarmOcean,
+        Biome::FrozenOcean,
     ];
+
+    /// Any of the seas.
+    pub fn is_ocean(self) -> bool {
+        matches!(self, Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean | Biome::FrozenOcean)
+    }
 
     /// For /locate: "plains", "snowy", "badlands"...
     pub fn from_name(s: &str) -> Option<Biome> {
@@ -151,6 +164,9 @@ impl Biome {
             Biome::IceSpikes => "Ice Spikes (Pointy, Chilly)",
             Biome::Meadow => "Meadow (Hay Fever)",
             Biome::StonyPeaks => "Stony Peaks (Rock Bottom, but Up)",
+            Biome::WarmOcean => "Warm Ocean (Tropical-ish)",
+            Biome::LukewarmOcean => "Lukewarm Ocean (Bathwater)",
+            Biome::FrozenOcean => "Frozen Ocean (Brr)",
         }
     }
 
@@ -661,7 +677,16 @@ impl Generator {
         let mesa = ((t - 0.4) / 0.1).clamp(0.0, 1.0) * ((0.05 - m) / 0.1).clamp(0.0, 1.0);
         let h = if mesa > 0.0 && h > SEA { (h + ((h - SEA) as f32 * 0.9 * mesa) as i32).min(CH - 20) } else { h };
         let biome = if h < SEA - 1 {
-            Biome::Ocean
+            // Seas by temperature.
+            if t > 0.3 {
+                Biome::WarmOcean
+            } else if t > 0.12 {
+                Biome::LukewarmOcean
+            } else if t < -0.3 {
+                Biome::FrozenOcean
+            } else {
+                Biome::Ocean
+            }
         } else if h > 92 && t > -0.05 {
             // Mountaintops too warm for snow are bare rock.
             Biome::StonyPeaks
@@ -704,13 +729,13 @@ impl Generator {
             Biome::Plains
         };
         // Far out in deep water, now and then, the sea floor rises into a mushroom island.
-        let (h, biome) = if biome == Biome::Ocean && h < SEA - 4 {
+        let (h, biome) = if biome.is_ocean() && h < SEA - 4 {
             let k = self.mushroom_isle(x, z);
             if k > 0.0 {
                 // A steep shore, then a low hump up to five blocks above the sea.
                 let top = SEA as f32 + 1.0 + (k - 0.5).max(0.0) * 10.0;
                 let hh = (h as f32 + (top - h as f32) * (k * 2.0).min(1.0)).round() as i32;
-                (hh, if hh >= SEA - 1 { Biome::MushroomIslands } else { Biome::Ocean })
+                (hh, if hh >= SEA - 1 { Biome::MushroomIslands } else { biome })
             } else {
                 (h, biome)
             }
@@ -902,7 +927,7 @@ impl Generator {
                     b[idx(lx, y, lz)] = id;
                 }
                 // Caves, ravines and ores
-                let ravine = if h > SEA + 2 && biome != Biome::Ocean { self.ravine_floor(x, z) } else { None };
+                let ravine = if h > SEA + 2 && !biome.is_ocean() { self.ravine_floor(x, z) } else { None };
                 for y in 1..h + 1 {
                     let i = idx(lx, y, lz);
                     if b[i] == BEDROCK {
@@ -1047,8 +1072,32 @@ impl Generator {
                         b[idx(lx, y, lz)] = PACKED_ICE;
                     }
                 }
-                // Coral reefs on warm, shallow sea floors.
-                if biome == Biome::Ocean && (SEA - 18..SEA - 3).contains(&h) && !self.cold(x, z) && hash2(s ^ 0xC0A1, x >> 3, z >> 3) < 0.3 && hash2(s ^ 0xC0A2, x, z) < 0.75 {
+                // Coral reefs on warm, shallow sea floors (and a little in lukewarm ones).
+                let reefs = match biome {
+                    Biome::WarmOcean => 0.5,
+                    Biome::LukewarmOcean => 0.12,
+                    _ => 0.0,
+                };
+                let reef = (SEA - 18..SEA - 3).contains(&h) && hash2(s ^ 0xC0A1, x >> 3, z >> 3) < reefs && hash2(s ^ 0xC0A2, x, z) < 0.75;
+                if !reef && biome.is_ocean() && h < SEA - 1 && b[idx(lx, h + 1, lz)] == WATER {
+                    // Kelp, seagrass and sea pickles on the rest of the sea floor (see seas.rs).
+                    if let Some((plant, tall)) = crate::seas::floor_plant(self, biome, x, z, SEA - h) {
+                        for y in h + 1..=h + tall {
+                            b[idx(lx, y, lz)] = plant;
+                        }
+                    }
+                }
+                // Frozen seas: icebergs of packed ice, snow on top.
+                if biome == Biome::FrozenOcean {
+                    let berg = self.iceberg(x, z);
+                    if berg > 0 {
+                        for y in (SEA - berg / 2).max(h + 1)..=SEA + berg {
+                            b[idx(lx, y, lz)] = PACKED_ICE;
+                        }
+                        b[idx(lx, SEA + berg + 1, lz)] = SNOW_BLOCK;
+                    }
+                }
+                if reef {
                     let kind = CORAL_FIRST + (hash2(s ^ 0xC0A3, x >> 1, z >> 1) * 4.0) as Id;
                     b[idx(lx, h, lz)] = kind;
                     // Knobbly: some reach up a block or two.
@@ -1821,7 +1870,7 @@ impl World {
                 let (h, biome) = self.generator.column(x, z);
                 // Solid ground: no cave mouth or ravine to drop straight into.
                 let solid = (h - 4..=h).all(|y| !self.generator.is_cave(x, y, z, h)) && self.generator.ravine_floor(x, z).is_none();
-                if h > SEA + 1 && biome != Biome::Ocean && solid && self.generator.tree_at(x, z).is_none() {
+                if h > SEA + 1 && !biome.is_ocean() && solid && self.generator.tree_at(x, z).is_none() {
                     return Vec3::new(x as f32 + 0.5, h as f32 + 1.0, z as f32 + 0.5);
                 }
             }

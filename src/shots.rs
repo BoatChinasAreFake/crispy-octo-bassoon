@@ -102,6 +102,21 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
+        "kelp" => {
+            // Under the sea in a kelp forest, looking across the floor.
+            for r in 0..200 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let (h, biome) = generator.column(x, z);
+                    let deep = world::SEA - h;
+                    let kelpy = (-2..=2).filter(|k| crate::seas::floor_plant(generator, biome, x + k * 3, z, deep).is_some_and(|p| p.0 == block::KELP)).count();
+                    if biome.is_ocean() && deep >= 8 && kelpy >= 2 {
+                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + 3.0, z as f32 + 0.5), 0.7, 0.05));
+                    }
+                }
+            }
+            return None;
+        }
         "geode" => {
             // Inside the nearest geode, looking at its wall.
             let (rx0, rz0) = (cx0 * 16 / 56, cz0 * 16 / 56);
@@ -150,8 +165,10 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
-        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" => {
+        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" => {
             let want = match mode {
+                "warmocean" => world::Biome::WarmOcean,
+                "frozenocean" => world::Biome::FrozenOcean,
                 "savanna" => world::Biome::Savanna,
                 "birchforest" => world::Biome::BirchForest,
                 "darkforest" => world::Biome::DarkForest,
@@ -192,7 +209,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 for (dx, dz) in ring(r) {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
                     let (h, biome) = generator.column(x, z);
-                    if biome == world::Biome::Ocean && h < world::SEA - 6 && !generator.cold(x, z) {
+                    if biome.is_ocean() && h < world::SEA - 6 && !generator.cold(x, z) {
                         return Some((Vec3::new(x as f32 + 0.5, world::SEA as f32 - 3.0, z as f32 + 0.5), 0.8, -0.4));
                     }
                 }
@@ -310,7 +327,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });

@@ -46,7 +46,7 @@ pub fn pack_of_key(p: IVec3) -> Option<u32> {
 
 fn ahead_is_water(m: &Mob, world: &World) -> bool {
     let ahead = m.body.pos + Vec3::new(m.yaw.sin(), 0.2, -m.yaw.cos()) * 0.9;
-    is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32))
+    is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32))
 }
 
 /// Drift about in the water without leaving it.

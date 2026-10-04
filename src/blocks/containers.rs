@@ -69,6 +69,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         COBBLE => STONE,
         LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,
+        KELP => DRIED_KELP,
         COBBLED_DEEPSLATE => DEEPSLATE,
         RESIN_CLUMP => RESIN_BRICK,
         // Concrete bakes into glazed terracotta of its colour (see masonry.rs).

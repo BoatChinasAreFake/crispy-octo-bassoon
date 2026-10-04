@@ -412,7 +412,23 @@ pub const MUSHROOM_STEM: Id = MYCELIUM + 1;
 pub const RED_MUSHROOM_BLOCK: Id = MYCELIUM + 2;
 pub const BROWN_MUSHROOM_BLOCK: Id = MYCELIUM + 3;
 pub const PACKED_ICE: Id = MYCELIUM + 4;
-pub const NUM_BLOCKS: Id = MYCELIUM + 5;
+/// Busier seas: plants that live in the water (they're "waterlogged": the
+/// cell is water as well, see `waterlogged`).
+pub const KELP: Id = MYCELIUM + 5;
+pub const SEAGRASS: Id = MYCELIUM + 6;
+pub const SEA_PICKLE: Id = MYCELIUM + 7;
+pub const NUM_BLOCKS: Id = MYCELIUM + 8;
+
+/// A block that sits in water: it's drawn with water round it, you swim
+/// through it, and breaking it leaves water behind.
+pub fn waterlogged(id: Id) -> bool {
+    matches!(id, MANGROVE_ROOTS_WET | KELP | SEAGRASS | SEA_PICKLE)
+}
+
+/// Water, or something sitting in it.
+pub fn is_wet(id: Id) -> bool {
+    is_water(id) || waterlogged(id)
+}
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -649,7 +665,9 @@ pub const DARK_OAK_DOOR: Id = FIRST_ITEM + 252;
 pub const ACACIA_BOAT: Id = FIRST_ITEM + 253;
 pub const BIRCH_BOAT: Id = FIRST_ITEM + 254;
 pub const DARK_OAK_BOAT: Id = FIRST_ITEM + 255;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 256;
+/// Kelp, dried in a furnace: a small snack.
+pub const DRIED_KELP: Id = FIRST_ITEM + 256;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 257;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2487,6 +2505,9 @@ impl Registry {
         blocks.push(def("red_mushroom_block", "Red Mushroom Block (Spotty Roof)", Cube, true, true, [T_RED_MUSHROOM_BLOCK; 3], 0.2, 0, false, MUSHROOM, 0.0, S_WOOD));
         blocks.push(def("brown_mushroom_block", "Brown Mushroom Block (Flat Roof)", Cube, true, true, [T_BROWN_MUSHROOM_BLOCK; 3], 0.2, 0, false, MUSHROOM, 0.0, S_WOOD));
         blocks.push(def("packed_ice", "Packed Ice (Never Melts)", Cube, true, true, [T_PACKED_ICE; 3], 0.5, 0, false, PACKED_ICE, 0.0, S_GLASS));
+        blocks.push(def("kelp", "Kelp (Seaweed, Ambitious)", Cross, false, false, [T_KELP; 3], 0.0, 0, false, KELP, 0.0, S_GRASS));
+        blocks.push(def("seagrass", "Seagrass (Wet Lawn)", Cross, false, false, [T_SEAGRASS; 3], 0.0, 0, false, AIR, 0.0, S_GRASS));
+        blocks.push(def("sea_pickle", "Sea Pickle (Not for Eating)", Cross, false, false, [T_SEA_PICKLE; 3], 0.0, 0, false, SEA_PICKLE, 6.0, S_GRASS));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2751,6 +2772,7 @@ impl Registry {
         items.push(item("wilter_star", "Wilter Star (Still Warm)", T_WILTER_STAR));
         items.push(ItemDef { stack: 1, ..item("support_gauge", "Support Gauge (Is It Going to Hold?)", T_SUPPORT_GAUGE) });
         items.extend(crate::woods::items());
+        items.push(ItemDef { food: Some(1.0), ..item("dried_kelp", "Dried Kelp (Crunchy Ocean)", T_DRIED_KELP) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };

@@ -755,6 +755,11 @@ pub const T_RED_MUSHROOM_BLOCK: u16 = 921;
 pub const T_BROWN_MUSHROOM_BLOCK: u16 = 922;
 pub const T_PACKED_ICE: u16 = 923;
 pub const T_MUSHMOO_SKIN: u16 = 924;
+/// Busier seas.
+pub const T_KELP: u16 = 925;
+pub const T_SEAGRASS: u16 = 926;
+pub const T_SEA_PICKLE: u16 = 927;
+pub const T_DRIED_KELP: u16 = 928;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3017,6 +3022,25 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     });
     a.each(T_BROWN_MUSHROOM_BLOCK, |_, _, r, _| shade(rgb(150, 110, 75), r.range(0.86, 1.08)));
     a.each(T_PACKED_ICE, |x, y, r, _| shade(if (x + y * 2) % 7 == 0 { rgb(200, 220, 250) } else { rgb(150, 180, 230) }, r.range(0.94, 1.04)));
+    // Sea plants: kelp fronds, seagrass blades, sea pickles (green, glowing tips).
+    a.each(T_KELP, |x, y, r, _| {
+        let stem = (7..9).contains(&x);
+        let frond = (y % 5 < 3) && ((x as i32 - 8).unsigned_abs() as usize) < 2 + (y % 5) * 2;
+        if stem || frond { shade(rgb(70, 120, 40), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SEAGRASS, |x, y, r, _| {
+        let blade = (x % 4 == 1 && y > 2) || (x % 4 == 2 && y > 5 && x > 4);
+        if blade { shade(rgb(60, 150, 60), r.range(0.8, 1.15)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SEA_PICKLE, |x, y, _, _| {
+        let pickle = y > 7 && ((3..6).contains(&x) || (9..12).contains(&x));
+        let tip = y == 7 && (x == 4 || x == 10);
+        if tip { rgb(200, 255, 170) } else if pickle { rgb(100, 140, 50) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_DRIED_KELP, |x, y, _, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        if dx * dx + dy * dy < 30.0 { if (x + y) % 3 == 0 { rgb(40, 55, 30) } else { rgb(60, 80, 40) } } else { [0, 0, 0, 0] }
+    });
     // A red-spotted Mooer: red hide with white patches.
     a.each(T_MUSHMOO_SKIN, |x, y, r, _| if (x / 4 + y / 5) % 3 == 0 && (x + y) % 5 != 0 { rgb(225, 220, 215) } else { shade(rgb(170, 40, 35), r.range(0.88, 1.08)) });
     for (w, c) in [rgb(200, 105, 55), rgb(215, 195, 140), rgb(75, 50, 28)].into_iter().enumerate() {

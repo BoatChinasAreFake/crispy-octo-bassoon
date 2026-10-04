@@ -44,7 +44,8 @@ pub fn grass(b: Biome) -> [f32; 3] {
         Biome::Desert => [1.3, 1.08, 0.6],
         Biome::Badlands => [1.35, 1.0, 0.55],
         Biome::Snowy => [0.85, 0.97, 1.05],
-        Biome::Ocean => [0.95, 1.0, 0.95],
+        Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean => [0.95, 1.0, 0.95],
+        Biome::FrozenOcean => [0.85, 0.97, 1.05],
         Biome::Swamp => [0.72, 0.78, 0.5],
         Biome::Jungle => [0.78, 1.18, 0.62],
         Biome::Taiga => [0.8, 0.95, 0.92],
@@ -83,6 +84,10 @@ pub fn water(b: Biome) -> [f32; 3] {
         Biome::DarkForest => [0.75, 0.9, 0.95],
         Biome::MushroomIslands => [1.05, 0.85, 1.1],
         Biome::IceSpikes => [0.85, 0.95, 1.18],
+        // Clear turquoise, warmer green-blue, and deep cold blue.
+        Biome::WarmOcean => [0.55, 1.25, 1.15],
+        Biome::LukewarmOcean => [0.75, 1.12, 1.08],
+        Biome::FrozenOcean => [0.7, 0.8, 1.15],
     }
 }
 

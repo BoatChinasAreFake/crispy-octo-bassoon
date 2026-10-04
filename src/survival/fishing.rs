@@ -251,7 +251,7 @@ pub fn roll_catch(world: &World, p: Vec3, time: f32, level: u32, bait: bool, rng
     let (depth, area) = water_info(world, p);
     let puddle = area < 6 || depth < 2;
     let (_, biome) = world.generator.column(p.x.floor() as i32, p.z.floor() as i32);
-    let ocean = biome == Biome::Ocean || p.y < SEA as f32 - 2.0;
+    let ocean = biome.is_ocean() || p.y < SEA as f32 - 2.0;
     let edge = time_factor(time) < 1.0;
     let lvl = level as f32;
     let r = rng.f32();

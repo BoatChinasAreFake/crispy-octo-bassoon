@@ -88,6 +88,8 @@ impl Game {
                     self.advance("patina");
                 }
             }
+        } else if id == KELP {
+            self.kelp_grows(p);
         } else if id == BAMBOO {
             let up = p + IVec3::Y;
             if self.world.get_v(up) == AIR && up.y < CH - 1 && self.rng.chance(BAMBOO_CHANCE) {

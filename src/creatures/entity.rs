@@ -163,7 +163,7 @@ pub fn move_body(world: &World, b: &mut Body, dt: f32, edge_guard: bool) {
         b.on_ground = true;
     }
     let feet = world.get(b.pos.x.floor() as i32, (b.pos.y + 0.3).floor() as i32, b.pos.z.floor() as i32);
-    b.in_water = is_liquid(feet);
+    b.in_water = is_liquid(feet) || waterlogged(feet);
     b.in_lava = is_lava(feet);
 }
 
@@ -1287,7 +1287,7 @@ impl Mob {
                         self.fuse = 0.0;
                         // Turn back before leaving the water; Elders stay near their room.
                         let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.3, -self.yaw.cos()) * (self.body.half + 0.6);
-                        if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                        if !is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
                             self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
                             self.wander_t = rng.range(1.0, 3.0);
                         }
@@ -1314,7 +1314,7 @@ impl Mob {
                 if self.body.in_water {
                     // Drift about, never out of the water.
                     let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
-                    if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                    if !is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
                         self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
                         self.wander_t = rng.range(1.0, 3.0);
                     }
@@ -1795,7 +1795,7 @@ impl Mob {
             MobKind::Axolotl => {
                 if self.body.in_water {
                     let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
-                    if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                    if !is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
                         self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
                         self.wander_t = rng.range(1.0, 3.0);
                     }
