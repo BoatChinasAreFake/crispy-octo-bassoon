@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    matches!(id, CHEST | COPPER_CHEST | BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
+    crate::chests::is_chest(id) || matches!(id, BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -113,7 +113,7 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
         return armor_of(item).is_some_and(|(s, _)| s == slot);
     }
     if !is_furnace(kind) {
-        return slot < CHEST_SLOTS;
+        return slot < crate::chests::slots(kind);
     }
     match slot {
         INPUT => crate::home::cooks_in(kind, item),
@@ -133,7 +133,7 @@ impl Container {
         } else if crate::home::is_stand(id) {
             crate::home::STAND_SLOTS
         } else {
-            CHEST_SLOTS
+            crate::chests::slots(id)
         };
         Container { slots: vec![None; n], wear: vec![0; n], burn: 0.0, burn_total: 0.0, cook: 0.0 }
     }
@@ -328,7 +328,7 @@ pub fn decode(b: &[u8], wear_bytes: usize) -> std::collections::HashMap<IVec3, C
         let (burn, burn_total, cook) = (f(i + 12), f(i + 16), f(i + 20));
         let n = b[i + 24] as usize;
         i += 25;
-        if n > CHEST_SLOTS || i + n * per > b.len() {
+        if n > crate::chests::MAX_SLOTS || i + n * per > b.len() {
             break;
         }
         let slots = (0..n)

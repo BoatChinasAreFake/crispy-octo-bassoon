@@ -424,6 +424,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             let ((s0, b0), (s1, b1)) = (hood.lit(lx, y, lz), hood.lit(lx, y + 1, lz));
                             let (sky, blk) = (s0.max(s1), b0.max(b1));
                             let (boxes, n) = def.shape.boxes();
+                            // A chest that's open has its lid drawn swinging (see chests.rs).
+                            let n = if crate::chests::is_chest(id) && crate::chests::lid_lifted(macroquad::math::IVec3::new(wx as i32, y, wz as i32)) { 1 } else { n };
                             for &(bmin, bmax) in &boxes[..n] {
                                 for (f, (nrm, corners, shade)) in FACES.iter().enumerate() {
                                     let axis = if nrm[0] != 0 { 0 } else if nrm[1] != 0 { 1 } else { 2 };

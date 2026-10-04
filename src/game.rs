@@ -371,6 +371,8 @@ pub struct Game {
     pub last_death: Option<Vec3>,
     /// Places you've named (see waypoints.rs).
     pub waypoints: Vec<crate::waypoints::Waypoint>,
+    /// Chest lids swinging open or shut (see chests.rs).
+    pub lids: std::collections::HashMap<IVec3, crate::chests::Lid>,
     /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
     pub lodestone: Option<IVec3>,
     /// A joined player's view of their Bundles (the host's word), and the one just used.
@@ -590,6 +592,7 @@ impl Game {
             bench: None,
             last_death: None,
             waypoints: Vec::new(),
+            lids: Default::default(),
             lodestone: None,
             bundle_mirror: HashMap::new(),
             bundle_pending: None,
@@ -1190,6 +1193,7 @@ impl Game {
         }
         self.hunger_tick(dt);
         self.breath_tick(dt);
+        self.lids_tick(dt);
         let landed = self.player.landed.take();
         let feet = self.player.body.pos - Vec3::Y * 0.05;
         let under = ivec3(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
@@ -2108,6 +2112,14 @@ impl Game {
             return;
         }
         if matches!(held, BOAT | MINECART | CHEST_MINECART | HOPPER_MINECART) && self.place_vehicle(held) {
+            return;
+        }
+        // Sneak-right-clicking a chest with iron, gold or diamonds upgrades it.
+        if let Some(Target::Block(h)) = &self.target
+            && self.player.sneaking
+            && crate::chests::is_chest(self.world.get_v(h.pos))
+            && self.upgrade_chest(h.pos)
+        {
             return;
         }
         // Chests, furnaces and anvils open (sneak to place against them instead).
@@ -3624,6 +3636,7 @@ impl Game {
         }
         self.draw_skies(&mut g, eye, sun_dir);
         self.draw_border(&mut g, eye);
+        self.draw_lids(&mut g);
 
         // Clouds: a scrolling blocky layer.
         let cloud_y = 112.0;

@@ -79,6 +79,7 @@ mod playtest;
 mod potions;
 mod qol;
 mod waypoints;
+mod chests;
 mod players;
 mod regions;
 mod render;
@@ -2142,7 +2143,7 @@ async fn game_main() {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks" | "glider" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks" | "glider" => {
                 let mut g = Game::new(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -2572,7 +2573,7 @@ async fn game_main() {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2854,6 +2855,44 @@ async fn game_main() {
                     m.id = 1000 + i as u32;
                     app.game.mobs.push(m);
                 }
+            }
+            if matches!(s.mode.as_str(), "chests" | "bigchest") && frames == 125 {
+                // Every kind of chest in a row, the diamond one open.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y = p.y.floor() as i32;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y, v.z.floor() as i32)
+                };
+                let row = [block::CHEST, block::COPPER_CHEST, block::IRON_CHEST, block::GOLD_CHEST, block::DIAMOND_CHEST];
+                for (i, &id) in row.iter().enumerate() {
+                    app.game.world.set_v(at(3.5, i as f32 * 1.2 - 2.4), id);
+                }
+                let big = at(3.5, 4.0 * 1.2 - 2.4);
+                if let Some(c) = app.game.world.containers.get_mut(&big) {
+                    for (i, item) in [block::DIAMOND, block::GOLD_INGOT, block::IRON, block::BREAD, block::COAL, block::LOG, block::COBBLE].into_iter().enumerate() {
+                        c.slots[i * 9 + 2] = Some((item, 32 + i as u8 * 4));
+                    }
+                }
+                if s.mode == "bigchest" {
+                    app.game.open = Some(big);
+                    app.set_screen(Screen::Container);
+                }
+            }
+            if s.mode == "chests" && frames >= 126 {
+                // Hold the diamond chest's lid open (nobody's using it).
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let v = p + fwd * 3.5 + right * (4.0 * 1.2 - 2.4);
+                let big = IVec3::new(v.x.floor() as i32, p.y.floor() as i32, v.z.floor() as i32);
+                if !app.game.lids.contains_key(&big) {
+                    chests::set_lifted(big, true);
+                    app.game.world.dirty.insert((big.x.div_euclid(16), big.z.div_euclid(16)));
+                }
+                app.game.lids.insert(big, chests::Lid { open: 1.0, yaw: s.yaw + std::f32::consts::PI });
             }
             if matches!(s.mode.as_str(), "kitchen" | "chest" | "furnace") && frames == 125 {
                 // A chest, a table and a row of furnaces (the middle one busy), a few blocks ahead.

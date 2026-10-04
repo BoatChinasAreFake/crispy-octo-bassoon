@@ -348,7 +348,11 @@ pub const WALL_TORCH_FIRST: Id = 532;
 /// Snow piled up by snowfall: one to four eighths of a block deep.
 pub const SNOW_LAYER_FIRST: Id = 536;
 pub const SNOW_LAYERS: Id = 4;
-pub const NUM_BLOCKS: Id = 540;
+/// Bigger chests (see chests.rs).
+pub const IRON_CHEST: Id = 540;
+pub const GOLD_CHEST: Id = 541;
+pub const DIAMOND_CHEST: Id = 542;
+pub const NUM_BLOCKS: Id = 543;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -777,6 +781,8 @@ pub enum Shape {
     Hanging,
     /// A flat layer on the floor, `eighths` of a block deep (snow).
     Layer { eighths: u8 },
+    /// A chest: a body and its lid (see chests.rs).
+    Chest,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -852,6 +858,7 @@ impl Shape {
             Shape::Anvil => ([([0.125, 0.0, 0.125], [0.875, 0.25, 0.875]), ([0.25, 0.25, 0.3125], [0.75, 0.625, 0.6875]), ([0.0, 0.625, 0.1875], [1.0, 1.0, 0.8125])], 3),
             Shape::Table => ([([0.0; 3], [1.0, 0.75, 1.0]), full, full], 1),
             Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
+            Shape::Chest => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, 10.0 / 16.0, 15.0 / 16.0]), ([1.0 / 16.0, 10.0 / 16.0, 1.0 / 16.0], [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0]), full], 2),
             Shape::Layer { eighths } => ([([0.0; 3], [1.0, eighths as f32 / 8.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
             Shape::Button { down } => ([([5.0 / 16.0, 0.0, 6.0 / 16.0], [11.0 / 16.0, if down { 1.0 / 16.0 } else { 2.0 / 16.0 }, 10.0 / 16.0]), full, full], 1),
@@ -1621,7 +1628,9 @@ impl Registry {
                 blocks.push(b);
             }
         }
-        blocks.push(def("chest", "Chest (Latches on Every Side)", Cube, true, true, [T_CHEST_TOP, T_CHEST_SIDE, T_CHEST_TOP], 2.5, 0, false, CHEST, 0.0, S_WOOD));
+        let mut chest = def("chest", "Chest (Latches on Every Side)", Shaped, true, false, [T_CHEST_TOP, T_CHEST_SIDE, T_CHEST_TOP], 2.5, 0, false, CHEST, 0.0, S_WOOD);
+        chest.shape = Shape::Chest;
+        blocks.push(chest);
         blocks.push(def("furnace", "Furnace (Omnidirectional)", Cube, true, true, [T_FURNACE_TOP, T_FURNACE_SIDE, T_FURNACE_TOP], 3.5, 1, true, FURNACE, 0.0, S_STONE));
         let mut lit = def("furnace_lit", "Furnace (Toasty)", Cube, true, true, [T_FURNACE_TOP, T_FURNACE_LIT, T_FURNACE_TOP], 3.5, 1, true, FURNACE, 13.0, S_STONE);
         lit.creative = false;
@@ -2161,7 +2170,9 @@ impl Registry {
         blocks.push(def("banner", "Banner (Flag-Adjacent)", Empty, false, false, [T_BANNER_ICON; 3], 1.0, 0, false, AIR, 0.0, S_GRASS));
         blocks.push(def("loom", "Loom (Pattern Machine)", Cube, true, true, [T_LOOM_TOP, T_LOOM_SIDE, T_PLANKS], 2.5, 0, false, LOOM, 0.0, S_WOOD));
         blocks.push(def("personal_chest", "Personal Chest (Yours Alone)", Cube, true, true, [T_PERSONAL_CHEST_TOP, T_PERSONAL_CHEST_SIDE, T_PERSONAL_CHEST_TOP], 22.0, 1, true, PERSONAL_CHEST, 7.0, S_STONE));
-        blocks.push(def("copper_chest", "Copper Chest (Sorted, Hopefully)", Cube, true, true, [T_COPPER_CHEST_TOP, T_COPPER_CHEST_SIDE, T_COPPER_CHEST_TOP], 3.0, 0, false, COPPER_CHEST, 0.0, S_STONE));
+        let mut copper = def("copper_chest", "Copper Chest (Sorted, Hopefully)", Shaped, true, false, [T_COPPER_CHEST_TOP, T_COPPER_CHEST_SIDE, T_COPPER_CHEST_TOP], 3.0, 0, false, COPPER_CHEST, 0.0, S_STONE);
+        copper.shape = Shape::Chest;
+        blocks.push(copper);
         blocks.push(def("eyeblossom", "Eyeblossom (Pretending to Sleep)", Cross, false, false, [T_EYEBLOSSOM; 3], 0.0, 0, false, EYEBLOSSOM, 0.0, S_GRASS));
         let mut open = def("eyeblossom_open", "Eyeblossom (Wide Awake)", Cross, false, false, [T_EYEBLOSSOM_OPEN; 3], 0.0, 0, false, EYEBLOSSOM, 3.0, S_GRASS);
         open.creative = false;
@@ -2254,6 +2265,15 @@ impl Registry {
             d.shape = Shape::Layer { eighths: k as u8 + 1 };
             d.see_through = true;
             d.creative = false;
+            blocks.push(d);
+        }
+        for (id, key, name, tex, hard) in [
+            (IRON_CHEST, "iron_chest", "Iron Chest (Heavy Lid)", [T_IRON_CHEST_TOP, T_IRON_CHEST_SIDE, T_IRON_CHEST_TOP], 4.0),
+            (GOLD_CHEST, "gold_chest", "Gold Chest (Showing Off)", [T_GOLD_CHEST_TOP, T_GOLD_CHEST_SIDE, T_GOLD_CHEST_TOP], 4.0),
+            (DIAMOND_CHEST, "diamond_chest", "Diamond Chest (Really Showing Off)", [T_DIAMOND_CHEST_TOP, T_DIAMOND_CHEST_SIDE, T_DIAMOND_CHEST_TOP], 5.0),
+        ] {
+            let mut d = def(key, name, Shaped, true, false, tex, hard, 0, false, id, 0.0, S_STONE);
+            d.shape = Shape::Chest;
             blocks.push(d);
         }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
@@ -2624,6 +2644,10 @@ impl Registry {
             r(&[(PLANKS, 2), (STRING, 2)], (LOOM, 1)),
             r(&[(OBSIDIAN, 8), (STARING_EYE, 1)], (PERSONAL_CHEST, 1)),
             r(&[(CHEST, 1), (COPPER_INGOT, 4)], (COPPER_CHEST, 1)),
+            // Bigger chests (or upgrade one where it stands: see chests.rs).
+            r(&[(CHEST, 1), (IRON, 8)], (IRON_CHEST, 1)),
+            r(&[(IRON_CHEST, 1), (GOLD_INGOT, 8)], (GOLD_CHEST, 1)),
+            r(&[(GOLD_CHEST, 1), (DIAMOND, 4)], (DIAMOND_CHEST, 1)),
             r(&[(RESIN_CLUMP, 9)], (RESIN_BLOCK, 1)),
             r(&[(RESIN_BLOCK, 1)], (RESIN_CLUMP, 9)),
             r(&[(RESIN_BRICK, 4)], (RESIN_BRICKS, 1)),
@@ -3054,6 +3078,7 @@ mod id_order_tests {
             (LANTERN_HANGING, "lantern_hanging"),
             (WALL_TORCH_FIRST + 3, "wall_torch_west"),
             (SNOW_LAYER_FIRST + 3, "snow_layer_4"),
+            (DIAMOND_CHEST, "diamond_chest"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }

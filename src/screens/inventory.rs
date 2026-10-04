@@ -511,14 +511,19 @@ impl App {
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
         let slot = 20.0 * s;
-        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * 3.0 };
-        let panel_w = slot * 9.0 + 12.0 * s;
+        // Bigger chests have more rows (and the biggest is wider; see chests.rs).
+        let cols = if containers::is_three_slot(kind) { 9 } else { chests::columns(c.slots.len()) };
+        let rows = if containers::is_three_slot(kind) { 3 } else { c.slots.len().div_ceil(cols).max(1) };
+        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * rows as f32 };
+        let panel_w = slot * cols as f32 + 12.0 * s;
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
         draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
+        // Your own slots, centred under a wide chest.
+        let isx = x0 + (panel_w - slot * 9.0) / 2.0;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         let mut tooltip: Option<String> = None;
         self.ui.text(block(kind).name, sx, y0 + 12.0 * s, 10.0, WHITE);
@@ -532,7 +537,7 @@ impl App {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
         } else {
-            (0..c.slots.len()).map(|i| (i, sx + (i % 9) as f32 * slot, top + (i / 9) as f32 * slot)).collect()
+            (0..c.slots.len()).map(|i| (i, sx + (i % cols) as f32 * slot, top + (i / cols) as f32 * slot)).collect()
         };
         for &(i, x, y) in &spots {
             let (l, r, hov) = self.ui.slot_worn(c.slots[i], c.wear[i], x, y, slot, false);
@@ -577,10 +582,10 @@ impl App {
             self.ui.text(&hint, sx + slot * 5.0, top + slot * 2.9, 7.0, GRAY);
         }
         let inv_y = top + top_h + 14.0 * s;
-        self.ui.text("Inventory (shift-click to move stacks)", sx, inv_y - 4.0 * s, 8.0, GRAY);
+        self.ui.text("Inventory (shift-click to move stacks)", isx, inv_y - 4.0 * s, 8.0, GRAY);
         for i in 9..36 {
             let j = i - 9;
-            let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
+            let (cx, cy) = (isx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
             let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
@@ -589,7 +594,7 @@ impl App {
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], isx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }

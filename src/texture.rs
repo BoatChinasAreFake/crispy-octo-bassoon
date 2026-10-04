@@ -641,6 +641,13 @@ pub const T_CANDLE_LIT: u16 = 814;
 pub const T_CHAIN: u16 = 815;
 pub const T_SCAFFOLD_TOP: u16 = 816;
 pub const T_SCAFFOLD_SIDE: u16 = 817;
+/// Chest tiers (see chests.rs).
+pub const T_IRON_CHEST_TOP: u16 = 818;
+pub const T_IRON_CHEST_SIDE: u16 = 819;
+pub const T_GOLD_CHEST_TOP: u16 = 820;
+pub const T_GOLD_CHEST_SIDE: u16 = 821;
+pub const T_DIAMOND_CHEST_TOP: u16 = 822;
+pub const T_DIAMOND_CHEST_SIDE: u16 = 823;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2451,6 +2458,28 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let edge = x == 0 || y == 0 || x == 15 || y == 15;
         if edge { shade(rgb(90, 60, 30), r.range(0.9, 1.05)) } else { shade(rgb(165, 115, 60), r.range(0.88, 1.06) * if x % 5 == 0 { 0.9 } else { 1.0 }) }
     });
+    // Bigger chests: the same chest in iron, gold and diamond, banded darker.
+    for (top, side, body, band, latch) in [
+        (T_IRON_CHEST_TOP, T_IRON_CHEST_SIDE, rgb(200, 200, 205), rgb(110, 110, 118), rgb(70, 70, 75)),
+        (T_GOLD_CHEST_TOP, T_GOLD_CHEST_SIDE, rgb(240, 200, 70), rgb(170, 120, 30), rgb(120, 80, 20)),
+        (T_DIAMOND_CHEST_TOP, T_DIAMOND_CHEST_SIDE, rgb(120, 230, 225), rgb(50, 150, 150), rgb(30, 90, 95)),
+    ] {
+        a.each(side, move |x, y, r, _| {
+            let edge = y == 0 || y == 15 || y == 5 || y == 6 || x == 0 || x == 15;
+            let lock = (6..10).contains(&x) && (4..9).contains(&y);
+            if lock {
+                if (7..9).contains(&x) && y == 6 { rgb(30, 30, 30) } else { shade(latch, r.range(0.9, 1.05)) }
+            } else if edge {
+                shade(band, r.range(0.9, 1.05))
+            } else {
+                shade(body, r.range(0.88, 1.06) * if (x + y * 3) % 7 == 0 { 1.12 } else { 1.0 })
+            }
+        });
+        a.each(top, move |x, y, r, _| {
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            if edge { shade(band, r.range(0.9, 1.05)) } else { shade(body, r.range(0.88, 1.06) * if (x * 5 + y) % 9 == 0 { 1.12 } else { 1.0 }) }
+        });
+    }
     a.copy(T_STONE_BRICKS, T_FURNACE_TOP);
     a.copy(T_COBBLE, T_FURNACE_SIDE);
     a.copy(T_COBBLE, T_FURNACE_LIT);
