@@ -826,47 +826,120 @@ pub enum Mood {
 pub const MOODS: [Mood; 4] = [Mood::Day, Mood::Night, Mood::Morning, Mood::Deep];
 
 /// One piece of music for a mood (different seeds, different tunes).
+/// How long each mood's piece of background music lasts (seconds).
+pub const MUSIC_SECS: f32 = 170.0;
+
+/// A mood's piece of background music, composed afresh from `seed`:
+/// a quiet intro, a tune (a short motif over a chord progression, repeated
+/// with changes), a contrasting middle that wanders higher, the tune again,
+/// and an outro that thins out and fades.
 fn synth_music_mood(mood: Mood, seed: u64) -> Vec<f32> {
     let mut rng = Rng::new(seed ^ (mood as u64 * 0x9E37));
-    let len = 60.0;
+    let len = MUSIC_SECS;
     let mut v = vec![0.0f32; samples(len)];
-    let (scale, root, steps, chord_chance, low, high): (&[i32], f32, &[f32], f32, i32, i32) = match mood {
-        Mood::Day => (&[0, 2, 4, 7, 9], 196.0, &[0.6, 0.9, 1.2, 1.8, 2.4], 0.3, 2, 11),
-        Mood::Night => (&[0, 2, 3, 5, 7, 8, 10], 174.6, &[1.2, 1.8, 2.4, 3.6], 0.45, 3, 12),
-        Mood::Morning => (&[0, 2, 4, 5, 7, 9, 11], 220.0, &[0.3, 0.3, 0.6, 0.6, 0.9], 0.2, 4, 14),
-        Mood::Deep => (&[0, 1, 3, 7, 8], 98.0, &[2.4, 3.6, 4.8], 0.6, 0, 8),
+    // Scale, root, seconds a bar, the chords (as scale steps), lowest and highest melody step.
+    let (scale, root, bar, prog, low, high): (&[i32], f32, f32, &[i32], i32, i32) = match mood {
+        Mood::Day => (&[0, 2, 4, 7, 9], 196.0, 3.2, &[0, 3, 1, 4], 2, 11),
+        Mood::Night => (&[0, 2, 3, 5, 7, 8, 10], 174.6, 4.0, &[0, 5, 3, 4], 3, 12),
+        Mood::Morning => (&[0, 2, 4, 5, 7, 9, 11], 220.0, 2.6, &[0, 4, 5, 3], 4, 14),
+        Mood::Deep => (&[0, 1, 3, 7, 8], 98.0, 5.0, &[0, 3, 1, 0], 0, 8),
     };
     let n = scale.len() as i32;
     let note = |deg: i32| -> f32 {
         let st = scale[deg.rem_euclid(n) as usize] + deg.div_euclid(n) * 12;
         root * 2f32.powf(st as f32 / 12.0)
     };
-    let mut t = 1.0;
-    let mut deg = (low + high) / 2;
-    while t < len - 6.0 {
-        let f = note(deg);
-        match mood {
-            Mood::Deep => pad(&mut v, t, 5.0, f, 0.35),
-            _ => piano(&mut v, t, 4.0, f, 0.5),
-        }
-        if rng.chance(chord_chance) {
-            // A soft chord underneath: the third and fifth below (in scale steps).
-            for d in [deg - n, deg - n + 2, deg - n + 4] {
-                pad(&mut v, t, 5.5, note(d), 0.1);
+    // A motif: a few notes (offsets from the chord's root, and where in the bar).
+    let motif = |rng: &mut Rng, k: usize| -> Vec<(f32, i32)> {
+        let mut m = Vec::new();
+        let mut at = 0.0;
+        let mut d = rng.int(0, 2);
+        for _ in 0..k {
+            m.push((at, d));
+            at += [0.125, 0.25, 0.25, 0.375, 0.5][rng.int(0, 4) as usize];
+            if at >= 0.95 {
+                break;
             }
+            d += rng.int(-2, 2);
         }
-        if mood == Mood::Morning && rng.chance(0.35) {
-            // A quick run upward.
-            for (k, step) in [1, 2, 4].iter().enumerate() {
-                piano(&mut v, t + 0.15 * (k + 1) as f32, 1.5, note(deg + step), 0.28);
+        m
+    };
+    let (tune, middle) = (motif(&mut rng, 5), motif(&mut rng, 4));
+    // Sections: (kind, bars). 0 intro, 1 tune, 2 tune varied, 3 middle, 4 outro.
+    let bars_total = ((len - 8.0) / bar) as i32;
+    let intro = 2;
+    let outro = 3;
+    let body = (bars_total - intro - outro).max(8);
+    let plan = [(0, intro), (1, body * 3 / 10), (3, body * 2 / 10), (2, body * 3 / 10), (3, body / 10), (1, body - body * 3 / 10 * 2 - body * 2 / 10 - body / 10), (4, outro)];
+    let mut t = 1.5;
+    let mut b = 0usize;
+    for (kind, bars) in plan {
+        for k in 0..bars {
+            if t > len - 6.0 {
+                break;
             }
+            let chord = prog[b % prog.len()];
+            b += 1;
+            let base = (low + high) / 2 - 2 + chord;
+            // Chords underneath (pads), soft in the intro and outro.
+            let soft = if kind == 0 || kind == 4 { 0.07 } else { 0.1 };
+            for d in [chord - n, chord - n + 2, chord - n + 4] {
+                pad(&mut v, t, bar * 1.1, note(d), soft);
+            }
+            // A low note on the bar (not in the Deep: that's all pads).
+            if mood != Mood::Deep && kind != 0 {
+                piano(&mut v, t, bar, note(chord - 2 * n), 0.22);
+            }
+            match kind {
+                1 | 2 => {
+                    let lift = if kind == 2 && k % 2 == 1 { rng.int(-1, 1) } else { 0 };
+                    for (i, &(at, d)) in tune.iter().enumerate() {
+                        // The varied tune leaves the odd note out, or adds a grace note.
+                        if kind == 2 && rng.chance(0.15) {
+                            continue;
+                        }
+                        let deg = (base + d + lift).clamp(low, high);
+                        let voice = if mood == Mood::Deep { 0.0 } else { 1.0 };
+                        if voice > 0.0 {
+                            piano(&mut v, t + at * bar, 3.0, note(deg), if i == 0 { 0.5 } else { 0.42 });
+                        } else {
+                            pad(&mut v, t + at * bar, bar * 0.8, note(deg), 0.3);
+                        }
+                        if kind == 2 && rng.chance(0.12) {
+                            piano(&mut v, t + at * bar - 0.12, 1.0, note(deg + 1), 0.2);
+                        }
+                    }
+                }
+                3 => {
+                    // The middle: its own motif, an octave-ish higher, with space.
+                    for &(at, d) in &middle {
+                        let deg = (base + d + n - 1).clamp(low, high + 2);
+                        if mood == Mood::Deep {
+                            pad(&mut v, t + at * bar, bar * 0.9, note(deg), 0.25);
+                        } else {
+                            piano(&mut v, t + at * bar, 3.5, note(deg), 0.36);
+                        }
+                    }
+                    if mood == Mood::Morning && rng.chance(0.5) {
+                        for (j, step) in [1, 2, 4].iter().enumerate() {
+                            piano(&mut v, t + bar * 0.75 + 0.15 * j as f32, 1.5, note(base + step), 0.25);
+                        }
+                    }
+                }
+                4 => {
+                    // The outro: the tune's first note, fainter each bar.
+                    if let Some(&(_, d)) = tune.first() {
+                        piano(&mut v, t, 4.0, note((base + d).clamp(low, high)), 0.35 / (k + 1) as f32);
+                    }
+                }
+                _ => {}
+            }
+            t += bar;
         }
-        deg = (deg + rng.int(-2, 2)).clamp(low, high);
-        t += steps[rng.int(0, steps.len() as i32 - 1) as usize];
     }
     reverb(&mut v, if mood == Mood::Deep { 0.8 } else { 0.45 }, if mood == Mood::Deep { 2.2 } else { 1.4 });
     let total = v.len();
-    let fade = samples(5.0);
+    let fade = samples(6.0);
     for i in 0..fade {
         v[total - 1 - i] *= i as f32 / fade as f32;
     }
@@ -1376,10 +1449,10 @@ mod tests {
         let mut rng = Rng::new(2);
         for m in MOODS {
             let v = synth_music_mood(m, 5);
-            assert_eq!(v.len(), samples(60.0), "{m:?}");
+            assert_eq!(v.len(), samples(MUSIC_SECS), "{m:?}");
             assert!(v.iter().all(|x| x.is_finite() && x.abs() <= 1.0), "{m:?} out of range");
             // Something plays through most of it (no long dead stretches).
-            let quiet = v.chunks(samples(5.0)).take(10).filter(|c| c.iter().fold(0.0f32, |a, x| a.max(x.abs())) < 0.02).count();
+            let quiet = v.chunks(samples(5.0)).take(30).filter(|c| c.iter().fold(0.0f32, |a, x| a.max(x.abs())) < 0.02).count();
             assert!(quiet <= 1, "{m:?} has {quiet} silent stretches");
             // Fades out at the end.
             assert!(v[v.len() - 10..].iter().all(|x| x.abs() < 0.01), "{m:?} ends abruptly");
