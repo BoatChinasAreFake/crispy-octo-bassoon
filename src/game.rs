@@ -168,6 +168,8 @@ pub struct Game {
     dig_tick: f32,
     step_dist: f32,
     was_in_water: bool,
+    /// Seconds since we were last in water (bobbing at the surface doesn't splash).
+    dry_for: f32,
     // ---- multiplayer (see multiplayer.rs)
     pub net: Option<Net>,
     /// Other players, keyed by id (0 is the host).
@@ -454,6 +456,7 @@ impl Game {
             dig_tick: 0.0,
             step_dist: 0.0,
             was_in_water: false,
+            dry_for: 10.0,
             net: None,
             peers: BTreeMap::new(),
             my_id: 0,
@@ -1162,6 +1165,7 @@ impl Game {
             self.player.body.vel += push * dt * if self.player.body.in_lava { 2.0 } else { 9.0 };
         }
         self.hunger_tick(dt);
+        self.breath_tick(dt);
         let landed = self.player.landed.take();
         let feet = self.player.body.pos - Vec3::Y * 0.05;
         let under = ivec3(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
@@ -1397,9 +1401,11 @@ impl Game {
 
     fn footsteps(&mut self, dt: f32) {
         let in_water = self.player.body.in_water;
-        if in_water && !self.was_in_water {
+        // A splash for jumping or falling in, not for every bob at the surface.
+        if in_water && !self.was_in_water && self.dry_for > 1.0 {
             self.sfx(Sfx::Splash, None);
         }
+        self.dry_for = if in_water { 0.0 } else { self.dry_for + dt };
         self.was_in_water = in_water;
         let b = &self.player.body;
         if !b.on_ground || in_water || self.player.flying {
@@ -2726,6 +2732,37 @@ impl Game {
                 gravity: -1.0,
             });
         }
+    }
+
+    /// How long we can hold our breath (longer in a Turtle Shell).
+    pub fn max_air(&self) -> f32 {
+        let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
+        crate::player::MAX_AIR + if shell { crate::player::SHELL_AIR } else { 0.0 }
+    }
+
+    /// Breath underwater: it runs down with your head under, then you drown
+    /// (a heart a second, with bubbles), and it comes back fast in the air.
+    pub fn breath_tick(&mut self, dt: f32) {
+        let max = self.max_air();
+        let under = self.player.head_in_water(&self.world) && !self.creative && !self.spectator && self.dead.is_none();
+        if !under {
+            self.player.air = (self.player.air + dt * max / 2.0).min(max);
+            return;
+        }
+        let before = self.player.air;
+        self.player.air -= dt;
+        if self.player.air > 0.0 {
+            // A warning as the last bit runs out.
+            if before > 3.0 && self.player.air <= 3.0 {
+                self.sfx(Sfx::Bubbles, None);
+            }
+            return;
+        }
+        // Out of air: a heart's worth each second.
+        self.player.air = (self.player.air + 1.0).max(0.01);
+        self.sfx(Sfx::Bubbles, None);
+        self.player.hurt = 0.0;
+        self.hurt_player(2.0, "drowned. Turns out you do need air");
     }
 
     /// Hunger over time: healing when well fed, starving when empty.
@@ -6503,5 +6540,42 @@ looks_like = diamond
         assert!(!back.creative);
         std::fs::remove_dir_all(&dir).ok();
     }
-}
 
+    #[test]
+    fn you_drown_without_air_and_a_turtle_shell_helps() {
+        let mut g = arena(231);
+        let p = ivec3(2, 50, 2);
+        for y in 0..3 {
+            g.world.set_v(p + IVec3::Y * y, WATER);
+        }
+        g.player.body.pos = p.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+        let full = g.player.health;
+        // Fifteen seconds of breath, then a heart a second.
+        for _ in 0..(14.0 / 0.05) as i32 {
+            g.breath_tick(0.05);
+        }
+        assert_eq!(g.player.health, full, "still holding it");
+        for _ in 0..(3.0 / 0.05) as i32 {
+            g.breath_tick(0.05);
+        }
+        assert!(g.player.health <= full - 2.0 && g.player.health >= full - 6.0, "{}", g.player.health);
+        // Back in the air it comes back quickly.
+        g.world.set_v(p + IVec3::Y, AIR);
+        g.world.set_v(p + IVec3::Y * 2, AIR);
+        for _ in 0..(2.0 / 0.05) as i32 {
+            g.breath_tick(0.05);
+        }
+        assert!(g.player.air >= crate::player::MAX_AIR - 0.01);
+        g.inv.armor[0] = Some((TURTLE_SHELL, 1));
+        assert_eq!(g.max_air(), crate::player::MAX_AIR + crate::player::SHELL_AIR);
+        // Creative players don't need air.
+        g.creative = true;
+        g.world.set_v(p + IVec3::Y, WATER);
+        g.player.air = 0.5;
+        let h = g.player.health;
+        for _ in 0..40 {
+            g.breath_tick(0.05);
+        }
+        assert_eq!(g.player.health, h);
+    }
+}

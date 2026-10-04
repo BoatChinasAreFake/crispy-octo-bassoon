@@ -86,6 +86,10 @@ impl App {
                     self.ui.armor_bar(points, x0, y0 - 29.0 * s);
                 }
                 self.ui.hunger_bar(g.player.hunger.food, x0 + slot * 9.0, y0 - 18.0 * s);
+                let max_air = g.max_air();
+                if g.player.air < max_air - 0.01 {
+                    self.ui.air_bar(g.player.air, max_air, x0 + slot * 9.0, y0 - 29.0 * s);
+                }
             }
             if g.held_name > 0.0 {
                 let held = g.inv.held();

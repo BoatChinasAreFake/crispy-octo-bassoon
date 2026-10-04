@@ -287,6 +287,19 @@ impl Ui {
         }
     }
 
+    /// Breath underwater: ten bubbles, right-aligned to end at `x`, that pop as it runs out.
+    pub fn air_bar(&self, air: f32, max: f32, x: f32, y: f32) {
+        let size = 9.0 * self.s;
+        let left = (air / max * 10.0).ceil().clamp(0.0, 10.0) as i32;
+        for i in 0..left {
+            let cx = x - (i as f32 + 0.5) * (size - self.s);
+            let cy = y + size / 2.0;
+            draw_circle(cx, cy, size * 0.42, Color::new(0.1, 0.2, 0.45, 0.9));
+            draw_circle(cx, cy, size * 0.32, Color::new(0.55, 0.8, 1.0, 1.0));
+            draw_circle(cx - size * 0.12, cy - size * 0.12, size * 0.1, WHITE);
+        }
+    }
+
     pub fn crosshair(&self) {
         let (cx, cy) = (screen_width() / 2.0, screen_height() / 2.0);
         let (l, t) = (6.0 * self.s, self.s.max(1.5));

@@ -40,6 +40,7 @@ pub fn caption(s: Sfx) -> Option<&'static str> {
         Sfx::Rattle => "Bones rattle",
         Sfx::Skitter => "Webber skitters",
         Sfx::Bloop => "Bloop",
+        Sfx::Bubbles => "Bubbles (you need air)",
         Sfx::Twang => "Bow fires",
         Sfx::Thunk => "Arrow hits",
         Sfx::Thunder => "Thunder",

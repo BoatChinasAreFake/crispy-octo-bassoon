@@ -170,6 +170,8 @@ pub enum Sfx {
     Horn,
     /// A note block: (instrument, pitch); see songs.rs.
     Note(u8, u8),
+    /// Bubbles: running out of air underwater.
+    Bubbles,
 }
 
 // ---------------------------------------------------------------- synthesis
@@ -260,6 +262,22 @@ fn voice(out: &mut [f32], start: f32, len: f32, f0: f32, f1: f32, formant: f32, 
     }
 }
 
+/// A soft hum: a sine with a little second and third harmonic, a gentle
+/// swell in and out, and the pitch gliding from `f0` to `f1` late on.
+fn hum(out: &mut [f32], len: f32, f0: f32, f1: f32, gain: f32) {
+    let n = samples(len).min(out.len());
+    let mut phase = 0.0f32;
+    for (i, x) in out.iter_mut().take(n).enumerate() {
+        let k = i as f32 / n as f32;
+        let glide = ((k - 0.45) / 0.55).clamp(0.0, 1.0);
+        let f = f0 + (f1 - f0) * glide * glide;
+        phase += TAU * f / SR as f32;
+        let s = phase.sin() + (phase * 2.0).sin() * 0.3 + (phase * 3.0).sin() * 0.12;
+        let env = (k / 0.12).min(1.0) * ((1.0 - k) / 0.3).min(1.0);
+        *x += s * env * gain;
+    }
+}
+
 pub(crate) fn finish(mut v: Vec<f32>, peak: f32) -> Vec<f32> {
     let m = v.iter().fold(0.0f32, |a, x| a.max(x.abs())).max(1e-6);
     for x in v.iter_mut() {
@@ -296,9 +314,9 @@ fn synth_material(m: Mat, kind: u8, rng: &mut Rng) -> Vec<f32> {
     let p = rng.range(0.85, 1.15);
     match m {
         Mat::Stone => {
-            burst(&mut v, 0.0, 0.12, 45.0, 400.0 * p, 3200.0 * p, 1.0, rng);
+            burst(&mut v, 0.0, 0.12, 45.0, 250.0 * p, 1800.0 * p, 1.0, rng);
             if kind == 0 {
-                burst(&mut v, 0.035, 0.12, 35.0, 250.0, 2000.0 * p, 0.8, rng);
+                burst(&mut v, 0.035, 0.12, 35.0, 180.0, 1300.0 * p, 0.8, rng);
                 burst(&mut v, 0.08, 0.15, 30.0, 150.0, 1400.0, 0.5, rng);
             }
         }
@@ -313,30 +331,31 @@ fn synth_material(m: Mat, kind: u8, rng: &mut Rng) -> Vec<f32> {
             let grains = if kind == 0 { 7 } else { 3 };
             for g in 0..grains {
                 let at = g as f32 * 0.025 + rng.range(0.0, 0.015);
-                burst(&mut v, at, 0.07, 55.0, 300.0, 1800.0 * p, rng.range(0.4, 1.0), rng);
+                burst(&mut v, at, 0.07, 55.0, 220.0, 1200.0 * p, rng.range(0.4, 1.0), rng);
             }
         }
         Mat::Sand => {
-            let grains = if kind == 0 { 10 } else { 4 };
+            // A soft, low crunch (it used to hiss like a detuned radio).
+            let grains = if kind == 0 { 8 } else { 3 };
             for g in 0..grains {
-                let at = g as f32 * 0.02 + rng.range(0.0, 0.01);
-                burst(&mut v, at, 0.05, 70.0, 900.0, 4200.0 * p, rng.range(0.3, 0.9), rng);
+                let at = g as f32 * 0.03 + rng.range(0.0, 0.012);
+                burst(&mut v, at, 0.06, 50.0, 200.0, 1100.0 * p, rng.range(0.4, 0.9), rng);
             }
         }
         Mat::Glass => {
             if kind == 0 {
-                burst(&mut v, 0.0, 0.08, 60.0, 2000.0, 7000.0, 0.8, rng);
+                burst(&mut v, 0.0, 0.08, 60.0, 900.0, 3500.0, 0.5, rng);
                 for _ in 0..7 {
-                    let f = rng.range(2200.0, 5200.0);
-                    tone(&mut v, rng.range(0.0, 0.06), 0.3, f, f * 0.98, rng.range(12.0, 25.0), 0.35, &[1.0]);
+                    let f = rng.range(1600.0, 3200.0);
+                    tone(&mut v, rng.range(0.0, 0.06), 0.3, f, f * 0.98, rng.range(14.0, 25.0), 0.25, &[1.0]);
                 }
             } else {
                 tone(&mut v, 0.0, 0.1, 1800.0 * p, 1700.0, 40.0, 0.5, &[1.0, 0.3]);
-                burst(&mut v, 0.0, 0.05, 80.0, 1500.0, 5000.0, 0.5, rng);
+                burst(&mut v, 0.0, 0.05, 80.0, 800.0, 3000.0, 0.35, rng);
             }
         }
     }
-    finish(v, 1.4)
+    finish(v, 0.75)
 }
 
 fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
@@ -374,8 +393,8 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             let (mut lp, mut hp) = (Lp::new(), Lp::new());
             for (i, x) in v.iter_mut().enumerate() {
                 let k = i as f32 / n as f32;
-                let y = lp.run(rng.range(-1.0, 1.0), 7000.0);
-                let band = y - hp.run(y, 2500.0);
+                let y = lp.run(rng.range(-1.0, 1.0), 4000.0);
+                let band = y - hp.run(y, 1200.0);
                 *x = band * k.powf(0.7) * ((1.0 - k) / 0.03).min(1.0);
             }
             finish(v, 1.1)
@@ -400,7 +419,7 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
                 let swell = (0.6 + 0.4 * (t * wobble * TAU).sin()) * (-t * 0.9).exp();
                 *x = (snap + rumble * swell) * (t / 0.003).min(1.0);
             }
-            finish(v, 2.0)
+            finish(v, 1.2)
         }
         Sfx::Chime => {
             let n = samples(1.6);
@@ -431,16 +450,16 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
                 let thump = phase.sin() * (-t * 5.0).exp() * 1.2;
                 *x = (rumble * (-t * 2.2).exp() + thump) * (t / 0.004).min(1.0);
             }
-            finish(v, 2.5)
+            finish(v, 1.3)
         }
         Sfx::Eat => {
             let mut v = vec![0.0; samples(0.6)];
             for k in 0..3 {
                 let at = k as f32 * 0.17 + rng.range(0.0, 0.02);
-                burst(&mut v, at, 0.1, 30.0, 500.0, 2400.0, 1.0, rng);
-                burst(&mut v, at + 0.02, 0.06, 50.0, 1200.0, 5000.0, 0.4, rng);
+                burst(&mut v, at, 0.1, 30.0, 300.0, 1600.0, 1.0, rng);
+                burst(&mut v, at + 0.02, 0.06, 50.0, 700.0, 2600.0, 0.3, rng);
             }
-            finish(v, 1.3)
+            finish(v, 0.8)
         }
         Sfx::Pop => {
             let mut v = vec![0.0; samples(0.12)];
@@ -455,13 +474,11 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             finish(v, 0.9)
         }
         Sfx::Splash => {
-            let mut v = vec![0.0; samples(0.7)];
-            burst(&mut v, 0.0, 0.6, 7.0, 300.0, 2600.0, 1.0, rng);
-            for _ in 0..6 {
-                let f = rng.range(350.0, 800.0);
-                tone(&mut v, rng.range(0.05, 0.4), 0.08, f, f * 1.8, 30.0, 0.35, &[1.0]);
-            }
-            finish(v, 1.3)
+            // A soft, low sploosh.
+            let mut v = vec![0.0; samples(0.6)];
+            burst(&mut v, 0.0, 0.5, 9.0, 120.0, 1100.0, 1.0, rng);
+            burst(&mut v, 0.0, 0.12, 30.0, 300.0, 1800.0, 0.25, rng);
+            finish(v, 0.7)
         }
         Sfx::Craft => {
             let mut v = vec![0.0; samples(0.3)];
@@ -473,7 +490,7 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             let mut v = vec![0.0; samples(0.25)];
             tone(&mut v, 0.0, 0.2, 90.0, 40.0, 20.0, 1.0, &[1.0, 0.3]);
             burst(&mut v, 0.0, 0.1, 40.0, 60.0, 500.0, 0.8, rng);
-            finish(v, 1.6)
+            finish(v, 1.0)
         }
         Sfx::Baa => {
             // Heavy vibrato is what makes it a bleat rather than a moan.
@@ -655,11 +672,12 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
             finish(v, 1.0)
         }
         Sfx::Hmm => {
-            // A thoughtful, nasal "hmm".
-            let mut v = vec![0.0; samples(0.6)];
+            // A thoughtful, closed-mouth "hmm?": a soft hum that lifts at the end.
             let p = rng.range(0.85, 1.15);
-            voice(&mut v, 0.0, 0.5, 180.0 * p, 150.0 * p, 900.0, 0.04, 1.0, rng);
-            finish(v, 1.0)
+            let rise = if rng.chance(0.5) { 1.18 } else { 0.92 };
+            let mut v = vec![0.0; samples(0.55)];
+            hum(&mut v, 0.5, 210.0 * p, 210.0 * p * rise, 0.9);
+            finish(v, 0.8)
         }
         Sfx::Moo => {
             let mut v = vec![0.0; samples(1.2)];
@@ -683,6 +701,15 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
                 burst(&mut v, k as f32 * 0.035 + rng.range(0.0, 0.01), 0.02, 120.0, 2000.0, 7000.0, rng.range(0.3, 0.8), rng);
             }
             finish(v, 1.0)
+        }
+        Sfx::Bubbles => {
+            // A few soft, rising blips.
+            let mut v = vec![0.0; samples(0.5)];
+            for _ in 0..5 {
+                let f = rng.range(260.0, 520.0);
+                tone(&mut v, rng.range(0.0, 0.35), 0.09, f, f * 1.7, 28.0, 0.5, &[1.0]);
+            }
+            finish(v, 0.7)
         }
         Sfx::Bloop => {
             let mut v = vec![0.0; samples(0.3)];
@@ -1010,6 +1037,7 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Bleat,
         Sfx::Firework,
         Sfx::Horn,
+        Sfx::Bubbles,
     ]);
     v
 }

@@ -7,6 +7,9 @@ use macroquad::math::Vec3;
 
 pub const EYE: f32 = 1.62;
 pub const MAX_HEALTH: f32 = 20.0;
+/// Seconds you can hold your breath (a Turtle Shell adds `SHELL_AIR`).
+pub const MAX_AIR: f32 = 15.0;
+pub const SHELL_AIR: f32 = 10.0;
 
 #[derive(Default, Clone)]
 pub struct Input {
@@ -56,6 +59,8 @@ pub struct Player {
     pub bounced: bool,
     /// Set on landing to how far we fell (for trampling and hay bales).
     pub landed: Option<f32>,
+    /// Seconds of breath left underwater (see `Game::breath_tick`).
+    pub air: f32,
 }
 
 impl Player {
@@ -86,6 +91,7 @@ impl Player {
             leaping: 0,
             bounced: false,
             landed: None,
+            air: MAX_AIR,
         }
     }
 
