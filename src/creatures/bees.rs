@@ -284,7 +284,15 @@ pub fn climate(b: Biome) -> f32 {
         Biome::Taiga => 0.7,
         Biome::Desert | Biome::Badlands => 0.6,
         Biome::Snowy => 0.45,
-        Biome::Ocean => 0.8,
+        Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean => 0.8,
+        Biome::FrozenOcean => 0.4,
+        // Meadows are what bees dream of.
+        Biome::Meadow => 1.3,
+        Biome::BirchForest => 1.0,
+        Biome::Savanna => 0.8,
+        Biome::DarkForest => 0.6,
+        Biome::MushroomIslands => 0.5,
+        Biome::IceSpikes | Biome::StonyPeaks => 0.4,
     }
 }
 

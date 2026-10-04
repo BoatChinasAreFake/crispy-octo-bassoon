@@ -36,14 +36,30 @@ pub fn colour_rgb(c: usize) -> [u8; 3] {
     [[235, 235, 235], [40, 40, 45], [190, 40, 40], [230, 130, 40], [235, 210, 50], [80, 150, 50], [50, 80, 200], [130, 60, 170]][c % 8]
 }
 
+/// The first block of a fence's family (the plain fence's, or a wood's; see woods.rs).
+pub fn fence_base(id: Id) -> Option<Id> {
+    match block(id).shape {
+        Shape::Fence { mask } => Some(id - mask as Id),
+        _ => None,
+    }
+}
+
 pub fn is_fence(id: Id) -> bool {
-    (FENCE_FIRST..FENCE_FIRST + 16).contains(&id)
+    fence_base(id).is_some()
 }
 pub fn is_pane(id: Id) -> bool {
     (PANE_FIRST..PANE_FIRST + 16).contains(&id)
 }
+/// The first block of a gate's family (shut, across north-south).
+pub fn gate_base(id: Id) -> Option<Id> {
+    match block(id).shape {
+        Shape::Gate { x_axis, open } => Some(id - (x_axis as Id * 2 + open as Id)),
+        _ => None,
+    }
+}
+
 pub fn is_gate(id: Id) -> bool {
-    (GATE_FIRST..GATE_FIRST + 4).contains(&id)
+    gate_base(id).is_some()
 }
 pub fn is_ladder(id: Id) -> bool {
     (LADDER_FIRST..LADDER_FIRST + 4).contains(&id)
@@ -57,12 +73,10 @@ pub fn is_stained_glass(id: Id) -> bool {
 
 /// The item a family member is placed from (and drops as).
 pub fn family(id: Id) -> Option<Id> {
-    if is_fence(id) {
-        Some(FENCE_FIRST)
+    if let Some(base) = fence_base(id).or_else(|| gate_base(id)) {
+        Some(base)
     } else if is_pane(id) {
         Some(PANE_FIRST)
-    } else if is_gate(id) {
-        Some(GATE_FIRST)
     } else if is_ladder(id) {
         Some(LADDER_FIRST)
     } else if is_trapdoor(id) {
@@ -94,17 +108,25 @@ pub const TALL: f32 = 1.6;
 
 /// Things that stand taller than their block for anything trying to jump them.
 pub fn is_tall(id: Id) -> bool {
-    is_fence(id) || (is_gate(id) && (id - GATE_FIRST).is_multiple_of(2))
+    is_fence(id) || (is_gate(id) && !gate_state(id).1)
 }
 
 /// A gate's state: (spans east-west, open).
 pub fn gate_state(id: Id) -> (bool, bool) {
-    let k = id - GATE_FIRST;
-    (k >= 2, k % 2 == 1)
+    match block(id).shape {
+        Shape::Gate { x_axis, open } => (x_axis, open),
+        _ => (false, false),
+    }
 }
 
+/// A plain fence gate.
 pub fn gate(x_axis: bool, open: bool) -> Id {
-    GATE_FIRST + x_axis as Id * 2 + open as Id
+    gate_of(GATE_FIRST, x_axis, open)
+}
+
+/// A gate of the family starting at `base`.
+pub fn gate_of(base: Id, x_axis: bool, open: bool) -> Id {
+    base + x_axis as Id * 2 + open as Id
 }
 
 pub fn trapdoor(facing: u8, open: bool) -> Id {
@@ -116,8 +138,8 @@ impl World {
     pub fn reshape_joins(&mut self, p: IVec3) {
         for q in [p, p + IVec3::X, p - IVec3::X, p + IVec3::Z, p - IVec3::Z] {
             let id = self.get_v(q);
-            let (first, pane) = if is_fence(id) {
-                (FENCE_FIRST, false)
+            let (first, pane) = if let Some(base) = fence_base(id) {
+                (base, false)
             } else if is_pane(id) {
                 (PANE_FIRST, true)
             } else {
@@ -135,10 +157,10 @@ impl Game {
     /// Open or shut a gate or trapdoor at `pos`. Returns whether there was one.
     pub fn toggle_hinged(&mut self, pos: IVec3) -> bool {
         let id = self.world.get_v(pos);
-        let new = if is_gate(id) {
+        let new = if let Some(base) = gate_base(id) {
             let (x_axis, open) = gate_state(id);
             // Gates open away from you, which here just means across your way.
-            gate(x_axis, !open)
+            gate_of(base, x_axis, !open)
         } else if is_trapdoor(id) {
             let k = id - TRAPDOOR_FIRST;
             trapdoor((k / 2) as u8, k.is_multiple_of(2))
@@ -158,10 +180,10 @@ impl Game {
     /// The block to place for a gate, ladder or trapdoor held in hand.
     pub fn hinged_facing(&self, held: Id, normal: IVec3) -> Option<Id> {
         match held {
-            GATE_FIRST => {
+            g if gate_base(g) == Some(g) => {
                 // Across the way you're facing.
                 let f = self.facing();
-                Some(gate(f.is_multiple_of(2), false))
+                Some(gate_of(g, f.is_multiple_of(2), false))
             }
             LADDER_FIRST => crate::decor::frame_facing(normal).map(|f| LADDER_FIRST + f as Id),
             TRAPDOOR_FIRST => {

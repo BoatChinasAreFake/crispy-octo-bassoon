@@ -30,7 +30,7 @@ pub fn kind_of(id: Id, face: usize) -> Option<Kind> {
     match id {
         GRASS if face == 2 => Some(Kind::Grass),
         TALL_GRASS => Some(Kind::Grass),
-        LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES => Some(Kind::Leaves),
+        LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES | ACACIA_LEAVES | DARK_OAK_LEAVES => Some(Kind::Leaves),
         _ if is_water(id) => Some(Kind::Water),
         _ => None,
     }
@@ -44,7 +44,8 @@ pub fn grass(b: Biome) -> [f32; 3] {
         Biome::Desert => [1.3, 1.08, 0.6],
         Biome::Badlands => [1.35, 1.0, 0.55],
         Biome::Snowy => [0.85, 0.97, 1.05],
-        Biome::Ocean => [0.95, 1.0, 0.95],
+        Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean => [0.95, 1.0, 0.95],
+        Biome::FrozenOcean => [0.85, 0.97, 1.05],
         Biome::Swamp => [0.72, 0.78, 0.5],
         Biome::Jungle => [0.78, 1.18, 0.62],
         Biome::Taiga => [0.8, 0.95, 0.92],
@@ -52,6 +53,16 @@ pub fn grass(b: Biome) -> [f32; 3] {
         Biome::Mangrove => [0.78, 0.9, 0.55],
         // Grey-green at most (any grass at its edges fades to grey).
         Biome::PaleGarden => [1.3, 0.88, 1.7],
+        // Dry and yellow.
+        Biome::Savanna => [1.3, 1.05, 0.55],
+        Biome::BirchForest => [0.95, 1.05, 0.85],
+        // Deep and dark.
+        Biome::DarkForest => [0.62, 0.82, 0.55],
+        Biome::MushroomIslands => [0.85, 1.05, 0.7],
+        Biome::IceSpikes => [0.85, 0.97, 1.05],
+        // Lush.
+        Biome::Meadow => [0.82, 1.1, 0.85],
+        Biome::StonyPeaks => [0.9, 0.95, 0.85],
     }
 }
 
@@ -68,6 +79,15 @@ pub fn water(b: Biome) -> [f32; 3] {
         Biome::Taiga => [0.85, 0.98, 1.1],
         Biome::Desert => [0.95, 1.12, 1.05],
         Biome::Badlands => [1.05, 0.98, 0.85],
+        Biome::Savanna => [0.95, 1.05, 1.0],
+        Biome::BirchForest | Biome::Meadow | Biome::StonyPeaks => [0.95, 1.0, 1.08],
+        Biome::DarkForest => [0.75, 0.9, 0.95],
+        Biome::MushroomIslands => [1.05, 0.85, 1.1],
+        Biome::IceSpikes => [0.85, 0.95, 1.18],
+        // Clear turquoise, warmer green-blue, and deep cold blue.
+        Biome::WarmOcean => [0.55, 1.25, 1.15],
+        Biome::LukewarmOcean => [0.75, 1.12, 1.08],
+        Biome::FrozenOcean => [0.7, 0.8, 1.15],
     }
 }
 

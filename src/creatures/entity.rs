@@ -163,7 +163,7 @@ pub fn move_body(world: &World, b: &mut Body, dt: f32, edge_guard: bool) {
         b.on_ground = true;
     }
     let feet = world.get(b.pos.x.floor() as i32, (b.pos.y + 0.3).floor() as i32, b.pos.z.floor() as i32);
-    b.in_water = is_liquid(feet);
+    b.in_water = is_liquid(feet) || waterlogged(feet);
     b.in_lava = is_lava(feet);
 }
 
@@ -281,6 +281,9 @@ pub enum MobKind {
     /// The second boss (see wilter.rs): built from Sorrow Sand and three
     /// Charred Skulls, it flies, throws wilting skulls, and leaves a star.
     Wilter,
+    /// A Mooer gone red-spotted with mushrooms on its back (mushroom islands).
+    /// Shear it for the mushrooms, and it's a plain Mooer again.
+    Mushmooer,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -296,7 +299,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 59] = [
+    pub const ALL: [MobKind; 60] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -357,6 +360,7 @@ impl MobKind {
         MobKind::Allay,
         MobKind::CharredRattler,
         MobKind::Wilter,
+        MobKind::Mushmooer,
     ];
 
     pub fn index(self) -> u8 {
@@ -408,6 +412,7 @@ impl MobKind {
             "starer" | "enderman" => Some(MobKind::Starer),
             "cluckster" | "chicken" => Some(MobKind::Cluckster),
             "mooer" | "cow" => Some(MobKind::Mooer),
+            "mushmooer" | "mooshroom" | "red mooer" | "red-spotted mooer" => Some(MobKind::Mushmooer),
             "rattler" | "skeleton" => Some(MobKind::Rattler),
             "webber" | "spider" => Some(MobKind::Webber),
             "bloop" | "slime" => Some(MobKind::Bloop),
@@ -475,6 +480,7 @@ impl MobKind {
             MobKind::Starer => "Starer",
             MobKind::Cluckster => "Cluckster",
             MobKind::Mooer => "Mooer",
+            MobKind::Mushmooer => "Mushmooer",
             MobKind::Rattler => "Rattler",
             MobKind::Webber => "Webber",
             MobKind::Bloop => "Bloop",
@@ -542,7 +548,7 @@ impl MobKind {
             MobKind::Fluffer => (0.45, 1.25),
             MobKind::Starer => (0.3, 2.9),
             MobKind::Cluckster => (0.2, 0.7),
-            MobKind::Mooer => (0.45, 1.4),
+            MobKind::Mooer | MobKind::Mushmooer => (0.45, 1.4),
             MobKind::Rattler => (0.3, 1.95),
             MobKind::Webber => (0.7, 0.9),
             MobKind::Bloop => (0.26, 0.52),
@@ -604,7 +610,7 @@ impl MobKind {
             MobKind::Fluffer => 8.0,
             MobKind::Starer => 40.0,
             MobKind::Cluckster => 4.0,
-            MobKind::Mooer => 10.0,
+            MobKind::Mooer | MobKind::Mushmooer => 10.0,
             MobKind::Rattler => 20.0,
             MobKind::Webber => 16.0,
             MobKind::Bloop => 1.0, // times size squared
@@ -685,7 +691,7 @@ impl MobKind {
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::Turtle | MobKind::Panda | MobKind::Llama)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::Turtle | MobKind::Panda | MobKind::Llama)
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
@@ -703,7 +709,7 @@ impl MobKind {
     pub fn breed_food(self) -> &'static [Id] {
         match self {
             MobKind::Oinker => &[CARROT, POTATO],
-            MobKind::Fluffer | MobKind::Mooer => &[WHEAT],
+            MobKind::Fluffer | MobKind::Mooer | MobKind::Mushmooer => &[WHEAT],
             MobKind::Cluckster | MobKind::Squawker => &[WHEAT_SEEDS],
             MobKind::Sneaker => &[CLUCKETS, COOKED_CLUCKETS],
             MobKind::Ribbit => &[GOO],
@@ -1150,7 +1156,7 @@ impl Mob {
         let face = flat.x.atan2(-flat.z);
         match self.kind {
             // (The Wyrm and the Wilter fly on their own, see hollow.rs and wilter.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Wilter | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Wilter | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -1281,7 +1287,7 @@ impl Mob {
                         self.fuse = 0.0;
                         // Turn back before leaving the water; Elders stay near their room.
                         let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.3, -self.yaw.cos()) * (self.body.half + 0.6);
-                        if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                        if !is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
                             self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
                             self.wander_t = rng.range(1.0, 3.0);
                         }
@@ -1308,7 +1314,7 @@ impl Mob {
                 if self.body.in_water {
                     // Drift about, never out of the water.
                     let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
-                    if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                    if !is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
                         self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
                         self.wander_t = rng.range(1.0, 3.0);
                     }
@@ -1789,7 +1795,7 @@ impl Mob {
             MobKind::Axolotl => {
                 if self.body.in_water {
                     let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
-                    if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                    if !is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
                         self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
                         self.wander_t = rng.range(1.0, 3.0);
                     }
@@ -2250,7 +2256,7 @@ impl Mob {
             MobKind::Fluffer if !self.sheared => Some((WOOL, n.max(1))),
             MobKind::Starer if n > 0 => Some((PEARL, 1)),
             MobKind::Cluckster | MobKind::Squawker if n > 0 => Some((FEATHER, n)),
-            MobKind::Mooer => Some((MOO_STEAK, n + 1)),
+            MobKind::Mooer | MobKind::Mushmooer => Some((MOO_STEAK, n + 1)),
             MobKind::Rattler if n > 0 => Some((BONE, n)),
             MobKind::Webber if n > 0 => Some((STRING, n)),
             // Only the smallest Bloops leave anything; bigger ones split instead.
@@ -2626,6 +2632,25 @@ static MOOER: [Part; 8] = [
     part([-0.36, 0.0, 0.28], [0.22, 0.62, 0.22], [0.0, 0.62, 0.4], Limb::Swing(-1.0), [MS; 6]),
     part([0.14, 0.0, 0.28], [0.22, 0.62, 0.22], [0.0, 0.62, 0.4], Limb::Swing(1.0), [MS; 6]),
 ];
+
+/// A Mushmooer: a red-spotted Mooer with two mushrooms on its back.
+static MUSHMOOER: [Part; 10] = {
+    const R: u16 = T_MUSHMOO_SKIN;
+    const C: u16 = T_RED_MUSHROOM_BLOCK;
+    const S: u16 = T_MUSHROOM_STEM;
+    [
+        part([-0.38, 0.62, -0.62], [0.76, 0.66, 1.24], [0.0; 3], Limb::Fixed, [R; 6]),
+        part([-0.26, 0.86, -1.0], [0.52, 0.5, 0.4], [0.0; 3], Limb::Fixed, [R, R, R, R, R, T_MOO_FACE]),
+        part([-0.36, 0.0, -0.5], [0.22, 0.62, 0.22], [0.0, 0.62, -0.4], Limb::Swing(1.0), [R; 6]),
+        part([0.14, 0.0, -0.5], [0.22, 0.62, 0.22], [0.0, 0.62, -0.4], Limb::Swing(-1.0), [R; 6]),
+        part([-0.36, 0.0, 0.28], [0.22, 0.62, 0.22], [0.0, 0.62, 0.4], Limb::Swing(-1.0), [R; 6]),
+        part([0.14, 0.0, 0.28], [0.22, 0.62, 0.22], [0.0, 0.62, 0.4], Limb::Swing(1.0), [R; 6]),
+        part([-0.05, 1.28, -0.2], [0.08, 0.16, 0.08], [0.0; 3], Limb::Fixed, [S; 6]),
+        part([-0.16, 1.42, -0.31], [0.3, 0.12, 0.3], [0.0; 3], Limb::Fixed, [C; 6]),
+        part([0.07, 1.28, 0.25], [0.08, 0.16, 0.08], [0.0; 3], Limb::Fixed, [S; 6]),
+        part([-0.04, 1.42, 0.14], [0.3, 0.12, 0.3], [0.0; 3], Limb::Fixed, [C; 6]),
+    ]
+};
 
 // A fish: a long body, a tail that waggles, a fin on top.
 static FISHY: [Part; 3] = [
@@ -3231,6 +3256,7 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Starer => &STARER,
         MobKind::Cluckster => &CLUCKSTER,
         MobKind::Mooer => &MOOER,
+        MobKind::Mushmooer => &MUSHMOOER,
         MobKind::Rattler => &RATTLER,
         MobKind::Webber => &WEBBER,
         MobKind::Bloop => &BLOOP,

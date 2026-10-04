@@ -86,7 +86,7 @@ pub fn update(m: &mut Mob, dt: f32, world: &World, player: Vec3, visible: bool, 
             if m.body.in_water {
                 // Drift, turning back from the edges of the water; flee when hurt.
                 let ahead = m.body.pos + Vec3::new(m.yaw.sin(), 0.3, -m.yaw.cos()) * 0.9;
-                if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                if !is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
                     m.wander_dir = Some(m.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
                     m.wander_t = rng.range(1.0, 3.0);
                 }

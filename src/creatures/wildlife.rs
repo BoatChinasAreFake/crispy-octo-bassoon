@@ -46,7 +46,7 @@ pub fn pack_of_key(p: IVec3) -> Option<u32> {
 
 fn ahead_is_water(m: &Mob, world: &World) -> bool {
     let ahead = m.body.pos + Vec3::new(m.yaw.sin(), 0.2, -m.yaw.cos()) * 0.9;
-    is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32))
+    is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32))
 }
 
 /// Drift about in the water without leaving it.
@@ -363,9 +363,32 @@ pub fn spawn_kind(biome: crate::world::Biome, top: Id, rng: &mut Rng) -> Option<
     match (biome, top) {
         (_, SAND) if biome != Biome::Desert && rng.chance(0.3) => Some(MobKind::Turtle),
         (Biome::Jungle, _) if rng.chance(0.25) => Some(MobKind::Panda),
-        (Biome::Snowy, _) if rng.chance(0.2) => Some(MobKind::PolarBear),
+        (Biome::Snowy | Biome::IceSpikes, _) if rng.chance(0.2) => Some(MobKind::PolarBear),
         (Biome::Plains | Biome::Taiga, _) if rng.chance(0.06) => Some(MobKind::Llama),
+        // Llamas like it high and dry as well.
+        (Biome::Savanna | Biome::StonyPeaks, _) if rng.chance(0.2) => Some(MobKind::Llama),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod mushmooer_tests {
+    use crate::block::*;
+    use crate::entity::MobKind;
+    use macroquad::math::Vec3;
+
+    #[test]
+    fn shearing_a_mushmooer_gives_mushrooms_and_leaves_a_mooer() {
+        let mut g = crate::game::tests::arena(161);
+        let me = crate::players::record_key(&g.player_name);
+        let at = Vec3::new(2.5, 50.0, 0.5);
+        let id = g.alloc_mob(MobKind::Mushmooer, at);
+        assert_eq!(g.interact_mob(&me, g.player.body.pos, id, SHEARS), crate::animals::Interaction::Sheared);
+        let m = g.mobs.iter().find(|m| m.id == id).unwrap();
+        assert_eq!(m.kind, MobKind::Mooer);
+        assert_eq!(g.drops.iter().filter(|d| d.item == MUSHROOM).map(|d| d.n as u32).sum::<u32>(), 5);
+        // Shears do nothing more to it now.
+        assert_eq!(g.interact_mob(&me, g.player.body.pos, id, SHEARS), crate::animals::Interaction::Nothing);
     }
 }
 

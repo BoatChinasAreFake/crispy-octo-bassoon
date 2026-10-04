@@ -183,6 +183,18 @@ pub const ALL: &[Advancement] = &[
     adv("propped_up", "Propped Up", "Stop a creaking ceiling from coming down."),
     adv("sinking_feeling", "That Sinking Feeling", "Be under a ceiling when it comes down."),
     adv("rope_a_dope", "Rope-a-Dope", "Throw a Spelunker's Rope down a hole."),
+    adv("branching_out", "Branching Out", "Carry acacia, birch and dark oak logs at once."),
+    adv("flat_tops", "Flat Tops", "Find a savanna, where the trees had a haircut."),
+    adv("birch_please", "Birch, Please", "Find a birch forest."),
+    adv("lights_out", "Lights Out", "Find a dark forest. Bring a torch."),
+    adv("fungi_to_be_with", "Fungi to Be With", "Find a mushroom island."),
+    adv("point_taken", "Point Taken", "Find the ice spikes."),
+    adv("hay_fever", "Hay Fever", "Find a meadow."),
+    adv("peak_performance", "Peak Performance", "Stand on a stony peak."),
+    adv("fungus_amongus", "Fungus Among Us", "Shear the mushrooms off a Mushmooer."),
+    adv("warm_welcome", "Warm Welcome", "Swim in a warm ocean."),
+    adv("brr", "Brr", "Find a frozen ocean, icebergs and all."),
+    adv("kelp_me", "Kelp Me", "Bring down a column of kelp."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -190,18 +202,19 @@ pub const TABS: [&str; 5] = ["All", "Getting Started", "Creatures", "Home and Cr
 const STARTED: &[&str] = &[
     "getting_wood", "benchmarking", "stone_age", "tool_time", "iron_will", "dimonds", "fools_gold", "golden_boy", "boing", "ouch", "zoomies", "sweet_dreams", "cake", "spooky", "thirsty",
     "kaboom", "centurion", "why_cross", "suit_up", "cover_me", "open_door_policy", "butterfingers", "hot_stuff", "not_today",
+    "branching_out",
 ];
 const CREATURES: &[&str] = &[
     "bacon", "hiss_tory", "groan_up", "fluffed", "dont_blink", "staring_champ", "rude_teleport", "udderly", "bone_zone", "arachno", "split_decision", "robin_hood", "good_boy",
     "the_birds_and_the_bees", "giddy_up", "hello_my_name_is", "pretty_polly", "soggy", "spear_it", "fishy_business", "sly_friend", "special_delivery", "tongue_tied", "scute_cute",
     "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
-    "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch", "char_broiled",
+    "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch", "char_broiled", "fungus_amongus",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
-    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power",
+    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me",
 ];
 
 /// Which tab (1..) an advancement is on.

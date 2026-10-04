@@ -67,8 +67,9 @@ pub fn smelt(id: Id) -> Option<Id> {
         BOOT => COOKED_BOOT,
         SAND => GLASS,
         COBBLE => STONE,
-        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG => COAL, // charcoal, legally distinct
+        LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,
+        KELP => DRIED_KELP,
         COBBLED_DEEPSLATE => DEEPSLATE,
         RESIN_CLUMP => RESIN_BRICK,
         // Concrete bakes into glazed terracotta of its colour (see masonry.rs).
@@ -85,7 +86,11 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
         LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | PLANKS | CHERRY_PLANKS | MANGROVE_PLANKS | PALE_OAK_PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
         HAY => 45.0,
         STICK | WHEAT => 5.0,
-        DOOR => 10.0,
+        DOOR | ACACIA_DOOR | BIRCH_DOOR | DARK_OAK_DOOR => 10.0,
+        id if is_log(id) || crate::woods::is_planks(id) => 15.0,
+        id if crate::woods::wood_of(id).is_some_and(|(_, p)| p == crate::woods::part::FENCE || p == crate::woods::part::GATE) => 15.0,
+        id if slab_of(id).is_some() && crate::woods::is_planks(made_of(id)) => 7.5,
+        id if stairs_of(id).is_some() && crate::woods::is_planks(made_of(id)) => 15.0,
         id if slab_of(id).is_some() && made_of(id) == PLANKS => 7.5,
         id if stairs_of(id).is_some() && made_of(id) == PLANKS => 15.0,
         BOW | ROD | HOE | PICK_WOOD | SWORD_WOOD => 10.0,

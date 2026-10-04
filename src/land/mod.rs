@@ -15,6 +15,7 @@ pub(crate) mod monument;
 pub(crate) mod nature;
 pub(crate) mod rope;
 pub(crate) mod scorch;
+pub(crate) mod seas;
 pub(crate) mod seasons;
 pub(crate) mod skies;
 pub(crate) mod structures;

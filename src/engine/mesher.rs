@@ -299,8 +299,8 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                 if def.light > 0.0 {
                     out.lights.push([wx + 0.5, wy + 0.6, wz + 0.5, def.light]);
                 }
-                // Wet mangrove roots are roots with water in them: drawn as both.
-                let layers = if id == MANGROVE_ROOTS_WET { 2 } else { 1 };
+                // Waterlogged blocks (wet mangrove roots, sea plants) are drawn as themselves and water.
+                let layers = if waterlogged(id) { 2 } else { 1 };
                 for id in [id, WATER].into_iter().take(layers) {
                     let def = block(id);
                     match def.model {
@@ -340,15 +340,15 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         Model::Liquid => {
                             // Water is translucent; lava glows and hides what's behind it.
                             let lava = is_lava(id);
-                            let same = |b: Id| if lava { is_lava(b) } else { is_water(b) || b == MANGROVE_ROOTS_WET };
+                            let same = |b: Id| if lava { is_lava(b) } else { is_wet(b) };
                             // Surface height of a same-kind cell (1.0 if more of it sits on top).
                             let height = |x: i32, z: i32| -> Option<f32> {
                                 let b = hood.get(x, y, z);
                                 if !same(b) {
                                     return None;
                                 }
-                                // (Wet roots hold still water.)
-                                let b = if b == MANGROVE_ROOTS_WET { WATER } else { b };
+                                // (Waterlogged blocks hold still water.)
+                                let b = if waterlogged(b) { WATER } else { b };
                                 if same(hood.get(x, y + 1, z)) {
                                     return Some(1.0);
                                 }

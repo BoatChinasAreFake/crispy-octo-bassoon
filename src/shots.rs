@@ -102,6 +102,21 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
+        "kelp" => {
+            // Under the sea in a kelp forest, looking across the floor.
+            for r in 0..200 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let (h, biome) = generator.column(x, z);
+                    let deep = world::SEA - h;
+                    let kelpy = (-2..=2).filter(|k| crate::seas::floor_plant(generator, biome, x + k * 3, z, deep).is_some_and(|p| p.0 == block::KELP)).count();
+                    if biome.is_ocean() && deep >= 8 && kelpy >= 2 {
+                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + 3.0, z as f32 + 0.5), 0.7, 0.05));
+                    }
+                }
+            }
+            return None;
+        }
         "geode" => {
             // Inside the nearest geode, looking at its wall.
             let (rx0, rz0) = (cx0 * 16 / 56, cz0 * 16 / 56);
@@ -150,8 +165,17 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
-        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "aurora" | "autumn" | "rainbow" => {
+        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" => {
             let want = match mode {
+                "warmocean" => world::Biome::WarmOcean,
+                "frozenocean" => world::Biome::FrozenOcean,
+                "savanna" => world::Biome::Savanna,
+                "birchforest" => world::Biome::BirchForest,
+                "darkforest" => world::Biome::DarkForest,
+                "mushroomisland" => world::Biome::MushroomIslands,
+                "icespikes" => world::Biome::IceSpikes,
+                "meadow" => world::Biome::Meadow,
+                "stonypeaks" => world::Biome::StonyPeaks,
                 "aurora" => world::Biome::Snowy,
                 "autumn" => world::Biome::Forest,
                 "rainbow" => world::Biome::Plains,
@@ -164,13 +188,16 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 _ => world::Biome::Taiga,
             };
             // Somewhere well inside the biome (all nine columns around agree), looking across it.
-            for r in 0..160 {
+            // (Islands are small and dark forests patchy: closer in will do for them.)
+            let spread = if matches!(want, world::Biome::MushroomIslands | world::Biome::DarkForest) { 10 } else { 24 };
+            let lift = if want == world::Biome::StonyPeaks { 4.0 } else { 12.0 };
+            for r in 0..400 {
                 for (dx, dz) in ring(r) {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
-                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.column(x + i * 24, z + j * 24).1 == want));
+                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.column(x + i * spread, z + j * spread).1 == want));
                     if inside {
                         let h = generator.column(x, z).0.max(world::SEA);
-                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + 12.0, z as f32 + 0.5), 0.8, -0.35));
+                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + lift, z as f32 + 0.5), 0.8, -0.35));
                     }
                 }
             }
@@ -182,7 +209,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 for (dx, dz) in ring(r) {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
                     let (h, biome) = generator.column(x, z);
-                    if biome == world::Biome::Ocean && h < world::SEA - 6 && !generator.cold(x, z) {
+                    if biome.is_ocean() && h < world::SEA - 6 && !generator.cold(x, z) {
                         return Some((Vec3::new(x as f32 + 0.5, world::SEA as f32 - 3.0, z as f32 + 0.5), 0.8, -0.4));
                     }
                 }
@@ -291,7 +318,7 @@ impl App {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "newblocks" | "glider" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "newblocks" | "glider" => {
                 let mut g = Game::new(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -300,7 +327,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -716,7 +743,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1232,6 +1259,35 @@ impl App {
                 app.game.world.set_v(at(3, -5, 1), block::HOPPER_FIRST);
                 app.game.world.set_v(at(3, -5, 2), block::CHEST);
                 app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
+            }
+            if s.mode == "woods" && frames == 125 {
+                // v0.3's woods, one row each: log, leaves, planks, slab, stairs, fence and gate, door; a boat.
+                use crate::woods::{id, part};
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                for w in 0..3usize {
+                    let fo = 5 + w as i32 * 3;
+                    for up in 0..3 {
+                        app.game.world.set_v(at(fo, -5, up), id(w, part::LOG));
+                    }
+                    app.game.world.set_v(at(fo, -5, 3), id(w, part::LEAVES));
+                    app.game.world.set_v(at(fo, -4, 0), id(w, part::PLANKS));
+                    app.game.world.set_v(at(fo, -3, 0), id(w, part::SLAB));
+                    app.game.world.set_v(at(fo, -2, 0), id(w, part::STAIRS));
+                    for k in -1..=1 {
+                        app.game.world.set_v(at(fo, k, 0), id(w, part::FENCE));
+                    }
+                    app.game.world.set_v(at(fo, 2, 0), crate::carpentry::gate_of(id(w, part::GATE), f.z != 0, false));
+                    app.game.world.set_v(at(fo, 3, 0), id(w, part::FENCE));
+                    let away = if fwd.x.abs() > fwd.z.abs() { if fwd.x > 0.0 { 1 } else { 3 } } else if fwd.z > 0.0 { 2 } else { 0 };
+                    app.game.world.set_v(at(fo, 5, 0), block::door_of(id(w, part::DOOR), away, false, false));
+                    app.game.world.set_v(at(fo, 5, 1), block::door_of(id(w, part::DOOR), away, false, true));
+                    app.game.spawn_vehicle(vehicles::WOOD_BOAT_KIND + w as u8, at(fo - 1, 7, 0).as_vec3() + Vec3::new(0.5, 0.0, 0.5), 0.3);
+                }
             }
             if s.mode == "underworks" && frames == 125 {
                 // v0.2 part 2: a Wilter's T (one skull short), a Starred Beacon, a rope down a hole.

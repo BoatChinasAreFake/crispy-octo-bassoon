@@ -313,8 +313,8 @@ impl Game {
 
     /// Detector rails switch on under a cart, and off a moment after it's gone.
     fn detector_rails(&mut self, dt: f32) {
-        use crate::vehicles::{detector_on, detector_shape, is_detector, BOAT_KIND};
-        let carts: HashSet<IVec3> = self.vehicles.iter().filter(|v| v.kind != BOAT_KIND).map(|v| v.cell()).filter(|c| is_detector(self.world.get_v(*c))).collect();
+        use crate::vehicles::{detector_on, detector_shape, is_boat, is_detector};
+        let carts: HashSet<IVec3> = self.vehicles.iter().filter(|v| !is_boat(v.kind)).map(|v| v.cell()).filter(|c| is_detector(self.world.get_v(*c))).collect();
         for &p in &carts {
             self.detectors.insert(p, 0.5);
             let id = self.world.get_v(p);

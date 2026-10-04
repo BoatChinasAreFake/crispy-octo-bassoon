@@ -725,6 +725,41 @@ pub const T_CHARRED_BONE: u16 = 890;
 pub const T_CHARRED_FACE: u16 = 891;
 pub const T_WILTER: u16 = 892;
 pub const T_WILTER_FACE: u16 = 893;
+/// v0.3's woods (see woods.rs): bark, leaves, planks and doors, then the door and boat items.
+pub const T_ACACIA_LOG_SIDE: u16 = 894;
+pub const T_ACACIA_LOG_TOP: u16 = 895;
+pub const T_ACACIA_LEAVES: u16 = 896;
+pub const T_ACACIA_PLANKS: u16 = 897;
+pub const T_ACACIA_DOOR_TOP: u16 = 898;
+pub const T_ACACIA_DOOR_BOTTOM: u16 = 899;
+pub const T_BIRCH_LOG_SIDE: u16 = 900;
+pub const T_BIRCH_LOG_TOP: u16 = 901;
+pub const T_BIRCH_LEAVES: u16 = 902;
+pub const T_BIRCH_PLANKS: u16 = 903;
+pub const T_BIRCH_DOOR_TOP: u16 = 904;
+pub const T_BIRCH_DOOR_BOTTOM: u16 = 905;
+pub const T_DARK_OAK_LOG_SIDE: u16 = 906;
+pub const T_DARK_OAK_LOG_TOP: u16 = 907;
+pub const T_DARK_OAK_LEAVES: u16 = 908;
+pub const T_DARK_OAK_PLANKS: u16 = 909;
+pub const T_DARK_OAK_DOOR_TOP: u16 = 910;
+pub const T_DARK_OAK_DOOR_BOTTOM: u16 = 911;
+/// `+ wood`: each wood's door item, then its boat item.
+pub const T_ACACIA_DOOR_ITEM: u16 = 912;
+pub const T_ACACIA_BOAT_ITEM: u16 = 915;
+/// v0.3's surface biomes.
+pub const T_MYCELIUM_TOP: u16 = 918;
+pub const T_MYCELIUM_SIDE: u16 = 919;
+pub const T_MUSHROOM_STEM: u16 = 920;
+pub const T_RED_MUSHROOM_BLOCK: u16 = 921;
+pub const T_BROWN_MUSHROOM_BLOCK: u16 = 922;
+pub const T_PACKED_ICE: u16 = 923;
+pub const T_MUSHMOO_SKIN: u16 = 924;
+/// Busier seas.
+pub const T_KELP: u16 = 925;
+pub const T_SEAGRASS: u16 = 926;
+pub const T_SEA_PICKLE: u16 = 927;
+pub const T_DRIED_KELP: u16 = 928;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2932,6 +2967,86 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     bark(&mut a, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP, [90, 55, 40], [150, 60, 50]);
     bark(&mut a, T_PALE_LOG_SIDE, T_PALE_LOG_TOP, [175, 170, 165], [225, 215, 210]);
+    // v0.3's woods: acacia (grey bark, orange inside), birch (white with black
+    // marks), dark oak (very dark). Acacia and dark oak leaves take the biome's
+    // tint like oak; birch keeps its own pale green.
+    bark(&mut a, T_ACACIA_LOG_SIDE, T_ACACIA_LOG_TOP, [105, 98, 90], [200, 105, 55]);
+    bark(&mut a, T_BIRCH_LOG_SIDE, T_BIRCH_LOG_TOP, [220, 220, 210], [215, 195, 140]);
+    a.each(T_BIRCH_LOG_SIDE, |x, y, r, _| {
+        let mark = (y * 5 + x / 4 * 7) % 11 == 0 && (x % 7) < 4;
+        if mark { rgb(40, 40, 38) } else { shade(rgb(225, 225, 215), r.range(0.9, 1.05)) }
+    });
+    bark(&mut a, T_DARK_OAK_LOG_SIDE, T_DARK_OAK_LOG_TOP, [55, 40, 25], [75, 50, 28]);
+    a.copy(T_LEAVES, T_ACACIA_LEAVES);
+    a.copy(T_LEAVES, T_DARK_OAK_LEAVES);
+    a.each(T_BIRCH_LEAVES, |_, _, r, _| if r.chance(0.13) { [120, 160, 80, 0] } else { shade(rgb(120, 165, 80), r.range(0.75, 1.15)) });
+    for (planks, top, bottom, c) in [(T_ACACIA_PLANKS, T_ACACIA_DOOR_TOP, T_ACACIA_DOOR_BOTTOM, rgb(200, 105, 55)), (T_BIRCH_PLANKS, T_BIRCH_DOOR_TOP, T_BIRCH_DOOR_BOTTOM, rgb(215, 195, 140)), (T_DARK_OAK_PLANKS, T_DARK_OAK_DOOR_TOP, T_DARK_OAK_DOOR_BOTTOM, rgb(75, 50, 28))] {
+        let dark = shade(c, 0.7);
+        a.each(planks, |x, y, r, _| {
+            let board = y / 4;
+            let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
+            if seam { dark } else { shade(c, r.range(0.9, 1.08)) }
+        });
+        for (tile, top) in [(bottom, false), (top, true)] {
+            a.each(tile, |x, y, r, _| {
+                let frame = x <= 1 || x >= 14 || (!top && y >= 14) || (top && y <= 1);
+                let window = top && (4..12).contains(&x) && (4..12).contains(&y) && x != 7 && x != 8 && y != 7 && y != 8;
+                let panel = !top && (4..12).contains(&x) && ((2..7).contains(&y) || (9..13).contains(&y));
+                let handle = !top && x == 12 && (1..3).contains(&y);
+                if handle {
+                    rgb(60, 60, 60)
+                } else if window {
+                    [0, 0, 0, 0]
+                } else if frame {
+                    shade(c, 0.65 * r.range(0.9, 1.05))
+                } else if panel {
+                    shade(c, 0.85 * r.range(0.9, 1.05))
+                } else {
+                    shade(c, r.range(0.9, 1.06) * if x % 5 == 0 { 0.9 } else { 1.0 })
+                }
+            });
+        }
+    }
+    // Mushroom islands: purple-grey mycelium, giant mushrooms; packed ice for the spikes.
+    a.each(T_MYCELIUM_TOP, |x, y, r, _| shade(if (x * 7 + y * 3) % 9 == 0 { rgb(150, 120, 145) } else { rgb(115, 95, 110) }, r.range(0.85, 1.1)));
+    a.copy(T_DIRT, T_MYCELIUM_SIDE);
+    for x in 0..TILE {
+        for y in 0..3 + (x % 3 == 0) as usize {
+            a.set(T_MYCELIUM_SIDE, x, y, shade(rgb(115, 95, 110), 0.9 + ((x * 7 + y * 3) % 5) as f32 * 0.04));
+        }
+    }
+    a.each(T_MUSHROOM_STEM, |x, _, r, _| shade(if x % 4 == 1 { rgb(200, 195, 180) } else { rgb(225, 220, 205) }, r.range(0.92, 1.05)));
+    a.each(T_RED_MUSHROOM_BLOCK, |x, y, r, _| {
+        let spot = [(3, 3), (11, 5), (6, 10), (13, 12), (2, 13)].iter().any(|&(sx, sy): &(i32, i32)| (x as i32 - sx).pow(2) + (y as i32 - sy).pow(2) <= 3);
+        if spot { rgb(235, 230, 220) } else { shade(rgb(190, 35, 30), r.range(0.88, 1.08)) }
+    });
+    a.each(T_BROWN_MUSHROOM_BLOCK, |_, _, r, _| shade(rgb(150, 110, 75), r.range(0.86, 1.08)));
+    a.each(T_PACKED_ICE, |x, y, r, _| shade(if (x + y * 2) % 7 == 0 { rgb(200, 220, 250) } else { rgb(150, 180, 230) }, r.range(0.94, 1.04)));
+    // Sea plants: kelp fronds, seagrass blades, sea pickles (green, glowing tips).
+    a.each(T_KELP, |x, y, r, _| {
+        let stem = (7..9).contains(&x);
+        let frond = (y % 5 < 3) && ((x as i32 - 8).unsigned_abs() as usize) < 2 + (y % 5) * 2;
+        if stem || frond { shade(rgb(70, 120, 40), r.range(0.8, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SEAGRASS, |x, y, r, _| {
+        let blade = (x % 4 == 1 && y > 2) || (x % 4 == 2 && y > 5 && x > 4);
+        if blade { shade(rgb(60, 150, 60), r.range(0.8, 1.15)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SEA_PICKLE, |x, y, _, _| {
+        let pickle = y > 7 && ((3..6).contains(&x) || (9..12).contains(&x));
+        let tip = y == 7 && (x == 4 || x == 10);
+        if tip { rgb(200, 255, 170) } else if pickle { rgb(100, 140, 50) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_DRIED_KELP, |x, y, _, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        if dx * dx + dy * dy < 30.0 { if (x + y) % 3 == 0 { rgb(40, 55, 30) } else { rgb(60, 80, 40) } } else { [0, 0, 0, 0] }
+    });
+    // A red-spotted Mooer: red hide with white patches.
+    a.each(T_MUSHMOO_SKIN, |x, y, r, _| if (x / 4 + y / 5) % 3 == 0 && (x + y) % 5 != 0 { rgb(225, 220, 215) } else { shade(rgb(170, 40, 35), r.range(0.88, 1.08)) });
+    for (w, c) in [rgb(200, 105, 55), rgb(215, 195, 140), rgb(75, 50, 28)].into_iter().enumerate() {
+        a.sprite(T_ACACIA_DOOR_ITEM + w as u16, &DOOR_ITEM, &[('#', shade(c, 0.45)), ('b', c), ('d', shade(c, 0.75)), ('w', rgb(60, 60, 60))]);
+        a.sprite(T_ACACIA_BOAT_ITEM + w as u16, &BOAT_SPRITE, &[('#', shade(c, 0.4)), ('w', c), ('d', shade(c, 0.75))]);
+    }
     a.each(T_PALE_LEAVES, |_, _, r, _| if r.chance(0.15) { [180, 185, 175, 0] } else { shade(rgb(165, 172, 162), r.range(0.78, 1.12)) });
     a.each(T_PALE_PLANKS, |x, y, r, _| {
         let board = y / 4;
