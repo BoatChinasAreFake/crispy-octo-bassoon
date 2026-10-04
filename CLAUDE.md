@@ -49,7 +49,7 @@ Originals:
 - Hot springs: steaming pools in snowy mountains. Bathing slowly heals and gets rid of the chill of a long night out.
 
 Parts:
-- Part 1: items 1 and 2.
+- Part 1: items 1 and 2. **(released)**
 - Part 2: items 3 and 4.
 - Part 3: items 5, 6 and 7.
 - Part 4: the two originals (this is the last part).
