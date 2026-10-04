@@ -95,8 +95,9 @@ impl Game {
         true
     }
 
-    /// Place a door (two blocks tall, on something solid) facing away from the player.
-    pub fn place_door(&mut self, hit: IVec3, normal: IVec3, hit_id: Id) {
+    /// Place a door (two blocks tall, on something solid) facing away from the
+    /// player: the plain door, or a wood's (the family starting at `base`).
+    pub fn place_door(&mut self, base: Id, hit: IVec3, normal: IVec3, hit_id: Id) {
         let bottom = if replaceable(hit_id) { hit } else { hit + normal };
         let top = bottom + IVec3::Y;
         if top.y >= crate::world::CH || bottom.y < 1 {
@@ -116,8 +117,8 @@ impl Game {
             }
         }
         let f = self.facing();
-        self.world.set_v(bottom, door(f, false, false));
-        self.world.set_v(top, door(f, false, true));
+        self.world.set_v(bottom, door_of(base, f, false, false));
+        self.world.set_v(top, door_of(base, f, false, true));
         self.sfx(Sfx::Place(Mat::Wood), Some(bottom.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
         if !self.creative {
@@ -127,11 +128,12 @@ impl Game {
 
     /// Open or close the door at `pos` (both halves).
     pub fn toggle_door(&mut self, pos: IVec3) {
-        let Some((f, open, top)) = door_state(self.world.get_v(pos)) else { return };
+        let here = self.world.get_v(pos);
+        let (Some((f, open, top)), Some(base)) = (door_state(here), door_base(here)) else { return };
         let (bottom, upper) = if top { (pos - IVec3::Y, pos) } else { (pos, pos + IVec3::Y) };
         for (p, is_top) in [(bottom, false), (upper, true)] {
-            if self.world.get_v(p) == door(f, open, is_top) {
-                self.world.set_v(p, door(f, !open, is_top));
+            if self.world.get_v(p) == door_of(base, f, open, is_top) {
+                self.world.set_v(p, door_of(base, f, !open, is_top));
             }
         }
         self.sfx(Sfx::Place(Mat::Wood), Some(pos.as_vec3() + Vec3::splat(0.5)));

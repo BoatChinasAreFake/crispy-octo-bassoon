@@ -975,10 +975,10 @@ impl Game {
         }
         // Doors open and close; a door's top half only goes on its own bottom half.
         if let (Some((f, o, t)), Some((nf, no, nt))) = (door_state(old), door_state(new)) {
-            return f == nf && t == nt && o != no;
+            return f == nf && t == nt && o != no && door_base(old) == door_base(new);
         }
-        if let Some((f, o, true)) = door_state(new) {
-            return replaceable(old) && self.world.get(x, y - 1, z) == door(f, o, false);
+        if let (Some((f, o, true)), Some(base)) = (door_state(new), door_base(new)) {
+            return replaceable(old) && self.world.get(x, y - 1, z) == door_of(base, f, o, false);
         }
         // Fire only where it can burn.
         if new == FIRE {
@@ -991,7 +991,7 @@ impl Game {
         }
         // Gates and trapdoors swing; fences and panes may be placed at any join (the host reshapes them).
         if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new)) {
-            return a == b && matches!(a, GATE_FIRST | TRAPDOOR_FIRST);
+            return a == b && (crate::carpentry::is_gate(a) || a == TRAPDOOR_FIRST);
         }
         // Levers flip both ways, buttons only go in (the host lets them out).
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON) | (CANDLE, CANDLE_LIT) | (CANDLE_LIT, CANDLE) | (CAVE_VINES_LIT, CAVE_VINES)) {

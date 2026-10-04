@@ -725,6 +725,28 @@ pub const T_CHARRED_BONE: u16 = 890;
 pub const T_CHARRED_FACE: u16 = 891;
 pub const T_WILTER: u16 = 892;
 pub const T_WILTER_FACE: u16 = 893;
+/// v0.3's woods (see woods.rs): bark, leaves, planks and doors, then the door and boat items.
+pub const T_ACACIA_LOG_SIDE: u16 = 894;
+pub const T_ACACIA_LOG_TOP: u16 = 895;
+pub const T_ACACIA_LEAVES: u16 = 896;
+pub const T_ACACIA_PLANKS: u16 = 897;
+pub const T_ACACIA_DOOR_TOP: u16 = 898;
+pub const T_ACACIA_DOOR_BOTTOM: u16 = 899;
+pub const T_BIRCH_LOG_SIDE: u16 = 900;
+pub const T_BIRCH_LOG_TOP: u16 = 901;
+pub const T_BIRCH_LEAVES: u16 = 902;
+pub const T_BIRCH_PLANKS: u16 = 903;
+pub const T_BIRCH_DOOR_TOP: u16 = 904;
+pub const T_BIRCH_DOOR_BOTTOM: u16 = 905;
+pub const T_DARK_OAK_LOG_SIDE: u16 = 906;
+pub const T_DARK_OAK_LOG_TOP: u16 = 907;
+pub const T_DARK_OAK_LEAVES: u16 = 908;
+pub const T_DARK_OAK_PLANKS: u16 = 909;
+pub const T_DARK_OAK_DOOR_TOP: u16 = 910;
+pub const T_DARK_OAK_DOOR_BOTTOM: u16 = 911;
+/// `+ wood`: each wood's door item, then its boat item.
+pub const T_ACACIA_DOOR_ITEM: u16 = 912;
+pub const T_ACACIA_BOAT_ITEM: u16 = 915;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2932,6 +2954,50 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     bark(&mut a, T_MANGROVE_LOG_SIDE, T_MANGROVE_LOG_TOP, [90, 55, 40], [150, 60, 50]);
     bark(&mut a, T_PALE_LOG_SIDE, T_PALE_LOG_TOP, [175, 170, 165], [225, 215, 210]);
+    // v0.3's woods: acacia (grey bark, orange inside), birch (white with black
+    // marks), dark oak (very dark). Acacia and dark oak leaves take the biome's
+    // tint like oak; birch keeps its own pale green.
+    bark(&mut a, T_ACACIA_LOG_SIDE, T_ACACIA_LOG_TOP, [105, 98, 90], [200, 105, 55]);
+    bark(&mut a, T_BIRCH_LOG_SIDE, T_BIRCH_LOG_TOP, [220, 220, 210], [215, 195, 140]);
+    a.each(T_BIRCH_LOG_SIDE, |x, y, r, _| {
+        let mark = (y * 5 + x / 4 * 7) % 11 == 0 && (x % 7) < 4;
+        if mark { rgb(40, 40, 38) } else { shade(rgb(225, 225, 215), r.range(0.9, 1.05)) }
+    });
+    bark(&mut a, T_DARK_OAK_LOG_SIDE, T_DARK_OAK_LOG_TOP, [55, 40, 25], [75, 50, 28]);
+    a.copy(T_LEAVES, T_ACACIA_LEAVES);
+    a.copy(T_LEAVES, T_DARK_OAK_LEAVES);
+    a.each(T_BIRCH_LEAVES, |_, _, r, _| if r.chance(0.13) { [120, 160, 80, 0] } else { shade(rgb(120, 165, 80), r.range(0.75, 1.15)) });
+    for (planks, top, bottom, c) in [(T_ACACIA_PLANKS, T_ACACIA_DOOR_TOP, T_ACACIA_DOOR_BOTTOM, rgb(200, 105, 55)), (T_BIRCH_PLANKS, T_BIRCH_DOOR_TOP, T_BIRCH_DOOR_BOTTOM, rgb(215, 195, 140)), (T_DARK_OAK_PLANKS, T_DARK_OAK_DOOR_TOP, T_DARK_OAK_DOOR_BOTTOM, rgb(75, 50, 28))] {
+        let dark = shade(c, 0.7);
+        a.each(planks, |x, y, r, _| {
+            let board = y / 4;
+            let seam = y % 4 == 3 || (x + board * 5) % 16 == 0;
+            if seam { dark } else { shade(c, r.range(0.9, 1.08)) }
+        });
+        for (tile, top) in [(bottom, false), (top, true)] {
+            a.each(tile, |x, y, r, _| {
+                let frame = x <= 1 || x >= 14 || (!top && y >= 14) || (top && y <= 1);
+                let window = top && (4..12).contains(&x) && (4..12).contains(&y) && x != 7 && x != 8 && y != 7 && y != 8;
+                let panel = !top && (4..12).contains(&x) && ((2..7).contains(&y) || (9..13).contains(&y));
+                let handle = !top && x == 12 && (1..3).contains(&y);
+                if handle {
+                    rgb(60, 60, 60)
+                } else if window {
+                    [0, 0, 0, 0]
+                } else if frame {
+                    shade(c, 0.65 * r.range(0.9, 1.05))
+                } else if panel {
+                    shade(c, 0.85 * r.range(0.9, 1.05))
+                } else {
+                    shade(c, r.range(0.9, 1.06) * if x % 5 == 0 { 0.9 } else { 1.0 })
+                }
+            });
+        }
+    }
+    for (w, c) in [rgb(200, 105, 55), rgb(215, 195, 140), rgb(75, 50, 28)].into_iter().enumerate() {
+        a.sprite(T_ACACIA_DOOR_ITEM + w as u16, &DOOR_ITEM, &[('#', shade(c, 0.45)), ('b', c), ('d', shade(c, 0.75)), ('w', rgb(60, 60, 60))]);
+        a.sprite(T_ACACIA_BOAT_ITEM + w as u16, &BOAT_SPRITE, &[('#', shade(c, 0.4)), ('w', c), ('d', shade(c, 0.75))]);
+    }
     a.each(T_PALE_LEAVES, |_, _, r, _| if r.chance(0.15) { [180, 185, 175, 0] } else { shade(rgb(165, 172, 162), r.range(0.78, 1.12)) });
     a.each(T_PALE_PLANKS, |x, y, r, _| {
         let board = y / 4;

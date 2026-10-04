@@ -27,4 +27,5 @@ pub(crate) mod smithing;
 pub(crate) mod stash;
 pub(crate) mod trims;
 pub(crate) mod tripwire;
+pub(crate) mod woods;
 pub(crate) mod wiring;

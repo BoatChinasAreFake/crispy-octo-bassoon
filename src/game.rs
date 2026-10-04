@@ -978,7 +978,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
-            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG => "getting_wood",
+            LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
             DIAMOND => "dimonds",
@@ -2579,8 +2579,8 @@ impl Game {
             self.at_table = true;
             return;
         }
-        if held == DOOR {
-            self.place_door(hit_pos, normal, hit_id);
+        if let Some(base) = crate::woods::door_for_item(held) {
+            self.place_door(base, hit_pos, normal, hit_id);
             return;
         }
         if held == ZAP_DUST {

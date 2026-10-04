@@ -30,7 +30,7 @@ pub fn kind_of(id: Id, face: usize) -> Option<Kind> {
     match id {
         GRASS if face == 2 => Some(Kind::Grass),
         TALL_GRASS => Some(Kind::Grass),
-        LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES => Some(Kind::Leaves),
+        LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES | ACACIA_LEAVES | DARK_OAK_LEAVES => Some(Kind::Leaves),
         _ if is_water(id) => Some(Kind::Water),
         _ => None,
     }

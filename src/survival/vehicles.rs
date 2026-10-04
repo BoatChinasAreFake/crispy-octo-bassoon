@@ -31,8 +31,15 @@ pub const BOAT_KIND: u8 = 0;
 pub const CART_KIND: u8 = 1;
 pub const CHEST_CART_KIND: u8 = 2;
 pub const HOPPER_CART_KIND: u8 = 3;
+/// The new woods' boats (see woods.rs): `+ wood`.
+pub const WOOD_BOAT_KIND: u8 = 4;
 /// The highest kind there is.
-pub const LAST_KIND: u8 = HOPPER_CART_KIND;
+pub const LAST_KIND: u8 = WOOD_BOAT_KIND + crate::woods::WOODS.len() as u8 - 1;
+
+/// A boat of any wood.
+pub fn is_boat(kind: u8) -> bool {
+    kind == BOAT_KIND || (WOOD_BOAT_KIND..=LAST_KIND).contains(&kind)
+}
 
 /// Carts' contents are reached by a key that's no place in the world
 /// (below bedrock, far west of even the Hollow; see containers.rs `store`).
@@ -49,6 +56,7 @@ pub fn cart_of_key(p: IVec3) -> Option<u32> {
 pub fn kind_of_item(item: Id) -> Option<u8> {
     match item {
         BOAT => Some(BOAT_KIND),
+        b if crate::woods::WOODS.iter().any(|w| w.boat_item == b) => crate::woods::wood_of_item(b).map(|w| WOOD_BOAT_KIND + w as u8),
         MINECART => Some(CART_KIND),
         CHEST_MINECART => Some(CHEST_CART_KIND),
         HOPPER_MINECART => Some(HOPPER_CART_KIND),
@@ -94,6 +102,7 @@ impl Vehicle {
     pub fn item(&self) -> Id {
         match self.kind {
             BOAT_KIND => BOAT,
+            k if is_boat(k) => crate::woods::WOODS[(k - WOOD_BOAT_KIND) as usize].boat_item,
             CHEST_CART_KIND => CHEST_MINECART,
             HOPPER_CART_KIND => HOPPER_MINECART,
             _ => MINECART,
@@ -117,13 +126,13 @@ impl Vehicle {
 
     /// Its box, for pointing at and bumping.
     pub fn bounds(&self) -> (Vec3, Vec3) {
-        let (half, h) = if self.kind == BOAT_KIND { (0.65, 0.55) } else { (0.45, 0.7) };
+        let (half, h) = if is_boat(self.kind) { (0.65, 0.55) } else { (0.45, 0.7) };
         (self.pos - Vec3::new(half, 0.0, half), self.pos + Vec3::new(half, h, half))
     }
 
     /// Where a rider sits.
     pub fn seat(&self) -> Vec3 {
-        self.pos + Vec3::Y * if self.kind == BOAT_KIND { 0.15 } else { 0.25 }
+        self.pos + Vec3::Y * if is_boat(self.kind) { 0.15 } else { 0.25 }
     }
 }
 
@@ -255,10 +264,10 @@ impl Game {
         let dir = self.player.look_dir();
         let reach = if self.creative { 6.5 } else { 5.0 };
         let Some(kind) = kind_of_item(held) else { return false };
-        let (kind, at) = if held == BOAT {
+        let (kind, at) = if is_boat(kind) {
             let Some(h) = self.world.raycast_liquid(eye, dir, reach).or_else(|| self.world.raycast(eye, dir, reach)) else { return false };
             let top = if is_liquid(self.world.get_v(h.pos)) { h.pos.as_vec3() + Vec3::new(0.5, 0.6, 0.5) } else { (h.pos + h.normal).as_vec3() + Vec3::new(0.5, 0.0, 0.5) };
-            (BOAT_KIND, top)
+            (kind, top)
         } else {
             let Some(h) = self.world.raycast(eye, dir, reach) else { return false };
             if !is_rail(self.world.get_v(h.pos)) {
@@ -284,7 +293,7 @@ impl Game {
         self.next_vehicle_id += 1;
         let id = self.next_vehicle_id;
         let mut v = Vehicle::new(id, kind, at, yaw);
-        if kind != BOAT_KIND {
+        if !is_boat(kind) {
             // Face along the rail.
             let cell = IVec3::new(at.x.floor() as i32, at.y.floor() as i32, at.z.floor() as i32);
             if let Some(d) = rail_dirs(self.world.get_v(cell)) {
@@ -395,7 +404,7 @@ impl Game {
                 continue;
             }
             let (f, s) = if mine { (forward, strafe) } else { (0.0, 0.0) };
-            if v.kind == BOAT_KIND {
+            if is_boat(v.kind) {
                 boat_step(&self.world, v, dt, f, s);
             } else {
                 cart_step(&self.world, v, dt, if mine { f } else { 0.0 }, look);
@@ -498,12 +507,16 @@ impl Game {
             let tint = if v.hurt > 0.0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let root = Mat4::from_translation(v.pos) * Mat4::from_rotation_y(-v.yaw);
-            let boxes: &[([f32; 3], [f32; 3])] = if v.kind == BOAT_KIND {
+            let boxes: &[([f32; 3], [f32; 3])] = if is_boat(v.kind) {
                 &[([-0.6, 0.0, -0.8], [1.2, 0.12, 1.6]), ([-0.6, 0.12, -0.8], [0.1, 0.35, 1.6]), ([0.5, 0.12, -0.8], [0.1, 0.35, 1.6]), ([-0.5, 0.12, -0.8], [1.0, 0.35, 0.1]), ([-0.5, 0.12, 0.7], [1.0, 0.35, 0.1])]
             } else {
                 &[([-0.45, 0.1, -0.55], [0.9, 0.08, 1.1]), ([-0.45, 0.1, -0.55], [0.08, 0.55, 1.1]), ([0.37, 0.1, -0.55], [0.08, 0.55, 1.1]), ([-0.37, 0.1, -0.55], [0.74, 0.55, 0.08]), ([-0.37, 0.1, 0.47], [0.74, 0.55, 0.08])]
             };
-            let tile = if v.kind == BOAT_KIND { T_PLANKS } else { T_CART };
+            let tile = match v.kind {
+                BOAT_KIND => T_PLANKS,
+                k if is_boat(k) => crate::woods::WOODS[(k - WOOD_BOAT_KIND) as usize].planks,
+                _ => T_CART,
+            };
             for &(min, size) in boxes {
                 let m = root * Mat4::from_translation(Vec3::from_array(min)) * Mat4::from_scale(Vec3::from_array(size));
                 g.cube(&m, [tile; 6], sky, [0.0, 0.0, 1.0, 1.0]);

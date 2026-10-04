@@ -398,7 +398,15 @@ pub const CHARRED_SKULL: Id = 581;
 pub const STARRED_BEACON_FIRST: Id = 582;
 /// Spelunker's Rope, hanging down a shaft (see rope.rs).
 pub const ROPE: Id = 587;
-pub const NUM_BLOCKS: Id = 588;
+/// v0.3's woods: acacia, birch and dark oak, each a whole set (see woods.rs).
+pub const WOOD_FIRST: Id = 588;
+pub const ACACIA_LOG: Id = crate::woods::id(0, crate::woods::part::LOG);
+pub const ACACIA_LEAVES: Id = crate::woods::id(0, crate::woods::part::LEAVES);
+pub const BIRCH_LOG: Id = crate::woods::id(1, crate::woods::part::LOG);
+pub const BIRCH_LEAVES: Id = crate::woods::id(1, crate::woods::part::LEAVES);
+pub const DARK_OAK_LOG: Id = crate::woods::id(2, crate::woods::part::LOG);
+pub const DARK_OAK_LEAVES: Id = crate::woods::id(2, crate::woods::part::LEAVES);
+pub const NUM_BLOCKS: Id = WOOD_FIRST + 3 * crate::woods::PER_WOOD;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -628,7 +636,14 @@ pub const GLOW_INK_SAC: Id = FIRST_ITEM + 247;
 pub const WILTER_STAR: Id = FIRST_ITEM + 248;
 /// Tells you how well the room you're in is held up (see caveins.rs).
 pub const SUPPORT_GAUGE: Id = FIRST_ITEM + 249;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 250;
+/// The new woods' doors and boats (see woods.rs).
+pub const ACACIA_DOOR: Id = FIRST_ITEM + 250;
+pub const BIRCH_DOOR: Id = FIRST_ITEM + 251;
+pub const DARK_OAK_DOOR: Id = FIRST_ITEM + 252;
+pub const ACACIA_BOAT: Id = FIRST_ITEM + 253;
+pub const BIRCH_BOAT: Id = FIRST_ITEM + 254;
+pub const DARK_OAK_BOAT: Id = FIRST_ITEM + 255;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 256;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -1061,15 +1076,25 @@ pub fn block_boxes(id: Id) -> ([Aabb; 3], usize) {
 }
 
 pub fn is_door(id: Id) -> bool {
-    (DOOR_FIRST..DOOR_FIRST + 16).contains(&id)
+    door_state(id).is_some()
 }
 
 /// A door half's (facing, open, top).
 pub fn door_state(id: Id) -> Option<(u8, bool, bool)> {
-    is_door(id).then(|| {
-        let k = id - DOOR_FIRST;
-        ((k / 4) as u8, k & 2 != 0, k & 1 != 0)
-    })
+    match block(id).shape {
+        Shape::Door { facing, open, top } => Some((facing, open, top)),
+        _ => None,
+    }
+}
+
+/// The first block of a door's family (the plain door's, or a wood's).
+pub fn door_base(id: Id) -> Option<Id> {
+    door_state(id).map(|(f, o, t)| id - (f as Id * 4 + o as Id * 2 + t as Id))
+}
+
+/// A door half of the family starting at `base`.
+pub const fn door_of(base: Id, facing: u8, open: bool, top: bool) -> Id {
+    base + facing as Id * 4 + open as Id * 2 + top as Id
 }
 
 /// A slab's (bottom slab, which is the item; top). A slab's variants are
@@ -1157,7 +1182,7 @@ pub fn placing_item(id: Id) -> Option<Id> {
         return Some(family);
     }
     if let Some((_, _, top)) = door_state(id) {
-        return (!top).then_some(DOOR);
+        return (!top).then_some(block(id).drop);
     }
     (id != AIR && valid_block(id) && block(id).creative).then_some(id)
 }
@@ -1652,11 +1677,11 @@ pub(crate) fn item(key: &'static str, name: &'static str, tile: u16) -> ItemDef 
     ItemDef { key, name, tile, stack: 64, pick_tier: 0, damage: 1.0, food: None, on_use: Vec::new(), consume: true, real: true, durability: None, armor: None, repair: AIR }
 }
 
-const S_STONE: u8 = 0;
-const S_WOOD: u8 = 1;
-const S_GRASS: u8 = 2;
-const S_SAND: u8 = 3;
-const S_GLASS: u8 = 4;
+pub(crate) const S_STONE: u8 = 0;
+pub(crate) const S_WOOD: u8 = 1;
+pub(crate) const S_GRASS: u8 = 2;
+pub(crate) const S_SAND: u8 = 3;
+pub(crate) const S_GLASS: u8 = 4;
 
 impl Registry {
     pub fn base() -> Registry {
@@ -2450,6 +2475,7 @@ impl Registry {
         let mut rope = def("rope", "Spelunker's Rope (Throw It Down a Hole)", Shaped, false, false, [T_ROPE; 3], 0.2, 0, false, ROPE, 0.0, S_GRASS);
         rope.shape = Shape::Chain;
         blocks.push(rope);
+        blocks.extend(crate::woods::defs());
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2713,6 +2739,7 @@ impl Registry {
         items.push(item("glow_ink_sac", "Glow Ink Sac (Squid Highlighter)", T_GLOW_INK_SAC));
         items.push(item("wilter_star", "Wilter Star (Still Warm)", T_WILTER_STAR));
         items.push(ItemDef { stack: 1, ..item("support_gauge", "Support Gauge (Is It Going to Hold?)", T_SUPPORT_GAUGE) });
+        items.extend(crate::woods::items());
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2970,6 +2997,7 @@ impl Registry {
         recipes.push(r(&[(PRISMARINE_SHARD, 4), (PRISMARINE_CRYSTALS, 5)], (SEA_LANTERN, 1)));
         recipes.push(r(&[(HEART_OF_THE_SEA, 1), (NAUTILUS_SHELL, 8)], (CONDUIT, 1)));
         recipes.push(r(&[(STRING, 6), (STICK, 1)], (ROPE, 2)));
+        recipes.extend(crate::woods::recipes());
         recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
@@ -3051,12 +3079,12 @@ pub fn dapples_sky(id: Id) -> bool {
 /// Any kind of tree trunk.
 #[inline]
 pub fn is_log(id: Id) -> bool {
-    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG)
+    matches!(id, LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG)
 }
 /// Any kind of leaves.
 #[inline]
 pub fn is_leaves(id: Id) -> bool {
-    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES | PALE_OAK_LEAVES)
+    matches!(id, LEAVES | SPRUCE_LEAVES | JUNGLE_LEAVES | CHERRY_LEAVES | MANGROVE_LEAVES | PALE_OAK_LEAVES | ACACIA_LEAVES | BIRCH_LEAVES | DARK_OAK_LEAVES)
 }
 /// Can the player point at it (and break it)?
 #[inline]
