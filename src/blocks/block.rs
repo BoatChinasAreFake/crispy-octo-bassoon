@@ -383,7 +383,14 @@ pub const TRIPWIRE_FIRST: Id = 563;
 /// The hooks at a tripwire's ends: `+ facing` (the wall they're on), then the tripped ones.
 pub const TRIPWIRE_HOOK_FIRST: Id = 567;
 pub const TRIPWIRE_HOOK_ON_FIRST: Id = 571;
-pub const NUM_BLOCKS: Id = 575;
+/// The Ocean Monument (see monument.rs).
+pub const PRISMARINE: Id = 575;
+pub const PRISMARINE_BRICKS: Id = 576;
+pub const DARK_PRISMARINE: Id = 577;
+pub const SEA_LANTERN: Id = 578;
+/// Lets you breathe underwater, inside a frame of prismarine.
+pub const CONDUIT: Id = 579;
+pub const NUM_BLOCKS: Id = 580;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -601,7 +608,13 @@ pub const HUGE_BACKPACK: Id = FIRST_ITEM + 240;
 pub const GLOW_BERRIES: Id = FIRST_ITEM + 241;
 /// From amethyst clusters.
 pub const AMETHYST_SHARD: Id = FIRST_ITEM + 242;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 243;
+/// From Guardians (see monument.rs).
+pub const PRISMARINE_SHARD: Id = FIRST_ITEM + 243;
+pub const PRISMARINE_CRYSTALS: Id = FIRST_ITEM + 244;
+/// What a Conduit is made of: a Heart of the Sea (buried treasure) and eight shells.
+pub const NAUTILUS_SHELL: Id = FIRST_ITEM + 245;
+pub const HEART_OF_THE_SEA: Id = FIRST_ITEM + 246;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 247;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -824,6 +837,8 @@ pub enum Shape {
     Chest,
     /// A bed: mattress, headboard and footboard, its head toward `facing` (see beds.rs).
     Bed { facing: u8 },
+    /// A small cube in the middle of its cell (the Conduit).
+    Core,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -900,6 +915,7 @@ impl Shape {
             Shape::Table => ([([0.0; 3], [1.0, 0.75, 1.0]), full, full], 1),
             Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
             Shape::Bed { facing } => (crate::beds::boxes(facing), 3),
+            Shape::Core => ([([0.3125; 3], [0.6875; 3]), full, full], 1),
             Shape::Chest => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, 10.0 / 16.0, 15.0 / 16.0]), ([1.0 / 16.0, 10.0 / 16.0, 1.0 / 16.0], [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0]), full], 2),
             Shape::Layer { eighths } => ([([0.0; 3], [1.0, eighths as f32 / 8.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
@@ -2392,6 +2408,14 @@ impl Registry {
                 blocks.push(d);
             }
         }
+        // The Ocean Monument (see monument.rs).
+        blocks.push(def("prismarine", "Prismarine (Sea-Stone, Shifty Colours)", Cube, true, true, [T_PRISMARINE; 3], 1.5, 1, true, PRISMARINE, 0.0, S_STONE));
+        blocks.push(def("prismarine_bricks", "Prismarine Bricks (Tidy Sea-Stone)", Cube, true, true, [T_PRISMARINE_BRICKS; 3], 1.5, 1, true, PRISMARINE_BRICKS, 0.0, S_STONE));
+        blocks.push(def("dark_prismarine", "Dark Prismarine (Moody Sea-Stone)", Cube, true, true, [T_DARK_PRISMARINE; 3], 1.5, 1, true, DARK_PRISMARINE, 0.0, S_STONE));
+        blocks.push(def("sea_lantern", "Sea Lantern (Glows Under Pressure)", Cube, true, true, [T_SEA_LANTERN; 3], 0.3, 0, false, PRISMARINE_CRYSTALS, 15.0, S_GLASS));
+        let mut conduit = def("conduit", "Conduit (Breathe Easy, Literally)", Shaped, false, false, [T_CONDUIT; 3], 3.0, 0, true, CONDUIT, 10.0, S_GLASS);
+        conduit.shape = Shape::Core;
+        blocks.push(conduit);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2648,6 +2672,10 @@ impl Registry {
         items.push(ItemDef { stack: 1, ..item("huge_backpack", "Huge Backpack (All 72 Slots of Your Pack)", T_HUGE_BACKPACK) });
         items.push(ItemDef { food: Some(2.0), ..item("glow_berries", "Glow Berries (Nightlight Snack)", T_GLOW_BERRIES) });
         items.push(item("amethyst_shard", "Amethyst Shard (Pointy, Pretty)", T_AMETHYST_SHARD));
+        items.push(item("prismarine_shard", "Prismarine Shard (Fishbone, Basically)", T_PRISMARINE_SHARD));
+        items.push(item("prismarine_crystals", "Prismarine Crystals (Wet Sparkles)", T_PRISMARINE_CRYSTALS));
+        items.push(item("nautilus_shell", "Nautilus Shell (Spiral, Spiralling)", T_NAUTILUS_SHELL));
+        items.push(ItemDef { stack: 1, ..item("heart_of_the_sea", "Heart of the Sea (Beats Faintly)", T_HEART_OF_THE_SEA) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2898,6 +2926,12 @@ impl Registry {
         // Temples and friends.
         recipes.push(r(&[(IRON, 1), (STICK, 1), (PLANKS, 1)], (TRIPWIRE_HOOK_FIRST, 2)));
         recipes.push(r(&[(SANDSTONE, 2)], (CHISELED_SANDSTONE, 1)));
+        // The Ocean Monument's stone, and the Conduit.
+        recipes.push(r(&[(PRISMARINE_SHARD, 4)], (PRISMARINE, 1)));
+        recipes.push(r(&[(PRISMARINE_SHARD, 9)], (PRISMARINE_BRICKS, 1)));
+        recipes.push(r(&[(PRISMARINE_SHARD, 8), (DYE_FIRST + 1, 1)], (DARK_PRISMARINE, 1)));
+        recipes.push(r(&[(PRISMARINE_SHARD, 4), (PRISMARINE_CRYSTALS, 5)], (SEA_LANTERN, 1)));
+        recipes.push(r(&[(HEART_OF_THE_SEA, 1), (NAUTILUS_SHELL, 8)], (CONDUIT, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
             recipes.push(r(&[(DIAMOND, 7), (t, 1), (TUFF_BRICKS, 1)], (t, 2)));
@@ -3217,6 +3251,9 @@ mod id_order_tests {
             (CAVE_VINES_LIT, "cave_vines_lit"),
             (AMETHYST_CLUSTER, "amethyst_cluster"),
             (TINTED_GLASS, "tinted_glass"),
+            (SNOW_BLOCK, "snow_block"),
+            (TRIPWIRE_HOOK_ON_FIRST + 3, "tripwire_hook_west_on"),
+            (CONDUIT, "conduit"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }
@@ -3240,6 +3277,7 @@ mod id_order_tests {
             (TURTLE_SHELL, "turtle_shell"),
             (GLOW_BERRIES, "glow_berries"),
             (AMETHYST_SHARD, "amethyst_shard"),
+            (HEART_OF_THE_SEA, "heart_of_the_sea"),
         ] {
             assert_eq!(reg().key_of(id), key, "item {id}");
         }

@@ -47,6 +47,10 @@ pub enum Potion {
     BadOmen,
     /// Not a potion: a village's thanks for seeing off a raid (better prices).
     Hero,
+    /// Not a potion: an Elder Guardian's curse (digging is slow; see monument.rs).
+    MiningFatigue,
+    /// Not a potion: a working Conduit nearby (you can breathe underwater).
+    ConduitPower,
 }
 
 /// The first five, which beacons give (and whose items come first).
@@ -54,7 +58,19 @@ pub const ALL: [Potion; 5] = [Potion::Healing, Potion::Speed, Potion::FireResist
 /// Everything a brewing stand makes.
 pub const BREWABLE: [Potion; 7] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping, Potion::Strength, Potion::Regeneration];
 /// Every effect, in wire order.
-pub const EFFECTS: [Potion; 9] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping, Potion::Strength, Potion::Regeneration, Potion::BadOmen, Potion::Hero];
+pub const EFFECTS: [Potion; 11] = [
+    Potion::Healing,
+    Potion::Speed,
+    Potion::FireResistance,
+    Potion::NightVision,
+    Potion::Leaping,
+    Potion::Strength,
+    Potion::Regeneration,
+    Potion::BadOmen,
+    Potion::Hero,
+    Potion::MiningFatigue,
+    Potion::ConduitPower,
+];
 /// Extra melee damage with Strength, and seconds per heart-half with Regeneration.
 pub const STRENGTH_BONUS: f32 = 3.0;
 pub const REGEN_EVERY: f32 = 2.5;
@@ -110,6 +126,8 @@ impl Potion {
             Potion::Regeneration => "Regeneration",
             Potion::BadOmen => "Bad Omen",
             Potion::Hero => "Hero of the Village",
+            Potion::MiningFatigue => "Mining Fatigue",
+            Potion::ConduitPower => "Conduit Power",
         }
     }
     pub fn key(self) -> &'static str {
@@ -123,6 +141,8 @@ impl Potion {
             Potion::Regeneration => "regeneration",
             Potion::BadOmen => "bad_omen",
             Potion::Hero => "hero_of_the_village",
+            Potion::MiningFatigue => "mining_fatigue",
+            Potion::ConduitPower => "conduit_power",
         }
     }
     pub fn colour(self) -> [u8; 3] {
@@ -136,6 +156,8 @@ impl Potion {
             Potion::Regeneration => [230, 120, 200],
             Potion::BadOmen => [40, 70, 50],
             Potion::Hero => [90, 220, 90],
+            Potion::MiningFatigue => [90, 80, 40],
+            Potion::ConduitPower => [80, 190, 230],
         }
     }
     /// What goes in to make it.
@@ -148,7 +170,7 @@ impl Potion {
             Potion::Leaping => FEATHER,
             Potion::Strength => SIZZLE_POWDER,
             Potion::Regeneration => WEEPER_TEAR,
-            Potion::BadOmen | Potion::Hero => AIR,
+            Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower => AIR,
         }
     }
     /// Over at once (healing) rather than lasting.

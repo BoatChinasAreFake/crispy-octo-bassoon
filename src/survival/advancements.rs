@@ -168,6 +168,11 @@ pub const ALL: &[Advancement] = &[
     adv("temple_run", "Temple Run", "Find a jungle temple. Watch your feet."),
     adv("off_the_rails", "Off the Rails", "Find an abandoned mineshaft. Watch out for webs."),
     adv("cold_feet", "Cold Feet", "Find an igloo. Watch the floor."),
+    adv("monumental", "Monumental", "Find an Ocean Monument. Hold your breath."),
+    adv("guardian_down", "Eye Contact", "Defeat a Guardian. It saw you first."),
+    adv("elder_statesman", "Elder Statesman", "Defeat an Elder Guardian. Your arms will thank you."),
+    adv("cursed", "Heavy Arms", "Get cursed with Mining Fatigue by an Elder Guardian."),
+    adv("conduit_power", "Breathe Easy", "Feel a Conduit's power underwater."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -179,7 +184,7 @@ const STARTED: &[&str] = &[
 const CREATURES: &[&str] = &[
     "bacon", "hiss_tory", "groan_up", "fluffed", "dont_blink", "staring_champ", "rude_teleport", "udderly", "bone_zone", "arachno", "split_decision", "robin_hood", "good_boy",
     "the_birds_and_the_bees", "giddy_up", "hello_my_name_is", "pretty_polly", "soggy", "spear_it", "fishy_business", "sly_friend", "special_delivery", "tongue_tied", "scute_cute",
-    "armoured_pup", "too_hot", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
+    "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
     "full_flight", "jousting", "resin_up",
 ];
 const HOME: &[&str] = &[

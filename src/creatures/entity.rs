@@ -260,6 +260,10 @@ pub enum MobKind {
     ZombieHmmer,
     /// Turns up now and then with things to sell, then wanders off again (see villagers.rs).
     Wanderer,
+    /// Spiky one-eyed fish that guard Ocean Monuments with a laser (see monument.rs).
+    Guardian,
+    /// The big pale ones in the middle of a monument, which curse you with Mining Fatigue.
+    ElderGuardian,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -275,7 +279,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 49] = [
+    pub const ALL: [MobKind; 51] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -326,6 +330,8 @@ impl MobKind {
         MobKind::Llama,
         MobKind::ZombieHmmer,
         MobKind::Wanderer,
+        MobKind::Guardian,
+        MobKind::ElderGuardian,
     ];
 
     pub fn index(self) -> u8 {
@@ -419,6 +425,8 @@ impl MobKind {
             "llama" => Some(MobKind::Llama),
             "zombie hmmer" | "zombie_hmmer" | "zombiehmmer" | "zombie_villager" => Some(MobKind::ZombieHmmer),
             "wanderer" | "wandering_trader" | "wandering trader" => Some(MobKind::Wanderer),
+            "guardian" => Some(MobKind::Guardian),
+            "elder guardian" | "elder_guardian" | "elderguardian" | "elder" => Some(MobKind::ElderGuardian),
             _ => None,
         }
     }
@@ -476,6 +484,8 @@ impl MobKind {
             MobKind::Llama => "Llama",
             MobKind::ZombieHmmer => "Zombie Hmmer",
             MobKind::Wanderer => "Wanderer",
+            MobKind::Guardian => "Guardian",
+            MobKind::ElderGuardian => "Elder Guardian",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -531,6 +541,8 @@ impl MobKind {
             MobKind::PolarBear => (0.6, 1.4),
             MobKind::Llama => (0.45, 1.85),
             MobKind::ZombieHmmer | MobKind::Wanderer => (0.3, 1.95),
+            MobKind::Guardian => (0.42, 0.85),
+            MobKind::ElderGuardian => (1.0, 2.0),
             MobKind::Modded(_) => (0.4, 0.9),
         }
     }
@@ -588,6 +600,8 @@ impl MobKind {
             MobKind::Llama => 22.0,
             MobKind::ZombieHmmer => 20.0,
             MobKind::Wanderer => 20.0,
+            MobKind::Guardian => 30.0,
+            MobKind::ElderGuardian => 80.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -598,6 +612,7 @@ impl MobKind {
         }
         match self {
             MobKind::Bloop => size as u32,
+            MobKind::ElderGuardian => 10,
             k if !k.hostile() => rng.int(1, 3) as u32,
             _ => 5,
         }
@@ -1161,6 +1176,57 @@ impl Mob {
                 if self.fuse >= 1.5 {
                     ev.push(MobEvent::Explode(self.body.pos + Vec3::Y * 0.8, 3.0, "was blown up by a Hisser"));
                     self.health = -100.0;
+                }
+            }
+            MobKind::Guardian | MobKind::ElderGuardian => {
+                // Swim about guarding the place; lock on to anyone in sight,
+                // charge the laser (`fuse`) and zap them (see monument.rs).
+                let elder = self.kind == MobKind::ElderGuardian;
+                if self.body.in_water {
+                    let reach = if elder { 14.0 } else { 16.0 };
+                    let eye = self.eye();
+                    let aim = player + Vec3::Y * 0.9 - eye;
+                    let in_sight = player_visible && dist < reach && world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                    if in_sight && self.attack_cd <= 0.0 {
+                        self.yaw = face;
+                        self.fuse += dt;
+                        if self.fuse >= crate::monument::LASER_SECS {
+                            let (dmg, cause) = if elder { (8.0, "was zapped by an Elder Guardian. Elders know best") } else { (6.0, "was zapped by a Guardian. The big eye was a clue") };
+                            ev.push(MobEvent::HurtPlayer(dmg, cause));
+                            self.fuse = 0.0;
+                            self.attack_cd = rng.range(1.5, 3.0);
+                        }
+                        // Keep a lasering distance.
+                        if flat.length() < 5.0 {
+                            want = Some(((-flat.x).atan2(flat.z), 1.5));
+                        }
+                        swim_vy = Some((to_player.y * 0.8).clamp(-1.5, 1.5));
+                        may_wander = false;
+                    } else {
+                        self.fuse = 0.0;
+                        // Turn back before leaving the water; Elders stay near their room.
+                        let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.3, -self.yaw.cos()) * (self.body.half + 0.6);
+                        if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                            self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
+                            self.wander_t = rng.range(1.0, 3.0);
+                        }
+                        if let Some(h) = self.home.filter(|h| h.distance(self.body.pos) > if elder { 5.0 } else { 20.0 }) {
+                            let d = h - self.body.pos;
+                            want = Some((d.x.atan2(-d.z), 1.5));
+                        }
+                        let drift = (self.wander_t * 1.3 + self.id as f32).sin() * 0.6;
+                        let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + self.body.height).floor() as i32, self.body.pos.z.floor() as i32);
+                        swim_vy = Some(if is_water(above) { drift } else { drift.min(0.0) - 0.3 });
+                    }
+                } else {
+                    // Stranded: flop about (they don't dry out, more's the pity).
+                    self.fuse = 0.0;
+                    may_wander = false;
+                    if self.body.on_ground && rng.chance(dt * 1.5) {
+                        self.body.vel.y = 4.0;
+                        self.yaw = rng.range(0.0, std::f32::consts::TAU);
+                        self.knock = Vec3::new(self.yaw.sin(), 0.0, -self.yaw.cos()) * 1.5;
+                    }
                 }
             }
             MobKind::Fishy => {
@@ -2120,6 +2186,8 @@ impl Mob {
             MobKind::PolarBear => Some(([COD, SALMON][rng.int(0, 1) as usize], n.max(1))),
             MobKind::Llama => Some((WOOL, n.max(1))),
             MobKind::ZombieHmmer if n > 0 => Some((GOO, n)),
+            MobKind::Guardian if n > 0 => Some((PRISMARINE_SHARD, n)),
+            MobKind::ElderGuardian => Some((SPONGE, 1)),
             MobKind::Modded(_) => self.kind.mod_def().and_then(|d| d.drop).map(|(id, max)| (id, rng.int(1, max.max(1) as i32) as u8)),
             _ => None,
         }
@@ -2134,11 +2202,15 @@ impl Mob {
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             MobKind::Grumbler if rng.chance(0.4) => Some((GOLD_INGOT, 1)),
             MobKind::Grumbler if rng.chance(0.5) => Some((GRUMBLER_TUSK, 1)),
+            MobKind::Soggy if rng.chance(0.08) => Some((NAUTILUS_SHELL, 1)),
             MobKind::Soggy if rng.chance(0.11) => Some((COPPER_INGOT, 1)),
             MobKind::Weeper => Some((GUNPOWDER, rng.int(0, 2) as u8)).filter(|l| l.1 > 0),
             // A patrol's captain carries the banner (see raids.rs).
             MobKind::Pilferer if self.seed == 1 => Some((OMINOUS_BANNER, 1)),
             MobKind::Invoicer if rng.chance(0.5) => Some((GOLD_INGOT, rng.int(1, 3) as u8)),
+            MobKind::Guardian if rng.chance(0.4) => Some((PRISMARINE_CRYSTALS, 1)),
+            MobKind::Guardian if rng.chance(0.3) => Some((COD, 1)),
+            MobKind::ElderGuardian => Some((PRISMARINE_CRYSTALS, rng.int(1, 3) as u8)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -2440,6 +2512,35 @@ static FISHY: [Part; 3] = [
     part([-0.02, 0.06, 0.25], [0.04, 0.28, 0.22], [0.0, 0.2, 0.25], Limb::SwingY(2.0), [T_FISHY_FIN; 6]),
     part([-0.02, 0.35, -0.12], [0.04, 0.1, 0.24], [0.0; 3], Limb::Fixed, [T_FISHY_FIN; 6]),
 ];
+
+/// A Guardian: a spiky box of a fish with one big eye and a wagging tail.
+/// (An Elder is the same, bigger and paler.)
+/// A part scaled up by `k` (about the model's origin).
+const fn scaled(k: f32, min: [f32; 3], size: [f32; 3], pivot: [f32; 3], limb: Limb, tiles: [u16; 6]) -> Part {
+    part([min[0] * k, min[1] * k, min[2] * k], [size[0] * k, size[1] * k, size[2] * k], [pivot[0] * k, pivot[1] * k, pivot[2] * k], limb, tiles)
+}
+
+const fn guardian(k: f32, body: u16, eye: u16) -> [Part; 12] {
+    let s = [T_GUARDIAN_SPIKE; 6];
+    [
+        scaled(k, [-0.4, 0.05, -0.4], [0.8, 0.75, 0.8], [0.0; 3], Limb::Fixed, [body, body, body, body, body, eye]),
+        // Spikes: up, down and out of every side.
+        scaled(k, [-0.04, 0.8, -0.04], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.04, -0.12, -0.04], [0.08, 0.17, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [0.4, 0.38, -0.04], [0.2, 0.08, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.6, 0.38, -0.04], [0.2, 0.08, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.04, 0.38, -0.6], [0.08, 0.08, 0.2], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [0.3, 0.7, 0.3], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.38, 0.7, 0.3], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [0.3, 0.7, -0.38], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.38, 0.7, -0.38], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        // The tail, in two pieces, wagging.
+        scaled(k, [-0.15, 0.28, 0.4], [0.3, 0.3, 0.4], [0.0, 0.43, 0.4], Limb::SwingY(1.2), [body; 6]),
+        scaled(k, [-0.08, 0.32, 0.8], [0.16, 0.22, 0.3], [0.0, 0.43, 0.4], Limb::SwingY(1.6), [T_GUARDIAN_SPIKE; 6]),
+    ]
+}
+static GUARDIAN: [Part; 12] = guardian(1.0, T_GUARDIAN, T_GUARDIAN_EYE);
+static ELDER_GUARDIAN: [Part; 12] = guardian(2.35, T_ELDER_GUARDIAN, T_ELDER_EYE);
 
 static SOGGY: [Part; 6] = humanoid(T_SOGGY_SKIN, T_SOGGY_FACE, T_SOGGY_SHIRT, T_SOGGY_PANTS, Limb::Forward, Limb::Forward);
 /// With a spear in its right hand.
@@ -2980,6 +3081,8 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Llama => &LLAMA,
         MobKind::ZombieHmmer => &ZOMBIE_HMMER,
         MobKind::Wanderer => &WANDERER,
+        MobKind::Guardian => &GUARDIAN,
+        MobKind::ElderGuardian => &ELDER_GUARDIAN,
         // Modded mobs are drawn from a runtime-built, textured copy of a base
         // template (see `modded_parts`); this static fallback keeps `model`
         // total and is used only where the texture doesn't matter (e.g. the

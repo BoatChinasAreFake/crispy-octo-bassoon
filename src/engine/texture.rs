@@ -679,6 +679,22 @@ pub const T_TRIPWIRE_EW: u16 = 847;
 pub const T_TRIPWIRE_HOOK: u16 = 848;
 pub const T_TRIPWIRE_HOOK_ON: u16 = 849;
 pub const T_CHISELED_SANDSTONE: u16 = 850;
+// The Ocean Monument.
+pub const T_PRISMARINE: u16 = 851;
+pub const T_PRISMARINE_BRICKS: u16 = 852;
+pub const T_DARK_PRISMARINE: u16 = 853;
+pub const T_SEA_LANTERN: u16 = 854;
+pub const T_CONDUIT: u16 = 855;
+pub const T_PRISMARINE_SHARD: u16 = 856;
+pub const T_PRISMARINE_CRYSTALS: u16 = 857;
+pub const T_NAUTILUS_SHELL: u16 = 858;
+pub const T_HEART_OF_THE_SEA: u16 = 859;
+pub const T_GUARDIAN: u16 = 860;
+pub const T_GUARDIAN_EYE: u16 = 861;
+pub const T_GUARDIAN_SPIKE: u16 = 862;
+pub const T_ELDER_GUARDIAN: u16 = 863;
+pub const T_ELDER_EYE: u16 = 864;
+pub const T_GUARDIAN_LASER: u16 = 865;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3666,6 +3682,75 @@ fn home_tiles(a: &mut Atlas) {
     masonry_tiles(a);
     cave_tiles(a);
     temple_tiles(a);
+    monument_tiles(a);
+}
+
+/// v0.2's Ocean Monument: prismarine, its lights and treasures, and Guardians.
+fn monument_tiles(a: &mut Atlas) {
+    // Prismarine: mottled teal-green that shifts between blue and green.
+    a.each(T_PRISMARINE, |x, y, r, p| {
+        let n = p.noise2(x as f32 / 5.0 + 40.0, y as f32 / 5.0);
+        let c = if n > 0.1 { rgb(90, 160, 150) } else if n < -0.15 { rgb(70, 130, 150) } else { rgb(100, 170, 140) };
+        shade(c, r.range(0.88, 1.08))
+    });
+    a.each(T_PRISMARINE_BRICKS, |x, y, r, _| {
+        let row = y / 4;
+        let mortar = y % 4 == 3 || (x + row * 4) % 8 == 0;
+        if mortar { rgb(60, 110, 100) } else { shade(rgb(100, 175, 160), r.range(0.9, 1.06)) }
+    });
+    a.each(T_DARK_PRISMARINE, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15 || ((x == 4 || x == 11) && (4..12).contains(&y)) || ((y == 4 || y == 11) && (4..12).contains(&x));
+        if edge { rgb(30, 60, 50) } else { shade(rgb(50, 95, 80), r.range(0.9, 1.06)) }
+    });
+    // A sea lantern: pale glowing panes round a bright core.
+    a.each(T_SEA_LANTERN, |x, y, r, _| {
+        let (dx, dy) = ((x as i32 - 7).abs().min((x as i32 - 8).abs()), (y as i32 - 7).abs().min((y as i32 - 8).abs()));
+        let core = dx < 3 && dy < 3;
+        let frame = x == 0 || y == 0 || x == 15 || y == 15;
+        if frame { rgb(170, 200, 190) } else if core { rgb(250, 255, 250) } else { shade(rgb(205, 230, 225), r.range(0.92, 1.05)) }
+    });
+    // The conduit: a wooden-ish cage round a blue eye.
+    a.each(T_CONDUIT, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        if d < 3.0 { rgb(70, 160, 230) } else if d < 4.0 { rgb(20, 40, 70) } else if (x + y) % 4 < 2 { shade(rgb(160, 120, 70), r.range(0.9, 1.05)) } else { shade(rgb(120, 90, 55), r.range(0.9, 1.05)) }
+    });
+    a.each(T_PRISMARINE_SHARD, |x, y, r, _| {
+        let d = (x as i32 - y as i32).abs();
+        if d <= 2 && (3..14).contains(&x) { shade(rgb(110, 180, 165), r.range(0.85, 1.08)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_PRISMARINE_CRYSTALS, |x, y, r, _| {
+        let blob = [(5, 6), (10, 5), (8, 10), (4, 11), (11, 11)].iter().any(|&(cx, cy)| (x as i32 - cx).abs() + (y as i32 - cy).abs() < 3);
+        if blob { shade(if (x + y) % 3 == 0 { rgb(240, 255, 240) } else { rgb(170, 230, 210) }, r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_NAUTILUS_SHELL, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 8.0, y as f32 - 8.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let a = dy.atan2(dx);
+        let stripe = ((d * 1.2 - a * 1.5).rem_euclid(3.0)) < 1.0;
+        if d < 6.5 { shade(if stripe { rgb(170, 90, 60) } else { rgb(240, 225, 205) }, r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_HEART_OF_THE_SEA, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = dx.abs() + dy.abs();
+        if d < 4.0 { rgb(120, 220, 255) } else if d < 6.5 { shade(rgb(40, 90, 170), r.range(0.9, 1.06)) } else if d < 7.5 { rgb(20, 40, 90) } else { [0, 0, 0, 0] }
+    });
+    // Guardians: teal-orange scales, a single big eye, and spikes.
+    for (t, base, belly) in [(T_GUARDIAN, rgb(90, 150, 140), rgb(210, 130, 80)), (T_ELDER_GUARDIAN, rgb(200, 195, 175), rgb(160, 140, 170))] {
+        a.each(t, move |x, y, r, _| {
+            let scale = (x / 3 + y / 3) % 2 == 0;
+            shade(if y > 11 { belly } else { base }, if scale { 1.0 } else { 0.86 } * r.range(0.92, 1.06))
+        });
+    }
+    for (t, base, iris) in [(T_GUARDIAN_EYE, rgb(90, 150, 140), rgb(230, 120, 40)), (T_ELDER_EYE, rgb(200, 195, 175), rgb(150, 60, 160))] {
+        a.each(t, move |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let d = (dx * dx + dy * dy).sqrt();
+            if d < 2.0 { rgb(20, 20, 20) } else if d < 4.0 { iris } else if d < 5.5 { rgb(240, 240, 230) } else { shade(base, r.range(0.9, 1.05)) }
+        });
+    }
+    a.each(T_GUARDIAN_SPIKE, |_, y, r, _| shade(if y < 6 { rgb(240, 225, 200) } else { rgb(200, 120, 70) }, r.range(0.9, 1.05)));
+    a.each(T_GUARDIAN_LASER, |_, y, _, _| if (5..11).contains(&y) { [255, 210, 120, 255] } else { [200, 80, 40, 200] });
 }
 
 /// v0.2's temples, mineshafts and igloos.

@@ -165,6 +165,10 @@ pub struct Game {
     pub random_tick_acc: f32,
     /// Seconds towards the next look for loose Pointy Rocks (see caves.rs).
     pub shake_acc: f32,
+    /// Seconds towards the next look at monuments and conduits, the next Elder curse, the next conduit zap (see monument.rs).
+    pub monument_acc: f32,
+    pub curse_acc: f32,
+    pub zap_acc: f32,
     /// What's packed inside broken Hollow Boxes, by number (see boxes.rs).
     pub boxes: HashMap<u16, crate::containers::Container>,
     /// Sound effects requested this frame (effect, world position if positional).
@@ -470,6 +474,9 @@ impl Game {
             boxes: HashMap::new(),
             random_tick_acc: 0.0,
             shake_acc: 0.0,
+            monument_acc: 0.0,
+            curse_acc: 0.0,
+            zap_acc: 0.0,
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -941,12 +948,13 @@ impl Game {
         }
         // Temples, mineshafts and igloos (see temples.rs).
         use crate::structures::Kind;
-        if let Some(kind) = self.world.generator.site_near(p, 14.0) {
+        if let Some(kind) = self.world.generator.site_near(p, 18.0) {
             match kind {
                 Kind::DesertPyramid => self.advance("pyramid_scheme"),
                 Kind::JungleTemple => self.advance("temple_run"),
                 Kind::Mineshaft => self.advance("off_the_rails"),
                 Kind::Igloo => self.advance("cold_feet"),
+                Kind::Monument => self.advance("monumental"),
                 _ => {}
             }
         }
@@ -2033,6 +2041,7 @@ impl Game {
                             self.smash_around(at, i, me);
                         }
                         self.creaking_hit(i);
+                        self.guardian_spikes(i);
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
@@ -2076,6 +2085,8 @@ impl Game {
                     } else {
                         let efficiency = self.held_level(Enchant::Efficiency);
                         let (t, _) = break_time_with(id, held, efficiency);
+                        // An Elder Guardian's curse: everything takes four times as long.
+                        let t = if self.has_effect(crate::potions::Potion::MiningFatigue) { t * 4.0 } else { t };
                         let progress = match self.breaking {
                             Some((p, prog)) if p == pos => prog,
                             _ => 0.0,
@@ -2877,7 +2888,9 @@ impl Game {
     /// (a heart a second, with bubbles), and it comes back fast in the air.
     pub fn breath_tick(&mut self, dt: f32) {
         let max = self.max_air();
-        let under = self.player.head_in_water(&self.world) && !self.creative && !self.spectator && self.dead.is_none();
+        // A Conduit nearby: no need to breathe (see monument.rs).
+        let conduit = self.has_effect(crate::potions::Potion::ConduitPower);
+        let under = self.player.head_in_water(&self.world) && !self.creative && !self.spectator && self.dead.is_none() && !conduit;
         if !under {
             self.player.air = (self.player.air + dt * max / 2.0).min(max);
             return;
@@ -3133,6 +3146,7 @@ impl Game {
         self.house_clankers();
         self.clankers_tick(dt);
         self.beacons_tick(dt);
+        self.monument_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
         self.wildlife_tick(dt);
@@ -3167,7 +3181,7 @@ impl Game {
             let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
             let id = m.id;
             events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
-            if fuse_before == 0.0 && m.fuse > 0.0 {
+            if fuse_before == 0.0 && m.fuse > 0.0 && !crate::monument::is_guardian(m.kind) {
                 noises.push((Sfx::Hiss, m.body.pos));
             }
             // Idle chatter.
@@ -3198,6 +3212,7 @@ impl Game {
                     MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel | MobKind::Creaking => {}
                     MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rotsteed => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::Guardian | MobKind::ElderGuardian => noises.push((Sfx::Bubbles, m.body.pos)),
                     MobKind::CopperGolem | MobKind::Floaty => {}
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
@@ -3317,6 +3332,8 @@ impl Game {
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Breeze => self.advance("breeze_through"),
                             MobKind::Creaking => self.advance("heartbreak"),
+                            MobKind::Guardian => self.advance("guardian_down"),
+                            MobKind::ElderGuardian => self.advance("elder_statesman"),
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
@@ -3877,6 +3894,7 @@ impl Game {
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
         self.draw_falling(&mut g);
+        self.draw_lasers(&mut g);
         self.draw_fireballs(&mut g);
         // Rain, snow and lightning
         if !scorch {

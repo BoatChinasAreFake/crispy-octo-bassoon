@@ -49,6 +49,8 @@ pub enum Kind {
     JungleTemple,
     Mineshaft,
     Igloo,
+    /// On the deep sea floor (see monument.rs).
+    Monument,
 }
 
 impl Kind {
@@ -74,6 +76,7 @@ impl Kind {
             Kind::JungleTemple => "Jungle Temple (Mind the String)",
             Kind::Mineshaft => "Abandoned Mineshaft (Mind the Webs)",
             Kind::Igloo => "Igloo (Mind the Basement)",
+            Kind::Monument => "Ocean Monument (Mind the Eyes)",
         }
     }
 
@@ -99,13 +102,14 @@ impl Kind {
             "jungle_temple" | "jungle_pyramid" => Kind::JungleTemple,
             "mineshaft" | "abandoned_mineshaft" => Kind::Mineshaft,
             "igloo" => Kind::Igloo,
+            "monument" | "ocean_monument" => Kind::Monument,
             _ => return None,
         })
     }
 
     /// Wide enough that it reaches two chunks out.
     fn wide(self) -> bool {
-        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft)
+        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument)
     }
 }
 
@@ -145,7 +149,9 @@ impl Generator {
         let city_roll = self.opts.structures > 0 && hash2(s ^ 0xC17, cx, cz) < 0.035;
         // Mineshafts: deep, on a grid of their own (and never where Trial Chambers are).
         let shaft_spot = self.opts.structures > 0 && !trial_spot && (cx.rem_euclid(6), cz.rem_euclid(6)) == (3, 3) && hash2(s ^ 0x5AF7, cx.div_euclid(6), cz.div_euclid(6)) < 0.45;
-        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll && !shaft_spot {
+        // Ocean Monuments: rare, on a grid of their own, on the deep sea floor.
+        let monument_spot = self.opts.structures > 0 && (cx.rem_euclid(8), cz.rem_euclid(8)) == (4, 4) && hash2(s ^ 0x30A, cx.div_euclid(8), cz.div_euclid(8)) < 0.6;
+        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll && !shaft_spot && !monument_spot {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -173,6 +179,17 @@ impl Generator {
         }
         if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
             return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
+        }
+        if monument_spot && biome == Biome::Ocean && h < SEA - 4 {
+            // Open sea all round (it digs its own deep basin; see monument.rs).
+            let r = crate::monument::BASIN;
+            let open = [(-r, -r), (r, -r), (-r, r), (r, r), (0, r), (0, -r), (r, 0), (-r, 0)].iter().all(|&(dx, dz)| {
+                let (hh, b) = self.column(ox + dx, oz + dz);
+                b == Biome::Ocean && hh < SEA - 2
+            });
+            if open {
+                return Some(Site { kind: Kind::Monument, origin: ivec3(ox, SEA - crate::monument::DEPTH, oz), facing, seed });
+            }
         }
         if shaft_spot && h > 50 && biome != Biome::Ocean {
             let y = 20 + (hash2(s ^ 0x5AF8, cx, cz) * (h - 45).clamp(1, 20) as f32) as i32;
@@ -282,6 +299,7 @@ impl Generator {
             Kind::JungleTemple => return crate::temples::jungle_temple_blocks(site),
             Kind::Mineshaft => return crate::temples::mineshaft_blocks(site),
             Kind::Igloo => return crate::temples::igloo_blocks(site),
+            Kind::Monument => return crate::monument::monument_blocks(site),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -741,6 +759,7 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (TNT, 2, 0.1),
         ],
         Kind::BuriedTreasure => &[
+            (HEART_OF_THE_SEA, 1, 1.0),
             (GOLD_INGOT, 8, 1.0),
             (IRON, 6, 0.8),
             (DIAMOND, 2, 0.5),
@@ -777,6 +796,16 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (PICK_IRON, 1, 0.1),
             (GLOW_BERRIES, 4, 0.25),
             (ENCHANTED_BOOK, 1, 0.1),
+        ],
+        Kind::Monument => &[
+            (PRISMARINE_CRYSTALS, 6, 0.7),
+            (GOLD_INGOT, 6, 0.6),
+            (NAUTILUS_SHELL, 3, 0.6),
+            (DIAMOND, 2, 0.3),
+            (SPONGE, 2, 0.4),
+            (ENCHANTED_BOOK, 1, 0.3),
+            (HEART_OF_THE_SEA, 1, 0.15),
+            (PRISMARINE_SHARD, 8, 0.5),
         ],
         Kind::Igloo => &[(GOLDEN_CHOP, 1, 1.0), (COAL, 4, 0.6), (APPLE, 3, 0.5), (BREAD, 2, 0.5), (WHEAT, 4, 0.3), (GOLD_INGOT, 2, 0.3), (SWORD_STONE, 1, 0.2)],
         Kind::SnoutCamp => &[
@@ -892,6 +921,11 @@ impl World {
                     continue;
                 }
                 self.containers.insert(p, c);
+                if kind == Kind::Monument {
+                    for at in crate::monument::elder_spots(p) {
+                        self.new_residents.push((at, crate::entity::MobKind::ElderGuardian));
+                    }
+                }
                 if kind == Kind::Igloo {
                     // The basement's prisoners.
                     let [hmmer, zombie] = crate::temples::igloo_cells(p);

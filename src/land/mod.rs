@@ -10,6 +10,7 @@ pub(crate) mod fire;
 pub(crate) mod fortress;
 pub(crate) mod hollow;
 pub(crate) mod liquids;
+pub(crate) mod monument;
 pub(crate) mod nature;
 pub(crate) mod scorch;
 pub(crate) mod seasons;
