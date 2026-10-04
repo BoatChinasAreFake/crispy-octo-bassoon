@@ -307,6 +307,8 @@ struct App {
     form_seed: String,
     form_creative: bool,
     form_keep: bool,
+    /// World generation options for the next new world.
+    form_gen: world::GenOptions,
     form_hardcore: bool,
     form_focus: usize,
     /// The Backups screen's list and choice.
@@ -550,7 +552,7 @@ impl App {
     }
 
     fn new_world(&mut self, creative: bool, keep_inventory: bool, seed: u32) {
-        let mut g = Game::new(seed, creative, false);
+        let mut g = Game::new_with(seed, creative, false, self.form_gen);
         g.rules.keep_inventory = keep_inventory;
         g.msg(if creative {
             "Creative mode: infinite blocks, zero consequences. Double-tap Space to fly."
@@ -1146,9 +1148,9 @@ impl App {
         conn.flush();
         if let Some(i) = msgs.iter().position(|m| matches!(m, net::Msg::Welcome { .. })) {
             let leftover = msgs.split_off(i + 1);
-            let Some(net::Msg::Welcome { id, seed, time, creative, spawn, keep_inventory }) = msgs.pop() else { return };
+            let Some(net::Msg::Welcome { id, seed, time, creative, spawn, keep_inventory, worldgen }) = msgs.pop() else { return };
             let (conn, _) = self.joining.take().unwrap();
-            let mut g = Game::new_client(id, seed, time, creative, spawn, conn, &self.mp_name, leftover);
+            let mut g = Game::new_client(id, seed, worldgen, time, creative, spawn, conn, &self.mp_name, leftover);
             g.rules.keep_inventory = keep_inventory;
             self.start_game(g);
             return;
@@ -2036,6 +2038,7 @@ async fn game_main() {
         form_seed: String::new(),
         form_creative: false,
         form_keep: false,
+        form_gen: world::GenOptions::DEFAULT,
         form_hardcore: false,
         form_focus: 0,
         backup_list: Vec::new(),

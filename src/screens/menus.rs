@@ -223,7 +223,24 @@ impl App {
             "Gather, craft, and try not to get hissed at."
         };
         self.ui.text_centered(hint, w / 2.0, y + 9.0 * s, 8.0, GRAY);
-        y += 18.0 * s;
+        y += 16.0 * s;
+        // The land itself: how many structures, how big the biomes, how hilly.
+        let row = (bw * 1.4).min(w - 8.0 * s);
+        let rx = w / 2.0 - row / 2.0;
+        let third = (row - 8.0 * s) / 3.0;
+        let g = self.form_gen;
+        let labels = [format!("Structures: {}", g.structures_name()), format!("Biomes: {}", g.biome_name()), format!("Land: {}", g.terrain_name())];
+        for (k, label) in labels.iter().enumerate() {
+            if self.ui.button(Rect::new(rx + k as f32 * (third + 4.0 * s), y, third, bh), label, true) {
+                let f = &mut self.form_gen;
+                match k {
+                    0 => f.structures = (f.structures + 1) % 4,
+                    1 => f.biome_size = (f.biome_size + 1) % 4,
+                    _ => f.terrain = (f.terrain + 1) % 4,
+                }
+            }
+        }
+        y += bh + 8.0 * s;
         let half = (bw - 5.0 * s) / 2.0;
         if self.ui.button(Rect::new(x, y, half, bh), "Create World", true) {
             self.create_world();

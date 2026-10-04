@@ -395,7 +395,12 @@ pub struct Game {
 
 impl Game {
     pub fn new(seed: u32, creative: bool, menu: bool) -> Self {
-        let world = World::new(seed);
+        Game::new_with(seed, creative, menu, crate::world::GenOptions::LEGACY)
+    }
+
+    /// A game in a world made with these generation options.
+    pub fn new_with(seed: u32, creative: bool, menu: bool, worldgen: crate::world::GenOptions) -> Self {
+        let world = World::with_options(seed, worldgen);
         let spawn = world.find_spawn();
         let mut rng = Rng::new(seed as u64 ^ 0xC0FFEE);
         let stars = (0..350)
@@ -604,7 +609,9 @@ impl Game {
 
     pub fn from_save(d: SaveData) -> Self {
         let extras = d.extras.clone();
-        let mut g = Game::new(d.seed, d.creative, false);
+        // How the world was generated (worlds from before there were options: as they always were).
+        let worldgen = extras.iter().find(|(k, _)| k == "gen").and_then(|(_, b)| b.get(..4)).map(|b| crate::world::GenOptions::unpack(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))).unwrap_or(crate::world::GenOptions::LEGACY);
+        let mut g = Game::new_with(d.seed, d.creative, false, worldgen);
         g.saved_script_vars = d.script_vars.clone();
         g.advancements = Progress::from_keys(&d.advancements);
         g.world.farm = crate::farming::decode(&d.farm);
@@ -800,6 +807,9 @@ impl Game {
         ];
         if let Some(p) = self.pinned {
             v.push(("pinned".into(), (p as u32).to_le_bytes().to_vec()));
+        }
+        if self.world.generator.opts != crate::world::GenOptions::LEGACY {
+            v.push(("gen".into(), self.world.generator.opts.pack().to_le_bytes().to_vec()));
         }
         if !self.waypoints.is_empty() {
             v.push(("waypoints".into(), crate::waypoints::encode(&self.waypoints)));
@@ -6679,5 +6689,17 @@ looks_like = diamond
         assert_eq!(g.world.get_v(torch), WALL_TORCH_FIRST + f as Id);
         g.break_block(wall, false);
         assert_eq!(g.world.get_v(torch), AIR);
+    }
+
+    #[test]
+    fn a_worlds_generation_options_are_kept() {
+        use crate::world::GenOptions;
+        let opts = GenOptions { version: 1, structures: 1, biome_size: 3, terrain: 2 };
+        let mut g = Game::new_with(236, false, false, opts);
+        let back = Game::from_save(g.to_save());
+        assert_eq!(back.world.generator.opts, opts);
+        // Old worlds (no options saved) keep the old rules.
+        let mut old = Game::new(237, false, false);
+        assert_eq!(Game::from_save(old.to_save()).world.generator.opts, GenOptions::LEGACY);
     }
 }

@@ -368,9 +368,65 @@ impl TreeKind {
     }
 }
 
-/// Pure function of the seed: safe to share across worker threads.
+/// World generation options, chosen when a world is made (see the Create
+/// World screen) and kept with it. Worlds from before there were options
+/// are `LEGACY`, so they carry on generating exactly as they always did.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GenOptions {
+    /// 0: legacy (the old rules), 1: these options.
+    pub version: u8,
+    /// Structures: 0 none, 1 few, 2 normal, 3 lots.
+    pub structures: u8,
+    /// Biome size: 0 small (as they used to be), 1 normal, 2 large, 3 huge.
+    pub biome_size: u8,
+    /// Terrain: 0 flat-ish, 1 normal, 2 hilly, 3 amplified.
+    pub terrain: u8,
+}
+
+impl GenOptions {
+    pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
+    /// What a new world gets unless you choose otherwise.
+    pub const DEFAULT: GenOptions = GenOptions { version: 1, structures: 2, biome_size: 1, terrain: 1 };
+
+    pub fn pack(self) -> u32 {
+        u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
+    }
+
+    pub fn unpack(v: u32) -> GenOptions {
+        let [structures, biome_size, terrain, version] = v.to_le_bytes();
+        if version == 0 {
+            return GenOptions::LEGACY;
+        }
+        GenOptions { version: 1, structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+    }
+
+    /// How much bigger than the old ones biomes are.
+    pub fn biome_scale(self) -> f32 {
+        [1.0, 2.2, 3.0, 4.5][self.biome_size as usize % 4]
+    }
+
+    /// How much taller than normal hills and mountains rise.
+    pub fn relief(self) -> f32 {
+        [0.35, 1.0, 1.45, 2.1][self.terrain as usize % 4]
+    }
+
+    pub fn structures_name(self) -> &'static str {
+        ["None", "Few", "Normal", "Lots"][self.structures as usize % 4]
+    }
+
+    pub fn biome_name(self) -> &'static str {
+        ["Small", "Normal", "Large", "Huge"][self.biome_size as usize % 4]
+    }
+
+    pub fn terrain_name(self) -> &'static str {
+        ["Flat-ish", "Normal", "Hilly", "Amplified"][self.terrain as usize % 4]
+    }
+}
+
+/// Pure function of the seed (and the world's options): safe to share across worker threads.
 pub struct Generator {
     pub seed: u32,
+    pub opts: GenOptions,
     continent: Perlin,
     hills: Perlin,
     ridges: Perlin,
@@ -387,10 +443,17 @@ pub struct Generator {
 }
 
 impl Generator {
+    /// A generator with the old rules (tests).
+    #[cfg(test)]
     pub fn new(seed: u32) -> Self {
+        Generator::with(seed, GenOptions::LEGACY)
+    }
+
+    pub fn with(seed: u32, opts: GenOptions) -> Self {
         let s = seed as u64;
         Generator {
             seed,
+            opts,
             continent: Perlin::new(s),
             hills: Perlin::new(s + 1),
             ridges: Perlin::new(s + 2),
@@ -408,14 +471,24 @@ impl Generator {
     /// Surface height and biome for a column.
     pub fn column(&self, x: i32, z: i32) -> (i32, Biome) {
         let (fx, fz) = (x as f32, z as f32);
-        let c = self.continent.fbm2(fx / 420.0, fz / 420.0, 4);
+        // Bigger biomes come with bigger land and sea to hold them.
+        let bs = self.opts.biome_scale();
+        let cs = 420.0 * bs.sqrt();
+        let c = self.continent.fbm2(fx / cs, fz / cs, 4);
         let hills = self.hills.fbm2(fx / 110.0, fz / 110.0, 4);
         let r = 1.0 - self.ridges.fbm2(fx / 180.0, fz / 180.0, 3).abs();
         let mount = ((c - 0.1) / 0.45).clamp(0.0, 1.0);
-        let h = SEA as f32 + 3.0 + c * 20.0 + hills * 9.0 * (0.4 + mount) + mount * r * r * 48.0;
+        let relief = self.opts.relief();
+        // (Below the sea, relief only matters by half: oceans stay oceans.)
+        let lift = c * 20.0 + hills * 9.0 * (0.4 + mount) + mount * r * r * 48.0;
+        let lift = if lift > -3.0 { lift * relief } else { lift * (0.5 + relief * 0.5) };
+        let h = SEA as f32 + 3.0 + lift;
+        // Tall peaks ease off toward the top of the world instead of being cut flat.
+        let knee = (CH - 44) as f32;
+        let h = if h > knee { knee + (h - knee) / (1.0 + (h - knee) / 24.0) } else { h };
         let h = (h as i32).clamp(4, CH - 20);
-        let t = self.temp.fbm2(fx / 520.0 + 300.0, fz / 520.0, 3);
-        let m = self.moist.fbm2(fx / 380.0, fz / 380.0 - 200.0, 3);
+        let t = self.temp.fbm2(fx / (520.0 * bs) + 300.0, fz / (520.0 * bs), 3);
+        let m = self.moist.fbm2(fx / (380.0 * bs), fz / (380.0 * bs) - 200.0, 3);
         // Swamps: where it's wet but not hot, the land sinks toward the sea.
         let swampy = ((m - 0.18) / 0.1).clamp(0.0, 1.0) * (1.0 - ((t - 0.15) / 0.1).clamp(0.0, 1.0)) * ((t + 0.15) / 0.1).clamp(0.0, 1.0);
         // ...to a bumpy level just under it: pools and islands of mud and grass.
@@ -459,7 +532,8 @@ impl Generator {
 
     /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
     pub fn cold(&self, x: i32, z: i32) -> bool {
-        self.temp.fbm2(x as f32 / 520.0 + 300.0, z as f32 / 520.0, 3) < -0.3
+        let bs = self.opts.biome_scale();
+        self.temp.fbm2(x as f32 / (520.0 * bs) + 300.0, z as f32 / (520.0 * bs), 3) < -0.3
     }
 
     /// Where the generator put Creaking Hearts in chunk (cx, cz)'s pale oaks.
@@ -911,8 +985,14 @@ pub struct World {
 }
 
 impl World {
+    /// A world with the old generation rules (tests).
+    #[cfg(test)]
     pub fn new(seed: u32) -> Self {
-        let generator = Arc::new(Generator::new(seed));
+        World::with_options(seed, GenOptions::LEGACY)
+    }
+
+    pub fn with_options(seed: u32, opts: GenOptions) -> Self {
+        let generator = Arc::new(Generator::with(seed, opts));
         let (req_tx, req_rx) = channel::<(i32, i32)>();
         let (res_tx, res_rx) = channel();
         let req_rx = Arc::new(Mutex::new(req_rx));

@@ -113,17 +113,24 @@ impl Generator {
             return self.scorch_site(cx, cz);
         }
         let s = self.seed ^ 0x57_C0DE;
-        let r = hash2(s, cx, cz);
-        // Villages: at most one per 6x6-chunk region, at a spot away from its
-        // edges (so neighbours never overlap), in most regions.
-        let (rx, rz) = (cx.div_euclid(6), cz.div_euclid(6));
-        let village_spot = cx == rx * 6 + 2 + (hash2(s ^ 0xA11, rx, rz) * 2.0) as i32 % 2 && cz == rz * 6 + 2 + (hash2(s ^ 0xA12, rx, rz) * 2.0) as i32 % 2 && hash2(s ^ 0x7111, rx, rz) < 0.85;
+        let village_spot = self.village_spot(cx, cz);
+        // New worlds: the surface's sites only start in a structure slot (see
+        // `structure_slot`), so no two sit side by side. Older worlds keep the
+        // old rolls, chunk by chunk, so they carry on as they were.
+        let spaced = self.opts.version >= 1;
+        let slot = spaced && self.structure_slot(cx, cz);
+        let r = if spaced { hash2(s, cx, cz) * 0.1 } else { hash2(s, cx, cz) };
         // (Villages and the rarer sites roll on their own, below; the rest only here.)
-        let common = r < 0.10;
+        let common = if spaced { slot } else { r < 0.10 };
         // Trial Chambers: rare, deep, wherever (but never two in reach of each other).
-        let trial_spot = (cx.rem_euclid(5), cz.rem_euclid(5)) == (2, 2) && hash2(s ^ 0x7A1, cx.div_euclid(5), cz.div_euclid(5)) < 0.3;
-        let (wreck_roll, treasure_roll) = (hash2(s ^ 0x5419, cx, cz) < 0.035, hash2(s ^ 0x7EA5, cx, cz) < 0.06);
-        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && hash2(s ^ 0x0B0, cx, cz) >= 0.01 && hash2(s ^ 0xC17, cx, cz) >= 0.035 {
+        let trial_spot = self.opts.structures > 0 && (cx.rem_euclid(5), cz.rem_euclid(5)) == (2, 2) && hash2(s ^ 0x7A1, cx.div_euclid(5), cz.div_euclid(5)) < 0.3;
+        let (wreck_roll, treasure_roll, outpost_roll) = if spaced {
+            (slot && hash2(s ^ 0x5419, cx, cz) < 0.55, slot && hash2(s ^ 0x7EA5, cx, cz) < 0.7, slot && hash2(s ^ 0x0B0, cx, cz) < 0.15)
+        } else {
+            (hash2(s ^ 0x5419, cx, cz) < 0.035, hash2(s ^ 0x7EA5, cx, cz) < 0.06, hash2(s ^ 0x0B0, cx, cz) < 0.01)
+        };
+        let city_roll = self.opts.structures > 0 && hash2(s ^ 0xC17, cx, cz) < 0.035;
+        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -144,14 +151,14 @@ impl Generator {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
         // Pilferers build lookouts on open, flat ground.
-        if hash2(s ^ 0x0B0, cx, cz) < 0.01 && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() {
+        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() {
             return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
         }
         if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
             return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
         }
         // The Hushed Ones built rarely, and only in the Deep Dark.
-        if hash2(s ^ 0xC17, cx, cz) < 0.035 && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
+        if city_roll && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
             return Some(Site { kind: Kind::HushedCity, origin: ivec3(ox, crate::deepdark::CITY_Y, oz), facing, seed });
         }
         // Wrecks lie on the sea bed; treasure is buried in beaches (see treasure.rs).
@@ -191,6 +198,27 @@ impl Generator {
             _ => h,
         };
         Some(Site { kind, origin: ivec3(ox, y, oz), facing, seed })
+    }
+
+    /// Villages: at most one per 6x6-chunk region, at a spot away from its
+    /// edges (so neighbours never overlap), in most regions (fewer, or none,
+    /// if the world was made that way).
+    pub fn village_spot(&self, cx: i32, cz: i32) -> bool {
+        let s = self.seed ^ 0x57_C0DE;
+        let (rx, rz) = (cx.div_euclid(6), cz.div_euclid(6));
+        let chance = if self.opts.version == 0 { 0.85 } else { [0.0, 0.45, 0.85, 0.95][self.opts.structures as usize % 4] };
+        cx == rx * 6 + 2 + (hash2(s ^ 0xA11, rx, rz) * 2.0) as i32 % 2 && cz == rz * 6 + 2 + (hash2(s ^ 0xA12, rx, rz) * 2.0) as i32 % 2 && hash2(s ^ 0x7111, rx, rz) < chance
+    }
+
+    /// New worlds' structure slots: one chunk in the middle of each 4x4-chunk
+    /// region may hold a site (so any two are at least two chunks apart), if
+    /// the region rolls one and no village is within two chunks.
+    pub fn structure_slot(&self, cx: i32, cz: i32) -> bool {
+        let s = self.seed ^ 0x5107;
+        let (gx, gz) = (cx.div_euclid(4), cz.div_euclid(4));
+        let (sx, sz) = (gx * 4 + 1 + (hash2(s, gx, gz) * 2.0) as i32 % 2, gz * 4 + 1 + (hash2(s ^ 1, gx, gz) * 2.0) as i32 % 2);
+        let chance = [0.0, 0.35, 0.7, 1.0][self.opts.structures as usize % 4];
+        (cx, cz) == (sx, sz) && hash2(s ^ 2, gx, gz) < chance && !(-2..=2).any(|dz| (-2..=2).any(|dx| self.village_spot(cx + dx, cz + dz)))
     }
 
     /// Every block a site places, in world coordinates (AIR clears space).
@@ -907,5 +935,57 @@ mod tests {
         let o = site.origin;
         let (lx, lz) = (o.x - cx * CW, o.z - cz * CW);
         assert_eq!(blocks[crate::world::idx(lx, o.y, lz)], PLANKS, "the hut floor");
+    }
+
+    #[test]
+    fn new_worlds_space_their_structures_out_and_grow_bigger_biomes() {
+        use crate::world::GenOptions;
+        let g = Generator::with(31337, GenOptions::DEFAULT);
+        let mut surface = Vec::new();
+        for cz in -40..40 {
+            for cx in -40..40 {
+                if let Some(site) = g.site(cx, cz).filter(|s| !matches!(s.kind, Kind::TrialChambers | Kind::HushedCity)) {
+                    surface.push((cx, cz, site.kind));
+                }
+            }
+        }
+        assert!(surface.len() > 40, "still plenty: {}", surface.len());
+        for (i, a) in surface.iter().enumerate() {
+            for b in &surface[i + 1..] {
+                assert!((a.0 - b.0).abs().max((a.1 - b.1).abs()) >= 2, "{a:?} and {b:?} are side by side");
+            }
+        }
+        // None means none.
+        let none = Generator::with(31337, GenOptions { structures: 0, ..GenOptions::DEFAULT });
+        assert!((-20..20).all(|cz| (-20..20).all(|cx| none.site(cx, cz).is_none())));
+        // Bigger biomes: walking along some long lines, the stretch of one land biome
+        // you're typically in (weighted by how long you spend in it) is longer.
+        let typical = |g: &Generator| {
+            let (mut sum, mut sq) = (0.0f32, 0.0f32);
+            for z in [777, -3000, 5100] {
+                let v: Vec<_> = (0..6000).step_by(4).map(|x| g.column(x, z).1).collect();
+                let mut run = 1.0f32;
+                for w in v.windows(2) {
+                    if w[0] == crate::world::Biome::Ocean {
+                        run = 1.0;
+                    } else if w[0] == w[1] {
+                        run += 1.0;
+                    } else {
+                        sum += run;
+                        sq += run * run;
+                        run = 1.0;
+                    }
+                }
+                sum += run;
+                sq += run * run;
+            }
+            sq / sum * 4.0
+        };
+        let (old, new) = (typical(&Generator::new(31337)), typical(&g));
+        assert!(new > old * 1.4, "old {old}, new {new}");
+        // The options pack into the save and the join message.
+        let o = GenOptions { version: 1, structures: 3, biome_size: 2, terrain: 0 };
+        assert_eq!(GenOptions::unpack(o.pack()), o);
+        assert_eq!(GenOptions::unpack(0), GenOptions::LEGACY);
     }
 }

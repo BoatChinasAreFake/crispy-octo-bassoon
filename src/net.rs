@@ -30,7 +30,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
 /// v22: bundles, books and banners through the host; chest sorting.
 /// v23: seats in mount ids (Floaties), regulars' discounts, spears by kind.
-pub const PROTOCOL: u32 = 25;
+pub const PROTOCOL: u32 = 26;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -88,7 +88,8 @@ pub enum Msg {
     /// client -> host
     Hello { protocol: u32, name: String },
     /// host -> client, first reply
-    Welcome { id: u32, seed: u32, time: f32, creative: bool, spawn: Vec3, keep_inventory: bool },
+    /// `worldgen`: the world's generation options (see `world::GenOptions::pack`).
+    Welcome { id: u32, seed: u32, time: f32, creative: bool, spawn: Vec3, keep_inventory: bool, worldgen: u32 },
     Kick { reason: String },
     /// Player edits for one chunk (sent on join).
     Mods { cx: i32, cz: i32, entries: Vec<(u32, Id)> },
@@ -386,7 +387,7 @@ impl Msg {
                 w.u32(*protocol);
                 w.str(name);
             }
-            Msg::Welcome { id, seed, time, creative, spawn, keep_inventory } => {
+            Msg::Welcome { id, seed, time, creative, spawn, keep_inventory, worldgen } => {
                 w.u8(1);
                 w.u32(*id);
                 w.u32(*seed);
@@ -394,6 +395,7 @@ impl Msg {
                 w.u8(*creative as u8);
                 w.v3(*spawn);
                 w.u8(*keep_inventory as u8);
+                w.u32(*worldgen);
             }
             Msg::Kick { reason } => {
                 w.u8(2);
@@ -986,7 +988,7 @@ impl Msg {
         let mut r = R(b);
         let m = match r.u8()? {
             0 => Msg::Hello { protocol: r.u32()?, name: r.str()? },
-            1 => Msg::Welcome { id: r.u32()?, seed: r.u32()?, time: r.f32()?, creative: r.u8()? != 0, spawn: r.v3()?, keep_inventory: r.u8()? != 0 },
+            1 => Msg::Welcome { id: r.u32()?, seed: r.u32()?, time: r.f32()?, creative: r.u8()? != 0, spawn: r.v3()?, keep_inventory: r.u8()? != 0, worldgen: r.u32()? },
             2 => Msg::Kick { reason: r.str()? },
             3 => {
                 let (cx, cz) = (r.i32()?, r.i32()?);
@@ -1695,7 +1697,7 @@ mod tests {
     fn messages_round_trip() {
         let msgs = vec![
             Msg::Hello { protocol: PROTOCOL, name: "Stove".into() },
-            Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0), keep_inventory: true },
+            Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0), keep_inventory: true, worldgen: crate::world::GenOptions::DEFAULT.pack() },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
             Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102, trims: 0x2A },

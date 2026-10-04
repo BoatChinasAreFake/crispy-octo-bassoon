@@ -130,8 +130,8 @@ impl Game {
 
     /// Build a client-side game from the host's Welcome.
     #[allow(clippy::too_many_arguments)]
-    pub fn new_client(id: u32, seed: u32, time: f32, creative: bool, spawn: Vec3, conn: Conn, name: &str, leftover: Vec<Msg>) -> Game {
-        let mut g = Game::new(seed, creative, false);
+    pub fn new_client(id: u32, seed: u32, worldgen: u32, time: f32, creative: bool, spawn: Vec3, conn: Conn, name: &str, leftover: Vec<Msg>) -> Game {
+        let mut g = Game::new_with(seed, creative, false, crate::world::GenOptions::unpack(worldgen));
         g.time = time;
         g.spawn = spawn;
         g.player = Player::new(spawn);
@@ -419,7 +419,7 @@ impl Game {
             if taken(&name) {
                 name = format!("{}{}", name.chars().take(13).collect::<String>(), from);
             }
-            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.default_creative, spawn: self.spawn, keep_inventory: self.rules.keep_inventory };
+            let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.default_creative, spawn: self.spawn, keep_inventory: self.rules.keep_inventory, worldgen: self.world.generator.opts.pack() };
             let mods: Vec<Msg> = self
                 .world
                 .mods
@@ -1570,9 +1570,9 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(10), "no welcome");
             std::thread::sleep(Duration::from_millis(4));
         };
-        let Msg::Welcome { id, seed, time, creative, spawn: cspawn, .. } = welcome else { unreachable!() };
+        let Msg::Welcome { id, seed, time, creative, spawn: cspawn, worldgen, .. } = welcome else { unreachable!() };
         assert_eq!(seed, 777);
-        let mut client = Game::new_client(id, seed, time, creative, cspawn, conn, "Clienty", leftover);
+        let mut client = Game::new_client(id, seed, worldgen, time, creative, cspawn, conn, "Clienty", leftover);
         load_around(&mut client, cspawn);
 
         // Join is visible on both sides, and the pre-join edit arrived.
@@ -1648,8 +1648,8 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(4));
         };
-        let Msg::Welcome { id, seed, time, creative, spawn, .. } = welcome else { unreachable!() };
-        let mut client = Game::new_client(id, seed, time, creative, spawn, conn, name, leftover);
+        let Msg::Welcome { id, seed, time, creative, spawn, worldgen, .. } = welcome else { unreachable!() };
+        let mut client = Game::new_client(id, seed, worldgen, time, creative, spawn, conn, name, leftover);
         load_around(&mut client, spawn);
         Ok(client)
     }

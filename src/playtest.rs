@@ -84,8 +84,8 @@ pub fn connect(host: &mut Game, port: u16, name: &str) -> Result<Game, String> {
         }
         std::thread::sleep(Duration::from_millis(2));
     };
-    let Msg::Welcome { id, seed, time, creative, spawn, .. } = welcome else { unreachable!() };
-    let mut g = Game::new_client(id, seed, time, creative, spawn, conn, name, leftover);
+    let Msg::Welcome { id, seed, time, creative, spawn, worldgen, .. } = welcome else { unreachable!() };
+    let mut g = Game::new_client(id, seed, worldgen, time, creative, spawn, conn, name, leftover);
     load_around(&mut g, spawn);
     Ok(g)
 }
