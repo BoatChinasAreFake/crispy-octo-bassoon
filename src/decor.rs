@@ -46,7 +46,7 @@ pub fn frame_facing(normal: IVec3) -> Option<u8> {
 }
 
 /// Outward from the wall, for a frame hung on side `facing`.
-fn outward(facing: u8) -> Vec3 {
+pub fn outward(facing: u8) -> Vec3 {
     match facing % 4 {
         0 => Vec3::Z,
         1 => Vec3::NEG_X,

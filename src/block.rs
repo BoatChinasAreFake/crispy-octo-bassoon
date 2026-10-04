@@ -343,7 +343,13 @@ pub const CHAIN: Id = 529;
 pub const SCAFFOLDING: Id = 530;
 /// A lantern hung from the block above.
 pub const LANTERN_HANGING: Id = 531;
-pub const NUM_BLOCKS: Id = 532;
+/// Torches on a wall, leaning out on the side they face (0 north .. 3 west, as frames).
+pub const WALL_TORCH_FIRST: Id = 532;
+pub const NUM_BLOCKS: Id = 536;
+
+pub fn is_wall_torch(id: Id) -> bool {
+    (WALL_TORCH_FIRST..WALL_TORCH_FIRST + 4).contains(&id)
+}
 /// Half the id space for blocks, half for items.
 pub const FIRST_ITEM: Id = 0x8000;
 
@@ -1028,6 +1034,9 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if id == LANTERN_HANGING {
         return Some(LANTERN);
+    }
+    if is_wall_torch(id) {
+        return Some(TORCH);
     }
     if crate::hoppers::is_hopper(id) {
         return Some(HOPPER_FIRST);
@@ -1888,6 +1897,8 @@ impl Registry {
         blocks.push(def("mud", "Mud (Squelchy)", Cube, true, true, [T_MUD; 3], 0.5, 0, false, MUD, 0.0, S_GRASS));
         let mut lily = def("lily_pad", "Lily Pad (Frog Not Included)", Shaped, false, false, [T_LILY_PAD; 3], 0.0, 0, false, LILY_PAD, 0.0, S_GRASS);
         lily.shape = Shape::Dust;
+        // Stood on (see entity::collides), not swum into.
+        lily.solid = true;
         blocks.push(lily);
         blocks.push(def("red_sand", "Red Sand (Sunburnt)", Cube, true, true, [T_RED_SAND; 3], 0.5, 0, false, RED_SAND, 0.0, S_SAND));
         for (i, (key, name)) in [("terracotta", "Terracotta (Fancy Mud)"), ("orange_terracotta", "Orange Terracotta"), ("red_terracotta", "Red Terracotta"), ("yellow_terracotta", "Yellow Terracotta")].into_iter().enumerate() {
@@ -2223,6 +2234,11 @@ impl Registry {
         hanging.shape = Shape::Hanging;
         hanging.creative = false;
         blocks.push(hanging);
+        for key in ["wall_torch_north", "wall_torch_east", "wall_torch_south", "wall_torch_west"] {
+            let mut t = def(key, "Torch", Cross, false, false, [T_TORCH; 3], 0.0, 0, false, TORCH, 8.0, S_WOOD);
+            t.creative = false;
+            blocks.push(t);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -3019,6 +3035,7 @@ mod id_order_tests {
             (CANDLE_LIT, "candle_lit"),
             (SCAFFOLDING, "scaffolding"),
             (LANTERN_HANGING, "lantern_hanging"),
+            (WALL_TORCH_FIRST + 3, "wall_torch_west"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }

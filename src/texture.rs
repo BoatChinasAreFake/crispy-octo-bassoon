@@ -2472,7 +2472,8 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             if handle {
                 rgb(60, 60, 60)
             } else if window {
-                rgb(170, 210, 230)
+                // Clear: you can see through the window.
+                [0, 0, 0, 0]
             } else if frame {
                 shade(rgb(110, 80, 45), r.range(0.9, 1.05))
             } else if panel {

@@ -1039,6 +1039,11 @@ impl App {
             self.renderer.update_atlas(gl.quad_context, &atlas);
             self.ui.tex.update_from_bytes(texture::UI_ATLAS as u32, texture::UI_ATLAS as u32, &texture::ui_atlas(&atlas));
         }
+        {
+            let size = render::SHADOW_SIZES[self.settings.shadow_quality as usize % render::SHADOW_SIZES.len()].0;
+            let gl = unsafe { get_internal_gl() };
+            self.renderer.set_shadow_size(gl.quad_context, size);
+        }
 
         // 3D world
         let sky = self.game.sky_color();
@@ -2423,6 +2428,7 @@ async fn game_main() {
                 app.game = Game::new(424242, true, true);
                 app.settings.max_fps = 144;
                 app.settings.particles = 1;
+                app.settings.shadow_quality = 3;
                 app.set_screen(Screen::Video { from_title: true });
             }
             "reef" => {
@@ -2601,6 +2607,10 @@ async fn game_main() {
                     }
                     for r in [-3, 0, 3] {
                         app.game.world.set_v(at(10.0, r as f32) + IVec3::Y * 2 - f, block::PAINTING_FIRST + facing as u16);
+                    }
+                    // Torches on the wall between the paintings.
+                    for r in [-1.5, 1.5] {
+                        app.game.world.set_v(at(10.0, r) + IVec3::Y * 2 - f, block::WALL_TORCH_FIRST + facing as u16);
                     }
                 }
                 // v0.1.21's building blocks along the left.

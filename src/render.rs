@@ -139,8 +139,9 @@ float shadowing(vec3 n) {
     float t = shadow.y * 0.75;
     float z = s.z - bias + shadow.z;
     float sum = shadow_tap(s.xy + vec2(-t, -t), z) + shadow_tap(s.xy + vec2(t, -t), z) + shadow_tap(s.xy + vec2(-t, t), z) + shadow_tap(s.xy + vec2(t, t), z);
-    vec2 e = abs(s.xy - 0.5) * 2.0;
-    float fade = 1.0 - smoothstep(0.8, 1.0, max(e.x, e.y));
+    // Fade out in a circle well inside the map's square edge, so there's no
+    // hard line (or corners) where shadows start as you walk.
+    float fade = 1.0 - smoothstep(0.65, 0.95, length(s.xy - 0.5) * 2.0);
     return sum * 0.25 * fade;
 }
 
@@ -277,6 +278,28 @@ void main() {
 /// Shadow map size (texels a side) and how far it reaches from the camera (blocks).
 pub const SHADOW_SIZE: u32 = 2048;
 pub const SHADOW_REACH: f32 = 72.0;
+/// The shadow map sizes the Shadow Quality setting picks from (and what it calls them).
+pub const SHADOW_SIZES: [(u32, &str); 4] = [(1024, "Potato"), (2048, "Medium"), (4096, "High"), (8192, "What the hell is wrong with you?")];
+
+/// A shadow map: colour (packed depth), a depth buffer, and the pass that draws into them.
+fn shadow_targets(ctx: &mut dyn RenderingBackend, size: u32) -> (TextureId, TextureId, RenderPass) {
+    let params = |format| TextureParams {
+        kind: TextureKind::Texture2D,
+        format,
+        wrap: TextureWrap::Clamp,
+        min_filter: FilterMode::Nearest,
+        mag_filter: FilterMode::Nearest,
+        mipmap_filter: MipmapFilterMode::None,
+        width: size,
+        height: size,
+        allocate_mipmaps: false,
+        sample_count: 1,
+    };
+    let tex = ctx.new_render_texture(params(TextureFormat::RGBA8));
+    let depth = ctx.new_render_texture(params(TextureFormat::Depth));
+    let pass = ctx.new_render_pass(tex, Some(depth));
+    (tex, depth, pass)
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -467,7 +490,10 @@ pub struct Renderer {
     pub texture: TextureId,
     /// The sun's view of the world (see `draw`): packed depth, its depth buffer, and how to draw it.
     shadow_tex: TextureId,
+    shadow_depth: TextureId,
     shadow_pass: RenderPass,
+    /// Texels a side (see `set_shadow_size`).
+    shadow_size: u32,
     shadow_pipe: Pipeline,
     dyn_vb: BufferId,
     dyn_ib: BufferId,
@@ -558,10 +584,13 @@ impl Renderer {
             alpha_blend: alpha,
             ..Default::default()
         });
+        // The hand and what it holds: drawn over the world (the depth buffer
+        // is cleared first) but depth-tested among themselves, so a held
+        // stair or sprite never shows its far side through its near one.
         let overlay = pipe(PipelineParams {
             cull_face: CullFace::Back,
-            depth_test: Comparison::Always,
-            depth_write: false,
+            depth_test: Comparison::LessOrEqual,
+            depth_write: true,
             color_blend: alpha,
             ..Default::default()
         });
@@ -576,26 +605,12 @@ impl Renderer {
         let shadow_src = SHADOW_FRAGMENT.replace("TILE_SIZE", &format!("{tile:.8}"));
         let shadow_shader = ctx.new_shader(ShaderSource::Glsl { vertex: SHADOW_VERTEX, fragment: &shadow_src }, shadow_meta()).unwrap_or_else(|e| panic!("shadow shader failed to compile: {e:?}"));
         let shadow_pipe = ctx.new_pipeline(&layout, &attrs, shadow_shader, PipelineParams { cull_face: CullFace::Nothing, depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() });
-        let shadow_params = |format| TextureParams {
-            kind: TextureKind::Texture2D,
-            format,
-            wrap: TextureWrap::Clamp,
-            min_filter: FilterMode::Nearest,
-            mag_filter: FilterMode::Nearest,
-            mipmap_filter: MipmapFilterMode::None,
-            width: SHADOW_SIZE,
-            height: SHADOW_SIZE,
-            allocate_mipmaps: false,
-            sample_count: 1,
-        };
-        let shadow_tex = ctx.new_render_texture(shadow_params(TextureFormat::RGBA8));
-        let shadow_depth = ctx.new_render_texture(shadow_params(TextureFormat::Depth));
-        let shadow_pass = ctx.new_render_pass(shadow_tex, Some(shadow_depth));
+        let (shadow_tex, shadow_depth, shadow_pass) = shadow_targets(ctx, SHADOW_SIZE);
 
         let (dyn_cap_v, dyn_cap_i) = (1 << 16, 3 << 15);
         let dyn_vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Stream, BufferSource::empty::<Vertex>(dyn_cap_v));
         let dyn_ib = ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Stream, BufferSource::empty::<u32>(dyn_cap_i));
-        Renderer { opaque, blend, overlay, sky, texture, shadow_tex, shadow_pass, shadow_pipe, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new(), far: None, far_tiles: Vec::new() }
+        Renderer { opaque, blend, overlay, sky, texture, shadow_tex, shadow_depth, shadow_pass, shadow_size: SHADOW_SIZE, shadow_pipe, dyn_vb, dyn_ib, dyn_cap_v, dyn_cap_i, chunks: HashMap::new(), far: None, far_tiles: Vec::new() }
     }
 
     pub fn set_chunk(&mut self, ctx: &mut dyn RenderingBackend, key: (i32, i32), mesh: ChunkMesh) {
@@ -666,12 +681,24 @@ impl Renderer {
 
     /// The sun's camera: an orthographic box round the player, nudged to whole
     /// texels so shadow edges don't crawl as you walk.
-    fn light_matrix(fp: &FrameParams) -> Mat4 {
+    /// Change the shadow map's size (Shadow Quality in Video Settings).
+    pub fn set_shadow_size(&mut self, ctx: &mut dyn RenderingBackend, size: u32) {
+        if size == self.shadow_size {
+            return;
+        }
+        ctx.delete_render_pass(self.shadow_pass);
+        ctx.delete_texture(self.shadow_tex);
+        ctx.delete_texture(self.shadow_depth);
+        (self.shadow_tex, self.shadow_depth, self.shadow_pass) = shadow_targets(ctx, size);
+        self.shadow_size = size;
+    }
+
+    fn light_matrix(fp: &FrameParams, size: u32) -> Mat4 {
         let dir = fp.sun_dir.normalize_or_zero();
         let up = if dir.y.abs() > 0.95 { Vec3::Z } else { Vec3::Y };
         let view = Mat4::look_at_rh(dir * 200.0, Vec3::ZERO, up);
         let c = view.transform_point3(fp.cam_pos);
-        let texel = 2.0 * SHADOW_REACH / SHADOW_SIZE as f32;
+        let texel = 2.0 * SHADOW_REACH / size as f32;
         let (x, y) = ((c.x / texel).round() * texel, (c.y / texel).round() * texel);
         // Depth: well past the camera both ways (tall things far off still cast).
         let proj = Mat4::orthographic_rh_gl(x - SHADOW_REACH, x + SHADOW_REACH, y - SHADOW_REACH, y + SHADOW_REACH, -c.z - 160.0, -c.z + 160.0);
@@ -682,7 +709,8 @@ impl Renderer {
         let planes = frustum_planes(&fp.view_proj);
         // Sun shadows only while the sun is properly up.
         let shadows_on = fp.shadows && fp.sun_dir.y > 0.12;
-        let light_mvp = Self::light_matrix(fp);
+        let size = self.shadow_size;
+        let light_mvp = Self::light_matrix(fp, size);
         let base = Uniforms {
             mvp: fp.view_proj,
             cam_pos: fp.cam_pos.extend(1.0),
@@ -702,8 +730,8 @@ impl Renderer {
             },
             light_mvp,
             // Shadows deepen as the sun climbs (and fade out toward sunset).
-            shadow: Vec4::new(shadows_on as u8 as f32, 1.0 / SHADOW_SIZE as f32, 0.0012, 0.55 * ((fp.sun_dir.y - 0.12) * 4.0).clamp(0.0, 1.0)),
-            sun: fp.sun_dir.normalize_or_zero().extend(2.0 * SHADOW_REACH / SHADOW_SIZE as f32),
+            shadow: Vec4::new(shadows_on as u8 as f32, 1.0 / size as f32, 0.0012 * (SHADOW_SIZE as f32 / size as f32).sqrt(), 0.55 * ((fp.sun_dir.y - 0.12) * 4.0).clamp(0.0, 1.0)),
+            sun: fp.sun_dir.normalize_or_zero().extend(2.0 * SHADOW_REACH / size as f32),
         };
         let images = vec![self.texture, self.shadow_tex];
 
@@ -720,8 +748,8 @@ impl Renderer {
         if shadows_on {
             ctx.begin_pass(Some(self.shadow_pass), PassAction::clear_color(1.0, 1.0, 1.0, 1.0));
             // The whole map, whatever size the window is.
-            ctx.apply_viewport(0, 0, SHADOW_SIZE as i32, SHADOW_SIZE as i32);
-            ctx.apply_scissor_rect(0, 0, SHADOW_SIZE as i32, SHADOW_SIZE as i32);
+            ctx.apply_viewport(0, 0, size as i32, size as i32);
+            ctx.apply_scissor_rect(0, 0, size as i32, size as i32);
             ctx.apply_pipeline(&self.shadow_pipe);
             ctx.apply_uniforms(UniformsSource::table(&ShadowUniforms { mvp: light_mvp }));
             let reach = SHADOW_REACH + 24.0;
@@ -836,6 +864,7 @@ impl Renderer {
         draw_batches(ctx, Pass::Blend, &self.blend);
         // Restore before anything else (including macroquad's clears) touches depth.
         set_depth_writes(true);
+        ctx.clear(None, Some(1.0), None);
         draw_batches(ctx, Pass::Overlay, &self.overlay);
 
         ctx.end_render_pass();

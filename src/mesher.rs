@@ -308,7 +308,7 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                         Model::Cross => {
                             let (sky, blk) = hood.lit(lx, y, lz);
                             let tile = def.tex[1];
-                            let (a, b) = if id == TORCH || crate::contraptions::is_ztorch(id) { (0.3, 0.7) } else { (0.15, 0.85) };
+                            let (a, b) = if id == TORCH || is_wall_torch(id) || crate::contraptions::is_ztorch(id) { (0.3, 0.7) } else { (0.15, 0.85) };
                             let diag = [
                                 [[a, 0., a], [b, 0., b], [b, 1., b], [a, 1., a]],
                                 [[b, 0., a], [a, 0., b], [a, 1., b], [b, 1., a]],
@@ -316,6 +316,18 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             // A pointy rock hanging from a ceiling points down (a stalactite).
                             let hanging = id == POINTY_ROCK && is_solid(hood.get(lx, y + 1, lz)) && !is_solid(hood.get(lx, y - 1, lz));
                             let uv = if hanging { [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] } else { CORNER_UV };
+                            // A torch on a wall leans out from it.
+                            let lean = is_wall_torch(id).then(|| crate::decor::outward((id - WALL_TORCH_FIRST) as u8));
+                            let diag = diag.map(|q| {
+                                q.map(|p| match lean {
+                                    Some(o) => {
+                                        let y = p[1];
+                                        let back = 0.42 - 0.3 * y;
+                                        [p[0] - o.x * back, 0.2 + y * 0.8, p[2] - o.z * back]
+                                    }
+                                    None => p,
+                                })
+                            });
                             for d in diag {
                                 let tint = tint_at(id, 0, wx + 0.5, wz + 0.5);
                                 let v = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };

@@ -55,6 +55,8 @@ pub struct Settings {
     pub clouds: bool,
     /// Sun shadows, and deep water with light rippling under it (see render.rs).
     pub shadows: bool,
+    /// Shadow map size: an index into render::SHADOW_SIZES (1024 to 8192).
+    pub shadow_quality: u8,
     pub fancy_water: bool,
     /// Low-detail land past the render distance (see lod.rs).
     pub distant_terrain: bool,
@@ -102,6 +104,7 @@ impl Default for Settings {
             fog: true,
             clouds: true,
             shadows: true,
+            shadow_quality: 1,
             fancy_water: true,
             distant_terrain: true,
             shield_banner: 0,
@@ -123,7 +126,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nfancy_water={}\ndistant_terrain={}\nshield_banner={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nshield_banner={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -150,6 +153,7 @@ impl Settings {
             self.fog,
             self.clouds,
             self.shadows,
+            self.shadow_quality,
             self.fancy_water,
             self.distant_terrain,
             self.shield_banner,
@@ -198,6 +202,7 @@ impl Settings {
                 "view_bobbing" => s.view_bobbing = flag(s.view_bobbing),
                 "fog" => s.fog = flag(s.fog),
                 "shadows" => s.shadows = flag(s.shadows),
+                "shadow_quality" => s.shadow_quality = v.parse::<u8>().unwrap_or(s.shadow_quality).min(crate::render::SHADOW_SIZES.len() as u8 - 1),
                 "fancy_water" => s.fancy_water = flag(s.fancy_water),
                 "distant_terrain" => s.distant_terrain = flag(s.distant_terrain),
                 "shield_banner" => s.shield_banner = v.parse().unwrap_or(0),
@@ -289,6 +294,7 @@ mod tests {
             fog: false,
             clouds: false,
             shadows: false,
+            shadow_quality: 3,
             fancy_water: false,
             distant_terrain: false,
             shield_banner: 0x0042,

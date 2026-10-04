@@ -140,7 +140,8 @@ impl Ui {
     /// Item icon: blocks become a little isometric block (slabs and stairs keep
     /// their shape), everything else a flat sprite.
     pub fn icon(&self, item: Id, x: f32, y: f32, size: f32) {
-        if is_block_item(item) && matches!(block(item).model, Model::Cube | Model::Shaped) {
+        // (Flat things on the ground, like leaf litter, show as their picture.)
+        if is_block_item(item) && matches!(block(item).model, Model::Cube | Model::Shaped) && !matches!(block(item).shape, Shape::Dust) {
             let t = block(item).tex;
             // Isometric projection of a point in the unit cell.
             let p = |bx: f32, by: f32, bz: f32| vec2(x + size * (0.5 + 0.45 * (bx - bz)), y + size * (0.04 + 0.23 * (bx + bz) + 0.46 * (1.0 - by)));

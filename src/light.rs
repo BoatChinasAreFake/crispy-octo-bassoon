@@ -109,7 +109,7 @@ pub fn emission(id: Id) -> u8 {
         return 0;
     }
     match id {
-        TORCH => 14,
+        _ if id == TORCH || is_wall_torch(id) => 14,
         FURNACE_LIT | SMOKER_LIT | BLAST_FURNACE_LIT => 13,
         CANDLE_LIT => 6,
         ENCHANTING_TABLE => 7,

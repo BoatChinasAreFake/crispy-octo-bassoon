@@ -2458,7 +2458,9 @@ impl Game {
         let below = self.world.get_v(place - IVec3::Y);
         match held {
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
-            TORCH | LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            // Torches go on walls too.
+            TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
+            LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
             FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
@@ -2472,7 +2474,14 @@ impl Game {
                 return;
             }
         }
-        let oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
+        let mut oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
+        if held == TORCH
+            && is_solid(hit_id)
+            && !replaceable(hit_id)
+            && let Some(f) = crate::decor::frame_facing(normal)
+        {
+            oriented = WALL_TORCH_FIRST + f as Id;
+        }
         self.world.set_v(place, oriented);
         if held == HOLLOW_BOX && !self.is_client() {
             let wear = self.inv.wear[self.inv.selected];
@@ -2582,13 +2591,23 @@ impl Game {
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
-        if block(a).model == Model::Cross || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
+        if (block(a).model == Model::Cross && !is_wall_torch(a)) || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
             self.world.set_v(above, AIR);
             if is_door(a) {
                 self.world.set_v(above + IVec3::Y, AIR);
             }
             if !self.creative && !self.is_client() && block(a).drop != AIR {
                 self.pop_drop(above.as_vec3() + Vec3::splat(0.5), block(a).drop, 1);
+            }
+        }
+        // Torches on its sides fall off too.
+        for f in 0..4u8 {
+            let side = pos + crate::decor::outward(f).as_ivec3();
+            if self.world.get_v(side) == WALL_TORCH_FIRST + f as Id {
+                self.world.set_v(side, AIR);
+                if !self.creative && !self.is_client() {
+                    self.pop_drop(side.as_vec3() + Vec3::splat(0.5), TORCH, 1);
+                }
             }
         }
         // Bamboo: the whole stalk above comes down.
@@ -3775,8 +3794,10 @@ impl Game {
                 (h.pos.as_vec3(), h.pos.as_vec3() + Vec3::ONE)
             };
             g.begin(Pass::Blend, [0.0, 0.0, 0.0, 0.55], true);
-            // Edges sit entirely outside the block so the (now depth-tested) outline never z-fights.
-            outline(&mut g, min - Vec3::splat(0.014), max + Vec3::splat(0.014), 0.012);
+            // The edges straddle the block's surface: their outer faces sit just
+            // outside it (so they never z-fight) and their inner faces just inside
+            // it (so there's no gap between outline and block).
+            outline(&mut g, min - Vec3::splat(0.009), max + Vec3::splat(0.009), 0.012);
             if let Some((bp, prog)) = self.breaking
                 && bp == h.pos {
                     let stage = ((prog * 5.0) as u16).min(4);
@@ -3828,7 +3849,7 @@ impl Game {
             let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
             g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
-        } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) {
+        } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) && !matches!(block(held).shape, Shape::Dust) {
             let tiles = {
                 let t = block(held).tex;
                 [t[1], t[1], t[0], t[2], t[1], t[1]]
@@ -3890,7 +3911,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = self.sun_angle(); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = sun_step(self.sun_angle()); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
     }
 }
 
@@ -4002,6 +4023,14 @@ fn outline(g: &mut DynGeo, min: Vec3, max: Vec3, t: f32) {
         let m = Mat4::from_translation(min + o) * Mat4::from_scale(sz);
         g.cube(&m, [T_WHITE; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
     }
+}
+
+/// The sun's angle in small steps (a second or so of daytime apart): if the
+/// sun's camera turned a little every frame, every shadow edge would shimmer
+/// as the shadow map's texels slid across the world.
+pub fn sun_step(a: f32) -> f32 {
+    const STEP: f32 = TAU / 1200.0;
+    (a / STEP).round() * STEP
 }
 
 /// Slab-method ray/AABB test; returns entry distance.
@@ -6577,5 +6606,64 @@ looks_like = diamond
             g.breath_tick(0.05);
         }
         assert_eq!(g.player.health, h);
+    }
+
+    #[test]
+    fn frogs_climb_out_of_ponds_and_lily_pads_hold_you_up() {
+        let mut g = arena(232);
+        // A pond two deep, its banks a block above the water.
+        for x in -2..=2 {
+            for z in -2..=2 {
+                g.world.set(x, 47, z, STONE);
+                g.world.set(x, 48, z, WATER);
+                g.world.set(x, 49, z, WATER);
+            }
+        }
+        g.world.set(0, 50, 2, LILY_PAD);
+        let frog = g.alloc_mob(MobKind::Ribbit, Vec3::new(0.5, 48.2, 0.5));
+        let mut out = false;
+        for _ in 0..1200 {
+            let world = &g.world;
+            for m in g.mobs.iter_mut() {
+                m.update(0.05, world, Vec3::new(0.0, 50.0, -30.0), false, 0.3, &mut g.rng);
+            }
+            let f = g.mobs.iter().find(|m| m.id == frog).unwrap();
+            if f.body.pos.y >= 50.0 && !f.body.in_water && f.body.on_ground {
+                out = true;
+                break;
+            }
+        }
+        assert!(out, "the frog got out");
+        // Something dropped onto the lily pad stands on it...
+        let mut b = crate::entity::Body::new(Vec3::new(0.5, 51.5, 2.5), 0.3, 1.8);
+        for _ in 0..40 {
+            b.vel.y -= crate::entity::GRAVITY * 0.05;
+            crate::entity::move_body(&g.world, &mut b, 0.05, false);
+        }
+        assert!(b.on_ground && (b.pos.y - 50.0625).abs() < 0.01, "{}", b.pos.y);
+        // ...but a swimmer comes up through it.
+        let mut s = crate::entity::Body::new(Vec3::new(0.5, 48.5, 2.5), 0.3, 1.8);
+        s.vel.y = 4.0;
+        crate::entity::move_body(&g.world, &mut s, 0.3, false);
+        assert!(s.pos.y > 49.5, "{}", s.pos.y);
+    }
+
+    #[test]
+    fn torches_go_on_walls_and_fall_off_with_them() {
+        let mut g = arena(233);
+        let wall = ivec3(3, 51, 3);
+        g.world.set_v(wall, STONE);
+        // Facing +x out from the wall's east side.
+        let f = crate::decor::frame_facing(IVec3::X).unwrap();
+        let torch = wall + IVec3::X;
+        g.world.set_v(torch, WALL_TORCH_FIRST + f as Id);
+        assert_eq!(crate::decor::outward(f).as_ivec3(), IVec3::X);
+        assert_eq!(placing_item(WALL_TORCH_FIRST + f as Id), Some(TORCH));
+        assert_eq!(crate::light::emission(WALL_TORCH_FIRST + f as Id), crate::light::emission(TORCH));
+        // Breaking the block under it leaves it be; breaking its wall drops it.
+        g.break_block(torch - IVec3::Y, false);
+        assert_eq!(g.world.get_v(torch), WALL_TORCH_FIRST + f as Id);
+        g.break_block(wall, false);
+        assert_eq!(g.world.get_v(torch), AIR);
     }
 }

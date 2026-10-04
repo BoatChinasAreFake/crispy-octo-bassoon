@@ -109,7 +109,7 @@ impl ItemDrop {
 /// blocks as scaled-down blocks, everything else as a two-sided sprite.
 pub fn draw_item(g: &mut DynGeo, root: &Mat4, item: Id, size: f32, sky: f32) {
     g.begin(Pass::Opaque, [1.0; 4], false);
-    if is_block_item(item) && matches!(block(item).model, Model::Cube | Model::Shaped) {
+    if is_block_item(item) && matches!(block(item).model, Model::Cube | Model::Shaped) && !matches!(block(item).shape, Shape::Dust) {
         let t = block(item).tex;
         let tiles = [t[1], t[1], t[0], t[2], t[1], t[1]];
         let (boxes, n) = block_boxes(item);

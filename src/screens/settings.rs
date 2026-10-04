@@ -162,10 +162,17 @@ impl App {
         if self.ui.button(Rect::new(left, y, half, bh), &on_off("Distant Terrain", st.distant_terrain), true) {
             self.settings.distant_terrain = !st.distant_terrain;
         }
+        let (size, name) = crate::render::SHADOW_SIZES[st.shadow_quality as usize % crate::render::SHADOW_SIZES.len()];
+        let short = if st.shadow_quality as usize == crate::render::SHADOW_SIZES.len() - 1 { "Why" } else { name };
+        if self.ui.button(Rect::new(right, y, half, bh), &format!("Shadow Map: {short} ({size})"), st.shadows) {
+            self.settings.shadow_quality = (st.shadow_quality + 1) % crate::render::SHADOW_SIZES.len() as u8;
+        }
         y += bh + 4.0 * s;
         // VSync and anti-aliasing are set when the window opens.
         if (self.settings.vsync, self.settings.msaa) != self.video_at_start {
             self.ui.text_centered("VSync and anti-aliasing change next time the game starts.", w / 2.0, y + 9.0 * s, 8.0, GOLD);
+        } else if st.shadows && st.shadow_quality as usize == crate::render::SHADOW_SIZES.len() - 1 {
+            self.ui.text_centered(&format!("{size} shadows? {name}"), w / 2.0, y + 9.0 * s, 8.0, GOLD);
         }
         y += 16.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {

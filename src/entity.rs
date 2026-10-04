@@ -39,7 +39,9 @@ impl Body {
 }
 
 /// The first block box overlapping the box `min..max`, in world coordinates.
-fn collides(world: &World, min: Vec3, max: Vec3) -> Option<(Vec3, Vec3)> {
+/// `from_y` is where the bottom of the box was before this move: lily pads
+/// only hold up what comes down onto them (swimmers and boats pass under).
+fn collides(world: &World, min: Vec3, max: Vec3, from_y: f32) -> Option<(Vec3, Vec3)> {
     const E: f32 = 1e-4;
     let low = (min.y + E).floor() as i32;
     // One row lower too: fences and shut gates reach above their cell.
@@ -51,7 +53,7 @@ fn collides(world: &World, min: Vec3, max: Vec3) -> Option<(Vec3, Vec3)> {
                     continue;
                 }
                 let tall = crate::carpentry::is_tall(id);
-                if y < low && !tall {
+                if (y < low && !tall) || (id == LILY_PAD && from_y < y as f32 + LILY_TOP - 0.02) {
                     continue;
                 }
                 let cell = Vec3::new(x as f32, y as f32, z as f32);
@@ -78,11 +80,12 @@ fn move_axis(world: &World, b: &mut Body, axis: usize, d: f32) -> bool {
     if d == 0.0 {
         return false;
     }
+    let from_y = b.pos.y;
     b.pos[axis] += d;
     let mut blocked = false;
     // A few iterations handle standing on block corners.
     for _ in 0..3 {
-        let Some((bmin, bmax)) = collides(world, b.min(), b.max()) else { break };
+        let Some((bmin, bmax)) = collides(world, b.min(), b.max(), from_y) else { break };
         blocked = true;
         let (neg, pos_ext) = if axis == 1 { (0.0, b.height) } else { (b.half, b.half) };
         if d > 0.0 {
@@ -97,6 +100,9 @@ fn move_axis(world: &World, b: &mut Body, axis: usize, d: f32) -> bool {
     blocked
 }
 
+/// How thick a lily pad is.
+const LILY_TOP: f32 = 1.0 / 16.0;
+
 /// Walking into something at most this tall (a slab, a stair) climbs it.
 pub const STEP_UP: f32 = 0.55;
 
@@ -104,7 +110,7 @@ pub const STEP_UP: f32 = 0.55;
 fn step_up(world: &World, b: &mut Body, axis: usize, d: f32) -> bool {
     let before = b.clone();
     b.pos.y += STEP_UP;
-    if collides(world, b.min(), b.max()).is_some() {
+    if collides(world, b.min(), b.max(), b.pos.y).is_some() {
         *b = before;
         return false;
     }
@@ -121,7 +127,7 @@ fn step_up(world: &World, b: &mut Body, axis: usize, d: f32) -> bool {
 pub fn has_support(world: &World, pos: Vec3, half: f32) -> bool {
     let min = Vec3::new(pos.x - half, pos.y - 0.1, pos.z - half);
     let max = Vec3::new(pos.x + half, pos.y - 0.01, pos.z + half);
-    collides(world, min, max).is_some()
+    collides(world, min, max, pos.y).is_some()
 }
 
 /// Integrate velocity with collisions. `edge_guard` keeps the body from walking off ledges.
@@ -1250,9 +1256,15 @@ impl Mob {
                 may_wander = false;
                 self.hop_cd = (self.hop_cd - dt).max(0.0);
                 if self.body.in_water {
-                    let drift = (self.wander_t * 1.3 + self.id as f32).sin() * 0.6;
-                    swim_vy = Some(drift);
-                    may_wander = true;
+                    // Up to the surface and off towards the bank (it hops out
+                    // when it bumps into one; see the wall check below).
+                    let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + 0.6).floor() as i32, self.body.pos.z.floor() as i32);
+                    let drift = (self.wander_t * 1.3 + self.id as f32).sin() * 0.3;
+                    swim_vy = Some(if is_water(above) { 1.0 + drift } else { drift });
+                    if self.goal.is_none() && rng.chance(dt * 0.3) {
+                        self.yaw += rng.range(-1.0, 1.0);
+                    }
+                    want = Some((self.goal.map(|g| (g.x - self.body.pos.x).atan2(-(g.z - self.body.pos.z))).unwrap_or(self.yaw), 1.8));
                 } else if self.body.on_ground {
                     if self.hop_cd <= 0.0 {
                         self.yaw = match self.goal {
@@ -2033,7 +2045,13 @@ impl Mob {
                 // Webbers walk straight up walls.
                 MobKind::Webber => self.body.vel.y = 3.2,
                 MobKind::Bee => self.body.vel.y = 3.0,
-                MobKind::Bloop | MobKind::Ribbit => {}
+                MobKind::Bloop => {}
+                // A frog in the water leaps out onto the bank.
+                MobKind::Ribbit if self.body.in_water => {
+                    self.body.vel.y = 7.0;
+                    self.hop_cd = 0.3;
+                }
+                MobKind::Ribbit => {}
                 _ if self.body.on_ground || prev_ground => self.body.vel.y = 8.8,
                 _ => {}
             }
