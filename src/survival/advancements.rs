@@ -159,6 +159,23 @@ pub const ALL: &[Advancement] = &[
     adv("jousting", "Jousting Champion", "Hit something with a spear from a galloping mount."),
     adv("the_usual", "The Usual, Please", "Trade fifteen times with the same Hmmer. They know your order now."),
     adv("trading_hall", "Trading Hall", "Trade with a Farmer, a Librarian, a Smith and a Fisher."),
+    adv("glow_up", "Glow Up", "Pick Glow Berries off a cave vine. Snack and nightlight in one."),
+    adv("mind_your_head", "Mind Your Head", "Get hit by a falling Pointy Rock. It was on the label."),
+    adv("crystal_clear", "Crystal Clear", "Get an Amethyst Shard out of a geode."),
+    adv("stalac_tight", "Stalac-tight", "Find a dripstone cave. Look up. Then move."),
+    adv("lush_life", "Lush Life", "Find a lush cave, where the moss is greener."),
+    adv("pyramid_scheme", "Pyramid Scheme", "Find a desert pyramid. Watch your step."),
+    adv("temple_run", "Temple Run", "Find a jungle temple. Watch your feet."),
+    adv("off_the_rails", "Off the Rails", "Find an abandoned mineshaft. Watch out for webs."),
+    adv("cold_feet", "Cold Feet", "Find an igloo. Watch the floor."),
+    adv("monumental", "Monumental", "Find an Ocean Monument. Hold your breath."),
+    adv("guardian_down", "Eye Contact", "Defeat a Guardian. It saw you first."),
+    adv("elder_statesman", "Elder Statesman", "Defeat an Elder Guardian. Your arms will thank you."),
+    adv("cursed", "Heavy Arms", "Get cursed with Mining Fatigue by an Elder Guardian."),
+    adv("conduit_power", "Breathe Easy", "Feel a Conduit's power underwater."),
+    adv("which_witch", "Which Witch?", "Defeat a Witch. Mind the bottles."),
+    adv("local_flavour", "Local Flavour", "Defeat a desert Groaner or a snowy Rattler."),
+    adv("fetch", "Fetch!", "Give an Allay something to fetch."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -170,14 +187,14 @@ const STARTED: &[&str] = &[
 const CREATURES: &[&str] = &[
     "bacon", "hiss_tory", "groan_up", "fluffed", "dont_blink", "staring_champ", "rude_teleport", "udderly", "bone_zone", "arachno", "split_decision", "robin_hood", "good_boy",
     "the_birds_and_the_bees", "giddy_up", "hello_my_name_is", "pretty_polly", "soggy", "spear_it", "fishy_business", "sly_friend", "special_delivery", "tongue_tied", "scute_cute",
-    "armoured_pup", "too_hot", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
-    "full_flight", "jousting", "resin_up",
+    "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
+    "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
-    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane",
+    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up",
 ];
 
 /// Which tab (1..) an advancement is on.

@@ -163,6 +163,14 @@ pub struct Game {
     pub glide_wear: f32,
     /// Time owed to random block ticks (see copper.rs).
     pub random_tick_acc: f32,
+    /// Seconds towards the next look for loose Pointy Rocks (see caves.rs).
+    pub shake_acc: f32,
+    /// Seconds towards the next look at monuments and conduits, the next Elder curse, the next conduit zap (see monument.rs).
+    pub monument_acc: f32,
+    pub curse_acc: f32,
+    pub zap_acc: f32,
+    /// Seconds towards Poison's next sting (see potions.rs).
+    pub poison_clock: f32,
     /// What's packed inside broken Hollow Boxes, by number (see boxes.rs).
     pub boxes: HashMap<u16, crate::containers::Container>,
     /// Sound effects requested this frame (effect, world position if positional).
@@ -467,6 +475,11 @@ impl Game {
             glide_wear: 0.0,
             boxes: HashMap::new(),
             random_tick_acc: 0.0,
+            shake_acc: 0.0,
+            monument_acc: 0.0,
+            curse_acc: 0.0,
+            zap_acc: 0.0,
+            poison_clock: 0.0,
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -928,6 +941,26 @@ impl Game {
         if near_village {
             self.advance("village_people");
         }
+        // Cave biomes, well under the ground (see caves.rs).
+        if p.y < (self.world.generator.column(x, z).0 - 8) as f32 && p.y > 4.0 {
+            match self.world.generator.cave_biome(x, z) {
+                crate::caves::CaveBiome::Dripstone => self.advance("stalac_tight"),
+                crate::caves::CaveBiome::Lush => self.advance("lush_life"),
+                crate::caves::CaveBiome::Plain => {}
+            }
+        }
+        // Temples, mineshafts and igloos (see temples.rs).
+        use crate::structures::Kind;
+        if let Some(kind) = self.world.generator.site_near(p, 18.0) {
+            match kind {
+                Kind::DesertPyramid => self.advance("pyramid_scheme"),
+                Kind::JungleTemple => self.advance("temple_run"),
+                Kind::Mineshaft => self.advance("off_the_rails"),
+                Kind::Igloo => self.advance("cold_feet"),
+                Kind::Monument => self.advance("monumental"),
+                _ => {}
+            }
+        }
     }
 
     /// Advancements for getting hold of an item.
@@ -943,6 +976,7 @@ impl Game {
             MOO_STEAK => "udderly",
             PICK_WOOD | PICK_STONE | PICK_IRON | PICK_DIAMOND | PICK_COPPER => "tool_time",
             BAMBOO => "bamboozled",
+            AMETHYST_SHARD => "crystal_clear",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
             _ => return,
         };
@@ -1222,6 +1256,11 @@ impl Game {
                 if height > 5.0 {
                     self.advance("hay_there");
                 }
+            }
+            // Landing on an upright Pointy Rock: twice the fall damage (and then some).
+            let spike = [under, under + IVec3::Y].into_iter().any(|p| self.world.get_v(p) == POINTY_ROCK && !crate::caves::hangs(|y| self.world.get(p.x, y, p.z), p.y));
+            if spike && height >= 2.0 {
+                fall = fall * 2.0 + 2.0;
             }
             self.trample(under, height);
         }
@@ -1718,6 +1757,7 @@ impl Game {
         let mut blasts: Vec<(Vec3, f32, f32, Option<crate::block::ProjectileEffect>)> = Vec::new();
         let mut winds: Vec<(Vec3, Option<u32>)> = Vec::new();
         let mut bursts: Vec<(Vec3, u8, f32, Option<u32>)> = Vec::new();
+        let mut splashes: Vec<(Vec3, Option<crate::block::ProjectileEffect>)> = Vec::new();
         let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
             if a.homing > 0.0 && !a.stuck {
@@ -1737,6 +1777,17 @@ impl Game {
                         || self.peers.iter().any(|(id, p)| Some(*id) != a.shooter && p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)));
                 if thunk || touched || a.life <= 0.0 {
                     bursts.push((a.pos - a.dir * 0.3, a.firework - 1, a.damage, a.shooter));
+                    return false;
+                }
+                return true;
+            }
+            if a.splash {
+                // A thrown bottle breaks on the first thing it meets.
+                let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
+                let touched = (!self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.0))
+                    || self.peers.values().any(|p| p.alive() && near(p.target + Vec3::Y * 0.9, 1.0));
+                if thunk || touched || a.life <= 0.0 {
+                    splashes.push((a.pos - a.dir * 0.3, a.effect));
                     return false;
                 }
                 return true;
@@ -1850,6 +1901,9 @@ impl Game {
         for (at, shooter) in winds {
             self.wind_burst(at, shooter);
         }
+        for (at, effect) in splashes {
+            self.potion_splash(at, effect);
+        }
         for (at, colour, damage, shooter) in bursts {
             self.firework_burst(at, colour, damage, shooter);
         }
@@ -1961,7 +2015,9 @@ impl Game {
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
                     let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
-                    let mut dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    let weakness = self.effect_level(crate::potions::Potion::Weakness) as f32 * crate::potions::WEAKNESS_PENALTY;
+                    let base = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength - weakness).max(0.5);
+                    let mut dmg = base * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
                     // A Mace swung on the way down: the fall goes into the blow (and not into you).
                     let fall = self.player.fall_start - self.player.body.pos.y;
                     let smash = held == MACE && fall > crate::combat::SMASH_MIN && !self.player.body.on_ground;
@@ -2005,6 +2061,7 @@ impl Game {
                             self.smash_around(at, i, me);
                         }
                         self.creaking_hit(i);
+                        self.guardian_spikes(i);
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
@@ -2048,6 +2105,8 @@ impl Game {
                     } else {
                         let efficiency = self.held_level(Enchant::Efficiency);
                         let (t, _) = break_time_with(id, held, efficiency);
+                        // An Elder Guardian's curse: everything takes four times as long.
+                        let t = if self.has_effect(crate::potions::Potion::MiningFatigue) { t * 4.0 } else { t };
                         let progress = match self.breaking {
                             Some((p, prog)) if p == pos => prog,
                             _ => 0.0,
@@ -2201,6 +2260,18 @@ impl Game {
             if id == RESTORATION_BENCH && held == ENCRUSTED_RELIC {
                 self.use_restoration(pos);
                 return;
+            }
+            // Glow berries: pick them off a vine; plant them under a ceiling.
+            if id == CAVE_VINES_LIT && self.pick_berries(pos) {
+                return;
+            }
+            if held == GLOW_BERRIES
+                && let Some(Target::Block(h)) = &self.target
+            {
+                let (normal, hit) = (h.normal, h.pos);
+                if self.plant_berries(hit, normal, id) {
+                    return;
+                }
             }
             if let Some(sprout) = crate::sniffers::sprout_of(held)
                 && matches!(id, GRASS | DIRT | FARMLAND | FARMLAND_WET | MUD | PALE_MOSS)
@@ -2504,6 +2575,19 @@ impl Game {
             self.place_dust(hit_pos, normal, hit_id);
             return;
         }
+        // String on a floor is tripwire, running the way you're facing (see tripwire.rs).
+        if held == STRING && normal == IVec3::Y && is_solid(hit_id) {
+            let place = hit_pos + IVec3::Y;
+            if place.y < CH && replaceable(self.world.get_v(place)) {
+                self.world.set_v(place, crate::tripwire::tripwire(self.facing() % 2, false));
+                self.sfx(Sfx::Place(crate::sound::Mat::Grass), Some(place.as_vec3() + Vec3::splat(0.5)));
+                self.player.swing = 1.0;
+                if !self.creative {
+                    self.inv.consume_held();
+                }
+            }
+            return;
+        }
         if !is_block_item(held) {
             return;
         }
@@ -2521,7 +2605,7 @@ impl Game {
             TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
             LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
             // Frames and ladders go on walls.
-            FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
+            FRAME_FIRST | LADDER_FIRST | PAINTING_FIRST | TRIPWIRE_HOOK_FIRST if crate::decor::frame_facing(normal).is_none() || !is_solid(hit_id) => return,
             _ => {}
         }
         if is_solid(held) && self.cell_occupied(place) {
@@ -2647,6 +2731,8 @@ impl Game {
             }
             self.farm_break_effects(pos, id);
         }
+        // Vines and buds hanging from it come down.
+        self.drop_hangers(pos);
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
@@ -2822,7 +2908,9 @@ impl Game {
     /// (a heart a second, with bubbles), and it comes back fast in the air.
     pub fn breath_tick(&mut self, dt: f32) {
         let max = self.max_air();
-        let under = self.player.head_in_water(&self.world) && !self.creative && !self.spectator && self.dead.is_none();
+        // A Conduit nearby: no need to breathe (see monument.rs).
+        let conduit = self.has_effect(crate::potions::Potion::ConduitPower);
+        let under = self.player.head_in_water(&self.world) && !self.creative && !self.spectator && self.dead.is_none() && !conduit;
         if !under {
             self.player.air = (self.player.air + dt * max / 2.0).min(max);
             return;
@@ -3074,12 +3162,15 @@ impl Game {
             self.advance("dont_blink");
         }
         self.house_hmmers();
+        self.move_in_temples();
         self.house_clankers();
         self.clankers_tick(dt);
         self.beacons_tick(dt);
+        self.monument_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
         self.wildlife_tick(dt);
+        self.allays_tick();
         self.copper_golems_tick(dt);
         self.floaties_tick();
         self.fireflies_tick(dt);
@@ -3111,7 +3202,7 @@ impl Game {
             let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
             let id = m.id;
             events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
-            if fuse_before == 0.0 && m.fuse > 0.0 {
+            if fuse_before == 0.0 && m.fuse > 0.0 && !crate::monument::is_guardian(m.kind) {
                 noises.push((Sfx::Hiss, m.body.pos));
             }
             // Idle chatter.
@@ -3142,6 +3233,12 @@ impl Game {
                     MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel | MobKind::Creaking => {}
                     MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rotsteed => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::Guardian | MobKind::ElderGuardian | MobKind::GlowSquid => noises.push((Sfx::Bubbles, m.body.pos)),
+                    MobKind::Witch => noises.push((Sfx::Hmm, m.body.pos)),
+                    MobKind::DesertGroaner => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::SnowyRattler => noises.push((Sfx::Rattle, m.body.pos)),
+                    MobKind::Bat => noises.push((Sfx::Squawk, m.body.pos)),
+                    MobKind::Allay => noises.push((Sfx::Chime, m.body.pos)),
                     MobKind::CopperGolem | MobKind::Floaty => {}
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
@@ -3215,6 +3312,21 @@ impl Game {
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
                 MobEvent::WindCharge(from, vel) => self.spawn_wind_charge(from, vel, None),
                 MobEvent::DropItem(at, item) => self.pop_drop(at, item, 1),
+                MobEvent::Afflict(p, secs) => {
+                    if target_id == self.my_id {
+                        self.timed_effect(p, secs);
+                    } else if self.peers.contains_key(&target_id) {
+                        self.send_timed_effect(target_id, p, secs, 0);
+                    }
+                }
+                MobEvent::ShootTipped(from, vel, p) => {
+                    self.spawn_arrow(from, vel, None);
+                    if let Some(a) = self.arrows.last_mut() {
+                        a.effect = Some(crate::block::ProjectileEffect { kind: p, duration: 10.0, amplifier: 0 });
+                    }
+                }
+                MobEvent::ThrowPotion(from, vel, p) => self.throw_witch_potion(from, vel, p),
+                MobEvent::Ink(at) => self.ink_cloud(at),
                 MobEvent::Bleat(at) => self.sfx(Sfx::Bleat, Some(at)),
             }
         }
@@ -3261,6 +3373,11 @@ impl Game {
                             MobKind::Rampager => self.advance("rampage_over"),
                             MobKind::Breeze => self.advance("breeze_through"),
                             MobKind::Creaking => self.advance("heartbreak"),
+                            MobKind::Guardian => self.advance("guardian_down"),
+                            MobKind::ElderGuardian => self.advance("elder_statesman"),
+                            MobKind::Witch => self.advance("which_witch"),
+                            MobKind::DesertGroaner | MobKind::SnowyRattler => self.advance("local_flavour"),
+                            MobKind::GlowSquid | MobKind::Bat | MobKind::Allay => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
@@ -3327,6 +3444,7 @@ impl Game {
             t.fuse -= dt;
         }
         self.falling_tick(dt);
+        self.stalactite_tick(dt);
         self.fireballs_tick(dt);
         let boom: Vec<Vec3> = self.tnts.iter().filter(|t| t.fuse <= 0.0).map(|t| t.pos + Vec3::splat(0.5)).collect();
         self.tnts.retain(|t| t.fuse > 0.0);
@@ -3428,6 +3546,10 @@ impl Game {
         let (_, biome) = self.world.generator.column(x, z);
         use crate::world::Biome;
         let woofy = matches!(biome, Biome::Forest | Biome::Snowy | Biome::Taiga);
+        // Bats in caves, Glow Squid in dark water (see night.rs).
+        if self.spawn_night_extras(x, z, y) {
+            return;
+        }
         // The sea: schools of Fishies any time, Soggy Groaners in the dark.
         if is_water(top) {
             let depth = (0..y).take_while(|d| is_water(self.world.get(x, y - d, z))).count() as i32;
@@ -3519,6 +3641,8 @@ impl Game {
             // Swamps are Bloop country; the badlands rattle.
             r if biome == Biome::Swamp && r < 0.35 => MobKind::Bloop,
             r if biome == Biome::Badlands && r < 0.3 => MobKind::Rattler,
+            // A Witch, now and then, anywhere (more often in swamps; see night.rs).
+            r if r < 0.03 => MobKind::Witch,
             r if r < 0.28 => MobKind::Hisser,
             r if r < 0.56 => MobKind::Groaner,
             r if r < 0.74 => MobKind::Rattler,
@@ -3526,6 +3650,7 @@ impl Game {
             r if r < 0.94 => MobKind::Bloop,
             _ => MobKind::Starer,
         };
+        let kind = crate::night::local_kind(kind, biome, &mut self.rng);
         let size = if kind == MobKind::Bloop { [1, 2, 2, 4][self.rng.int(0, 3) as usize] } else { 1 };
         // Starers (and big Bloops) are tall: they need an extra block of headroom.
         let tall = kind == MobKind::Starer || size == 4;
@@ -3820,6 +3945,7 @@ impl Game {
             g.cube(&m, [T_TNT_SIDE, T_TNT_SIDE, T_TNT_TOP, T_TNT_BOTTOM, T_TNT_SIDE, T_TNT_SIDE], sky, [0.0, 0.0, 1.0, 1.0]);
         }
         self.draw_falling(&mut g);
+        self.draw_lasers(&mut g);
         self.draw_fireballs(&mut g);
         // Rain, snow and lightning
         if !scorch {

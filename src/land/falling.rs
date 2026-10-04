@@ -1,4 +1,4 @@
-//! Sand, gravel and anvils fall.
+//! Sand, gravel and anvils fall (and Pointy Rocks, once nothing holds them up).
 //!
 //! Like liquids, nothing moves until something changes nearby: every edit
 //! queues the cell above it (and a falling block placed in mid-air queues
@@ -50,7 +50,8 @@ impl Game {
             for p in cells {
                 self.world.fall_dirty.remove(&p);
                 let id = self.world.get_v(p);
-                if p.y > 0 && is_gravity(id) && self.world.is_loaded(p.x, p.z) && falls_through(self.world.get_v(p - IVec3::Y)) {
+                let loose = is_gravity(id) || (id == POINTY_ROCK && !crate::caves::rock_supported(&self.world, p));
+                if p.y > 0 && loose && self.world.is_loaded(p.x, p.z) && falls_through(self.world.get_v(p - IVec3::Y)) {
                     // (The cell above hears about it, so a whole column follows.)
                     self.world.set_v(p, AIR);
                     self.falling.push(FallingBlock { pos: p.as_vec3(), vel: 0.0, id, from: p.y as f32 });
@@ -82,6 +83,11 @@ impl Game {
             }
             let here = self.world.get_v(at);
             let centre = at.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+            // A falling Pointy Rock shatters where it lands (on whoever is there).
+            if f.id == POINTY_ROCK {
+                self.rock_lands(centre, f.from - at.y as f32);
+                continue;
+            }
             if falls_through(here) {
                 self.world.set_v(at, f.id);
                 // Concrete Powder sets if it lands in (or by) water.

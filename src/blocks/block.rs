@@ -354,7 +354,43 @@ pub const GOLD_CHEST: Id = 541;
 pub const DIAMOND_CHEST: Id = 542;
 /// Beds facing east, south and west (`BED` faces north; see beds.rs).
 pub const BED_FACING_FIRST: Id = 543;
-pub const NUM_BLOCKS: Id = 546;
+/// Cave biomes (see caves.rs): dripstone caves, lush caves and amethyst geodes.
+pub const DRIPSTONE_BLOCK: Id = 546;
+pub const MOSS_BLOCK: Id = 547;
+pub const MOSS_CARPET: Id = 548;
+/// Hanging from cave ceilings; the lit ones have glow berries on.
+pub const CAVE_VINES: Id = 549;
+pub const CAVE_VINES_LIT: Id = 550;
+pub const AZALEA: Id = 551;
+pub const CALCITE: Id = 552;
+pub const SMOOTH_BASALT: Id = 553;
+pub const AMETHYST_BLOCK: Id = 554;
+/// Grows buds on its top and bottom, which grow into clusters.
+pub const BUDDING_AMETHYST: Id = 555;
+pub const AMETHYST_BUD_SMALL: Id = 556;
+pub const AMETHYST_BUD_LARGE: Id = 557;
+pub const AMETHYST_CLUSTER: Id = 558;
+/// Glass that lets no light through.
+pub const TINTED_GLASS: Id = 559;
+/// Temples, mineshafts and igloos (see temples.rs).
+pub const SNOW_BLOCK: Id = 560;
+/// Slows anything caught in it to a crawl.
+pub const COBWEB: Id = 561;
+pub const CHISELED_SANDSTONE: Id = 562;
+/// String laid across a floor: `TRIPWIRE_FIRST + axis * 2 + tripped` (axis 0
+/// north-south, 1 east-west; see tripwire.rs).
+pub const TRIPWIRE_FIRST: Id = 563;
+/// The hooks at a tripwire's ends: `+ facing` (the wall they're on), then the tripped ones.
+pub const TRIPWIRE_HOOK_FIRST: Id = 567;
+pub const TRIPWIRE_HOOK_ON_FIRST: Id = 571;
+/// The Ocean Monument (see monument.rs).
+pub const PRISMARINE: Id = 575;
+pub const PRISMARINE_BRICKS: Id = 576;
+pub const DARK_PRISMARINE: Id = 577;
+pub const SEA_LANTERN: Id = 578;
+/// Lets you breathe underwater, inside a frame of prismarine.
+pub const CONDUIT: Id = 579;
+pub const NUM_BLOCKS: Id = 580;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -568,7 +604,19 @@ pub const TURTLE_SHELL: Id = FIRST_ITEM + 237;
 pub const BACKPACK: Id = FIRST_ITEM + 238;
 pub const BIG_BACKPACK: Id = FIRST_ITEM + 239;
 pub const HUGE_BACKPACK: Id = FIRST_ITEM + 240;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 241;
+/// Picked off lit cave vines: a snack, and plant one under a ceiling for a new vine.
+pub const GLOW_BERRIES: Id = FIRST_ITEM + 241;
+/// From amethyst clusters.
+pub const AMETHYST_SHARD: Id = FIRST_ITEM + 242;
+/// From Guardians (see monument.rs).
+pub const PRISMARINE_SHARD: Id = FIRST_ITEM + 243;
+pub const PRISMARINE_CRYSTALS: Id = FIRST_ITEM + 244;
+/// What a Conduit is made of: a Heart of the Sea (buried treasure) and eight shells.
+pub const NAUTILUS_SHELL: Id = FIRST_ITEM + 245;
+pub const HEART_OF_THE_SEA: Id = FIRST_ITEM + 246;
+/// From Glow Squid: makes a sign's words glow.
+pub const GLOW_INK_SAC: Id = FIRST_ITEM + 247;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 248;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -582,7 +630,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) || crate::tripwire::is_tripwire(id) || crate::tripwire::is_hook(id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -791,6 +839,8 @@ pub enum Shape {
     Chest,
     /// A bed: mattress, headboard and footboard, its head toward `facing` (see beds.rs).
     Bed { facing: u8 },
+    /// A small cube in the middle of its cell (the Conduit).
+    Core,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -867,6 +917,7 @@ impl Shape {
             Shape::Table => ([([0.0; 3], [1.0, 0.75, 1.0]), full, full], 1),
             Shape::Dust => ([([0.0; 3], [1.0, 1.0 / 16.0, 1.0]), full, full], 1),
             Shape::Bed { facing } => (crate::beds::boxes(facing), 3),
+            Shape::Core => ([([0.3125; 3], [0.6875; 3]), full, full], 1),
             Shape::Chest => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, 10.0 / 16.0, 15.0 / 16.0]), ([1.0 / 16.0, 10.0 / 16.0, 1.0 / 16.0], [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0]), full], 2),
             Shape::Layer { eighths } => ([([0.0; 3], [1.0, eighths as f32 / 8.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
@@ -1060,6 +1111,17 @@ pub fn placing_item(id: Id) -> Option<Id> {
     }
     if id == LANTERN_HANGING {
         return Some(LANTERN);
+    }
+    // Vines are planted from glow berries.
+    if crate::caves::is_cave_vine(id) {
+        return Some(GLOW_BERRIES);
+    }
+    // Tripwire is laid from string; hooks come in eight forms, all one item.
+    if crate::tripwire::is_tripwire(id) {
+        return Some(STRING);
+    }
+    if crate::tripwire::is_hook(id) {
+        return Some(TRIPWIRE_HOOK_FIRST);
     }
     if is_wall_torch(id) {
         return Some(TORCH);
@@ -2298,6 +2360,64 @@ impl Registry {
             b.creative = false;
             blocks.push(b);
         }
+        // Cave biomes (see caves.rs).
+        blocks.push(def("dripstone_block", "Dripstone Block (Drippy Stone)", Cube, true, true, [T_DRIPSTONE; 3], 1.5, 1, true, DRIPSTONE_BLOCK, 0.0, S_STONE));
+        blocks.push(def("moss_block", "Moss Block (Soft, Green, Suspicious)", Cube, true, true, [T_MOSS; 3], 0.1, 0, false, MOSS_BLOCK, 0.0, S_GRASS));
+        let mut carpet = def("moss_carpet", "Moss Carpet (Rug of the Earth)", Shaped, true, false, [T_MOSS; 3], 0.1, 0, false, MOSS_CARPET, 0.0, S_GRASS);
+        carpet.shape = Shape::Layer { eighths: 1 };
+        carpet.see_through = true;
+        blocks.push(carpet);
+        let mut vines = def("cave_vines", "Cave Vines (Dangly)", Cross, false, false, [T_CAVE_VINES; 3], 0.0, 0, false, AIR, 0.0, S_GRASS);
+        vines.creative = false;
+        blocks.push(vines);
+        let mut lit = def("cave_vines_lit", "Cave Vines (With Glow Berries)", Cross, false, false, [T_CAVE_VINES_LIT; 3], 0.0, 0, false, GLOW_BERRIES, 8.0, S_GRASS);
+        lit.creative = false;
+        blocks.push(lit);
+        blocks.push(def("azalea", "Azalea (Shrub With Ambitions)", Cross, false, false, [T_AZALEA; 3], 0.0, 0, false, AZALEA, 0.0, S_GRASS));
+        blocks.push(def("calcite", "Calcite (Chalky)", Cube, true, true, [T_CALCITE; 3], 0.75, 1, true, CALCITE, 0.0, S_STONE));
+        blocks.push(def("smooth_basalt", "Smooth Basalt (Geode Rind)", Cube, true, true, [T_SMOOTH_BASALT; 3], 1.25, 1, true, SMOOTH_BASALT, 0.0, S_STONE));
+        blocks.push(def("amethyst_block", "Amethyst Block (Chimes When Touched)", Cube, true, true, [T_AMETHYST; 3], 1.5, 1, true, AMETHYST_BLOCK, 0.0, S_GLASS));
+        let mut budding = def("budding_amethyst", "Budding Amethyst (Grows Gems, Won't Move)", Cube, true, true, [T_BUDDING_AMETHYST; 3], 1.5, 1, true, AIR, 0.0, S_GLASS);
+        budding.creative = false;
+        blocks.push(budding);
+        for (key, name, tex, light, drop) in [
+            ("small_amethyst_bud", "Small Amethyst Bud (Patience)", T_AMETHYST_BUD_SMALL, 1.0, AIR),
+            ("large_amethyst_bud", "Large Amethyst Bud (Nearly)", T_AMETHYST_BUD_LARGE, 3.0, AIR),
+            ("amethyst_cluster", "Amethyst Cluster (Ready!)", T_AMETHYST_CLUSTER, 5.0, AMETHYST_SHARD),
+        ] {
+            blocks.push(def(key, name, Cross, false, false, [tex; 3], 1.5, 1, true, drop, light, S_GLASS));
+        }
+        let mut tinted = def("tinted_glass", "Tinted Glass (Sunglasses for Houses)", Cube, true, false, [T_TINTED_GLASS; 3], 0.3, 0, false, TINTED_GLASS, 0.0, S_GLASS);
+        tinted.see_through = true;
+        blocks.push(tinted);
+        // Temples, mineshafts and igloos (see temples.rs and tripwire.rs).
+        blocks.push(def("snow_block", "Snow Block (Packed, Chilly)", Cube, true, true, [T_SNOW; 3], 0.4, 0, false, SNOW_BLOCK, 0.0, S_SAND));
+        blocks.push(def("cobweb", "Cobweb (Sticky Situation)", Cross, false, false, [T_COBWEB; 3], 4.0, 0, false, STRING, 0.0, S_GRASS));
+        blocks.push(def("chiseled_sandstone", "Chiseled Sandstone (Ancient Doodles)", Cube, true, true, [T_SANDSTONE, T_CHISELED_SANDSTONE, T_SANDSTONE], 0.8, 1, true, CHISELED_SANDSTONE, 0.0, S_STONE));
+        for (k, key) in ["tripwire", "tripwire_on", "tripwire_ew", "tripwire_ew_on"].into_iter().enumerate() {
+            let tile = if k < 2 { T_TRIPWIRE } else { T_TRIPWIRE_EW };
+            let mut d = def(key, "Tripwire (Trippy)", Shaped, false, false, [tile; 3], 0.0, 0, false, STRING, 0.0, S_GRASS);
+            d.shape = Shape::Dust;
+            d.creative = false;
+            blocks.push(d);
+        }
+        for on in [false, true] {
+            for facing in 0..4u8 {
+                let key = leak(&format!("tripwire_hook{}{}", ["", "_east", "_south", "_west"][facing as usize], if on { "_on" } else { "" }));
+                let mut d = def(key, "Tripwire Hook (Gotcha)", Shaped, false, false, [if on { T_TRIPWIRE_HOOK_ON } else { T_TRIPWIRE_HOOK }; 3], 0.5, 0, false, TRIPWIRE_HOOK_FIRST, 0.0, S_WOOD);
+                d.shape = Shape::Frame { facing };
+                d.creative = !on && facing == 0;
+                blocks.push(d);
+            }
+        }
+        // The Ocean Monument (see monument.rs).
+        blocks.push(def("prismarine", "Prismarine (Sea-Stone, Shifty Colours)", Cube, true, true, [T_PRISMARINE; 3], 1.5, 1, true, PRISMARINE, 0.0, S_STONE));
+        blocks.push(def("prismarine_bricks", "Prismarine Bricks (Tidy Sea-Stone)", Cube, true, true, [T_PRISMARINE_BRICKS; 3], 1.5, 1, true, PRISMARINE_BRICKS, 0.0, S_STONE));
+        blocks.push(def("dark_prismarine", "Dark Prismarine (Moody Sea-Stone)", Cube, true, true, [T_DARK_PRISMARINE; 3], 1.5, 1, true, DARK_PRISMARINE, 0.0, S_STONE));
+        blocks.push(def("sea_lantern", "Sea Lantern (Glows Under Pressure)", Cube, true, true, [T_SEA_LANTERN; 3], 0.3, 0, false, PRISMARINE_CRYSTALS, 15.0, S_GLASS));
+        let mut conduit = def("conduit", "Conduit (Breathe Easy, Literally)", Shaped, false, false, [T_CONDUIT; 3], 3.0, 0, true, CONDUIT, 10.0, S_GLASS);
+        conduit.shape = Shape::Core;
+        blocks.push(conduit);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2552,6 +2672,13 @@ impl Registry {
         items.push(ItemDef { stack: 1, ..item("backpack", "Backpack (Right-Click: Your Pack, 27 Slots)", T_BACKPACK) });
         items.push(ItemDef { stack: 1, ..item("big_backpack", "Big Backpack (45 Slots of Your Pack)", T_BIG_BACKPACK) });
         items.push(ItemDef { stack: 1, ..item("huge_backpack", "Huge Backpack (All 72 Slots of Your Pack)", T_HUGE_BACKPACK) });
+        items.push(ItemDef { food: Some(2.0), ..item("glow_berries", "Glow Berries (Nightlight Snack)", T_GLOW_BERRIES) });
+        items.push(item("amethyst_shard", "Amethyst Shard (Pointy, Pretty)", T_AMETHYST_SHARD));
+        items.push(item("prismarine_shard", "Prismarine Shard (Fishbone, Basically)", T_PRISMARINE_SHARD));
+        items.push(item("prismarine_crystals", "Prismarine Crystals (Wet Sparkles)", T_PRISMARINE_CRYSTALS));
+        items.push(item("nautilus_shell", "Nautilus Shell (Spiral, Spiralling)", T_NAUTILUS_SHELL));
+        items.push(ItemDef { stack: 1, ..item("heart_of_the_sea", "Heart of the Sea (Beats Faintly)", T_HEART_OF_THE_SEA) });
+        items.push(item("glow_ink_sac", "Glow Ink Sac (Squid Highlighter)", T_GLOW_INK_SAC));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2794,6 +2921,20 @@ impl Registry {
         recipes.push(r(&[(GOLD_BLOCK, 1), (STICK, 2)], (BELL, 1)));
         recipes.push(r(&[(STICK, 3), (STRING, 2), (IRON, 1)], (CROSSBOW, 1)));
         recipes.push(r(&[(SCORCHITE_SCRAP, 4), (GOLD_INGOT, 4)], (SCORCHITE_INGOT, 1)));
+        // Cave biomes.
+        recipes.push(r(&[(POINTY_ROCK, 4)], (DRIPSTONE_BLOCK, 1)));
+        recipes.push(r(&[(MOSS_BLOCK, 2)], (MOSS_CARPET, 3)));
+        recipes.push(r(&[(AMETHYST_SHARD, 4)], (AMETHYST_BLOCK, 1)));
+        recipes.push(r(&[(AMETHYST_SHARD, 4), (GLASS, 1)], (TINTED_GLASS, 2)));
+        // Temples and friends.
+        recipes.push(r(&[(IRON, 1), (STICK, 1), (PLANKS, 1)], (TRIPWIRE_HOOK_FIRST, 2)));
+        recipes.push(r(&[(SANDSTONE, 2)], (CHISELED_SANDSTONE, 1)));
+        // The Ocean Monument's stone, and the Conduit.
+        recipes.push(r(&[(PRISMARINE_SHARD, 4)], (PRISMARINE, 1)));
+        recipes.push(r(&[(PRISMARINE_SHARD, 9)], (PRISMARINE_BRICKS, 1)));
+        recipes.push(r(&[(PRISMARINE_SHARD, 8), (DYE_FIRST + 1, 1)], (DARK_PRISMARINE, 1)));
+        recipes.push(r(&[(PRISMARINE_SHARD, 4), (PRISMARINE_CRYSTALS, 5)], (SEA_LANTERN, 1)));
+        recipes.push(r(&[(HEART_OF_THE_SEA, 1), (NAUTILUS_SHELL, 8)], (CONDUIT, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {
             recipes.push(r(&[(DIAMOND, 7), (t, 1), (TUFF_BRICKS, 1)], (t, 2)));
@@ -2864,7 +3005,7 @@ pub fn is_solid(id: Id) -> bool {
 #[inline]
 pub fn blocks_sky(id: Id) -> bool {
     let b = block(id);
-    !matches!(b.model, Empty | Cross) && !b.see_through && !dapples_sky(id) && !is_door(id)
+    id == TINTED_GLASS || (!matches!(b.model, Empty | Cross) && !b.see_through && !dapples_sky(id) && !is_door(id))
 }
 /// Foliage: lets dappled sunlight through instead of blocking it (see `world::exposure`).
 #[inline]
@@ -3109,6 +3250,13 @@ mod id_order_tests {
             (SNOW_LAYER_FIRST + 3, "snow_layer_4"),
             (DIAMOND_CHEST, "diamond_chest"),
             (BED_FACING_FIRST + 2, "bed_west"),
+            (DRIPSTONE_BLOCK, "dripstone_block"),
+            (CAVE_VINES_LIT, "cave_vines_lit"),
+            (AMETHYST_CLUSTER, "amethyst_cluster"),
+            (TINTED_GLASS, "tinted_glass"),
+            (SNOW_BLOCK, "snow_block"),
+            (TRIPWIRE_HOOK_ON_FIRST + 3, "tripwire_hook_west_on"),
+            (CONDUIT, "conduit"),
         ] {
             assert_eq!(block(id).key, key, "id {id}");
         }
@@ -3130,6 +3278,9 @@ mod id_order_tests {
             (SPEAR_FIRST + 3, "dimond_spear"),
             (TREASURE_MAP, "treasure_map"),
             (TURTLE_SHELL, "turtle_shell"),
+            (GLOW_BERRIES, "glow_berries"),
+            (AMETHYST_SHARD, "amethyst_shard"),
+            (HEART_OF_THE_SEA, "heart_of_the_sea"),
         ] {
             assert_eq!(reg().key_of(id), key, "item {id}");
         }

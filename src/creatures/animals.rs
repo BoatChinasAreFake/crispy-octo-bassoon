@@ -81,6 +81,9 @@ impl Game {
         if self.mobs[i].body.pos.distance(at) > 6.0 {
             return Interaction::Nothing;
         }
+        if self.mobs[i].kind == MobKind::Allay {
+            return self.allay_interact(who, at, i, item);
+        }
         let pos = self.mobs[i].body.pos + Vec3::Y * self.mobs[i].body.height;
         let m = &mut self.mobs[i];
         // Shears.

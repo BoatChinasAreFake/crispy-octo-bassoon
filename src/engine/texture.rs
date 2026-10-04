@@ -656,6 +656,63 @@ pub const T_BED_TOP_W: u16 = 826;
 pub const T_BACKPACK: u16 = 827;
 pub const T_BIG_BACKPACK: u16 = 828;
 pub const T_HUGE_BACKPACK: u16 = 829;
+// Cave biomes.
+pub const T_DRIPSTONE: u16 = 830;
+pub const T_MOSS: u16 = 831;
+pub const T_CAVE_VINES: u16 = 832;
+pub const T_CAVE_VINES_LIT: u16 = 833;
+pub const T_AZALEA: u16 = 834;
+pub const T_CALCITE: u16 = 835;
+pub const T_SMOOTH_BASALT: u16 = 836;
+pub const T_AMETHYST: u16 = 837;
+pub const T_BUDDING_AMETHYST: u16 = 838;
+pub const T_AMETHYST_BUD_SMALL: u16 = 839;
+pub const T_AMETHYST_BUD_LARGE: u16 = 840;
+pub const T_AMETHYST_CLUSTER: u16 = 841;
+pub const T_TINTED_GLASS: u16 = 842;
+pub const T_GLOW_BERRIES: u16 = 843;
+pub const T_AMETHYST_SHARD: u16 = 844;
+// Temples, mineshafts and igloos.
+pub const T_COBWEB: u16 = 845;
+pub const T_TRIPWIRE: u16 = 846;
+pub const T_TRIPWIRE_EW: u16 = 847;
+pub const T_TRIPWIRE_HOOK: u16 = 848;
+pub const T_TRIPWIRE_HOOK_ON: u16 = 849;
+pub const T_CHISELED_SANDSTONE: u16 = 850;
+// The Ocean Monument.
+pub const T_PRISMARINE: u16 = 851;
+pub const T_PRISMARINE_BRICKS: u16 = 852;
+pub const T_DARK_PRISMARINE: u16 = 853;
+pub const T_SEA_LANTERN: u16 = 854;
+pub const T_CONDUIT: u16 = 855;
+pub const T_PRISMARINE_SHARD: u16 = 856;
+pub const T_PRISMARINE_CRYSTALS: u16 = 857;
+pub const T_NAUTILUS_SHELL: u16 = 858;
+pub const T_HEART_OF_THE_SEA: u16 = 859;
+pub const T_GUARDIAN: u16 = 860;
+pub const T_GUARDIAN_EYE: u16 = 861;
+pub const T_GUARDIAN_SPIKE: u16 = 862;
+pub const T_ELDER_GUARDIAN: u16 = 863;
+pub const T_ELDER_EYE: u16 = 864;
+pub const T_GUARDIAN_LASER: u16 = 865;
+// Night threats and small creatures.
+pub const T_GLOW_INK_SAC: u16 = 866;
+pub const T_WITCH_ROBE: u16 = 867;
+pub const T_WITCH_FACE: u16 = 868;
+pub const T_WITCH_HAT: u16 = 869;
+pub const T_DESERT_SKIN: u16 = 870;
+pub const T_DESERT_FACE: u16 = 871;
+pub const T_DESERT_CLOTH: u16 = 872;
+pub const T_STRAY_BONE: u16 = 873;
+pub const T_STRAY_FACE: u16 = 874;
+pub const T_STRAY_CLOTH: u16 = 875;
+pub const T_GLOW_SQUID: u16 = 876;
+pub const T_GLOW_SQUID_FACE: u16 = 877;
+pub const T_BAT: u16 = 878;
+pub const T_BAT_WING: u16 = 879;
+pub const T_ALLAY: u16 = 880;
+pub const T_ALLAY_FACE: u16 = 881;
+pub const T_ALLAY_WING: u16 = 882;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3641,6 +3698,265 @@ fn home_tiles(a: &mut Atlas) {
     a.each(T_TURTLE_WORN, |x, y, r, _| shade(if (x + y * 2) % 5 == 0 { rgb(60, 120, 50) } else { rgb(90, 170, 70) }, r.range(0.88, 1.05)));
     mob_tiles(a);
     masonry_tiles(a);
+    cave_tiles(a);
+    temple_tiles(a);
+    monument_tiles(a);
+    night_tiles(a);
+}
+
+/// v0.2's night threats and small creatures.
+fn night_tiles(a: &mut Atlas) {
+    a.each(T_GLOW_INK_SAC, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        let sac = dx * dx / 25.0 + dy * dy / 36.0 < 1.0;
+        let tie = (6..10).contains(&x) && (1..4).contains(&y);
+        if sac { shade(if (x * 3 + y) % 5 == 0 { rgb(220, 255, 250) } else { rgb(60, 200, 190) }, r.range(0.9, 1.06)) } else if tie { rgb(30, 90, 90) } else { [0, 0, 0, 0] }
+    });
+    // A Witch: a purple robe, a green-tinged face with a big nose and a wart, a black hat.
+    a.each(T_WITCH_ROBE, |x, y, r, _| shade(if y % 5 == 0 { rgb(70, 40, 80) } else if x % 7 == 3 { rgb(60, 110, 50) } else { rgb(95, 55, 105) }, r.range(0.88, 1.06)));
+    a.each(T_WITCH_FACE, |x, y, r, _| {
+        let eye = y == 6 && (x == 4 || x == 11);
+        let nose = (7..9).contains(&x) && (7..12).contains(&y);
+        let wart = x == 9 && y == 10;
+        if eye { rgb(150, 230, 90) } else if wart { rgb(70, 110, 40) } else if nose { rgb(170, 160, 120) } else { shade(rgb(185, 175, 140), r.range(0.92, 1.05)) }
+    });
+    a.each(T_WITCH_HAT, |x, y, r, _| shade(if y == 12 { rgb(110, 60, 120) } else { rgb(35, 30, 40) }, if (x + y) % 6 == 0 { 0.85 } else { 1.0 } * r.range(0.92, 1.06)));
+    // A desert Groaner: dried-out, sandy, in rags.
+    a.each(T_DESERT_SKIN, |_, _, r, _| shade(rgb(165, 140, 95), r.range(0.85, 1.08)));
+    a.each(T_DESERT_FACE, |x, y, r, _| {
+        let eye = (5..7).contains(&y) && (x == 4 || x == 5 || x == 10 || x == 11);
+        let mouth = y == 11 && (5..11).contains(&x);
+        if eye { rgb(40, 30, 20) } else if mouth { rgb(90, 70, 45) } else { shade(rgb(165, 140, 95), r.range(0.88, 1.06)) }
+    });
+    a.each(T_DESERT_CLOTH, |x, y, r, _| shade(if (x + y * 3) % 7 == 0 { rgb(120, 95, 60) } else { rgb(190, 170, 120) }, r.range(0.86, 1.06)));
+    // A snowy Rattler: frosty bones, ragged grey wrappings.
+    a.each(T_STRAY_BONE, |x, y, r, _| shade(if (x + y) % 5 == 0 { rgb(200, 225, 230) } else { rgb(165, 190, 195) }, r.range(0.9, 1.06)));
+    a.each(T_STRAY_FACE, |x, y, r, _| {
+        let eye = (5..8).contains(&y) && ((3..6).contains(&x) || (10..13).contains(&x));
+        let teeth = y == 11 && x % 2 == 0 && (4..12).contains(&x);
+        if eye { rgb(30, 40, 50) } else if teeth { rgb(120, 140, 145) } else { shade(rgb(175, 200, 205), r.range(0.9, 1.05)) }
+    });
+    a.each(T_STRAY_CLOTH, |x, y, r, _| shade(if (x * 2 + y) % 6 < 2 { rgb(80, 95, 100) } else { rgb(120, 135, 140) }, r.range(0.86, 1.06)));
+    // A Glow Squid: teal with glowing speckles.
+    a.each(T_GLOW_SQUID, |x, y, r, _| if (x * 7 + y * 5) % 11 == 0 { rgb(200, 255, 245) } else { shade(rgb(40, 140, 140), r.range(0.85, 1.1)) });
+    a.each(T_GLOW_SQUID_FACE, |x, y, r, _| {
+        let eye = (5..9).contains(&y) && ((2..5).contains(&x) || (11..14).contains(&x));
+        if eye { if y == 6 { rgb(250, 255, 250) } else { rgb(20, 60, 60) } } else { shade(rgb(40, 140, 140), r.range(0.85, 1.1)) }
+    });
+    // A Bat: brown fur, leathery wings.
+    a.each(T_BAT, |x, y, r, _| if (y == 4 || y == 5) && (x == 5 || x == 10) { rgb(20, 15, 15) } else { shade(rgb(80, 60, 45), r.range(0.85, 1.1)) });
+    a.each(T_BAT_WING, |x, _, r, _| shade(if x % 4 == 0 { rgb(40, 30, 25) } else { rgb(65, 50, 40) }, r.range(0.9, 1.05)));
+    // An Allay: a little blue spirit with big eyes.
+    a.each(T_ALLAY, |x, y, r, _| shade(if (x + y) % 6 == 0 { rgb(170, 230, 255) } else { rgb(90, 190, 245) }, r.range(0.92, 1.06)));
+    a.each(T_ALLAY_FACE, |x, y, r, _| {
+        let eye = (6..10).contains(&y) && ((3..6).contains(&x) || (10..13).contains(&x));
+        if eye { if y == 6 { rgb(255, 255, 255) } else { rgb(20, 40, 90) } } else { shade(rgb(110, 205, 250), r.range(0.92, 1.06)) }
+    });
+    a.each(T_ALLAY_WING, |x, y, _, _| if (x + y) % 3 == 0 { [235, 250, 255, 220] } else { [190, 230, 255, 170] });
+}
+
+/// v0.2's Ocean Monument: prismarine, its lights and treasures, and Guardians.
+fn monument_tiles(a: &mut Atlas) {
+    // Prismarine: mottled teal-green that shifts between blue and green.
+    a.each(T_PRISMARINE, |x, y, r, p| {
+        let n = p.noise2(x as f32 / 5.0 + 40.0, y as f32 / 5.0);
+        let c = if n > 0.1 { rgb(90, 160, 150) } else if n < -0.15 { rgb(70, 130, 150) } else { rgb(100, 170, 140) };
+        shade(c, r.range(0.88, 1.08))
+    });
+    a.each(T_PRISMARINE_BRICKS, |x, y, r, _| {
+        let row = y / 4;
+        let mortar = y % 4 == 3 || (x + row * 4) % 8 == 0;
+        if mortar { rgb(60, 110, 100) } else { shade(rgb(100, 175, 160), r.range(0.9, 1.06)) }
+    });
+    a.each(T_DARK_PRISMARINE, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15 || ((x == 4 || x == 11) && (4..12).contains(&y)) || ((y == 4 || y == 11) && (4..12).contains(&x));
+        if edge { rgb(30, 60, 50) } else { shade(rgb(50, 95, 80), r.range(0.9, 1.06)) }
+    });
+    // A sea lantern: pale glowing panes round a bright core.
+    a.each(T_SEA_LANTERN, |x, y, r, _| {
+        let (dx, dy) = ((x as i32 - 7).abs().min((x as i32 - 8).abs()), (y as i32 - 7).abs().min((y as i32 - 8).abs()));
+        let core = dx < 3 && dy < 3;
+        let frame = x == 0 || y == 0 || x == 15 || y == 15;
+        if frame { rgb(170, 200, 190) } else if core { rgb(250, 255, 250) } else { shade(rgb(205, 230, 225), r.range(0.92, 1.05)) }
+    });
+    // The conduit: a wooden-ish cage round a blue eye.
+    a.each(T_CONDUIT, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        if d < 3.0 { rgb(70, 160, 230) } else if d < 4.0 { rgb(20, 40, 70) } else if (x + y) % 4 < 2 { shade(rgb(160, 120, 70), r.range(0.9, 1.05)) } else { shade(rgb(120, 90, 55), r.range(0.9, 1.05)) }
+    });
+    a.each(T_PRISMARINE_SHARD, |x, y, r, _| {
+        let d = (x as i32 - y as i32).abs();
+        if d <= 2 && (3..14).contains(&x) { shade(rgb(110, 180, 165), r.range(0.85, 1.08)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_PRISMARINE_CRYSTALS, |x, y, r, _| {
+        let blob = [(5, 6), (10, 5), (8, 10), (4, 11), (11, 11)].iter().any(|&(cx, cy)| (x as i32 - cx).abs() + (y as i32 - cy).abs() < 3);
+        if blob { shade(if (x + y) % 3 == 0 { rgb(240, 255, 240) } else { rgb(170, 230, 210) }, r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_NAUTILUS_SHELL, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 8.0, y as f32 - 8.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let a = dy.atan2(dx);
+        let stripe = ((d * 1.2 - a * 1.5).rem_euclid(3.0)) < 1.0;
+        if d < 6.5 { shade(if stripe { rgb(170, 90, 60) } else { rgb(240, 225, 205) }, r.range(0.9, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_HEART_OF_THE_SEA, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = dx.abs() + dy.abs();
+        if d < 4.0 { rgb(120, 220, 255) } else if d < 6.5 { shade(rgb(40, 90, 170), r.range(0.9, 1.06)) } else if d < 7.5 { rgb(20, 40, 90) } else { [0, 0, 0, 0] }
+    });
+    // Guardians: teal-orange scales, a single big eye, and spikes.
+    for (t, base, belly) in [(T_GUARDIAN, rgb(90, 150, 140), rgb(210, 130, 80)), (T_ELDER_GUARDIAN, rgb(200, 195, 175), rgb(160, 140, 170))] {
+        a.each(t, move |x, y, r, _| {
+            let scale = (x / 3 + y / 3) % 2 == 0;
+            shade(if y > 11 { belly } else { base }, if scale { 1.0 } else { 0.86 } * r.range(0.92, 1.06))
+        });
+    }
+    for (t, base, iris) in [(T_GUARDIAN_EYE, rgb(90, 150, 140), rgb(230, 120, 40)), (T_ELDER_EYE, rgb(200, 195, 175), rgb(150, 60, 160))] {
+        a.each(t, move |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let d = (dx * dx + dy * dy).sqrt();
+            if d < 2.0 { rgb(20, 20, 20) } else if d < 4.0 { iris } else if d < 5.5 { rgb(240, 240, 230) } else { shade(base, r.range(0.9, 1.05)) }
+        });
+    }
+    a.each(T_GUARDIAN_SPIKE, |_, y, r, _| shade(if y < 6 { rgb(240, 225, 200) } else { rgb(200, 120, 70) }, r.range(0.9, 1.05)));
+    a.each(T_GUARDIAN_LASER, |_, y, _, _| if (5..11).contains(&y) { [255, 210, 120, 255] } else { [200, 80, 40, 200] });
+}
+
+/// v0.2's temples, mineshafts and igloos.
+fn temple_tiles(a: &mut Atlas) {
+    // A web: spokes from the middle and rings round it.
+    a.each(T_COBWEB, |x, y, _, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let spoke = dx.abs() < 0.6 || dy.abs() < 0.6 || (dx.abs() - dy.abs()).abs() < 0.7;
+        let ring = (d % 3.2) < 0.6 && d > 1.5;
+        if (spoke || ring) && d < 8.0 { [235, 235, 240, 220] } else { [0, 0, 0, 0] }
+    });
+    // Tripwire: a thin taut string along the block (north-south, then east-west).
+    a.each(T_TRIPWIRE, |x, _, _, _| if x == 7 { [220, 220, 215, 255] } else { [0, 0, 0, 0] });
+    a.each(T_TRIPWIRE_EW, |_, y, _, _| if y == 7 { [220, 220, 215, 255] } else { [0, 0, 0, 0] });
+    // A hook: a wooden plank on the wall with a metal ring (red when tripped).
+    for (t, on) in [(T_TRIPWIRE_HOOK, false), (T_TRIPWIRE_HOOK_ON, true)] {
+        a.each(t, move |x, y, r, _| {
+            let plank = (6..10).contains(&x) && (2..14).contains(&y);
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 9.0);
+            let ring = ((dx * dx + dy * dy).sqrt() - 2.5).abs() < 0.8;
+            if ring {
+                if on { rgb(220, 60, 50) } else { rgb(170, 170, 175) }
+            } else if plank {
+                shade(rgb(150, 110, 65), r.range(0.88, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    // Chiseled sandstone: a carved face in a frame.
+    a.each(T_CHISELED_SANDSTONE, |x, y, r, _| {
+        let frame = x == 0 || x == 15 || y == 1 || y == 14;
+        let eye = (y == 6 || y == 7) && (x == 5 || x == 10);
+        let mouth = y == 10 && (5..11).contains(&x);
+        let base = shade(rgb(220, 205, 150), r.range(0.92, 1.04));
+        if frame || eye || mouth { shade(base, 0.75) } else { base }
+    });
+}
+
+/// v0.2's cave biomes: dripstone, lush caves and amethyst geodes.
+fn cave_tiles(a: &mut Atlas) {
+    // Dripstone: tan stone in wavy vertical streaks, where water ran down it.
+    a.each(T_DRIPSTONE, |x, y, r, p| {
+        let streak = (p.noise2(x as f32 / 3.0, y as f32 / 14.0) * 3.0 + x as f32 * 1.3).sin();
+        let line = if streak > 0.8 { 0.86 } else if streak < -0.7 { 1.08 } else { 1.0 };
+        let blotch = 1.0 + p.noise2(x as f32 / 4.0 + 30.0, y as f32 / 4.0) * 0.12;
+        shade(rgb(150, 116, 92), line * blotch * r.range(0.9, 1.08))
+    });
+    a.each(T_MOSS, |x, y, r, p| {
+        let clump = p.noise2(x as f32 / 4.0 + 7.0, y as f32 / 4.0);
+        shade(rgb(90, 125, 45), (1.0 + clump * 0.25) * r.range(0.82, 1.12))
+    });
+    // Cave vines: a stem hanging down with leaves either side; the lit ones carry berries.
+    for (t, berries) in [(T_CAVE_VINES, false), (T_CAVE_VINES_LIT, true)] {
+        a.each(t, move |x, y, r, _| {
+            let stem = (7..9).contains(&x);
+            let leaf = (y % 5 == 1 && (4..7).contains(&x)) || (y % 5 == 3 && (9..12).contains(&x));
+            let berry = berries && ((y % 6 == 4 && (4..7).contains(&x) && y > 3) || (y % 6 == 1 && (9..12).contains(&x) && y > 6));
+            if berry {
+                if (x + y) % 3 == 0 { rgb(255, 245, 170) } else { rgb(255, 175, 40) }
+            } else if stem || leaf {
+                shade(rgb(80, 120, 40), r.range(0.85, 1.12))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    // Azalea: a round green bush on a little trunk, with pink flowers.
+    a.each(T_AZALEA, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.0);
+        let bush = dx * dx / 42.0 + dy * dy / 30.0 < 1.0 && y < 12;
+        let trunk = (7..9).contains(&x) && y >= 11;
+        if bush {
+            if (x * 5 + y * 3) % 11 == 0 { rgb(230, 120, 200) } else { shade(rgb(95, 135, 50), r.range(0.8, 1.12)) }
+        } else if trunk {
+            rgb(110, 85, 60)
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_CALCITE, |_, _, r, _| shade(rgb(222, 222, 215), r.range(0.92, 1.05)));
+    a.each(T_SMOOTH_BASALT, |x, y, r, p| shade(rgb(72, 72, 78), (1.0 + p.noise2(x as f32 / 5.0, y as f32 / 5.0) * 0.12) * r.range(0.94, 1.04)));
+    // Amethyst: purple facets.
+    let facet = |x: usize, y: usize, r: &mut Rng| {
+        // Crystal faces: diagonal bands crossing, lighter where they meet.
+        let a = (x + y) / 3 % 3;
+        let b = (x + 16 - y) / 4 % 3;
+        shade(rgb(140, 95, 200), [0.78, 0.95, 1.12][a] * [0.92, 1.0, 1.1][b] * r.range(0.95, 1.04))
+    };
+    a.each(T_AMETHYST, |x, y, r, _| facet(x, y, r));
+    a.each(T_BUDDING_AMETHYST, move |x, y, r, _| {
+        // Budding: darker, with little bright crosses where buds start.
+        let spot = (x % 6 == 2 && (1..4).contains(&(y % 6))) || (y % 6 == 2 && (1..4).contains(&(x % 6)));
+        if spot { rgb(230, 190, 255) } else { shade(facet(x, y, r), 0.82) }
+    });
+    // Buds and the cluster: crystals pointing up (flipped when they hang).
+    for (t, tall, wide) in [(T_AMETHYST_BUD_SMALL, 5, 2), (T_AMETHYST_BUD_LARGE, 9, 3), (T_AMETHYST_CLUSTER, 13, 4)] {
+        a.each(t, move |x, y, r, _| {
+            let h = 15 - y as i32;
+            let crystals = [(7i32, tall), (7 - wide, tall * 2 / 3), (8 + wide, tall * 3 / 4)];
+            for (cx, ch) in crystals {
+                let half = 1 + (ch - h).max(0) / 4;
+                if h < ch && (x as i32 - cx).abs() <= half.min(2) {
+                    let tip = h > ch - 3;
+                    return shade(if tip { rgb(235, 200, 255) } else { rgb(165, 110, 225) }, r.range(0.9, 1.08));
+                }
+            }
+            [0, 0, 0, 0]
+        });
+    }
+    // Tinted glass: dark smoky panes with a pale rim.
+    a.each(T_TINTED_GLASS, |x, y, _, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        if edge { [70, 55, 85, 255] } else if (x + y) % 7 == 0 { [90, 80, 105, 200] } else { [40, 32, 50, 190] }
+    });
+    a.each(T_GLOW_BERRIES, |x, y, _, _| {
+        let berry = |cx: f32, cy: f32| (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2) < 9.0;
+        let stem = x == 8 && y < 5;
+        if berry(5.5, 9.5) || berry(10.5, 10.5) || berry(8.0, 6.5) {
+            if (x + y) % 4 == 0 { rgb(255, 250, 190) } else { rgb(255, 170, 40) }
+        } else if stem {
+            rgb(80, 120, 40)
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    a.each(T_AMETHYST_SHARD, |x, y, r, _| {
+        // A long crystal, corner to corner.
+        let d = (x as i32 - (15 - y as i32)).abs();
+        if d <= 2 && (2..14).contains(&y) {
+            shade(if d == 0 { rgb(235, 200, 255) } else { rgb(160, 105, 220) }, r.range(0.9, 1.06))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
 }
 
 /// v0.1.21's building blocks.

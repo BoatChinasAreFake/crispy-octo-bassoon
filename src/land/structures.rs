@@ -44,6 +44,13 @@ pub enum Kind {
     /// Wrecks on the sea bed, and chests buried in beaches (see treasure.rs).
     Shipwreck,
     BuriedTreasure,
+    /// Temples, mineshafts and igloos (see temples.rs).
+    DesertPyramid,
+    JungleTemple,
+    Mineshaft,
+    Igloo,
+    /// On the deep sea floor (see monument.rs).
+    Monument,
 }
 
 impl Kind {
@@ -65,6 +72,11 @@ impl Kind {
             Kind::TrialChambers => "Trial Chambers (Bring Keys Back)",
             Kind::Shipwreck => "Shipwreck (Abandoned, Soggy)",
             Kind::BuriedTreasure => "Buried Treasure (X Marks the Spot)",
+            Kind::DesertPyramid => "Desert Pyramid (Mind the Floor)",
+            Kind::JungleTemple => "Jungle Temple (Mind the String)",
+            Kind::Mineshaft => "Abandoned Mineshaft (Mind the Webs)",
+            Kind::Igloo => "Igloo (Mind the Basement)",
+            Kind::Monument => "Ocean Monument (Mind the Eyes)",
         }
     }
 
@@ -86,13 +98,18 @@ impl Kind {
             "trial_chambers" | "trial_chamber" | "trials" => Kind::TrialChambers,
             "shipwreck" | "wreck" => Kind::Shipwreck,
             "buried_treasure" | "treasure" => Kind::BuriedTreasure,
+            "desert_pyramid" | "pyramid" | "desert_temple" => Kind::DesertPyramid,
+            "jungle_temple" | "jungle_pyramid" => Kind::JungleTemple,
+            "mineshaft" | "abandoned_mineshaft" => Kind::Mineshaft,
+            "igloo" => Kind::Igloo,
+            "monument" | "ocean_monument" => Kind::Monument,
             _ => return None,
         })
     }
 
     /// Wide enough that it reaches two chunks out.
     fn wide(self) -> bool {
-        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers)
+        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument)
     }
 }
 
@@ -130,7 +147,11 @@ impl Generator {
             (hash2(s ^ 0x5419, cx, cz) < 0.035, hash2(s ^ 0x7EA5, cx, cz) < 0.06, hash2(s ^ 0x0B0, cx, cz) < 0.01)
         };
         let city_roll = self.opts.structures > 0 && hash2(s ^ 0xC17, cx, cz) < 0.035;
-        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll {
+        // Mineshafts: deep, on a grid of their own (and never where Trial Chambers are).
+        let shaft_spot = self.opts.structures > 0 && !trial_spot && (cx.rem_euclid(6), cz.rem_euclid(6)) == (3, 3) && hash2(s ^ 0x5AF7, cx.div_euclid(6), cz.div_euclid(6)) < 0.45;
+        // Ocean Monuments: rare, on a grid of their own, on the deep sea floor.
+        let monument_spot = self.opts.structures > 0 && (cx.rem_euclid(8), cz.rem_euclid(8)) == (4, 4) && hash2(s ^ 0x30A, cx.div_euclid(8), cz.div_euclid(8)) < 0.6;
+        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll && !shaft_spot && !monument_spot {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -140,6 +161,8 @@ impl Generator {
         let facing = (hash2(s ^ 4, cx, cz) * 4.0) as u8 % 4;
         // Surface buildings want ground that's roughly flat.
         let flat = || [(-3, -3), (3, -3), (-3, 3), (3, 3)].iter().all(|&(dx, dz)| (self.column(ox + dx, oz + dz).0 - h).abs() <= 2);
+        // Bigger buildings check further out.
+        let flat_r = |r: i32, tol: i32| [(-r, -r), (r, -r), (-r, r), (r, r), (0, r), (0, -r), (r, 0), (-r, 0)].iter().all(|&(dx, dz)| (self.column(ox + dx, oz + dz).0 - h).abs() <= tol);
         // Villages: rare, on wide flat plains.
         let wide_flat = || (0..8).all(|k| {
             let a = k as f32 * std::f32::consts::FRAC_PI_4;
@@ -151,11 +174,26 @@ impl Generator {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
         // Pilferers build lookouts on open, flat ground.
-        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() {
+        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() && flat_r(7, 2) {
             return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
         }
         if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
             return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
+        }
+        if monument_spot && biome == Biome::Ocean && h <= SEA - crate::monument::DEPTH {
+            // Deep, open sea all round (it levels its own basin; see monument.rs).
+            let r = crate::monument::BASIN;
+            let open = [(-r, -r), (r, -r), (-r, r), (r, r), (0, r), (0, -r), (r, 0), (-r, 0)].iter().all(|&(dx, dz)| {
+                let (hh, b) = self.column(ox + dx, oz + dz);
+                b == Biome::Ocean && hh < SEA - 2 && hh >= h - crate::monument::FILL
+            });
+            if open {
+                return Some(Site { kind: Kind::Monument, origin: ivec3(ox, h, oz), facing, seed });
+            }
+        }
+        if shaft_spot && h > 50 && biome != Biome::Ocean {
+            let y = 20 + (hash2(s ^ 0x5AF8, cx, cz) * (h - 45).clamp(1, 20) as f32) as i32;
+            return Some(Site { kind: Kind::Mineshaft, origin: ivec3(ox, y, oz), facing, seed });
         }
         // The Hushed Ones built rarely, and only in the Deep Dark.
         if city_roll && self.deep_dark(ox, oz) && h > crate::deepdark::DEEP_TOP + 8 {
@@ -176,6 +214,13 @@ impl Generator {
                 return None;
             }
             Kind::Dungeon
+        } else if biome == Biome::Jungle && h > SEA + 1 && h < CH - 30 && r < 0.085 && flat_r(6, 3) {
+            // (Rolls nothing else took, so older worlds' sites stay put.)
+            Kind::JungleTemple
+        } else if biome == Biome::Snowy && h > SEA + 1 && r >= 0.085 && flat_r(5, 2) {
+            Kind::Igloo
+        } else if biome == Biome::Desert && h > SEA + 1 && h < CH - 20 && (0.075..0.09).contains(&r) && flat() && flat_r(7, 2) {
+            Kind::DesertPyramid
         } else if r < 0.057 && matches!(biome, Biome::Plains | Biome::Forest) && h > SEA + 1 && flat() {
             // A lone hut now and then (villages are where the houses are).
             Kind::Hut
@@ -250,6 +295,11 @@ impl Generator {
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
             Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site),
             Kind::BuriedTreasure => return crate::treasure::treasure_blocks(site),
+            Kind::DesertPyramid => return crate::temples::pyramid_blocks(site),
+            Kind::JungleTemple => return crate::temples::jungle_temple_blocks(site),
+            Kind::Mineshaft => return crate::temples::mineshaft_blocks(site),
+            Kind::Igloo => return crate::temples::igloo_blocks(site),
+            Kind::Monument => return crate::monument::monument_blocks(site),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -521,6 +571,17 @@ impl Generator {
         v
     }
 
+    /// Dispensers built into chunk (cx, cz) (jungle temples' traps).
+    pub fn structure_dispensers(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        let mut v = Vec::new();
+        for (site, blocks) in self.sites_near(cx, cz) {
+            if site.kind == Kind::JungleTemple {
+                v.extend(blocks.into_iter().filter(|(p, id)| crate::contraptions::is_dispenser(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
+            }
+        }
+        v
+    }
+
     /// Monster and Sizzler Cages built into chunk (cx, cz) (see fortress.rs).
     pub fn structure_cages(&self, cx: i32, cz: i32) -> Vec<IVec3> {
         let mut v = Vec::new();
@@ -568,6 +629,12 @@ impl Generator {
             }
         }
         None
+    }
+
+    /// The kind of site whose middle is within `r` of `p`, if any.
+    pub fn site_near(&self, p: macroquad::math::Vec3, r: f32) -> Option<Kind> {
+        let (cx, cz) = ((p.x as i32).div_euclid(CW), (p.z as i32).div_euclid(CW));
+        (-1..=1).flat_map(|dz| (-1..=1).map(move |dx| (dx, dz))).filter_map(|(dx, dz)| self.site(cx + dx, cz + dz)).find(|s| s.origin.as_vec3().distance(p) < r).map(|s| s.kind)
     }
 
     /// Villages that reach into chunk (cx, cz).
@@ -692,6 +759,7 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (TNT, 2, 0.1),
         ],
         Kind::BuriedTreasure => &[
+            (HEART_OF_THE_SEA, 1, 1.0),
             (GOLD_INGOT, 8, 1.0),
             (IRON, 6, 0.8),
             (DIAMOND, 2, 0.5),
@@ -702,6 +770,44 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (TURTLE_SHELL, 1, 0.12),
             (SPEAR, 1, 0.1),
         ],
+        Kind::DesertPyramid => &[
+            (BONE, 6, 0.6),
+            (GOO, 7, 0.6),
+            (GOLD_INGOT, 5, 0.5),
+            (IRON, 4, 0.5),
+            (DIAMOND, 2, 0.25),
+            (ENCHANTED_BOOK, 1, 0.3),
+            (SADDLE, 1, 0.25),
+            (GOLDEN_CHOP, 1, 0.2),
+            (GUNPOWDER, 4, 0.4),
+            (SAND, 8, 0.3),
+        ],
+        Kind::JungleTemple => &[(BONE, 6, 0.6), (GOO, 6, 0.5), (GOLD_INGOT, 6, 0.5), (IRON, 5, 0.5), (DIAMOND, 2, 0.25), (SADDLE, 1, 0.25), (ENCHANTED_BOOK, 1, 0.25), (BAMBOO, 8, 0.4), (ARROW, 8, 0.4)],
+        Kind::Mineshaft => &[
+            (RAIL_FIRST, 12, 0.6),
+            (TORCH, 12, 0.5),
+            (BREAD, 3, 0.5),
+            (COAL, 8, 0.5),
+            (IRON, 5, 0.5),
+            (GOLD_INGOT, 3, 0.3),
+            (ZAP_DUST, 6, 0.3),
+            (DIAMOND, 2, 0.15),
+            (POWERED_RAIL, 4, 0.2),
+            (PICK_IRON, 1, 0.1),
+            (GLOW_BERRIES, 4, 0.25),
+            (ENCHANTED_BOOK, 1, 0.1),
+        ],
+        Kind::Monument => &[
+            (PRISMARINE_CRYSTALS, 6, 0.7),
+            (GOLD_INGOT, 6, 0.6),
+            (NAUTILUS_SHELL, 3, 0.6),
+            (DIAMOND, 2, 0.3),
+            (SPONGE, 2, 0.4),
+            (ENCHANTED_BOOK, 1, 0.3),
+            (HEART_OF_THE_SEA, 1, 0.15),
+            (PRISMARINE_SHARD, 8, 0.5),
+        ],
+        Kind::Igloo => &[(GOLDEN_CHOP, 1, 1.0), (COAL, 4, 0.6), (APPLE, 3, 0.5), (BREAD, 2, 0.5), (WHEAT, 4, 0.3), (GOLD_INGOT, 2, 0.3), (SWORD_STONE, 1, 0.2)],
         Kind::SnoutCamp => &[
             (GOLD_INGOT, 9, 0.8),
             (GOLD_BLOCK, 2, 0.3),
@@ -795,11 +901,41 @@ impl World {
                 self.cages.insert(p);
             }
         }
+        // Temple dispensers are loaded with arrows.
+        for p in self.generator.structure_dispensers(cx, cz) {
+            if crate::contraptions::is_dispenser(self.get_v(p)) && !self.containers.contains_key(&p) {
+                let mut c = crate::containers::Container::for_block(DISPENSER_FIRST);
+                c.slots[0] = Some((ARROW, 9));
+                self.containers.insert(p, c);
+            }
+        }
         for (p, kind, seed) in self.generator.structure_chests(cx, cz) {
             if self.get_v(p) == CHEST && !self.containers.contains_key(&p) {
                 let mut c = loot(kind, seed);
                 mark_maps(&self.generator, p, &mut c);
+                if kind == Kind::Mineshaft {
+                    // A mineshaft's "chests" are carts of loot parked on its rails.
+                    let ew = [IVec3::X, IVec3::NEG_X].iter().any(|&d| crate::vehicles::is_rail(self.get_v(p + d)));
+                    self.set_v(p, if ew { RAIL_FIRST + 1 } else { RAIL_FIRST });
+                    self.new_carts.push((p.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5), c));
+                    continue;
+                }
                 self.containers.insert(p, c);
+                if kind == Kind::Monument {
+                    for at in crate::monument::elder_spots(p) {
+                        self.new_residents.push((at, crate::entity::MobKind::ElderGuardian));
+                    }
+                }
+                if kind == Kind::Outpost {
+                    // The Allay they keep caged beside the tower.
+                    self.new_residents.push((crate::raids::allay_cage(p), crate::entity::MobKind::Allay));
+                }
+                if kind == Kind::Igloo {
+                    // The basement's prisoners.
+                    let [hmmer, zombie] = crate::temples::igloo_cells(p);
+                    self.new_residents.push((hmmer, crate::entity::MobKind::Hmmer));
+                    self.new_residents.push((zombie, crate::entity::MobKind::ZombieHmmer));
+                }
                 if kind == Kind::Village {
                     // The Clanker moves in: it stands guard on the square.
                     self.new_clankers.push(p.as_vec3() + macroquad::math::Vec3::new(-1.5, 0.0, -3.5));
@@ -944,7 +1080,7 @@ mod tests {
         let mut surface = Vec::new();
         for cz in -40..40 {
             for cx in -40..40 {
-                if let Some(site) = g.site(cx, cz).filter(|s| !matches!(s.kind, Kind::TrialChambers | Kind::HushedCity)) {
+                if let Some(site) = g.site(cx, cz).filter(|s| !matches!(s.kind, Kind::TrialChambers | Kind::HushedCity | Kind::Mineshaft)) {
                     surface.push((cx, cz, site.kind));
                 }
             }

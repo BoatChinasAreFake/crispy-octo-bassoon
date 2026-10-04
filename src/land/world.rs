@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 pub const CW: i32 = 16;
 pub const CH: i32 = 128;
 pub const SEA: i32 = 40;
+/// How deep (below the sea) the shallow coastal shelf goes before the sea floor drops away.
+const SEA_SHELF: f32 = 2.0;
 const CHUNK_VOL: usize = (CW * CW * CH) as usize;
 
 #[inline]
@@ -486,6 +488,15 @@ impl Generator {
         // Tall peaks ease off toward the top of the world instead of being cut flat.
         let knee = (CH - 44) as f32;
         let h = if h > knee { knee + (h - knee) / (1.0 + (h - knee) / 24.0) } else { h };
+        // The sea floor falls away offshore: shallow by the coast, deep out at sea.
+        let d = SEA as f32 - 1.0 - h;
+        let h = if d > 0.0 {
+            let deep = d * 1.6 + (d - SEA_SHELF).max(0.0) * 1.4;
+            // (Easing off toward the bottom, so it never reaches the world's floor.)
+            SEA as f32 - 1.0 - deep / (1.0 + deep / 60.0)
+        } else {
+            h
+        };
         let h = (h as i32).clamp(4, CH - 20);
         let t = self.temp.fbm2(fx / (520.0 * bs) + 300.0, fz / (520.0 * bs), 3);
         let m = self.moist.fbm2(fx / (380.0 * bs), fz / (380.0 * bs) - 200.0, 3);
@@ -640,6 +651,7 @@ impl Generator {
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
+        let geodes = self.geodes_for_chunk(cx, cz);
         for lz in 0..CW {
             for lx in 0..CW {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
@@ -749,6 +761,12 @@ impl Generator {
                             }
                         }
                     }
+                }
+                // Cave biomes and geodes (see caves.rs), above the Deep Dark.
+                let deep = h > crate::deepdark::DEEP_TOP + 6 && self.deep_dark(x, z);
+                self.cave_column(&mut b, (lx, lz), (x, z), h, if deep { crate::deepdark::DEEP_TOP + 2 } else { 3 });
+                if !geodes.is_empty() {
+                    self.geode_column(&mut b, lx, lz, x, z, &geodes);
                 }
                 // Cave decorations: glowing mushrooms and pointy rocks on floors, pointy rocks on ceilings.
                 for y in 3..(h - 4).max(3) {
@@ -963,6 +981,9 @@ pub struct World {
     pub new_huts: Vec<(Vec3, u32)>,
     /// Villages whose square chest was just filled: a Clanker should move in (where).
     pub new_clankers: Vec<Vec3>,
+    /// Mineshafts' loot carts, and who lives in igloo basements, waiting to move in (see temples.rs).
+    pub new_carts: Vec<(Vec3, crate::containers::Container)>,
+    pub new_residents: Vec<(Vec3, crate::entity::MobKind)>,
     /// Every sapling in loaded or edited chunks, and leaves that should check
     /// whether they still hang on to a tree (see trees.rs).
     pub saplings: HashSet<IVec3>,
@@ -978,6 +999,8 @@ pub struct World {
     pub comparators: HashSet<IVec3>,
     /// Every beacon (see beacon.rs).
     pub beacons: HashSet<IVec3>,
+    /// Conduits in loaded chunks (see monument.rs).
+    pub conduits: HashSet<IVec3>,
     pub leaf_checks: HashSet<IVec3>,
     /// Local edits waiting to be sent to other players (only filled when `log_edits`).
     pub edit_log: Vec<(i32, i32, i32, Id)>,
@@ -1034,10 +1057,13 @@ impl World {
             zap_dirty: HashSet::new(),
             new_huts: Vec::new(),
             new_clankers: Vec::new(),
+            new_carts: Vec::new(),
+            new_residents: Vec::new(),
             saplings: HashSet::new(),
             fires: HashSet::new(),
             comparators: HashSet::new(),
             beacons: HashSet::new(),
+            conduits: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
             sign_styles: HashMap::new(),
@@ -1110,13 +1136,14 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
+                    if id == SAPLING || id == FIRE || id == CONDUIT || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
                         match id {
                             SAPLING => self.saplings.insert(p),
                             FIRE => self.fires.insert(p),
+                            CONDUIT => self.conduits.insert(p),
                             b if crate::beacon::is_beacon(b) => self.beacons.insert(p),
                             b if crate::music::is_jukebox(b) => self.jukeboxes.insert(p),
                             _ => self.comparators.insert(p),
@@ -1344,6 +1371,11 @@ impl World {
         } else if crate::beacon::is_beacon(old) {
             self.beacons.remove(&p);
         }
+        if id == CONDUIT {
+            self.conduits.insert(p);
+        } else if old == CONDUIT {
+            self.conduits.remove(&p);
+        }
         if crate::fortress::is_cage(id) {
             self.cages.insert(p);
         } else if crate::fortress::is_cage(old) {
@@ -1369,8 +1401,13 @@ impl World {
                 self.fall_dirty.insert(p);
             }
             let above = p + IVec3::Y;
-            if crate::falling::is_gravity(self.get_v(above)) {
+            if crate::falling::is_gravity(self.get_v(above)) || self.get_v(above) == POINTY_ROCK {
                 self.fall_dirty.insert(above);
+            }
+            // A Pointy Rock hanging from here may have lost what it hangs from.
+            let below = p - IVec3::Y;
+            if below.y >= 0 && self.get_v(below) == POINTY_ROCK {
+                self.fall_dirty.insert(below);
             }
             self.wake_liquids(p, is_liquid(id) || is_liquid(old));
             self.wake_zappy(p, is_zappy(id) || is_zappy(old) || is_door(id) || id == TNT || crate::scorch::is_portal(old));

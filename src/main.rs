@@ -12,9 +12,9 @@ mod survival;
 mod online;
 
 pub(crate) use engine::{access, backups, keybinds, light, lod, mesher, noise, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
-pub(crate) use land::{archaeology, copper, deepdark, falling, fire, fortress, hollow, liquids, scorch, seasons, skies, structures, treasure, trial, weather, world};
-pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, hoppers, masonry, music, potions, smithing, stash, trims, wiring};
-pub(crate) use creatures::{animals, bees, creaking, critters, entity, floaty, horses, nametags, pathing, raids, sniffers, villagers, wildlife};
+pub(crate) use land::{archaeology, caves, copper, deepdark, falling, fire, fortress, hollow, liquids, monument, scorch, seasons, skies, structures, temples, treasure, trial, weather, world};
+pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, hoppers, masonry, music, potions, smithing, stash, trims, tripwire, wiring};
+pub(crate) use creatures::{animals, bees, creaking, critters, entity, floaty, horses, nametags, night, pathing, raids, sniffers, villagers, wildlife};
 pub(crate) use survival::{advancements, combat, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, ledger, mods, multiplayer, net, players, playtest, scripting, server};
 mod screens;

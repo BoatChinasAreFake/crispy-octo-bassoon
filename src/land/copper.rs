@@ -99,6 +99,8 @@ impl Game {
                     self.world.set_v(up, BAMBOO);
                 }
             }
+        } else if crate::caves::is_cave_vine(id) || id == BUDDING_AMETHYST {
+            self.cave_tick(p, id);
         } else if id == PITCHER_CROP {
             if self.rng.chance(0.06) && self.world.sky_light(p.x, p.y, p.z) > 0.3 {
                 self.world.set_v(p, PITCHER_PLANT);

@@ -787,6 +787,13 @@ impl Game {
                     self.host_use_vault(from, p);
                 }
             }
+            Msg::Interact { x, y, z, item: BONE_DUST } if self.world.get(x, y, z) == MOSS_BLOCK => {
+                let p = IVec3::new(x, y, z);
+                let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
+                if near && self.peer_rate_ok(from, "interact", 0.2) && self.peer_take(from, BONE_DUST, 1) {
+                    self.grow_moss(p);
+                }
+            }
             Msg::Interact { x, y, z, .. } if self.world.get(x, y, z) == BELL => {
                 let p = IVec3::new(x, y, z);
                 let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
@@ -980,7 +987,7 @@ impl Game {
             return a == b && matches!(a, GATE_FIRST | TRAPDOOR_FIRST);
         }
         // Levers flip both ways, buttons only go in (the host lets them out).
-        if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON) | (CANDLE, CANDLE_LIT) | (CANDLE_LIT, CANDLE)) {
+        if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON) | (CANDLE, CANDLE_LIT) | (CANDLE_LIT, CANDLE) | (CAVE_VINES_LIT, CAVE_VINES)) {
             return true;
         }
         // Beacons switch effect.

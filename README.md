@@ -90,7 +90,7 @@ Everything here is legally distinct, and most of it is a little sillier than you
 
 ### Worlds
 
-- **Infinite procedural terrain.** Seeded Perlin noise makes oceans, beaches, plains, forests, deserts, snowy land, swamps, jungles, badlands and taigas, ridged mountains, spaghetti caves, big caverns (the deepest ones flooded), ravines, ore veins (gold included, for all the good it'll do you), lava lakes and frozen seas. Chunks generate and light themselves on background threads.
+- **Infinite procedural terrain.** Seeded Perlin noise makes oceans, beaches, plains, forests, deserts, snowy land, swamps, jungles, badlands and taigas, ridged mountains, spaghetti caves, big caverns (the deepest ones flooded), ravines, ore veins (gold included, for all the good it'll do you), lava lakes and frozen seas. The sea is shallow by the shore and drops away to 10–25 blocks deep further out. Chunks generate and light themselves on background threads.
 - **Biomes.**
   - **Swamps** sink to just around sea level: pools with lily pads, mud, and wide oaks trailing leaves. **Mangrove Swamps** are warmer, with trees standing on tangled roots over the water.
   - **Jungles** grow very tall trees, thick undergrowth, **Melons** and **Bamboo**.
@@ -101,6 +101,10 @@ Everything here is legally distinct, and most of it is a little sillier than you
   - Every kind of wood makes its own planks, and saplings grow into whatever tree suits where they're planted.
   - Grass, leaves and water take their colour from the biome and blend smoothly across borders.
   - **Firefly Bushes** blink in swamps at night, **Leaf Litter** drifts under forest trees, and **Wildflowers** fill the meadows.
+- **Cave biomes.**
+  - **Dripstone caves** bristle with **Pointy Rock**. Stalactites drop when you break what holds them (or stand under a loose one too long), and landing on a stalagmite hurts twice as much.
+  - **Lush caves** have **Moss** floors, **Azaleas**, and **Cave Vines** hanging with **Glow Berries** that light the place up. Pick and eat the berries, plant them under a ceiling for a new vine, and climb the vines like ladders. Bone Dust on moss spreads it.
+  - **Amethyst geodes**: smooth basalt and calcite shells round a hollow of **Amethyst**. **Budding Amethyst** slowly grows buds into clusters, which break into **Amethyst Shards** for **Tinted Glass**.
 - **World options.** The Create World screen sets a name, game mode and seed (any text works), **Keep Inventory**, **Hardcore**, and how the world is generated: **Structures** (None, Few, Normal or Lots), **Biomes** (Small, Normal, Large or Huge) and **Land** (Flat-ish, Normal, Hilly or Amplified). Worlds made before these options keep generating exactly as they always did.
 - **Multiple worlds.** **Singleplayer** opens a world list with each world's name, mode, seed, when it was last played, and size. Play, create, rename or delete worlds. Each world is its own folder, `saves/<world>/`; only your edits are stored, and the terrain regenerates from the seed.
 - **Backups.** Each time you open a world, a copy of it as it was goes into `backups/<world>/`, and the last 5 are kept. **Backups** on the world list shows them, and **Restore as a New World** makes a separate world from one, so restoring never overwrites anything.
@@ -112,6 +116,8 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 
 - **Villages** on plains, deserts, taigas and snowy land: a well on a cobbled square with lamp posts, gravel paths, three to six houses (each with a Hmmer), watered farms and a **Clanker** on guard.
 - **Dungeons** deep underground around a **Monster Cage (Still Occupied)** that keeps spawning monsters while you're nearby, plus **Ruined Towers**, the odd lone **Hut** (definitely not a village), desert **Wishing Wells** and **Pilferer Outposts**.
+- **Desert Pyramids** with a hidden room of chests over a **TNT trap** (mind the pressure plate), **Jungle Temples** with **Tripwires** (string between two **Tripwire Hooks**) that set off arrow dispensers, **Abandoned Mineshafts** of rails, beams and **Cobwebs** with loot in parked minecarts, and **Igloos**, some with a ladder down to a basement holding two prisoners.
+- **Ocean Monuments** stand on the deep sea floor, built of **Prismarine** and lit with **Sea Lanterns**. **Guardians** charge lasers at you, three **Elder Guardians** curse anyone nearby with **Mining Fatigue**, and the middle hides blocks of gold. Frame a **Conduit** (made from a **Heart of the Sea**, found in buried treasure, and **Nautilus Shells**) with prismarine for **Conduit Power**: no drowning nearby.
 - **Shipwrecks** on the sea bed, often with a **Treasure Map** to **Buried Treasure** in a beach. **Coral reefs** grow in warm, shallow oceans.
 - **Dig sites** of four lost cultures (see Archaeology).
 - **Trial Chambers**: copper-and-tuff halls whose **Trial Spawners** wake as you come close and send out a wave; beat it for a **Trial Key** to open a **Vault**. **Breezes** bounce around throwing **Wind Charges**. Drink an **Ominous Bottle** first for bigger waves, **Ominous Vaults** and a chance at a **Heavy Core** (which makes the **Mace**: fall on something from a height and it lands harder the further you fell).
@@ -170,10 +176,11 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 - **Animals.** Oinkers, Fluffers (shear them), Mooers, Clucksters, Squawkers, Sneakers (foxes that steal), Ribbits (frogs that leap out of the water to snatch small Bloops and leave **Froglights**), Rollos (armadillos), Goats, Axolotls, Turtles, Dolphins (feed one a fish and it leads you to a shipwreck), Pandas, Polar Bears, Llamas (pack animals), Bees, Fishies and **Sniffers** (hatched from eggs found at dig sites; they dig up ancient seeds). Most come in a few colourings, and babies take after a parent.
 - **Breeding and taming.** Feed animals their favourite food and they make babies. Tame **Woofers** with bones: they follow you, fight for you and wear **Woofer Armour**. Mobs find their way round walls and through doors.
 - **Things to ride.** **Gallopers**, **Camels** (with a seat for a friend and a dash) and **Rotsteeds** with a saddle; **Strutters** over lava; and **Floaties**, big gentle fliers grown from a Dried Floaty, with a **Harness** and four seats.
-- **Monsters.** **Groaners** (and **Soggy Groaners** in the sea, some throwing spears), **Rattlers** (bony archers), **Hissers** (they explode), **Webbers** (they climb walls), **Bloops** (they split), **Starers** (don't look them in the eye), the **Creaking** (it only moves when nobody's looking; break its heart in a Pale Oak to be rid of it), and the Scorchlands' lot.
+- **Monsters.** **Groaners** (and **Soggy Groaners** in the sea, some throwing spears), **Rattlers** (bony archers), **Hissers** (they explode), **Webbers** (they climb walls), **Bloops** (they split), **Starers** (don't look them in the eye), the **Creaking** (it only moves when nobody's looking; break its heart in a Pale Oak to be rid of it), **Witches** (they throw Slowness, Poison and Weakness potions and drink their own to heal), **desert Groaners** that make you hungry, **snowy Rattlers** whose arrows slow you, and the Scorchlands' lot.
 - **Hmmers.** Villagers with eight jobs and five trades each, paid in gold ingots (finally, a use for them). They give regulars a discount. A Groaner can turn one into a **Zombie Hmmer** (cure it with a Golden Chop), and a **Wanderer** turns up now and then.
 - **Raids.** Defeat a patrol captain for **Bad Omen**, walk into a village, and waves of **Pilferers**, **Hacklers**, **Invoicers** (who summon flying **Fees**) and **Rampagers** march on the square. Win and you're a **Hero of the Village**. Ring the **Bell** to make raiders glow.
 - **Golems.** **Clankers** guard villages. Put a pumpkin on a block of copper for a **Copper Golem**, which sorts a **Copper Chest** into the chests nearby.
+- **Underground and underwater.** **Bats** roost in dark caves, **Glow Squid** shine in dark water and drop **Glow Ink Sacs** (rub one on a sign to make its words glow), and the **Allay** fetches: hand it an item and it brings you every matching one it finds lying around (take it back empty-handed). Pilferer Outposts keep one caged.
 - **Name Tags** name a mob for good.
 
 ### Farming, fishing, bees and digging

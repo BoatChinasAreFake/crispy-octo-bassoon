@@ -140,7 +140,29 @@ pub fn outpost_blocks(site: &Site) -> Vec<(IVec3, Id)> {
     }
     put(2, 0, 3, PLANKS);
     put(0, 12, 0, CHEST);
+    // A fence cage beside the tower, with a roof, holding an Allay.
+    let ring = |x: i32, z: i32| (5..=7).contains(&x) && (-1..=1).contains(&z) && !(x == CAGE.x && z == CAGE.z);
+    for x in 5..=7 {
+        for z in -1..=1 {
+            for y in -2..=0 {
+                put(x, y, z, COBBLE);
+            }
+            let mask = [(1, 0, 1), (-1, 0, 2), (0, 1, 4), (0, -1, 8)].iter().filter(|&&(dx, dz, _)| ring(x + dx, z + dz)).map(|t| t.2).sum::<Id>();
+            for y in 1..=2 {
+                put(x, y, z, if ring(x, z) { FENCE_FIRST + mask } else { AIR });
+            }
+            put(x, 3, z, SPRUCE_LOG);
+            put(x, 4, z, AIR);
+        }
+    }
     out
+}
+
+/// Where an outpost's caged Allay sits, from its chest (see `outpost_blocks`).
+const CAGE: IVec3 = ivec3(6, 1, 0);
+
+pub fn allay_cage(chest: IVec3) -> Vec3 {
+    (chest - ivec3(0, 12, 0) + CAGE).as_vec3() + Vec3::new(0.5, 0.2, 0.5)
 }
 
 impl Game {
@@ -683,5 +705,13 @@ mod tests {
         let b = outpost_blocks(&site);
         assert!(b.iter().any(|x| x.1 == CHEST && x.0.y == 72));
         assert!(b.iter().filter(|x| crate::carpentry::is_ladder(x.1)).count() >= 10);
+        // The Allay's cage: fenced in on all sides, open inside.
+        let chest = b.iter().find(|x| x.1 == CHEST).map(|x| x.0).unwrap();
+        let cell = allay_cage(chest).floor().as_ivec3();
+        let last = |p: IVec3| b.iter().rev().find(|x| x.0 == p).map(|x| x.1);
+        assert_eq!(last(cell), Some(AIR));
+        for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+            assert!(last(cell + d).is_some_and(|id| (FENCE_FIRST..FENCE_FIRST + 16).contains(&id)), "fenced {d}");
+        }
     }
 }

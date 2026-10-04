@@ -260,6 +260,21 @@ pub enum MobKind {
     ZombieHmmer,
     /// Turns up now and then with things to sell, then wanders off again (see villagers.rs).
     Wanderer,
+    /// Spiky one-eyed fish that guard Ocean Monuments with a laser (see monument.rs).
+    Guardian,
+    /// The big pale ones in the middle of a monument, which curse you with Mining Fatigue.
+    ElderGuardian,
+    /// Night threats (see night.rs): a potion-throwing Witch, a Groaner of
+    /// the desert (sun-proof; its bite makes you hungry) and a Rattler of the
+    /// snow (its arrows slow you).
+    Witch,
+    DesertGroaner,
+    SnowyRattler,
+    /// Small creatures (see night.rs): Glow Squid in dark water, Bats in
+    /// caves, and the Allay, which fetches whatever you give it.
+    GlowSquid,
+    Bat,
+    Allay,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -275,7 +290,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 49] = [
+    pub const ALL: [MobKind; 57] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -326,6 +341,14 @@ impl MobKind {
         MobKind::Llama,
         MobKind::ZombieHmmer,
         MobKind::Wanderer,
+        MobKind::Guardian,
+        MobKind::ElderGuardian,
+        MobKind::Witch,
+        MobKind::DesertGroaner,
+        MobKind::SnowyRattler,
+        MobKind::GlowSquid,
+        MobKind::Bat,
+        MobKind::Allay,
     ];
 
     pub fn index(self) -> u8 {
@@ -419,6 +442,14 @@ impl MobKind {
             "llama" => Some(MobKind::Llama),
             "zombie hmmer" | "zombie_hmmer" | "zombiehmmer" | "zombie_villager" => Some(MobKind::ZombieHmmer),
             "wanderer" | "wandering_trader" | "wandering trader" => Some(MobKind::Wanderer),
+            "guardian" => Some(MobKind::Guardian),
+            "elder guardian" | "elder_guardian" | "elderguardian" | "elder" => Some(MobKind::ElderGuardian),
+            "witch" => Some(MobKind::Witch),
+            "desert groaner" | "desert_groaner" | "husk" => Some(MobKind::DesertGroaner),
+            "snowy rattler" | "snowy_rattler" | "stray" => Some(MobKind::SnowyRattler),
+            "glow squid" | "glow_squid" | "glowsquid" => Some(MobKind::GlowSquid),
+            "bat" => Some(MobKind::Bat),
+            "allay" => Some(MobKind::Allay),
             _ => None,
         }
     }
@@ -476,6 +507,14 @@ impl MobKind {
             MobKind::Llama => "Llama",
             MobKind::ZombieHmmer => "Zombie Hmmer",
             MobKind::Wanderer => "Wanderer",
+            MobKind::Guardian => "Guardian",
+            MobKind::ElderGuardian => "Elder Guardian",
+            MobKind::Witch => "Witch",
+            MobKind::DesertGroaner => "Desert Groaner",
+            MobKind::SnowyRattler => "Snowy Rattler",
+            MobKind::GlowSquid => "Glow Squid",
+            MobKind::Bat => "Bat",
+            MobKind::Allay => "Allay",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -531,6 +570,12 @@ impl MobKind {
             MobKind::PolarBear => (0.6, 1.4),
             MobKind::Llama => (0.45, 1.85),
             MobKind::ZombieHmmer | MobKind::Wanderer => (0.3, 1.95),
+            MobKind::Guardian => (0.42, 0.85),
+            MobKind::ElderGuardian => (1.0, 2.0),
+            MobKind::Witch | MobKind::DesertGroaner | MobKind::SnowyRattler => (0.3, 1.95),
+            MobKind::GlowSquid => (0.4, 0.8),
+            MobKind::Bat => (0.25, 0.5),
+            MobKind::Allay => (0.18, 0.6),
             MobKind::Modded(_) => (0.4, 0.9),
         }
     }
@@ -588,6 +633,13 @@ impl MobKind {
             MobKind::Llama => 22.0,
             MobKind::ZombieHmmer => 20.0,
             MobKind::Wanderer => 20.0,
+            MobKind::Guardian => 30.0,
+            MobKind::ElderGuardian => 80.0,
+            MobKind::Witch => 26.0,
+            MobKind::DesertGroaner | MobKind::SnowyRattler => 20.0,
+            MobKind::GlowSquid => 10.0,
+            MobKind::Bat => 6.0,
+            MobKind::Allay => 20.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -598,6 +650,7 @@ impl MobKind {
         }
         match self {
             MobKind::Bloop => size as u32,
+            MobKind::ElderGuardian => 10,
             k if !k.hostile() => rng.int(1, 3) as u32,
             _ => 5,
         }
@@ -611,7 +664,7 @@ impl MobKind {
             // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
@@ -619,7 +672,7 @@ impl MobKind {
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
-        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee | MobKind::Floaty) || self.mod_def().is_some_and(|d| d.flying)
+        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee | MobKind::Floaty | MobKind::Bat | MobKind::Allay) || self.mod_def().is_some_and(|d| d.flying)
     }
     /// Lava and fire don't bother it.
     pub fn fireproof(self) -> bool {
@@ -654,7 +707,7 @@ impl MobKind {
     }
     /// Undead: burn in sunlight.
     fn burns(self) -> bool {
-        matches!(self, MobKind::Groaner | MobKind::Rattler | MobKind::ZombieHmmer)
+        matches!(self, MobKind::Groaner | MobKind::Rattler | MobKind::ZombieHmmer | MobKind::SnowyRattler)
     }
     /// The lowercase name scripts see (e.g. in `on_mob_death`). For a modded
     /// mob this is the bare section name from its key, so `spawn_mob` and
@@ -838,6 +891,14 @@ pub enum MobEvent {
     WindCharge(Vec3, Vec3),
     /// Something knocked loose (a Goat's horn, on a wall): (where, item).
     DropItem(Vec3, Id),
+    /// The player it's after gets an effect for some seconds (a desert Groaner's hunger).
+    Afflict(crate::potions::Potion, f32),
+    /// An arrow tipped with an effect (a snowy Rattler's Slowness): (from, velocity, effect).
+    ShootTipped(Vec3, Vec3, crate::potions::Potion),
+    /// A Witch's splash potion: (from, velocity, effect).
+    ThrowPotion(Vec3, Vec3, crate::potions::Potion),
+    /// A puff of ink (a hurt Glow Squid).
+    Ink(Vec3),
     /// A Goat lowers its head to charge.
     Bleat(Vec3),
 }
@@ -1161,6 +1222,60 @@ impl Mob {
                 if self.fuse >= 1.5 {
                     ev.push(MobEvent::Explode(self.body.pos + Vec3::Y * 0.8, 3.0, "was blown up by a Hisser"));
                     self.health = -100.0;
+                }
+            }
+            MobKind::Witch | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay => {
+                crate::night::update(self, dt, world, player, player_visible, rng, &mut want, &mut swim_vy, &mut fly_vy, &mut may_wander, &mut ev);
+            }
+            MobKind::Guardian | MobKind::ElderGuardian => {
+                // Swim about guarding the place; lock on to anyone in sight,
+                // charge the laser (`fuse`) and zap them (see monument.rs).
+                let elder = self.kind == MobKind::ElderGuardian;
+                if self.body.in_water {
+                    let reach = if elder { 14.0 } else { 16.0 };
+                    let eye = self.eye();
+                    let aim = player + Vec3::Y * 0.9 - eye;
+                    let in_sight = player_visible && dist < reach && world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                    if in_sight && self.attack_cd <= 0.0 {
+                        self.yaw = face;
+                        self.fuse += dt;
+                        if self.fuse >= crate::monument::LASER_SECS {
+                            let (dmg, cause) = if elder { (8.0, "was zapped by an Elder Guardian. Elders know best") } else { (6.0, "was zapped by a Guardian. The big eye was a clue") };
+                            ev.push(MobEvent::HurtPlayer(dmg, cause));
+                            self.fuse = 0.0;
+                            self.attack_cd = rng.range(1.5, 3.0);
+                        }
+                        // Keep a lasering distance.
+                        if flat.length() < 5.0 {
+                            want = Some(((-flat.x).atan2(flat.z), 1.5));
+                        }
+                        swim_vy = Some((to_player.y * 0.8).clamp(-1.5, 1.5));
+                        may_wander = false;
+                    } else {
+                        self.fuse = 0.0;
+                        // Turn back before leaving the water; Elders stay near their room.
+                        let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.3, -self.yaw.cos()) * (self.body.half + 0.6);
+                        if !is_water(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32)) {
+                            self.wander_dir = Some(self.yaw + std::f32::consts::PI + rng.range(-0.8, 0.8));
+                            self.wander_t = rng.range(1.0, 3.0);
+                        }
+                        if let Some(h) = self.home.filter(|h| h.distance(self.body.pos) > if elder { 5.0 } else { 20.0 }) {
+                            let d = h - self.body.pos;
+                            want = Some((d.x.atan2(-d.z), 1.5));
+                        }
+                        let drift = (self.wander_t * 1.3 + self.id as f32).sin() * 0.6;
+                        let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + self.body.height).floor() as i32, self.body.pos.z.floor() as i32);
+                        swim_vy = Some(if is_water(above) { drift } else { drift.min(0.0) - 0.3 });
+                    }
+                } else {
+                    // Stranded: flop about (they don't dry out, more's the pity).
+                    self.fuse = 0.0;
+                    may_wander = false;
+                    if self.body.on_ground && rng.chance(dt * 1.5) {
+                        self.body.vel.y = 4.0;
+                        self.yaw = rng.range(0.0, std::f32::consts::TAU);
+                        self.knock = Vec3::new(self.yaw.sin(), 0.0, -self.yaw.cos()) * 1.5;
+                    }
                 }
             }
             MobKind::Fishy => {
@@ -1510,14 +1625,23 @@ impl Mob {
                     self.health -= dt;
                 }
             }
-            MobKind::Groaner | MobKind::ZombieHmmer => {
+            MobKind::Groaner | MobKind::ZombieHmmer | MobKind::DesertGroaner => {
                 if self.kind == MobKind::ZombieHmmer && self.sitting {
                     // Being cured: it just shakes (see villagers.rs).
                     may_wander = false;
                 } else if player_visible && dist < 24.0 {
                     want = Some((flat.x.atan2(-flat.z), 2.3));
                     if flat.length() < 1.3 && to_player.y.abs() < 1.6 && self.attack_cd <= 0.0 {
-                        ev.push(MobEvent::HurtPlayer(3.0, if self.kind == MobKind::Groaner { "was groaned to death" } else { "was mobbed by a Zombie Hmmer" }));
+                        let cause = match self.kind {
+                            MobKind::Groaner => "was groaned to death",
+                            MobKind::DesertGroaner => "was groaned to death in the desert. Thirsty work",
+                            _ => "was mobbed by a Zombie Hmmer",
+                        };
+                        ev.push(MobEvent::HurtPlayer(3.0, cause));
+                        // A desert Groaner's bite leaves you hungry.
+                        if self.kind == MobKind::DesertGroaner {
+                            ev.push(MobEvent::Afflict(crate::potions::Potion::Hunger, 15.0));
+                        }
                         self.attack_cd = 1.0;
                     }
                 } else if let Some(g) = self.goal {
@@ -1529,7 +1653,7 @@ impl Mob {
             MobKind::Turtle | MobKind::Dolphin | MobKind::PolarBear | MobKind::Llama => {
                 crate::wildlife::update(self, dt, world, player, player_visible, rng, &mut want, &mut swim_vy, &mut may_wander, &mut ev);
             }
-            MobKind::Rattler => {
+            MobKind::Rattler | MobKind::SnowyRattler => {
                 let fd = flat.length();
                 if player_visible && dist < 22.0 {
                     // Keep a polite shooting distance.
@@ -1547,7 +1671,12 @@ impl Mob {
                     if self.attack_cd <= 0.0 && fd < 16.0 && clear {
                         // Lob it a little higher the further away you are (arrows drop).
                         let vel = aim.normalize_or_zero() * Arrow::SPEED + Vec3::Y * aim.length() * 0.42;
-                        ev.push(MobEvent::Shoot(eye + aim.normalize_or_zero() * 0.5, vel));
+                        // A snowy Rattler's arrows are tipped with Slowness.
+                        if self.kind == MobKind::SnowyRattler {
+                            ev.push(MobEvent::ShootTipped(eye + aim.normalize_or_zero() * 0.5, vel, crate::potions::Potion::Slowness));
+                        } else {
+                            ev.push(MobEvent::Shoot(eye + aim.normalize_or_zero() * 0.5, vel));
+                        }
                         self.attack_cd = rng.range(1.6, 2.6);
                     }
                 }
@@ -2120,6 +2249,14 @@ impl Mob {
             MobKind::PolarBear => Some(([COD, SALMON][rng.int(0, 1) as usize], n.max(1))),
             MobKind::Llama => Some((WOOL, n.max(1))),
             MobKind::ZombieHmmer if n > 0 => Some((GOO, n)),
+            MobKind::Guardian if n > 0 => Some((PRISMARINE_SHARD, n)),
+            MobKind::ElderGuardian => Some((SPONGE, 1)),
+            MobKind::Witch if n > 0 => Some(([GLASS_BOTTLE, GLOWSHROOM, ZAP_DUST, GUNPOWDER, STICK][rng.int(0, 4) as usize], n)),
+            MobKind::DesertGroaner if n > 0 => Some((GOO, n)),
+            MobKind::SnowyRattler if n > 0 => Some((BONE, n)),
+            MobKind::GlowSquid => Some((GLOW_INK_SAC, n.max(1))),
+            // An Allay drops whatever it was holding.
+            MobKind::Allay if self.seed != 0 => Some((self.seed as Id, 1 + self.temper)),
             MobKind::Modded(_) => self.kind.mod_def().and_then(|d| d.drop).map(|(id, max)| (id, rng.int(1, max.max(1) as i32) as u8)),
             _ => None,
         }
@@ -2134,11 +2271,18 @@ impl Mob {
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             MobKind::Grumbler if rng.chance(0.4) => Some((GOLD_INGOT, 1)),
             MobKind::Grumbler if rng.chance(0.5) => Some((GRUMBLER_TUSK, 1)),
+            MobKind::Soggy if rng.chance(0.08) => Some((NAUTILUS_SHELL, 1)),
             MobKind::Soggy if rng.chance(0.11) => Some((COPPER_INGOT, 1)),
             MobKind::Weeper => Some((GUNPOWDER, rng.int(0, 2) as u8)).filter(|l| l.1 > 0),
             // A patrol's captain carries the banner (see raids.rs).
             MobKind::Pilferer if self.seed == 1 => Some((OMINOUS_BANNER, 1)),
             MobKind::Invoicer if rng.chance(0.5) => Some((GOLD_INGOT, rng.int(1, 3) as u8)),
+            MobKind::Guardian if rng.chance(0.4) => Some((PRISMARINE_CRYSTALS, 1)),
+            MobKind::Guardian if rng.chance(0.3) => Some((COD, 1)),
+            MobKind::ElderGuardian => Some((PRISMARINE_CRYSTALS, rng.int(1, 3) as u8)),
+            MobKind::Witch if rng.chance(0.15) => Some((crate::potions::potion_item(crate::potions::Potion::Healing, false), 1)),
+            MobKind::DesertGroaner if rng.chance(0.3) => Some((SAND, 1)),
+            MobKind::SnowyRattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -2235,8 +2379,17 @@ impl Mob {
             draw_posed(geo, &root, &parts[..5], pose, self.flap, sky);
             geo.begin(Pass::Opaque, tint, false);
             draw_posed(geo, &root, &parts[5..], pose, self.flap, sky);
+        } else if self.kind == MobKind::GlowSquid {
+            // It glows: drawn at full brightness whatever the light.
+            draw_posed(geo, &root, parts, pose, self.flap, 1.0);
         } else {
             draw_posed(geo, &root, parts, pose, self.flap, sky);
+        }
+        // An Allay carries what it was given in its arms.
+        if self.kind == MobKind::Allay && self.seed != 0 {
+            let hold = root * Mat4::from_translation(Vec3::new(0.0, 0.12, -0.2)) * Mat4::from_scale(Vec3::splat(0.35));
+            crate::drops::draw_item(geo, &hold, self.seed as Id, 1.0, sky);
+            geo.begin(Pass::Opaque, tint, false);
         }
         if self.owner.is_some() && self.kind == MobKind::Woofer {
             draw_model(geo, &root, &WOOFER_COLLAR, 0.0, sky, false);
@@ -2440,6 +2593,91 @@ static FISHY: [Part; 3] = [
     part([-0.02, 0.06, 0.25], [0.04, 0.28, 0.22], [0.0, 0.2, 0.25], Limb::SwingY(2.0), [T_FISHY_FIN; 6]),
     part([-0.02, 0.35, -0.12], [0.04, 0.1, 0.24], [0.0; 3], Limb::Fixed, [T_FISHY_FIN; 6]),
 ];
+
+/// A Guardian: a spiky box of a fish with one big eye and a wagging tail.
+/// (An Elder is the same, bigger and paler.)
+/// A part scaled up by `k` (about the model's origin).
+const fn scaled(k: f32, min: [f32; 3], size: [f32; 3], pivot: [f32; 3], limb: Limb, tiles: [u16; 6]) -> Part {
+    part([min[0] * k, min[1] * k, min[2] * k], [size[0] * k, size[1] * k, size[2] * k], [pivot[0] * k, pivot[1] * k, pivot[2] * k], limb, tiles)
+}
+
+const fn guardian(k: f32, body: u16, eye: u16) -> [Part; 12] {
+    let s = [T_GUARDIAN_SPIKE; 6];
+    [
+        scaled(k, [-0.4, 0.05, -0.4], [0.8, 0.75, 0.8], [0.0; 3], Limb::Fixed, [body, body, body, body, body, eye]),
+        // Spikes: up, down and out of every side.
+        scaled(k, [-0.04, 0.8, -0.04], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.04, -0.12, -0.04], [0.08, 0.17, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [0.4, 0.38, -0.04], [0.2, 0.08, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.6, 0.38, -0.04], [0.2, 0.08, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.04, 0.38, -0.6], [0.08, 0.08, 0.2], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [0.3, 0.7, 0.3], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.38, 0.7, 0.3], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [0.3, 0.7, -0.38], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        scaled(k, [-0.38, 0.7, -0.38], [0.08, 0.2, 0.08], [0.0; 3], Limb::Fixed, s),
+        // The tail, in two pieces, wagging.
+        scaled(k, [-0.15, 0.28, 0.4], [0.3, 0.3, 0.4], [0.0, 0.43, 0.4], Limb::SwingY(1.2), [body; 6]),
+        scaled(k, [-0.08, 0.32, 0.8], [0.16, 0.22, 0.3], [0.0, 0.43, 0.4], Limb::SwingY(1.6), [T_GUARDIAN_SPIKE; 6]),
+    ]
+}
+static GUARDIAN: [Part; 12] = guardian(1.0, T_GUARDIAN, T_GUARDIAN_EYE);
+
+/// A Witch: a robe, a big nose, and a tall pointed hat.
+static WITCH: [Part; 11] = {
+    let h = humanoid(T_WITCH_FACE, T_WITCH_FACE, T_WITCH_ROBE, T_WITCH_ROBE, Limb::Fixed, Limb::Fixed);
+    let hat = [T_WITCH_HAT; 6];
+    [
+        h[0],
+        h[1],
+        h[2],
+        part([-0.3, 1.0, -0.3], [0.6, 0.22, 0.25], [0.0; 3], Limb::Fixed, [T_WITCH_ROBE; 6]),
+        part([-0.25, 1.5, -0.25], [0.5, 0.5, 0.5], [0.0; 3], Limb::Fixed, [T_WITCH_FACE, T_WITCH_FACE, T_WITCH_HAT, T_WITCH_FACE, T_WITCH_FACE, T_WITCH_FACE]),
+        part([-0.06, 1.55, -0.38], [0.12, 0.24, 0.14], [0.0; 3], Limb::Fixed, [T_DESERT_SKIN; 6]),
+        part([-0.36, 1.98, -0.36], [0.72, 0.07, 0.72], [0.0; 3], Limb::Fixed, hat),
+        part([-0.22, 2.05, -0.22], [0.44, 0.2, 0.44], [0.0; 3], Limb::Fixed, hat),
+        part([-0.13, 2.25, -0.13], [0.26, 0.17, 0.26], [0.0; 3], Limb::Fixed, hat),
+        part([-0.05, 2.42, -0.02], [0.1, 0.16, 0.1], [0.0; 3], Limb::Fixed, hat),
+        part([-0.25, 0.3, -0.13], [0.5, 0.5, 0.26], [0.0; 3], Limb::Fixed, [T_WITCH_ROBE; 6]),
+    ]
+};
+static DESERT_GROANER: [Part; 6] = humanoid(T_DESERT_SKIN, T_DESERT_FACE, T_DESERT_CLOTH, T_DESERT_CLOTH, Limb::Forward, Limb::Forward);
+static SNOWY_RATTLER: [Part; 6] = humanoid(T_STRAY_BONE, T_STRAY_FACE, T_STRAY_CLOTH, T_STRAY_BONE, Limb::Forward, Limb::Forward);
+/// A Glow Squid: a body and eight tentacles, waving.
+static GLOW_SQUID: [Part; 9] = {
+    const G: u16 = T_GLOW_SQUID;
+    const fn arm(x: f32, z: f32, phase: f32) -> Part {
+        part([x - 0.04, 0.0, z - 0.04], [0.08, 0.4, 0.08], [x, 0.4, z], Limb::Swing(phase), [G; 6])
+    }
+    [
+        part([-0.3, 0.38, -0.3], [0.6, 0.72, 0.6], [0.0; 3], Limb::Fixed, [G, G, G, G, G, T_GLOW_SQUID_FACE]),
+        arm(-0.22, -0.22, 1.0),
+        arm(0.0, -0.25, -1.0),
+        arm(0.22, -0.22, 1.0),
+        arm(0.25, 0.0, -1.0),
+        arm(0.22, 0.22, 1.0),
+        arm(0.0, 0.25, -1.0),
+        arm(-0.22, 0.22, 1.0),
+        arm(-0.25, 0.0, -1.0),
+    ]
+};
+/// A Bat: a furry body, ears, and two flapping wings.
+static BAT: [Part; 5] = [
+    part([-0.1, 0.15, -0.09], [0.2, 0.26, 0.18], [0.0; 3], Limb::Fixed, [T_BAT; 6]),
+    part([-0.09, 0.41, -0.03], [0.05, 0.08, 0.05], [0.0; 3], Limb::Fixed, [T_BAT; 6]),
+    part([0.04, 0.41, -0.03], [0.05, 0.08, 0.05], [0.0; 3], Limb::Fixed, [T_BAT; 6]),
+    part([0.1, 0.3, -0.06], [0.36, 0.03, 0.2], [0.1, 0.31, 0.0], Limb::Wing(1.0), [T_BAT_WING; 6]),
+    part([-0.46, 0.3, -0.06], [0.36, 0.03, 0.2], [-0.1, 0.31, 0.0], Limb::Wing(-1.0), [T_BAT_WING; 6]),
+];
+/// An Allay: a round blue head, a little body and see-through wings.
+static ALLAY: [Part; 6] = [
+    part([-0.15, 0.3, -0.15], [0.3, 0.28, 0.3], [0.0; 3], Limb::Fixed, [T_ALLAY, T_ALLAY, T_ALLAY, T_ALLAY, T_ALLAY, T_ALLAY_FACE]),
+    part([-0.09, 0.06, -0.07], [0.18, 0.24, 0.14], [0.0; 3], Limb::Fixed, [T_ALLAY; 6]),
+    part([-0.14, 0.12, -0.04], [0.05, 0.16, 0.06], [-0.12, 0.28, 0.0], Limb::Forward, [T_ALLAY; 6]),
+    part([0.09, 0.12, -0.04], [0.05, 0.16, 0.06], [0.12, 0.28, 0.0], Limb::Forward, [T_ALLAY; 6]),
+    part([0.02, 0.12, 0.07], [0.3, 0.22, 0.02], [0.02, 0.2, 0.07], Limb::Wing(1.0), [T_ALLAY_WING; 6]),
+    part([-0.32, 0.12, 0.07], [0.3, 0.22, 0.02], [-0.02, 0.2, 0.07], Limb::Wing(-1.0), [T_ALLAY_WING; 6]),
+];
+static ELDER_GUARDIAN: [Part; 12] = guardian(2.35, T_ELDER_GUARDIAN, T_ELDER_EYE);
 
 static SOGGY: [Part; 6] = humanoid(T_SOGGY_SKIN, T_SOGGY_FACE, T_SOGGY_SHIRT, T_SOGGY_PANTS, Limb::Forward, Limb::Forward);
 /// With a spear in its right hand.
@@ -2980,6 +3218,14 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Llama => &LLAMA,
         MobKind::ZombieHmmer => &ZOMBIE_HMMER,
         MobKind::Wanderer => &WANDERER,
+        MobKind::Guardian => &GUARDIAN,
+        MobKind::ElderGuardian => &ELDER_GUARDIAN,
+        MobKind::Witch => &WITCH,
+        MobKind::DesertGroaner => &DESERT_GROANER,
+        MobKind::SnowyRattler => &SNOWY_RATTLER,
+        MobKind::GlowSquid => &GLOW_SQUID,
+        MobKind::Bat => &BAT,
+        MobKind::Allay => &ALLAY,
         // Modded mobs are drawn from a runtime-built, textured copy of a base
         // template (see `modded_parts`); this static fallback keeps `model`
         // total and is used only where the texture doesn't matter (e.g. the
@@ -3225,6 +3471,9 @@ pub struct Arrow {
     pub wind: bool,
     /// Host-only: a firework rocket, by colour + 1 (0: not one; see fireworks.rs).
     pub firework: u8,
+    /// Host-only: a thrown splash potion (a Witch's): it bursts on whatever it
+    /// meets, on everyone near (see night.rs).
+    pub splash: bool,
 }
 
 impl Arrow {
@@ -3248,6 +3497,7 @@ impl Arrow {
             blast: 0.0,
             wind: false,
             firework: 0,
+            splash: false,
         }
     }
 
@@ -3300,6 +3550,7 @@ impl Arrow {
             blast: 0.0,
             wind: false,
             firework: 0,
+            splash: false,
         }
     }
 
