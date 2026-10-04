@@ -30,7 +30,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v21: Camels' back seats, fireworks, and the Trial Chambers' wind.
 /// v22: bundles, books and banners through the host; chest sorting.
 /// v23: seats in mount ids (Floaties), regulars' discounts, spears by kind.
-pub const PROTOCOL: u32 = 26;
+/// v27: v0.2's mobs (Guardians, Witches, Allays, ...) and effects (Slowness, Poison, ...).
+pub const PROTOCOL: u32 = 27;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

@@ -181,6 +181,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     latest_features(&mut host, &mut team, &mut report, &mut touched);
     batch_two(&mut host, &mut team, &mut report, &mut touched);
     batch_three(&mut host, &mut team, &mut report, &mut touched);
+    underground(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -894,6 +895,94 @@ fn batch_three(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: 
     }
 }
 
+/// v0.2: glow berries, tripwires, the Allay and Witches' potions.
+fn underground(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    let n = team.len();
+    revive(host, team);
+
+    // 19. A bot picks glow berries off a vine: the host sees the vine picked, and the berries drop.
+    let k = 0;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let vine = feet + IVec3::new(1, 2, 0);
+    host.world.set_v(vine + IVec3::Y, STONE);
+    host.world.set_v(vine, CAVE_VINES_LIT);
+    touched.extend([vine, vine + IVec3::Y]);
+    pump(host, team, 1.0, |_| idle());
+    let picked = team[k].game.pick_berries(vine);
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("glow berries");
+    // (Whoever's nearest may have picked the berries up.)
+    let held: u32 = host.peers.values().map(|p| p.ledger.bag.count(GLOW_BERRIES)).sum();
+    let dropped = host.drops.iter().any(|d| d.item == GLOW_BERRIES);
+    if !picked || host.world.get_v(vine) != CAVE_VINES || (held == 0 && !dropped) {
+        report.problems.push(format!("the host didn't see {} pick glow berries (picked {picked}, vine {}, berries {held}, dropped {dropped})", team[k].name, host.world.get_v(vine)));
+    }
+    host.drops.retain(|d| d.item != GLOW_BERRIES);
+
+    // 20. A bot walks into tripwire: the whole line trips, for everyone.
+    let k = 1 % n;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let (west, east) = (feet + IVec3::new(-2, 0, 2), feet + IVec3::new(2, 0, 2));
+    host.world.set_v(west - IVec3::X, STONE);
+    host.world.set_v(east + IVec3::X, STONE);
+    host.world.set_v(west, crate::tripwire::hook(3, false));
+    host.world.set_v(east, crate::tripwire::hook(1, false));
+    for x in west.x + 1..east.x {
+        host.world.set_v(IVec3::new(x, feet.y, feet.z + 2), crate::tripwire::tripwire(1, false));
+    }
+    touched.extend((west.x - 1..=east.x + 1).map(|x| IVec3::new(x, feet.y, feet.z + 2)));
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.player.body.pos = (feet + IVec3::Z * 2).as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+    pump(host, team, 0.4, |_| idle());
+    report.features.push("tripwire");
+    if !crate::tripwire::tripped(host.world.get_v(east)) {
+        report.problems.push(format!("{} walked into tripwire and the host's line didn't trip", team[k].name));
+    } else {
+        for b in team.iter() {
+            if !crate::tripwire::tripped(b.game.world.get_v(west)) {
+                report.problems.push(format!("{} never saw the tripwire trip", b.name));
+            }
+        }
+    }
+    team[k].game.player.body.pos = feet.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+    pump(host, team, 1.5, |_| idle());
+
+    // 21. A bot hands an Allay a diamond: it's that bot's Allay now, fetching diamonds.
+    let k = 2 % n;
+    ground(host, team, k);
+    let me = team[k].game.my_id;
+    let allay = host.alloc_mob(crate::entity::MobKind::Allay, team[k].game.player.body.pos + Vec3::new(1.5, 1.0, 0.0));
+    host.give_peer(me, DIAMOND, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let (Some(slot), Some(i)) = (g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == DIAMOND)), g.mobs.iter().position(|m| m.id == allay)) {
+        g.inv.selected = slot;
+        g.use_on_mob(i);
+    }
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("allay");
+    let mine = host.mobs.iter().find(|m| m.id == allay).is_some_and(|m| m.seed == DIAMOND as u32 && m.owner.as_deref() == Some(crate::players::record_key(&team[k].name).as_str()));
+    if !mine {
+        report.problems.push(format!("{} gave an Allay a diamond, and the host's Allay didn't take it", team[k].name));
+    }
+    host.mobs.retain(|m| m.id != allay);
+
+    // 22. A Witch's bottle bursts on a bot: it's slowed.
+    let k = 3 % n;
+    ground(host, team, k);
+    let at = team[k].game.player.body.pos;
+    host.throw_witch_potion(at + Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, -6.0, 0.0), crate::potions::Potion::Slowness);
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("witch potion");
+    if !team[k].game.has_effect(crate::potions::Potion::Slowness) {
+        report.problems.push(format!("a Witch's potion burst on {} and it wasn't slowed", team[k].name));
+    }
+}
+
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f64>().ok());
@@ -934,7 +1023,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }
