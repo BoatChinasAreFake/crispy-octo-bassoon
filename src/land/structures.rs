@@ -174,21 +174,21 @@ impl Generator {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
         // Pilferers build lookouts on open, flat ground.
-        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() {
+        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() && flat_r(7, 2) {
             return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
         }
         if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
             return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
         }
-        if monument_spot && biome == Biome::Ocean && h < SEA - 4 {
-            // Open sea all round (it digs its own deep basin; see monument.rs).
+        if monument_spot && biome == Biome::Ocean && h <= SEA - crate::monument::DEPTH {
+            // Deep, open sea all round (it levels its own basin; see monument.rs).
             let r = crate::monument::BASIN;
             let open = [(-r, -r), (r, -r), (-r, r), (r, r), (0, r), (0, -r), (r, 0), (-r, 0)].iter().all(|&(dx, dz)| {
                 let (hh, b) = self.column(ox + dx, oz + dz);
-                b == Biome::Ocean && hh < SEA - 2
+                b == Biome::Ocean && hh < SEA - 2 && hh >= h - crate::monument::FILL
             });
             if open {
-                return Some(Site { kind: Kind::Monument, origin: ivec3(ox, SEA - crate::monument::DEPTH, oz), facing, seed });
+                return Some(Site { kind: Kind::Monument, origin: ivec3(ox, h, oz), facing, seed });
             }
         }
         if shaft_spot && h > 50 && biome != Biome::Ocean {
@@ -925,6 +925,10 @@ impl World {
                     for at in crate::monument::elder_spots(p) {
                         self.new_residents.push((at, crate::entity::MobKind::ElderGuardian));
                     }
+                }
+                if kind == Kind::Outpost {
+                    // The Allay they keep caged beside the tower.
+                    self.new_residents.push((crate::raids::allay_cage(p), crate::entity::MobKind::Allay));
                 }
                 if kind == Kind::Igloo {
                     // The basement's prisoners.

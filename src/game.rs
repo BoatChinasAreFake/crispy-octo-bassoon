@@ -169,6 +169,8 @@ pub struct Game {
     pub monument_acc: f32,
     pub curse_acc: f32,
     pub zap_acc: f32,
+    /// Seconds towards Poison's next sting (see potions.rs).
+    pub poison_clock: f32,
     /// What's packed inside broken Hollow Boxes, by number (see boxes.rs).
     pub boxes: HashMap<u16, crate::containers::Container>,
     /// Sound effects requested this frame (effect, world position if positional).
@@ -477,6 +479,7 @@ impl Game {
             monument_acc: 0.0,
             curse_acc: 0.0,
             zap_acc: 0.0,
+            poison_clock: 0.0,
             sounds: Vec::new(),
             dig_tick: 0.0,
             step_dist: 0.0,
@@ -1754,6 +1757,7 @@ impl Game {
         let mut blasts: Vec<(Vec3, f32, f32, Option<crate::block::ProjectileEffect>)> = Vec::new();
         let mut winds: Vec<(Vec3, Option<u32>)> = Vec::new();
         let mut bursts: Vec<(Vec3, u8, f32, Option<u32>)> = Vec::new();
+        let mut splashes: Vec<(Vec3, Option<crate::block::ProjectileEffect>)> = Vec::new();
         let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
             if a.homing > 0.0 && !a.stuck {
@@ -1773,6 +1777,17 @@ impl Game {
                         || self.peers.iter().any(|(id, p)| Some(*id) != a.shooter && p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)));
                 if thunk || touched || a.life <= 0.0 {
                     bursts.push((a.pos - a.dir * 0.3, a.firework - 1, a.damage, a.shooter));
+                    return false;
+                }
+                return true;
+            }
+            if a.splash {
+                // A thrown bottle breaks on the first thing it meets.
+                let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
+                let touched = (!self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.0))
+                    || self.peers.values().any(|p| p.alive() && near(p.target + Vec3::Y * 0.9, 1.0));
+                if thunk || touched || a.life <= 0.0 {
+                    splashes.push((a.pos - a.dir * 0.3, a.effect));
                     return false;
                 }
                 return true;
@@ -1886,6 +1901,9 @@ impl Game {
         for (at, shooter) in winds {
             self.wind_burst(at, shooter);
         }
+        for (at, effect) in splashes {
+            self.potion_splash(at, effect);
+        }
         for (at, colour, damage, shooter) in bursts {
             self.firework_burst(at, colour, damage, shooter);
         }
@@ -1997,7 +2015,9 @@ impl Game {
                     let charge = self.attack_charge();
                     let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
                     let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
-                    let mut dmg = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength) * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    let weakness = self.effect_level(crate::potions::Potion::Weakness) as f32 * crate::potions::WEAKNESS_PENALTY;
+                    let base = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength - weakness).max(0.5);
+                    let mut dmg = base * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
                     // A Mace swung on the way down: the fall goes into the blow (and not into you).
                     let fall = self.player.fall_start - self.player.body.pos.y;
                     let smash = held == MACE && fall > crate::combat::SMASH_MIN && !self.player.body.on_ground;
@@ -3150,6 +3170,7 @@ impl Game {
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
         self.wildlife_tick(dt);
+        self.allays_tick();
         self.copper_golems_tick(dt);
         self.floaties_tick();
         self.fireflies_tick(dt);
@@ -3212,7 +3233,12 @@ impl Game {
                     MobKind::Sizzler | MobKind::Fee | MobKind::Breeze | MobKind::Axolotl | MobKind::Camel | MobKind::Creaking => {}
                     MobKind::Sniffer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rotsteed => noises.push((Sfx::Groan, m.body.pos)),
-                    MobKind::Guardian | MobKind::ElderGuardian => noises.push((Sfx::Bubbles, m.body.pos)),
+                    MobKind::Guardian | MobKind::ElderGuardian | MobKind::GlowSquid => noises.push((Sfx::Bubbles, m.body.pos)),
+                    MobKind::Witch => noises.push((Sfx::Hmm, m.body.pos)),
+                    MobKind::DesertGroaner => noises.push((Sfx::Groan, m.body.pos)),
+                    MobKind::SnowyRattler => noises.push((Sfx::Rattle, m.body.pos)),
+                    MobKind::Bat => noises.push((Sfx::Squawk, m.body.pos)),
+                    MobKind::Allay => noises.push((Sfx::Chime, m.body.pos)),
                     MobKind::CopperGolem | MobKind::Floaty => {}
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
@@ -3286,6 +3312,21 @@ impl Game {
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
                 MobEvent::WindCharge(from, vel) => self.spawn_wind_charge(from, vel, None),
                 MobEvent::DropItem(at, item) => self.pop_drop(at, item, 1),
+                MobEvent::Afflict(p, secs) => {
+                    if target_id == self.my_id {
+                        self.timed_effect(p, secs);
+                    } else if self.peers.contains_key(&target_id) {
+                        self.send_timed_effect(target_id, p, secs, 0);
+                    }
+                }
+                MobEvent::ShootTipped(from, vel, p) => {
+                    self.spawn_arrow(from, vel, None);
+                    if let Some(a) = self.arrows.last_mut() {
+                        a.effect = Some(crate::block::ProjectileEffect { kind: p, duration: 10.0, amplifier: 0 });
+                    }
+                }
+                MobEvent::ThrowPotion(from, vel, p) => self.throw_witch_potion(from, vel, p),
+                MobEvent::Ink(at) => self.ink_cloud(at),
                 MobEvent::Bleat(at) => self.sfx(Sfx::Bleat, Some(at)),
             }
         }
@@ -3334,6 +3375,9 @@ impl Game {
                             MobKind::Creaking => self.advance("heartbreak"),
                             MobKind::Guardian => self.advance("guardian_down"),
                             MobKind::ElderGuardian => self.advance("elder_statesman"),
+                            MobKind::Witch => self.advance("which_witch"),
+                            MobKind::DesertGroaner | MobKind::SnowyRattler => self.advance("local_flavour"),
+                            MobKind::GlowSquid | MobKind::Bat | MobKind::Allay => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
@@ -3502,6 +3546,10 @@ impl Game {
         let (_, biome) = self.world.generator.column(x, z);
         use crate::world::Biome;
         let woofy = matches!(biome, Biome::Forest | Biome::Snowy | Biome::Taiga);
+        // Bats in caves, Glow Squid in dark water (see night.rs).
+        if self.spawn_night_extras(x, z, y) {
+            return;
+        }
         // The sea: schools of Fishies any time, Soggy Groaners in the dark.
         if is_water(top) {
             let depth = (0..y).take_while(|d| is_water(self.world.get(x, y - d, z))).count() as i32;
@@ -3593,6 +3641,8 @@ impl Game {
             // Swamps are Bloop country; the badlands rattle.
             r if biome == Biome::Swamp && r < 0.35 => MobKind::Bloop,
             r if biome == Biome::Badlands && r < 0.3 => MobKind::Rattler,
+            // A Witch, now and then, anywhere (more often in swamps; see night.rs).
+            r if r < 0.03 => MobKind::Witch,
             r if r < 0.28 => MobKind::Hisser,
             r if r < 0.56 => MobKind::Groaner,
             r if r < 0.74 => MobKind::Rattler,
@@ -3600,6 +3650,7 @@ impl Game {
             r if r < 0.94 => MobKind::Bloop,
             _ => MobKind::Starer,
         };
+        let kind = crate::night::local_kind(kind, biome, &mut self.rng);
         let size = if kind == MobKind::Bloop { [1, 2, 2, 4][self.rng.int(0, 3) as usize] } else { 1 };
         // Starers (and big Bloops) are tall: they need an extra block of headroom.
         let tall = kind == MobKind::Starer || size == 4;

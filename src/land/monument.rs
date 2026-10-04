@@ -27,8 +27,10 @@ use crate::potions::Potion;
 use crate::structures::{Kind, Site};
 use macroquad::math::{ivec3, IVec3, Mat4, Quat, Vec3};
 
-/// How far below the sea's surface a monument's floor is.
+/// How far below the sea's surface (at least) a monument's floor is.
 pub const DEPTH: i32 = 19;
+/// How deep a dip in the sea floor its basin fills with sand.
+pub const FILL: i32 = 5;
 /// How far out from its middle a monument's basin reaches.
 pub const BASIN: i32 = 16;
 
@@ -60,10 +62,12 @@ pub fn monument_blocks(site: &Site) -> Vec<(IVec3, Id)> {
     let s = site.seed;
     let mut out = Vec::new();
     let mut put = |x: i32, y: i32, z: i32, id: Id| out.push((o + ivec3(x, y, z), id));
-    // The basin: flooded up to the sea, with a sandy floor.
+    // The basin: flooded up to the sea, with a sandy floor (filling any dips).
     for x in -BASIN..=BASIN {
         for z in -BASIN..=BASIN {
-            put(x, -1, z, SAND);
+            for y in -FILL..0 {
+                put(x, y, z, SAND);
+            }
             for y in 0..=crate::world::SEA - o.y {
                 put(x, y, z, WATER);
             }

@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 pub const CW: i32 = 16;
 pub const CH: i32 = 128;
 pub const SEA: i32 = 40;
+/// How deep (below the sea) the shallow coastal shelf goes before the sea floor drops away.
+const SEA_SHELF: f32 = 2.0;
 const CHUNK_VOL: usize = (CW * CW * CH) as usize;
 
 #[inline]
@@ -486,6 +488,15 @@ impl Generator {
         // Tall peaks ease off toward the top of the world instead of being cut flat.
         let knee = (CH - 44) as f32;
         let h = if h > knee { knee + (h - knee) / (1.0 + (h - knee) / 24.0) } else { h };
+        // The sea floor falls away offshore: shallow by the coast, deep out at sea.
+        let d = SEA as f32 - 1.0 - h;
+        let h = if d > 0.0 {
+            let deep = d * 1.6 + (d - SEA_SHELF).max(0.0) * 1.4;
+            // (Easing off toward the bottom, so it never reaches the world's floor.)
+            SEA as f32 - 1.0 - deep / (1.0 + deep / 60.0)
+        } else {
+            h
+        };
         let h = (h as i32).clamp(4, CH - 20);
         let t = self.temp.fbm2(fx / (520.0 * bs) + 300.0, fz / (520.0 * bs), 3);
         let m = self.moist.fbm2(fx / (380.0 * bs), fz / (380.0 * bs) - 200.0, 3);

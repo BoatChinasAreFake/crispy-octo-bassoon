@@ -614,7 +614,9 @@ pub const PRISMARINE_CRYSTALS: Id = FIRST_ITEM + 244;
 /// What a Conduit is made of: a Heart of the Sea (buried treasure) and eight shells.
 pub const NAUTILUS_SHELL: Id = FIRST_ITEM + 245;
 pub const HEART_OF_THE_SEA: Id = FIRST_ITEM + 246;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 247;
+/// From Glow Squid: makes a sign's words glow.
+pub const GLOW_INK_SAC: Id = FIRST_ITEM + 247;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 248;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2676,6 +2678,7 @@ impl Registry {
         items.push(item("prismarine_crystals", "Prismarine Crystals (Wet Sparkles)", T_PRISMARINE_CRYSTALS));
         items.push(item("nautilus_shell", "Nautilus Shell (Spiral, Spiralling)", T_NAUTILUS_SHELL));
         items.push(ItemDef { stack: 1, ..item("heart_of_the_sea", "Heart of the Sea (Beats Faintly)", T_HEART_OF_THE_SEA) });
+        items.push(item("glow_ink_sac", "Glow Ink Sac (Squid Highlighter)", T_GLOW_INK_SAC));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };

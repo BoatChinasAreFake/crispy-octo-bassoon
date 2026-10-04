@@ -8,13 +8,13 @@
 
 The plan below runs from v0.2 to v1.0.0. Stick to it:
 
-- **One version at a time, in order.** Each version is one big update. Don't start a version's items before the previous version is released, and don't split a version into smaller batches.
+- **One version at a time, in order, released in parts.** Each version ships as a few parts (tagged `v0.2-part1`, `v0.2-part2`, ...), each a release of its own made of whole items from the list. The parts are listed under each version as they're planned. Don't start a version's items before the previous version's last part is released.
 - **Don't wander.** Don't add features that aren't on the list for the version being worked on, and don't pull items forward from later versions. If something new seems worth doing, suggest it to the user and only add it to the list if they agree.
-- **Between versions, only fixes.** Bug fixes and small requests from the user can go out as patch releases (v0.2.1, v0.2.2, ...). The user decides what counts as a small request.
+- **Between versions, only fixes.** Bug fixes and small requests from the user can go out as patch releases (v0.2.1, v0.2.2, ...), or ride along in the next part while a version is in progress. The user decides what counts as a small request.
 - **Changing the plan.** Only the user changes this plan. When they do, update this file in the same session.
-- **Every version ships with:** tests for the new rules, playtest-bot coverage of anything that syncs in multiplayer, advancements for the new content, screenshots checked, the README updated, 0 Clippy warnings, and a publish only when the user says "Yes".
+- **Every part ships with** (for what's in it): tests for the new rules, playtest-bot coverage of anything that syncs in multiplayer, advancements for the new content, screenshots checked, the README updated, 0 Clippy warnings, and a publish only when the user says "Yes".
 - **Originals.** Each version from v0.2 to v0.8 also has two additions that aren't in Minecraft, listed under it as "Originals". They're as much a part of the version as the rest of its list.
-- **When a version is released,** mark it **(released)** here and leave its list in place so it's clear what each version contained.
+- **When a part or a version is released,** mark it **(released)** here and leave its list in place so it's clear what each one contained.
 
 ## v0.2: Underground and ruins
 
@@ -24,10 +24,15 @@ The plan below runs from v0.2 to v1.0.0. Stick to it:
 4. Night threats: Witches (potion throwers), desert Groaners (husks) and snowy Rattlers (strays) that slow you.
 5. Ocean and cave creatures: Glow Squid (ink), Bats, and the Allay (collects matching items).
 8. A second boss: a Wither-like boss built from soul sand and skulls, dropping a beacon-upgrade star.
+9. Deeper oceans (the user's request): the sea floor drops away offshore, and monuments sit on it.
 
 Originals:
 - Cave-ins: digging out a big hollow with no support makes the ceiling creak, drop dust, then collapse. Pillars and wooden beams hold it up, and a Support Gauge shows how stable a room is.
 - Spelunker's Rope: throw it down a shaft and climb it. Ropes stay put and show on maps.
+
+Parts:
+- Part 1: items 1 to 5 and 9.
+- Part 2: item 8 and the two originals (this is the last part).
 
 ## v0.3: A wider world
 

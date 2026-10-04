@@ -695,6 +695,24 @@ pub const T_GUARDIAN_SPIKE: u16 = 862;
 pub const T_ELDER_GUARDIAN: u16 = 863;
 pub const T_ELDER_EYE: u16 = 864;
 pub const T_GUARDIAN_LASER: u16 = 865;
+// Night threats and small creatures.
+pub const T_GLOW_INK_SAC: u16 = 866;
+pub const T_WITCH_ROBE: u16 = 867;
+pub const T_WITCH_FACE: u16 = 868;
+pub const T_WITCH_HAT: u16 = 869;
+pub const T_DESERT_SKIN: u16 = 870;
+pub const T_DESERT_FACE: u16 = 871;
+pub const T_DESERT_CLOTH: u16 = 872;
+pub const T_STRAY_BONE: u16 = 873;
+pub const T_STRAY_FACE: u16 = 874;
+pub const T_STRAY_CLOTH: u16 = 875;
+pub const T_GLOW_SQUID: u16 = 876;
+pub const T_GLOW_SQUID_FACE: u16 = 877;
+pub const T_BAT: u16 = 878;
+pub const T_BAT_WING: u16 = 879;
+pub const T_ALLAY: u16 = 880;
+pub const T_ALLAY_FACE: u16 = 881;
+pub const T_ALLAY_WING: u16 = 882;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3683,6 +3701,58 @@ fn home_tiles(a: &mut Atlas) {
     cave_tiles(a);
     temple_tiles(a);
     monument_tiles(a);
+    night_tiles(a);
+}
+
+/// v0.2's night threats and small creatures.
+fn night_tiles(a: &mut Atlas) {
+    a.each(T_GLOW_INK_SAC, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        let sac = dx * dx / 25.0 + dy * dy / 36.0 < 1.0;
+        let tie = (6..10).contains(&x) && (1..4).contains(&y);
+        if sac { shade(if (x * 3 + y) % 5 == 0 { rgb(220, 255, 250) } else { rgb(60, 200, 190) }, r.range(0.9, 1.06)) } else if tie { rgb(30, 90, 90) } else { [0, 0, 0, 0] }
+    });
+    // A Witch: a purple robe, a green-tinged face with a big nose and a wart, a black hat.
+    a.each(T_WITCH_ROBE, |x, y, r, _| shade(if y % 5 == 0 { rgb(70, 40, 80) } else if x % 7 == 3 { rgb(60, 110, 50) } else { rgb(95, 55, 105) }, r.range(0.88, 1.06)));
+    a.each(T_WITCH_FACE, |x, y, r, _| {
+        let eye = y == 6 && (x == 4 || x == 11);
+        let nose = (7..9).contains(&x) && (7..12).contains(&y);
+        let wart = x == 9 && y == 10;
+        if eye { rgb(150, 230, 90) } else if wart { rgb(70, 110, 40) } else if nose { rgb(170, 160, 120) } else { shade(rgb(185, 175, 140), r.range(0.92, 1.05)) }
+    });
+    a.each(T_WITCH_HAT, |x, y, r, _| shade(if y == 12 { rgb(110, 60, 120) } else { rgb(35, 30, 40) }, if (x + y) % 6 == 0 { 0.85 } else { 1.0 } * r.range(0.92, 1.06)));
+    // A desert Groaner: dried-out, sandy, in rags.
+    a.each(T_DESERT_SKIN, |_, _, r, _| shade(rgb(165, 140, 95), r.range(0.85, 1.08)));
+    a.each(T_DESERT_FACE, |x, y, r, _| {
+        let eye = (5..7).contains(&y) && (x == 4 || x == 5 || x == 10 || x == 11);
+        let mouth = y == 11 && (5..11).contains(&x);
+        if eye { rgb(40, 30, 20) } else if mouth { rgb(90, 70, 45) } else { shade(rgb(165, 140, 95), r.range(0.88, 1.06)) }
+    });
+    a.each(T_DESERT_CLOTH, |x, y, r, _| shade(if (x + y * 3) % 7 == 0 { rgb(120, 95, 60) } else { rgb(190, 170, 120) }, r.range(0.86, 1.06)));
+    // A snowy Rattler: frosty bones, ragged grey wrappings.
+    a.each(T_STRAY_BONE, |x, y, r, _| shade(if (x + y) % 5 == 0 { rgb(200, 225, 230) } else { rgb(165, 190, 195) }, r.range(0.9, 1.06)));
+    a.each(T_STRAY_FACE, |x, y, r, _| {
+        let eye = (5..8).contains(&y) && ((3..6).contains(&x) || (10..13).contains(&x));
+        let teeth = y == 11 && x % 2 == 0 && (4..12).contains(&x);
+        if eye { rgb(30, 40, 50) } else if teeth { rgb(120, 140, 145) } else { shade(rgb(175, 200, 205), r.range(0.9, 1.05)) }
+    });
+    a.each(T_STRAY_CLOTH, |x, y, r, _| shade(if (x * 2 + y) % 6 < 2 { rgb(80, 95, 100) } else { rgb(120, 135, 140) }, r.range(0.86, 1.06)));
+    // A Glow Squid: teal with glowing speckles.
+    a.each(T_GLOW_SQUID, |x, y, r, _| if (x * 7 + y * 5) % 11 == 0 { rgb(200, 255, 245) } else { shade(rgb(40, 140, 140), r.range(0.85, 1.1)) });
+    a.each(T_GLOW_SQUID_FACE, |x, y, r, _| {
+        let eye = (5..9).contains(&y) && ((2..5).contains(&x) || (11..14).contains(&x));
+        if eye { if y == 6 { rgb(250, 255, 250) } else { rgb(20, 60, 60) } } else { shade(rgb(40, 140, 140), r.range(0.85, 1.1)) }
+    });
+    // A Bat: brown fur, leathery wings.
+    a.each(T_BAT, |x, y, r, _| if (y == 4 || y == 5) && (x == 5 || x == 10) { rgb(20, 15, 15) } else { shade(rgb(80, 60, 45), r.range(0.85, 1.1)) });
+    a.each(T_BAT_WING, |x, _, r, _| shade(if x % 4 == 0 { rgb(40, 30, 25) } else { rgb(65, 50, 40) }, r.range(0.9, 1.05)));
+    // An Allay: a little blue spirit with big eyes.
+    a.each(T_ALLAY, |x, y, r, _| shade(if (x + y) % 6 == 0 { rgb(170, 230, 255) } else { rgb(90, 190, 245) }, r.range(0.92, 1.06)));
+    a.each(T_ALLAY_FACE, |x, y, r, _| {
+        let eye = (6..10).contains(&y) && ((3..6).contains(&x) || (10..13).contains(&x));
+        if eye { if y == 6 { rgb(255, 255, 255) } else { rgb(20, 40, 90) } } else { shade(rgb(110, 205, 250), r.range(0.92, 1.06)) }
+    });
+    a.each(T_ALLAY_WING, |x, y, _, _| if (x + y) % 3 == 0 { [235, 250, 255, 220] } else { [190, 230, 255, 170] });
 }
 
 /// v0.2's Ocean Monument: prismarine, its lights and treasures, and Guardians.

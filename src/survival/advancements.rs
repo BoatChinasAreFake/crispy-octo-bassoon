@@ -173,6 +173,9 @@ pub const ALL: &[Advancement] = &[
     adv("elder_statesman", "Elder Statesman", "Defeat an Elder Guardian. Your arms will thank you."),
     adv("cursed", "Heavy Arms", "Get cursed with Mining Fatigue by an Elder Guardian."),
     adv("conduit_power", "Breathe Easy", "Feel a Conduit's power underwater."),
+    adv("which_witch", "Which Witch?", "Defeat a Witch. Mind the bottles."),
+    adv("local_flavour", "Local Flavour", "Defeat a desert Groaner or a snowy Rattler."),
+    adv("fetch", "Fetch!", "Give an Allay something to fetch."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -185,7 +188,7 @@ const CREATURES: &[&str] = &[
     "bacon", "hiss_tory", "groan_up", "fluffed", "dont_blink", "staring_champ", "rude_teleport", "udderly", "bone_zone", "arachno", "split_decision", "robin_hood", "good_boy",
     "the_birds_and_the_bees", "giddy_up", "hello_my_name_is", "pretty_polly", "soggy", "spear_it", "fishy_business", "sly_friend", "special_delivery", "tongue_tied", "scute_cute",
     "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
-    "full_flight", "jousting", "resin_up",
+    "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",

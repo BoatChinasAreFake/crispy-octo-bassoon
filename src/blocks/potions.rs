@@ -51,6 +51,14 @@ pub enum Potion {
     MiningFatigue,
     /// Not a potion: a working Conduit nearby (you can breathe underwater).
     ConduitPower,
+    /// From Witches and snowy Rattlers' arrows: you walk slower.
+    Slowness,
+    /// From Witches: your blows land softer.
+    Weakness,
+    /// From Witches: health drains (but never below half a heart).
+    Poison,
+    /// From desert Groaners: you get hungry faster.
+    Hunger,
 }
 
 /// The first five, which beacons give (and whose items come first).
@@ -58,7 +66,7 @@ pub const ALL: [Potion; 5] = [Potion::Healing, Potion::Speed, Potion::FireResist
 /// Everything a brewing stand makes.
 pub const BREWABLE: [Potion; 7] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping, Potion::Strength, Potion::Regeneration];
 /// Every effect, in wire order.
-pub const EFFECTS: [Potion; 11] = [
+pub const EFFECTS: [Potion; 15] = [
     Potion::Healing,
     Potion::Speed,
     Potion::FireResistance,
@@ -70,10 +78,19 @@ pub const EFFECTS: [Potion; 11] = [
     Potion::Hero,
     Potion::MiningFatigue,
     Potion::ConduitPower,
+    Potion::Slowness,
+    Potion::Weakness,
+    Potion::Poison,
+    Potion::Hunger,
 ];
 /// Extra melee damage with Strength, and seconds per heart-half with Regeneration.
 pub const STRENGTH_BONUS: f32 = 3.0;
 pub const REGEN_EVERY: f32 = 2.5;
+/// Seconds per half-heart lost to Poison, damage taken off by Weakness, and
+/// exhaustion a second from Hunger (per level).
+pub const POISON_EVERY: f32 = 1.25;
+pub const WEAKNESS_PENALTY: f32 = 3.0;
+pub const HUNGER_PER_SEC: f32 = 0.5;
 
 /// One canonical timed effect on a player.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -128,6 +145,10 @@ impl Potion {
             Potion::Hero => "Hero of the Village",
             Potion::MiningFatigue => "Mining Fatigue",
             Potion::ConduitPower => "Conduit Power",
+            Potion::Slowness => "Slowness",
+            Potion::Weakness => "Weakness",
+            Potion::Poison => "Poison",
+            Potion::Hunger => "Hunger",
         }
     }
     pub fn key(self) -> &'static str {
@@ -143,6 +164,10 @@ impl Potion {
             Potion::Hero => "hero_of_the_village",
             Potion::MiningFatigue => "mining_fatigue",
             Potion::ConduitPower => "conduit_power",
+            Potion::Slowness => "slowness",
+            Potion::Weakness => "weakness",
+            Potion::Poison => "poison",
+            Potion::Hunger => "hunger",
         }
     }
     pub fn colour(self) -> [u8; 3] {
@@ -158,6 +183,10 @@ impl Potion {
             Potion::Hero => [90, 220, 90],
             Potion::MiningFatigue => [90, 80, 40],
             Potion::ConduitPower => [80, 190, 230],
+            Potion::Slowness => [90, 110, 140],
+            Potion::Weakness => [70, 70, 80],
+            Potion::Poison => [80, 150, 40],
+            Potion::Hunger => [90, 110, 60],
         }
     }
     /// What goes in to make it.
@@ -170,7 +199,7 @@ impl Potion {
             Potion::Leaping => FEATHER,
             Potion::Strength => SIZZLE_POWDER,
             Potion::Regeneration => WEEPER_TEAR,
-            Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower => AIR,
+            Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower | Potion::Slowness | Potion::Weakness | Potion::Poison | Potion::Hunger => AIR,
         }
     }
     /// Over at once (healing) rather than lasting.
@@ -289,7 +318,25 @@ impl Game {
         }
         // What the effects do to the player's body.
         let speed_level = self.effect_level(Potion::Speed) as f32;
-        self.player.speed_boost = 1.0 + 0.35 * speed_level;
+        let slow_level = self.effect_level(Potion::Slowness) as f32;
+        self.player.speed_boost = (1.0 + 0.35 * speed_level) * (1.0 - 0.15 * slow_level).max(0.3);
+        // Poison drains health (never below half a heart); Hunger, food.
+        let poison = self.effect_level(Potion::Poison) as f32;
+        if poison > 0.0 && self.dead.is_none() {
+            self.poison_clock += dt;
+            if self.poison_clock >= POISON_EVERY / poison {
+                self.poison_clock = 0.0;
+                if self.player.health > 1.0 {
+                    self.player.health = (self.player.health - 1.0).max(1.0);
+                    self.player.hurt = 0.3;
+                    self.sfx(Sfx::Hurt, None);
+                }
+            }
+        }
+        let hunger = self.effect_level(Potion::Hunger) as f32;
+        if hunger > 0.0 && !self.creative {
+            self.player.hunger.exhaust(HUNGER_PER_SEC * hunger * dt);
+        }
         self.player.leaping = self.effect_level(Potion::Leaping);
         let regeneration_level = self.effect_level(Potion::Regeneration) as f32;
         if regeneration_level > 0.0 && self.dead.is_none() {

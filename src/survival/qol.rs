@@ -36,7 +36,7 @@ pub fn restyle(style: u8, item: Id) -> Option<u8> {
         let c = (item - DYE_FIRST) as u8 + 1;
         return (style & 15 != c).then_some((style & GLOW) | c);
     }
-    (item == GLOWSHROOM && style & GLOW == 0).then_some(style | GLOW)
+    ((item == GLOWSHROOM || item == GLOW_INK_SAC) && style & GLOW == 0).then_some(style | GLOW)
 }
 
 /// A sign's text colour (white unless dyed).
@@ -119,7 +119,7 @@ impl Game {
         }
     }
 
-    /// Right-clicked a sign: a dye colours its words, a Glowshroom makes them glow.
+    /// Right-clicked a sign: a dye colours its words, a Glowshroom (or a Glow Ink Sac) makes them glow.
     pub fn style_sign(&mut self, pos: IVec3) -> bool {
         let held = self.inv.held();
         let style = self.world.sign_styles.get(&pos).copied().unwrap_or(0);
