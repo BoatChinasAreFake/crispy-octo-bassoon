@@ -150,8 +150,15 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
-        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "aurora" | "autumn" | "rainbow" => {
+        "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" => {
             let want = match mode {
+                "savanna" => world::Biome::Savanna,
+                "birchforest" => world::Biome::BirchForest,
+                "darkforest" => world::Biome::DarkForest,
+                "mushroomisland" => world::Biome::MushroomIslands,
+                "icespikes" => world::Biome::IceSpikes,
+                "meadow" => world::Biome::Meadow,
+                "stonypeaks" => world::Biome::StonyPeaks,
                 "aurora" => world::Biome::Snowy,
                 "autumn" => world::Biome::Forest,
                 "rainbow" => world::Biome::Plains,
@@ -164,13 +171,16 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 _ => world::Biome::Taiga,
             };
             // Somewhere well inside the biome (all nine columns around agree), looking across it.
-            for r in 0..160 {
+            // (Islands are small and dark forests patchy: closer in will do for them.)
+            let spread = if matches!(want, world::Biome::MushroomIslands | world::Biome::DarkForest) { 10 } else { 24 };
+            let lift = if want == world::Biome::StonyPeaks { 4.0 } else { 12.0 };
+            for r in 0..400 {
                 for (dx, dz) in ring(r) {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
-                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.column(x + i * 24, z + j * 24).1 == want));
+                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.column(x + i * spread, z + j * spread).1 == want));
                     if inside {
                         let h = generator.column(x, z).0.max(world::SEA);
-                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + 12.0, z as f32 + 0.5), 0.8, -0.35));
+                        return Some((Vec3::new(x as f32 + 0.5, h as f32 + lift, z as f32 + 0.5), 0.8, -0.35));
                     }
                 }
             }
@@ -300,7 +310,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });

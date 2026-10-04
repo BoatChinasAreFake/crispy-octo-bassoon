@@ -406,7 +406,13 @@ pub const BIRCH_LOG: Id = crate::woods::id(1, crate::woods::part::LOG);
 pub const BIRCH_LEAVES: Id = crate::woods::id(1, crate::woods::part::LEAVES);
 pub const DARK_OAK_LOG: Id = crate::woods::id(2, crate::woods::part::LOG);
 pub const DARK_OAK_LEAVES: Id = crate::woods::id(2, crate::woods::part::LEAVES);
-pub const NUM_BLOCKS: Id = WOOD_FIRST + 3 * crate::woods::PER_WOOD;
+/// v0.3's surface biomes: mushroom islands' ground and giant mushrooms, and ice spikes.
+pub const MYCELIUM: Id = WOOD_FIRST + 3 * crate::woods::PER_WOOD;
+pub const MUSHROOM_STEM: Id = MYCELIUM + 1;
+pub const RED_MUSHROOM_BLOCK: Id = MYCELIUM + 2;
+pub const BROWN_MUSHROOM_BLOCK: Id = MYCELIUM + 3;
+pub const PACKED_ICE: Id = MYCELIUM + 4;
+pub const NUM_BLOCKS: Id = MYCELIUM + 5;
 
 pub fn is_snow_layer(id: Id) -> bool {
     (SNOW_LAYER_FIRST..SNOW_LAYER_FIRST + SNOW_LAYERS).contains(&id)
@@ -2476,6 +2482,11 @@ impl Registry {
         rope.shape = Shape::Chain;
         blocks.push(rope);
         blocks.extend(crate::woods::defs());
+        blocks.push(def("mycelium", "Mycelium (Grass, but Fungal)", Cube, true, true, [T_MYCELIUM_TOP, T_MYCELIUM_SIDE, T_DIRT], 0.6, 0, false, DIRT, 0.0, S_GRASS));
+        blocks.push(def("mushroom_stem", "Mushroom Stem (A Very Tall Stalk)", Cube, true, true, [T_MUSHROOM_STEM; 3], 0.2, 0, false, MUSHROOM_STEM, 0.0, S_WOOD));
+        blocks.push(def("red_mushroom_block", "Red Mushroom Block (Spotty Roof)", Cube, true, true, [T_RED_MUSHROOM_BLOCK; 3], 0.2, 0, false, MUSHROOM, 0.0, S_WOOD));
+        blocks.push(def("brown_mushroom_block", "Brown Mushroom Block (Flat Roof)", Cube, true, true, [T_BROWN_MUSHROOM_BLOCK; 3], 0.2, 0, false, MUSHROOM, 0.0, S_WOOD));
+        blocks.push(def("packed_ice", "Packed Ice (Never Melts)", Cube, true, true, [T_PACKED_ICE; 3], 0.5, 0, false, PACKED_ICE, 0.0, S_GLASS));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");

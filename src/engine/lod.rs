@@ -68,6 +68,9 @@ fn surface(h: i32, biome: Biome) -> (Id, [f32; 3]) {
         Biome::Snowy => (SNOW_GRASS, [1.0; 3]),
         Biome::Mangrove => (MUD, [1.0; 3]),
         Biome::PaleGarden => (PALE_MOSS, [1.0; 3]),
+        Biome::MushroomIslands => (MYCELIUM, [1.0; 3]),
+        Biome::IceSpikes => (SNOW_BLOCK, [1.0; 3]),
+        Biome::StonyPeaks => (STONE, [1.0; 3]),
         b => (GRASS, crate::tint::grass(b)),
     }
 }
@@ -81,6 +84,9 @@ fn canopy(biome: Biome) -> Option<(Id, f32)> {
         Biome::Cherry => Some((CHERRY_LEAVES, 0.45)),
         Biome::Mangrove => Some((MANGROVE_LEAVES, 0.5)),
         Biome::PaleGarden => Some((PALE_OAK_LEAVES, 0.6)),
+        Biome::BirchForest => Some((BIRCH_LEAVES, 0.55)),
+        Biome::DarkForest => Some((DARK_OAK_LEAVES, 0.8)),
+        Biome::Savanna => Some((ACACIA_LEAVES, 0.12)),
         _ => None,
     }
 }

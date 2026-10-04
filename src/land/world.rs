@@ -85,10 +85,44 @@ pub enum Biome {
     Mangrove,
     /// A grey, still forest of pale oaks; something in the trunks wakes at night.
     PaleGarden,
+    /// Warm, dry grassland dotted with flat-topped acacias.
+    Savanna,
+    /// A bright forest of white birches.
+    BirchForest,
+    /// A gloomy forest of dark oaks so close together it's dim at noon (and the odd giant mushroom).
+    DarkForest,
+    /// Lonely islands far out at sea: mycelium, giant mushrooms, red-spotted Mooers, and no monsters.
+    MushroomIslands,
+    /// Snowy flats with great spikes of packed ice.
+    IceSpikes,
+    /// High, gentle grassland thick with flowers.
+    Meadow,
+    /// Bare stone mountaintops.
+    StonyPeaks,
 }
 
 impl Biome {
-    pub const ALL: [Biome; 12] = [Biome::Plains, Biome::Forest, Biome::Desert, Biome::Snowy, Biome::Ocean, Biome::Swamp, Biome::Jungle, Biome::Badlands, Biome::Taiga, Biome::Cherry, Biome::Mangrove, Biome::PaleGarden];
+    pub const ALL: [Biome; 19] = [
+        Biome::Plains,
+        Biome::Forest,
+        Biome::Desert,
+        Biome::Snowy,
+        Biome::Ocean,
+        Biome::Swamp,
+        Biome::Jungle,
+        Biome::Badlands,
+        Biome::Taiga,
+        Biome::Cherry,
+        Biome::Mangrove,
+        Biome::PaleGarden,
+        Biome::Savanna,
+        Biome::BirchForest,
+        Biome::DarkForest,
+        Biome::MushroomIslands,
+        Biome::IceSpikes,
+        Biome::Meadow,
+        Biome::StonyPeaks,
+    ];
 
     /// For /locate: "plains", "snowy", "badlands"...
     pub fn from_name(s: &str) -> Option<Biome> {
@@ -110,18 +144,29 @@ impl Biome {
             Biome::Cherry => "Cherry Grove (Aggressively Pink)",
             Biome::Mangrove => "Mangrove Swamp (Rooty)",
             Biome::PaleGarden => "Pale Garden (Don't Look Away)",
+            Biome::Savanna => "Savanna (Flat Tops)",
+            Biome::BirchForest => "Birch Forest (Pale and Interesting)",
+            Biome::DarkForest => "Dark Forest (Bring a Torch)",
+            Biome::MushroomIslands => "Mushroom Islands (Fungi to Be With)",
+            Biome::IceSpikes => "Ice Spikes (Pointy, Chilly)",
+            Biome::Meadow => "Meadow (Hay Fever)",
+            Biome::StonyPeaks => "Stony Peaks (Rock Bottom, but Up)",
         }
     }
 
     /// Too dry for rain (it just stays cloudy).
     pub fn dry(self) -> bool {
-        matches!(self, Biome::Desert | Biome::Badlands)
+        matches!(self, Biome::Desert | Biome::Badlands | Biome::Savanna)
     }
 
     /// What kind of tree grows here.
     pub fn tree(self) -> TreeKind {
         match self {
-            Biome::Snowy | Biome::Taiga => TreeKind::Spruce,
+            Biome::Snowy | Biome::Taiga | Biome::IceSpikes | Biome::StonyPeaks => TreeKind::Spruce,
+            Biome::Savanna => TreeKind::Acacia,
+            Biome::BirchForest | Biome::Meadow => TreeKind::Birch,
+            Biome::DarkForest => TreeKind::DarkOak,
+            Biome::MushroomIslands => TreeKind::RedMushroom,
             Biome::Jungle => TreeKind::Jungle,
             Biome::Swamp => TreeKind::Swamp,
             Biome::Cherry => TreeKind::Cherry,
@@ -147,6 +192,15 @@ pub enum TreeKind {
     Mangrove,
     /// A thick trunk under a broad, flat, pale crown hung with moss.
     PaleOak,
+    /// A trunk that leans over to one side under a wide, flat crown.
+    Acacia,
+    /// Tall and slim, white bark, a small round crown.
+    Birch,
+    /// A thick, short trunk under a broad dark crown.
+    DarkOak,
+    /// Giant mushrooms: a stalk under a domed red cap, or a flat brown one.
+    RedMushroom,
+    BrownMushroom,
 }
 
 impl TreeKind {
@@ -157,6 +211,10 @@ impl TreeKind {
             TreeKind::Cherry => CHERRY_LOG,
             TreeKind::Mangrove => MANGROVE_LOG,
             TreeKind::PaleOak => PALE_OAK_LOG,
+            TreeKind::Acacia => ACACIA_LOG,
+            TreeKind::Birch => BIRCH_LOG,
+            TreeKind::DarkOak => DARK_OAK_LOG,
+            TreeKind::RedMushroom | TreeKind::BrownMushroom => MUSHROOM_STEM,
             _ => LOG,
         }
     }
@@ -167,6 +225,11 @@ impl TreeKind {
             TreeKind::Cherry => CHERRY_LEAVES,
             TreeKind::Mangrove => MANGROVE_LEAVES,
             TreeKind::PaleOak => PALE_OAK_LEAVES,
+            TreeKind::Acacia => ACACIA_LEAVES,
+            TreeKind::Birch => BIRCH_LEAVES,
+            TreeKind::DarkOak => DARK_OAK_LEAVES,
+            TreeKind::RedMushroom => RED_MUSHROOM_BLOCK,
+            TreeKind::BrownMushroom => BROWN_MUSHROOM_BLOCK,
             _ => LEAVES,
         }
     }
@@ -180,6 +243,10 @@ impl TreeKind {
             TreeKind::Cherry => (4, 2.0),
             TreeKind::Mangrove => (6, 3.0),
             TreeKind::PaleOak => (6, 3.0),
+            TreeKind::Acacia => (3, 2.0),
+            TreeKind::Birch => (5, 3.0),
+            TreeKind::DarkOak => (5, 3.0),
+            TreeKind::RedMushroom | TreeKind::BrownMushroom => (4, 3.0),
         };
         lo + (roll * span) as i32
     }
@@ -328,6 +395,91 @@ impl TreeKind {
                     let o = ivec3(dx, top - 2, dz);
                     if roll(o) < 0.45 {
                         leaf(o, &mut out);
+                    }
+                }
+            }
+            TreeKind::Acacia => {
+                // The trunk leans off to one side, then a wide, flat crown on top.
+                let dirs = [ivec3(1, 0, 0), ivec3(-1, 0, 0), ivec3(0, 0, 1), ivec3(0, 0, -1)];
+                let d = dirs[(roll(ivec3(0, -32, 0)) * 4.0) as usize % 4];
+                out.push((d + IVec3::Y * (top + 1), log, true));
+                out.push((d * 2 + IVec3::Y * (top + 2), log, true));
+                let crown = d * 2 + IVec3::Y * (top + 3);
+                for dz in -2..=2i32 {
+                    for dx in -2..=2i32 {
+                        let o = crown + ivec3(dx, 0, dz);
+                        if dx.abs() == 2 && dz.abs() == 2 {
+                            continue;
+                        }
+                        leaf(o, &mut out);
+                        if dx.abs() <= 1 && dz.abs() <= 1 && !(dx.abs() == 1 && dz.abs() == 1 && roll(o) < 0.5) {
+                            leaf(o + IVec3::Y, &mut out);
+                        }
+                    }
+                }
+            }
+            TreeKind::Birch => {
+                // Like an oak's, but smaller and higher.
+                for dy in -2..=1 {
+                    let rad: i32 = if dy <= -1 { 2 } else { 1 };
+                    for dz in -rad..=rad {
+                        for dx in -rad..=rad {
+                            let o = ivec3(dx, top + dy, dz);
+                            if dx.abs() == rad && dz.abs() == rad && (dy == 1 || rad == 1 || roll(o) < 0.6) {
+                                continue;
+                            }
+                            leaf(o, &mut out);
+                        }
+                    }
+                }
+            }
+            TreeKind::DarkOak => {
+                // Two by two, short and thick, under a broad dark crown.
+                for (dx, dz) in [(1, 0), (0, 1), (1, 1)] {
+                    for y in 1..=top {
+                        out.push((ivec3(dx, y, dz), log, true));
+                    }
+                }
+                for dy in -1..=1 {
+                    let rad: i32 = if dy == 1 { 2 } else { 3 };
+                    for dz in -rad..=rad + 1 {
+                        for dx in -rad..=rad + 1 {
+                            let (ex, ez) = (if dx > 0 { dx - 1 } else { dx }, if dz > 0 { dz - 1 } else { dz });
+                            let o = ivec3(dx, top + dy, dz);
+                            if ex * ex + ez * ez > rad * rad + 1 || (ex * ex + ez * ez >= rad * rad && roll(o) < 0.4) {
+                                continue;
+                            }
+                            leaf(o, &mut out);
+                        }
+                    }
+                }
+            }
+            TreeKind::RedMushroom => {
+                // A domed cap: a flat top, and sides hanging down round the stalk.
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        leaf(ivec3(dx, top + 1, dz), &mut out);
+                    }
+                }
+                for dy in -2..=0 {
+                    for dz in -2..=2i32 {
+                        for dx in -2..=2i32 {
+                            let ring = dx.abs() == 2 || dz.abs() == 2;
+                            if ring && !(dx.abs() == 2 && dz.abs() == 2) {
+                                leaf(ivec3(dx, top + dy, dz), &mut out);
+                            }
+                        }
+                    }
+                }
+            }
+            TreeKind::BrownMushroom => {
+                // A wide, flat cap.
+                for dz in -3..=3i32 {
+                    for dx in -3..=3i32 {
+                        if dx.abs() == 3 && dz.abs() == 3 {
+                            continue;
+                        }
+                        leaf(ivec3(dx, top + 1, dz), &mut out);
                     }
                 }
             }
@@ -510,8 +662,12 @@ impl Generator {
         let h = if mesa > 0.0 && h > SEA { (h + ((h - SEA) as f32 * 0.9 * mesa) as i32).min(CH - 20) } else { h };
         let biome = if h < SEA - 1 {
             Biome::Ocean
+        } else if h > 92 && t > -0.05 {
+            // Mountaintops too warm for snow are bare rock.
+            Biome::StonyPeaks
         } else if t < -0.3 || h > 92 {
-            Biome::Snowy
+            // Here and there in the snow, fields of ice spikes.
+            if h <= 92 && self.temp.noise2(fx / 140.0 - 700.0, fz / 140.0 + 300.0) > 0.3 { Biome::IceSpikes } else { Biome::Snowy }
         } else if swampy > 0.5 && h <= SEA + 2 {
             Biome::Swamp
         } else if t < -0.12 && m > -0.05 {
@@ -520,6 +676,9 @@ impl Generator {
             Biome::Badlands
         } else if t > 0.25 && m < 0.05 {
             Biome::Desert
+        } else if t > 0.25 && m < 0.15 {
+            // Warm, but not desert-dry: grassland and acacias.
+            Biome::Savanna
         } else if t > 0.15 && m > 0.15 && h <= SEA + 3 {
             // Where the jungle meets the sea: mangroves on the mudflats.
             Biome::Mangrove
@@ -531,10 +690,32 @@ impl Generator {
         } else if (-0.12..-0.02).contains(&t) && m > 0.14 {
             // Cool and damp: the pale forest.
             Biome::PaleGarden
+        } else if (-0.02..0.15).contains(&t) && m > 0.22 {
+            // Mild and wetter still: the dark forest.
+            Biome::DarkForest
+        } else if m > 0.08 && (0.05..0.15).contains(&t) {
+            Biome::BirchForest
         } else if m > 0.08 {
             Biome::Forest
+        } else if h > SEA + 16 && m > -0.08 && (-0.12..0.15).contains(&t) {
+            // High, gentle grassland: meadows.
+            Biome::Meadow
         } else {
             Biome::Plains
+        };
+        // Far out in deep water, now and then, the sea floor rises into a mushroom island.
+        let (h, biome) = if biome == Biome::Ocean && h < SEA - 4 {
+            let k = self.mushroom_isle(x, z);
+            if k > 0.0 {
+                // A steep shore, then a low hump up to five blocks above the sea.
+                let top = SEA as f32 + 1.0 + (k - 0.5).max(0.0) * 10.0;
+                let hh = (h as f32 + (top - h as f32) * (k * 2.0).min(1.0)).round() as i32;
+                (hh, if hh >= SEA - 1 { Biome::MushroomIslands } else { Biome::Ocean })
+            } else {
+                (h, biome)
+            }
+        } else {
+            (h, biome)
         };
         // Mangrove mudflats sit right at sea level, in and out of the water.
         let h = if biome == Biome::Mangrove { h.min(bumps.round() as i32) } else { h };
@@ -576,6 +757,11 @@ impl Generator {
             Biome::Cherry => 0.02,
             Biome::Mangrove => 0.016,
             Biome::PaleGarden => 0.04,
+            Biome::Savanna => 0.006,
+            Biome::BirchForest => 0.035,
+            Biome::DarkForest => 0.07,
+            Biome::MushroomIslands => 0.008,
+            Biome::Meadow => 0.0015,
             _ => 0.0,
         };
         // Swamp trees and mangroves stand in the shallows too.
@@ -583,7 +769,14 @@ impl Generator {
         if h <= ground || hash2(self.seed ^ 0x7EE, x, z) >= density {
             return None;
         }
-        let kind = biome.tree();
+        let kind = match biome.tree() {
+            // Half the giant mushrooms are brown; dark forests grow the odd one too.
+            TreeKind::RedMushroom if hash2(self.seed ^ 0x3B0, x, z) < 0.5 => TreeKind::BrownMushroom,
+            TreeKind::DarkOak if hash2(self.seed ^ 0x3B1, x, z) < 0.08 => [TreeKind::RedMushroom, TreeKind::BrownMushroom][(hash2(self.seed ^ 0x3B2, x, z) * 2.0) as usize % 2],
+            // A meadow's trees are oaks as often as birches.
+            TreeKind::Birch if biome == Biome::Meadow && hash2(self.seed ^ 0x3B3, x, z) < 0.5 => TreeKind::Oak,
+            k => k,
+        };
         Some((h, kind.trunk(hash2(self.seed ^ 0x7E1, x, z)), kind))
     }
 
@@ -657,7 +850,8 @@ impl Generator {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
                 let (h, biome) = self.column(x, z);
                 cols[(lz * CW + lx) as usize] = (h, biome);
-                let beach = (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands);
+                let beach = (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::MushroomIslands | Biome::IceSpikes | Biome::StonyPeaks);
+                let peaks = biome == Biome::StonyPeaks;
                 // (Mangrove mudflats are muddier swamps.)
                 let swamp = matches!(biome, Biome::Swamp | Biome::Mangrove);
                 let mangrove = biome == Biome::Mangrove;
@@ -676,7 +870,17 @@ impl Generator {
                         // Deserts sit on a few layers of sandstone.
                         if biome == Biome::Desert && y >= h - 8 { SANDSTONE } else { STONE }
                     } else if y < h {
-                        if biome == Biome::Desert || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else { DIRT }
+                        if biome == Biome::Desert || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else if peaks { STONE } else { DIRT }
+                    } else if y == h && h >= SEA - 1 && matches!(biome, Biome::StonyPeaks | Biome::MushroomIslands | Biome::IceSpikes) {
+                        match biome {
+                            // Bare rock, with patches of gravel and calcite.
+                            Biome::StonyPeaks => {
+                                let r = hash2(s ^ 0x57E, x >> 2, z >> 2);
+                                if r < 0.15 { GRAVEL } else if r < 0.25 { CALCITE } else { STONE }
+                            }
+                            Biome::MushroomIslands => MYCELIUM,
+                            _ => SNOW_BLOCK,
+                        }
                     } else if y == h {
                         if swamp {
                             let mud = if mangrove { 0.65 } else { 0.3 };
@@ -790,7 +994,7 @@ impl Generator {
                 if top < CH && b[idx(lx, h, lz)] == GRASS && b[idx(lx, top, lz)] == AIR {
                     let r = hash2(s ^ 0xF10, x, z);
                     // Meadows: patches of plains and forest thick with flowers (bees love them).
-                    let meadow = matches!(biome, Biome::Plains | Biome::Forest) && hash2(s ^ 0xF12, x >> 4, z >> 4) < 0.15;
+                    let meadow = biome == Biome::Meadow || (matches!(biome, Biome::Plains | Biome::Forest) && hash2(s ^ 0xF12, x >> 4, z >> 4) < 0.15);
                     if biome == Biome::PaleGarden {
                         // All grey: pale moss everywhere, nothing green or bright on
                         // it but the odd Eyeblossom (open at night).
@@ -809,7 +1013,8 @@ impl Generator {
                     } else if biome == Biome::Cherry && r < 0.4 {
                         // Petals everywhere under the cherry trees.
                         b[idx(lx, top, lz)] = PINK_PETALS;
-                    } else if r < 0.11 {
+                    } else if r < 0.11 || (biome == Biome::Savanna && r < 0.24) {
+                        // (Savannas are long grass all over.)
                         b[idx(lx, top, lz)] = TALL_GRASS;
                     } else if r < 0.1125 && biome == Biome::Plains {
                         b[idx(lx, top, lz)] = PUMPKIN;
@@ -829,6 +1034,17 @@ impl Generator {
                         for y in top..(top + tall).min(CH - 1) {
                             b[idx(lx, y, lz)] = BAMBOO;
                         }
+                    }
+                }
+                // Mushrooms on mycelium.
+                if top < CH && b[idx(lx, h, lz)] == MYCELIUM && b[idx(lx, top, lz)] == AIR && hash2(s ^ 0x3C0, x, z) < 0.04 {
+                    b[idx(lx, top, lz)] = MUSHROOM;
+                }
+                // Ice spikes: cones of packed ice, now and then a very tall one.
+                if biome == Biome::IceSpikes {
+                    let spike = self.ice_spike(x, z);
+                    for y in top..(top + spike).min(CH - 2) {
+                        b[idx(lx, y, lz)] = PACKED_ICE;
                     }
                 }
                 // Coral reefs on warm, shallow sea floors.
@@ -917,6 +1133,59 @@ impl Generator {
     }
 }
 
+impl Generator {
+    /// How far into a mushroom island this column is (0: not at all, 1: its
+    /// middle). They're rare: a few in every thousand blocks of sea, each one
+    /// a lumpy round island 50 to 100 blocks across.
+    pub fn mushroom_isle(&self, x: i32, z: i32) -> f32 {
+        const GRID: i32 = 640;
+        let s = self.seed ^ 0x15E;
+        let (gx, gz) = (x.div_euclid(GRID), z.div_euclid(GRID));
+        let mut best: f32 = 0.0;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let (cx, cz) = (gx + dx, gz + dz);
+                if hash2(s, cx, cz) > 0.4 {
+                    continue;
+                }
+                let mid = (cx * GRID + 100 + (hash2(s ^ 1, cx, cz) * 440.0) as i32, cz * GRID + 100 + (hash2(s ^ 2, cx, cz) * 440.0) as i32);
+                let radius = 25.0 + hash2(s ^ 3, cx, cz) * 25.0;
+                let d = (((x - mid.0).pow(2) + (z - mid.1).pow(2)) as f32).sqrt();
+                // (Lumpy edges.)
+                let lumps = self.hills.noise2(x as f32 / 14.0 + 77.0, z as f32 / 14.0) * 8.0;
+                best = best.max(1.0 - (d + lumps) / radius);
+            }
+        }
+        best.max(0.0)
+    }
+
+    /// How tall an ice spike stands at this column (0: none). Spikes stand
+    /// on a grid, one per 12 blocks or so, each a cone from its middle.
+    pub fn ice_spike(&self, x: i32, z: i32) -> i32 {
+        const GRID: i32 = 12;
+        let s = self.seed ^ 0x1CE5;
+        let (gx, gz) = (x.div_euclid(GRID), z.div_euclid(GRID));
+        let mut best = 0;
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let (cx, cz) = (gx + dx, gz + dz);
+                if hash2(s, cx, cz) > 0.55 {
+                    continue;
+                }
+                let mid = (cx * GRID + 2 + (hash2(s ^ 1, cx, cz) * 8.0) as i32, cz * GRID + 2 + (hash2(s ^ 2, cx, cz) * 8.0) as i32);
+                let d = ((x - mid.0).pow(2) + (z - mid.1).pow(2)) as f32;
+                let tall = hash2(s ^ 3, cx, cz) < 0.15;
+                let (height, width) = if tall { (24.0 + hash2(s ^ 4, cx, cz) * 12.0, 1.6) } else { (6.0 + hash2(s ^ 4, cx, cz) * 8.0, 2.4) };
+                let here = height * (1.0 - d.sqrt() / width).max(0.0);
+                if here >= 1.0 && self.column(mid.0, mid.1).1 == Biome::IceSpikes {
+                    best = best.max(here as i32);
+                }
+            }
+        }
+        best
+    }
+}
+
 /// Which flower grows here, from a 0..1 roll (patchy, so flowers come in clumps).
 pub fn flower_for(biome: Biome, r: f32) -> Id {
     let list: &[Id] = match biome {
@@ -925,6 +1194,9 @@ pub fn flower_for(biome: Biome, r: f32) -> Id {
         Biome::Taiga => &[CORNFLOWER, LAVENDER],
         Biome::Swamp => &[CORNFLOWER, FLOWER],
         Biome::Cherry => &[FLOWER, LAVENDER, LAVENDER],
+        Biome::Meadow => &[CORNFLOWER, LAVENDER, DANDELION, FLOWER, CORNFLOWER],
+        Biome::BirchForest => &[FLOWER, DANDELION, CORNFLOWER],
+        Biome::Savanna => &[DANDELION],
         _ => &[FLOWER, DANDELION],
     };
     list[(r * list.len() as f32) as usize % list.len()]
@@ -1625,9 +1897,15 @@ mod biome_tests {
     fn every_biome_turns_up_with_its_own_ground() {
         let g = Generator::new(2024);
         let mut seen: HashMap<&str, (i32, i32)> = HashMap::new();
+        // (And somewhere well up from the shore, for looking at what grows there.)
+        let mut inland: HashMap<&str, (i32, i32)> = HashMap::new();
         for z in (-6000..6000).step_by(40) {
             for x in (-6000..6000).step_by(40) {
-                seen.entry(g.column(x, z).1.name()).or_insert((x, z));
+                let (h, b) = g.column(x, z);
+                seen.entry(b.name()).or_insert((x, z));
+                if h > SEA + 3 {
+                    inland.entry(b.name()).or_insert((x, z));
+                }
             }
         }
         for b in Biome::ALL {
@@ -1645,6 +1923,19 @@ mod biome_tests {
         assert!(has(Biome::Cherry, &|id| id == CHERRY_LEAVES || id == PINK_PETALS));
         assert!(has(Biome::Mangrove, &|id| id == MANGROVE_ROOTS || id == MANGROVE_LEAVES));
         assert!(has(Biome::Mangrove, &|id| id == MUD));
+        // v0.3's: each with its own trees or ground (looked at inland).
+        let has_inland = |biome: Biome, what: &dyn Fn(Id) -> bool| {
+            let (x, z) = inland[biome.name()];
+            let chunk = g.generate(x.div_euclid(CW), z.div_euclid(CW));
+            chunk.iter().any(|&id| what(id))
+        };
+        assert!(has_inland(Biome::Savanna, &|id| id == ACACIA_LEAVES || id == ACACIA_LOG || id == TALL_GRASS));
+        assert!(has_inland(Biome::BirchForest, &|id| id == BIRCH_LEAVES));
+        assert!(has_inland(Biome::DarkForest, &|id| id == DARK_OAK_LEAVES));
+        assert!(has(Biome::MushroomIslands, &|id| id == MYCELIUM));
+        assert!(has_inland(Biome::IceSpikes, &|id| id == PACKED_ICE || id == SNOW_BLOCK));
+        assert!(has_inland(Biome::StonyPeaks, &|id| id == STONE || id == CALCITE));
+        assert!(has_inland(Biome::Meadow, &|id| id == WILDFLOWERS || id == CORNFLOWER || id == LAVENDER));
         // Cacti only grow on dry land, and mangrove roots in water are wet.
         let mut wet = 0;
         for (name, near) in [(Biome::Desert.name(), 6), (Biome::Badlands.name(), 6), (Biome::Mangrove.name(), 6)] {

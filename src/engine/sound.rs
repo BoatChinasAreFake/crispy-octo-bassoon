@@ -71,7 +71,7 @@ impl Sfx {
             crate::entity::MobKind::Fluffer => Sfx::Baa,
             crate::entity::MobKind::Cluckster => Sfx::Cluck,
             crate::entity::MobKind::Squawker => Sfx::Squawk,
-            crate::entity::MobKind::Mooer => Sfx::Moo,
+            crate::entity::MobKind::Mooer | crate::entity::MobKind::Mushmooer => Sfx::Moo,
             crate::entity::MobKind::Rattler => Sfx::Rattle,
             crate::entity::MobKind::Bloop => Sfx::Bloop,
             crate::entity::MobKind::Woofer => Sfx::Woof,

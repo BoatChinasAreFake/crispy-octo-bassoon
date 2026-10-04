@@ -59,7 +59,7 @@ pub enum Interaction {
 /// Would right-clicking this mob with `item` do anything? (Joined players
 /// guess the same way before the host decides, to wear their shears.)
 pub fn will_shear(m: &Mob, item: Id) -> bool {
-    item == SHEARS && m.kind == MobKind::Fluffer && !m.sheared && m.baby <= 0.0
+    item == SHEARS && m.baby <= 0.0 && ((m.kind == MobKind::Fluffer && !m.sheared) || m.kind == MobKind::Mushmooer)
 }
 
 impl Game {
@@ -87,6 +87,16 @@ impl Game {
         let pos = self.mobs[i].body.pos + Vec3::Y * self.mobs[i].body.height;
         let m = &mut self.mobs[i];
         // Shears.
+        if will_shear(m, item) && m.kind == MobKind::Mushmooer {
+            // Its mushrooms come off, and it's a plain Mooer underneath.
+            m.kind = MobKind::Mooer;
+            m.variant = 2;
+            self.pop_drop(pos, MUSHROOM, 5);
+            self.sfx(Sfx::Snip, Some(pos));
+            self.smoke(pos, 6, 0.3);
+            self.advance_for(who, "fungus_amongus");
+            return Interaction::Sheared;
+        }
         if will_shear(m, item) {
             m.sheared = true;
             m.persistent = true;

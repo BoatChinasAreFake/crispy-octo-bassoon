@@ -198,7 +198,7 @@ mod tests {
             assert_eq!(wood_of(id(w, part::GATE)), Some((w, part::GATE)));
             assert!(is_log(id(w, part::LOG)) && is_leaves(id(w, part::LEAVES)) && is_planks(id(w, part::PLANKS)));
         }
-        assert_eq!(id(WOODS.len() - 1, part::COUNT), NUM_BLOCKS);
+        assert_eq!(id(WOODS.len() - 1, part::COUNT), MYCELIUM);
     }
 
     #[test]

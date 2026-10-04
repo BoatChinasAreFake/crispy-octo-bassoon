@@ -747,6 +747,14 @@ pub const T_DARK_OAK_DOOR_BOTTOM: u16 = 911;
 /// `+ wood`: each wood's door item, then its boat item.
 pub const T_ACACIA_DOOR_ITEM: u16 = 912;
 pub const T_ACACIA_BOAT_ITEM: u16 = 915;
+/// v0.3's surface biomes.
+pub const T_MYCELIUM_TOP: u16 = 918;
+pub const T_MYCELIUM_SIDE: u16 = 919;
+pub const T_MUSHROOM_STEM: u16 = 920;
+pub const T_RED_MUSHROOM_BLOCK: u16 = 921;
+pub const T_BROWN_MUSHROOM_BLOCK: u16 = 922;
+pub const T_PACKED_ICE: u16 = 923;
+pub const T_MUSHMOO_SKIN: u16 = 924;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2994,6 +3002,23 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             });
         }
     }
+    // Mushroom islands: purple-grey mycelium, giant mushrooms; packed ice for the spikes.
+    a.each(T_MYCELIUM_TOP, |x, y, r, _| shade(if (x * 7 + y * 3) % 9 == 0 { rgb(150, 120, 145) } else { rgb(115, 95, 110) }, r.range(0.85, 1.1)));
+    a.copy(T_DIRT, T_MYCELIUM_SIDE);
+    for x in 0..TILE {
+        for y in 0..3 + (x % 3 == 0) as usize {
+            a.set(T_MYCELIUM_SIDE, x, y, shade(rgb(115, 95, 110), 0.9 + ((x * 7 + y * 3) % 5) as f32 * 0.04));
+        }
+    }
+    a.each(T_MUSHROOM_STEM, |x, _, r, _| shade(if x % 4 == 1 { rgb(200, 195, 180) } else { rgb(225, 220, 205) }, r.range(0.92, 1.05)));
+    a.each(T_RED_MUSHROOM_BLOCK, |x, y, r, _| {
+        let spot = [(3, 3), (11, 5), (6, 10), (13, 12), (2, 13)].iter().any(|&(sx, sy): &(i32, i32)| (x as i32 - sx).pow(2) + (y as i32 - sy).pow(2) <= 3);
+        if spot { rgb(235, 230, 220) } else { shade(rgb(190, 35, 30), r.range(0.88, 1.08)) }
+    });
+    a.each(T_BROWN_MUSHROOM_BLOCK, |_, _, r, _| shade(rgb(150, 110, 75), r.range(0.86, 1.08)));
+    a.each(T_PACKED_ICE, |x, y, r, _| shade(if (x + y * 2) % 7 == 0 { rgb(200, 220, 250) } else { rgb(150, 180, 230) }, r.range(0.94, 1.04)));
+    // A red-spotted Mooer: red hide with white patches.
+    a.each(T_MUSHMOO_SKIN, |x, y, r, _| if (x / 4 + y / 5) % 3 == 0 && (x + y) % 5 != 0 { rgb(225, 220, 215) } else { shade(rgb(170, 40, 35), r.range(0.88, 1.08)) });
     for (w, c) in [rgb(200, 105, 55), rgb(215, 195, 140), rgb(75, 50, 28)].into_iter().enumerate() {
         a.sprite(T_ACACIA_DOOR_ITEM + w as u16, &DOOR_ITEM, &[('#', shade(c, 0.45)), ('b', c), ('d', shade(c, 0.75)), ('w', rgb(60, 60, 60))]);
         a.sprite(T_ACACIA_BOAT_ITEM + w as u16, &BOAT_SPRITE, &[('#', shade(c, 0.4)), ('w', c), ('d', shade(c, 0.75))]);

@@ -944,6 +944,13 @@ impl Game {
             Biome::Swamp => Some("swamp_thing"),
             Biome::Badlands => Some("stripy"),
             Biome::Taiga => Some("needles"),
+            Biome::Savanna => Some("flat_tops"),
+            Biome::BirchForest => Some("birch_please"),
+            Biome::DarkForest => Some("lights_out"),
+            Biome::MushroomIslands => Some("fungi_to_be_with"),
+            Biome::IceSpikes => Some("point_taken"),
+            Biome::Meadow => Some("hay_fever"),
+            Biome::StonyPeaks => Some("peak_performance"),
             _ => None,
         };
         if let Some(k) = key {
@@ -1540,7 +1547,7 @@ impl Game {
         let feet = b.pos - Vec3::Y * 0.05;
         let under = self.world.get(feet.x.floor() as i32, feet.y.floor() as i32, feet.z.floor() as i32);
         pokey |= under == CACTUS && b.on_ground;
-        let zoom = under == ICE && b.on_ground && self.player.sprinting;
+        let zoom = matches!(under, ICE | PACKED_ICE) && b.on_ground && self.player.sprinting;
         if pokey && self.player.hurt <= 0.0 && !self.creative {
             self.hurt_player(1.0, "hugged a Pokey Plant. We said not to.");
             self.advance("ouch");
@@ -3237,7 +3244,7 @@ impl Game {
                     MobKind::Groaner => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Fluffer => noises.push((Sfx::Baa, m.body.pos)),
                     MobKind::Cluckster => noises.push((Sfx::Cluck, m.body.pos)),
-                    MobKind::Mooer => noises.push((Sfx::Moo, m.body.pos)),
+                    MobKind::Mooer | MobKind::Mushmooer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rattler => noises.push((Sfx::Rattle, m.body.pos)),
                     MobKind::Webber => noises.push((Sfx::Skitter, m.body.pos)),
                     MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
@@ -3413,7 +3420,7 @@ impl Game {
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
-                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
+                            MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
                         }
                     }
@@ -3623,8 +3630,18 @@ impl Game {
             }
             return;
         }
+        // Mushroom islands: Mushmooers, day or night, and nothing else.
+        if biome == Biome::MushroomIslands {
+            let moos = self.mobs.iter().filter(|m| m.kind == MobKind::Mushmooer).count();
+            if top == MYCELIUM && moos < 8 && clear(&self.world, y + 1) {
+                for i in 0..self.rng.int(1, 3) {
+                    self.alloc_mob(MobKind::Mushmooer, Vec3::new(x as f32 + 0.5 + i as f32 * 0.8, y as f32 + 1.0, z as f32 + 0.5));
+                }
+            }
+            return;
+        }
         // Turtles on beaches, Pandas in jungles, Polar Bears on the snow, Llamas on the plains (see wildlife.rs).
-        if !self.is_night() && passive < 8 && matches!(top, SAND | GRASS | SNOW_GRASS) && clear(&self.world, y + 1) && (top != SAND || (crate::world::SEA - 1..=crate::world::SEA + 2).contains(&y))
+        if !self.is_night() && passive < 8 && matches!(top, SAND | GRASS | SNOW_GRASS | SNOW_BLOCK | STONE) && clear(&self.world, y + 1) && (top != SAND || (crate::world::SEA - 1..=crate::world::SEA + 2).contains(&y))
             && let Some(kind) = crate::wildlife::spawn_kind(biome, top, &mut self.rng)
         {
             for i in 0..self.rng.int(1, 2) {
@@ -3651,7 +3668,7 @@ impl Game {
                 MobKind::Ribbit
             } else if top == SNOW_GRASS || top == MUD {
                 return;
-            } else if biome == Biome::Plains && self.rng.chance(0.15) {
+            } else if (biome == Biome::Plains && self.rng.chance(0.15)) || (biome == Biome::Savanna && self.rng.chance(0.35)) {
                 MobKind::Galloper
             } else if biome == Biome::Jungle && self.rng.chance(0.5) {
                 MobKind::Squawker
