@@ -216,9 +216,10 @@ Legally distinct redstone, simplified. Power comes from levers, buttons, pressur
 ### Music and sound
 
 - Every sound is synthesised: footsteps by material, every mob, explosions, splashes and bubbles, rain that's muffled under a roof, and things rumbling in deep caves. Sounds fade with distance.
+- **Clean on good speakers.** Sounds reach the mixer as 32-bit float at 44.1 kHz, upsampled through a band-limited filter, so nothing harsh is added above the sound itself (the audio library's own converter used to add a fizz that studio monitors made plain). A look-ahead limiter on the mix keeps busy moments from clipping, and quiet passages and fades are left untouched.
 - **Music** drifts in now and then, picked to suit the moment: calm by day, slow at night, sparse in caves and other dimensions. Each piece is about three minutes long, with an introduction, a theme, a middle part and the theme coming back, played on a piano-like instrument with a little hall reverb.
 - **Note Blocks** (the block underneath picks the instrument) and a **Jukebox** with eight discs the game composed itself.
-- `minceraft --export-sounds <dir>` writes every sound out as a WAV.
+- `minceraft --export-sounds <dir>` writes every sound out as a WAV (32-bit float, 44.1 kHz).
 
 ### Graphics and settings
 

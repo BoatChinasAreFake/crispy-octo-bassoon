@@ -8,7 +8,15 @@ use macroquad::math::Vec3;
 use std::f32::consts::TAU;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// The rate every sound is designed and synthesised at.
 pub(crate) const SR: u32 = 22050;
+/// The rate they're handed over at: quad-snd mixes everything at 44.1 kHz, and
+/// converts anything else by repeating samples, which leaves a harsh fizz of
+/// mirror images above 11 kHz (inaudible on small speakers, plain on good
+/// monitors). So `wav` upsamples properly first, and quad-snd has nothing to do.
+pub(crate) const OUT_SR: u32 = 2 * SR;
+/// Taps either side of each new sample in the upsampler's half-band filter.
+const HALF_TAPS: usize = 64;
 /// Where note block notes start in the sound wire encoding.
 const NOTE_WIRE: u16 = 0x4000;
 
@@ -254,11 +262,27 @@ fn voice(out: &mut [f32], start: f32, len: f32, f0: f32, f1: f32, formant: f32, 
         let t = t_of(i);
         let k = i as f32 / n as f32;
         let f = (f0 + (f1 - f0) * k) * (1.0 + (t * 6.0 * TAU).sin() * vibrato);
-        phase = (phase + f / SR as f32) % 1.0;
-        let saw = phase * 2.0 - 1.0 + rng.range(-0.15, 0.15);
+        let dt = f / SR as f32;
+        phase = (phase + dt) % 1.0;
+        // (Smoothed at the jump, so its upper harmonics don't fold back down as grit.)
+        let saw = phase * 2.0 - 1.0 - poly_blep(phase, dt) + rng.range(-0.15, 0.15);
         let y = lp2.run(lp.run(saw, formant), formant * 1.3);
         let env = (k / 0.08).min(1.0) * ((1.0 - k) / 0.25).min(1.0);
         out[s0 + i] += y * env * gain;
+    }
+}
+
+/// PolyBLEP: the correction that rounds off a sawtooth's jump at `phase` 0,
+/// band-limiting it without a wavetable.
+fn poly_blep(phase: f32, dt: f32) -> f32 {
+    if phase < dt {
+        let t = phase / dt;
+        t + t - t * t - 1.0
+    } else if phase > 1.0 - dt {
+        let t = (phase - 1.0) / dt;
+        t * t + t + t + 1.0
+    } else {
+        0.0
     }
 }
 
@@ -286,23 +310,88 @@ pub(crate) fn finish(mut v: Vec<f32>, peak: f32) -> Vec<f32> {
     v
 }
 
+/// The half-band filter's taps: a Blackman-Harris windowed sinc, sampled
+/// halfway between the input samples (where the new ones go).
+fn half_band() -> [f32; HALF_TAPS] {
+    let mut h = [0.0f32; HALF_TAPS];
+    let width = (2 * HALF_TAPS) as f64;
+    for (k, tap) in h.iter_mut().enumerate() {
+        let x = k as f64 + 0.5;
+        let sinc = (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x);
+        // The window, centred on the new sample.
+        let w = |p: f64| 0.35875 - 0.48829 * (std::f64::consts::TAU * p).cos() + 0.14128 * (2.0 * std::f64::consts::TAU * p).cos() - 0.01168 * (3.0 * std::f64::consts::TAU * p).cos();
+        *tap = (sinc * w(0.5 + x / width)) as f32;
+    }
+    // Unity gain for a steady signal.
+    let sum: f32 = h.iter().sum::<f32>() * 2.0;
+    h.map(|t| t / sum)
+}
+
+/// Twice the samples, band-limited: the originals stay put and each new one
+/// is interpolated between them, so nothing appears above the old Nyquist.
+/// A `looped` sound wraps round its ends (its seam stays seamless).
+pub(crate) fn upsample(v: &[f32], looped: bool) -> Vec<f32> {
+    let h = half_band();
+    // The whole kernel, laid out along the input it covers (so each new sample
+    // is one straight dot product).
+    let kernel: Vec<f32> = (0..2 * HALF_TAPS).map(|j| if j < HALF_TAPS { h[HALF_TAPS - 1 - j] } else { h[j - HALF_TAPS] }).collect();
+    let n = v.len() as isize;
+    // Padded (with silence, or the other end of a loop) so the filter never runs off.
+    let pad = HALF_TAPS as isize;
+    let padded: Vec<f32> = (-pad..n + pad)
+        .map(|i| match (looped, (0..n).contains(&i)) {
+            (_, true) => v[i as usize],
+            (true, false) if n > 0 => v[i.rem_euclid(n) as usize],
+            _ => 0.0,
+        })
+        .collect();
+    let mut out = Vec::with_capacity(v.len() * 2);
+    for i in 0..v.len() {
+        out.push(padded[i + HALF_TAPS]);
+        out.push(dot(&padded[i + 1..i + 1 + 2 * HALF_TAPS], &kernel));
+    }
+    out
+}
+
+/// Σ a·b, in eight lanes (which the compiler turns into SIMD).
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let mut acc = [0.0f32; 8];
+    for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+        for k in 0..8 {
+            acc[k] += x[k] * y[k];
+        }
+    }
+    acc.iter().sum()
+}
+
+/// A sound as a WAV file at the mixer's rate, in 32-bit float (so quiet
+/// tails and fades aren't rounded into 16-bit grit).
 pub(crate) fn wav(samples: &[f32]) -> Vec<u8> {
-    let data_len = (samples.len() * 2) as u32;
+    wav_at(&upsample(samples, false))
+}
+
+/// The same, for a sound that loops.
+fn wav_looped(samples: &[f32]) -> Vec<u8> {
+    wav_at(&upsample(samples, true))
+}
+
+fn wav_at(samples: &[f32]) -> Vec<u8> {
+    let data_len = (samples.len() * 4) as u32;
     let mut b = Vec::with_capacity(44 + data_len as usize);
     b.extend_from_slice(b"RIFF");
     b.extend_from_slice(&(36 + data_len).to_le_bytes());
     b.extend_from_slice(b"WAVEfmt ");
     b.extend_from_slice(&16u32.to_le_bytes());
-    b.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    b.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
     b.extend_from_slice(&1u16.to_le_bytes()); // mono
-    b.extend_from_slice(&SR.to_le_bytes());
-    b.extend_from_slice(&(SR * 2).to_le_bytes());
-    b.extend_from_slice(&2u16.to_le_bytes());
-    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(&OUT_SR.to_le_bytes());
+    b.extend_from_slice(&(OUT_SR * 4).to_le_bytes());
+    b.extend_from_slice(&4u16.to_le_bytes());
+    b.extend_from_slice(&32u16.to_le_bytes());
     b.extend_from_slice(b"data");
     b.extend_from_slice(&data_len.to_le_bytes());
     for s in samples {
-        b.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32000.0) as i16).to_le_bytes());
+        b.extend_from_slice(&s.clamp(-1.0, 1.0).to_le_bytes());
     }
     b
 }
@@ -1006,7 +1095,7 @@ pub fn export_wavs(dir: &std::path::Path) -> std::io::Result<usize> {
     for (i, m) in MOODS.iter().enumerate() {
         std::fs::write(dir.join(format!("music_{}.wav", format!("{m:?}").to_lowercase())), wav(&synth_music_mood(*m, 7 + i as u64)))?;
     }
-    std::fs::write(dir.join("rain.wav"), wav(&synth_rain(&mut rng)))?;
+    std::fs::write(dir.join("rain.wav"), wav_looped(&synth_rain(&mut rng)))?;
     std::fs::write(dir.join("cave.wav"), wav(&synth_cave(&mut rng)))?;
     Ok(n + MOODS.len() + 2)
 }
@@ -1169,7 +1258,7 @@ impl Audio {
         let (rain, cave) = if dead {
             (None, None)
         } else {
-            (load_sound_from_bytes(&wav(&synth_rain(&mut rng))).await.ok(), load_sound_from_bytes(&wav(&synth_cave(&mut rng))).await.ok())
+            (load_sound_from_bytes(&wav_looped(&synth_rain(&mut rng))).await.ok(), load_sound_from_bytes(&wav(&synth_cave(&mut rng))).await.ok())
         };
         Audio {
             bank,
@@ -1438,7 +1527,7 @@ mod tests {
             assert!(v.iter().any(|x| x.abs() > 0.1), "{s:?} is silent");
             let w = wav(&v);
             assert_eq!(&w[..4], b"RIFF");
-            assert_eq!(w.len(), 44 + v.len() * 2);
+            assert_eq!(w.len(), 44 + v.len() * 2 * 4);
         }
         let m = synth_music(3);
         assert!(m.len() > SR as usize * 40 && m.iter().all(|x| x.is_finite()));
@@ -1467,4 +1556,97 @@ mod tests {
         let cave = synth_cave(&mut rng);
         assert!(cave.iter().any(|x| x.abs() > 0.2) && cave.iter().all(|x| x.is_finite()));
     }
+
+    /// In-place radix-2 FFT (for the tests).
+    fn fft(re: &mut [f64], im: &mut [f64]) {
+        let n = re.len();
+        let mut j = 0;
+        for i in 1..n {
+            let mut bit = n >> 1;
+            while j & bit != 0 {
+                j ^= bit;
+                bit >>= 1;
+            }
+            j |= bit;
+            if i < j {
+                re.swap(i, j);
+                im.swap(i, j);
+            }
+        }
+        let mut len = 2;
+        while len <= n {
+            let ang = -std::f64::consts::TAU / len as f64;
+            for start in (0..n).step_by(len) {
+                for k in 0..len / 2 {
+                    let (c, s) = ((ang * k as f64).cos(), (ang * k as f64).sin());
+                    let (a, b) = (start + k, start + k + len / 2);
+                    let (tr, ti) = (re[b] * c - im[b] * s, re[b] * s + im[b] * c);
+                    re[b] = re[a] - tr;
+                    im[b] = im[a] - ti;
+                    re[a] += tr;
+                    im[a] += ti;
+                }
+            }
+            len <<= 1;
+        }
+    }
+
+    /// How loud (dB, relative to everything) the sound at 44.1 kHz is above 12 kHz,
+    /// where nothing was ever meant to be.
+    fn above_12k_db(v: &[f32]) -> f64 {
+        const N: usize = 4096;
+        let (mut hi, mut all) = (0.0f64, 0.0f64);
+        for chunk in v.chunks_exact(N) {
+            let mut re: Vec<f64> = chunk.iter().enumerate().map(|(i, x)| *x as f64 * (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / N as f64).cos())).collect();
+            let mut im = vec![0.0; N];
+            fft(&mut re, &mut im);
+            for b in 1..N / 2 {
+                let p = re[b] * re[b] + im[b] * im[b];
+                all += p;
+                if b as f64 * OUT_SR as f64 / N as f64 > 12000.0 {
+                    hi += p;
+                }
+            }
+        }
+        10.0 * (hi / all.max(1e-30)).log10()
+    }
+
+    #[test]
+    fn sounds_reach_the_mixer_without_mirror_images() {
+        let mut rng = Rng::new(4);
+        let mut sounds: Vec<(String, Vec<f32>)> = [Sfx::Skitter, Sfx::Hiss, Sfx::Snip, Sfx::Step(Mat::Stone), Sfx::Moo].iter().map(|s| (format!("{s:?}"), synth(*s, &mut rng))).collect();
+        sounds.push(("rain".into(), synth_rain(&mut rng)));
+        sounds.push(("music".into(), synth_music_mood(Mood::Morning, 2)[..samples(20.0)].to_vec()));
+        for (name, v) in sounds {
+            // What quad-snd would make of it: every sample twice.
+            let doubled: Vec<f32> = v.iter().flat_map(|x| [*x, *x]).collect();
+            let (ours, theirs) = (above_12k_db(&upsample(&v, false)), above_12k_db(&doubled));
+            assert!(ours < -70.0, "{name}: {ours:.1} dB of junk above 12 kHz");
+            assert!(theirs > ours + 30.0, "{name}: doubling ({theirs:.1} dB) should be much worse than ours ({ours:.1} dB)");
+            // And the samples it started with are still there, untouched.
+            let up = upsample(&v, false);
+            assert!(v.iter().zip(up.iter().step_by(2)).all(|(a, b)| a == b));
+        }
+    }
+
+    #[test]
+    fn wavs_are_float_at_the_mixers_rate_and_loops_stay_seamless() {
+        let v: Vec<f32> = (0..2000).map(|i| (i as f32 * 0.05).sin() * 0.5).collect();
+        let w = wav(&v);
+        assert_eq!(u16::from_le_bytes([w[20], w[21]]), 3, "IEEE float");
+        assert_eq!(u32::from_le_bytes([w[24], w[25], w[26], w[27]]), OUT_SR);
+        assert_eq!(u16::from_le_bytes([w[34], w[35]]), 32);
+        // A quiet tail survives exactly (16-bit would have rounded it to nothing).
+        let tiny = [1e-6f32; 8];
+        let w = wav(&tiny);
+        let first = f32::from_le_bytes([w[44], w[45], w[46], w[47]]);
+        assert_eq!(first, 1e-6);
+        // Looping: the new samples across the seam come from both ends.
+        let tone: Vec<f32> = (0..400).map(|i| (i as f32 / 400.0 * TAU * 5.0).sin()).collect();
+        let up = upsample(&tone, true);
+        let jump = (up[up.len() - 1] - up[0]).abs();
+        let biggest = up.windows(2).fold(0.0f32, |a, w| a.max((w[1] - w[0]).abs()));
+        assert!(jump <= biggest * 1.01, "the loop seam clicks: {jump} vs {biggest}");
+    }
 }
+

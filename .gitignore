@@ -2,3 +2,5 @@
 /saves
 /mods
 /settings.txt
+/vendor/quad-snd/target
+/vendor/quad-snd/Cargo.lock

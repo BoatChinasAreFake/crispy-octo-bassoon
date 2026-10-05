@@ -24,6 +24,11 @@ gamepad = ["dep:gilrs"]
 [target.'cfg(target_os = "linux")'.dependencies]
 quad-alsa-sys = { version = "0.3", optional = true }
 
+# macroquad's audio backend, with a limiter on the mix and a better resampler
+# (see vendor/quad-snd/PATCHED.md).
+[patch.crates-io]
+quad-snd = { path = "vendor/quad-snd" }
+
 # Keep debug builds playable: the world generator and mesher are hot loops.
 [profile.dev]
 opt-level = 1

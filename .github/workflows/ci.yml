@@ -31,6 +31,9 @@ jobs:
       # The tests include multiplayer games over real TCP on localhost; no display is needed.
       - name: Tests
         run: cargo test --release --locked
+      # The mix-bus limiter in the patched quad-snd (see vendor/quad-snd/PATCHED.md).
+      - name: Audio mixer tests
+        run: cargo test --release --lib --manifest-path vendor/quad-snd/Cargo.toml
       # A host and six bots playing together for a minute; fails if they disagree about anything.
       - name: Multiplayer playtest
         run: cargo run --release --locked -- --playtest --bots 6 --seconds 60
