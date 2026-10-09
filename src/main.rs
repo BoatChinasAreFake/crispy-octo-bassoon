@@ -12,7 +12,7 @@ mod survival;
 mod online;
 
 pub(crate) use engine::{access, backups, keybinds, light, lod, mesher, noise, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
-pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, falling, fire, fortress, hollow, liquids, monument, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
+pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, falling, fire, fortress, hollow, houses, liquids, monument, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, nametags, night, pathing, raids, sniffers, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};

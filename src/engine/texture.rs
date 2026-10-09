@@ -3963,7 +3963,7 @@ fn paint_models(a: &mut Atlas) {
         let clapper = y == 14 && (7..9).contains(&x);
         if clapper {
             rgb(120, 90, 30)
-        } else if half >= 0 && (x - 8).abs() < half || (x - 7).abs() < half && half >= 0 {
+        } else if half >= 0 && ((x - 8).abs() < half || (x - 7).abs() < half) {
             let edge = (x - 8).abs() == half - 1 || y == 13;
             shade(if edge { rgb(195, 145, 30) } else { rgb(245, 205, 75) }, r.range(0.92, 1.05))
         } else {
@@ -3971,7 +3971,7 @@ fn paint_models(a: &mut Atlas) {
         }
     });
     // The enchanting table: obsidian sides with diamond studs under a red cloth; the book.
-    let obsidian = |x: usize, y: usize, r: &mut Rng| shade(if (x * 5 + y * 3) % 7 == 0 { rgb(45, 30, 65) } else { rgb(24, 16, 36) }, r.range(0.85, 1.15));
+    let obsidian = |x: usize, y: usize, r: &mut Rng| shade(if (x * 5 + y * 3).is_multiple_of(7) { rgb(45, 30, 65) } else { rgb(24, 16, 36) }, r.range(0.85, 1.15));
     a.each(T_ENCH_SIDE, |x, y, r, _| {
         let stud = (y == 6 || y == 7) && (x == 2 || x == 3 || x == 12 || x == 13);
         if y < 3 {
@@ -3985,7 +3985,7 @@ fn paint_models(a: &mut Atlas) {
         }
     });
     a.each(T_ENCH_TOP, |x, y, r, _| {
-        let corner = (x < 3 || x > 12) && (y < 3 || y > 12);
+        let corner = !(3..=12).contains(&x) && !(3..=12).contains(&y);
         let gem = corner && (x == 1 || x == 14) && (y == 1 || y == 14);
         let trim = x == 3 || x == 12 || y == 3 || y == 12;
         if gem {
@@ -4111,12 +4111,12 @@ fn paint_models(a: &mut Atlas) {
         });
     }
     // The Charred Skull: sooty bone, and a proper face: deep sockets, a nose, cheekbones, teeth.
-    let bone = |x: usize, y: usize, r: &mut Rng| shade(if (x * 3 + y * 5) % 11 == 0 { rgb(30, 30, 32) } else { rgb(58, 56, 56) }, r.range(0.88, 1.08));
+    let bone = |x: usize, y: usize, r: &mut Rng| shade(if (x * 3 + y * 5).is_multiple_of(11) { rgb(30, 30, 32) } else { rgb(58, 56, 56) }, r.range(0.88, 1.08));
     a.each(T_CHARRED_SKULL, |x, y, r, _| bone(x, y, r));
     a.each(T_CHARRED_SKULL_FACE, |x, y, r, _| {
         let (xi, yi) = (x as i32, y as i32);
         let socket = (6..11).contains(&yi) && ((2..7).contains(&xi) || (9..14).contains(&xi)) && !((yi == 6 || yi == 10) && (xi == 2 || xi == 6 || xi == 9 || xi == 13));
-        let nose = (11..14).contains(&yi) && (xi == 7 || xi == 8) && !(yi == 11 && false);
+        let nose = (11..14).contains(&yi) && (xi == 7 || xi == 8);
         let teeth = yi == 15 && xi % 2 == 0 && (3..13).contains(&xi);
         if socket || nose {
             rgb(8, 6, 8)

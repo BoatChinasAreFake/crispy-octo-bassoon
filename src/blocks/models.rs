@@ -169,9 +169,12 @@ pub fn flat_tile(id: Id) -> u16 {
     flat_icon(id).unwrap_or_else(|| if is_block_item(id) { block(id).tex[1] } else { item_tile(id) })
 }
 
+/// A box (lo, hi), its six face tiles and the part of the tiles to show.
+pub type ItemPart = (([f32; 3], [f32; 3]), [u16; 6], [f32; 4]);
+
 /// A block item's boxes for drawing it small: each with its face tiles (the
 /// mesher's order) and the part of the tiles to show.
-pub fn item_parts(id: Id) -> Vec<(([f32; 3], [f32; 3]), [u16; 6], [f32; 4])> {
+pub fn item_parts(id: Id) -> Vec<ItemPart> {
     if let Some(v) = pieces(id) {
         return v.iter().filter(|p| p.hide == 0).map(|p| ((p.lo, p.hi), p.tiles, p.uv.unwrap_or([p.lo[0], 1.0 - p.hi[1], p.hi[0], 1.0 - p.lo[1]]))).collect();
     }

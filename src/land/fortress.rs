@@ -40,8 +40,12 @@ pub const FORTRESS_Y: i32 = LAVA_SEA + 10;
 pub const CAMP_Y: i32 = LAVA_SEA + 5;
 /// How far a fortress's bridges reach from the hall.
 const ARM: i32 = 26;
+/// ...and in a big one (newer worlds), which stays within three chunks of its own.
+const BIG_ARM: i32 = 39;
 /// Rolls under this (and over the camps') are a Snout Bastion.
 const BASTION_ROLL: f32 = 0.034;
+/// Rolls under this are a fortress, in newer worlds.
+const BIG_FORT_ROLL: f32 = 0.004;
 /// Seconds a Snout admires gold before it pays up.
 pub const ADMIRE_SECS: f32 = 6.0;
 /// Most Sizzlers a cage keeps around it.
@@ -72,7 +76,13 @@ impl Generator {
         let oz = cz * CW + 5 + (hash2(s ^ 2, cx, cz) * 6.0) as i32;
         let seed = (hash2(s ^ 3, cx, cz) * u32::MAX as f32) as u32;
         let facing = (hash2(s ^ 4, cx, cz) * 4.0) as u8 % 4;
-        if r < 0.012 {
+        if self.opts.version >= 2 && r < BIG_FORT_ROLL {
+            // Rarer, and never two close together.
+            let crowded = (-6..=6).any(|dz| (-6..=6).any(|dx| (dx, dz) != (0, 0) && hash2(s, cx + dx, cz + dz) < BIG_FORT_ROLL));
+            (!crowded).then_some(Site { kind: Kind::Fortress, origin: ivec3(ox, FORTRESS_Y, oz), facing, seed })
+        } else if self.opts.version >= 2 && r < 0.012 {
+            None
+        } else if r < 0.012 {
             Some(Site { kind: Kind::Fortress, origin: ivec3(ox, FORTRESS_Y, oz), facing, seed })
         } else if r < 0.024 {
             Some(Site { kind: Kind::SnoutCamp, origin: ivec3(ox, CAMP_Y, oz), facing, seed })
@@ -87,33 +97,62 @@ impl Generator {
 }
 
 /// A fortress: the hall, four bridges on pillars, and a tower at each end.
-pub fn fortress_blocks(site: &Site) -> Vec<(IVec3, Id)> {
+/// `big` (newer worlds) is the full-size one: a two-storey hall, bridges half
+/// as long again with arches under them and a roofed walk on two of them, and
+/// taller towers with a lookout on top.
+pub fn fortress_blocks(site: &Site, big: bool) -> Vec<(IVec3, Id)> {
     let mut out = Vec::new();
     let o = site.origin;
     let mut put = |x: i32, y: i32, z: i32, id: Id| out.push((o + ivec3(x, y, z), id));
+    let (hh, top, arm, th, ttop): (i32, i32, i32, i32, i32) = if big { (9, 11, BIG_ARM, 3, 9) } else { (6, 6, ARM, 2, 4) };
     // The hall.
-    for x in -6..=6i32 {
-        for z in -6..=6i32 {
-            for y in -1..=6 {
-                let edge = x.abs() == 6 || z.abs() == 6;
-                let door = (x.abs() <= 1 && z.abs() == 6 || z.abs() <= 1 && x.abs() == 6) && (1..=3).contains(&y);
-                let id = if y <= 0 || y == 6 {
+    for x in -hh..=hh {
+        for z in -hh..=hh {
+            for y in -1..=top {
+                let edge = x.abs() == hh || z.abs() == hh;
+                let door = (x.abs() <= 1 && z.abs() == hh || z.abs() <= 1 && x.abs() == hh) && (1..=3).contains(&y);
+                // Upstairs: a gallery round the walls, open over the middle.
+                let gallery = big && y == 6 && (x.abs() >= hh - 3 || z.abs() >= hh - 3);
+                let window = big && edge && (7..=9).contains(&y) && (x + z).rem_euclid(4) == 0 && !(x.abs() == hh && z.abs() == hh);
+                let id = if y <= 0 || y == top || gallery {
                     SCORCH_BRICKS
-                } else if edge && !door {
+                } else if edge && !door && !window {
                     if y == 3 && (x + z) % 4 == 0 { GLOWROCK } else { SCORCH_BRICKS }
                 } else {
                     AIR
                 };
                 put(x, y, z, id);
             }
+            // Battlements.
+            if big && (x.abs() == hh || z.abs() == hh) && (x + z).rem_euclid(2) == 0 {
+                put(x, top + 1, z, SCORCH_BRICKS);
+            }
         }
     }
     put(0, 1, 0, SIZZLER_CAGE);
     put(-4, 1, -4, CHEST);
     put(4, 1, 4, CHEST);
+    if big {
+        // Stairs up to the gallery in one corner, a second cage and chest up there.
+        for s in 0..5 {
+            put(-hh + 1, 1 + s, hh - 3 - s, SCORCH_BRICKS);
+            put(-hh + 2, 1 + s, hh - 3 - s, SCORCH_BRICKS);
+            put(-hh + 1, 6, hh - 4 - s, AIR);
+            put(-hh + 2, 6, hh - 4 - s, AIR);
+        }
+        put(hh - 2, 7, -hh + 2, SIZZLER_CAGE);
+        put(-hh + 2, 7, -hh + 2, CHEST);
+        for (x, z) in [(-3, -3), (3, -3), (-3, 3), (3, 3)] {
+            for y in 1..top {
+                put(x, y, z, SCORCH_BRICKS);
+            }
+            put(x, top - 1, z + 1, LANTERN_HANGING);
+        }
+    }
     // Bridges, north, east, south, west.
     for (k, (dx, dz)) in [(0i32, -1i32), (1, 0), (0, 1), (-1, 0)].into_iter().enumerate() {
-        for d in 7..=ARM {
+        let roofed = big && site.seed.wrapping_add(k as u32).is_multiple_of(2);
+        for d in hh + 1..=arm {
             for w in -2..=2i32 {
                 let (x, z) = (dx * d + dz.abs() * w, dz * d + dx.abs() * w);
                 put(x, 0, z, SCORCH_BRICKS);
@@ -123,31 +162,66 @@ pub fn fortress_blocks(site: &Site) -> Vec<(IVec3, Id)> {
                     put(x, 1, z, AIR);
                 }
                 for y in 2..=4 {
-                    put(x, y, z, AIR);
+                    // A roofed walk has walls with slits, posts and a roof.
+                    let wall = roofed && w.abs() == 2 && !(y == 3 && d % 3 == 0);
+                    put(x, y, z, if wall { SCORCH_BRICKS } else { AIR });
                 }
-                // Pillars down into the lava every six blocks.
+                if roofed {
+                    put(x, 5, z, SCORCH_BRICKS);
+                    if w == 0 && d % 6 == 3 {
+                        put(x, 4, z, LANTERN_HANGING);
+                    }
+                }
+                // Pillars down into the lava every six blocks (with arches between, on the big ones).
                 if d % 6 == 0 && w.abs() <= 1 {
                     for y in (LAVA_SEA - 3 - FORTRESS_Y)..0 {
+                        put(x, y, z, SCORCH_BRICKS);
+                    }
+                } else if big && w.abs() <= 1 {
+                    let m = (d % 6) as f32 - 3.0;
+                    let depth = 1 + (3.0 - m.abs()).max(0.0).powi(2) as i32 / 3;
+                    for y in -(4 - depth).max(1)..0 {
                         put(x, y, z, SCORCH_BRICKS);
                     }
                 }
             }
         }
-        // A little tower at the end.
-        let (tx, tz) = (dx * (ARM + 3), dz * (ARM + 3));
-        for a in -2..=2i32 {
-            for b in -2..=2i32 {
-                for y in -1..=4 {
-                    let edge = a.abs() == 2 || b.abs() == 2;
+        // A tower at the end.
+        let (tx, tz) = (dx * (arm + th + 1), dz * (arm + th + 1));
+        for a in -th..=th {
+            for b in -th..=th {
+                for y in -1..=ttop {
+                    let edge = a.abs() == th || b.abs() == th;
                     // The way in, from the bridge.
-                    let toward = (dx != 0 && a * dx == -2 && b.abs() <= 1) || (dz != 0 && b * dz == -2 && a.abs() <= 1);
-                    let id = if y <= 0 || y == 4 || (edge && !(toward && y <= 2)) { SCORCH_BRICKS } else { AIR };
+                    let toward = (dx != 0 && a * dx == -th && b.abs() <= 1) || (dz != 0 && b * dz == -th && a.abs() <= 1);
+                    let slit = big && edge && y == 6 && (a == 0 || b == 0);
+                    let id = if y <= 0 || y == ttop || (big && y == 5 && !(a.abs() <= 1 && b == th - 1)) || (edge && !(toward && y <= 2) && !slit) { SCORCH_BRICKS } else { AIR };
                     put(tx + a, y, tz + b, id);
+                }
+                if big {
+                    // A lookout on top, with a crenellated wall.
+                    if (a.abs() == th || b.abs() == th) && (a + b).rem_euclid(2) == 0 {
+                        put(tx + a, ttop + 1, tz + b, SCORCH_BRICKS);
+                    }
+                    // Down to the lava.
+                    if a.abs() == th && b.abs() == th {
+                        for y in (LAVA_SEA - 3 - FORTRESS_Y)..-1 {
+                            put(tx + a, y, tz + b, SCORCH_BRICKS);
+                        }
+                    }
                 }
             }
         }
+        if big {
+            // A ladder-less way up: steps inside to the upper room.
+            for s in 0..4 {
+                put(tx - th + 1 + s, 1 + s, tz - th + 1, SCORCH_BRICKS);
+            }
+            put(tx - th + 4, 5, tz - th + 1, AIR);
+            put(tx, ttop - 1, tz, LANTERN_HANGING);
+        }
         // Two of the towers have a chest; one has a cage.
-        match (k as u32 + site.seed) % 4 {
+        match (site.seed.wrapping_add(k as u32)) % 4 {
             0 => put(tx, 1, tz, SIZZLER_CAGE),
             1 | 2 => put(tx, 1, tz, CHEST),
             _ => put(tx, 1, tz, GLOWROCK),
@@ -522,10 +596,16 @@ mod tests {
     #[test]
     fn fortresses_have_cages_chests_and_bridges() {
         let site = Site { kind: Kind::Fortress, origin: ivec3(SCORCH_X + 500, FORTRESS_Y, 40), facing: 0, seed: 7 };
-        let b = fortress_blocks(&site);
+        let b = fortress_blocks(&site, false);
         assert!(b.iter().filter(|x| x.1 == SIZZLER_CAGE).count() >= 1);
         assert!(b.iter().filter(|x| x.1 == CHEST).count() >= 3);
         assert!(b.iter().any(|x| x.0 == site.origin + ivec3(0, 0, -ARM)), "a bridge reaches out north");
+        // The big one is bigger, and stays within three chunks of the one it starts in.
+        let big = fortress_blocks(&site, true);
+        assert!(big.len() > b.len() * 2);
+        assert!(big.iter().any(|x| x.0 == site.origin + ivec3(0, 0, -BIG_ARM)));
+        let reach = big.iter().map(|x| (x.0 - site.origin).x.abs().max((x.0 - site.origin).z.abs())).max().unwrap();
+        assert!(reach + 11 < 4 * CW && reach > 5 + 2 * CW, "{reach}");
         let camp = camp_blocks(&Site { kind: Kind::SnoutCamp, ..site });
         assert!(camp.iter().any(|x| x.1 == GOLD_BLOCK) && camp.iter().any(|x| x.1 == CHEST));
     }
