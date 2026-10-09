@@ -48,7 +48,7 @@ impl Game {
         if self.rng.chance(0.5) {
             self.pop_drop(home + Vec3::Y * 0.6, RESIN_CLUMP, 1);
             self.sfx(Sfx::Break(crate::sound::Mat::Wood), Some(home));
-            if !self.dedicated && self.player.body.pos.distance(home) < 24.0 {
+            if !self.away() && self.player.body.pos.distance(home) < 24.0 {
                 self.advance("resin_up");
             }
         }
@@ -71,7 +71,7 @@ impl Game {
             .filter(|p| p.alive())
             .map(|p| (p.target + Vec3::Y * crate::player::EYE, Vec3::new(p.yaw.sin() * p.pitch.cos(), p.pitch.sin(), -p.yaw.cos() * p.pitch.cos())))
             .collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             eyes.push((self.player.eye(), self.player.look_dir()));
         }
         // Frozen while watched (and in view: not through a wall).

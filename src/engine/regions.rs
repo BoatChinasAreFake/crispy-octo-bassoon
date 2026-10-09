@@ -47,6 +47,22 @@ pub fn region_dir(world_file: &Path) -> PathBuf {
     world_file.with_extension("regions")
 }
 
+/// Where dimension `dim`'s regions go, given the world's region folder.
+pub fn dim_dir(base: &Path, dim: crate::dims::Dim) -> PathBuf {
+    match dim {
+        crate::dims::Dim::Over => base.to_path_buf(),
+        d => base.join(format!("dim{}", d.index())),
+    }
+}
+
+impl Regions {
+    /// A fresh store for another dimension of the same world.
+    pub fn for_dim(&self, dim: crate::dims::Dim) -> Regions {
+        let (io_tx, io_rx) = spawn_reader();
+        Regions { dir: dim_dir(&self.base, dim), base: self.base.clone(), loaded: HashSet::new(), dirty: HashSet::new(), reading: HashMap::new(), ticket: 0, io_tx, io_rx, news: Vec::new() }
+    }
+}
+
 pub fn region_of(cx: i32, cz: i32) -> (i32, i32) {
     (cx.div_euclid(REGION), cz.div_euclid(REGION))
 }
@@ -71,6 +87,9 @@ pub type ChunkRead = ((i32, i32), Vec<(u32, Id)>);
 /// and which are being read.
 pub struct Regions {
     pub dir: PathBuf,
+    /// The world's region folder (the Overworld's); the other dimensions
+    /// keep theirs in a folder inside it (see `for_dim`).
+    pub base: PathBuf,
     loaded: HashSet<(i32, i32)>,
     dirty: HashSet<(i32, i32)>,
     /// Regions being read in the background, and the ticket of the read that counts.
@@ -190,7 +209,11 @@ impl World {
             .chain(self.farm.keys().chain(self.containers.keys()).chain(self.signs.keys()).chain(self.frames.keys()).map(|&p| region_at(p)))
             .collect();
         let (io_tx, io_rx) = spawn_reader();
-        self.regions = Some(Regions { dir, loaded: held.clone(), dirty: held, reading: HashMap::new(), ticket: 0, io_tx, io_rx, news: Vec::new() });
+        self.regions = Some(Regions { base: dir.clone(), dir, loaded: held.clone(), dirty: held, reading: HashMap::new(), ticket: 0, io_tx, io_rx, news: Vec::new() });
+        let dim = self.dim();
+        if let Some(r) = &mut self.regions {
+            r.dir = dim_dir(&r.base, dim);
+        }
     }
 
     /// Start reading a region in the background, if it isn't in memory or on its way.

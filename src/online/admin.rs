@@ -137,7 +137,7 @@ impl Game {
     fn caller_is_op(&self, who: Caller) -> bool {
         match who {
             Caller::Console | Caller::Host => true,
-            Caller::Player(id) => self.peers.get(&id).is_some_and(|p| self.admin.is_op(&p.name)),
+            Caller::Player(id) => self.peer_ref(id).is_some_and(|p| self.admin.is_op(&p.name)),
         }
     }
 
@@ -180,7 +180,7 @@ impl Game {
                 }
             }
             ("list", _) => {
-                let mut names: Vec<String> = self.peers.values().map(|p| p.name.clone()).collect();
+                let mut names: Vec<String> = self.all_peers().map(|(_, p)| p.name.clone()).collect();
                 if !self.dedicated && self.net.is_some() {
                     names.insert(0, self.player_name.clone());
                 }
@@ -192,7 +192,7 @@ impl Game {
                     out.push("No players remembered yet.".into());
                 }
                 for (key, r) in &records {
-                    let online = self.peers.values().any(|p| record_key(&p.name) == *key);
+                    let online = self.all_peers().any(|(_, p)| record_key(&p.name) == *key);
                     let op = if self.admin.is_op(key) { " [op]" } else { "" };
                     out.push(format!(
                         "{key}{op}: {} at {:.0}, {:.0}, {:.0}, health {:.0}, {} xp",
@@ -207,7 +207,7 @@ impl Game {
             }
             ("info", name) if !name.is_empty() => {
                 let key = record_key(name);
-                let live = self.peers.iter().find(|(_, p)| record_key(&p.name) == key).map(|(&id, _)| id);
+                let live = self.all_peers().find(|(_, p)| record_key(&p.name) == key).map(|(&id, _)| id);
                 let record = live.and_then(|id| self.record_of(id)).map(|(_, r)| r).or_else(|| self.saved_players.get(&key).cloned());
                 match record {
                     None => out.push(format!("Nobody called {name} has played here.")),
@@ -304,7 +304,7 @@ impl Game {
                 match t {
                     Some(t) => {
                         self.time = t.rem_euclid(1.0);
-                        self.net_broadcast(self.time_msg());
+                        self.net_broadcast_all(self.time_msg());
                         out.push(format!("Time set to {:.2}.", self.time));
                     }
                     None => out.push("Usage: time <day|noon|night|midnight|0.0-1.0>".into()),
@@ -333,7 +333,7 @@ impl Game {
                     ("on", _) => {
                         self.admin.enforce = true;
                         // Don't lock out whoever is here already.
-                        let here: Vec<String> = self.peers.values().map(|p| record_key(&p.name)).collect();
+                        let here: Vec<String> = self.all_peers().map(|(_, p)| record_key(&p.name)).collect();
                         self.admin.allowed.extend(here);
                         save = true;
                         out.push(format!("Allow-list on: only the {} listed player(s) (and operators) can join.", self.admin.allowed.len()));

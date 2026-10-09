@@ -134,7 +134,7 @@ impl Game {
         }
         let share = |d: f32| (1.0 - d / BLAST_RADIUS).max(0.0);
         let me = self.player.body.pos + Vec3::Y * 0.9;
-        if !self.dedicated && !self.spectator && self.dead.is_none() && shooter != Some(self.my_id) && me.distance(at) < BLAST_RADIUS {
+        if !self.away() && !self.spectator && self.dead.is_none() && shooter != Some(self.my_id) && me.distance(at) < BLAST_RADIUS {
             self.player.hurt = 0.0;
             self.hurt_player_from(damage * share(me.distance(at)), "went out with a bang", Some(at), true);
         }
@@ -156,7 +156,7 @@ impl Game {
 
     /// The burst itself: a sphere of coloured sparks that drift down.
     pub fn firework_sparks(&mut self, at: Vec3, colour: u8) {
-        if self.dedicated {
+        if self.away() {
             return;
         }
         let tile = T_SPARK_FIRST + (colour % COLOURS) as u16;

@@ -73,7 +73,7 @@ impl Game {
 
     /// A little coloured note floats up (green low, through to red high).
     pub fn note_particle(&mut self, at: Vec3, pitch: u8) {
-        if self.dedicated {
+        if self.away() {
             return;
         }
         let cell = (pitch as u32 * 15 / (PITCHES as u32 - 1)) as f32;

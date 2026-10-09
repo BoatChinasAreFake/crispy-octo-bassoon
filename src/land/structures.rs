@@ -11,6 +11,7 @@
 //! who keeps monsters off the place. It moves in when the square's chest is
 //! first filled, like a hut's Hmmer.
 
+use crate::dims::Dim;
 use crate::block::*;
 use crate::containers::Container;
 use crate::inventory::Wear;
@@ -137,9 +138,12 @@ pub struct Site {
 
 impl Generator {
     /// The structure (if any) that starts in chunk (cx, cz).
+    /// (In generator coordinates; see dims.rs.)
     pub fn site(&self, cx: i32, cz: i32) -> Option<Site> {
-        if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL - 2 * CW {
-            return self.scorch_site(cx, cz);
+        match self.dim {
+            Dim::Scorch => return self.scorch_site(cx, cz),
+            Dim::Hollow => return None,
+            Dim::Over => {}
         }
         let s = self.seed ^ 0x57_C0DE;
         let village_spot = self.village_spot(cx, cz);
@@ -570,6 +574,8 @@ impl Generator {
             .collect()
     }
 
+    /// (The next few are in generator coordinates; `World` has versions in a
+    /// dimension's own, see dims.rs.)
     /// Where a village's farmland is (so it can be given soil when it first loads).
     pub fn village_farmland(&self, site: &Site) -> Vec<IVec3> {
         self.village_blocks(site).into_iter().filter(|b| b.1 == FARMLAND_WET).map(|b| b.0).collect()
@@ -578,7 +584,7 @@ impl Generator {
     /// Stamp every structure that reaches into chunk (cx, cz) onto its blocks.
     /// (Villages reach two chunks out; everything else, one.)
     pub fn place_structures(&self, cx: i32, cz: i32, b: &mut [Id]) {
-        let reach = self.site_reach(cx);
+        let reach = self.site_reach();
         for dz in -reach..=reach {
             for dx in -reach..=reach {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };
@@ -606,9 +612,12 @@ impl Generator {
     }
 
     /// Chests of structures that sit in chunk (cx, cz), with what kind of place they're in.
+    /// (Chunk (cx, cz) and what's returned are in the dimension's own
+    /// coordinates; the sites are found in generator coordinates, see dims.rs.)
     pub fn structure_chests(&self, cx: i32, cz: i32) -> Vec<(IVec3, Kind, u32)> {
-        if crate::hollow::in_hollow((cx * CW) as f32) {
-            return crate::hollow::spire_chests(self.seed, cx, cz).into_iter().map(|(p, s)| (p, Kind::Spire, s)).collect();
+        let (cx, back) = (cx + self.dim.gen_cx(), ivec3(self.dim.gen_x(), 0, 0));
+        if self.dim == Dim::Hollow {
+            return crate::hollow::spire_chests(self.seed, cx, cz).into_iter().map(|(p, s)| (p - back, Kind::Spire, s)).collect();
         }
         let mut v = Vec::new();
         for (site, blocks) in self.sites_near(cx, cz) {
@@ -622,7 +631,7 @@ impl Generator {
                     } else {
                         site.kind
                     };
-                    v.push((p, kind, site.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
+                    v.push((p - back, kind, site.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
                 }
             }
         }
@@ -631,10 +640,11 @@ impl Generator {
 
     /// Dispensers built into chunk (cx, cz) (jungle temples' traps).
     pub fn structure_dispensers(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        let (cx, back) = (cx + self.dim.gen_cx(), ivec3(self.dim.gen_x(), 0, 0));
         let mut v = Vec::new();
         for (site, blocks) in self.sites_near(cx, cz) {
             if site.kind == Kind::JungleTemple {
-                v.extend(blocks.into_iter().filter(|(p, id)| crate::contraptions::is_dispenser(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
+                v.extend(blocks.into_iter().filter(|(p, id)| crate::contraptions::is_dispenser(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p - back));
             }
         }
         v
@@ -642,9 +652,10 @@ impl Generator {
 
     /// Monster and Sizzler Cages built into chunk (cx, cz) (see fortress.rs).
     pub fn structure_cages(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        let (cx, back) = (cx + self.dim.gen_cx(), ivec3(self.dim.gen_x(), 0, 0));
         let mut v = Vec::new();
         for (_, blocks) in self.sites_near(cx, cz) {
-            v.extend(blocks.into_iter().filter(|(p, id)| crate::fortress::is_cage(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
+            v.extend(blocks.into_iter().filter(|(p, id)| crate::fortress::is_cage(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p - back));
         }
         v
     }
@@ -712,13 +723,13 @@ impl Generator {
 
     /// How many chunks out a site can reach into its neighbours. (Newer
     /// worlds' Scorchlands fortresses are bigger: three chunks.)
-    fn site_reach(&self, cx: i32) -> i32 {
-        if self.opts.version >= 2 && cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL - 4 * CW { 3 } else { 2 }
+    fn site_reach(&self) -> i32 {
+        if self.opts.version >= 2 && self.dim == Dim::Scorch { 3 } else { 2 }
     }
 
     fn sites_near(&self, cx: i32, cz: i32) -> Vec<(Site, Vec<(IVec3, Id)>)> {
         let mut v = Vec::new();
-        let reach = self.site_reach(cx);
+        let reach = self.site_reach();
         for dz in -reach..=reach {
             for dx in -reach..=reach {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };

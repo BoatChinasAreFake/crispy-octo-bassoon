@@ -1,5 +1,6 @@
 //! Chunked voxel world: storage, threaded terrain generation, edits and raycasts.
 
+use crate::dims::Dim;
 use crate::block::*;
 use crate::noise::{hash2, hash3, Perlin};
 use crate::containers::{is_container, Container};
@@ -599,6 +600,9 @@ impl GenOptions {
 pub struct Generator {
     pub seed: u32,
     pub opts: GenOptions,
+    /// Which dimension this generates (see dims.rs): it works in that
+    /// dimension's generator coordinates, its own plus `dim.gen_x()`.
+    pub dim: Dim,
     continent: Perlin,
     hills: Perlin,
     ridges: Perlin,
@@ -622,10 +626,15 @@ impl Generator {
     }
 
     pub fn with(seed: u32, opts: GenOptions) -> Self {
+        Generator::with_dim(seed, opts, Dim::Over)
+    }
+
+    pub fn with_dim(seed: u32, opts: GenOptions, dim: Dim) -> Self {
         let s = seed as u64;
         Generator {
             seed,
             opts,
+            dim,
             continent: Perlin::new(s),
             hills: Perlin::new(s + 1),
             ridges: Perlin::new(s + 2),
@@ -859,15 +868,17 @@ impl Generator {
         y < 36 && self.cavern.noise3(fx / 55.0, fy / 28.0, fz / 55.0) > 0.42
     }
 
+    /// Chunk (cx, cz) of this generator's dimension (in its own coordinates).
     pub fn generate(&self, cx: i32, cz: i32) -> Vec<Id> {
-        // Far east: the wall, then the Scorchlands (see scorch.rs).
-        if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL {
-            return self.generate_scorch(cx, cz);
+        match self.dim {
+            Dim::Over => self.generate_over(cx, cz),
+            // (The other dimensions are generated in generator coordinates; see dims.rs.)
+            Dim::Scorch => self.generate_scorch(cx + self.dim.gen_cx(), cz),
+            Dim::Hollow => self.generate_hollow(cx + self.dim.gen_cx(), cz),
         }
-        // Far west: the wall, then the Hollow (see hollow.rs).
-        if cx * CW < crate::hollow::HOLLOW_X + crate::hollow::WALL {
-            return self.generate_hollow(cx, cz);
-        }
+    }
+
+    fn generate_over(&self, cx: i32, cz: i32) -> Vec<Id> {
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -1351,7 +1362,12 @@ impl World {
     }
 
     pub fn with_options(seed: u32, opts: GenOptions) -> Self {
-        let generator = Arc::new(Generator::with(seed, opts));
+        World::with_dim(seed, opts, Dim::Over)
+    }
+
+    /// A world for dimension `dim` (see dims.rs).
+    pub fn with_dim(seed: u32, opts: GenOptions, dim: Dim) -> Self {
+        let generator = Arc::new(Generator::with_dim(seed, opts, dim));
         let (req_tx, req_rx) = channel::<(i32, i32)>();
         let (res_tx, res_rx) = channel();
         let req_rx = Arc::new(Mutex::new(req_rx));
@@ -1416,6 +1432,36 @@ impl World {
 
     pub fn seed(&self) -> u32 {
         self.generator.seed
+    }
+
+    /// Which dimension this is.
+    pub fn dim(&self) -> Dim {
+        self.generator.dim
+    }
+
+    pub fn is_scorch(&self) -> bool {
+        self.dim() == Dim::Scorch
+    }
+
+    pub fn is_hollow(&self) -> bool {
+        self.dim() == Dim::Hollow
+    }
+
+    /// The structure that starts in chunk (cx, cz), in this dimension's own coordinates.
+    pub fn site(&self, cx: i32, cz: i32) -> Option<crate::structures::Site> {
+        let off = self.dim().gen_x();
+        self.generator.site(cx + self.dim().gen_cx(), cz).map(|s| crate::structures::Site { origin: s.origin - ivec3(off, 0, 0), ..s })
+    }
+
+    /// The kind of structure whose middle is within `r` of `p` (this dimension's coordinates).
+    pub fn site_near(&self, p: Vec3, r: f32) -> Option<crate::structures::Kind> {
+        self.generator.site_near(p + Vec3::new(self.dim().gen_x() as f32, 0.0, 0.0), r)
+    }
+
+    /// The nearest structure of a kind to `at` (this dimension's coordinates).
+    pub fn nearest_site(&self, kind: crate::structures::Kind, at: Vec3, radius: i32) -> Option<IVec3> {
+        let off = self.dim().gen_x();
+        self.generator.nearest_site(kind, at + Vec3::new(off as f32, 0.0, 0.0), radius).map(|p| p - ivec3(off, 0, 0))
     }
 
     /// Queue generation for chunks around a point and absorb finished ones.

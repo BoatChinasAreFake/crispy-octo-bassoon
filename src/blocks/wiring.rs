@@ -259,7 +259,7 @@ impl Game {
     /// Pressure plates go down under anyone (or anything) standing on them.
     fn pressure_plates(&mut self, dt: f32) {
         let mut feet: Vec<Vec3> = Vec::new();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             feet.push(self.player.body.pos);
         }
         feet.extend(self.peers.values().filter(|p| p.alive()).map(|p| p.target));

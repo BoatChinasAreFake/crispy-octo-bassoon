@@ -148,7 +148,7 @@ impl Game {
     /// A Charred Skull just went on at `skull`: if it finishes the T, the
     /// Wilter wakes (where the world lives).
     pub fn try_build_wilter(&mut self, skull: IVec3, who: &str) -> bool {
-        if self.is_client() || crate::hollow::in_hollow(skull.x as f32) {
+        if self.is_client() || self.world.is_hollow() {
             return false;
         }
         let Some(cells) = frame(&self.world, skull) else { return false };
@@ -198,7 +198,7 @@ impl Game {
         let t = "The Wilter has been beaten! It left a star behind.";
         self.msg(t);
         self.system_message(None, t);
-        if !self.dedicated && self.player.body.pos.distance(at) < 48.0 {
+        if !self.away() && self.player.body.pos.distance(at) < 48.0 {
             self.advance("wilt_under_pressure");
         }
         let near: Vec<String> = self.peers.values().filter(|p| p.target.distance(at) < 48.0).map(|p| crate::players::record_key(&p.name)).collect();

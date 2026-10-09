@@ -91,7 +91,7 @@ impl Game {
                 self.pop_drop(q.as_vec3() + Vec3::splat(0.5), KELP, 1);
                 q += IVec3::Y;
             }
-            if !self.dedicated && p.as_vec3().distance(self.player.body.pos) < 8.0 {
+            if !self.away() && p.as_vec3().distance(self.player.body.pos) < 8.0 {
                 self.advance("kelp_me");
             }
         }

@@ -206,7 +206,7 @@ impl Game {
 impl Game {
     /// An Axolotl's prey is beaten: players nearby get a little Regeneration.
     pub fn axolotl_win(&mut self, at: Vec3) {
-        if !self.dedicated && self.dead.is_none() && self.player.body.pos.distance(at) < 12.0 {
+        if !self.away() && self.dead.is_none() && self.player.body.pos.distance(at) < 12.0 {
             self.timed_effect(crate::potions::Potion::Regeneration, 6.0);
         }
         let near: Vec<u32> = self.peers.iter().filter(|(_, p)| p.alive() && p.target.distance(at) < 12.0).map(|(&id, _)| id).collect();

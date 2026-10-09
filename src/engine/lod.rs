@@ -214,9 +214,6 @@ pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, ski
             }
             let (cx, cz) = (pcx + dx, pcz + dz);
             let x0 = cx * CW;
-            if crate::scorch::in_scorch(x0 as f32) || crate::scorch::in_scorch((x0 + CW) as f32) || crate::hollow::in_hollow(x0 as f32) {
-                continue;
-            }
             let step = if d2 <= near * near { NEAR_STEP } else { FAR_STEP };
             let start = land.mesh.idx.len() as u32;
             if smooth {

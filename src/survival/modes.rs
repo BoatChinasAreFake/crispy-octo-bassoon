@@ -90,7 +90,7 @@ impl Game {
 
     /// A joined player's mode, as the host knows it.
     pub fn peer_mode(&self, id: u32) -> GameMode {
-        self.peers.get(&id).map(|p| p.mode).unwrap_or(GameMode::Survival)
+        self.peer_ref(id).map(|p| p.mode).unwrap_or(GameMode::Survival)
     }
 
     /// Joined players in creative (or spectating) get things for free.
@@ -100,7 +100,7 @@ impl Game {
 
     /// Set a joined player's mode (host side) and tell them.
     pub fn set_peer_mode(&mut self, id: u32, mode: GameMode) {
-        if let Some(p) = self.peers.get_mut(&id) {
+        if let Some(p) = self.peer_mut(id) {
             p.mode = mode;
         }
         self.net_send_to(id, Msg::GameMode { mode: mode.index() });

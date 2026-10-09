@@ -107,8 +107,7 @@ impl Field {
     /// The overworld chunk at (cx, cz)'s colours; None in the other dimensions
     /// (nothing there is tinted).
     pub fn of(world: &World, cx: i32, cz: i32) -> Option<Field> {
-        let mid = (cx * CW + CW / 2) as f32;
-        if crate::scorch::in_scorch(mid) || crate::hollow::in_hollow(mid) {
+        if world.dim() != crate::dims::Dim::Over {
             return None;
         }
         Some(Field::from_biomes(|x, z| world.generator.column(x, z).1, cx, cz))

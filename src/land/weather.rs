@@ -83,7 +83,7 @@ fn takes_snow(id: Id) -> bool {
 impl Game {
     /// Is it raining (or snowing) right here, on this spot under the open sky?
     pub fn rained_on(&self, x: i32, y: i32, z: i32) -> bool {
-        self.weather.kind.wet() && !crate::hollow::in_hollow(x as f32) && self.world.sky_light(x, y, z) >= 1.0 && !self.world.generator.column(x, z).1.dry()
+        self.weather.kind.wet() && self.world.dim().open_sky() && self.world.sky_light(x, y, z) >= 1.0 && !self.world.generator.column(x, z).1.dry()
     }
 
     /// What the world sounds like where you are: the music's mood, how loud
@@ -148,13 +148,13 @@ impl Game {
     /// slowly melts away again.
     pub fn snow_tick(&mut self, dt: f32) {
         let mut near: Vec<Vec3> = self.peers.values().filter(|p| p.alive()).map(|p| p.target).collect();
-        if !self.dedicated && !self.menu {
+        if !self.away() && !self.menu {
             near.push(self.player.body.pos);
         }
         let snowing = self.weather.kind.wet() && self.weather.strength > 0.5;
         let season = self.season();
         for c in near {
-            if crate::hollow::in_hollow(c.x) || crate::scorch::in_scorch(c.x) {
+            if !self.world.dim().open_sky() {
                 continue;
             }
             // A few columns a second round each player.
@@ -193,13 +193,13 @@ impl Game {
             Weather::Clear => self.rng.range(300.0, 900.0),
             _ => self.rng.range(120.0, 300.0),
         };
-        self.net_broadcast(Msg::Weather { kind: kind.index() });
+        self.net_broadcast_all(Msg::Weather { kind: kind.index() });
     }
 
     /// A strike somewhere near a random player.
     fn random_lightning(&mut self) {
         let mut near: Vec<Vec3> = self.peers.values().filter(|p| p.alive()).map(|p| p.target).collect();
-        if !self.dedicated && !self.menu {
+        if !self.away() && !self.menu {
             near.push(self.player.body.pos);
         }
         if near.is_empty() {
@@ -229,7 +229,7 @@ impl Game {
             self.ignite(at_cell);
         }
         let cause = "was struck by lightning. Statistically impressive";
-        if !self.dedicated && self.player.body.pos.distance(at) < LIGHTNING_RADIUS {
+        if !self.away() && self.player.body.pos.distance(at) < LIGHTNING_RADIUS {
             self.player.hurt = 0.0;
             self.hurt_player(LIGHTNING_DAMAGE, cause);
         }

@@ -9,6 +9,7 @@
 //! the two ever disagree (the usual inventory check sorts that out).
 
 use crate::block::*;
+use crate::dims::Dim;
 use crate::game::Game;
 use crate::inventory::Wear;
 use crate::net::Msg;
@@ -43,6 +44,8 @@ pub struct PlayerRecord {
     /// Their statistics (`stats::Stats::encode`) and game mode (`modes::GameMode` index).
     pub stats: Vec<u8>,
     pub mode: u8,
+    /// Which dimension `pos` is in.
+    pub dim: Dim,
 }
 
 /// The most statistics a joined player may send (they're short text).
@@ -130,6 +133,15 @@ pub fn encode(records: &BTreeMap<String, PlayerRecord>) -> Vec<u8> {
         put(&(stats.len() as u32).to_le_bytes());
         put(stats);
     }
+    // Another (older saves end above, from when the dimensions shared one map):
+    // which dimension each player is in.
+    put(b"DIMS");
+    put(&(records.len() as u32).to_le_bytes());
+    for (name, r) in records {
+        put(&(name.len() as u8).to_le_bytes());
+        put(name.as_bytes());
+        put(&[r.dim.index()]);
+    }
     out
 }
 
@@ -172,7 +184,7 @@ pub fn decode(b: &[u8]) -> BTreeMap<String, PlayerRecord> {
             enchanted.push((u16::from_le_bytes([s[0], s[1]]), u16::from_le_bytes([s[2], s[3]]), u32_of(&s[4..])));
         }
         let report = Report { slots, health: f[3], food: f[4], saturation: f[5] };
-        map.insert(name, PlayerRecord { pos: Vec3::new(f[0], f[1], f[2]), xp: xp.min(1 << 24), bag, report, enchanted, enchant_count, stats: Vec::new(), mode: 0 });
+        map.insert(name, PlayerRecord { pos: Vec3::new(f[0], f[1], f[2]), xp: xp.min(1 << 24), bag, report, enchanted, enchant_count, stats: Vec::new(), mode: 0, dim: Dim::Over });
     }
     if take(4) == Some(b"STAT")
         && let Some(n) = take(4).map(u32_of)
@@ -189,6 +201,27 @@ pub fn decode(b: &[u8]) -> BTreeMap<String, PlayerRecord> {
             }
         }
     }
+    let mut split = false;
+    if take(4) == Some(b"DIMS")
+        && let Some(n) = take(4).map(u32_of)
+    {
+        split = true;
+        for _ in 0..n.min(10_000) {
+            let Some(len) = take(1).map(|s| s[0] as usize) else { break };
+            let Some(name) = take(len).map(|s| String::from_utf8_lossy(s).into_owned()) else { break };
+            let Some(d) = take(1).map(|s| s[0]) else { break };
+            if let Some(r) = map.get_mut(&name) {
+                r.dim = Dim::from_index(d).unwrap_or_default();
+            }
+        }
+    }
+    if !split {
+        // From when the dimensions shared one map: work out where they are.
+        for r in map.values_mut() {
+            r.dim = Dim::of_old_x(r.pos.x as i32);
+            r.pos.x -= r.dim.gen_x() as f32;
+        }
+    }
     map
 }
 
@@ -199,7 +232,7 @@ impl Game {
         if self.is_local_player(name) {
             return self.player.health;
         }
-        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.report.as_ref().map(|r| r.health).unwrap_or(20.0)).unwrap_or(-1.0)
+        self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.report.as_ref().map(|r| r.health).unwrap_or(20.0)).unwrap_or(-1.0)
     }
 
     /// For scripts: a player's food level (0–20), or -1 if unknown.
@@ -207,7 +240,7 @@ impl Game {
         if self.is_local_player(name) {
             return self.player.hunger.food;
         }
-        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.report.as_ref().map(|r| r.food).unwrap_or(20.0)).unwrap_or(-1.0)
+        self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.report.as_ref().map(|r| r.food).unwrap_or(20.0)).unwrap_or(-1.0)
     }
 
     /// For scripts: what a player holds. For joined players, only what the
@@ -225,7 +258,7 @@ impl Game {
         if self.is_local_player(name) {
             return self.inv.count(item);
         }
-        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.ledger.bag.count(item)).unwrap_or(0)
+        self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.ledger.bag.count(item)).unwrap_or(0)
     }
 
     /// For scripts: everything a player has, as (item, count), sorted by item.
@@ -233,7 +266,7 @@ impl Game {
         let mut v: Vec<(Id, u32)> = if self.is_local_player(name) {
             self.inv.counts().into_iter().collect()
         } else {
-            self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.ledger.bag.items()).unwrap_or_default()
+            self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.ledger.bag.items()).unwrap_or_default()
         };
         v.retain(|&(id, n)| id != AIR && n > 0);
         v.sort_unstable();
@@ -266,7 +299,7 @@ impl Game {
 
     /// The host: a joined player's report.
     pub fn host_report(&mut self, from: u32, slots: Vec<(Id, u8, Wear)>, health: f32, food: f32, saturation: f32) {
-        if let Some(p) = self.peers.get_mut(&from) {
+        if let Some(p) = self.peer_mut(from) {
             let report = Report { slots: clean(slots), health: finite(health, 0.0, 20.0, 20.0), food: finite(food, 0.0, 20.0, 20.0), saturation: finite(saturation, 0.0, 20.0, 5.0) };
             p.report = Some(report);
         }
@@ -274,12 +307,12 @@ impl Game {
 
     /// The host: what to remember about a joined player.
     pub fn record_of(&self, id: u32) -> Option<(String, PlayerRecord)> {
-        let p = self.peers.get(&id)?;
+        let p = self.peer_ref(id)?;
         let bag = p.ledger.bag.items();
         let mut enchanted: Vec<(Id, u16, u32)> = p.ledger.enchanted.iter().map(|(&(id, e), &n)| (id, e, n)).collect();
         enchanted.sort_unstable();
         let report = p.report.clone().unwrap_or_else(|| Report { slots: layout_from(&bag), health: 20.0, food: 20.0, saturation: 5.0 });
-        Some((record_key(&p.name), PlayerRecord { pos: p.target, xp: p.ledger.xp, bag, report, enchanted, enchant_count: p.ledger.enchant_count, stats: p.stats.clone(), mode: p.mode.index() }))
+        Some((record_key(&p.name), PlayerRecord { pos: p.target, xp: p.ledger.xp, bag, report, enchanted, enchant_count: p.ledger.enchant_count, stats: p.stats.clone(), mode: p.mode.index(), dim: p.dim }))
     }
 
     /// The host: a joined player is leaving; remember them.
@@ -292,14 +325,14 @@ impl Game {
     /// Everyone remembered, including whoever is here right now (for saving the world).
     pub fn all_player_records(&self) -> BTreeMap<String, PlayerRecord> {
         let mut all = self.saved_players.clone();
-        all.extend(self.peers.keys().filter_map(|&id| self.record_of(id)));
+        all.extend(self.all_peers().filter_map(|(&id, _)| self.record_of(id)));
         all
     }
 
     /// The host: someone joined; if we know them, put everything back.
     pub fn welcome_back(&mut self, id: u32, name: &str) {
         let Some(r) = self.saved_players.remove(&record_key(name)) else { return };
-        if let Some(p) = self.peers.get_mut(&id) {
+        if let Some(p) = self.peer_mut(id) {
             p.ledger.bag = crate::ledger::Bag::from_items(&r.bag);
             p.ledger.xp = r.xp;
             p.ledger.enchanted = r.enchanted.iter().filter(|e| valid_item(e.0)).map(|&(id, e, n)| ((id, e), n)).collect();
@@ -308,6 +341,10 @@ impl Game {
             p.pos = r.pos;
             p.stats = r.stats.clone();
             p.mode = crate::modes::GameMode::from_index(r.mode);
+        }
+        // Back to the dimension they left from (everyone's told).
+        if r.dim != crate::dims::Dim::Over {
+            self.move_peer(id, r.dim, r.pos);
         }
         self.net_send_to(id, Msg::Stats { data: r.stats.clone() });
         if r.mode != 0 {
@@ -366,15 +403,25 @@ mod tests {
         let mut slots = vec![(AIR, 0, 0); SLOTS];
         slots[0] = (PICK_IRON, 1, 0x0003_0012);
         slots[37] = (ARMOR_FIRST + 5, 1, 9);
-        let r = PlayerRecord { pos: Vec3::new(1.5, 70.0, -3.0), xp: 99, bag: vec![(PICK_IRON, 1), (ARMOR_FIRST + 5, 1)], report: Report { slots, health: 13.0, food: 7.0, saturation: 1.5 }, enchanted: vec![(PICK_IRON, 3, 1)], enchant_count: 4, stats: b"mined=12\n".to_vec(), mode: 2 };
+        let r = PlayerRecord { pos: Vec3::new(1.5, 70.0, -3.0), xp: 99, bag: vec![(PICK_IRON, 1), (ARMOR_FIRST + 5, 1)], report: Report { slots, health: 13.0, food: 7.0, saturation: 1.5 }, enchanted: vec![(PICK_IRON, 3, 1)], enchant_count: 4, stats: b"mined=12\n".to_vec(), mode: 2, dim: Dim::Over };
         let mut map = BTreeMap::new();
         map.insert("stove".to_string(), r.clone());
-        map.insert("joiny".to_string(), PlayerRecord { bag: vec![], ..r });
+        map.insert("joiny".to_string(), PlayerRecord { bag: vec![], ..r.clone() });
+        map.insert("hotty".to_string(), PlayerRecord { dim: Dim::Scorch, pos: Vec3::new(-5.0, 40.0, 2.0), ..r.clone() });
         assert_eq!(decode(&encode(&map)), map);
         // A save from before statistics were kept still loads.
         let old = encode(&map);
         let cut = old.windows(4).position(|w| w == b"STAT").unwrap();
         assert_eq!(decode(&old[..cut])["stove"].stats, Vec::<u8>::new());
+        // One from when the dimensions shared a map is sorted out.
+        let mut shared = map.clone();
+        shared.get_mut("hotty").unwrap().pos.x += crate::scorch::SCORCH_ORIGIN as f32;
+        let old = encode(&shared);
+        let cut = old.windows(4).position(|w| w == b"DIMS").unwrap();
+        let back = decode(&old[..cut]);
+        assert_eq!(back["hotty"].dim, Dim::Scorch);
+        assert_eq!(back["hotty"].pos, Vec3::new(-5.0, 40.0, 2.0));
+        assert_eq!(back["stove"].dim, Dim::Over);
         assert!(decode(&[1, 0, 0]).is_empty());
         // Without a report, the bag is laid out in stacks.
         let l = layout_from(&[(DIRT, 130), (DIAMOND, 1)]);

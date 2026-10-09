@@ -19,7 +19,7 @@ pub const FIREFLY_TILE: u16 = crate::texture::T_SPARK_FIRST + 2;
 impl Game {
     /// Fireflies around Firefly Bushes near us, after dark.
     pub fn fireflies_tick(&mut self, dt: f32) {
-        if self.dedicated || self.menu || !self.is_night() {
+        if self.away() || self.menu || !self.is_night() {
             return;
         }
         self.firefly_acc += dt;

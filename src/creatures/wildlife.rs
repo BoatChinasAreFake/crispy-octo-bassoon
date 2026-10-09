@@ -250,7 +250,7 @@ impl Game {
         let pos = self.mobs[i].body.pos + Vec3::Y * self.mobs[i].body.height;
         match self.mobs[i].kind {
             MobKind::Dolphin if matches!(item, COD | SALMON | COOKED_COD | COOKED_SALMON) => {
-                let wreck = self.world.generator.nearest_site(crate::structures::Kind::Shipwreck, self.mobs[i].body.pos, WRECK_RANGE);
+                let wreck = self.world.nearest_site(crate::structures::Kind::Shipwreck, self.mobs[i].body.pos, WRECK_RANGE);
                 self.mobs[i].angry = false;
                 self.hearts(pos, 4);
                 match wreck {
@@ -493,7 +493,7 @@ mod tests {
         let me = record_key(&g.player_name);
         g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
         let d = g.alloc_mob(MobKind::Dolphin, Vec3::new(1.5, 50.0, 0.5));
-        let wreck = g.world.generator.nearest_site(crate::structures::Kind::Shipwreck, Vec3::new(1.5, 50.0, 0.5), WRECK_RANGE);
+        let wreck = g.world.nearest_site(crate::structures::Kind::Shipwreck, Vec3::new(1.5, 50.0, 0.5), WRECK_RANGE);
         assert_eq!(g.interact_mob(&me, g.player.body.pos, d, COD), Interaction::Ate);
         let dolphin = g.mobs.iter().find(|m| m.id == d).unwrap();
         assert_eq!(dolphin.home.is_some(), wreck.is_some(), "leads the way if there's a wreck in range");

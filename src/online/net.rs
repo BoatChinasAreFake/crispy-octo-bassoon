@@ -33,7 +33,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v27: v0.2's mobs (Guardians, Witches, Allays, ...) and effects (Slowness, Poison, ...).
 /// v28: the Wilter, Charred Rattlers and Wilting.
 /// v29: new woods (doors, boats), the Mushmooer, kelp and sea plants.
-pub const PROTOCOL: u32 = 30;
+pub const PROTOCOL: u32 = 31;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -150,6 +150,9 @@ pub enum Msg {
     SignStyle { x: i32, y: i32, z: i32, style: u8, item: Id },
     /// A joined player upgrading the chest at (x, y, z) (see chests.rs).
     ChestUpgrade { x: i32, y: i32, z: i32 },
+    /// Host → everyone: player `id` is now at (x, y, z) in dimension `dim`
+    /// (see dims.rs). If that's you, forget the world you had and load this one.
+    Dimension { id: u32, dim: u8, x: f32, y: f32, z: f32 },
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -794,6 +797,14 @@ impl Msg {
                 w.u32(*points);
             }
             Msg::FrostWalk => w.u8(86),
+            Msg::Dimension { id, dim, x, y, z } => {
+                w.u8(89);
+                w.u32(*id);
+                w.u8(*dim);
+                w.f32(*x);
+                w.f32(*y);
+                w.f32(*z);
+            }
             Msg::ChestUpgrade { x, y, z } => {
                 w.u8(88);
                 w.i32(*x);
@@ -1177,6 +1188,7 @@ impl Msg {
             86 => Msg::FrostWalk,
             87 => Msg::SignStyle { x: r.i32()?, y: r.i32()?, z: r.i32()?, style: r.u8()?, item: r.u16()? },
             88 => Msg::ChestUpgrade { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            89 => Msg::Dimension { id: r.u32()?, dim: r.u8()?, x: r.f32()?, y: r.f32()?, z: r.f32()? },
             78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
             74 => {
@@ -1568,8 +1580,13 @@ impl Server {
     }
 
     pub fn broadcast(&mut self, m: &Msg, except: Option<u32>) {
+        self.broadcast_where(m, |id| Some(id) != except);
+    }
+
+    /// Send to the joined clients `keep` picks.
+    pub fn broadcast_where(&mut self, m: &Msg, keep: impl Fn(u32) -> bool) {
         let body = m.encode();
-        for c in self.clients.iter_mut().filter(|c| c.joined && Some(c.id) != except) {
+        for c in self.clients.iter_mut().filter(|c| c.joined && keep(c.id)) {
             if c.conn.closed.is_none() {
                 c.conn.wbuf.extend_from_slice(&(body.len() as u32).to_le_bytes());
                 c.conn.wbuf.extend_from_slice(&body);
@@ -1770,6 +1787,7 @@ mod tests {
             Msg::FrostWalk,
             Msg::SignStyle { x: -4, y: 70, z: 9, style: 19, item: 0x805a },
             Msg::ChestUpgrade { x: 5, y: 60, z: -7 },
+            Msg::Dimension { id: 4, dim: 2, x: 1.5, y: 70.0, z: -3.25 },
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },

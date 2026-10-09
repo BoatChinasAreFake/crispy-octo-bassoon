@@ -29,7 +29,7 @@ use crate::block::*;
 use crate::entity::MobKind;
 use crate::game::Game;
 use crate::noise::{hash2, Rng};
-use crate::scorch::{LAVA_SEA, SCORCH_X};
+use crate::scorch::LAVA_SEA;
 use crate::sound::Sfx;
 use crate::structures::{Kind, Site};
 use crate::world::{Generator, CW};
@@ -67,9 +67,6 @@ pub struct Fireball {
 impl Generator {
     /// Fortresses and Snout camps, out past the Scorchlands' edge.
     pub fn scorch_site(&self, cx: i32, cz: i32) -> Option<Site> {
-        if cx * CW < SCORCH_X + 96 {
-            return None;
-        }
         let s = self.seed ^ 0xF07;
         let r = hash2(s, cx, cz);
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -341,7 +338,7 @@ impl Game {
             let solid = is_solid(self.world.get_v(f.pos.floor().as_ivec3()));
             // Anywhere on someone, head to toe.
             let touches = |feet: Vec3| Vec3::new(feet.x - f.pos.x, 0.0, feet.z - f.pos.z).length() < r && f.pos.y > feet.y - r * 0.5 && f.pos.y < feet.y + 1.8 + r * 0.5;
-            let me = !self.dedicated && self.dead.is_none() && !self.creative && Some(self.my_id) != f.returned && touches(self.player.body.pos);
+            let me = !self.away() && self.dead.is_none() && !self.creative && Some(self.my_id) != f.returned && touches(self.player.body.pos);
             let peer = self.peers.iter().find(|&(&id, p)| p.alive() && Some(id) != f.returned && touches(p.target)).map(|(&id, _)| id);
             let mob = self.mobs.iter().position(|m| (m.id != f.shooter || f.returned.is_some()) && (m.body.pos + Vec3::Y * m.body.height * 0.5).distance(f.pos) < m.body.half + r * 0.6 + 0.2);
             if !(solid || me || peer.is_some() || mob.is_some()) {
@@ -555,7 +552,7 @@ impl Game {
 
     /// Breaking a Snout's gold makes every Snout nearby cross.
     pub fn gold_taken(&mut self, pos: IVec3, old: Id) {
-        if matches!(old, GOLD_BLOCK | GILDED_SCORCHROCK | CHEST) && crate::scorch::in_scorch(pos.x as f32) {
+        if matches!(old, GOLD_BLOCK | GILDED_SCORCHROCK | CHEST) && self.world.is_scorch() {
             let at = pos.as_vec3();
             for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Snout && m.body.pos.distance(at) < 16.0) {
                 m.angry = true;

@@ -274,7 +274,7 @@ impl Game {
             merge(&mut self.drops);
         }
         // The local player walks into things (spectators just pass through).
-        if self.dedicated || self.menu || self.dead.is_some() || self.spectator {
+        if self.away() || self.menu || self.dead.is_some() || self.spectator {
             return;
         }
         let me = self.player.body.pos;
@@ -331,12 +331,19 @@ impl Game {
     }
 
     /// The host tells joined players what's on the ground, a few times a second.
-    pub fn send_drops(&mut self, dt: f32) {
+    /// The host: every so often, the dropped items to everyone here. True
+    /// when it's time (`broadcast_drops` then does the other dimensions).
+    pub fn send_drops(&mut self, dt: f32) -> bool {
         self.drop_sync += dt;
         if self.drop_sync < 0.2 {
-            return;
+            return false;
         }
         self.drop_sync = 0.0;
+        self.broadcast_drops();
+        true
+    }
+
+    pub fn broadcast_drops(&mut self) {
         if self.drops.is_empty() && self.drops_sent_empty {
             return;
         }

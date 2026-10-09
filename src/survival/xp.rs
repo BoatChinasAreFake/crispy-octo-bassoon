@@ -182,7 +182,7 @@ impl Game {
     pub fn orbs_tick(&mut self, dt: f32) {
         // Everyone who can collect: (None = the local player, or a joined player's id, and their middle).
         let mut players: Vec<(Option<u32>, Vec3)> = Vec::new();
-        if !self.dedicated && !self.menu && self.dead.is_none() {
+        if !self.away() && !self.menu && self.dead.is_none() {
             players.push((None, self.player.body.pos + Vec3::Y * 0.9));
         }
         players.extend(self.peers.iter().filter(|(_, p)| p.alive()).map(|(id, p)| (Some(*id), p.target + Vec3::Y * 0.9)));
@@ -226,12 +226,19 @@ impl Game {
     }
 
     /// The host tells joined players where the orbs are.
-    pub fn send_orbs(&mut self, dt: f32) {
+    /// The host: every so often, the orbs to everyone here (true when it's
+    /// time; `broadcast_orbs` then does the other dimensions).
+    pub fn send_orbs(&mut self, dt: f32) -> bool {
         self.orb_sync += dt;
         if self.orb_sync < 0.1 {
-            return;
+            return false;
         }
         self.orb_sync = 0.0;
+        self.broadcast_orbs();
+        true
+    }
+
+    pub fn broadcast_orbs(&mut self) {
         if self.orbs.is_empty() && self.orbs_sent_empty {
             return;
         }

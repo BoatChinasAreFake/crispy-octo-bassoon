@@ -377,7 +377,7 @@ impl Game {
         self.world.set_v(p, piston(f, true, sticky));
         self.shove_bodies(p + d, line.len() + 1, d);
         self.sfx(Sfx::Place(Mat::Stone), Some(p.as_vec3() + Vec3::splat(0.5)));
-        if !line.is_empty() && !self.dedicated && self.player.body.pos.distance(p.as_vec3()) < 16.0 {
+        if !line.is_empty() && !self.away() && self.player.body.pos.distance(p.as_vec3()) < 16.0 {
             self.advance("pushy");
         }
     }

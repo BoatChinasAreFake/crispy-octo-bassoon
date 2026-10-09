@@ -21,6 +21,7 @@
 //! Scorchlands ones (`Msg::UsePortal`).
 
 use crate::block::*;
+use crate::dims::Dim;
 use crate::entity::{Mob, MobEvent, MobKind};
 use crate::game::Game;
 use crate::noise::{hash2, hash3};
@@ -28,9 +29,13 @@ use crate::sound::Sfx;
 use crate::world::{Generator, World, CH, CW};
 use macroquad::math::{ivec3, IVec3, Vec3};
 
-/// Where the Hollow starts (blocks west), and its island's middle.
+/// Where the Hollow used to start, when it shared the ordinary world's map
+/// (blocks west; see dims.rs), and its island's middle then: the Hollow is
+/// still generated there (`GEN_ORIGIN`, in generator coordinates).
 pub const HOLLOW_X: i32 = -32_768;
-pub const ORIGIN: IVec3 = IVec3::new(HOLLOW_X - 1024, 50, 0);
+pub const GEN_ORIGIN: IVec3 = IVec3::new(HOLLOW_X - 1024, 50, 0);
+/// The island's middle, in the Hollow's own coordinates.
+pub const ORIGIN: IVec3 = IVec3::new(0, 50, 0);
 /// The bedrock band between the worlds.
 pub const WALL: i32 = 2048;
 /// The island's radius, and the pillars around its middle.
@@ -45,21 +50,13 @@ const CRYPT_Y: i32 = 18;
 const WYRM_REACH: f32 = 3.5;
 const WYRM_DAMAGE: f32 = 7.0;
 
-pub fn in_hollow(x: f32) -> bool {
-    x <= (HOLLOW_X + 16) as f32
-}
-
-pub fn in_wall(x: i32) -> bool {
-    (HOLLOW_X + 1..HOLLOW_X + WALL).contains(&x)
-}
-
 /// The pillars' spots (x, z) and heights.
 pub fn pillars(seed: u32) -> Vec<(i32, i32, i32)> {
     (0..PILLARS)
         .map(|i| {
             let a = i as f32 / PILLARS as f32 * std::f32::consts::TAU;
-            let x = ORIGIN.x + (a.cos() * PILLAR_RING) as i32;
-            let z = ORIGIN.z + (a.sin() * PILLAR_RING) as i32;
+            let x = GEN_ORIGIN.x + (a.cos() * PILLAR_RING) as i32;
+            let z = GEN_ORIGIN.z + (a.sin() * PILLAR_RING) as i32;
             let h = 62 + (hash2(seed ^ 0x9111, i as i32, 0) * 14.0) as i32;
             (x, z, h)
         })
@@ -77,20 +74,20 @@ pub fn outer_island(seed: u32, gx: i32, gz: i32) -> Option<(IVec3, i32, bool)> {
     if hash2(seed ^ 0x0A7E, gx, gz) > 0.55 {
         return None;
     }
-    let x = ORIGIN.x + gx * OUTER_CELL + 16 + (hash2(seed ^ 0x0A7F, gx, gz) * (OUTER_CELL - 32) as f32) as i32;
-    let z = ORIGIN.z + gz * OUTER_CELL + 16 + (hash2(seed ^ 0x0A80, gx, gz) * (OUTER_CELL - 32) as f32) as i32;
-    let d = ((x - ORIGIN.x) as f32).hypot((z - ORIGIN.z) as f32);
+    let x = GEN_ORIGIN.x + gx * OUTER_CELL + 16 + (hash2(seed ^ 0x0A7F, gx, gz) * (OUTER_CELL - 32) as f32) as i32;
+    let z = GEN_ORIGIN.z + gz * OUTER_CELL + 16 + (hash2(seed ^ 0x0A80, gx, gz) * (OUTER_CELL - 32) as f32) as i32;
+    let d = ((x - GEN_ORIGIN.x) as f32).hypot((z - GEN_ORIGIN.z) as f32);
     if !(OUTER_NEAR..OUTER_FAR).contains(&d) {
         return None;
     }
-    let y = ORIGIN.y - 6 + (hash2(seed ^ 0x0A81, gx, gz) * 14.0) as i32;
+    let y = GEN_ORIGIN.y - 6 + (hash2(seed ^ 0x0A81, gx, gz) * 14.0) as i32;
     let r = 9 + (hash2(seed ^ 0x0A82, gx, gz) * 8.0) as i32;
     Some((ivec3(x, y, z), r, hash2(seed ^ 0x0A83, gx, gz) < 0.6))
 }
 
 /// Outer islands that might reach (x, z).
 fn outer_islands_near(seed: u32, x: i32, z: i32) -> Vec<(IVec3, i32, bool)> {
-    let (gx, gz) = ((x - ORIGIN.x).div_euclid(OUTER_CELL), (z - ORIGIN.z).div_euclid(OUTER_CELL));
+    let (gx, gz) = ((x - GEN_ORIGIN.x).div_euclid(OUTER_CELL), (z - GEN_ORIGIN.z).div_euclid(OUTER_CELL));
     let mut v = Vec::new();
     for dz in -1..=1 {
         for dx in -1..=1 {
@@ -122,7 +119,8 @@ pub fn spire_block(dx: i32, dy: i32, dz: i32) -> Option<Id> {
     })
 }
 
-/// The chest in each outer spire in chunk (cx, cz), with a seed for its loot.
+/// The chest in each outer spire in chunk (cx, cz), with a seed for its loot
+/// (all in generator coordinates).
 pub fn spire_chests(seed: u32, cx: i32, cz: i32) -> Vec<(IVec3, u32)> {
     let mid = ivec3(cx * CW + CW / 2, 0, cz * CW + CW / 2);
     outer_islands_near(seed, mid.x, mid.z)
@@ -153,7 +151,8 @@ pub fn crypt_in_region(seed: u32, rx: i32, rz: i32) -> Option<IVec3> {
     let x = rx * CRYPT_REGION + 64 + (hash2(seed ^ 0xC417, rx, rz) * (CRYPT_REGION - 128) as f32) as i32;
     let z = rz * CRYPT_REGION + 64 + (hash2(seed ^ 0xC418, rx, rz) * (CRYPT_REGION - 128) as f32) as i32;
     // Only in the ordinary world.
-    (x > HOLLOW_X + WALL + 64 && x < crate::scorch::SCORCH_X - crate::scorch::WALL - 64).then(|| ivec3(x, CRYPT_Y, z))
+    // (Within where the old shared map's ordinary world was, so old worlds keep theirs.)
+    (x > HOLLOW_X + 2048 + 64 && x < crate::scorch::SCORCH_X - 2048 - 64).then(|| ivec3(x, CRYPT_Y, z))
 }
 
 /// The nearest Crypt to `p` (looking a few regions around).
@@ -229,24 +228,18 @@ impl Generator {
             for lx in 0..CW {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
                 let i = |y: i32| crate::world::idx(lx, y, lz);
-                if in_wall(x) {
-                    for y in 0..CH {
-                        b[i(y)] = BEDROCK;
-                    }
-                    continue;
-                }
-                let d = ((x - ORIGIN.x) as f32).hypot((z - ORIGIN.z) as f32);
+                let d = ((x - GEN_ORIGIN.x) as f32).hypot((z - GEN_ORIGIN.z) as f32);
                 let edge = ISLAND + self.scorch.noise3(x as f32 / 20.0, 3.0, z as f32 / 20.0) * 8.0;
                 if d < edge {
                     // A lens of Hollow Stone: thick in the middle, thin at the rim.
                     let depth = ((1.0 - d / edge).sqrt() * 26.0) as i32 + 2;
-                    for y in (ORIGIN.y - depth).max(1)..=ORIGIN.y {
+                    for y in (GEN_ORIGIN.y - depth).max(1)..=GEN_ORIGIN.y {
                         b[i(y)] = HOLLOW_STONE;
                     }
                 }
                 for &(px, pz, h) in &pillars {
                     if (x - px).pow(2) + (z - pz).pow(2) <= 9 {
-                        for y in ORIGIN.y + 1..h {
+                        for y in GEN_ORIGIN.y + 1..h {
                             b[i(y)] = OBSIDIAN;
                         }
                     }
@@ -275,9 +268,9 @@ impl Generator {
                     }
                 }
                 // A little obsidian landing where you arrive.
-                let a = arrival();
+                let a = arrival() + Vec3::new(GEN_ORIGIN.x as f32, 0.0, 0.0);
                 if (x as f32 - a.x).abs() < 2.5 && (z as f32 - a.z).abs() < 2.5 {
-                    b[i(ORIGIN.y)] = OBSIDIAN;
+                    b[i(GEN_ORIGIN.y)] = OBSIDIAN;
                 }
             }
         }
@@ -308,7 +301,7 @@ impl Generator {
 
 impl Game {
     pub fn in_hollow(&self) -> bool {
-        !self.menu && in_hollow(self.player.body.pos.x)
+        !self.menu && self.world.is_hollow()
     }
 
     /// Right-click with a Staring Eye: into a frame, or thrown to point the way.
@@ -376,14 +369,17 @@ impl Game {
         }
     }
 
-    /// Where a Hollow portal at `at` takes you.
-    pub fn hollow_destination(&mut self, at: IVec3) -> Vec3 {
-        if in_hollow(at.x as f32) {
+    /// Where a Hollow portal at `at` takes you (leaving that realm active).
+    pub fn hollow_destination(&mut self, at: IVec3) -> (Dim, Vec3) {
+        let _ = at;
+        if self.world.is_hollow() {
             // Home: the world's spawn.
+            self.enter(Dim::Over);
             let s = self.spawn;
             self.world.load_now(s.x.floor() as i32 >> 4, s.z.floor() as i32 >> 4);
-            return s;
+            return (Dim::Over, s);
         }
+        self.enter(Dim::Hollow);
         let a = arrival();
         let (cx, cz) = ((a.x as i32).div_euclid(CW), (a.z as i32).div_euclid(CW));
         for dz in -1..=1 {
@@ -391,7 +387,7 @@ impl Game {
                 self.world.load_now(cx + dx, cz + dz);
             }
         }
-        a
+        (Dim::Hollow, a)
     }
 
     /// Standing in a Hollow portal (the local player) takes you through at once.
@@ -407,13 +403,10 @@ impl Game {
             self.net_send_msg(crate::net::Msg::UsePortal { x: feet.x, y: feet.y, z: feet.z });
             return true;
         }
-        let to = self.hollow_destination(feet);
-        self.player.body.pos = to;
-        self.player.body.vel = Vec3::ZERO;
-        self.player.fall_start = to.y;
-        self.ready = false;
+        let (dim, to) = self.hollow_destination(feet);
+        self.move_local_player(dim, to);
         self.sfx(Sfx::Warp, None);
-        if in_hollow(to.x) {
+        if dim == Dim::Hollow {
             self.advance("hollow");
             self.msg("The Hollow. Something big is circling.");
         }
@@ -425,7 +418,8 @@ impl Game {
         if self.is_client() {
             return;
         }
-        let anyone = (!self.dedicated && self.in_hollow()) || self.peers.values().any(|p| in_hollow(p.target.x));
+        // (Players here: the local one, or any joined ones in this realm.)
+        let anyone = self.in_hollow() && (!self.away() || !self.peers.is_empty());
         if !anyone {
             return;
         }
@@ -451,7 +445,7 @@ impl Game {
             }
         }
         // Void: fall off and it's over.
-        if !self.dedicated && self.in_hollow() && self.player.body.pos.y < -8.0 && self.dead.is_none() {
+        if !self.away() && self.in_hollow() && self.player.body.pos.y < -8.0 && self.dead.is_none() {
             self.hurt_player(4.0 * dt * 10.0, "fell into the void. It's not a pool either");
         }
     }

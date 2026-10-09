@@ -9,11 +9,9 @@ use macroquad::math::Vec3;
 pub const MAP_SIZE: usize = 96;
 
 /// Which way the compass needle points, relative to straight ahead (radians,
-/// clockwise). In the Scorchlands it just spins.
+/// clockwise). (Where its target isn't, it spins: see `compass_target`.)
 pub fn compass_needle(pos: Vec3, yaw: f32, target: Vec3, clock: f32) -> f32 {
-    if crate::scorch::in_scorch(pos.x) {
-        return clock * 7.0;
-    }
+    let _ = clock;
     let d = target - pos;
     let bearing = d.x.atan2(-d.z);
     bearing - yaw
@@ -47,7 +45,7 @@ pub fn block_colors(atlas: &[u8]) -> Vec<[u8; 3]> {
 /// `scale`: blocks per pixel (a zoomed-out map sees further, in less detail).
 pub fn map_pixels(world: &World, center: Vec3, colors: &[[u8; 3]], scale: i32) -> Vec<u8> {
     let (cx, cz) = (center.x.floor() as i32, center.z.floor() as i32);
-    let covered = crate::scorch::in_scorch(center.x);
+    let covered = !world.dim().open_sky();
     let start_y = if covered { (center.y as i32 + 2).min(CH - 2) } else { CH - 1 };
     let half = (MAP_SIZE / 2) as i32;
     let mut heights = vec![0i32; MAP_SIZE * MAP_SIZE];

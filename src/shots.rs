@@ -457,8 +457,8 @@ impl App {
                 let spawn = g.spawn;
                 let here = IVec3::new(spawn.x.floor() as i32, spawn.y.floor() as i32, spawn.z.floor() as i32);
                 if s.mode == "scorch" {
-                    let to = g.travel(here);
-                    g.player.body.pos = to;
+                    let (dim, to) = g.travel(here);
+                    g.move_local_player(dim, to);
                     if s.pos.is_none() {
                         s.pos = Some(to + Vec3::new(0.0, 0.0, 1.0));
                         s.yaw = std::f32::consts::PI;
@@ -486,8 +486,8 @@ impl App {
             "hollow" => {
                 // On the island's edge, looking in at the pillars (and whatever circles them).
                 let mut g = shot_game(424242, true, false);
-                let to = g.hollow_destination(IVec3::ZERO);
-                g.player.body.pos = to;
+                let (dim, to) = g.hollow_destination(IVec3::ZERO);
+                g.move_local_player(dim, to);
                 let o = hollow::ORIGIN.as_vec3();
                 g.world.load_now(hollow::ORIGIN.x.div_euclid(16), 0);
                 g.alloc_mob(entity::MobKind::Wyrm, o + Vec3::new(20.0, 24.0, -10.0));

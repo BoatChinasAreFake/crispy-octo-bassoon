@@ -311,7 +311,7 @@ impl Game {
         }
         self.shake_acc -= 1.0;
         let mut heads: Vec<Vec3> = self.peers.values().filter(|p| p.alive()).map(|p| p.target).collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             heads.push(self.player.body.pos);
         }
         for at in heads {
@@ -367,7 +367,7 @@ impl Game {
             m.damage(dmg, at + Vec3::Y);
         }
         const DEATH: &str = "was skewered by a falling Pointy Rock. It did say 'Mind Your Head'.";
-        if !self.dedicated && under(self.player.body.pos, 1.8) {
+        if !self.away() && under(self.player.body.pos, 1.8) {
             self.player.hurt = 0.0;
             self.hurt_player(dmg, DEATH);
             self.advance("mind_your_head");

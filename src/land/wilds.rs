@@ -427,11 +427,17 @@ pub fn recipes() -> Vec<Recipe> {
 impl World {
     /// The Scorchlands biome under a point (anywhere else: the Wastes).
     pub fn scorch_biome_at(&self, p: Vec3) -> ScorchBiome {
-        if crate::scorch::in_scorch(p.x) {
-            self.generator.scorch_biome(p.x.floor() as i32, p.z.floor() as i32)
+        if self.is_scorch() {
+            self.scorch_biome(p.x.floor() as i32, p.z.floor() as i32)
         } else {
             ScorchBiome::Wastes
         }
+    }
+
+    /// The Scorchlands biome at (x, z) in the Scorchlands' own coordinates
+    /// (from any dimension's world: it's the same seed).
+    pub fn scorch_biome(&self, x: i32, z: i32) -> ScorchBiome {
+        self.generator.scorch_biome(x + crate::dims::Dim::Scorch.gen_x(), z)
     }
 
     /// The air down here near `p`, blended over the biomes round about.
@@ -440,7 +446,7 @@ impl World {
         let mut d = 0.0;
         let pts = [(0.0, 0.0), (10.0, 0.0), (-10.0, 0.0), (0.0, 10.0), (0.0, -10.0)];
         for (dx, dz) in pts {
-            let (hc, hd) = self.generator.scorch_biome((p.x + dx).floor() as i32, (p.z + dz).floor() as i32).haze();
+            let (hc, hd) = self.scorch_biome((p.x + dx).floor() as i32, (p.z + dz).floor() as i32).haze();
             for i in 0..3 {
                 c[i] += hc[i] / pts.len() as f32;
             }
@@ -453,7 +459,7 @@ impl World {
 impl Game {
     /// Spores, ash and embers drifting about in the Scorchlands' biomes (just a sight).
     pub fn motes_tick(&mut self, dt: f32) {
-        if self.dedicated || self.menu || !self.in_scorch() {
+        if self.away() || self.menu || !self.in_scorch() {
             return;
         }
         self.mote_acc += dt;

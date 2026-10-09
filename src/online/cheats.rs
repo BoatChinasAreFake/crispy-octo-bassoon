@@ -55,12 +55,12 @@ impl Game {
         if self.is_local_player(name) {
             Some(self.player.body.pos)
         } else {
-            self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.target)
+            self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.target)
         }
     }
 
     fn is_player(&self, name: &str) -> bool {
-        (!self.dedicated && name.eq_ignore_ascii_case(&self.player_name)) || self.peer_by_name(name).is_some()
+        (!self.away() && name.eq_ignore_ascii_case(&self.player_name)) || self.peer_by_name(name).is_some()
     }
 
     /// Run a cheat command. `me` is the caller's name ("" for the console).
@@ -156,7 +156,7 @@ impl Game {
         if self.is_local_player(me) {
             return (self.player.body.pos, self.player.look_dir());
         }
-        match self.peer_by_name(me).and_then(|id| self.peers.get(&id)) {
+        match self.peer_by_name(me).and_then(|id| self.peer_ref(id)) {
             Some(p) => (p.target, Vec3::new(p.yaw.sin(), 0.0, -p.yaw.cos())),
             None => (self.spawn, Vec3::Z),
         }
@@ -202,13 +202,13 @@ impl Game {
         }
         // The Scorchlands' biomes: searched from here if you're down there, else from where a portal here would lead.
         if let Some(biome) = crate::wilds::ScorchBiome::from_name(&what) {
-            let from = if crate::scorch::in_scorch(here.x) { here.floor().as_ivec3() } else { crate::scorch::destination(here.floor().as_ivec3()) };
+            let from = if self.world.is_scorch() { here.floor().as_ivec3() } else { crate::scorch::destination(self.realm_dim(), here.floor().as_ivec3()).1 };
             for r in 0..120 {
                 let step = 8;
                 for k in 0..(r * 8).max(1) {
                     let a = k as f32 / (r * 8).max(1) as f32 * std::f32::consts::TAU;
                     let (x, z) = (from.x + (a.cos() * (r * step) as f32) as i32, from.z + (a.sin() * (r * step) as f32) as i32);
-                    if x > crate::scorch::SCORCH_X + 16 && g.scorch_biome(x, z) == biome {
+                    if self.world.scorch_biome(x, z) == biome {
                         return vec![format!("The nearest {} is around {x}, {z}, down in the Scorchlands ({} blocks from {}, {}).", biome.name(), r * step, from.x, from.z)];
                     }
                 }
@@ -388,8 +388,8 @@ impl Game {
         let (last, done) = words.split_last().map(|(l, d)| (*l, d)).unwrap_or(("", &[]));
         let lower = last.to_ascii_lowercase();
         let players = || {
-            let mut v: Vec<String> = self.peers.values().map(|p| p.name.clone()).collect();
-            if !self.dedicated {
+            let mut v: Vec<String> = self.all_peers().map(|(_, p)| p.name.clone()).collect();
+            if !self.away() {
                 v.push(self.player_name.clone());
             }
             v

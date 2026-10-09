@@ -98,6 +98,12 @@ pub struct Camera {
 
 pub struct Game {
     pub world: World,
+    /// Which dimension the local player is in (see dims.rs), and the realms
+    /// not active just now (see realms.rs; `world` and the rest are the active one's).
+    pub dim: crate::dims::Dim,
+    pub parked: HashMap<crate::dims::Dim, crate::realms::Realm>,
+    /// The dimension the renderer's chunks are from.
+    pub drawn: crate::dims::Dim,
     pub player: Player,
     pub mobs: Vec<Mob>,
     pub particles: Vec<Particle>,
@@ -351,7 +357,7 @@ pub struct Game {
     pub portal_cooldown: f32,
     pub left_portal: bool,
     /// Which portal leads to which (by `scorch::portal_key`), both ways.
-    pub portal_links: HashMap<IVec3, IVec3>,
+    pub portal_links: HashMap<crate::scorch::Spot, crate::scorch::Spot>,
     /// The sign we've just put up and are writing on (see decor.rs).
     pub editing_sign: Option<IVec3>,
     /// Boats and minecarts (see vehicles.rs), the one we're in, and time to the next sync.
@@ -392,7 +398,7 @@ pub struct Game {
     /// The grindstone or smithing table screen's inputs while it's open (see smithing.rs).
     pub bench: Option<crate::smithing::BenchUi>,
     /// Where the local player last died (for the Recovery Compass).
-    pub last_death: Option<Vec3>,
+    pub last_death: Option<(crate::dims::Dim, Vec3)>,
     /// Places you've named (see qol.rs).
     pub waypoints: Vec<crate::qol::Waypoint>,
     /// Chest lids swinging open or shut (see chests.rs).
@@ -400,7 +406,7 @@ pub struct Game {
     /// Asleep in a bed (see beds.rs).
     pub sleeping: Option<crate::beds::Sleep>,
     /// The Lodestone our compass points to (see gadgets.rs), and whether we're looking through a Spyglass.
-    pub lodestone: Option<IVec3>,
+    pub lodestone: Option<(crate::dims::Dim, IVec3)>,
     /// A joined player's view of their Bundles (the host's word), and the one just used.
     pub bundle_mirror: HashMap<u16, Vec<(Id, u8)>>,
     pub bundle_pending: Option<usize>,
@@ -444,6 +450,9 @@ impl Game {
         player.yaw = 0.6;
         Game {
             world,
+            dim: crate::dims::Dim::Over,
+            parked: HashMap::new(),
+            drawn: Default::default(),
             player,
             mobs: Vec::new(),
             particles: Vec::new(),
@@ -747,7 +756,7 @@ impl Game {
         g.boxes = crate::boxes::decode(&d.boxes);
         g.load_extras(&extras);
         g.set_mode(crate::modes::GameMode::from_index(d.mode));
-        g.portal_links = crate::scorch::decode_links(&d.portals);
+        g.portal_links = crate::scorch::decode_links(&d.portals, !crate::realms::is_split(&extras));
         let (signs, frames) = crate::decor::decode(&d.decor);
         g.world.signs = signs;
         for (p, (item, wear)) in frames {
@@ -858,13 +867,13 @@ impl Game {
             v.push(("gen".into(), self.world.generator.opts.pack().to_le_bytes().to_vec()));
         }
         if !self.waypoints.is_empty() {
-            v.push(("waypoints".into(), crate::qol::encode(&self.waypoints)));
+            v.push(("waypoints2".into(), crate::qol::encode(&self.waypoints)));
         }
-        if let Some(d) = self.last_death {
-            v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).collect()));
+        if let Some((dim, d)) = self.last_death {
+            v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).chain([dim.index()]).collect()));
         }
-        if let Some(p) = self.lodestone {
-            v.push(("lodestone".into(), p.to_array().iter().flat_map(|c| c.to_le_bytes()).collect()));
+        if let Some((dim, p)) = self.lodestone {
+            v.push(("lodestone".into(), p.to_array().iter().flat_map(|c| c.to_le_bytes()).chain([dim.index()]).collect()));
         }
         v
     }
@@ -913,23 +922,33 @@ impl Game {
         if let Some(b) = extra("journal") {
             self.journal = crate::archaeology::Journal::decode(b);
         }
-        if let Some(b) = extra("waypoints") {
-            self.waypoints = crate::qol::decode(b);
+        // (From before the dimensions were separated, places carry no dimension: it's
+        // told by where they were, and they move to the dimension's own coordinates.)
+        let old_dim = |x: f32| crate::dims::Dim::of_old_x(x.floor() as i32);
+        if let Some(b) = extra("waypoints2") {
+            self.waypoints = crate::qol::decode(b, false);
+        } else if let Some(b) = extra("waypoints") {
+            self.waypoints = crate::qol::decode(b, true);
         }
         if let Some(b) = extra("last_death").filter(|b| b.len() >= 12) {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
             let p = Vec3::new(f(0), f(4), f(8));
-            self.last_death = p.is_finite().then_some(p);
+            let dim = b.get(12).and_then(|&d| crate::dims::Dim::from_index(d)).unwrap_or(old_dim(p.x));
+            let p = if b.len() >= 13 { p } else { p - Vec3::new(dim.gen_x() as f32, 0.0, 0.0) };
+            self.last_death = p.is_finite().then_some((dim, p));
         }
         if let Some(b) = extra("lodestone").filter(|b| b.len() >= 12) {
             let c = |o: usize| i32::from_le_bytes(b[o..o + 4].try_into().unwrap());
-            self.lodestone = Some(IVec3::new(c(0), c(4), c(8)));
+            let p = IVec3::new(c(0), c(4), c(8));
+            let dim = b.get(12).and_then(|&d| crate::dims::Dim::from_index(d)).unwrap_or(old_dim(p.x as f32));
+            let p = if b.len() >= 13 { p } else { p - IVec3::new(dim.gen_x(), 0, 0) };
+            self.lodestone = Some((dim, p));
         }
     }
 
     /// Earn an advancement (once per world): toast, fanfare, chat line.
     pub fn advance(&mut self, key: &str) {
-        if self.menu || self.dedicated {
+        if self.menu || self.away() {
             return;
         }
         if let Some(a) = self.advancements.grant(key) {
@@ -946,7 +965,7 @@ impl Game {
     /// Advancements for going places: the new biomes, and villages.
     fn explore_advancements(&mut self, dt: f32) {
         self.explore_timer += dt;
-        if self.explore_timer < 0.5 || self.menu || self.dedicated || !self.ready {
+        if self.explore_timer < 0.5 || self.menu || self.away() || !self.ready {
             return;
         }
         self.explore_timer = 0.0;
@@ -991,7 +1010,7 @@ impl Game {
         }
         // Temples, mineshafts and igloos (see temples.rs).
         use crate::structures::Kind;
-        if let Some(kind) = self.world.generator.site_near(p, 18.0) {
+        if let Some(kind) = self.world.site_near(p, 18.0) {
             match kind {
                 Kind::DesertPyramid => self.advance("pyramid_scheme"),
                 Kind::JungleTemple => self.advance("temple_run"),
@@ -1036,7 +1055,7 @@ impl Game {
 
     pub fn msg(&mut self, s: impl Into<String>) {
         let s = s.into();
-        if self.dedicated {
+        if self.away() {
             println!("[{}] {s}", crate::server::timestamp());
         }
         // Everything said is kept a while, to scroll back through with chat open.
@@ -1070,9 +1089,10 @@ impl Game {
         self.in_scorch() || self.in_hollow()
     }
 
-    /// Is the camera (or the local player) down in the Scorchlands?
+    /// Is the active realm (where the local player is, unless the host is
+    /// busy with another dimension) the Scorchlands?
     pub fn in_scorch(&self) -> bool {
-        !self.menu && crate::scorch::in_scorch(self.player.body.pos.x)
+        !self.menu && self.world.is_scorch()
     }
 
     pub fn sky_color(&self) -> [f32; 3] {
@@ -1106,6 +1126,14 @@ impl Game {
 
     /// Stream chunks and upload fresh meshes. Returns true once the player's area is ready.
     pub fn stream(&mut self, renderer: &mut Renderer, ctx: &mut dyn RenderingBackend, radius: i32) {
+        if self.drawn != self.realm_dim() {
+            // Another dimension: start the picture again.
+            self.drawn = self.realm_dim();
+            renderer.clear(ctx);
+            renderer.set_far(ctx, None);
+            let all: Vec<(i32, i32)> = self.world.chunks.keys().copied().collect();
+            self.world.dirty.extend(all);
+        }
         let center = self.player.body.pos;
         let mut centers = vec![(center, radius)];
         if self.is_host() {
@@ -1216,6 +1244,7 @@ impl Game {
         };
         self.net_receive(dt);
         self.update_local(dt, c);
+        self.foreign_tick(dt);
         self.net_send(dt);
     }
 
@@ -1377,7 +1406,7 @@ impl Game {
         } else {
             let ids = host.mod_ids().join(", ");
             self.scripts = Some(host);
-            if self.dedicated {
+            if self.away() {
                 self.msg(format!("Scripts running: {ids}"));
             }
             self.fire("on_load", vec![]);
@@ -1421,12 +1450,12 @@ impl Game {
     }
 
     pub fn is_local_player(&self, name: &str) -> bool {
-        !self.dedicated && (name.is_empty() || name.eq_ignore_ascii_case(&self.player_name))
+        !self.away() && (name.is_empty() || name.eq_ignore_ascii_case(&self.player_name))
     }
 
     pub fn player_names(&self) -> Vec<String> {
-        let mut v = if self.dedicated { vec![] } else { vec![self.player_name.clone()] };
-        v.extend(self.peers.values().map(|p| p.name.clone()));
+        let mut v = if self.away() { vec![] } else { vec![self.player_name.clone()] };
+        v.extend(self.all_peers().map(|(_, p)| p.name.clone()));
         v
     }
 
@@ -1434,7 +1463,7 @@ impl Game {
         if self.is_local_player(name) {
             return Some(self.player.body.pos);
         }
-        self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.target)
+        self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.target)
     }
 
     pub(crate) fn apply_cmds(&mut self, cmds: Vec<Cmd>) {
@@ -1451,7 +1480,7 @@ impl Game {
                         self.msg(t);
                     } else if let Some(id) = self.peer_by_name(&p) {
                         self.system_message(Some(id), &t);
-                    } else if self.dedicated && p.eq_ignore_ascii_case("server") {
+                    } else if self.away() && p.eq_ignore_ascii_case("server") {
                         self.msg(t);
                     }
                 }
@@ -1491,7 +1520,7 @@ impl Game {
                         self.player.fall_start = to.y;
                     } else if let Some(id) = self.peer_by_name(&p) {
                         self.net_send_to(id, effect(0.0, Some(to), None, None));
-                        if let Some(peer) = self.peers.get_mut(&id) {
+                        if let Some(peer) = self.peer_mut(id) {
                             peer.target = to;
                         }
                     }
@@ -1512,7 +1541,7 @@ impl Game {
                 }
                 Cmd::SetTime(t) => {
                     self.time = t;
-                    self.net_broadcast(self.time_msg());
+                    self.net_broadcast_all(self.time_msg());
                 }
                 Cmd::Sound(s, at) => {
                     self.sfx(s, Some(at));
@@ -1617,7 +1646,7 @@ impl Game {
         if self.weather.kind.wet() {
             self.set_weather(crate::weather::Weather::Clear);
         }
-        self.net_broadcast(self.time_msg());
+        self.net_broadcast_all(self.time_msg());
         self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
         self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set. Your back hurts.");
         self.advance("sweet_dreams");
@@ -1748,7 +1777,7 @@ impl Game {
     /// Where a homing projectile may aim: the chests of every player it could hurt.
     fn homing_targets(&self) -> Vec<Vec3> {
         let mut v = Vec::new();
-        if !self.dedicated && !self.spectator && self.dead.is_none() {
+        if !self.away() && !self.spectator && self.dead.is_none() {
             v.push(self.player.body.pos + Vec3::Y * 1.0);
         }
         v.extend(self.peers.values().filter(|p| p.alive() && p.mode != crate::modes::GameMode::Spectator).map(|p| p.target + Vec3::Y * 1.0));
@@ -1766,7 +1795,7 @@ impl Game {
         self.net_broadcast(Msg::Explosion { at, r });
         let share = |d: f32| 1.0 - 0.5 * (d / r).min(1.0);
         let me = self.player.body.pos + Vec3::Y * 0.9;
-        if !self.dedicated && !self.spectator && self.dead.is_none() && me.distance(at) <= r {
+        if !self.away() && !self.spectator && self.dead.is_none() && me.distance(at) <= r {
             let d = me.distance(at);
             if damage > 0.0 {
                 self.player.hurt = 0.0;
@@ -1820,7 +1849,7 @@ impl Game {
                 let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
                 let touched = a.damage > 0.0
                     && (self.mobs.iter().any(|m| near(m.body.pos + Vec3::Y * m.body.height * 0.5, m.body.half + m.body.height * 0.5 + 0.2))
-                        || (Some(self.my_id) != a.shooter && !self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1))
+                        || (Some(self.my_id) != a.shooter && !self.away() && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1))
                         || self.peers.iter().any(|(id, p)| Some(*id) != a.shooter && p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)));
                 if thunk || touched || a.life <= 0.0 {
                     bursts.push((a.pos - a.dir * 0.3, a.firework - 1, a.damage, a.shooter));
@@ -1831,7 +1860,7 @@ impl Game {
             if a.splash {
                 // A thrown bottle breaks on the first thing it meets.
                 let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
-                let touched = (!self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.0))
+                let touched = (!self.away() && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.0))
                     || self.peers.values().any(|p| p.alive() && near(p.target + Vec3::Y * 0.9, 1.0));
                 if thunk || touched || a.life <= 0.0 {
                     splashes.push((a.pos - a.dir * 0.3, a.effect));
@@ -1845,7 +1874,7 @@ impl Game {
                 let near = |c: Vec3, r: f32| a.pos.distance(c) < r;
                 let touched = match a.shooter {
                     Some(_) => self.mobs.iter().any(|m| m.kind != MobKind::Breeze && near(m.body.pos + Vec3::Y * m.body.height * 0.5, m.body.half + m.body.height * 0.5 + 0.2)),
-                    None => (!self.dedicated && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1)) || self.peers.values().any(|p| p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)),
+                    None => (!self.away() && !self.spectator && self.dead.is_none() && near(self.player.body.pos + Vec3::Y * 0.9, 1.1)) || self.peers.values().any(|p| p.alive() && near(p.target + Vec3::Y * 0.9, 1.1)),
                 };
                 if thunk || touched || a.life <= 0.0 {
                     winds.push((a.pos - a.dir * 0.3, a.shooter));
@@ -1890,7 +1919,7 @@ impl Game {
                     self.sfx(Sfx::hurt_of(kind), Some(at));
                     if let Some(spear) = a.spear {
                         landed.push((a.pos - a.dir * 0.5, spear));
-                    } else if pid == self.my_id && !self.dedicated {
+                    } else if pid == self.my_id && !self.away() {
                         self.advance("robin_hood");
                     }
                     false
@@ -1903,7 +1932,7 @@ impl Game {
                     let me = self.player.body.clone();
                     if a.blast > 0.0 {
                         // A blast shot goes off on whoever it touches.
-                        let touched = (!self.dedicated && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()))
+                        let touched = (!self.away() && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()))
                             || self.peers.values().any(|p| p.alive() && hit_box(p.target - Vec3::new(0.3, 0.0, 0.3), p.target + Vec3::new(0.3, 1.8, 0.3)));
                         if touched {
                             blasts.push((a.pos, a.blast, a.damage, a.effect));
@@ -1911,7 +1940,7 @@ impl Game {
                         }
                         return true;
                     }
-                    if !self.dedicated && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()) {
+                    if !self.away() && !self.spectator && self.dead.is_none() && hit_box(me.min(), me.max()) {
                         if a.damage > 0.0 {
                             self.player.hurt = 0.0;
                             let d = self.rules.difficulty.mob_damage(a.damage);
@@ -2413,7 +2442,7 @@ impl Game {
             return;
         }
         if held == RECOVERY_COMPASS {
-            match self.last_death {
+            match self.last_death.filter(|d| d.0 == self.dim).map(|d| d.1) {
                 Some(d) => {
                     let v = d - self.player.body.pos;
                     let dist = Vec3::new(v.x, 0.0, v.z).length();
@@ -2887,7 +2916,7 @@ impl Game {
                         self.msg("Only the host can change the time.");
                     } else {
                         self.time = *t;
-                        self.net_broadcast(self.time_msg());
+                        self.net_broadcast_all(self.time_msg());
                     }
                 }
                 Action::Spawn(k) => {
@@ -2928,7 +2957,7 @@ impl Game {
     }
 
     pub(crate) fn block_particles_tile(&mut self, pos: IVec3, tile: u16, n: usize) {
-        if self.dedicated {
+        if self.away() {
             return;
         }
         for _ in 0..n {
@@ -2947,7 +2976,7 @@ impl Game {
     }
 
     pub(crate) fn smoke(&mut self, at: Vec3, n: usize, spread: f32) {
-        if self.dedicated {
+        if self.away() {
             return;
         }
         for _ in 0..n {
@@ -3060,7 +3089,7 @@ impl Game {
         if self.player.health <= 0.0 {
             self.player.health = 0.0;
             self.stats.deaths += 1;
-            self.last_death = Some(self.player.body.pos);
+            self.last_death = Some((self.dim, self.player.body.pos));
             self.dead = Some(format!("{} {cause}", self.player_name));
             self.announce_death(cause);
             // Everything falls out of your pockets, unless the world says otherwise.
@@ -3113,7 +3142,7 @@ impl Game {
         }
         self.explosion_effects(at, r);
         let pd = (self.player.body.pos + Vec3::Y * 0.9).distance(at);
-        if pd < r * 2.0 && !self.dedicated {
+        if pd < r * 2.0 && !self.away() {
             let dmg = (1.0 - pd / (r * 2.0)) * r * 5.0;
             self.player.hurt = 0.0;
             self.hurt_player_from(dmg, cause, Some(at), true);
@@ -3132,7 +3161,7 @@ impl Game {
     /// Mob AI targets and damage recipients: (player id, chest position).
     pub fn player_targets(&self) -> Vec<(u32, Vec3)> {
         let mut t = Vec::new();
-        if self.dead.is_none() && !self.dedicated && !self.spectator {
+        if self.dead.is_none() && !self.away() && !self.spectator {
             t.push((self.my_id, self.player.body.pos + Vec3::Y * 0.9));
         }
         t.extend(self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target + Vec3::Y * 0.9)));
@@ -3170,19 +3199,12 @@ impl Game {
             self.count_days(before);
         }
         self.weather_tick(dt);
-        self.liquid_tick(dt);
-        self.zap_tick(dt);
-        self.vehicles_tick(dt, 0.0, 0.0, false);
         for m in self.messages.iter_mut() {
             m.1 -= dt;
         }
         self.messages.retain(|m| m.1 > 0.0);
-        let centers: Vec<(Vec3, i32)> = self.peers.values().map(|p| (p.target, 4)).collect();
-        self.world.stream(&centers);
-        self.world.dirty.clear(); // nothing to draw
-        if !self.peers.is_empty() {
-            self.update_entities(dt);
-        }
+        self.realm_tick(dt);
+        self.foreign_tick(dt);
         self.script_tick(dt);
         self.net_send(dt);
         self.sounds.clear();
@@ -3201,7 +3223,7 @@ impl Game {
         let mut noises = Vec::new();
         // Who is looking where, for Starers: (is the local player, eye, look direction).
         let mut gazes: Vec<(bool, Vec3, Vec3)> = Vec::new();
-        if visible && self.dead.is_none() && !self.dedicated {
+        if visible && self.dead.is_none() && !self.away() {
             gazes.push((true, self.player.eye(), self.player.look_dir()));
         }
         for p in self.peers.values().filter(|p| p.alive()) {
@@ -3431,7 +3453,7 @@ impl Game {
         let mut i = 0;
         while i < self.mobs.len() {
             let m = &self.mobs[i];
-            let far = !m.persistent && (self.dedicated || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
+            let far = !m.persistent && (self.away() || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
                 if m.kind == MobKind::Llama && m.health <= 0.0 {
@@ -3443,7 +3465,7 @@ impl Game {
                 if m.health <= 0.0 && m.health > -50.0 {
                     let at = m.body.pos + Vec3::Y * 0.5;
                     self.smoke(at, 10, 0.3);
-                    let killer = if m.last_attacker == self.my_id && !self.dedicated { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
+                    let killer = if m.last_attacker == self.my_id && !self.away() { self.player_name.clone() } else { self.peers.get(&m.last_attacker).map(|p| p.name.clone()).unwrap_or_default() };
                     let args = vec![m.kind.script_name().into(), (at.x as rhai::FLOAT).into(), (at.y as rhai::FLOAT).into(), (at.z as rhai::FLOAT).into(), killer.into()];
                     self.fire("on_mob_death", args);
                     if m.kind == MobKind::Wyrm {
@@ -3453,10 +3475,10 @@ impl Game {
                         self.wilter_defeated(at);
                     }
                     let remote = m.last_attacker != self.my_id && self.peers.contains_key(&m.last_attacker);
-                    if m.last_attacker == self.my_id && !self.dedicated {
+                    if m.last_attacker == self.my_id && !self.away() {
                         self.stats.kills += 1;
                     }
-                    if !remote && !self.dedicated && at.distance(self.player.body.pos) < 32.0 {
+                    if !remote && !self.away() && at.distance(self.player.body.pos) < 32.0 {
                         match m.kind {
                             MobKind::Oinker => self.advance("bacon"),
                             MobKind::Hisser => self.advance("hiss_tory"),
@@ -3511,7 +3533,7 @@ impl Game {
                         self.sfx(Sfx::Fanfare, Some(at));
                     }
                     // Looting on whatever killed it: a little more of each.
-                    let looting = if m.last_attacker == self.my_id && !self.dedicated {
+                    let looting = if m.last_attacker == self.my_id && !self.away() {
                         if Enchant::Looting.fits(self.inv.held()) { self.held_level(Enchant::Looting) } else { 0 }
                     } else if self.peers.contains_key(&m.last_attacker) && Enchant::Looting.fits(self.verified_held(m.last_attacker)) {
                         crate::enchant::level((self.verified_ench(m.last_attacker) as u32) << 16, Enchant::Looting)
@@ -3621,19 +3643,19 @@ impl Game {
 
     fn try_spawn(&mut self) {
         // Spawn around a random player so everyone gets company.
-        let mut centers = if self.dedicated { vec![] } else { vec![self.player.body.pos] };
+        let mut centers = if self.away() { vec![] } else { vec![self.player.body.pos] };
         centers.extend(self.peers.values().map(|p| p.target));
         if centers.is_empty() {
             return;
         }
         let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
-        if crate::scorch::in_scorch(p.x) {
+        if self.world.is_scorch() {
             self.scorch_spawn(p);
             return;
         }
-        if crate::hollow::in_hollow(p.x) {
+        if self.world.is_hollow() {
             // Only Starers (and the Wyrm, see hollow.rs) out here.
-            let here = self.mobs.iter().filter(|m| m.kind == MobKind::Starer && crate::hollow::in_hollow(m.body.pos.x)).count();
+            let here = self.mobs.iter().filter(|m| m.kind == MobKind::Starer).count();
             let (x, z) = (p.x as i32 + self.rng.int(-30, 30), p.z as i32 + self.rng.int(-30, 30));
             if here < 6 && self.world.is_loaded(x, z) && self.world.get(x, crate::hollow::ORIGIN.y, z) == HOLLOW_STONE && self.rules.difficulty.monsters() {
                 self.alloc_mob(MobKind::Starer, Vec3::new(x as f32 + 0.5, (crate::hollow::ORIGIN.y + 1) as f32, z as f32 + 0.5));
@@ -3796,14 +3818,14 @@ impl Game {
 
     /// The Scorchlands have their own residents, light or dark.
     fn scorch_spawn(&mut self, p: Vec3) {
-        let here = self.mobs.iter().filter(|m| crate::scorch::in_scorch(m.body.pos.x)).count();
+        let here = self.mobs.len();
         if here >= 10 + 3 * self.peers.len() || !self.rules.difficulty.monsters() {
             return;
         }
         let a = self.rng.range(0.0, TAU);
         let d = self.rng.range(16.0, 40.0);
         let (x, z) = ((p.x + a.cos() * d).floor() as i32, (p.z + a.sin() * d).floor() as i32);
-        if !self.world.is_loaded(x, z) || crate::scorch::in_wall(x) || x < crate::scorch::SCORCH_X + 16 {
+        if !self.world.is_loaded(x, z) {
             return;
         }
         let sea = crate::scorch::LAVA_SEA;
@@ -3832,7 +3854,7 @@ impl Game {
             if ground && clear {
                 let at = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
                 // Snouts keep near their camps.
-                let camp = [crate::structures::Kind::SnoutCamp, crate::structures::Kind::Bastion].into_iter().any(|k| self.world.generator.nearest_site(k, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0));
+                let camp = [crate::structures::Kind::SnoutCamp, crate::structures::Kind::Bastion].into_iter().any(|k| self.world.nearest_site(k, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0));
                 let roll = self.rng.f32();
                 // Charred Rattlers walk the fortresses' halls.
                 if floor == SCORCH_BRICKS && roll < 0.5 {
@@ -3841,7 +3863,7 @@ impl Game {
                 }
                 // Each biome's own creatures (see beasts.rs), most of the time.
                 use crate::wilds::ScorchBiome;
-                let own = match self.world.generator.scorch_biome(x, z) {
+                let own = match self.world.scorch_biome(x, z) {
                     ScorchBiome::CrimsonForest => Some((MobKind::Tusker, 0.55, 3)),
                     ScorchBiome::TealForest => Some((MobKind::Sporeling, 0.6, 2)),
                     ScorchBiome::BasaltDeltas => Some((MobKind::MagmaBloop, 0.7, 1)),

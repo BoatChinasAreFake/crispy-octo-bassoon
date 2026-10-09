@@ -175,7 +175,7 @@ impl Game {
 
     /// Everyone: smoke drifting up from Campfires near us.
     pub fn campfire_smoke(&mut self, dt: f32) {
-        if self.dedicated || self.menu {
+        if self.away() || self.menu {
             return;
         }
         self.smoke_acc += dt;

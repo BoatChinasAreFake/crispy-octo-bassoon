@@ -203,23 +203,14 @@ pub const SHOW_RANGE: f32 = 2000.0;
 pub struct Waypoint {
     pub name: String,
     pub pos: Vec3,
+    /// Which dimension it's in (see dims.rs).
+    pub dim: crate::dims::Dim,
 }
 
 /// A waypoint's colour (by its place in the list).
 pub fn colour(i: usize) -> [u8; 3] {
     const COLOURS: [[u8; 3]; 8] = [[255, 90, 90], [90, 200, 255], [255, 210, 70], [120, 230, 110], [230, 120, 255], [255, 150, 60], [90, 255, 210], [250, 250, 250]];
     COLOURS[i % COLOURS.len()]
-}
-
-/// Which world a spot is in (the Scorchlands and the Hollow live far off along x).
-pub fn realm(x: f32) -> u8 {
-    if crate::hollow::in_hollow(x) {
-        2
-    } else if crate::scorch::in_scorch(x) {
-        1
-    } else {
-        0
-    }
 }
 
 pub fn encode(w: &[Waypoint]) -> Vec<u8> {
@@ -230,24 +221,32 @@ pub fn encode(w: &[Waypoint]) -> Vec<u8> {
         for v in p.pos.to_array() {
             out.extend_from_slice(&v.to_le_bytes());
         }
+        out.push(p.dim.index());
     }
     out
 }
 
-pub fn decode(mut b: &[u8]) -> Vec<Waypoint> {
+/// `old`: written before the dimensions were separated (no dimension byte;
+/// it's told by where the waypoint was, see dims.rs).
+pub fn decode(mut b: &[u8], old: bool) -> Vec<Waypoint> {
     let mut out = Vec::new();
+    let size = if old { 12 } else { 13 };
     while let Some((&n, rest)) = b.split_first() {
         let n = n as usize;
-        if rest.len() < n + 12 {
+        if rest.len() < n + size {
             break;
         }
         let name = String::from_utf8_lossy(&rest[..n]).into_owned();
         let f = |o: usize| f32::from_le_bytes(rest[n + o..n + o + 4].try_into().unwrap());
-        let pos = Vec3::new(f(0), f(4), f(8));
-        if pos.is_finite() && !name.is_empty() && out.len() < MAX_WAYPOINTS {
-            out.push(Waypoint { name, pos });
+        let mut pos = Vec3::new(f(0), f(4), f(8));
+        let dim = if old { crate::dims::Dim::of_old_x(pos.x.floor() as i32) } else { crate::dims::Dim::from_index(rest[n + 12]).unwrap_or_default() };
+        if old {
+            pos.x -= dim.gen_x() as f32;
         }
-        b = &rest[n + 12..];
+        if pos.is_finite() && !name.is_empty() && out.len() < MAX_WAYPOINTS {
+            out.push(Waypoint { name, pos, dim });
+        }
+        b = &rest[n + size..];
     }
     out
 }
@@ -270,12 +269,13 @@ impl Game {
                 let at = Vec3::new(me.x.floor() + 0.5, me.y.floor(), me.z.floor() + 0.5);
                 if let Some(i) = find(&self.waypoints, &name) {
                     self.waypoints[i].pos = at;
+                    self.waypoints[i].dim = self.dim;
                     return vec![format!("Moved waypoint \"{name}\" here.")];
                 }
                 if self.waypoints.len() >= MAX_WAYPOINTS {
                     return vec![format!("That's {MAX_WAYPOINTS} waypoints already. Remove one first (/wp remove <name>).")];
                 }
-                self.waypoints.push(Waypoint { name: name.clone(), pos: at });
+                self.waypoints.push(Waypoint { name: name.clone(), pos: at, dim: self.dim });
                 vec![format!("Waypoint \"{name}\" set at {:.0} {:.0} {:.0}.", at.x.floor(), at.y, at.z.floor())]
             }
             "remove" | "delete" | "del" | "rm" if !name.is_empty() => match find(&self.waypoints, &name) {
@@ -292,7 +292,7 @@ impl Game {
                 let mut out = vec![format!("{} waypoint{}:", self.waypoints.len(), if self.waypoints.len() == 1 { "" } else { "s" })];
                 for w in &self.waypoints {
                     let d = w.pos - me;
-                    let far = if realm(w.pos.x) != realm(me.x) {
+                    let far = if w.dim != self.dim {
                         "in another world".to_string()
                     } else {
                         format!("{:.0} blocks {}", Vec3::new(d.x, 0.0, d.z).length(), crate::archaeology::compass_word(d))
@@ -307,8 +307,8 @@ impl Game {
 
     /// The waypoints in the world you're in, with their colours.
     pub fn waypoints_here(&self) -> impl Iterator<Item = (&Waypoint, [u8; 3])> {
-        let here = realm(self.player.body.pos.x);
-        self.waypoints.iter().enumerate().filter(move |(_, w)| realm(w.pos.x) == here).map(|(i, w)| (w, colour(i)))
+        let here = self.dim;
+        self.waypoints.iter().enumerate().filter(move |(_, w)| w.dim == here).map(|(i, w)| (w, colour(i)))
     }
 }
 

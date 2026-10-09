@@ -229,7 +229,7 @@ impl Game {
         }
         self.monument_acc -= 1.0;
         let mut people: Vec<(u32, Vec3)> = self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target)).collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             people.push((self.my_id, self.player.body.pos));
         }
         // More Guardians in a monument's water while someone's about.
@@ -318,7 +318,7 @@ impl Game {
     /// thickening as it charges.
     pub fn draw_lasers(&self, g: &mut crate::render::DynGeo) {
         let mut people: Vec<Vec3> = self.peers.values().filter(|p| p.alive()).map(|p| p.target).collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             people.push(self.player.body.pos);
         }
         for m in self.mobs.iter().filter(|m| is_guardian(m.kind) && m.fuse > 0.0) {
