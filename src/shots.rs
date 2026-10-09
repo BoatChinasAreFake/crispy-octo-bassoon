@@ -682,6 +682,11 @@ impl App {
                 app.mp_password = "sekrit".into();
                 app.open_to_internet();
                 app.set_screen(Screen::Paused);
+                app.pause_page = crate::PausePage::Share;
+            }
+            "pause" => {
+                app.start_game(shot_game(424242, true, false));
+                app.set_screen(Screen::Paused);
             }
             "join" => {
                 app.mp_name = "Joiny".into();
@@ -741,7 +746,7 @@ impl App {
     /// Each frame of a screenshot run: keep the camera put, and stage whatever the mode needs.
     pub(crate) fn shot_frame(&mut self, s: &ShotArgs, frames: u32) {
         let app = self;
-            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette" | "worlds" | "newworld" | "createform") || (s.mode == "join" && app.game.is_client()) {
+            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "pause" | "mods" | "palette" | "worlds" | "newworld" | "createform") || (s.mode == "join" && app.game.is_client()) {
                 // Keep the demo camera looking at something interesting.
                 app.game.player.pitch = s.pitch;
                 app.game.player.yaw = s.yaw;
@@ -926,8 +931,10 @@ impl App {
                 for i in 0..40 {
                     app.game.msg(format!("<Player{}> chat line number {i}", i % 3));
                 }
-                app.chat = Some("hello".into());
-                app.chat_scroll = 6;
+                app.game.msg("<Player1> and here's a much longer message, the kind somebody types when they're explaining exactly where they left the diamonds, which wraps onto the next line instead of running off the edge of the screen".to_string());
+                app.chat = Some("/g".into());
+                app.chat_options = Some((app.game.complete_command("/g"), usize::MAX));
+                app.chat_scroll = 0;
             }
             if s.mode == "homestead" && frames == 150 {
                 use entity::MobKind as K;

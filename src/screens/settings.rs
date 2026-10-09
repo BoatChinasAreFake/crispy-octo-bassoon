@@ -91,7 +91,9 @@ impl App {
         y += bh + 5.0 * s;
         let caps = settings::FPS_CAPS;
         let ci = caps.iter().position(|&c| c == st.max_fps).unwrap_or(caps.len() - 1);
-        let label = if st.max_fps == 0 { "Max FPS: Unlimited".to_string() } else { format!("Max FPS: {}", st.max_fps) };
+        // (With VSync on, the screen's refresh rate is a cap too.)
+        let synced = if st.vsync { " (and VSync)" } else { "" };
+        let label = if st.max_fps == 0 { format!("Max FPS: Unlimited{synced}") } else { format!("Max FPS: {}{synced}", st.max_fps) };
         let d = self.stepper(&label, x, y, bw, bh);
         self.settings.max_fps = caps[(ci as i32 + d).clamp(0, caps.len() as i32 - 1) as usize];
         y += bh + 5.0 * s;
@@ -104,6 +106,10 @@ impl App {
         }
         if self.ui.button(Rect::new(right, y, half, bh), &on_off("VSync", st.vsync), true) {
             self.settings.vsync = !st.vsync;
+            // Straight away where the driver lets us (otherwise next time the game starts).
+            if crate::pacing::set_vsync(self.settings.vsync) {
+                self.video_at_start.0 = self.settings.vsync;
+            }
         }
         y += bh + 5.0 * s;
         let aa = if st.msaa == 0 { "Anti-aliasing: OFF".to_string() } else { format!("Anti-aliasing: {}x", st.msaa) };

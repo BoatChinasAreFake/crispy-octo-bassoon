@@ -465,81 +465,104 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
-        self.ui.text_centered("Game Paused (the world politely waits)", w / 2.0, h * 0.25, 14.0, WHITE);
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;
+        let gap = 5.0 * s;
         let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.29;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Back to Game", true) {
-            self.set_screen(Screen::Playing);
-        }
-        y += bh + 5.0 * s;
+        let half = (bw - gap) / 2.0;
         let client = self.game.is_client();
-        if client {
-            let host = self.game.peers.get(&0).map(|p| format!("{}'s world", p.name)).unwrap_or_else(|| "a dedicated server".into());
-            self.ui.text_centered(&format!("Playing on {host} ({})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GRAY);
-        } else if self.game.is_host() {
-            let addr = self.lan_addr.clone().unwrap_or_default();
-            let lock = if self.game.has_password() { ", password protected" } else { ", no password" };
-            self.ui.text_centered(&format!("Hosting at {addr}  ({}{lock})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GOLD);
-        } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to LAN", true) {
-            self.host_now();
-        }
-        if !client {
-            y += bh + 5.0 * s;
-            if let Some(t) = &self.internet_status {
-                // Long messages wrap onto two lines.
-                let (a, b) = match t.char_indices().filter(|(_, c)| *c == ' ').map(|(i, _)| i).find(|&i| i > 60) {
-                    Some(i) if t.len() > 80 => (&t[..i], &t[i + 1..]),
-                    _ => (t.as_str(), ""),
-                };
-                self.ui.text_centered(a, w / 2.0, y + bh * 0.4, 9.0, Color::new(0.7, 0.9, 1.0, 1.0));
-                self.ui.text_centered(b, w / 2.0, y + bh * 0.4 + 11.0 * s, 9.0, Color::new(0.7, 0.9, 1.0, 1.0));
-            } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to Internet", true) {
-                self.open_to_internet();
+        // A few buttons on the main page; the logs and sharing the world each have a page of their own.
+        let title = match self.pause_page {
+            PausePage::Main => "Game Paused (the world politely waits)",
+            PausePage::Logs => "Logs and Progress",
+            PausePage::Share => "Play With Others",
+        };
+        self.ui.text_centered(title, w / 2.0, h * 0.27, 14.0, WHITE);
+        let mut y = h * 0.32;
+        match self.pause_page {
+            PausePage::Main => {
+                if self.ui.button(Rect::new(x, y, bw, bh), "Back to Game", true) {
+                    self.set_screen(Screen::Playing);
+                }
+                y += bh + gap;
+                if self.ui.button(Rect::new(x, y, half, bh), "Logs and Progress", true) {
+                    self.pause_page = PausePage::Logs;
+                }
+                if self.ui.button(Rect::new(x + half + gap, y, half, bh), "Play With Others", true) {
+                    self.pause_page = PausePage::Share;
+                }
+                y += bh + gap;
+                if self.ui.button(Rect::new(x, y, half, bh), "Options", true) {
+                    self.set_screen(Screen::Options { from_title: false });
+                }
+                if self.ui.button(Rect::new(x + half + gap, y, half, bh), "World Settings", true) {
+                    self.set_screen(Screen::WorldSettings);
+                }
+                y += bh + gap * 3.0;
+                let quit_label = if client { "Disconnect" } else { "Save and Quit to Title" };
+                if self.ui.button(Rect::new(x, y, bw, bh), quit_label, true) {
+                    self.back_to_title();
+                }
             }
-        }
-        y += bh + 5.0 * s;
-        let half = (bw - 5.0 * s) / 2.0;
-        if self.ui.button(Rect::new(x, y, half, bh), "Save World", !client) {
-            self.save();
-        }
-        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "World Settings", true) {
-            self.set_screen(Screen::WorldSettings);
-        }
-        y += bh + 5.0 * s;
-        let third = (bw - 10.0 * s) / 3.0;
-        let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::ALL.len());
-        if self.ui.button(Rect::new(x, y, third, bh), &self.ui.fit(&adv, 9.0, third - 6.0 * s), true) {
-            self.set_screen(Screen::Advancements);
-        }
-        if self.ui.button(Rect::new(x + third + 5.0 * s, y, third, bh), "Statistics", true) {
-            self.set_screen(Screen::Stats);
-        }
-        if self.ui.button(Rect::new(x + 2.0 * (third + 5.0 * s), y, third, bh), "Fishing Log", true) {
-            self.set_screen(Screen::FishLog);
-        }
-        y += bh + 5.0 * s;
-        let half = (bw - 5.0 * s) / 2.0;
-        if self.ui.button(Rect::new(x, y, half, bh), "Field Journal", true) {
-            self.journal_back = Screen::Paused;
-            self.set_screen(Screen::Journal);
-        }
-        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "Beekeeping Log", true) {
-            self.set_screen(Screen::BeeLog);
-        }
-        y += bh + 5.0 * s;
-        let half = (bw - 5.0 * s) / 2.0;
-        if self.ui.button(Rect::new(x, y, half, bh), "Options", true) {
-            self.set_screen(Screen::Options { from_title: false });
-        }
-        if self.ui.button(Rect::new(x + half + 5.0 * s, y, half, bh), "How to Play", true) {
-            self.set_screen(Screen::Help { from_title: false });
-        }
-        y += bh + 5.0 * s;
-        let quit_label = if client { "Disconnect" } else { "Save and Quit to Title" };
-        if self.ui.button(Rect::new(x, y, bw, bh), quit_label, true) {
-            self.back_to_title();
+            PausePage::Logs => {
+                let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::ALL.len());
+                let rows: [(&str, Screen); 5] = [
+                    (&adv, Screen::Advancements),
+                    ("Statistics", Screen::Stats),
+                    ("Fishing Log", Screen::FishLog),
+                    ("Beekeeping Log", Screen::BeeLog),
+                    ("Field Journal", Screen::Journal),
+                ];
+                for (i, (label, screen)) in rows.into_iter().enumerate() {
+                    let (bx, by) = (x + (i % 2) as f32 * (half + gap), y + (i / 2) as f32 * (bh + gap));
+                    if self.ui.button(Rect::new(bx, by, half, bh), label, true) {
+                        if screen == Screen::Journal {
+                            self.journal_back = Screen::Paused;
+                        }
+                        self.set_screen(screen);
+                    }
+                }
+                // (The sixth spot.)
+                if self.ui.button(Rect::new(x + half + gap, y + 2.0 * (bh + gap), half, bh), "How to Play", true) {
+                    self.set_screen(Screen::Help { from_title: false });
+                }
+                y += 3.0 * (bh + gap) + gap * 2.0;
+                if self.ui.button(Rect::new(x, y, bw, bh), "Back", true) {
+                    self.pause_page = PausePage::Main;
+                }
+            }
+            PausePage::Share => {
+                if client {
+                    let host = self.game.peers.get(&0).map(|p| format!("{}'s world", p.name)).unwrap_or_else(|| "a dedicated server".into());
+                    self.ui.text_centered(&format!("Playing on {host} ({})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GRAY);
+                } else if self.game.is_host() {
+                    let addr = self.lan_addr.clone().unwrap_or_default();
+                    let lock = if self.game.has_password() { ", password protected" } else { ", no password" };
+                    self.ui.text_centered(&format!("Hosting at {addr}  ({}{lock})", players(self.game.player_count())), w / 2.0, y + bh * 0.65, 10.0, GOLD);
+                } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to LAN", true) {
+                    self.host_now();
+                }
+                y += bh + gap;
+                if !client {
+                    if let Some(t) = &self.internet_status {
+                        let lines = self.ui.wrap(t, 9.0, w * 0.8);
+                        for (i, line) in lines.iter().enumerate() {
+                            self.ui.text_centered(line, w / 2.0, y + bh * 0.4 + i as f32 * 11.0 * s, 9.0, Color::new(0.7, 0.9, 1.0, 1.0));
+                        }
+                        y += lines.len().saturating_sub(1) as f32 * 11.0 * s;
+                    } else if self.ui.button(Rect::new(x, y, bw, bh), "Open to Internet", true) {
+                        self.open_to_internet();
+                    }
+                    y += bh + gap;
+                    if self.ui.button(Rect::new(x, y, bw, bh), "Save World Now", true) {
+                        self.save();
+                    }
+                }
+                y += bh + gap * 3.0;
+                if self.ui.button(Rect::new(x, y, bw, bh), "Back", true) {
+                    self.pause_page = PausePage::Main;
+                }
+            }
         }
     }
 

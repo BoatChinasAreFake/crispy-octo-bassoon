@@ -132,9 +132,24 @@ impl App {
                     self.palette_scroll = self.palette_scroll.saturating_sub(1);
                 }
             }
+            if most > 0 {
+                // Where in the list we are (drag the knob, or click along the bar to jump there).
+                let bar_h = visible as f32 * slot;
+                let knob = bar_h * visible as f32 / rows as f32;
+                let bar_x = sx + slot * 9.0 + 1.0 * s;
+                if self.ui.clicked && (bar_x - 3.0 * s..bar_x + 7.0 * s).contains(&mx) && (inv_top..inv_top + bar_h).contains(&my) {
+                    self.palette_drag = true;
+                }
+                if !is_mouse_button_down(MouseButton::Left) {
+                    self.palette_drag = false;
+                }
+                if self.palette_drag {
+                    let along = ((my - inv_top - knob / 2.0) / (bar_h - knob).max(1.0)).clamp(0.0, 1.0);
+                    self.palette_scroll = (along * most as f32).round() as usize;
+                }
+            }
             self.palette_scroll = self.palette_scroll.min(most);
             if most > 0 {
-                // Where in the list we are.
                 let bar_h = visible as f32 * slot;
                 let knob = bar_h * visible as f32 / rows as f32;
                 let at = (bar_h - knob) * self.palette_scroll as f32 / most as f32;
@@ -218,7 +233,12 @@ impl App {
                 }
             }
             if r {
-                self.game.inv.right_click(i);
+                if creative && self.game.inv.cursor.is_none() {
+                    // Creative: right-click picks up one more of it, and leaves the hotbar alone.
+                    self.game.inv.cursor = self.game.inv.slots[i].map(|(id, _)| (id, 1));
+                } else {
+                    self.game.inv.right_click(i);
+                }
             }
         }
         if self.game.inv.cursor.is_some() && self.ui.clicked {

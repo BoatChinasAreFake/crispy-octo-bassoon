@@ -47,6 +47,33 @@ impl Ui {
         measure_text(t, None, self.font(px), 1.0).width
     }
 
+    /// Break text into lines that fit in `max` pixels, at spaces where it can
+    /// (a word too long for a line on its own is split wherever it has to be).
+    pub fn wrap(&self, t: &str, px: f32, max: f32) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut line = String::new();
+        for word in t.split(' ') {
+            let joined = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+            if self.text_width(&joined, px) <= max {
+                line = joined;
+                continue;
+            }
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            // The word alone, split up if even that's too wide.
+            for c in word.chars() {
+                line.push(c);
+                if self.text_width(&line, px) > max && line.chars().count() > 1 {
+                    let last = line.pop().unwrap();
+                    lines.push(std::mem::replace(&mut line, last.to_string()));
+                }
+            }
+        }
+        lines.push(line);
+        lines
+    }
+
     /// Shorten text with "..." so it fits in `max` pixels.
     pub fn fit(&self, t: &str, px: f32, max: f32) -> String {
         if self.text_width(t, px) <= max {

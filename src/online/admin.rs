@@ -122,6 +122,9 @@ fn describe_stack(id: Id, n: u8, wear: crate::inventory::Wear) -> String {
     s
 }
 
+/// The admin commands (without the slash); the cheats are in `cheats::WORDS`.
+pub const WORDS: [&str; 17] = ["help", "list", "players", "info", "say", "kick", "ban", "unban", "bans", "time", "op", "deop", "ops", "allowlist", "whitelist", "forget", "password"];
+
 impl Game {
     fn caller_name(&self, who: Caller) -> String {
         match who {
@@ -144,9 +147,7 @@ impl Game {
         let line = line.trim().trim_start_matches('/');
         let (word, rest) = line.split_once(' ').map(|(a, b)| (a, b.trim())).unwrap_or((line, ""));
         let word = word.to_ascii_lowercase();
-        let known = [
-            "help", "list", "players", "info", "say", "kick", "ban", "unban", "bans", "time", "op", "deop", "ops", "allowlist", "whitelist", "forget", "password",
-        ];
+        let known = WORDS;
         let cheat = crate::cheats::WORDS.contains(&word.as_str());
         if !known.contains(&word.as_str()) && !cheat {
             return None;
