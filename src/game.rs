@@ -4198,19 +4198,14 @@ impl Game {
             let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
             g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
-        } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) && !matches!(block(held).shape, Shape::Dust) {
-            let tiles = {
-                let t = block(held).tex;
-                [t[1], t[1], t[0], t[2], t[1], t[1]]
-            };
-            let (boxes, n) = block_boxes(held);
-            for &(a, b) in &boxes[..n] {
+        } else if crate::models::drawn_as_block(held) {
+            for ((a, b), tiles, rect) in crate::models::item_parts(held) {
                 let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
                 let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.12)) * Mat4::from_scale(Vec3::splat(0.24)) * Mat4::from_translation(a) * Mat4::from_scale(b - a);
-                g.cube(&m, tiles, sky, [a.x, 1.0 - b.y, b.x, 1.0 - a.y]);
+                g.cube(&m, tiles, sky, rect);
             }
         } else {
-            let tile = if is_block_item(held) { block(held).tex[1] } else { item_tile(held) };
+            let tile = crate::models::flat_tile(held);
             // Tools and weapons (anything that wears out) are gripped by the handle
             // and tilted up and in; other things are held up flat to look at.
             let tool = crate::block::durability(held).is_some();

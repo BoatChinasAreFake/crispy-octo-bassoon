@@ -349,7 +349,7 @@ impl App {
                 app.start_game(Game::new(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "newblocks" | "glider" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" => {
                 let mut g = Game::new(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -774,7 +774,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1290,6 +1290,45 @@ impl App {
                 app.game.world.set_v(at(3, -5, 1), block::HOPPER_FIRST);
                 app.game.world.set_v(at(3, -5, 2), block::CHEST);
                 app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
+            }
+            if s.mode == "models" && frames == 125 {
+                // Two rows of shaped blocks to look at closely (the bug list's models).
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                let near = [block::BED_FACING_FIRST, block::SOUL_LANTERN, block::LANTERN, block::ENCHANTING_TABLE, block::DETECTOR_RAIL, block::BELL, block::SNOW_GRASS, block::GRINDSTONE];
+                let far = [block::POT_FIRST, block::SMITHING_TABLE, block::BOOKSHELF, block::SCAFFOLDING, block::CHAIN, block::CHARRED_SKULL, block::EYE_FRAME_FULL, block::BREWING_STAND];
+                // `--row 1..3` shows a few of them up close instead.
+                let row = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--row").and_then(|w| w[1].parse::<usize>().ok());
+                let all: Vec<block::Id> = near.into_iter().chain(far).collect();
+                let rows: Vec<(i32, Vec<block::Id>)> = match row {
+                    Some(k) => vec![(4, all.iter().copied().skip((k - 1) * 6).take(6).collect())],
+                    None => vec![(7, near.to_vec()), (11, far.to_vec())],
+                };
+                let gap = if row.is_some() { 1 } else { 2 };
+                for (row, ids) in rows {
+                    for (i, id) in ids.into_iter().enumerate() {
+                        let ro = i as i32 * gap - if gap == 1 { 3 } else { 7 };
+                        app.game.world.set_v(at(row, ro, 0), id);
+                        if id == block::CHAIN {
+                            app.game.world.set_v(at(row, ro, 1), id);
+                        }
+                    }
+                }
+                // A lit portal in a frame, off to one side.
+                for dy in -1..=3 {
+                    for dx in -1..=2 {
+                        let frame = dx == -1 || dx == 2 || dy == -1 || dy == 3;
+                        let c = at(14, dx, dy + 1);
+                        app.game.world.set_v(c, if frame { block::OBSIDIAN } else if f.z != 0 { block::PORTAL_X } else { block::PORTAL_Z });
+                    }
+                }
+                for (k, id) in [block::BELL, block::GRINDSTONE, block::BREWING_STAND, block::POT_FIRST, block::SCAFFOLDING, block::CHAIN, block::SOUL_LANTERN, block::CHARRED_SKULL, block::ENCHANTING_TABLE].into_iter().enumerate() {
+                    app.game.inv.slots[k] = Some((id, 1));
+                }
             }
             if s.mode == "woods" && frames == 125 {
                 // v0.3's woods, one row each: log, leaves, planks, slab, stairs, fence and gate, door; a boat.

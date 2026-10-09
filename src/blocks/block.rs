@@ -922,6 +922,8 @@ pub enum Shape {
     Core,
     /// A head-sized cube sitting on the floor (a Charred Skull).
     Skull,
+    /// A lantern standing on the floor.
+    Lantern,
 }
 
 /// A box covering `a..b` of a cell measured along direction `facing` (see
@@ -1000,6 +1002,7 @@ impl Shape {
             Shape::Bed { facing } => (crate::beds::boxes(facing), 3),
             Shape::Core => ([([0.3125; 3], [0.6875; 3]), full, full], 1),
             Shape::Skull => ([([0.25, 0.0, 0.25], [0.75, 0.5, 0.75]), full, full], 1),
+            Shape::Lantern => ([([0.3125, 0.0, 0.3125], [0.6875, 0.5625, 0.6875]), full, full], 1),
             Shape::Chest => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, 10.0 / 16.0, 15.0 / 16.0]), ([1.0 / 16.0, 10.0 / 16.0, 1.0 / 16.0], [15.0 / 16.0, 14.0 / 16.0, 15.0 / 16.0]), full], 2),
             Shape::Layer { eighths } => ([([0.0; 3], [1.0, eighths as f32 / 8.0, 1.0]), full, full], 1),
             Shape::Plate { down } => ([([1.0 / 16.0, 0.0, 1.0 / 16.0], [15.0 / 16.0, if down { 1.0 / 32.0 } else { 1.0 / 16.0 }, 15.0 / 16.0]), full, full], 1),
@@ -1781,7 +1784,11 @@ impl Registry {
             def("mossy_cobblestone", "Mossy Cobblestun (Vintage)", Cube, true, true, [T_MOSSY; 3], 2.0, 1, true, MOSSY_COBBLE, 0.0, S_STONE),
             def("hay_bale", "Hay Bale (Soft Landing)", Cube, true, true, [T_HAY_TOP, T_HAY_SIDE, T_HAY_TOP], 0.5, 0, false, HAY, 0.0, S_GRASS),
             def("bookshelf", "Bookshelf (Unread)", Cube, true, true, [T_PLANKS, T_BOOKSHELF, T_PLANKS], 1.5, 0, false, BOOKSHELF, 0.0, S_WOOD),
-            def("lantern", "Lantern (Fancy Torch)", Cube, true, false, [T_LANTERN; 3], 0.8, 0, false, LANTERN, 14.0, S_GLASS),
+            {
+                let mut d = def("lantern", "Lantern (Fancy Torch)", Shaped, true, false, [T_LANTERN; 3], 0.8, 0, false, LANTERN, 14.0, S_GLASS);
+                d.shape = Shape::Lantern;
+                d
+            },
             def("mushroom", "Mushroom (Probably Fine)", Cross, false, false, [T_MUSHROOM; 3], 0.0, 0, false, MUSHROOM, 0.0, S_GRASS),
             def("scarecrow", "Scarecrow (Unconvincing)", Cube, true, true, [T_PUMPKIN_TOP, T_SCARECROW, T_HAY_TOP], 0.8, 0, false, SCARECROW, 0.0, S_WOOD),
             def("weeds", "Weeds (Unwelcome)", Cross, false, false, [T_WEEDS; 3], 0.0, 0, false, AIR, 0.0, S_GRASS),
@@ -2072,7 +2079,8 @@ impl Registry {
         sheet.creative = false;
         blocks.push(sheet);
         for (key, name, top) in [("eye_frame", "Eye Frame (Empty)", T_EYE_FRAME_TOP), ("eye_frame_full", "Eye Frame (Staring Back)", T_EYE_FRAME_FULL)] {
-            let mut d = def(key, name, Cube, true, true, [top, T_EYE_FRAME_SIDE, T_HOLLOW_STONE], -1.0, 0, false, AIR, 0.0, S_STONE);
+            let mut d = def(key, name, Shaped, true, false, [top, T_EYE_FRAME_SIDE, T_HOLLOW_STONE], -1.0, 0, false, AIR, 0.0, S_STONE);
+            d.shape = Shape::Table;
             d.creative = key == "eye_frame";
             blocks.push(d);
         }
@@ -2207,8 +2215,8 @@ impl Registry {
         blocks.push(active);
         blocks.push(def("sculk_shrieker", "Sculk Shrieker (Do Not Wake)", Cube, true, true, [T_SHRIEKER_TOP, T_SHRIEKER_SIDE, T_SCULK], 3.0, 0, false, SCULK_SHRIEKER, 0.0, S_GRASS));
         blocks.push(def("sculk_catalyst", "Sculk Catalyst (Feeds on Endings)", Cube, true, true, [T_CATALYST_TOP, T_CATALYST_SIDE, T_SCULK], 3.0, 0, false, SCULK_CATALYST, 6.0, S_GRASS));
-        let mut soul = def("soul_lantern", "Soul Lantern (Spooky Blue)", Cube, true, false, [T_SOUL_LANTERN; 3], 0.8, 0, false, SOUL_LANTERN, 10.0, S_GLASS);
-        soul.see_through = true;
+        let mut soul = def("soul_lantern", "Soul Lantern (Spooky Blue)", Shaped, true, false, [T_SOUL_LANTERN; 3], 0.8, 0, false, SOUL_LANTERN, 10.0, S_GLASS);
+        soul.shape = Shape::Lantern;
         blocks.push(soul);
         // Archaeology.
         blocks.push(def("suspicious_sand", "Suspicious Sand (Brush, Don't Dig)", Cube, true, true, [T_SUS_SAND; 3], 0.5, 0, false, SAND, 0.0, S_SAND));

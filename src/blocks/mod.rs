@@ -21,6 +21,7 @@ pub(crate) mod fireworks;
 pub(crate) mod home;
 pub(crate) mod hoppers;
 pub(crate) mod masonry;
+pub(crate) mod models;
 pub(crate) mod music;
 pub(crate) mod potions;
 pub(crate) mod smithing;

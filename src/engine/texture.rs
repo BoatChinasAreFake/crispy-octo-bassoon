@@ -800,6 +800,22 @@ pub const T_WISP_FACE: u16 = 963;
 pub const T_BRUTE_TUNIC: u16 = 964;
 pub const T_MAGMA_CREAM: u16 = 965;
 pub const T_SOUL_EMBER: u16 = 966;
+/// Parts of the detailed block models (see models.rs).
+pub const T_LANTERN_BODY: u16 = 967;
+pub const T_SOUL_LANTERN_BODY: u16 = 968;
+pub const T_LANTERN_CAP: u16 = 969;
+pub const T_BELL_ITEM: u16 = 970;
+pub const T_ENCH_BOOK: u16 = 971;
+pub const T_GRIND_LEG: u16 = 972;
+pub const T_POT_NECK: u16 = 973;
+pub const T_SCAFFOLD_RIM: u16 = 974;
+pub const T_SCAFFOLD_POST: u16 = 975;
+pub const T_CHAIN2: u16 = 976;
+pub const T_CHARRED_JAW: u16 = 977;
+pub const T_EYE_FRAME_EYE: u16 = 978;
+pub const T_BREWING_ROD: u16 = 979;
+pub const T_BREWING_BASE: u16 = 980;
+pub const T_BREWING_ITEM: u16 = 981;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2926,7 +2942,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             let (across, along) = if ew { (y as f32 + 0.5, x as f32 + 0.5) } else { (x as f32 + 0.5, y as f32 + 0.5) };
             if (3.0..5.0).contains(&across) || (11.0..13.0).contains(&across) {
                 shade(rgb(170, 170, 178), r.range(0.9, 1.1))
-            } else if (5.5..10.5).contains(&across) && (5.0..11.0).contains(&along) {
+            } else if (5.0..11.0).contains(&across) && (5.0..11.0).contains(&along) {
                 if on { rgb(230, 50, 40) } else { shade(rgb(120, 115, 110), r.range(0.9, 1.05)) }
             } else if (2.0..14.0).contains(&across) && along.rem_euclid(4.0) < 2.0 {
                 shade(rgb(115, 85, 50), r.range(0.85, 1.05))
@@ -3891,8 +3907,272 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         });
     }
     home_tiles(&mut a);
+    paint_models(&mut a);
 
     a.px
+}
+
+/// Textures for the detailed block models (see models.rs), and the blocks
+/// they replaced looking better: painted last, so they win.
+fn paint_models(a: &mut Atlas) {
+    let iron = rgb(62, 64, 72);
+    // Lanterns: a dark iron cage round warm (or blue) glass, a cap, and the item pictures.
+    for (tile, glow) in [(T_LANTERN_BODY, rgb(255, 200, 100)), (T_SOUL_LANTERN_BODY, rgb(110, 220, 240))] {
+        a.each(tile, |x, y, r, _| {
+            let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+            if frame { shade(iron, r.range(0.85, 1.1)) } else { shade(glow, r.range(0.9, 1.05) * (1.0 - (y as f32 - 8.0).abs() * 0.02)) }
+        });
+    }
+    a.each(T_LANTERN_CAP, |x, y, r, _| shade(iron, r.range(0.85, 1.1) * if (x + y) % 5 == 0 { 0.85 } else { 1.0 }));
+    for (tile, glow) in [(T_LANTERN, rgb(255, 200, 100)), (T_SOUL_LANTERN, rgb(110, 220, 240))] {
+        a.each(tile, |x, y, r, _| {
+            let (x, y) = (x as i32, y as i32);
+            let handle = (y == 1 && (6..10).contains(&x)) || ((x == 5 || x == 10) && (1..4).contains(&y));
+            let cap = (5..11).contains(&x) && (3..5).contains(&y);
+            let body = (4..12).contains(&x) && (5..15).contains(&y);
+            let bar = x == 4 || x == 11 || y == 5 || y == 14;
+            if handle || cap || (body && bar) {
+                shade(iron, r.range(0.85, 1.1))
+            } else if body {
+                shade(glow, r.range(0.9, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    // The bell: bright brass with a darker band and a rim; and its picture.
+    a.each(T_BELL, |x, y, r, _| {
+        let band = y % 6 == 3;
+        shade(if band { rgb(205, 155, 35) } else { rgb(245, 205, 75) }, r.range(0.9, 1.06) * (1.05 - x as f32 * 0.012))
+    });
+    a.each(T_BELL_ITEM, |x, y, r, _| {
+        let (x, y) = (x as i32, y as i32);
+        let half = match y {
+            2..=3 => 2,
+            4..=8 => 3,
+            9..=11 => 4,
+            12..=13 => 6,
+            _ => -1,
+        };
+        let clapper = y == 14 && (7..9).contains(&x);
+        if clapper {
+            rgb(120, 90, 30)
+        } else if half >= 0 && (x - 8).abs() < half || (x - 7).abs() < half && half >= 0 {
+            let edge = (x - 8).abs() == half - 1 || y == 13;
+            shade(if edge { rgb(195, 145, 30) } else { rgb(245, 205, 75) }, r.range(0.92, 1.05))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    // The enchanting table: obsidian sides with diamond studs under a red cloth; the book.
+    let obsidian = |x: usize, y: usize, r: &mut Rng| shade(if (x * 5 + y * 3) % 7 == 0 { rgb(45, 30, 65) } else { rgb(24, 16, 36) }, r.range(0.85, 1.15));
+    a.each(T_ENCH_SIDE, |x, y, r, _| {
+        let stud = (y == 6 || y == 7) && (x == 2 || x == 3 || x == 12 || x == 13);
+        if y < 3 {
+            shade(rgb(160, 25, 35), r.range(0.9, 1.05))
+        } else if y == 3 {
+            rgb(230, 190, 60)
+        } else if stud {
+            rgb(120, 230, 230)
+        } else {
+            obsidian(x, y, r)
+        }
+    });
+    a.each(T_ENCH_TOP, |x, y, r, _| {
+        let corner = (x < 3 || x > 12) && (y < 3 || y > 12);
+        let gem = corner && (x == 1 || x == 14) && (y == 1 || y == 14);
+        let trim = x == 3 || x == 12 || y == 3 || y == 12;
+        if gem {
+            rgb(120, 230, 230)
+        } else if corner {
+            obsidian(x, y, r)
+        } else if trim {
+            rgb(230, 190, 60)
+        } else {
+            shade(rgb(160, 25, 35), r.range(0.9, 1.05))
+        }
+    });
+    a.each(T_ENCH_BOTTOM, |x, y, r, _| obsidian(x, y, r));
+    // The open book: two pages (top row of the tile), its cover below.
+    a.each(T_ENCH_BOOK, |x, y, r, _| {
+        if y < 4 {
+            shade(rgb(120, 50, 30), r.range(0.9, 1.05))
+        } else if x == 7 || x == 8 {
+            rgb(90, 35, 25)
+        } else if (y + 1) % 3 == 0 && (2..14).contains(&x) {
+            rgb(150, 140, 120)
+        } else {
+            shade(rgb(235, 225, 200), r.range(0.95, 1.03))
+        }
+    });
+    // Grindstone: a stone wheel (round face, worn tread) and dark wooden legs.
+    a.each(T_GRINDSTONE_SIDE, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 1.6 {
+            rgb(90, 65, 40)
+        } else if (d as i32) % 3 == 0 {
+            shade(rgb(125, 125, 125), r.range(0.9, 1.05))
+        } else {
+            shade(rgb(150, 150, 150), r.range(0.88, 1.06))
+        }
+    });
+    a.each(T_GRINDSTONE_TOP, |x, _, r, _| shade(rgb(140, 140, 140), r.range(0.85, 1.08) * if x % 4 == 0 { 0.88 } else { 1.0 }));
+    a.each(T_GRIND_LEG, |_, y, r, _| shade(rgb(85, 60, 35), r.range(0.85, 1.08) * if y % 5 == 0 { 0.85 } else { 1.0 }));
+    // A pot's neck: plain terracotta, darker inside the lip.
+    a.each(T_POT_NECK, |_, y, r, _| shade(rgb(160, 85, 52), r.range(0.9, 1.05) * if y < 2 { 0.85 } else { 1.0 }));
+    // Smithing table: an iron top with a hammered sheen, oak sides with an iron band and tools hung up.
+    a.each(T_SMITHING_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let mark = (x * 7 + y * 11) % 13 == 0;
+        shade(if rim { rgb(38, 38, 44) } else if mark { rgb(95, 95, 105) } else { rgb(70, 70, 80) }, r.range(0.92, 1.06))
+    });
+    a.each(T_SMITHING_SIDE, |x, y, r, _| {
+        let band = (3..5).contains(&y);
+        let edge = y < 3;
+        let hammer_head = (3..9).contains(&x) && (7..9).contains(&y);
+        let hammer_handle = (5..7).contains(&x) && (9..14).contains(&y);
+        let tongs = (x == 11 || x == 13) && (7..14).contains(&y) || (y == 7 && (11..14).contains(&x));
+        if hammer_head || tongs {
+            shade(rgb(175, 175, 185), r.range(0.92, 1.05))
+        } else if hammer_handle {
+            rgb(110, 75, 40)
+        } else if edge {
+            shade(rgb(55, 55, 62), r.range(0.9, 1.05))
+        } else if band {
+            shade(rgb(90, 90, 98), r.range(0.9, 1.05))
+        } else {
+            let board = y % 4 == 3;
+            shade(rgb(150, 110, 65), r.range(0.92, 1.05) * if board { 0.8 } else { 1.0 })
+        }
+    });
+    // Bookshelf: a plank frame, two shelves of books of different heights, colours and thicknesses.
+    let spines = [rgb(140, 35, 35), rgb(40, 75, 135), rgb(45, 105, 50), rgb(165, 130, 55), rgb(95, 45, 105), rgb(120, 85, 50), rgb(170, 170, 160)];
+    a.each(T_BOOKSHELF, |x, y, r, _| {
+        let frame = x == 0 || x == 15 || y == 0 || y == 15 || y == 7 || y == 8;
+        if frame {
+            return shade(rgb(160, 120, 75), r.range(0.85, 1.0) * if y == 8 || y == 15 { 0.75 } else { 1.0 });
+        }
+        let shelf = if y < 7 { 0 } else { 1 };
+        // Books are 1-3 pixels wide; work out which one this pixel is in.
+        let mut start = 1;
+        let mut k = 0usize;
+        loop {
+            let w = 1 + (crate::noise::hash2(77 + shelf, start as i32, k as i32) * 2.99) as usize;
+            if x < start + w || start + w >= 15 {
+                break;
+            }
+            start += w;
+            k += 1;
+        }
+        let h = crate::noise::hash2(91 + shelf, start as i32, 3);
+        let top = if shelf == 0 { 1 + (h * 3.0) as usize } else { 9 + (h * 3.0) as usize };
+        if y < top {
+            return shade(rgb(40, 28, 18), r.range(0.9, 1.1));
+        }
+        let c = spines[(crate::noise::hash2(5 + shelf, start as i32, 9) * spines.len() as f32) as usize % spines.len()];
+        let band = y == top + 1 || y + 2 == if shelf == 0 { 7 } else { 15 };
+        let lip = x == start;
+        shade(c, r.range(0.92, 1.05) * if band { 1.25 } else if lip { 0.75 } else { 1.0 })
+    });
+    // Scaffolding: a slatted top, a rim round its edge, and bamboo-ish posts.
+    a.each(T_SCAFFOLD_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        let slat = (y % 4 == 1) && !rim;
+        if rim {
+            shade(rgb(190, 160, 80), r.range(0.9, 1.05))
+        } else if slat {
+            [0, 0, 0, 0]
+        } else {
+            shade(rgb(210, 180, 95), r.range(0.9, 1.05) * if x % 4 == 0 { 0.9 } else { 1.0 })
+        }
+    });
+    a.each(T_SCAFFOLD_RIM, |_, y, r, _| shade(rgb(190, 160, 80), r.range(0.9, 1.05) * if y % 8 == 7 { 0.8 } else { 1.0 }));
+    a.each(T_SCAFFOLD_POST, |x, y, r, _| shade(rgb(200, 170, 85), r.range(0.9, 1.05) * if y % 5 == 0 { 0.8 } else if x % 2 == 0 { 0.92 } else { 1.0 }));
+    // Chains: oval links in the middle six columns, alternating face-on and edge-on;
+    // the second sheet has them the other way round.
+    for (tile, phase) in [(T_CHAIN, 0usize), (T_CHAIN2, 4usize)] {
+        a.each(tile, |x, y, r, _| {
+            let yy = (y + phase) % 8;
+            let face_on = yy < 5;
+            let link = if face_on {
+                // An oval ring 4 wide, 5 tall.
+                (6..10).contains(&x) && ((x == 6 || x == 9) && (1..4).contains(&yy) || (yy == 0 || yy == 4) && (7..9).contains(&x))
+            } else {
+                // Edge on: a short bar.
+                (7..9).contains(&x)
+            };
+            if link { shade(rgb(60, 66, 78), r.range(0.85, 1.15) * if x == 7 { 1.2 } else { 1.0 }) } else { [0, 0, 0, 0] }
+        });
+    }
+    // The Charred Skull: sooty bone, and a proper face: deep sockets, a nose, cheekbones, teeth.
+    let bone = |x: usize, y: usize, r: &mut Rng| shade(if (x * 3 + y * 5) % 11 == 0 { rgb(30, 30, 32) } else { rgb(58, 56, 56) }, r.range(0.88, 1.08));
+    a.each(T_CHARRED_SKULL, |x, y, r, _| bone(x, y, r));
+    a.each(T_CHARRED_SKULL_FACE, |x, y, r, _| {
+        let (xi, yi) = (x as i32, y as i32);
+        let socket = (6..11).contains(&yi) && ((2..7).contains(&xi) || (9..14).contains(&xi)) && !((yi == 6 || yi == 10) && (xi == 2 || xi == 6 || xi == 9 || xi == 13));
+        let nose = (11..14).contains(&yi) && (xi == 7 || xi == 8) && !(yi == 11 && false);
+        let teeth = yi == 15 && xi % 2 == 0 && (3..13).contains(&xi);
+        if socket || nose {
+            rgb(8, 6, 8)
+        } else if teeth {
+            rgb(150, 145, 130)
+        } else {
+            bone(x, y, r)
+        }
+    });
+    a.each(T_CHARRED_JAW, |x, y, r, _| {
+        let teeth = y < 6 && x % 2 == 0 && (2..14).contains(&x);
+        if teeth { rgb(150, 145, 130) } else if y < 6 { rgb(10, 8, 10) } else { bone(x, y, r) }
+    });
+    // Eye frames: pale stone sides with green-blue panels and a band; the eye itself.
+    a.each(T_EYE_FRAME_SIDE, |x, y, r, _| {
+        let band = y < 4;
+        let panel = (3..13).contains(&x) && (6..14).contains(&y);
+        let groove = panel && (x == 3 || x == 12 || y == 6 || y == 13);
+        if band {
+            shade(rgb(60, 112, 92), r.range(0.85, 1.1))
+        } else if groove {
+            shade(rgb(150, 150, 110), r.range(0.9, 1.05))
+        } else if panel {
+            shade(rgb(70, 125, 105), r.range(0.85, 1.1) * if (x + y) % 3 == 0 { 0.9 } else { 1.0 })
+        } else {
+            shade(rgb(222, 222, 170), r.range(0.88, 1.05))
+        }
+    });
+    a.each(T_EYE_FRAME_EYE, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 2.0 {
+            rgb(10, 20, 15)
+        } else if d < 5.0 {
+            shade(rgb(40, 150, 110), r.range(0.9, 1.1))
+        } else {
+            shade(rgb(25, 80, 60), r.range(0.85, 1.05))
+        }
+    });
+    // Brewing stand: a rod of Sizzle-gold, cobbled feet, and its picture.
+    a.each(T_BREWING_ROD, |_, y, r, _| shade(rgb(230, 175, 50), r.range(0.85, 1.1) * if y % 4 == 0 { 0.8 } else { 1.0 }));
+    a.each(T_BREWING_BASE, |x, y, r, _| shade(if (x * 3 + y * 7) % 5 == 0 { rgb(85, 82, 80) } else { rgb(120, 117, 112) }, r.range(0.88, 1.06)));
+    a.each(T_BREWING_ITEM, |x, y, r, _| {
+        let (x, y) = (x as i32, y as i32);
+        let rod = (7..9).contains(&x) && (1..13).contains(&y);
+        let arms = y == 6 && (3..13).contains(&x);
+        let base = y >= 13 && ((1..6).contains(&x) || (10..15).contains(&x) || (6..10).contains(&x) && y == 15);
+        let bottle = (8..12).contains(&y) && ((2..5).contains(&x) || (11..14).contains(&x));
+        if rod || arms {
+            shade(rgb(230, 175, 50), r.range(0.9, 1.05))
+        } else if base {
+            shade(rgb(115, 112, 108), r.range(0.9, 1.05))
+        } else if bottle {
+            shade(rgb(150, 200, 230), r.range(0.95, 1.05))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    // The portal: a solid swirl with no gaps (the shader makes it flow, see render.rs).
+    a.each(T_PORTAL, |x, y, r, p| {
+        let swirl = (p.noise2(x as f32 * 0.35, y as f32 * 0.35 + 40.0) * 7.0).sin();
+        shade(rgb(130, 55, 215), 0.75 + swirl.abs() * 0.45 + r.range(-0.05, 0.05))
+    });
 }
 
 /// v0.1.20: campfires, smokers, blast furnaces, barrels, turtle eggs, paintings and treasure.

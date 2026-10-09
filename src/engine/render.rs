@@ -19,6 +19,8 @@ uniform mat4 mvp;
 uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections, w: fancy water
 uniform vec4 wave;     // where leaf tiles start in the atlas: oak (xy), spruce (zw)
 uniform vec4 wave2;    // jungle leaves (xy), water (zw)
+uniform vec4 anim;     // where tiles that move start: the portal (xy), kelp (zw)
+uniform vec4 anim2;    // seagrass (xy), the Hollow's portal (zw)
 uniform mat4 light_mvp;
 
 varying vec2 v_uv;
@@ -40,6 +42,14 @@ void main() {
         float t = params3.x;
         p.x += sin(t * 1.6 + p.x * 0.6 + p.y * 0.4 + p.z * 0.2) * 0.04;
         p.z += cos(t * 1.3 + p.z * 0.6 + p.y * 0.3 + p.x * 0.2) * 0.04;
+    }
+    // Kelp and seagrass sway in the current (by where they are, so a column bends as one).
+    vec2 corner = -in_tile - 2.0;
+    if (in_tile.x < -1.5 && (starts_at(corner, anim.zw) || starts_at(corner, anim2.xy))) {
+        float t = params3.x;
+        float lift = fract(p.y) > 0.01 || starts_at(corner, anim.zw) ? 1.0 : 0.15;
+        p.x += sin(t * 1.4 + p.y * 0.7 + p.z * 0.5) * 0.09 * lift;
+        p.z += cos(t * 1.1 + p.y * 0.6 + p.x * 0.4) * 0.07 * lift;
     }
     gl_Position = mvp * vec4(p, 1.0);
     v_uv = in_uv;
@@ -79,6 +89,8 @@ uniform vec4 params;   // x: daylight, y: fog start, z: fog end, w: alpha multip
 uniform vec4 params2;  // x: fullbright, y: least light anywhere (the Scorchlands glow), z: colour-blind view
 uniform vec4 params3;  // x: time, y: waving leaves, z: water reflections, w: fancy water
 uniform vec4 wave2;    // zw: where the water tile starts in the atlas
+uniform vec4 anim;     // xy: where the portal tile starts
+uniform vec4 anim2;    // zw: where the Hollow's portal tile starts
 DALTONIZE
 uniform vec4 tint;
 uniform vec4 lights[16];
@@ -95,6 +107,13 @@ vec4 sample_tile() {
         // so no line of the next tile over shows along block edges.
         if (v_tile.x < -1.5) {
             vec2 o = -v_tile - 2.0;
+            // Portals swirl: their tile flows and wobbles within itself.
+            if (abs(o.x - anim.x) < 0.0001 && abs(o.y - anim.y) < 0.0001 || abs(o.x - anim2.z) < 0.0001 && abs(o.y - anim2.w) < 0.0001) {
+                float t = params3.x;
+                vec2 rel = (v_uv - o) / TILE;
+                rel += vec2(sin(rel.y * 6.2832 + t * 1.7) * 0.06 + t * 0.04, cos(rel.x * 6.2832 + t * 1.3) * 0.06 - t * 0.11);
+                return texture2D(tex, o + EDGE + fract(rel) * (TILE - 2.0 * EDGE));
+            }
             return texture2D(tex, clamp(v_uv, o + EDGE, o + TILE - EDGE));
         }
         return texture2D(tex, v_uv);
@@ -349,6 +368,8 @@ pub struct Uniforms {
     pub params3: Vec4,
     pub wave: Vec4,
     pub wave2: Vec4,
+    pub anim: Vec4,
+    pub anim2: Vec4,
     pub light_mvp: Mat4,
     pub shadow: Vec4,
     pub sun: Vec4,
@@ -369,6 +390,8 @@ fn shader_meta() -> ShaderMeta {
                 UniformDesc::new("params3", UniformType::Float4),
                 UniformDesc::new("wave", UniformType::Float4),
                 UniformDesc::new("wave2", UniformType::Float4),
+                UniformDesc::new("anim", UniformType::Float4),
+                UniformDesc::new("anim2", UniformType::Float4),
                 UniformDesc::new("light_mvp", UniformType::Mat4),
                 UniformDesc::new("shadow", UniformType::Float4),
                 UniformDesc::new("sun", UniformType::Float4),
@@ -739,6 +762,14 @@ impl Renderer {
             },
             wave2: {
                 let (a, b) = (tile_uv(crate::texture::T_JUNGLE_LEAVES), tile_uv(crate::texture::T_WATER));
+                Vec4::new(a.0, a.1, b.0, b.1)
+            },
+            anim: {
+                let (a, b) = (tile_uv(crate::texture::T_PORTAL), tile_uv(crate::texture::T_KELP));
+                Vec4::new(a.0, a.1, b.0, b.1)
+            },
+            anim2: {
+                let (a, b) = (tile_uv(crate::texture::T_SEAGRASS), tile_uv(crate::texture::T_HOLLOW_PORTAL));
                 Vec4::new(a.0, a.1, b.0, b.1)
             },
             light_mvp,

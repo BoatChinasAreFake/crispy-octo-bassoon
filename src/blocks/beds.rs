@@ -46,7 +46,8 @@ pub fn head_dir(f: u8) -> Vec3 {
 /// The bed's boxes: the mattress, the headboard and the footboard.
 pub fn boxes(f: u8) -> [([f32; 3], [f32; 3]); 3] {
     let t = 2.0 / 16.0;
-    let mattress = ([0.0, 3.0 / 16.0, 0.0], [1.0, 9.0 / 16.0, 1.0]);
+    // The mattress fits between the boards (overlapping them made their faces fight).
+    let mattress = if f.is_multiple_of(2) { ([0.0, 3.0 / 16.0, t], [1.0, 9.0 / 16.0, 1.0 - t]) } else { ([t, 3.0 / 16.0, 0.0], [1.0 - t, 9.0 / 16.0, 1.0]) };
     // (lo, hi) along the bed's length, for the head and the foot.
     let (head, foot) = match f % 4 {
         0 | 3 => ((0.0, t), (1.0 - t, 1.0)),

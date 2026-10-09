@@ -109,17 +109,14 @@ impl ItemDrop {
 /// blocks as scaled-down blocks, everything else as a two-sided sprite.
 pub fn draw_item(g: &mut DynGeo, root: &Mat4, item: Id, size: f32, sky: f32) {
     g.begin(Pass::Opaque, [1.0; 4], false);
-    if is_block_item(item) && matches!(block(item).model, Model::Cube | Model::Shaped) && !matches!(block(item).shape, Shape::Dust) {
-        let t = block(item).tex;
-        let tiles = [t[1], t[1], t[0], t[2], t[1], t[1]];
-        let (boxes, n) = block_boxes(item);
-        for &(a, b) in &boxes[..n] {
+    if crate::models::drawn_as_block(item) {
+        for ((a, b), tiles, rect) in crate::models::item_parts(item) {
             let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
             let m = *root * Mat4::from_scale(Vec3::splat(size)) * Mat4::from_translation(a - Vec3::new(0.5, 0.0, 0.5)) * Mat4::from_scale(b - a);
-            g.cube(&m, tiles, sky, [a.x, 1.0 - b.y, b.x, 1.0 - a.y]);
+            g.cube(&m, tiles, sky, rect);
         }
     } else {
-        let tile = if is_block_item(item) { block(item).tex[1] } else { item_tile(item) };
+        let tile = crate::models::flat_tile(item);
         let s = size * 1.5;
         let c = [Vec3::new(-s / 2.0, 0.0, 0.0), Vec3::new(s / 2.0, 0.0, 0.0), Vec3::new(s / 2.0, s, 0.0), Vec3::new(-s / 2.0, s, 0.0)].map(|p| root.transform_point3(p));
         g.quad(c, tile, [0.0, 0.0, 1.0, 1.0], [1.0, sky]);
