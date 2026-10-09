@@ -127,6 +127,11 @@ impl Game {
                     spread.push(side);
                 }
             }
+            // Creep up and along the walls it's burning.
+            if self.rng.chance(0.25) {
+                let d = [IVec3::Y, IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z][self.rng.int(0, 4) as usize];
+                spread.push(p + d);
+            }
             // Leap a little, to air near fuel.
             if self.rng.chance(0.05) {
                 let jump = p + ivec3(self.rng.int(-1, 1), self.rng.int(-1, 1), self.rng.int(-1, 1));

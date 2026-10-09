@@ -535,14 +535,39 @@ impl Game {
     }
 }
 
-/// A boat: floats, rows, steers; crawls on land.
+/// How fast a boat can go on this block, if it's ice.
+fn ice_speed(id: Id) -> Option<f32> {
+    match id {
+        ICE => Some(22.0),
+        PACKED_ICE => Some(30.0),
+        _ => None,
+    }
+}
+
+/// A boat: floats, rows, steers; crawls on land; flies along ice.
 fn boat_step(world: &World, v: &mut Vehicle, dt: f32, forward: f32, strafe: f32) {
     v.yaw += strafe * 2.2 * dt;
     let dir = Vec3::new(v.yaw.sin(), 0.0, -v.yaw.cos());
     let cell = |p: Vec3| IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
     let under = world.get_v(cell(v.pos + Vec3::Y * 0.2));
     let wet = is_water(under) || is_water(world.get_v(cell(v.pos + Vec3::Y * 0.6)));
-    if wet {
+    // On ice a boat hardly slows at all, and goes much faster than it rows.
+    let ice = if wet { None } else { ice_speed(world.get_v(cell(v.pos - Vec3::Y * 0.1))) };
+    let mut cap = BOAT_SPEED;
+    if let Some(top) = ice {
+        v.vel.y -= crate::entity::GRAVITY * dt;
+        v.vel += dir * forward * 14.0 * dt;
+        let drag = (1.0 - 0.15 * dt).max(0.0);
+        v.vel.x *= drag;
+        v.vel.z *= drag;
+        // It slides the way it's pointing, mostly (or you'd never get round a bend).
+        let flat = Vec3::new(v.vel.x, 0.0, v.vel.z);
+        let along = flat.dot(dir);
+        let turned = dir * along + (flat - dir * along) * (1.0 - 2.5 * dt).max(0.0);
+        v.vel.x = turned.x;
+        v.vel.z = turned.z;
+        cap = top;
+    } else if wet {
         // Float at the surface.
         let mut top = cell(v.pos + Vec3::Y * 0.2);
         while is_water(world.get_v(top + IVec3::Y)) {
@@ -562,8 +587,8 @@ fn boat_step(world: &World, v: &mut Vehicle, dt: f32, forward: f32, strafe: f32)
         v.vel.z *= drag;
     }
     let flat = Vec3::new(v.vel.x, 0.0, v.vel.z);
-    if flat.length() > BOAT_SPEED {
-        let k = BOAT_SPEED / flat.length();
+    if flat.length() > cap {
+        let k = cap / flat.length();
         v.vel.x *= k;
         v.vel.z *= k;
     }
@@ -667,6 +692,36 @@ pub fn decode(b: &[u8]) -> Vec<(u8, Vec3, f32, Option<crate::containers::Contain
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boats_fly_along_ice_and_wood_boats_go_down() {
+        let mut g = crate::game::tests::arena(61);
+        // A long strip of ice to row along (north), and the same over plain ground.
+        let speed_on = |g: &mut Game, floor: Id| {
+            for z in -15..4 {
+                for x in -2..=2 {
+                    g.world.set_v(IVec3::new(x, 49, z), floor);
+                    for y in 50..53 {
+                        g.world.set_v(IVec3::new(x, y, z), AIR);
+                    }
+                }
+            }
+            let mut v = Vehicle::new(1, BOAT_KIND, Vec3::new(0.5, 50.0, 2.5), 0.0);
+            // (A second's rowing: the arena only reaches so far.)
+            for _ in 0..60 {
+                boat_step(&g.world, &mut v, 1.0 / 60.0, 1.0, 0.0);
+            }
+            Vec3::new(v.vel.x, 0.0, v.vel.z).length()
+        };
+        let ground = speed_on(&mut g, STONE);
+        let ice = speed_on(&mut g, ICE);
+        assert!(ice > BOAT_SPEED && ice > ground * 4.0, "ice {ice} vs ground {ground}");
+        assert!(ice_speed(PACKED_ICE) > ice_speed(ICE), "packed ice is quicker still");
+        // Every wood's boat goes down like the plain one.
+        for w in crate::woods::WOODS.iter() {
+            assert!(kind_of_item(w.boat_item).is_some_and(is_boat));
+        }
+    }
 
     #[test]
     fn rails_join_up() {

@@ -834,6 +834,11 @@ impl Renderer {
                 if pass == Pass::Sky {
                     u.params.z = 0.0;
                 }
+                // What's in your hand is drawn up by the camera, not where it is in the world:
+                // the sun's shadow map there is the ground or your own body, and checkered it.
+                if pass == Pass::Overlay {
+                    u.shadow.x = 0.0;
+                }
                 ctx.apply_uniforms(UniformsSource::table(&u));
                 ctx.draw(b.start as i32, b.count as i32, 1);
             }

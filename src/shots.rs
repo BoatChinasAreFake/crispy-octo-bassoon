@@ -362,13 +362,18 @@ impl App {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
+                if s.mode == "aurora" {
+                    // Already out (it fades in over a while otherwise).
+                    g.aurora = 1.0;
+                }
                 match s.mode.as_str() {
                     "autumn" => {
                         g.rules.seasons = true;
                         g.day = seasons::SEASON_DAYS * 2 + 3;
                     }
                     "rainbow" => {
-                        g.rainbow = skies::RAINBOW_SECS;
+                        // (A little while after the rain, so it's fully in.)
+                        g.rainbow = skies::RAINBOW_SECS - 20.0;
                         g.time = s.time.unwrap_or(0.38);
                     }
                     // A Turtle Shell, to see further underwater.
@@ -1497,6 +1502,11 @@ impl App {
                 app.game.world.set_v(at(2, -3, 0), block::LOG);
                 app.game.world.set_v(at(2, -3, 1), block::FIRE);
                 app.game.world.set_v(at(2, -2, 0), block::FIRE);
+                // A plank post on fire up one side (the flames cling to it).
+                for up in 0..3 {
+                    app.game.world.set_v(at(4, -3, up), block::PLANKS);
+                    app.game.world.set_v(at(4, -2, up), block::FIRE);
+                }
             }
             if s.mode == "decor" && frames == 125 {
                 // A signpost, a framed sword on a wall, and a map in hand.

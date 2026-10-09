@@ -202,6 +202,9 @@ fn nest_spot(world: &World, at: Vec3, r: i32) -> Option<IVec3> {
     best.map(|b| b.1)
 }
 
+/// How likely walking over Turtle Eggs is to crack them, per second on them.
+pub const EGG_CRACK_PER_SEC: f32 = 0.6;
+
 impl Game {
     /// Where the world lives, after `animals_tick` (which sets every goal):
     /// Llamas follow their owners, Dolphins lead the way, bears guard cubs.
@@ -324,6 +327,24 @@ impl Game {
         self.world.set_v(p, TURTLE_EGG);
         self.sfx(crate::sound::Sfx::Place(crate::sound::Mat::Sand), Some(p.as_vec3()));
         true
+    }
+
+    /// Turtle Eggs underfoot crack: landing on them always does, walking over
+    /// them now and then. Sneaking past is safe (that's what it's for).
+    pub fn step_on_eggs(&mut self, landed: Option<f32>, dt: f32) {
+        let b = &self.player.body;
+        let cell = IVec3::new(b.pos.x.floor() as i32, (b.pos.y + 0.05).floor() as i32, b.pos.z.floor() as i32);
+        if self.player.sneaking || self.world.get_v(cell) != TURTLE_EGG || !b.on_ground {
+            return;
+        }
+        let walking = Vec3::new(b.vel.x, 0.0, b.vel.z).length() > 0.5;
+        let crack = landed.is_some() || (walking && self.rng.chance((EGG_CRACK_PER_SEC * dt).min(1.0)));
+        if crack {
+            self.world.set_v(cell, AIR);
+            let at = cell.as_vec3() + Vec3::new(0.5, 0.1, 0.5);
+            self.sfx(crate::sound::Sfx::Break(crate::sound::Mat::Sand), Some(at));
+            self.msg("Crunch. You stepped on the Turtle Eggs. The label did say.");
+        }
     }
 
     /// A Turtle Egg's random tick: at night (more so under a full moon) it hatches.
@@ -483,5 +504,35 @@ mod tests {
         g.wildlife_tick(0.05);
         assert!(g.mobs.iter().find(|m| m.id == mum).unwrap().angry);
         assert!(!g.mobs.iter().find(|m| m.id == cub).unwrap().angry);
+    }
+
+    #[test]
+    fn turtle_eggs_crack_underfoot_unless_you_sneak() {
+        let mut g = crate::game::tests::arena(77);
+        let egg = ivec3(0, 50, 0);
+        let stand = |g: &mut Game| {
+            g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+            g.player.body.on_ground = true;
+        };
+        // Landing on them: crunch.
+        g.world.set_v(egg, TURTLE_EGG);
+        stand(&mut g);
+        g.step_on_eggs(Some(1.5), 0.05);
+        assert_eq!(g.world.get_v(egg), AIR);
+        // Sneaking over them: they're fine, however long.
+        g.world.set_v(egg, TURTLE_EGG);
+        stand(&mut g);
+        g.player.sneaking = true;
+        g.player.body.vel = Vec3::new(1.0, 0.0, 0.0);
+        for _ in 0..400 {
+            g.step_on_eggs(None, 0.05);
+        }
+        assert_eq!(g.world.get_v(egg), TURTLE_EGG);
+        // Walking about on them: before long.
+        g.player.sneaking = false;
+        for _ in 0..400 {
+            g.step_on_eggs(None, 0.05);
+        }
+        assert_eq!(g.world.get_v(egg), AIR);
     }
 }

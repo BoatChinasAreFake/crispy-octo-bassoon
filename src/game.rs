@@ -301,6 +301,8 @@ pub struct Game {
     /// The sky (see skies.rs): shooting stars, seconds of rainbow left, and whether it was raining.
     pub shooting: Vec<crate::skies::ShootingStar>,
     pub rainbow: f32,
+    /// How much of the aurora is showing (it fades in and out, 0 to 1).
+    pub aurora: f32,
     pub was_wet: bool,
     /// Seconds until the world border speaks up again (see qol.rs).
     pub border_note: f32,
@@ -574,6 +576,7 @@ impl Game {
             frosted: Vec::new(),
             shooting: Vec::new(),
             rainbow: 0.0,
+            aurora: 0.0,
             was_wet: false,
             border_note: 0.0,
             distant_terrain: true,
@@ -1304,6 +1307,7 @@ impl Game {
             }
             self.trample(under, height);
         }
+        self.step_on_eggs(landed, dt);
         if fall > 0.0 {
             self.sfx(Sfx::Thud, None);
             self.hurt_player(fall, "hit the ground too hard (the ground is fine)");
@@ -2233,7 +2237,7 @@ impl Game {
             self.mount(i);
             return;
         }
-        if matches!(held, BOAT | MINECART | CHEST_MINECART | HOPPER_MINECART) && self.place_vehicle(held) {
+        if crate::vehicles::kind_of_item(held).is_some() && self.place_vehicle(held) {
             return;
         }
         // Sneak-right-clicking a chest with iron, gold or diamonds upgrades it.
@@ -3945,6 +3949,9 @@ impl Game {
         let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
         let reach = if scorch || !self.clouds_on { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
+        // With the distant land showing, clouds go on out over it (as flat ones past the near boxes).
+        let far_land = self.distant_terrain && !self.in_scorch() && !self.in_hollow();
+        let far_reach = if reach < 0 || !far_land { reach } else { reach.max((crate::lod::far_for(render_distance) as f32 / cell) as i32 + 2) };
         // Each row's runs of cloudy cells become one strip (Fast) or one box
         // (Fancy). Edges come from whole cells plus one shared fraction, so
         // neighbours meet exactly, and the plain white tile is sampled at its
@@ -3957,6 +3964,8 @@ impl Game {
         let fancy = self.fancy_clouds;
         // Boxes cost more; they stop a little sooner (and fade into the fog anyway).
         let reach = if fancy { reach.min(32) } else { reach };
+        // The flat clouds further out (where there are any) go in a batch of their own, after.
+        let draw_far = far_reach > reach;
         let thick = 4.0;
         if fancy {
             g.begin(Pass::Opaque, [1.0; 4], false);
@@ -4004,6 +4013,29 @@ impl Game {
                         let (a, b) = (Vec3::new(edge(from), cloud_y, z), Vec3::new(edge(k), cloud_y + thick, z));
                         cloud_face(&mut g, f, a, b);
                     }
+                }
+            }
+        }
+        if draw_far {
+            g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
+            for j in -far_reach..=far_reach {
+                let cj = fj + j;
+                let (z0, z1) = (cj as f32 * cell, (cj + 1) as f32 * cell);
+                // In the rows the near clouds cover, only the parts either side of them.
+                let inner = j.abs() <= reach;
+                let mut i = -far_reach;
+                while i <= far_reach {
+                    if (inner && i.abs() <= reach) || !cloudy(fi + i, cj) {
+                        i += 1;
+                        continue;
+                    }
+                    let start = fi + i;
+                    while i <= far_reach && cloudy(fi + i, cj) && !(inner && i.abs() <= reach) {
+                        i += 1;
+                    }
+                    let (x0, x1) = (edge(start), edge(fi + i));
+                    let c = [Vec3::new(x0, cloud_y, z1), Vec3::new(x1, cloud_y, z1), Vec3::new(x1, cloud_y, z0), Vec3::new(x0, cloud_y, z0)];
+                    g.quad(c, T_CLOUD, [0.5, 0.5, 0.5, 0.5], [1.0, 1.0]);
                 }
             }
         }

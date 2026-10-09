@@ -334,6 +334,29 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                     None => p,
                                 })
                             });
+                            // Fire clings to what it's burning: a sheet of flame up the side of each
+                            // flammable block beside it, leaning in a little at the top. With no
+                            // floor under it, that's all there is (no flames standing on thin air).
+                            let mut sheets: Vec<[[f32; 3]; 4]> = Vec::new();
+                            if id == FIRE || id == SOUL_FIRE {
+                                const IN: f32 = 0.03;
+                                const LEAN: f32 = 0.25;
+                                for (dx, dz) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                                    if !crate::fire::flammable(hood.get(lx + dx, y, lz + dz)) {
+                                        continue;
+                                    }
+                                    // Bottom edge against the face, top edge leaning out into the cell.
+                                    let face = |t: f32, h: f32| {
+                                        let off = if h > 0.5 { IN + LEAN } else { IN };
+                                        let x = if dx > 0 { 1.0 - off } else if dx < 0 { off } else { t };
+                                        let z = if dz > 0 { 1.0 - off } else if dz < 0 { off } else { t };
+                                        [x, h, z]
+                                    };
+                                    sheets.push([face(0.0, 0.0), face(1.0, 0.0), face(1.0, 1.0), face(0.0, 1.0)]);
+                                }
+                            }
+                            let floored = is_solid(hood.get(lx, y - 1, lz));
+                            let diag: Vec<[[f32; 3]; 4]> = if (id == FIRE || id == SOUL_FIRE) && !floored && !sheets.is_empty() { sheets } else { diag.into_iter().chain(sheets).collect() };
                             for d in diag {
                                 let tint = tint_at(id, 0, wx + 0.5, wz + 0.5);
                                 let v = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
