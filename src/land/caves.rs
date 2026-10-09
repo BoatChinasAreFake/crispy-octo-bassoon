@@ -454,7 +454,7 @@ impl Game {
             self.world.set_v(q, AIR);
             return;
         }
-        while q.y > 0 && is_cave_vine(self.world.get_v(q)) {
+        while q.y > 0 && (is_cave_vine(self.world.get_v(q)) || self.world.get_v(q) == WEEPING_VINES) {
             if self.world.get_v(q) == CAVE_VINES_LIT && !self.creative && !self.is_client() {
                 self.pop_drop(q.as_vec3() + Vec3::splat(0.5), GLOW_BERRIES, 1);
             }

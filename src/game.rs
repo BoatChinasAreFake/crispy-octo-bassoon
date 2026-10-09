@@ -286,6 +286,11 @@ pub struct Game {
     pub seat_no: u8,
     /// When fireflies were last let out (see nature.rs).
     pub firefly_acc: f32,
+    /// When spores and ash were last let loose (see wilds.rs).
+    pub mote_acc: f32,
+    /// Bastions whose residents have moved in this session, and when they were last looked at (see bastion.rs).
+    pub bastions_peopled: HashSet<IVec3>,
+    pub bastion_timer: f32,
     /// Seconds since campfire smoke was last puffed (see home.rs).
     pub smoke_acc: f32,
     /// Seconds until a Wanderer might turn up (see villagers.rs).
@@ -296,6 +301,8 @@ pub struct Game {
     /// The sky (see skies.rs): shooting stars, seconds of rainbow left, and whether it was raining.
     pub shooting: Vec<crate::skies::ShootingStar>,
     pub rainbow: f32,
+    /// How much of the aurora is showing (it fades in and out, 0 to 1).
+    pub aurora: f32,
     pub was_wet: bool,
     /// Seconds until the world border speaks up again (see qol.rs).
     pub border_note: f32,
@@ -560,12 +567,16 @@ impl Game {
             mounted: None,
             seat_no: 0,
             firefly_acc: 0.0,
+            mote_acc: 0.0,
+            bastions_peopled: HashSet::new(),
+            bastion_timer: 0.0,
             smoke_acc: 0.0,
             wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
             frost_acc: 0.0,
             frosted: Vec::new(),
             shooting: Vec::new(),
             rainbow: 0.0,
+            aurora: 0.0,
             was_wet: false,
             border_note: 0.0,
             distant_terrain: true,
@@ -939,6 +950,11 @@ impl Game {
             return;
         }
         self.explore_timer = 0.0;
+        // Down below, it's the Scorchlands' own biomes (see wilds.rs).
+        if self.in_scorch() {
+            self.scorch_explore();
+            return;
+        }
         use crate::world::Biome;
         let p = self.player.body.pos;
         let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
@@ -1061,7 +1077,7 @@ impl Game {
 
     pub fn sky_color(&self) -> [f32; 3] {
         if self.in_scorch() {
-            return [0.24, 0.06, 0.03];
+            return self.world.scorch_haze(self.player.body.pos).0;
         }
         if self.in_hollow() {
             return [0.05, 0.02, 0.08];
@@ -1291,6 +1307,7 @@ impl Game {
             }
             self.trample(under, height);
         }
+        self.step_on_eggs(landed, dt);
         if fall > 0.0 {
             self.sfx(Sfx::Thud, None);
             self.hurt_player(fall, "hit the ground too hard (the ground is fine)");
@@ -1562,6 +1579,9 @@ impl Game {
         }
         if zoom {
             self.advance("zoomies");
+        }
+        if self.player.body.on_ground {
+            self.magma_feet(under);
         }
     }
 
@@ -2217,7 +2237,7 @@ impl Game {
             self.mount(i);
             return;
         }
-        if matches!(held, BOAT | MINECART | CHEST_MINECART | HOPPER_MINECART) && self.place_vehicle(held) {
+        if crate::vehicles::kind_of_item(held).is_some() && self.place_vehicle(held) {
             return;
         }
         // Sneak-right-clicking a chest with iron, gold or diamonds upgrades it.
@@ -2636,6 +2656,9 @@ impl Game {
             // Torches go on walls too.
             TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
             LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            // Fungi and roots want rock or earth under them; vines hang from something.
+            CRIMSON_FUNGUS | TEAL_FUNGUS | CRIMSON_ROOTS | TEAL_ROOTS if !(crate::wilds::is_nylium(below) || matches!(below, SCORCHROCK | SOUL_SOIL | DIRT | GRASS | MYCELIUM)) => return,
+            WEEPING_VINES if !matches!(self.world.get_v(place + IVec3::Y), WEEPING_VINES) && !is_solid(self.world.get_v(place + IVec3::Y)) => return,
             // Kelp and seagrass only grow in water, on the floor (or on kelp).
             KELP | SEAGRASS if !(is_water(self.world.get_v(place)) && (is_solid(below) || below == KELP)) => return,
             // Frames and ladders go on walls.
@@ -3217,6 +3240,7 @@ impl Game {
         self.copper_golems_tick(dt);
         self.floaties_tick();
         self.fireflies_tick(dt);
+        self.motes_tick(dt);
         self.campfires_tick(dt);
         self.frost_tick(dt);
         self.critters_tick(dt);
@@ -3224,6 +3248,8 @@ impl Game {
         self.trials_tick(dt);
         self.creaking_tick(dt);
         self.snouts_tick(dt);
+        self.beasts_tick();
+        self.bastions_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
         self.zombie_hmmers_tick(dt);
@@ -3236,13 +3262,14 @@ impl Game {
                 continue;
             }
             let fuse_before = m.fuse;
-            // Chase whoever is closest.
+            // Chase whoever is closest (but not a host in creative: joined players still count).
             let (target_id, target) = targets
                 .iter()
                 .copied()
+                .filter(|t| visible || t.0 != self.my_id)
                 .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
                 .unwrap_or((u32::MAX, ppos));
-            let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
+            let evs = m.update(dt, &self.world, target, target_id != u32::MAX, daylight, &mut self.rng);
             let id = m.id;
             events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
             if fuse_before == 0.0 && m.fuse > 0.0 && !crate::monument::is_guardian(m.kind) {
@@ -3258,7 +3285,9 @@ impl Game {
                     MobKind::Mooer | MobKind::Mushmooer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rattler => noises.push((Sfx::Rattle, m.body.pos)),
                     MobKind::Webber => noises.push((Sfx::Skitter, m.body.pos)),
-                    MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
+                    MobKind::Bloop | MobKind::MagmaBloop => noises.push((Sfx::Bloop, m.body.pos)),
+                    MobKind::Tusker | MobKind::SnoutBrute => noises.push((Sfx::Oink, m.body.pos)),
+                    MobKind::Sporeling | MobKind::Wisp => {}
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
@@ -3356,6 +3385,28 @@ impl Game {
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
                 MobEvent::WindCharge(from, vel) => self.spawn_wind_charge(from, vel, None),
                 MobEvent::DropItem(at, item) => self.pop_drop(at, item, 1),
+                MobEvent::Toss(d, cause) => {
+                    // Up in the air you go (see beasts.rs).
+                    let d = self.rules.difficulty.mob_damage(d);
+                    let from = self.mobs.iter().find(|m| m.id == mob_id).map(|m| m.body.pos);
+                    let away = from.map(|f| (target - f).normalize_or_zero()).unwrap_or(Vec3::ZERO);
+                    if target_id == self.my_id {
+                        self.hurt_player_from(d, cause, from.map(|f| f + Vec3::Y * 0.9), false);
+                        self.player.body.vel += self.steadied(away * 6.0 + Vec3::Y * 9.0);
+                    } else if self.peers.contains_key(&target_id) {
+                        self.hurt_peer(target_id, d, cause, away * 6.0 + Vec3::Y * 9.0);
+                    }
+                }
+                MobEvent::Ignite(secs) => {
+                    if target_id == self.my_id && !self.creative && !self.has_effect(crate::potions::Potion::FireResistance) {
+                        self.on_fire = self.on_fire.max(secs);
+                    }
+                }
+                MobEvent::Spores(at) => {
+                    let kind = self.mobs.iter().find(|m| m.id == mob_id).map(|m| m.kind).unwrap_or(MobKind::Sporeling);
+                    self.spores(at, kind);
+                }
+                MobEvent::SporeCloud(at) => self.spore_cloud(at),
                 MobEvent::Afflict(p, secs) => {
                     if target_id == self.my_id {
                         self.timed_effect(p, secs);
@@ -3427,6 +3478,11 @@ impl Game {
                             MobKind::Witch => self.advance("which_witch"),
                             MobKind::DesertGroaner | MobKind::SnowyRattler => self.advance("local_flavour"),
                             MobKind::CharredRattler => self.advance("char_broiled"),
+                            MobKind::Tusker => self.advance("pork_barrel"),
+                            MobKind::MagmaBloop => self.advance("magma_carta"),
+                            MobKind::Wisp => self.advance("snuffed_out"),
+                            MobKind::SnoutBrute => self.advance("brute_force"),
+                            MobKind::Sporeling => {}
                             MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Wilter => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
@@ -3435,12 +3491,12 @@ impl Game {
                             MobKind::Modded(_) => {}
                         }
                     }
-                    // Big Bloops split into smaller ones.
-                    if m.kind == MobKind::Bloop && m.size > 1.0 {
+                    // Big Bloops (and Magma Bloops) split into smaller ones.
+                    if matches!(m.kind, MobKind::Bloop | MobKind::MagmaBloop) && m.size > 1.0 {
                         let size = (m.size / 2.0) as u8;
                         for _ in 0..self.rng.int(2, 4) {
                             let off = Vec3::new(self.rng.range(-0.4, 0.4), 0.3, self.rng.range(-0.4, 0.4)) * m.size;
-                            self.alloc_mob_sized(MobKind::Bloop, m.body.pos + off, size);
+                            self.alloc_mob_sized(m.kind, m.body.pos + off, size);
                         }
                         self.sfx(Sfx::Bloop, Some(at));
                     }
@@ -3772,14 +3828,47 @@ impl Game {
         for y in y0..y0 + 12 {
             let floor = self.world.get(x, y - 1, z);
             let clear = (0..3).all(|h| self.world.get(x, y + h, z) == AIR);
-            if matches!(floor, SCORCHROCK | EMBERSAND | GILDED_SCORCHROCK | SCORCH_BRICKS | SORROW_SAND) && clear {
+            let ground = matches!(floor, SCORCHROCK | EMBERSAND | GILDED_SCORCHROCK | SCORCH_BRICKS | SORROW_SAND | CRIMSON_NYLIUM | TEAL_NYLIUM | BASALT | BLACKSTONE | SOUL_SOIL);
+            if ground && clear {
                 let at = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
                 // Snouts keep near their camps.
-                let camp = self.world.generator.nearest_site(crate::structures::Kind::SnoutCamp, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0);
+                let camp = [crate::structures::Kind::SnoutCamp, crate::structures::Kind::Bastion].into_iter().any(|k| self.world.generator.nearest_site(k, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0));
                 let roll = self.rng.f32();
                 // Charred Rattlers walk the fortresses' halls.
                 if floor == SCORCH_BRICKS && roll < 0.5 {
                     self.alloc_mob(MobKind::CharredRattler, at);
+                    return;
+                }
+                // Each biome's own creatures (see beasts.rs), most of the time.
+                use crate::wilds::ScorchBiome;
+                let own = match self.world.generator.scorch_biome(x, z) {
+                    ScorchBiome::CrimsonForest => Some((MobKind::Tusker, 0.55, 3)),
+                    ScorchBiome::TealForest => Some((MobKind::Sporeling, 0.6, 2)),
+                    ScorchBiome::BasaltDeltas => Some((MobKind::MagmaBloop, 0.7, 1)),
+                    ScorchBiome::SoulValley => Some((MobKind::Wisp, 0.5, 2)),
+                    ScorchBiome::Wastes => None,
+                };
+                if let Some((kind, chance, most)) = own
+                    && !camp
+                    && roll < chance
+                {
+                    if kind_count(self, kind) >= 8 {
+                        return;
+                    }
+                    for i in 0..self.rng.int(1, most) {
+                        let p = at + Vec3::new(i as f32 * 0.9, if kind == MobKind::Wisp { 1.0 } else { 0.0 }, 0.0);
+                        if kind == MobKind::MagmaBloop {
+                            let size = [1, 2, 2, 4][self.rng.int(0, 3) as usize];
+                            self.alloc_mob_sized(kind, p, size);
+                        } else {
+                            self.alloc_mob(kind, p);
+                        }
+                    }
+                    return;
+                }
+                // (Teal forests are Starer country, as well.)
+                if own.is_some_and(|o| o.0 == MobKind::Sporeling) && roll < 0.8 {
+                    self.alloc_mob(MobKind::Starer, at);
                     return;
                 }
                 if camp && roll < 0.7 {
@@ -3860,6 +3949,9 @@ impl Game {
         let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
         let reach = if scorch || !self.clouds_on { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
+        // With the distant land showing, clouds go on out over it (as flat ones past the near boxes).
+        let far_land = self.distant_terrain && !self.in_scorch() && !self.in_hollow();
+        let far_reach = if reach < 0 || !far_land { reach } else { reach.max((crate::lod::far_for(render_distance) as f32 / cell) as i32 + 2) };
         // Each row's runs of cloudy cells become one strip (Fast) or one box
         // (Fancy). Edges come from whole cells plus one shared fraction, so
         // neighbours meet exactly, and the plain white tile is sampled at its
@@ -3872,6 +3964,8 @@ impl Game {
         let fancy = self.fancy_clouds;
         // Boxes cost more; they stop a little sooner (and fade into the fog anyway).
         let reach = if fancy { reach.min(32) } else { reach };
+        // The flat clouds further out (where there are any) go in a batch of their own, after.
+        let draw_far = far_reach > reach;
         let thick = 4.0;
         if fancy {
             g.begin(Pass::Opaque, [1.0; 4], false);
@@ -3919,6 +4013,29 @@ impl Game {
                         let (a, b) = (Vec3::new(edge(from), cloud_y, z), Vec3::new(edge(k), cloud_y + thick, z));
                         cloud_face(&mut g, f, a, b);
                     }
+                }
+            }
+        }
+        if draw_far {
+            g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.82], false);
+            for j in -far_reach..=far_reach {
+                let cj = fj + j;
+                let (z0, z1) = (cj as f32 * cell, (cj + 1) as f32 * cell);
+                // In the rows the near clouds cover, only the parts either side of them.
+                let inner = j.abs() <= reach;
+                let mut i = -far_reach;
+                while i <= far_reach {
+                    if (inner && i.abs() <= reach) || !cloudy(fi + i, cj) {
+                        i += 1;
+                        continue;
+                    }
+                    let start = fi + i;
+                    while i <= far_reach && cloudy(fi + i, cj) && !(inner && i.abs() <= reach) {
+                        i += 1;
+                    }
+                    let (x0, x1) = (edge(start), edge(fi + i));
+                    let c = [Vec3::new(x0, cloud_y, z1), Vec3::new(x1, cloud_y, z1), Vec3::new(x1, cloud_y, z0), Vec3::new(x0, cloud_y, z0)];
+                    g.quad(c, T_CLOUD, [0.5, 0.5, 0.5, 0.5], [1.0, 1.0]);
                 }
             }
         }
@@ -4113,19 +4230,14 @@ impl Game {
             let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
             g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
-        } else if is_block_item(held) && matches!(block(held).model, Model::Cube | Model::Shaped) && !matches!(block(held).shape, Shape::Dust) {
-            let tiles = {
-                let t = block(held).tex;
-                [t[1], t[1], t[0], t[2], t[1], t[1]]
-            };
-            let (boxes, n) = block_boxes(held);
-            for &(a, b) in &boxes[..n] {
+        } else if crate::models::drawn_as_block(held) {
+            for ((a, b), tiles, rect) in crate::models::item_parts(held) {
                 let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
                 let m = basis * local * Mat4::from_rotation_y(0.75) * Mat4::from_translation(Vec3::splat(-0.12)) * Mat4::from_scale(Vec3::splat(0.24)) * Mat4::from_translation(a) * Mat4::from_scale(b - a);
-                g.cube(&m, tiles, sky, [a.x, 1.0 - b.y, b.x, 1.0 - a.y]);
+                g.cube(&m, tiles, sky, rect);
             }
         } else {
-            let tile = if is_block_item(held) { block(held).tex[1] } else { item_tile(held) };
+            let tile = crate::models::flat_tile(held);
             // Tools and weapons (anything that wears out) are gripped by the handle
             // and tilted up and in; other things are held up flat to look at.
             let tool = crate::block::durability(held).is_some();
@@ -4154,8 +4266,9 @@ impl Game {
             let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
             ([0.05, 0.12, 0.35], 0.0, if shell { 48.0 } else { 22.0 })
         } else if self.in_scorch() {
-            // Hazy, hot air.
-            (sky, far * 0.2, far * 0.8)
+            // Hazy, hot air (thick with ash in the basalt deltas).
+            let thick = self.world.scorch_haze(self.player.body.pos).1;
+            (sky, far * 0.2 * thick, far * 0.8 * thick)
         } else if self.in_hollow() {
             ([0.1, 0.05, 0.14], far * 0.4, far)
         } else if !self.fog_on {
@@ -5820,7 +5933,8 @@ looks_like = diamond
         let feet = IVec3::new(there.x.floor() as i32, there.y.floor() as i32, there.z.floor() as i32);
         assert!(is_portal(g.world.get_v(feet)), "arrived in a portal");
         assert!(g.advancements.has("hotter"));
-        assert_eq!(g.sky_color(), [0.24, 0.06, 0.03]);
+        // The air down there is the colour of whichever biome it is.
+        assert_eq!(g.sky_color(), g.world.scorch_haze(there).0);
         // Straight back through isn't possible without stepping out first.
         for _ in 0..60 {
             g.portal_tick(0.05);

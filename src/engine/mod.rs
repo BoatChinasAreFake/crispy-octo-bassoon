@@ -10,6 +10,8 @@ pub(crate) mod mesher;
 pub(crate) mod noise;
 pub(crate) mod pad;
 pub(crate) mod palette;
+pub(crate) mod compose;
+pub(crate) mod pacing;
 pub(crate) mod paths;
 pub(crate) mod regions;
 pub(crate) mod render;

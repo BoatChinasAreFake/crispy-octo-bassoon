@@ -30,6 +30,10 @@ pub struct ShootingStar {
     pub age: f32,
 }
 
+/// Seconds for the aurora to fade in or out, and for a rainbow to appear.
+const AURORA_FADE: f32 = 20.0;
+const RAINBOW_IN: f32 = 12.0;
+
 /// Rainbow bands, outside in.
 const BANDS: [[u8; 3]; 6] = [[230, 60, 60], [240, 150, 50], [240, 230, 70], [80, 200, 90], [70, 120, 230], [140, 80, 200]];
 
@@ -53,6 +57,9 @@ impl Game {
         }
         self.was_wet = wet;
         self.rainbow = (self.rainbow - dt).max(0.0);
+        // The aurora comes and goes over half a minute or so, not all at once.
+        let want = if self.aurora_here() { 1.0 } else { 0.0 };
+        self.aurora += (want - self.aurora).clamp(-dt / AURORA_FADE, dt / AURORA_FADE);
         for s in self.shooting.iter_mut() {
             s.age += dt;
             s.dir = (s.dir + s.vel * dt).normalize();
@@ -96,10 +103,10 @@ impl Game {
                 }
             }
         }
-        if self.aurora_here() {
+        if self.aurora > 0.0 {
             // Curtains across the northern sky, waving slowly.
             let t = self.clock;
-            let strength = (night - 0.5) * 2.0;
+            let strength = ((night - 0.5) * 2.0).clamp(0.0, 1.0) * self.aurora;
             g.begin(Pass::Sky, [1.0, 1.0, 1.0, 0.35 * strength], true);
             let strips = 48;
             for i in 0..strips {
@@ -119,7 +126,9 @@ impl Game {
         }
         if self.rainbow > 0.0 {
             // An arc round the point opposite the sun.
-            let fade = (self.rainbow / 10.0).min(1.0) * (1.0 - night).max(0.0);
+            // It grows in as the rain clears, and fades away at the end.
+            let since = RAINBOW_SECS - self.rainbow;
+            let fade = (self.rainbow / 10.0).min(1.0) * (since / RAINBOW_IN).min(1.0) * (1.0 - night).max(0.0);
             g.begin(Pass::Sky, [1.0, 1.0, 1.0, 0.55 * fade], true);
             let anti = -sun_dir;
             let u = anti.cross(Vec3::Y).normalize_or(Vec3::X);

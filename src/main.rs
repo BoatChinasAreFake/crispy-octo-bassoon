@@ -11,10 +11,10 @@ mod creatures;
 mod survival;
 mod online;
 
-pub(crate) use engine::{access, backups, keybinds, light, lod, mesher, noise, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
-pub(crate) use land::{archaeology, caveins, caves, copper, deepdark, falling, fire, fortress, hollow, liquids, monument, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, world};
-pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, hoppers, masonry, music, potions, smithing, stash, trims, tripwire, wiring, woods};
-pub(crate) use creatures::{animals, bees, creaking, critters, entity, floaty, horses, nametags, night, pathing, raids, sniffers, villagers, wildlife, wilter};
+pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
+pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, falling, fire, fortress, hollow, houses, liquids, monument, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
+pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods};
+pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, nametags, night, pathing, raids, sniffers, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, ledger, mods, multiplayer, net, players, playtest, scripting, server};
 mod screens;
@@ -125,6 +125,8 @@ struct App {
     recipe_scroll: f32,
     /// Rows scrolled down the creative palette.
     palette_scroll: usize,
+    /// Dragging the palette's scrollbar.
+    palette_drag: bool,
     /// Creative inventory: which kind of thing the palette shows, and
     /// whether your own 27 slots are showing instead.
     creative_tab: u8,
@@ -160,6 +162,10 @@ struct App {
     /// Sound subtitles on screen (see access.rs).
     captions: access::Captions,
     chat_pick: Option<usize>,
+    /// Which page of the pause menu is showing.
+    pause_page: PausePage,
+    /// Tab completion: the lines Tab can make of the command being typed, and which one it's on.
+    chat_options: Option<(Vec<String>, usize)>,
     chat_scroll: usize,
     /// Where the chat log's scrollbar was last drawn (see screens/hud.rs).
     chat_bar: (f32, f32, f32, f32),
@@ -248,9 +254,43 @@ fn type_into(buf: &mut String, max: usize) {
             buf.push(c);
         }
     }
-    if is_key_pressed(KeyCode::Backspace) {
+    // Backspace (or Delete: there's no caret to delete after) takes off the last
+    // character, and keeps going while it's held, like everywhere else.
+    let held = is_key_down(KeyCode::Backspace) || is_key_down(KeyCode::Delete);
+    let pressed = is_key_pressed(KeyCode::Backspace) || is_key_pressed(KeyCode::Delete);
+    if erase_repeat(pressed, held, get_frame_time()) {
         buf.pop();
     }
+}
+
+thread_local! {
+    /// How long Backspace has been held, and when it last repeated.
+    static ERASE_HELD: std::cell::Cell<(f32, f32)> = const { std::cell::Cell::new((0.0, 0.0)) };
+}
+
+/// Should a held erase key erase now? Once on the press, then after a pause, quickly.
+fn erase_repeat(pressed: bool, held: bool, dt: f32) -> bool {
+    const DELAY: f32 = 0.45;
+    const EVERY: f32 = 0.035;
+    ERASE_HELD.with(|c| {
+        if pressed {
+            c.set((0.0, 0.0));
+            return true;
+        }
+        if !held {
+            c.set((0.0, 0.0));
+            return false;
+        }
+        let (t, last) = c.get();
+        let t = t + dt.min(0.1);
+        if t >= DELAY && t - last.max(DELAY - EVERY) >= EVERY {
+            c.set((t, t));
+            true
+        } else {
+            c.set((t, last));
+            false
+        }
+    })
 }
 
 fn players(n: usize) -> String {
@@ -310,8 +350,19 @@ fn grab(on: bool) {
     show_mouse(!on);
 }
 
+/// The pause menu's pages.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PausePage {
+    Main,
+    Logs,
+    Share,
+}
+
 impl App {
     fn set_screen(&mut self, s: Screen) {
+        if s == Screen::Playing {
+            self.pause_page = PausePage::Main;
+        }
         let playing = s == Screen::Playing && self.chat.is_none();
         grab(playing);
         self.last_mouse = None;
@@ -556,7 +607,9 @@ impl App {
 
     fn mouse_look(&mut self) {
         let m: Vec2 = mouse_position().into();
+        // (Not while typing in chat: the pointer is free then.)
         if self.screen == Screen::Playing
+            && self.chat.is_none()
             && let Some(last) = self.last_mouse {
                 let d = m - last;
                 if d.length() < 400.0 {
@@ -582,6 +635,38 @@ impl App {
     fn handle_keys(&mut self) {
         if let Some(line) = &mut self.chat {
             type_into(line, 200);
+            // Tab finishes a command (or a player, item, mob... in it): as far as all the
+            // choices agree, then once more steps through them.
+            if is_key_pressed(KeyCode::Tab) {
+                let stepping = self.chat_options.as_ref().filter(|(o, i)| o.len() > 1 && o.get(*i).is_some_and(|l| l == line || l.trim_end() == line.as_str()));
+                if let Some((o, i)) = stepping {
+                    let next = (i + 1) % o.len();
+                    *line = o[next].clone();
+                    self.chat_options = Some((o.clone(), next));
+                } else {
+                    let options = self.game.complete_command(line);
+                    match options.len() {
+                        0 => self.chat_options = None,
+                        1 => {
+                            *line = format!("{} ", options[0]);
+                            self.chat_options = None;
+                        }
+                        _ => {
+                            let common = options.iter().skip(1).fold(options[0].clone(), |acc, o| acc.chars().zip(o.chars()).take_while(|(a, b)| a.eq_ignore_ascii_case(b)).map(|(a, _)| a).collect());
+                            if common.len() > line.len() {
+                                *line = common;
+                                self.chat_options = Some((options, usize::MAX));
+                            } else {
+                                *line = options[0].clone();
+                                self.chat_options = Some((options, 0));
+                            }
+                        }
+                    }
+                }
+            } else if self.chat_options.as_ref().is_some_and(|(o, i)| o.get(*i).is_none_or(|l| l != line) && !o.iter().any(|l| l.starts_with(line.as_str()))) {
+                // Typed something else: the choices are stale.
+                self.chat_options = None;
+            }
             // Up and Down bring back what you said before; Page Up/Down and the wheel scroll the log.
             let recall = if is_key_pressed(KeyCode::Up) && !self.chat_sent.is_empty() {
                 Some(self.chat_pick.map_or(0, |p| p + 1).min(self.chat_sent.len() - 1))
@@ -759,7 +844,9 @@ impl App {
                 }
             }
             Screen::Paused => {
-                if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause || self.pad_frame.back {
+                if (is_key_pressed(KeyCode::Escape) || self.pad_frame.back) && self.pause_page != PausePage::Main {
+                    self.pause_page = PausePage::Main;
+                } else if is_key_pressed(KeyCode::Escape) || self.pad_frame.pause || self.pad_frame.back {
                     self.set_screen(Screen::Playing);
                 }
             }
@@ -1703,6 +1790,7 @@ async fn game_main() {
         show_debug: false,
         recipe_scroll: 0.0,
         palette_scroll: 0,
+        palette_drag: false,
         creative_tab: 0,
         creative_backpack: false,
         book_search: String::new(),
@@ -1725,6 +1813,8 @@ async fn game_main() {
         name_line: String::new(),
         captions: Default::default(),
         chat_pick: None,
+        pause_page: PausePage::Main,
+        chat_options: None,
         chat_scroll: 0,
         chat_bar: (0.0, 0.0, 0.0, 0.0),
         last_view_proj: Mat4::IDENTITY,
@@ -1787,6 +1877,9 @@ async fn game_main() {
             set_fullscreen(true);
         }
         app.video_at_start = (saved.vsync, saved.msaa);
+        // (Drivers can ignore what the window asked for; tell the context too.)
+        pacing::init();
+        pacing::set_vsync(saved.vsync);
         app.settings = saved;
         app.updates = updates::UpdateCheck::start(app.settings.check_updates);
     }
@@ -1856,16 +1949,13 @@ async fn game_main() {
             break;
         }
         // Max FPS: wait out the rest of this frame's share of a second.
-        if shot.is_none() && app.settings.max_fps > 0 {
-            let share = std::time::Duration::from_secs_f64(1.0 / app.settings.max_fps as f64);
-            let due = last_frame + share;
-            let now = std::time::Instant::now();
-            if due > now {
-                std::thread::sleep(due - now);
+        let now = std::time::Instant::now();
+        match pacing::next_due(last_frame, if shot.is_none() { app.settings.max_fps } else { 0 }, now) {
+            Some(due) => {
+                pacing::wait_until(due);
+                last_frame = due;
             }
-            last_frame = due.max(now - share);
-        } else {
-            last_frame = std::time::Instant::now();
+            None => last_frame = now,
         }
         next_frame().await;
     }
@@ -1874,4 +1964,20 @@ async fn game_main() {
 /// The ladder/frame facing for a wall on side `d` of the cell.
 fn building_facing(d: IVec3) -> block::Id {
     crate::decor::frame_facing(-d).unwrap_or(0) as block::Id
+}
+
+#[cfg(test)]
+mod typing_tests {
+    #[test]
+    fn a_held_backspace_repeats_after_a_pause() {
+        assert!(super::erase_repeat(true, true, 0.016), "once on the press");
+        let mut erased = 0;
+        // Held for a second at 60 fps: nothing for the first 0.45 s, then quickly.
+        for _ in 0..60 {
+            erased += super::erase_repeat(false, true, 1.0 / 60.0) as u32;
+        }
+        assert!((8..=20).contains(&erased), "{erased}");
+        assert!(!super::erase_repeat(false, false, 0.016), "let go");
+        assert!(!super::erase_repeat(false, true, 0.016), "held again: waits first");
+    }
 }

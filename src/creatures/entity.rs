@@ -284,6 +284,17 @@ pub enum MobKind {
     /// A Mooer gone red-spotted with mushrooms on its back (mushroom islands).
     /// Shear it for the mushrooms, and it's a plain Mooer again.
     Mushmooer,
+    /// The Scorchlands' biomes' own (see beasts.rs): a big angry boar of the
+    /// crimson forests and the Snouts' pens that tosses you about (breed it
+    /// with Crimson Fungus; it can't abide Teal Fungus); a little teal
+    /// fungus-thing that puffs spores when hit; a hot Bloop of the basalt
+    /// deltas; and a drifting blue flame of the soul sand valleys.
+    Tusker,
+    Sporeling,
+    MagmaBloop,
+    Wisp,
+    /// A Snout who guards a bastion: always cross, never bribed, golden axe.
+    SnoutBrute,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -299,7 +310,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 60] = [
+    pub const ALL: [MobKind; 65] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -361,6 +372,11 @@ impl MobKind {
         MobKind::CharredRattler,
         MobKind::Wilter,
         MobKind::Mushmooer,
+        MobKind::Tusker,
+        MobKind::Sporeling,
+        MobKind::MagmaBloop,
+        MobKind::Wisp,
+        MobKind::SnoutBrute,
     ];
 
     pub fn index(self) -> u8 {
@@ -465,6 +481,11 @@ impl MobKind {
             "glow squid" | "glow_squid" | "glowsquid" => Some(MobKind::GlowSquid),
             "bat" => Some(MobKind::Bat),
             "allay" => Some(MobKind::Allay),
+            "tusker" | "hoglin" => Some(MobKind::Tusker),
+            "sporeling" => Some(MobKind::Sporeling),
+            "magma bloop" | "magma_bloop" | "magmabloop" | "magma_cube" | "magma cube" => Some(MobKind::MagmaBloop),
+            "wisp" => Some(MobKind::Wisp),
+            "snout brute" | "snout_brute" | "snoutbrute" | "piglin_brute" | "brute" => Some(MobKind::SnoutBrute),
             _ => None,
         }
     }
@@ -533,6 +554,11 @@ impl MobKind {
             MobKind::Allay => "Allay",
             MobKind::CharredRattler => "Charred Rattler",
             MobKind::Wilter => "Wilter",
+            MobKind::Tusker => "Tusker",
+            MobKind::Sporeling => "Sporeling",
+            MobKind::MagmaBloop => "Magma Bloop",
+            MobKind::Wisp => "Wisp",
+            MobKind::SnoutBrute => "Snout Brute",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -549,6 +575,11 @@ impl MobKind {
             MobKind::Starer => (0.3, 2.9),
             MobKind::Cluckster => (0.2, 0.7),
             MobKind::Mooer | MobKind::Mushmooer => (0.45, 1.4),
+            MobKind::Tusker => (0.65, 1.4),
+            MobKind::Sporeling => (0.28, 0.8),
+            MobKind::MagmaBloop => (0.26, 0.52),
+            MobKind::Wisp => (0.25, 0.6),
+            MobKind::SnoutBrute => (0.3, 1.95),
             MobKind::Rattler => (0.3, 1.95),
             MobKind::Webber => (0.7, 0.9),
             MobKind::Bloop => (0.26, 0.52),
@@ -662,6 +693,11 @@ impl MobKind {
             MobKind::Allay => 20.0,
             MobKind::CharredRattler => 20.0,
             MobKind::Wilter => crate::wilter::HEALTH,
+            MobKind::Tusker => 40.0,
+            MobKind::Sporeling => 10.0,
+            MobKind::MagmaBloop => 1.5, // times size squared
+            MobKind::Wisp => 8.0,
+            MobKind::SnoutBrute => 50.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -671,7 +707,8 @@ impl MobKind {
             return xp;
         }
         match self {
-            MobKind::Bloop => size as u32,
+            MobKind::Bloop | MobKind::MagmaBloop => size as u32,
+            MobKind::SnoutBrute => 20,
             MobKind::ElderGuardian => 10,
             MobKind::Wilter => 50,
             k if !k.hostile() => rng.int(1, 3) as u32,
@@ -687,7 +724,7 @@ impl MobKind {
             // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Sporeling)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
@@ -695,11 +732,11 @@ impl MobKind {
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
-        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee | MobKind::Floaty | MobKind::Bat | MobKind::Allay | MobKind::Wilter) || self.mod_def().is_some_and(|d| d.flying)
+        matches!(self, MobKind::Bee | MobKind::Sizzler | MobKind::Weeper | MobKind::Fee | MobKind::Floaty | MobKind::Bat | MobKind::Allay | MobKind::Wilter | MobKind::Wisp) || self.mod_def().is_some_and(|d| d.flying)
     }
     /// Lava and fire don't bother it.
     pub fn fireproof(self) -> bool {
-        matches!(self, MobKind::Grumbler | MobKind::Sizzler | MobKind::Weeper | MobKind::Strutter | MobKind::Wyrm | MobKind::CharredRattler | MobKind::Wilter)
+        matches!(self, MobKind::Grumbler | MobKind::Sizzler | MobKind::Weeper | MobKind::Strutter | MobKind::Wyrm | MobKind::CharredRattler | MobKind::Wilter | MobKind::MagmaBloop | MobKind::Wisp)
     }
     /// Part of a raid (see raids.rs).
     pub fn raider(self) -> bool {
@@ -715,6 +752,7 @@ impl MobKind {
             MobKind::Ribbit => &[GOO],
             MobKind::Rollo => &[DEAD_BUSH],
             MobKind::Strutter => &[EMBER_SHROOM],
+            MobKind::Tusker => &[CRIMSON_FUNGUS],
             MobKind::Galloper => &[APPLE],
             MobKind::Goat => &[WHEAT],
             MobKind::Camel => &[CACTUS],
@@ -928,6 +966,14 @@ pub enum MobEvent {
     WiltSkull(Vec3, Vec3),
     /// The Wilter bursts out of its waking.
     WilterWakes(Vec3),
+    /// A Tusker's charge: hurts, and throws the player it's after up in the air.
+    Toss(f32, &'static str),
+    /// A Wisp sets the player it's after alight for this long.
+    Ignite(f32),
+    /// A wisp of spores (a Sporeling) or a flicker (a Wisp) here.
+    Spores(Vec3),
+    /// A hit Sporeling's cloud of spores: everyone close is slowed and weakened.
+    SporeCloud(Vec3),
 }
 
 /// A spot a Starer can teleport to near `around`: standing room on solid ground.
@@ -1096,6 +1142,13 @@ impl Mob {
             }
             MobKind::Hmmer | MobKind::Fishy => self.flee = 4.0,
             MobKind::Grumbler | MobKind::Bee => self.angry = true,
+            // A Sporeling puffs its spores at you, then scarpers (see beasts.rs).
+            MobKind::Sporeling => {
+                self.flee = 4.0;
+                self.temper = 1;
+            }
+            // A Snout Brute barely budges.
+            MobKind::SnoutBrute => self.knock *= 0.4,
             MobKind::Hush => {
                 // Hard to shift; and now it knows exactly where you are.
                 self.knock *= 0.1;
@@ -1166,7 +1219,11 @@ impl Mob {
                     if fd > 1.1 {
                         want = Some((d.x.atan2(-d.z), 1.8));
                     } else {
-                        self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        // Turn to face it, unless standing right on it (where the way to
+                        // it swings about with every nudge, and so would the head).
+                        if fd > 0.5 {
+                            self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        }
                         may_wander = false;
                     }
                 }
@@ -1532,28 +1589,47 @@ impl Mob {
                 }
             }
             MobKind::Weeper => {
-                // Drifts about high and slow; opens its eyes, and cries a fireball.
+                // Drifts about high and slow between open spots it can reach in a
+                // straight line; on seeing someone it stops, turns slowly to face
+                // them, opens its eyes, and cries a fireball. (It remembers seeing
+                // them for a moment, so a flicker of rock between doesn't send it
+                // lurching back and forth.)
                 may_wander = false;
                 self.fuse += dt;
+                self.warp_cd = (self.warp_cd - dt).max(0.0);
                 let eye = self.eye();
                 let aim = player + Vec3::Y * 0.9 - eye;
-                let sees = player_visible && dist < 48.0 && world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                let clear = player_visible && dist < 48.0 && world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                if clear {
+                    self.warp_cd = 1.5;
+                }
+                let sees = player_visible && dist < 48.0 && self.warp_cd > 0.0;
                 self.angry = sees && self.attack_cd < 1.0;
-                if self.goal.is_none() || self.fuse > 9.0 || self.body.hit_wall || self.goal.is_some_and(|g| g.distance(self.body.pos) < 2.0) {
+                let arrived = self.goal.is_some_and(|g| g.distance(self.body.pos) < 2.0);
+                if self.goal.is_none() || self.fuse > 12.0 || arrived || (self.body.hit_wall && self.fuse > 1.0) {
                     self.fuse = 0.0;
-                    self.goal = Some(self.body.pos + Vec3::new(rng.range(-16.0, 16.0), rng.range(-3.0, 3.0), rng.range(-16.0, 16.0)));
+                    let here = self.body.pos + Vec3::Y * 2.0;
+                    let open = |c: Vec3| [Vec3::ZERO, Vec3::X * 2.5, Vec3::NEG_X * 2.5, Vec3::Z * 2.5, Vec3::NEG_Z * 2.5, Vec3::Y * 2.5].iter().all(|o| world.get_v((c + *o).floor().as_ivec3()) == AIR);
+                    self.goal = (0..10)
+                        .map(|_| self.body.pos + Vec3::new(rng.range(-14.0, 14.0), rng.range(-3.0, 3.0), rng.range(-14.0, 14.0)))
+                        .find(|&c| open(c + Vec3::Y * 2.0) && world.raycast(here, (c - self.body.pos).normalize_or_zero(), c.distance(self.body.pos)).is_none())
+                        .or(Some(self.body.pos));
                 }
-                if let Some(g) = self.goal {
-                    let d = g - self.body.pos;
-                    want = Some((d.x.atan2(-d.z), 1.4));
-                    fly_vy = Some((d.y * 0.5).clamp(-1.0, 1.0));
-                }
+                let bob = (self.wander_t * 1.3 + self.id as f32).sin() * 0.25;
+                self.wander_t += dt;
                 if sees {
-                    want = want.map(|(_, s)| (face, s * 0.5));
-                    if self.attack_cd <= 0.0 {
+                    self.yaw += angle_diff(face, self.yaw).clamp(-1.5 * dt, 1.5 * dt);
+                    fly_vy = Some(bob);
+                    if clear && self.attack_cd <= 0.0 && angle_diff(face, self.yaw).abs() < 0.5 {
                         ev.push(MobEvent::Fireball(eye + aim.normalize_or_zero() * 2.4, aim.normalize_or_zero() * 10.0, true));
                         self.attack_cd = rng.range(3.0, 5.0);
                     }
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 1.0 {
+                        want = Some((d.x.atan2(-d.z), 1.4));
+                    }
+                    fly_vy = Some((d.y * 0.5 + bob).clamp(-1.0, 1.0));
                 }
             }
             MobKind::Snout => {
@@ -1633,6 +1709,21 @@ impl Mob {
                             }
                         }
                     }
+                } else if let Some(g) = self.goal {
+                    // After a Hmmer (see villagers.rs; the blows land there): a Pilferer
+                    // keeps a shooting distance, the rest close in.
+                    let d = g - self.body.pos;
+                    let fd = Vec3::new(d.x, 0.0, d.z).length();
+                    let toward = d.x.atan2(-d.z);
+                    if self.kind == MobKind::Pilferer && fd < 6.0 {
+                        self.yaw += angle_diff(toward, self.yaw).clamp(-8.0 * dt, 8.0 * dt);
+                        may_wander = false;
+                        self.fuse = if self.attack_cd < 0.8 { 1.0 } else { 0.0 };
+                    } else if fd > 1.2 {
+                        want = Some((toward, if self.kind == MobKind::Rampager { 2.9 } else { 3.2 }));
+                    } else {
+                        may_wander = false;
+                    }
                 } else if let Some(h) = self.home {
                     let d = h - self.body.pos;
                     if Vec3::new(d.x, 0.0, d.z).length() > 5.0 {
@@ -1681,6 +1772,9 @@ impl Mob {
                     let d = g - self.body.pos;
                     want = Some((d.x.atan2(-d.z), 2.0));
                 }
+            }
+            MobKind::Tusker | MobKind::Sporeling | MobKind::Wisp | MobKind::SnoutBrute => {
+                crate::beasts::update(self, dt, world, player, player_visible, rng, &mut want, &mut fly_vy, &mut may_wander, &mut ev);
             }
             MobKind::Turtle | MobKind::Dolphin | MobKind::PolarBear | MobKind::Llama => {
                 crate::wildlife::update(self, dt, world, player, player_visible, rng, &mut want, &mut swim_vy, &mut may_wander, &mut ev);
@@ -1737,14 +1831,16 @@ impl Mob {
                     }
                 }
             }
-            MobKind::Bloop => {
+            MobKind::Bloop | MobKind::MagmaBloop => {
+                // (A Magma Bloop jumps higher, and even the smallest burns.)
+                let hot = self.kind == MobKind::MagmaBloop;
                 may_wander = false;
                 self.hop_cd = (self.hop_cd - dt).max(0.0);
                 if self.body.on_ground {
                     if self.hop_cd <= 0.0 {
                         let chase = player_visible && dist < 16.0;
                         self.yaw = if chase { face } else { rng.range(0.0, std::f32::consts::TAU) };
-                        self.body.vel.y = 6.0 + self.size * 0.6;
+                        self.body.vel.y = if hot { 8.0 + self.size * 0.8 } else { 6.0 + self.size * 0.6 };
                         self.body.on_ground = false;
                         self.hop_cd = if chase { rng.range(0.6, 1.2) } else { rng.range(1.5, 3.5) };
                         self.anim += 1.0;
@@ -1753,8 +1849,8 @@ impl Mob {
                     want = Some((self.yaw, 2.6 + self.size * 0.3));
                 }
                 // Small ones are harmless; bigger ones hurt on contact.
-                if self.size >= 2.0 && flat.length() < self.body.half + 0.6 && to_player.y.abs() < self.body.height && self.attack_cd <= 0.0 {
-                    ev.push(MobEvent::HurtPlayer(self.size, "was bloop'd"));
+                if (self.size >= 2.0 || hot) && flat.length() < self.body.half + 0.6 && to_player.y.abs() < self.body.height && self.attack_cd <= 0.0 {
+                    ev.push(if hot { MobEvent::HurtPlayer(self.size * 1.5, "was scorched by a Magma Bloop") } else { MobEvent::HurtPlayer(self.size, "was bloop'd") });
                     self.attack_cd = 1.0;
                 }
             }
@@ -2221,7 +2317,7 @@ impl Mob {
                 // Webbers walk straight up walls.
                 MobKind::Webber => self.body.vel.y = 3.2,
                 MobKind::Bee => self.body.vel.y = 3.0,
-                MobKind::Bloop => {}
+                MobKind::Bloop | MobKind::MagmaBloop => {}
                 // A frog in the water leaps out onto the bank.
                 MobKind::Ribbit if self.body.in_water => {
                     self.body.vel.y = 7.0;
@@ -2261,6 +2357,11 @@ impl Mob {
             MobKind::Webber if n > 0 => Some((STRING, n)),
             // Only the smallest Bloops leave anything; bigger ones split instead.
             MobKind::Bloop if n > 0 && self.size <= 1.0 => Some((GOO, n)),
+            MobKind::MagmaBloop if n > 0 && self.size <= 1.0 => Some((MAGMA_CREAM, n)),
+            MobKind::Tusker => Some((PORKCHOP, rng.int(2, 4) as u8)),
+            MobKind::Sporeling if n > 0 => Some((TEAL_FUNGUS, n)),
+            MobKind::Wisp if rng.chance(0.6) => Some((SOUL_EMBER, 1)),
+            MobKind::SnoutBrute => Some((GOLD_INGOT, rng.int(1, 3) as u8)),
             MobKind::Grumbler if n > 0 => Some((GOO, n)),
             MobKind::Clanker => Some((IRON, 3 + n)),
             MobKind::Fishy => Some(([COD, COD, SALMON, TROPICAL][rng.int(0, 3) as usize], 1)),
@@ -2329,6 +2430,8 @@ impl Mob {
             MobKind::DesertGroaner if rng.chance(0.3) => Some((SAND, 1)),
             MobKind::SnowyRattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
             MobKind::CharredRattler if rng.chance(crate::wilter::SKULL_CHANCE) => Some((CHARRED_SKULL, 1)),
+            MobKind::Tusker if rng.chance(0.3) => Some((GRUMBLER_TUSK, 1)),
+            MobKind::SnoutBrute if rng.chance(0.1) => Some((GOLD_BLOCK, 1)),
             _ => None,
         }
         .filter(|_| self.baby <= 0.0)
@@ -2361,6 +2464,9 @@ impl Mob {
             [1.0, 0.8, 0.6, 1.0]
         } else if self.angry && self.kind == MobKind::Starer {
             [1.6, 0.9, 1.8, 1.0]
+        } else if matches!(self.kind, MobKind::Wisp | MobKind::MagmaBloop) {
+            // They glow.
+            [1.9, 1.9, 1.9, 1.0]
         } else {
             [1.0; 4]
         };
@@ -2376,7 +2482,7 @@ impl Mob {
         geo.begin(Pass::Opaque, tint, false);
         let swell = if self.kind == MobKind::Hisser { 1.0 + self.fuse * 0.08 } else { 1.0 };
         let mut scale = Vec3::splat(swell * self.size * if self.baby > 0.0 { 0.55 } else { 1.0 });
-        if self.kind == MobKind::Bloop && !self.body.on_ground {
+        if matches!(self.kind, MobKind::Bloop | MobKind::MagmaBloop) && !self.body.on_ground {
             // Stretch a little mid-hop.
             scale *= Vec3::new(0.9, 1.2, 0.9);
         }
@@ -2501,6 +2607,11 @@ pub enum Limb {
     Wing(f32),
     /// Held at a fixed lean (radians about x; negative leans forward).
     Tilt(f32),
+    /// An arm held out forward and turned in by this much (radians about y,
+    /// about its own shoulder): holding something in both hands.
+    Aim(f32),
+    /// Turned about the vertical by a fixed amount (a crossbow's drawn string).
+    Yaw(f32),
     /// A bird's wing: out and back while it falls, a little sway as it walks.
     /// The sign says which side (-1 left, 1 right).
     Flap(f32),
@@ -2652,6 +2763,45 @@ static MUSHMOOER: [Part; 10] = {
     ]
 };
 
+/// A Tusker: a heavy, bristly boar with a mane and two upturned tusks.
+static TUSKER: [Part; 9] = {
+    const T: u16 = T_TUSKER_SKIN;
+    const B: u16 = T_BONE_BLOCK_SIDE;
+    [
+        part([-0.55, 0.55, -0.75], [1.1, 0.8, 1.5], [0.0; 3], Limb::Fixed, [T; 6]),
+        part([-0.42, 0.55, -1.25], [0.84, 0.7, 0.55], [0.0; 3], Limb::Fixed, [T, T, T, T, T, T_TUSKER_FACE]),
+        part([-0.45, 0.62, -1.38], [0.08, 0.32, 0.08], [0.0; 3], Limb::Fixed, [B; 6]),
+        part([0.37, 0.62, -1.38], [0.08, 0.32, 0.08], [0.0; 3], Limb::Fixed, [B; 6]),
+        part([-0.08, 1.35, -0.7], [0.16, 0.18, 1.1], [0.0; 3], Limb::Fixed, [T_CRIMSON_WART; 6]),
+        part([-0.45, 0.0, -0.6], [0.28, 0.6, 0.28], [0.0, 0.6, -0.45], Limb::Swing(1.0), [T; 6]),
+        part([0.17, 0.0, -0.6], [0.28, 0.6, 0.28], [0.0, 0.6, -0.45], Limb::Swing(-1.0), [T; 6]),
+        part([-0.45, 0.0, 0.35], [0.28, 0.6, 0.28], [0.0, 0.6, 0.5], Limb::Swing(-1.0), [T; 6]),
+        part([0.17, 0.0, 0.35], [0.28, 0.6, 0.28], [0.0, 0.6, 0.5], Limb::Swing(1.0), [T; 6]),
+    ]
+};
+
+/// A Sporeling: a stubby stalk on little feet, under a big teal cap.
+static SPORELING: [Part; 4] = [
+    part([-0.17, 0.15, -0.17], [0.34, 0.38, 0.34], [0.0; 3], Limb::Fixed, [T_SPORELING, T_SPORELING, T_SPORELING, T_SPORELING, T_SPORELING, T_SPORELING_FACE]),
+    part([-0.3, 0.5, -0.3], [0.6, 0.28, 0.6], [0.0; 3], Limb::Fixed, [T_TEAL_WART; 6]),
+    part([-0.14, 0.0, -0.06], [0.11, 0.16, 0.12], [0.0, 0.16, 0.0], Limb::Swing(1.0), [T_SPORELING; 6]),
+    part([0.03, 0.0, -0.06], [0.11, 0.16, 0.12], [0.0, 0.16, 0.0], Limb::Swing(-1.0), [T_SPORELING; 6]),
+];
+
+static MAGMA_BLOOP: [Part; 1] = [part([-0.26, 0.0, -0.26], [0.52, 0.52, 0.52], [0.0; 3], Limb::Fixed, [T_MAGMA_BLOOP, T_MAGMA_BLOOP, T_MAGMA_BLOOP, T_MAGMA_BLOOP, T_MAGMA_BLOOP, T_MAGMA_BLOOP_FACE])];
+
+/// A Wisp: a blue flame with a flicker on top.
+static WISP: [Part; 2] = [
+    part([-0.2, 0.15, -0.2], [0.4, 0.4, 0.4], [0.0; 3], Limb::Fixed, [T_WISP, T_WISP, T_WISP, T_WISP, T_WISP, T_WISP_FACE]),
+    part([-0.11, 0.55, -0.11], [0.22, 0.22, 0.22], [0.0; 3], Limb::Fixed, [T_WISP; 6]),
+];
+
+/// A Snout Brute: a Snout in black and gold.
+static SNOUT_BRUTE: [Part; 7] = {
+    let h = humanoid(T_SNOUT, T_SNOUT_FACE, T_BRUTE_TUNIC, T_BRUTE_TUNIC, Limb::Forward, Limb::Swing(0.8));
+    [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.12, 1.55, -0.34], [0.24, 0.16, 0.1], [0.0; 3], Limb::Fixed, [T_SNOUT; 6])]
+};
+
 // A fish: a long body, a tail that waggles, a fin on top.
 static FISHY: [Part; 3] = [
     part([-0.12, 0.05, -0.3], [0.24, 0.3, 0.55], [0.0; 3], Limb::Fixed, [T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY_FACE]),
@@ -2768,7 +2918,7 @@ static SOGGY_ARMED: [Part; 7] = {
 
 static RATTLER: [Part; 6] = humanoid(T_BONE, T_RATTLER_FACE, T_BONE, T_BONE, Limb::Forward, Limb::Forward);
 
-static GRUMBLER: [Part; 6] = humanoid(T_GRUMBLE_SKIN, T_GRUMBLE_FACE, T_GRUMBLE_SKIN, T_GOLD, Limb::Swing(-0.8), Limb::Swing(0.8));
+static GRUMBLER: [Part; 6] = humanoid(T_GRUMBLE_SKIN, T_GRUMBLE_FACE, T_GRUMBLE_SKIN, T_GRUMBLE_PANTS, Limb::Swing(-0.8), Limb::Swing(0.8));
 
 /// A robe, arms folded, and a nose that means business.
 static HMMER: [Part; 7] = {
@@ -3039,16 +3189,39 @@ const fn illager(coat: u16, arms: Limb) -> [Part; 7] {
     let h = humanoid(T_ILLAGER, T_ILLAGER_FACE, coat, coat, arms, arms);
     [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.06, 1.55, -0.38], [0.12, 0.22, 0.14], [0.0; 3], Limb::Fixed, [T_ILLAGER; 6])]
 }
-static PILFERER: [Part; 7] = illager(T_PILFERER_COAT, Limb::Forward);
-/// A crossbow in a Pilferer's hands: stock, bow, string, and a bolt when loaded.
+/// A Pilferer: both hands on its crossbow (one at the stock, one reaching to the bow).
+static PILFERER: [Part; 7] = {
+    let h = illager(T_PILFERER_COAT, Limb::Fixed);
+    let (a, b) = (h[3], h[4]);
+    [
+        h[0],
+        h[1],
+        h[2],
+        part(a.min, a.size, [-0.375, 1.4, 0.0], Limb::Aim(-0.55), a.tiles),
+        part(b.min, b.size, [0.375, 1.4, 0.0], Limb::Aim(0.3), b.tiles),
+        h[5],
+        h[6],
+    ]
+};
+/// A crossbow in a Pilferer's hands: stock, bow, the string between the bow's
+/// tips (drawn back to a nock in two halves when loaded), and the grip.
+const STRING_HALF: f32 = 0.42;
+const STRING_TURN: f32 = 0.637;
 static CROSSBOW_HELD: [Part; 5] = [
-    part([-0.05, 1.3, -1.2], [0.1, 0.09, 0.62], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
-    part([-0.38, 1.32, -1.16], [0.76, 0.07, 0.08], [0.0; 3], Limb::Fixed, [T_PLANKS; 6]),
-    part([-0.36, 1.34, -1.0], [0.72, 0.025, 0.025], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
-    part([-0.04, 1.2, -0.72], [0.08, 0.12, 0.08], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
-    part([-0.02, 1.39, -1.35], [0.04, 0.04, 0.6], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
+    part([-0.05, 1.36, -0.95], [0.1, 0.09, 0.6], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
+    part([-0.38, 1.38, -0.88], [0.76, 0.06, 0.06], [0.0; 3], Limb::Fixed, [T_LANTERN_CAP; 6]),
+    part([-0.36, 1.4, -0.82], [0.72, 0.02, 0.02], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
+    part([-0.04, 1.26, -0.5], [0.08, 0.12, 0.08], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
+    part([-0.02, 1.46, -1.0], [0.04, 0.04, 0.45], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
 ];
-static CROSSBOW_LOADED: [Part; 5] = CROSSBOW_HELD;
+static CROSSBOW_LOADED: [Part; 6] = [
+    CROSSBOW_HELD[0],
+    CROSSBOW_HELD[1],
+    part([-0.36, 1.4, -0.82], [STRING_HALF, 0.02, 0.02], [-0.36, 1.4, -0.81], Limb::Yaw(-STRING_TURN), [T_WHITE; 6]),
+    part([0.36 - STRING_HALF, 1.4, -0.82], [STRING_HALF, 0.02, 0.02], [0.36, 1.4, -0.81], Limb::Yaw(STRING_TURN), [T_WHITE; 6]),
+    CROSSBOW_HELD[3],
+    CROSSBOW_HELD[4],
+];
 static HACKLER: [Part; 7] = illager(T_HACKLER_COAT, Limb::Swing(-1.0));
 static INVOICER: [Part; 7] = illager(T_INVOICER_ROBE, Limb::Fixed);
 /// The Invoicer casting: arms up.
@@ -3103,8 +3276,11 @@ static TURTLE: [Part; 7] = [
     part([-0.3, 0.02, -0.5], [0.6, 0.12, 1.0], [0.0; 3], Limb::Fixed, [TU; 6]),
 ];
 const DO: u16 = crate::texture::T_DOLPHIN;
-static DOLPHIN: [Part; 5] = [
+static DOLPHIN: [Part; 7] = [
     part([-0.25, 0.1, -0.6], [0.5, 0.45, 1.1], [0.0; 3], Limb::Fixed, [DO; 6]),
+    // Flippers out to the sides.
+    part([-0.5, 0.14, -0.38], [0.26, 0.05, 0.2], [-0.25, 0.16, -0.3], Limb::Wing(-0.35), [DO; 6]),
+    part([0.24, 0.14, -0.38], [0.26, 0.05, 0.2], [0.25, 0.16, -0.3], Limb::Wing(0.35), [DO; 6]),
     part([-0.2, 0.12, -0.95], [0.4, 0.38, 0.35], [0.0; 3], Limb::Fixed, [DO, DO, DO, DO, DO, crate::texture::T_DOLPHIN_FACE]),
     part([-0.06, 0.18, -1.15], [0.12, 0.1, 0.2], [0.0; 3], Limb::Fixed, [DO; 6]),
     part([-0.04, 0.55, -0.15], [0.08, 0.22, 0.3], [0.0; 3], Limb::Fixed, [DO; 6]),
@@ -3168,19 +3344,35 @@ static WANDERER: [Part; 8] = {
         part([-0.28, 1.75, -0.28], [0.56, 0.3, 0.56], [0.0; 3], Limb::Fixed, [crate::texture::T_WANDERER_ROBE; 6]),
     ]
 };
-static GOAT: [Part; 10] = [
-    part([-0.25, 0.6, -0.45], [0.5, 0.5, 0.9], [0.0; 3], Limb::Fixed, [GT; 6]),
-    part([-0.17, 0.85, -0.82], [0.34, 0.36, 0.42], [0.0; 3], Limb::Fixed, [GT, GT, GT, GT, GT, T_GOAT_FACE]),
-    // Beard and horns.
-    part([-0.05, 0.68, -0.8], [0.1, 0.2, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
-    part([-0.15, 1.2, -0.62], [0.08, 0.28, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
-    part([0.07, 1.2, -0.62], [0.08, 0.28, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
-    part([-0.24, 0.0, -0.4], [0.14, 0.6, 0.14], [0.0, 0.6, -0.33], Limb::Swing(1.0), [GT; 6]),
-    part([0.1, 0.0, -0.4], [0.14, 0.6, 0.14], [0.0, 0.6, -0.33], Limb::Swing(-1.0), [GT; 6]),
-    part([-0.24, 0.0, 0.26], [0.14, 0.6, 0.14], [0.0, 0.6, 0.33], Limb::Swing(-1.0), [GT; 6]),
-    part([0.1, 0.0, 0.26], [0.14, 0.6, 0.14], [0.0, 0.6, 0.33], Limb::Swing(1.0), [GT; 6]),
-    part([-0.05, 0.95, 0.42], [0.1, 0.12, 0.12], [0.0; 3], Limb::Fixed, [GT; 6]),
-];
+/// A goat: a long, shaggy body with hair hanging below, a narrow head held
+/// forward, horns sweeping back, ears out to the sides, a beard and dark hooves.
+static GOAT: [Part; 19] = {
+    const F: u16 = T_GOAT_FUR;
+    const HS: u16 = T_GOAT_HEAD_SIDE;
+    const H: u16 = T_GOAT_HORN_TILE;
+    const K: u16 = T_GOAT_HOOF;
+    [
+        part([-0.24, 0.66, -0.44], [0.48, 0.42, 0.88], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([-0.27, 0.5, -0.38], [0.54, 0.22, 0.76], [0.0; 3], Limb::Fixed, [F; 6]),
+        part([-0.12, 0.86, -0.62], [0.24, 0.32, 0.22], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([-0.14, 0.98, -0.9], [0.28, 0.28, 0.32], [0.0; 3], Limb::Fixed, [HS, HS, GT, GT, GT, GT]),
+        part([-0.1, 0.94, -1.06], [0.2, 0.22, 0.16], [0.0; 3], Limb::Fixed, [GT, GT, GT, GT, GT, T_GOAT_FACE]),
+        part([-0.04, 0.72, -1.0], [0.08, 0.22, 0.08], [0.0; 3], Limb::Fixed, [F; 6]),
+        part([-0.32, 1.13, -0.8], [0.18, 0.06, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([0.14, 1.13, -0.8], [0.18, 0.06, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([-0.13, 1.24, -0.8], [0.07, 0.34, 0.07], [-0.1, 1.24, -0.77], Limb::Tilt(0.75), [H; 6]),
+        part([0.06, 1.24, -0.8], [0.07, 0.34, 0.07], [0.1, 1.24, -0.77], Limb::Tilt(0.75), [H; 6]),
+        part([-0.22, 0.1, -0.38], [0.13, 0.56, 0.13], [0.0, 0.66, -0.32], Limb::Swing(1.0), [GT; 6]),
+        part([0.09, 0.1, -0.38], [0.13, 0.56, 0.13], [0.0, 0.66, -0.32], Limb::Swing(-1.0), [GT; 6]),
+        part([-0.22, 0.1, 0.25], [0.13, 0.56, 0.13], [0.0, 0.66, 0.32], Limb::Swing(-1.0), [GT; 6]),
+        part([0.09, 0.1, 0.25], [0.13, 0.56, 0.13], [0.0, 0.66, 0.32], Limb::Swing(1.0), [GT; 6]),
+        part([-0.22, 0.0, -0.38], [0.13, 0.1, 0.13], [0.0, 0.66, -0.32], Limb::Swing(1.0), [K; 6]),
+        part([0.09, 0.0, -0.38], [0.13, 0.1, 0.13], [0.0, 0.66, -0.32], Limb::Swing(-1.0), [K; 6]),
+        part([-0.22, 0.0, 0.25], [0.13, 0.1, 0.13], [0.0, 0.66, 0.32], Limb::Swing(-1.0), [K; 6]),
+        part([0.09, 0.0, 0.25], [0.13, 0.1, 0.13], [0.0, 0.66, 0.32], Limb::Swing(1.0), [K; 6]),
+        part([-0.05, 0.98, 0.42], [0.1, 0.14, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
+    ]
+};
 const AX: u16 = T_AXOLOTL;
 static AXOLOTL: [Part; 9] = [
     part([-0.18, 0.08, -0.4], [0.36, 0.24, 0.62], [0.0; 3], Limb::Fixed, [AX; 6]),
@@ -3257,6 +3449,11 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Cluckster => &CLUCKSTER,
         MobKind::Mooer => &MOOER,
         MobKind::Mushmooer => &MUSHMOOER,
+        MobKind::Tusker => &TUSKER,
+        MobKind::Sporeling => &SPORELING,
+        MobKind::MagmaBloop => &MAGMA_BLOOP,
+        MobKind::Wisp => &WISP,
+        MobKind::SnoutBrute => &SNOUT_BRUTE,
         MobKind::Rattler => &RATTLER,
         MobKind::Webber => &WEBBER,
         MobKind::Bloop => &BLOOP,
@@ -3393,6 +3590,8 @@ fn draw_posed(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, flap: f3
             Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
             Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
             Limb::Tilt(t) => Mat4::from_rotation_x(t),
+            Limb::Aim(a) => Mat4::from_rotation_y(a) * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            Limb::Yaw(a) => Mat4::from_rotation_y(a),
             Limb::Flap(s) => Mat4::from_rotation_z(flap.sin().abs() * 1.3 * s) * Mat4::from_rotation_x(swing * 0.3 * s),
             Limb::Bob(s) => Mat4::from_translation(Vec3::Y * (anim * 2.0).sin() * 0.06 * s),
             Limb::Spin(s) => Mat4::from_rotation_y(anim * s),

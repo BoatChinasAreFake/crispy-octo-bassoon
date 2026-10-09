@@ -25,6 +25,8 @@ use macroquad::math::{ivec3, IVec3, Vec3};
 
 /// The Deep Dark is below this height, in its regions.
 pub const DEEP_TOP: i32 = 24;
+/// How strong the noise must be for the Deep Dark in newer worlds (see `deep_dark`).
+const DEEP_RARE: f32 = 0.4;
 /// The Hushed City's floor.
 pub const CITY_Y: i32 = 10;
 /// How far a sensor hears, and how far a sensor's alarm reaches shriekers.
@@ -37,7 +39,9 @@ pub const WARNINGS: u8 = 4;
 impl Generator {
     /// Is (x, z) over a Deep Dark region?
     pub fn deep_dark(&self, x: i32, z: i32) -> bool {
-        self.cavern.noise3(x as f32 / 160.0, 300.5, z as f32 / 160.0) > 0.22
+        // (Newer worlds have a good deal less of it.)
+        let cut = if self.opts.version >= 2 { DEEP_RARE } else { 0.22 };
+        self.cavern.noise3(x as f32 / 160.0, 300.5, z as f32 / 160.0) > cut
     }
 
     /// The Deep Dark's big open caverns.
@@ -360,6 +364,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::structures::Kind;
 
     #[test]

@@ -102,7 +102,8 @@ impl Game {
         } else {
             Mood::Day
         };
-        let wet = self.weather.kind.wet() && !self.elsewhere() && !biome.dry() && !crate::seasons::snows(biome, self.season());
+        // (While it eases off, the patter does too, rather than stopping dead.)
+        let wet = self.weather.strength > 0.0 && !self.elsewhere() && !biome.dry() && !crate::seasons::snows(biome, self.season());
         // Out in it: full; under a roof: a muffled patter, fainter the deeper you are.
         let open = e.y >= self.world.rain_top(e.x, e.z);
         let rain = if wet && (open || sky > 0.0) { self.weather.strength * if open { 0.25 + 0.75 * sky } else { 0.3 * sky } } else { 0.0 };

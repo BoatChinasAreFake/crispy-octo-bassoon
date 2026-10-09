@@ -107,6 +107,7 @@ impl crate::game::Game {
                 match self.world.generator.site(cx + dx, cz + dz) {
                     Some(s) if s.kind == Kind::BuriedTreasure && s.origin == pos => self.advance("x_marks_the_spot"),
                     Some(s) if s.kind == Kind::Shipwreck && s.origin.as_vec3().distance(pos.as_vec3()) < 8.0 => self.advance("ahoy"),
+                    Some(s) if s.kind == Kind::Bastion && crate::bastion::treasure_chest(&s) == pos => self.advance("gilded_age"),
                     _ => {}
                 }
             }

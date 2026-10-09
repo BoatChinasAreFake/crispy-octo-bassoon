@@ -195,6 +195,19 @@ pub const ALL: &[Advancement] = &[
     adv("warm_welcome", "Warm Welcome", "Swim in a warm ocean."),
     adv("brr", "Brr", "Find a frozen ocean, icebergs and all."),
     adv("kelp_me", "Kelp Me", "Bring down a column of kelp."),
+    adv("seeing_red", "Seeing Red", "Find a Crimson Forest down in the Scorchlands."),
+    adv("teal_appeal", "Teal Appeal", "Find a Teal Forest. It's oddly calming."),
+    adv("delta_force", "Delta Force", "Find the Basalt Deltas. Mind the ash."),
+    adv("soul_searching", "Soul Searching", "Find a Soul Sand Valley."),
+    adv("hot_foot", "Hot Foot", "Stand on a Magma Block without sneaking. Ow."),
+    adv("fungal_growth", "Fungal Growth", "Grow a huge fungus with Bone Dust."),
+    adv("pork_barrel", "Pork Barrel", "Defeat a Tusker."),
+    adv("raising_hell", "Raising Hell", "Breed two Tuskers with Crimson Fungus."),
+    adv("spore_loser", "Spore Loser", "Get a faceful of a Sporeling's spores."),
+    adv("magma_carta", "Magma Carta", "Defeat a Magma Bloop."),
+    adv("snuffed_out", "Snuffed Out", "Put out a Wisp for good."),
+    adv("brute_force", "Brute Force", "Defeat a Snout Brute."),
+    adv("gilded_age", "Gilded Age", "Open the treasure chest in a Snout Bastion."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -209,12 +222,13 @@ const CREATURES: &[&str] = &[
     "the_birds_and_the_bees", "giddy_up", "hello_my_name_is", "pretty_polly", "soggy", "spear_it", "fishy_business", "sly_friend", "special_delivery", "tongue_tied", "scute_cute",
     "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
     "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch", "char_broiled", "fungus_amongus",
+    "pork_barrel", "raising_hell", "spore_loser", "magma_carta", "snuffed_out",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
-    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me",
+    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me", "fungal_growth",
 ];
 
 /// Which tab (1..) an advancement is on.

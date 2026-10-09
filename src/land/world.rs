@@ -543,7 +543,9 @@ impl TreeKind {
 /// are `LEGACY`, so they carry on generating exactly as they always did.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GenOptions {
-    /// 0: legacy (the old rules), 1: these options.
+    /// 0: legacy (the old rules), 1: these options, 2: rarer villages
+    /// (and outposts kept away from them), bigger and rarer fortresses, less
+    /// Deep Dark, taller ice spikes, and structures that settle into the land.
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -556,7 +558,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 1, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 2, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -567,7 +569,7 @@ impl GenOptions {
         if version == 0 {
             return GenOptions::LEGACY;
         }
-        GenOptions { version: 1, structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+        GenOptions { version: version.min(2), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
     }
 
     /// How much bigger than the old ones biomes are.
@@ -600,8 +602,8 @@ pub struct Generator {
     continent: Perlin,
     hills: Perlin,
     ridges: Perlin,
-    temp: Perlin,
-    moist: Perlin,
+    pub(crate) temp: Perlin,
+    pub(crate) moist: Perlin,
     cave_a: Perlin,
     cave_b: Perlin,
     pub(crate) cavern: Perlin,
@@ -1224,8 +1226,14 @@ impl Generator {
                 let mid = (cx * GRID + 2 + (hash2(s ^ 1, cx, cz) * 8.0) as i32, cz * GRID + 2 + (hash2(s ^ 2, cx, cz) * 8.0) as i32);
                 let d = ((x - mid.0).pow(2) + (z - mid.1).pow(2)) as f32;
                 let tall = hash2(s ^ 3, cx, cz) < 0.15;
-                let (height, width) = if tall { (24.0 + hash2(s ^ 4, cx, cz) * 12.0, 1.6) } else { (6.0 + hash2(s ^ 4, cx, cz) * 8.0, 2.4) };
-                let here = height * (1.0 - d.sqrt() / width).max(0.0);
+                let here = if self.opts.version >= 2 {
+                    // Taller, with a broad foot and a slender point (thinner the higher it goes).
+                    let (height, width) = if tall { (30.0 + hash2(s ^ 4, cx, cz) * 18.0, 3.0) } else { (10.0 + hash2(s ^ 4, cx, cz) * 12.0, 3.4) };
+                    height * (1.0 - d.sqrt() / width).max(0.0).powf(1.8)
+                } else {
+                    let (height, width) = if tall { (24.0 + hash2(s ^ 4, cx, cz) * 12.0, 1.6) } else { (6.0 + hash2(s ^ 4, cx, cz) * 8.0, 2.4) };
+                    height * (1.0 - d.sqrt() / width).max(0.0)
+                };
                 if here >= 1.0 && self.column(mid.0, mid.1).1 == Biome::IceSpikes {
                     best = best.max(here as i32);
                 }

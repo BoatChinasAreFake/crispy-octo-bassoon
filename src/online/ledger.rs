@@ -359,8 +359,8 @@ impl Game {
         if new == PITCHER_CROP {
             return self.peer_take(from, PITCHER_POD, 1);
         }
-        // Fire comes from a Sparker (which wears a little).
-        if new == FIRE {
+        // Fire (blue, on soul ground) comes from a Sparker (which wears a little).
+        if new == FIRE || new == SOUL_FIRE {
             let ok = self.peer_has(from, SPARKER);
             if ok {
                 self.host_wear(from, SPARKER, 1);

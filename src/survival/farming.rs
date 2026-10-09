@@ -525,7 +525,20 @@ impl Game {
             }
             return true;
         }
-        // Bone Dust on moss spreads it (see caves.rs).
+        // Bone Dust on moss spreads it (see caves.rs), and grows a fungus huge (see wilds.rs).
+        if held == BONE_DUST && crate::wilds::is_fungus(id) {
+            self.player.swing = 1.0;
+            if self.is_client() {
+                self.net_send_msg(crate::net::Msg::Interact { x: pos.x, y: pos.y, z: pos.z, item: held });
+            } else {
+                let me = crate::players::record_key(&self.player_name);
+                self.grow_fungus(pos, &me);
+            }
+            if !self.creative {
+                self.inv.consume_held();
+            }
+            return true;
+        }
         if held == BONE_DUST && id == MOSS_BLOCK {
             self.player.swing = 1.0;
             if !self.creative {

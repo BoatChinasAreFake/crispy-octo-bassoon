@@ -200,6 +200,21 @@ impl Game {
                 None => vec![format!("No {} within 2,500 blocks.", kind.name())],
             };
         }
+        // The Scorchlands' biomes: searched from here if you're down there, else from where a portal here would lead.
+        if let Some(biome) = crate::wilds::ScorchBiome::from_name(&what) {
+            let from = if crate::scorch::in_scorch(here.x) { here.floor().as_ivec3() } else { crate::scorch::destination(here.floor().as_ivec3()) };
+            for r in 0..120 {
+                let step = 8;
+                for k in 0..(r * 8).max(1) {
+                    let a = k as f32 / (r * 8).max(1) as f32 * std::f32::consts::TAU;
+                    let (x, z) = (from.x + (a.cos() * (r * step) as f32) as i32, from.z + (a.sin() * (r * step) as f32) as i32);
+                    if x > crate::scorch::SCORCH_X + 16 && g.scorch_biome(x, z) == biome {
+                        return vec![format!("The nearest {} is around {x}, {z}, down in the Scorchlands ({} blocks from {}, {}).", biome.name(), r * step, from.x, from.z)];
+                    }
+                }
+            }
+            return vec![format!("No {} within 1,000 blocks.", biome.name())];
+        }
         if let Some(biome) = crate::world::Biome::from_name(&what) {
             let (cx, cz) = (here.x as i32, here.z as i32);
             for r in 0..160 {
@@ -349,5 +364,89 @@ mod tests {
         g.rules.hardcore = true;
         let out = g.admin_command(Caller::Host, "/give stone").unwrap();
         assert!(out[0].contains("hardcore"));
+    }
+}
+
+/// "SnoutBrute" -> "snout_brute".
+fn snake(s: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
+
+impl Game {
+    /// What Tab could finish a command line with: whole lines, each the line
+    /// with its last word completed (empty if it isn't a command, or nothing fits).
+    pub fn complete_command(&self, line: &str) -> Vec<String> {
+        let Some(body) = line.strip_prefix('/') else { return Vec::new() };
+        let words: Vec<&str> = body.split(' ').collect();
+        let (last, done) = words.split_last().map(|(l, d)| (*l, d)).unwrap_or(("", &[]));
+        let lower = last.to_ascii_lowercase();
+        let players = || {
+            let mut v: Vec<String> = self.peers.values().map(|p| p.name.clone()).collect();
+            if !self.dedicated {
+                v.push(self.player_name.clone());
+            }
+            v
+        };
+        let mobs = || crate::entity::MobKind::ALL.iter().map(|k| snake(&format!("{k:?}"))).filter(|n| crate::entity::MobKind::from_name(n).is_some()).collect::<Vec<_>>();
+        let items = || {
+            let r = reg();
+            let blocks = r.blocks.iter().filter(|b| b.creative).map(|b| b.key.to_string());
+            blocks.chain(r.items.iter().filter(|i| i.real).map(|i| i.key.to_string())).collect::<Vec<_>>()
+        };
+        let options: Vec<String> = match done {
+            [] => crate::admin::WORDS.iter().chain(WORDS.iter()).map(|w| w.to_string()).collect(),
+            [cmd, rest @ ..] => match (cmd.to_ascii_lowercase().as_str(), rest.len()) {
+                ("gamemode" | "gm", 0) => ["survival", "creative", "spectator"].map(String::from).to_vec(),
+                ("gamemode" | "gm", 1) => players(),
+                ("weather", 0) => ["clear", "rain", "thunder"].map(String::from).to_vec(),
+                ("summon", 0) => mobs(),
+                ("kill", 0) => [players(), mobs(), vec!["mobs".into()]].concat(),
+                ("locate", 0) => {
+                    let mut v = Vec::new();
+                    for name in ["village", "outpost", "fortress", "bastion", "monument", "mineshaft", "igloo", "desert_pyramid", "jungle_temple", "trial_chambers", "shipwreck", "buried_treasure", "hushed_city", "ocean_ruins", "trail_ruins", "desert_ruins", "snout_camp", "dungeon", "tower", "hut", "well"] {
+                        v.push(name.into());
+                    }
+                    v.extend(crate::world::Biome::ALL.iter().map(|b| format!("{b:?}").to_ascii_lowercase()));
+                    v
+                }
+                ("give", 0) => [players(), items()].concat(),
+                ("give", 1) if self.is_player(rest[0]) => items(),
+                ("setblock", 3) => items(),
+                ("tp" | "teleport", 0 | 1) | ("kick" | "ban" | "unban" | "op" | "deop" | "forget", 0) => players(),
+                _ => Vec::new(),
+            },
+        };
+        let head = &line[..line.len() - last.len()];
+        let mut out: Vec<String> = options.into_iter().filter(|o| o.to_ascii_lowercase().starts_with(&lower)).map(|o| format!("{head}{o}")).collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+#[cfg(test)]
+mod completion_tests {
+    #[test]
+    fn tab_finishes_commands_and_what_goes_in_them() {
+        let g = crate::game::tests::arena(17);
+        assert_eq!(g.complete_command("/summ"), vec!["/summon"]);
+        assert_eq!(g.complete_command("/gam"), vec!["/gamemode"]);
+        let g_words = g.complete_command("/g");
+        assert!(g_words.contains(&"/give".to_string()) && g_words.contains(&"/gm".to_string()));
+        assert_eq!(g.complete_command("/gamemode cr"), vec!["/gamemode creative"]);
+        assert_eq!(g.complete_command("/weather th"), vec!["/weather thunder"]);
+        assert!(g.complete_command("/summon hiss").contains(&"/summon hisser".to_string()));
+        assert!(g.complete_command("/locate vill").contains(&"/locate village".to_string()));
+        assert!(g.complete_command("/give dirt").iter().any(|l| l == "/give dirt"));
+        // Chat isn't a command; nothing fits nonsense.
+        assert!(g.complete_command("hello").is_empty());
+        assert!(g.complete_command("/zzz").is_empty());
     }
 }

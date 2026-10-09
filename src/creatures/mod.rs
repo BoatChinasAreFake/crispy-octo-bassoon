@@ -2,6 +2,7 @@
 //! raids, and name tags.
 
 pub(crate) mod animals;
+pub(crate) mod beasts;
 pub(crate) mod bees;
 pub(crate) mod creaking;
 pub(crate) mod critters;

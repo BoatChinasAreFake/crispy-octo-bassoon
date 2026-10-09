@@ -78,9 +78,7 @@ impl Generator {
                         continue;
                     }
                     // Big open caverns in the middle, solid toward floor and ceiling.
-                    let n = self.scorch.noise3(x as f32 / 38.0, y as f32 / 26.0, z as f32 / 38.0) + self.scorch.noise3(x as f32 / 13.0, y as f32 / 10.0, z as f32 / 13.0) * 0.3;
-                    let edge = ((y - 64) as f32 / 58.0).powi(2);
-                    let solid = n + edge * 1.1 > 0.18;
+                    let solid = self.scorch_solid(x, y, z);
                     b[i] = if solid {
                         if hash3(s ^ 2, x, y, z) < 0.012 {
                             SCORCH_GOLD_ORE
@@ -118,6 +116,8 @@ impl Generator {
                 }
             }
         }
+        // Fungus forests, basalt deltas and soul sand valleys (see wilds.rs).
+        self.decorate_scorch(cx, cz, &mut b);
         // Fortresses and Snout camps (see fortress.rs).
         self.place_structures(cx, cz, &mut b);
         b

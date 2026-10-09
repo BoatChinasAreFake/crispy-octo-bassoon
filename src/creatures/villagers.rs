@@ -336,6 +336,54 @@ impl Game {
                 }
             }
         }
+        // Raiders go after Hmmers too (when there's no player to go for):
+        // Hacklers and Rampagers up close, Pilferers with their crossbows.
+        let mut blows: Vec<(usize, f32, macroquad::math::Vec3)> = Vec::new();
+        let mut shots: Vec<(macroquad::math::Vec3, macroquad::math::Vec3)> = Vec::new();
+        if self.rules.difficulty.monsters() {
+            let players = self.player_spots();
+            for m in self.mobs.iter_mut().filter(|m| m.kind.raider() && m.kind != MobKind::Invoicer) {
+                if players.iter().any(|p| p.1.distance(m.body.pos) < 16.0) {
+                    continue;
+                }
+                let near = hmmers.iter().filter(|(_, p)| p.distance(m.body.pos) < 16.0).min_by(|a, b| a.1.distance(m.body.pos).total_cmp(&b.1.distance(m.body.pos)));
+                let Some(&(i, p)) = near else { continue };
+                m.goal = Some(p);
+                let d = p.distance(m.body.pos);
+                if m.attack_cd > 0.0 {
+                    continue;
+                }
+                match m.kind {
+                    MobKind::Pilferer if d < 14.0 => {
+                        let eye = m.eye();
+                        let aim = p + macroquad::math::Vec3::Y * 1.2 - eye;
+                        shots.push((eye + aim.normalize_or_zero() * 0.6, aim.normalize_or_zero() * crate::entity::Arrow::SPEED * 1.25 + macroquad::math::Vec3::Y * aim.length() * 0.3));
+                        // (Monsters' arrows only hit players: this one's hit is dealt here.)
+                        blows.push((i, 4.0, m.body.pos));
+                        m.attack_cd = 2.5;
+                    }
+                    MobKind::Hackler if d < 1.6 => {
+                        blows.push((i, 8.0, m.body.pos));
+                        m.attack_cd = 1.0;
+                    }
+                    MobKind::Rampager if d < 2.4 => {
+                        blows.push((i, 12.0, m.body.pos));
+                        m.attack_cd = 1.6;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (i, dmg, from) in blows {
+            let m = &mut self.mobs[i];
+            m.hurt = 0.0;
+            m.damage(dmg, from);
+            let at = m.body.pos;
+            self.sfx(Sfx::Hmm, Some(at));
+        }
+        for (from, vel) in shots {
+            self.spawn_arrow(from, vel, None);
+        }
         for i in bitten {
             // Easy: they get away with a fright. Otherwise: one more of them.
             let turn = match self.rules.difficulty {

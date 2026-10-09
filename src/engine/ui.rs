@@ -47,6 +47,33 @@ impl Ui {
         measure_text(t, None, self.font(px), 1.0).width
     }
 
+    /// Break text into lines that fit in `max` pixels, at spaces where it can
+    /// (a word too long for a line on its own is split wherever it has to be).
+    pub fn wrap(&self, t: &str, px: f32, max: f32) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut line = String::new();
+        for word in t.split(' ') {
+            let joined = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+            if self.text_width(&joined, px) <= max {
+                line = joined;
+                continue;
+            }
+            if !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            // The word alone, split up if even that's too wide.
+            for c in word.chars() {
+                line.push(c);
+                if self.text_width(&line, px) > max && line.chars().count() > 1 {
+                    let last = line.pop().unwrap();
+                    lines.push(std::mem::replace(&mut line, last.to_string()));
+                }
+            }
+        }
+        lines.push(line);
+        lines
+    }
+
     /// Shorten text with "..." so it fits in `max` pixels.
     pub fn fit(&self, t: &str, px: f32, max: f32) -> String {
         if self.text_width(t, px) <= max {
@@ -141,20 +168,23 @@ impl Ui {
     /// their shape), everything else a flat sprite.
     pub fn icon(&self, item: Id, x: f32, y: f32, size: f32) {
         // (Flat things on the ground, like leaf litter, show as their picture.)
-        if is_block_item(item) && matches!(block(item).model, Model::Cube | Model::Shaped) && !matches!(block(item).shape, Shape::Dust) {
-            let t = block(item).tex;
+        if crate::models::drawn_as_block(item) {
             // Isometric projection of a point in the unit cell.
             let p = |bx: f32, by: f32, bz: f32| vec2(x + size * (0.5 + 0.45 * (bx - bz)), y + size * (0.04 + 0.23 * (bx + bz) + 0.46 * (1.0 - by)));
             let mut verts = Vec::with_capacity(24);
             let mut idx: Vec<u16> = Vec::with_capacity(36);
-            let (boxes, n) = block_boxes(item);
-            for &(a, b) in &boxes[..n] {
+            for ((a, b), tiles, rect) in crate::models::item_parts(item) {
                 // Visible faces: top, the +z side (left) and the +x side (right),
-                // with the part of the tile that box covers.
+                // with the part of the tile that box covers (or its set part).
+                let cell = rect == [a[0], 1.0 - b[1], b[0], 1.0 - a[1]];
+                let (r0, r1, r2, r3) = (rect[0], rect[1], rect[2], rect[3]);
+                let top_uv = if cell { [[a[0], a[2]], [b[0], a[2]], [b[0], b[2]], [a[0], b[2]]] } else { [[r0, r1], [r2, r1], [r2, r3], [r0, r3]] };
+                let left_uv = if cell { [[a[0], 1.0 - b[1]], [b[0], 1.0 - b[1]], [b[0], 1.0 - a[1]], [a[0], 1.0 - a[1]]] } else { [[r0, r1], [r2, r1], [r2, r3], [r0, r3]] };
+                let right_uv = if cell { [[1.0 - b[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - a[1]], [1.0 - b[2], 1.0 - a[1]]] } else { [[r0, r1], [r2, r1], [r2, r3], [r0, r3]] };
                 let faces = [
-                    ([p(a[0], b[1], a[2]), p(b[0], b[1], a[2]), p(b[0], b[1], b[2]), p(a[0], b[1], b[2])], t[0], 1.0, [[a[0], a[2]], [b[0], a[2]], [b[0], b[2]], [a[0], b[2]]]),
-                    ([p(a[0], b[1], b[2]), p(b[0], b[1], b[2]), p(b[0], a[1], b[2]), p(a[0], a[1], b[2])], t[1], 0.78, [[a[0], 1.0 - b[1]], [b[0], 1.0 - b[1]], [b[0], 1.0 - a[1]], [a[0], 1.0 - a[1]]]),
-                    ([p(b[0], b[1], b[2]), p(b[0], b[1], a[2]), p(b[0], a[1], a[2]), p(b[0], a[1], b[2])], t[1], 0.6, [[1.0 - b[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - b[1]], [1.0 - a[2], 1.0 - a[1]], [1.0 - b[2], 1.0 - a[1]]]),
+                    ([p(a[0], b[1], a[2]), p(b[0], b[1], a[2]), p(b[0], b[1], b[2]), p(a[0], b[1], b[2])], tiles[2], 1.0, top_uv),
+                    ([p(a[0], b[1], b[2]), p(b[0], b[1], b[2]), p(b[0], a[1], b[2]), p(a[0], a[1], b[2])], tiles[4], 0.78, left_uv),
+                    ([p(b[0], b[1], b[2]), p(b[0], b[1], a[2]), p(b[0], a[1], a[2]), p(b[0], a[1], b[2])], tiles[0], 0.6, right_uv),
                 ];
                 for (quad, tile, shade, uvs) in faces {
                     let (u0, v0, s) = ui_tile_uv(tile);
@@ -168,8 +198,7 @@ impl Ui {
             }
             draw_mesh(&Mesh { vertices: verts, indices: idx, texture: Some(self.tex.clone()) });
         } else {
-            let tile = if is_block_item(item) { block(item).tex[1] } else { item_tile(item) };
-            self.tile(tile, x, y, size, WHITE);
+            self.tile(crate::models::flat_tile(item), x, y, size, WHITE);
         }
     }
 

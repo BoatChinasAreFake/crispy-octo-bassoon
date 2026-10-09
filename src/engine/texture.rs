@@ -760,6 +760,68 @@ pub const T_KELP: u16 = 925;
 pub const T_SEAGRASS: u16 = 926;
 pub const T_SEA_PICKLE: u16 = 927;
 pub const T_DRIED_KELP: u16 = 928;
+/// The Scorchlands' biomes (see wilds.rs), then Snout Bastions' bricks.
+pub const T_CRIMSON_NYLIUM_TOP: u16 = 929;
+pub const T_CRIMSON_NYLIUM_SIDE: u16 = 930;
+pub const T_CRIMSON_STEM_SIDE: u16 = 931;
+pub const T_CRIMSON_STEM_TOP: u16 = 932;
+pub const T_CRIMSON_WART: u16 = 933;
+pub const T_CRIMSON_FUNGUS: u16 = 934;
+pub const T_CRIMSON_ROOTS: u16 = 935;
+pub const T_WEEPING_VINES: u16 = 936;
+pub const T_SHROOMLIGHT: u16 = 937;
+pub const T_TEAL_NYLIUM_TOP: u16 = 938;
+pub const T_TEAL_NYLIUM_SIDE: u16 = 939;
+pub const T_TEAL_STEM_SIDE: u16 = 940;
+pub const T_TEAL_STEM_TOP: u16 = 941;
+pub const T_TEAL_WART: u16 = 942;
+pub const T_TEAL_FUNGUS: u16 = 943;
+pub const T_TEAL_ROOTS: u16 = 944;
+pub const T_BASALT_SIDE: u16 = 945;
+pub const T_BASALT_TOP: u16 = 946;
+pub const T_BLACKSTONE: u16 = 947;
+pub const T_MAGMA: u16 = 948;
+pub const T_SOUL_SOIL: u16 = 949;
+pub const T_BONE_BLOCK_SIDE: u16 = 950;
+pub const T_BONE_BLOCK_TOP: u16 = 951;
+pub const T_SOUL_FIRE: u16 = 952;
+pub const T_BLACKSTONE_BRICKS: u16 = 953;
+pub const T_CRACKED_BLACKSTONE_BRICKS: u16 = 954;
+pub const T_GILDED_BLACKSTONE: u16 = 955;
+/// The Scorchlands' biomes' creatures (see beasts.rs), and what they drop.
+pub const T_TUSKER_SKIN: u16 = 956;
+pub const T_TUSKER_FACE: u16 = 957;
+pub const T_SPORELING: u16 = 958;
+pub const T_SPORELING_FACE: u16 = 959;
+pub const T_MAGMA_BLOOP: u16 = 960;
+pub const T_MAGMA_BLOOP_FACE: u16 = 961;
+pub const T_WISP: u16 = 962;
+pub const T_WISP_FACE: u16 = 963;
+pub const T_BRUTE_TUNIC: u16 = 964;
+pub const T_MAGMA_CREAM: u16 = 965;
+pub const T_SOUL_EMBER: u16 = 966;
+/// Parts of the detailed block models (see models.rs).
+pub const T_LANTERN_BODY: u16 = 967;
+pub const T_SOUL_LANTERN_BODY: u16 = 968;
+pub const T_LANTERN_CAP: u16 = 969;
+pub const T_BELL_ITEM: u16 = 970;
+pub const T_ENCH_BOOK: u16 = 971;
+pub const T_GRIND_LEG: u16 = 972;
+pub const T_POT_NECK: u16 = 973;
+pub const T_SCAFFOLD_RIM: u16 = 974;
+pub const T_SCAFFOLD_POST: u16 = 975;
+pub const T_CHAIN2: u16 = 976;
+pub const T_CHARRED_JAW: u16 = 977;
+pub const T_EYE_FRAME_EYE: u16 = 978;
+pub const T_BREWING_ROD: u16 = 979;
+pub const T_BREWING_BASE: u16 = 980;
+pub const T_BREWING_ITEM: u16 = 981;
+/// Mob fixes: a shaggier goat, and Grumblers' rags.
+pub const T_GOAT_FUR: u16 = 982;
+pub const T_GOAT_HOOF: u16 = 983;
+pub const T_GOAT_HORN_TILE: u16 = 984;
+pub const T_GRUMBLE_PANTS: u16 = 985;
+pub const T_GOAT_HEAD_SIDE: u16 = 986;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -2886,7 +2948,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             let (across, along) = if ew { (y as f32 + 0.5, x as f32 + 0.5) } else { (x as f32 + 0.5, y as f32 + 0.5) };
             if (3.0..5.0).contains(&across) || (11.0..13.0).contains(&across) {
                 shade(rgb(170, 170, 178), r.range(0.9, 1.1))
-            } else if (5.5..10.5).contains(&across) && (5.0..11.0).contains(&along) {
+            } else if (5.0..11.0).contains(&across) && (5.0..11.0).contains(&along) {
                 if on { rgb(230, 50, 40) } else { shade(rgb(120, 115, 110), r.range(0.9, 1.05)) }
             } else if (2.0..14.0).contains(&across) && along.rem_euclid(4.0) < 2.0 {
                 shade(rgb(115, 85, 50), r.range(0.85, 1.05))
@@ -3047,6 +3109,162 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         a.sprite(T_ACACIA_DOOR_ITEM + w as u16, &DOOR_ITEM, &[('#', shade(c, 0.45)), ('b', c), ('d', shade(c, 0.75)), ('w', rgb(60, 60, 60))]);
         a.sprite(T_ACACIA_BOAT_ITEM + w as u16, &BOAT_SPRITE, &[('#', shade(c, 0.4)), ('w', c), ('d', shade(c, 0.75))]);
     }
+    // ---- The Scorchlands' biomes: crimson and teal forests (nylium over
+    // Scorchrock, stems, wart, fungi, roots, vines, shroomlights), basalt
+    // deltas, soul sand valleys, and the Snouts' blackstone.
+    for (top, side, stem_side, stem_top, wart, fungus, roots, c, stem, inner) in [
+        (T_CRIMSON_NYLIUM_TOP, T_CRIMSON_NYLIUM_SIDE, T_CRIMSON_STEM_SIDE, T_CRIMSON_STEM_TOP, T_CRIMSON_WART, T_CRIMSON_FUNGUS, T_CRIMSON_ROOTS, rgb(150, 25, 30), [95, 30, 45], [150, 70, 80]),
+        (T_TEAL_NYLIUM_TOP, T_TEAL_NYLIUM_SIDE, T_TEAL_STEM_SIDE, T_TEAL_STEM_TOP, T_TEAL_WART, T_TEAL_FUNGUS, T_TEAL_ROOTS, rgb(30, 130, 125), [45, 60, 80], [60, 155, 145]),
+    ] {
+        a.each(top, |x, y, r, p| {
+            let n = p.noise2(x as f32 * 0.5 + top as f32, y as f32 * 0.5);
+            shade(c, 0.9 + n * 0.25 + r.range(-0.1, 0.1))
+        });
+        a.copy(T_SCORCHROCK, side);
+        for x in 0..TILE {
+            for y in 0..2 + (x * 7 % 5 == 0) as usize + (x % 3 == 1) as usize {
+                a.set(side, x, y, shade(c, 0.85 + ((x * 5 + y * 3) % 4) as f32 * 0.06));
+            }
+        }
+        a.each(stem_side, |x, y, r, _| {
+            let streak = (x * 5 + y / 3) % 7 == 0;
+            let glow = (x * 3 + y * 11) % 23 == 0;
+            if glow { shade(rgb(inner[0], inner[1], inner[2]), 1.4) } else { shade(rgb(stem[0], stem[1], stem[2]), if streak { 0.75 } else { r.range(0.88, 1.1) }) }
+        });
+        a.each(stem_top, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let d = dx.abs().max(dy.abs());
+            if d > 6.5 { shade(rgb(stem[0], stem[1], stem[2]), r.range(0.85, 1.05)) } else { shade(rgb(inner[0], inner[1], inner[2]), if (d as i32) % 3 == 0 { 0.85 } else { 1.0 } * r.range(0.92, 1.06)) }
+        });
+        a.each(wart, |x, y, r, p| {
+            let n = p.noise2(x as f32 * 0.4 + 9.0, y as f32 * 0.4 + wart as f32);
+            shade(c, 0.85 + n * 0.3 + r.range(-0.08, 0.08))
+        });
+        // A fungus: a stubby stalk and a round cap with spots.
+        a.each(fungus, |x, y, r, _| {
+            let (dx, dy) = (x as i32 - 8, y as i32 - 6);
+            let cap = dx * dx * 2 / 3 + dy * dy * 2 < 30 && y <= 8;
+            let stalk = (7..9).contains(&x) && y > 8;
+            if cap {
+                if (x + y * 3) % 7 == 0 { rgb(240, 200, 90) } else { shade(c, r.range(0.85, 1.15)) }
+            } else if stalk {
+                rgb(stem[0], stem[1], stem[2])
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+        // Roots: a tuft of thin strands.
+        a.each(roots, |x, y, r, _| {
+            let strand = (x % 3 == 1 && y > 4 + (x * 7) % 5) || (x % 5 == 3 && y > 7);
+            if strand { shade(c, r.range(0.75, 1.2)) } else { [0, 0, 0, 0] }
+        });
+    }
+    a.each(T_WEEPING_VINES, |x, y, r, _| {
+        let vine = (x == 7 || x == 8 || (x == 6 && y % 4 < 2) || (x == 9 && y % 5 > 2)) && y < 15;
+        let bud = (5..11).contains(&x) && y % 6 == 4 && r.chance(0.6);
+        if vine || bud { shade(rgb(150, 30, 35), r.range(0.8, 1.15)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SHROOMLIGHT, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.6 + 50.0, y as f32 * 0.6);
+        shade(if n > 0.1 { rgb(255, 205, 120) } else { rgb(240, 150, 70) }, r.range(0.92, 1.08))
+    });
+    a.each(T_BASALT_SIDE, |x, _, r, _| shade(rgb(80, 80, 85), if x % 4 == 0 { 0.7 } else { r.range(0.88, 1.1) }));
+    a.each(T_BASALT_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let ring = (dx * dx + dy * dy).sqrt() as i32 % 4 == 0;
+        shade(rgb(90, 90, 95), if ring { 0.75 } else { r.range(0.9, 1.08) })
+    });
+    a.each(T_BLACKSTONE, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.55 + 33.0, y as f32 * 0.55);
+        shade(rgb(62, 53, 62), 1.0 + n * 0.35 + r.range(-0.1, 0.1))
+    });
+    a.each(T_MAGMA, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.4 + 77.0, y as f32 * 0.4);
+        if n > 0.2 { shade(rgb(255, 140, 30), r.range(0.85, 1.1)) } else if n > 0.0 { rgb(200, 60, 20) } else { shade(rgb(80, 30, 20), r.range(0.8, 1.1)) }
+    });
+    a.each(T_SOUL_SOIL, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.5 + 12.0, y as f32 * 0.5 + 40.0);
+        shade(rgb(75, 58, 45), 1.0 + n * 0.3 + r.range(-0.1, 0.1))
+    });
+    a.each(T_BONE_BLOCK_SIDE, |x, _, r, _| shade(rgb(225, 220, 195), if x % 5 == 2 { 0.86 } else { r.range(0.93, 1.04) }));
+    a.each(T_BONE_BLOCK_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let marrow = dx * dx + dy * dy < 16.0;
+        shade(if marrow { rgb(190, 180, 150) } else { rgb(225, 220, 195) }, r.range(0.92, 1.04))
+    });
+    a.each(T_SOUL_FIRE, |x, y, r, p| {
+        let fx = x as f32 / 15.0;
+        let wave = p.noise2(fx * 5.0, 7.3) * 0.25;
+        let height = 0.85 - (fx - 0.5).abs() * 0.9 + wave;
+        let h = 1.0 - y as f32 / 15.0;
+        let core = h < height * 0.5 && (fx - 0.5).abs() < 0.25;
+        if h > height || (!core && r.chance(0.08)) {
+            return [0, 0, 0, 0];
+        }
+        if core { shade(rgb(150, 235, 245), r.range(0.9, 1.05)) } else { shade(rgb(50, 180, 205), r.range(0.8, 1.1)) }
+    });
+    for (tile, cracks) in [(T_BLACKSTONE_BRICKS, false), (T_CRACKED_BLACKSTONE_BRICKS, true)] {
+        a.each(tile, |x, y, r, _| {
+            let row = y / 4;
+            let mortar = y % 4 == 3 || (x + if row % 2 == 1 { 4 } else { 0 }) % 8 == 7;
+            let crack = cracks && ((x * 3 + y * 5) % 13 == 0 || (x == y + 2 && x % 3 != 0));
+            shade(if mortar || crack { rgb(28, 23, 30) } else { rgb(78, 66, 78) }, r.range(0.88, 1.08))
+        });
+    }
+    a.each(T_GILDED_BLACKSTONE, |x, y, r, p| {
+        let n = p.noise3(x as f32 * 0.6, y as f32 * 0.6, 57.0);
+        if n > 0.3 { shade(rgb(240, 200, 60), r.range(0.85, 1.1)) } else { shade(rgb(45, 38, 45), r.range(0.85, 1.12)) }
+    });
+    // A Tusker: coarse pinkish-brown bristles, small mean eyes, a broad snout.
+    a.each(T_TUSKER_SKIN, |x, y, r, _| shade(if (x * 3 + y * 7) % 5 == 0 { rgb(120, 70, 55) } else { rgb(170, 105, 85) }, r.range(0.85, 1.08)));
+    a.each(T_TUSKER_FACE, |x, y, r, _| {
+        let eye = y == 5 && (x == 3 || x == 12);
+        let snout = (4..12).contains(&x) && (9..15).contains(&y);
+        let nostril = y == 11 && (x == 6 || x == 9);
+        if eye { rgb(20, 15, 15) } else if nostril { rgb(60, 30, 30) } else if snout { shade(rgb(210, 150, 130), r.range(0.92, 1.05)) } else { shade(rgb(170, 105, 85), r.range(0.85, 1.08)) }
+    });
+    // A Sporeling: a pale stalk of a body with a little face.
+    a.each(T_SPORELING, |x, y, r, _| shade(if (x + y * 3) % 6 == 0 { rgb(120, 200, 190) } else { rgb(190, 215, 205) }, r.range(0.9, 1.06)));
+    a.each(T_SPORELING_FACE, |x, y, r, _| {
+        let eye = (5..7).contains(&y) && (x == 4 || x == 5 || x == 10 || x == 11);
+        let mouth = y == 10 && (6..10).contains(&x);
+        if eye { rgb(20, 40, 40) } else if mouth { rgb(70, 110, 105) } else { shade(rgb(190, 215, 205), r.range(0.9, 1.06)) }
+    });
+    // A Magma Bloop: cracked dark crust over glowing insides.
+    a.each(T_MAGMA_BLOOP, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.45 + 140.0, y as f32 * 0.45);
+        if n > 0.15 { shade(rgb(255, 150, 40), r.range(0.85, 1.1)) } else { shade(rgb(70, 30, 25), r.range(0.8, 1.1)) }
+    });
+    a.copy(T_MAGMA_BLOOP, T_MAGMA_BLOOP_FACE);
+    for (x, y) in [(4, 5), (5, 5), (10, 5), (11, 5), (4, 6), (5, 6), (10, 6), (11, 6)] {
+        a.set(T_MAGMA_BLOOP_FACE, x, y, rgb(255, 230, 120));
+    }
+    // A Wisp: a blue flame with a hint of a face.
+    a.each(T_WISP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 9.0);
+        let core = dx * dx + dy * dy < 20.0;
+        shade(if core { rgb(170, 240, 250) } else { rgb(60, 190, 215) }, r.range(0.85, 1.1))
+    });
+    a.copy(T_WISP, T_WISP_FACE);
+    for (x, y) in [(5, 7), (5, 8), (10, 7), (10, 8)] {
+        a.set(T_WISP_FACE, x, y, rgb(20, 60, 80));
+    }
+    // A Snout Brute's tunic: black, with a gold belt.
+    a.each(T_BRUTE_TUNIC, |x, y, r, _| {
+        let belt = (9..11).contains(&y);
+        let buckle = belt && (7..9).contains(&x);
+        if buckle { rgb(255, 240, 150) } else if belt { shade(rgb(230, 190, 50), r.range(0.9, 1.05)) } else { shade(rgb(40, 32, 30), r.range(0.85, 1.1)) }
+    });
+    a.each(T_MAGMA_CREAM, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
+        let d = dx * dx + dy * dy;
+        if d < 22.0 { if d < 6.0 { rgb(255, 220, 90) } else { shade(rgb(230, 120, 40), r.range(0.85, 1.1)) } } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SOUL_EMBER, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        let flame = dx.abs() < 5.0 - (8.5 - y as f32).max(0.0) * 0.45 && y > 2 && y < 14;
+        if flame { if dx * dx + dy * dy < 6.0 { rgb(200, 250, 255) } else { shade(rgb(60, 190, 215), r.range(0.85, 1.1)) } } else { [0, 0, 0, 0] }
+    });
     a.each(T_PALE_LEAVES, |_, _, r, _| if r.chance(0.15) { [180, 185, 175, 0] } else { shade(rgb(165, 172, 162), r.range(0.78, 1.12)) });
     a.each(T_PALE_PLANKS, |x, y, r, _| {
         let board = y / 4;
@@ -3695,8 +3913,304 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         });
     }
     home_tiles(&mut a);
+    paint_models(&mut a);
 
     a.px
+}
+
+/// Textures for the detailed block models (see models.rs), and the blocks
+/// they replaced looking better: painted last, so they win.
+fn paint_models(a: &mut Atlas) {
+    let iron = rgb(62, 64, 72);
+    // Lanterns: a dark iron cage round warm (or blue) glass, a cap, and the item pictures.
+    for (tile, glow) in [(T_LANTERN_BODY, rgb(255, 200, 100)), (T_SOUL_LANTERN_BODY, rgb(110, 220, 240))] {
+        a.each(tile, |x, y, r, _| {
+            let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+            if frame { shade(iron, r.range(0.85, 1.1)) } else { shade(glow, r.range(0.9, 1.05) * (1.0 - (y as f32 - 8.0).abs() * 0.02)) }
+        });
+    }
+    a.each(T_LANTERN_CAP, |x, y, r, _| shade(iron, r.range(0.85, 1.1) * if (x + y) % 5 == 0 { 0.85 } else { 1.0 }));
+    for (tile, glow) in [(T_LANTERN, rgb(255, 200, 100)), (T_SOUL_LANTERN, rgb(110, 220, 240))] {
+        a.each(tile, |x, y, r, _| {
+            let (x, y) = (x as i32, y as i32);
+            let handle = (y == 1 && (6..10).contains(&x)) || ((x == 5 || x == 10) && (1..4).contains(&y));
+            let cap = (5..11).contains(&x) && (3..5).contains(&y);
+            let body = (4..12).contains(&x) && (5..15).contains(&y);
+            let bar = x == 4 || x == 11 || y == 5 || y == 14;
+            if handle || cap || (body && bar) {
+                shade(iron, r.range(0.85, 1.1))
+            } else if body {
+                shade(glow, r.range(0.9, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    // The bell: bright brass with a darker band and a rim; and its picture.
+    a.each(T_BELL, |x, y, r, _| {
+        let band = y % 6 == 3;
+        shade(if band { rgb(205, 155, 35) } else { rgb(245, 205, 75) }, r.range(0.9, 1.06) * (1.05 - x as f32 * 0.012))
+    });
+    a.each(T_BELL_ITEM, |x, y, r, _| {
+        let (x, y) = (x as i32, y as i32);
+        let half = match y {
+            2..=3 => 2,
+            4..=8 => 3,
+            9..=11 => 4,
+            12..=13 => 6,
+            _ => -1,
+        };
+        let clapper = y == 14 && (7..9).contains(&x);
+        if clapper {
+            rgb(120, 90, 30)
+        } else if half >= 0 && ((x - 8).abs() < half || (x - 7).abs() < half) {
+            let edge = (x - 8).abs() == half - 1 || y == 13;
+            shade(if edge { rgb(195, 145, 30) } else { rgb(245, 205, 75) }, r.range(0.92, 1.05))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    // The enchanting table: obsidian sides with diamond studs under a red cloth; the book.
+    let obsidian = |x: usize, y: usize, r: &mut Rng| shade(if (x * 5 + y * 3).is_multiple_of(7) { rgb(45, 30, 65) } else { rgb(24, 16, 36) }, r.range(0.85, 1.15));
+    a.each(T_ENCH_SIDE, |x, y, r, _| {
+        let stud = (y == 6 || y == 7) && (x == 2 || x == 3 || x == 12 || x == 13);
+        if y < 3 {
+            shade(rgb(160, 25, 35), r.range(0.9, 1.05))
+        } else if y == 3 {
+            rgb(230, 190, 60)
+        } else if stud {
+            rgb(120, 230, 230)
+        } else {
+            obsidian(x, y, r)
+        }
+    });
+    a.each(T_ENCH_TOP, |x, y, r, _| {
+        let corner = !(3..=12).contains(&x) && !(3..=12).contains(&y);
+        let gem = corner && (x == 1 || x == 14) && (y == 1 || y == 14);
+        let trim = x == 3 || x == 12 || y == 3 || y == 12;
+        if gem {
+            rgb(120, 230, 230)
+        } else if corner {
+            obsidian(x, y, r)
+        } else if trim {
+            rgb(230, 190, 60)
+        } else {
+            shade(rgb(160, 25, 35), r.range(0.9, 1.05))
+        }
+    });
+    a.each(T_ENCH_BOTTOM, |x, y, r, _| obsidian(x, y, r));
+    // The open book: two pages (top row of the tile), its cover below.
+    a.each(T_ENCH_BOOK, |x, y, r, _| {
+        if y < 4 {
+            shade(rgb(120, 50, 30), r.range(0.9, 1.05))
+        } else if x == 7 || x == 8 {
+            rgb(90, 35, 25)
+        } else if (y + 1) % 3 == 0 && (2..14).contains(&x) {
+            rgb(150, 140, 120)
+        } else {
+            shade(rgb(235, 225, 200), r.range(0.95, 1.03))
+        }
+    });
+    // Grindstone: a stone wheel (round face, worn tread) and dark wooden legs.
+    a.each(T_GRINDSTONE_SIDE, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 1.6 {
+            rgb(90, 65, 40)
+        } else if (d as i32) % 3 == 0 {
+            shade(rgb(125, 125, 125), r.range(0.9, 1.05))
+        } else {
+            shade(rgb(150, 150, 150), r.range(0.88, 1.06))
+        }
+    });
+    a.each(T_GRINDSTONE_TOP, |x, _, r, _| shade(rgb(140, 140, 140), r.range(0.85, 1.08) * if x % 4 == 0 { 0.88 } else { 1.0 }));
+    a.each(T_GRIND_LEG, |_, y, r, _| shade(rgb(85, 60, 35), r.range(0.85, 1.08) * if y % 5 == 0 { 0.85 } else { 1.0 }));
+    // A pot's neck: plain terracotta, darker inside the lip.
+    a.each(T_POT_NECK, |_, y, r, _| shade(rgb(160, 85, 52), r.range(0.9, 1.05) * if y < 2 { 0.85 } else { 1.0 }));
+    // Smithing table: an iron top with a hammered sheen, oak sides with an iron band and tools hung up.
+    a.each(T_SMITHING_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        let mark = (x * 7 + y * 11) % 13 == 0;
+        shade(if rim { rgb(38, 38, 44) } else if mark { rgb(95, 95, 105) } else { rgb(70, 70, 80) }, r.range(0.92, 1.06))
+    });
+    a.each(T_SMITHING_SIDE, |x, y, r, _| {
+        let band = (3..5).contains(&y);
+        let edge = y < 3;
+        let hammer_head = (3..9).contains(&x) && (7..9).contains(&y);
+        let hammer_handle = (5..7).contains(&x) && (9..14).contains(&y);
+        let tongs = (x == 11 || x == 13) && (7..14).contains(&y) || (y == 7 && (11..14).contains(&x));
+        if hammer_head || tongs {
+            shade(rgb(175, 175, 185), r.range(0.92, 1.05))
+        } else if hammer_handle {
+            rgb(110, 75, 40)
+        } else if edge {
+            shade(rgb(55, 55, 62), r.range(0.9, 1.05))
+        } else if band {
+            shade(rgb(90, 90, 98), r.range(0.9, 1.05))
+        } else {
+            let board = y % 4 == 3;
+            shade(rgb(150, 110, 65), r.range(0.92, 1.05) * if board { 0.8 } else { 1.0 })
+        }
+    });
+    // Bookshelf: a plank frame, two shelves of books of different heights, colours and thicknesses.
+    let spines = [rgb(140, 35, 35), rgb(40, 75, 135), rgb(45, 105, 50), rgb(165, 130, 55), rgb(95, 45, 105), rgb(120, 85, 50), rgb(170, 170, 160)];
+    a.each(T_BOOKSHELF, |x, y, r, _| {
+        let frame = x == 0 || x == 15 || y == 0 || y == 15 || y == 7 || y == 8;
+        if frame {
+            return shade(rgb(160, 120, 75), r.range(0.85, 1.0) * if y == 8 || y == 15 { 0.75 } else { 1.0 });
+        }
+        let shelf = if y < 7 { 0 } else { 1 };
+        // Books are 1-3 pixels wide; work out which one this pixel is in.
+        let mut start = 1;
+        let mut k = 0usize;
+        loop {
+            let w = 1 + (crate::noise::hash2(77 + shelf, start as i32, k as i32) * 2.99) as usize;
+            if x < start + w || start + w >= 15 {
+                break;
+            }
+            start += w;
+            k += 1;
+        }
+        let h = crate::noise::hash2(91 + shelf, start as i32, 3);
+        let top = if shelf == 0 { 1 + (h * 3.0) as usize } else { 9 + (h * 3.0) as usize };
+        if y < top {
+            return shade(rgb(40, 28, 18), r.range(0.9, 1.1));
+        }
+        let c = spines[(crate::noise::hash2(5 + shelf, start as i32, 9) * spines.len() as f32) as usize % spines.len()];
+        let band = y == top + 1 || y + 2 == if shelf == 0 { 7 } else { 15 };
+        let lip = x == start;
+        shade(c, r.range(0.92, 1.05) * if band { 1.25 } else if lip { 0.75 } else { 1.0 })
+    });
+    // Scaffolding: a slatted top, a rim round its edge, and bamboo-ish posts.
+    a.each(T_SCAFFOLD_TOP, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        let slat = (y % 4 == 1) && !rim;
+        if rim {
+            shade(rgb(190, 160, 80), r.range(0.9, 1.05))
+        } else if slat {
+            [0, 0, 0, 0]
+        } else {
+            shade(rgb(210, 180, 95), r.range(0.9, 1.05) * if x % 4 == 0 { 0.9 } else { 1.0 })
+        }
+    });
+    a.each(T_SCAFFOLD_RIM, |_, y, r, _| shade(rgb(190, 160, 80), r.range(0.9, 1.05) * if y % 8 == 7 { 0.8 } else { 1.0 }));
+    a.each(T_SCAFFOLD_POST, |x, y, r, _| shade(rgb(200, 170, 85), r.range(0.9, 1.05) * if y % 5 == 0 { 0.8 } else if x % 2 == 0 { 0.92 } else { 1.0 }));
+    // Chains: oval links in the middle six columns, alternating face-on and edge-on;
+    // the second sheet has them the other way round.
+    for (tile, phase) in [(T_CHAIN, 0usize), (T_CHAIN2, 4usize)] {
+        a.each(tile, |x, y, r, _| {
+            let yy = (y + phase) % 8;
+            let face_on = yy < 5;
+            let link = if face_on {
+                // An oval ring 4 wide, 5 tall.
+                (6..10).contains(&x) && ((x == 6 || x == 9) && (1..4).contains(&yy) || (yy == 0 || yy == 4) && (7..9).contains(&x))
+            } else {
+                // Edge on: a short bar.
+                (7..9).contains(&x)
+            };
+            if link { shade(rgb(60, 66, 78), r.range(0.85, 1.15) * if x == 7 { 1.2 } else { 1.0 }) } else { [0, 0, 0, 0] }
+        });
+    }
+    // The Charred Skull: sooty bone, and a proper face: deep sockets, a nose, cheekbones, teeth.
+    let bone = |x: usize, y: usize, r: &mut Rng| shade(if (x * 3 + y * 5).is_multiple_of(11) { rgb(30, 30, 32) } else { rgb(58, 56, 56) }, r.range(0.88, 1.08));
+    a.each(T_CHARRED_SKULL, |x, y, r, _| bone(x, y, r));
+    a.each(T_CHARRED_SKULL_FACE, |x, y, r, _| {
+        let (xi, yi) = (x as i32, y as i32);
+        let socket = (6..11).contains(&yi) && ((2..7).contains(&xi) || (9..14).contains(&xi)) && !((yi == 6 || yi == 10) && (xi == 2 || xi == 6 || xi == 9 || xi == 13));
+        let nose = (11..14).contains(&yi) && (xi == 7 || xi == 8);
+        let teeth = yi == 15 && xi % 2 == 0 && (3..13).contains(&xi);
+        if socket || nose {
+            rgb(8, 6, 8)
+        } else if teeth {
+            rgb(150, 145, 130)
+        } else {
+            bone(x, y, r)
+        }
+    });
+    a.each(T_CHARRED_JAW, |x, y, r, _| {
+        let teeth = y < 6 && x % 2 == 0 && (2..14).contains(&x);
+        if teeth { rgb(150, 145, 130) } else if y < 6 { rgb(10, 8, 10) } else { bone(x, y, r) }
+    });
+    // Eye frames: pale stone sides with green-blue panels and a band; the eye itself.
+    a.each(T_EYE_FRAME_SIDE, |x, y, r, _| {
+        let band = y < 4;
+        let panel = (3..13).contains(&x) && (6..14).contains(&y);
+        let groove = panel && (x == 3 || x == 12 || y == 6 || y == 13);
+        if band {
+            shade(rgb(60, 112, 92), r.range(0.85, 1.1))
+        } else if groove {
+            shade(rgb(150, 150, 110), r.range(0.9, 1.05))
+        } else if panel {
+            shade(rgb(70, 125, 105), r.range(0.85, 1.1) * if (x + y) % 3 == 0 { 0.9 } else { 1.0 })
+        } else {
+            shade(rgb(222, 222, 170), r.range(0.88, 1.05))
+        }
+    });
+    a.each(T_EYE_FRAME_EYE, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 2.0 {
+            rgb(10, 20, 15)
+        } else if d < 5.0 {
+            shade(rgb(40, 150, 110), r.range(0.9, 1.1))
+        } else {
+            shade(rgb(25, 80, 60), r.range(0.85, 1.05))
+        }
+    });
+    // Brewing stand: a rod of Sizzle-gold, cobbled feet, and its picture.
+    a.each(T_BREWING_ROD, |_, y, r, _| shade(rgb(230, 175, 50), r.range(0.85, 1.1) * if y % 4 == 0 { 0.8 } else { 1.0 }));
+    a.each(T_BREWING_BASE, |x, y, r, _| shade(if (x * 3 + y * 7) % 5 == 0 { rgb(85, 82, 80) } else { rgb(120, 117, 112) }, r.range(0.88, 1.06)));
+    a.each(T_BREWING_ITEM, |x, y, r, _| {
+        let (x, y) = (x as i32, y as i32);
+        let rod = (7..9).contains(&x) && (1..13).contains(&y);
+        let arms = y == 6 && (3..13).contains(&x);
+        let base = y >= 13 && ((1..6).contains(&x) || (10..15).contains(&x) || (6..10).contains(&x) && y == 15);
+        let bottle = (8..12).contains(&y) && ((2..5).contains(&x) || (11..14).contains(&x));
+        if rod || arms {
+            shade(rgb(230, 175, 50), r.range(0.9, 1.05))
+        } else if base {
+            shade(rgb(115, 112, 108), r.range(0.9, 1.05))
+        } else if bottle {
+            shade(rgb(150, 200, 230), r.range(0.95, 1.05))
+        } else {
+            [0, 0, 0, 0]
+        }
+    });
+    // Goats: creamy hair that hangs in shaggy strands, dark hooves, ridged horns,
+    // eyes on the sides of the head and a pale muzzle in front.
+    a.each(T_GOAT, |x, y, r, _| shade(rgb(228, 222, 206), r.range(0.9, 1.05) * if (x * 7 + y * 3) % 9 == 0 { 0.86 } else { 1.0 }));
+    a.each(T_GOAT_FUR, |x, y, r, _| {
+        let strand = (x * 5 + 3) % 4 == 0;
+        let ragged = y > 11 && (x * 7) % 5 < 2;
+        if ragged { [0, 0, 0, 0] } else { shade(rgb(218, 210, 192), r.range(0.88, 1.05) * if strand { 0.85 } else { 1.0 }) }
+    });
+    a.each(T_GOAT_HOOF, |_, _, r, _| shade(rgb(55, 48, 40), r.range(0.85, 1.1)));
+    a.each(T_GOAT_HORN_TILE, |_, y, r, _| shade(rgb(180, 170, 150), r.range(0.9, 1.05) * if y % 3 == 0 { 0.8 } else { 1.0 }));
+    a.each(T_GOAT_HEAD_SIDE, |x, y, r, _| {
+        let eye = (6..8).contains(&y) && (5..8).contains(&x);
+        let pupil = y == 6 && x == 6;
+        if pupil { rgb(20, 15, 10) } else if eye { rgb(200, 160, 60) } else { shade(rgb(228, 222, 206), r.range(0.9, 1.05)) }
+    });
+    a.each(T_GOAT_FACE, |x, y, r, _| {
+        let nostril = y == 10 && (x == 5 || x == 10);
+        let mouth = y == 13 && (6..10).contains(&x);
+        let muzzle = y > 7;
+        if nostril || mouth { rgb(70, 55, 45) } else if muzzle { shade(rgb(205, 190, 175), r.range(0.92, 1.04)) } else { shade(rgb(228, 222, 206), r.range(0.9, 1.05)) }
+    });
+    // A Grumbler's rags: a torn brown cloth round the waist, rotting legs below.
+    a.each(T_GRUMBLE_PANTS, |x, y, r, _| {
+        let torn = y >= 5 + (x * 7 % 4);
+        if !torn {
+            shade(rgb(100, 70, 45), r.range(0.85, 1.05))
+        } else if (x * 3 + y * 5) % 7 == 0 {
+            rgb(110, 150, 90)
+        } else {
+            shade(rgb(210, 140, 130), r.range(0.88, 1.06))
+        }
+    });
+    // The portal: a solid swirl with no gaps (the shader makes it flow, see render.rs).
+    a.each(T_PORTAL, |x, y, r, p| {
+        let swirl = (p.noise2(x as f32 * 0.35, y as f32 * 0.35 + 40.0) * 7.0).sin();
+        shade(rgb(130, 55, 215), 0.75 + swirl.abs() * 0.45 + r.range(-0.05, 0.05))
+    });
 }
 
 /// v0.1.20: campfires, smokers, blast furnaces, barrels, turtle eggs, paintings and treasure.
@@ -5607,24 +6121,6 @@ const TEAR_SPRITE: [&str; 16] = [
     "................",
     "................",
 ];
-const CROSSBOW_SPRITE: [&str; 16] = [
-    "................",
-    ".s..............",
-    "..s......####...",
-    "...s....#ww#....",
-    "....s..#ww#.....",
-    ".....s#ww#......",
-    "......#w#.......",
-    ".....#w#s.......",
-    "....#w#..s......",
-    "...#ww#...s.....",
-    "..#ww#.....s....",
-    ".#ww#.......s...",
-    "#ww#.........s..",
-    "##............s.",
-    "................",
-    "................",
-];
 const BACKPACK_SPRITE: [&str; 16] = [
     "................",
     "......####......",
@@ -5716,10 +6212,43 @@ fn paint_scorch_and_raids(a: &mut Atlas) {
     a.sprite(T_SIZZLE_POWDER, &POWDER_SPRITE, &[('h', rgb(255, 240, 150)), ('b', rgb(245, 170, 40)), ('d', rgb(190, 110, 20))]);
     a.sprite(T_WEEPER_TEAR, &TEAR_SPRITE, &[('#', rgb(120, 150, 170)), ('h', rgb(255, 255, 255)), ('b', rgb(210, 235, 245)), ('d', rgb(160, 200, 220))]);
     a.sprite(T_SHROOM_STICK, &ROD, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(230, 230, 230)), ('k', rgb(230, 90, 40))]);
-    let bow = [('#', rgb(60, 40, 20)), ('w', rgb(130, 95, 55)), ('s', rgb(220, 220, 220))];
-    a.sprite(T_CROSSBOW, &CROSSBOW_SPRITE, &bow);
-    a.sprite(T_CROSSBOW_LOADED, &CROSSBOW_SPRITE, &bow);
-    a.sprite(T_CROSSBOW_LOADED, &["................", "................", "................", "................", "................", "................", "................", "........k.......", ".......k........", "......k.........", ".....k..........", "....k..........."], &[('k', rgb(180, 180, 190))]);
+    // Crossbows: a stock running up to the right, the bow across its front end, and
+    // the string from one tip of the bow to the other (pulled back to a nock when loaded).
+    for (tile, loaded) in [(T_CROSSBOW, false), (T_CROSSBOW_LOADED, true)] {
+        let seg = |p: (f32, f32), a: (f32, f32), b: (f32, f32)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+            ((p.0 - a.0 - t * dx).powi(2) + (p.1 - a.1 - t * dy).powi(2)).sqrt()
+        };
+        let (front, back) = ((10.6, 5.4), (2.0, 14.0));
+        let (tip0, tip1, bulge) = ((5.4, 1.8), (14.2, 10.6), (11.8, 4.2));
+        let nock = (8.0, 8.0);
+        a.each(tile, |x, y, r, _| {
+            let p = (x as f32 + 0.5, y as f32 + 0.5);
+            // The bow: a curve from tip to tip, bowed forward.
+            let bow_d = (0..=16).map(|k| {
+                let t = k as f32 / 16.0;
+                let q = ((1.0 - t).powi(2) * tip0.0 + 2.0 * t * (1.0 - t) * bulge.0 + t * t * tip1.0, (1.0 - t).powi(2) * tip0.1 + 2.0 * t * (1.0 - t) * bulge.1 + t * t * tip1.1);
+                ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt()
+            }).fold(f32::MAX, f32::min);
+            let string = if loaded { seg(p, tip0, nock).min(seg(p, nock, tip1)) } else { seg(p, tip0, tip1) };
+            let stock = seg(p, back, front);
+            let bolt = loaded && seg(p, nock, (12.5, 3.5)) < 0.55;
+            if bow_d < 0.75 {
+                shade(rgb(85, 85, 95), r.range(0.9, 1.1))
+            } else if bolt {
+                rgb(180, 180, 190)
+            } else if stock < 0.9 {
+                rgb(130, 95, 55)
+            } else if stock < 1.5 {
+                rgb(60, 40, 20)
+            } else if string < 0.5 {
+                rgb(225, 225, 225)
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
     a.sprite(T_TOTEM, &TOTEM_SPRITE, &[('#', rgb(120, 90, 20)), ('g', rgb(240, 200, 60)), ('G', rgb(120, 200, 90)), ('E', rgb(20, 120, 40))]);
     a.sprite(T_BANNER, &BANNER_SPRITE, &[('#', rgb(90, 60, 30)), ('w', rgb(235, 235, 230)), ('k', rgb(40, 40, 45)), ('d', rgb(140, 30, 30))]);
     // Mob skins.

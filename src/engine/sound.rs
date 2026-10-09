@@ -8,7 +8,15 @@ use macroquad::math::Vec3;
 use std::f32::consts::TAU;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// The rate every sound is designed and synthesised at.
 pub(crate) const SR: u32 = 22050;
+/// The rate they're handed over at: quad-snd mixes everything at 44.1 kHz, and
+/// converts anything else by repeating samples, which leaves a harsh fizz of
+/// mirror images above 11 kHz (inaudible on small speakers, plain on good
+/// monitors). So `wav` upsamples properly first, and quad-snd has nothing to do.
+pub(crate) const OUT_SR: u32 = 2 * SR;
+/// Taps either side of each new sample in the upsampler's half-band filter.
+const HALF_TAPS: usize = 64;
 /// Where note block notes start in the sound wire encoding.
 const NOTE_WIRE: u16 = 0x4000;
 
@@ -73,7 +81,8 @@ impl Sfx {
             crate::entity::MobKind::Squawker => Sfx::Squawk,
             crate::entity::MobKind::Mooer | crate::entity::MobKind::Mushmooer => Sfx::Moo,
             crate::entity::MobKind::Rattler => Sfx::Rattle,
-            crate::entity::MobKind::Bloop => Sfx::Bloop,
+            crate::entity::MobKind::Bloop | crate::entity::MobKind::MagmaBloop => Sfx::Bloop,
+            crate::entity::MobKind::Tusker | crate::entity::MobKind::SnoutBrute => Sfx::Oink,
             crate::entity::MobKind::Woofer => Sfx::Woof,
             crate::entity::MobKind::Hmmer | crate::entity::MobKind::Wanderer => Sfx::Hmm,
             crate::entity::MobKind::ZombieHmmer => Sfx::Groan,
@@ -254,11 +263,27 @@ fn voice(out: &mut [f32], start: f32, len: f32, f0: f32, f1: f32, formant: f32, 
         let t = t_of(i);
         let k = i as f32 / n as f32;
         let f = (f0 + (f1 - f0) * k) * (1.0 + (t * 6.0 * TAU).sin() * vibrato);
-        phase = (phase + f / SR as f32) % 1.0;
-        let saw = phase * 2.0 - 1.0 + rng.range(-0.15, 0.15);
+        let dt = f / SR as f32;
+        phase = (phase + dt) % 1.0;
+        // (Smoothed at the jump, so its upper harmonics don't fold back down as grit.)
+        let saw = phase * 2.0 - 1.0 - poly_blep(phase, dt) + rng.range(-0.15, 0.15);
         let y = lp2.run(lp.run(saw, formant), formant * 1.3);
         let env = (k / 0.08).min(1.0) * ((1.0 - k) / 0.25).min(1.0);
         out[s0 + i] += y * env * gain;
+    }
+}
+
+/// PolyBLEP: the correction that rounds off a sawtooth's jump at `phase` 0,
+/// band-limiting it without a wavetable.
+fn poly_blep(phase: f32, dt: f32) -> f32 {
+    if phase < dt {
+        let t = phase / dt;
+        t + t - t * t - 1.0
+    } else if phase > 1.0 - dt {
+        let t = (phase - 1.0) / dt;
+        t * t + t + t + 1.0
+    } else {
+        0.0
     }
 }
 
@@ -286,23 +311,88 @@ pub(crate) fn finish(mut v: Vec<f32>, peak: f32) -> Vec<f32> {
     v
 }
 
+/// The half-band filter's taps: a Blackman-Harris windowed sinc, sampled
+/// halfway between the input samples (where the new ones go).
+fn half_band() -> [f32; HALF_TAPS] {
+    let mut h = [0.0f32; HALF_TAPS];
+    let width = (2 * HALF_TAPS) as f64;
+    for (k, tap) in h.iter_mut().enumerate() {
+        let x = k as f64 + 0.5;
+        let sinc = (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x);
+        // The window, centred on the new sample.
+        let w = |p: f64| 0.35875 - 0.48829 * (std::f64::consts::TAU * p).cos() + 0.14128 * (2.0 * std::f64::consts::TAU * p).cos() - 0.01168 * (3.0 * std::f64::consts::TAU * p).cos();
+        *tap = (sinc * w(0.5 + x / width)) as f32;
+    }
+    // Unity gain for a steady signal.
+    let sum: f32 = h.iter().sum::<f32>() * 2.0;
+    h.map(|t| t / sum)
+}
+
+/// Twice the samples, band-limited: the originals stay put and each new one
+/// is interpolated between them, so nothing appears above the old Nyquist.
+/// A `looped` sound wraps round its ends (its seam stays seamless).
+pub(crate) fn upsample(v: &[f32], looped: bool) -> Vec<f32> {
+    let h = half_band();
+    // The whole kernel, laid out along the input it covers (so each new sample
+    // is one straight dot product).
+    let kernel: Vec<f32> = (0..2 * HALF_TAPS).map(|j| if j < HALF_TAPS { h[HALF_TAPS - 1 - j] } else { h[j - HALF_TAPS] }).collect();
+    let n = v.len() as isize;
+    // Padded (with silence, or the other end of a loop) so the filter never runs off.
+    let pad = HALF_TAPS as isize;
+    let padded: Vec<f32> = (-pad..n + pad)
+        .map(|i| match (looped, (0..n).contains(&i)) {
+            (_, true) => v[i as usize],
+            (true, false) if n > 0 => v[i.rem_euclid(n) as usize],
+            _ => 0.0,
+        })
+        .collect();
+    let mut out = Vec::with_capacity(v.len() * 2);
+    for i in 0..v.len() {
+        out.push(padded[i + HALF_TAPS]);
+        out.push(dot(&padded[i + 1..i + 1 + 2 * HALF_TAPS], &kernel));
+    }
+    out
+}
+
+/// Σ a·b, in eight lanes (which the compiler turns into SIMD).
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let mut acc = [0.0f32; 8];
+    for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+        for k in 0..8 {
+            acc[k] += x[k] * y[k];
+        }
+    }
+    acc.iter().sum()
+}
+
+/// A sound as a WAV file at the mixer's rate, in 32-bit float (so quiet
+/// tails and fades aren't rounded into 16-bit grit).
 pub(crate) fn wav(samples: &[f32]) -> Vec<u8> {
-    let data_len = (samples.len() * 2) as u32;
+    wav_at(&upsample(samples, false))
+}
+
+/// The same, for a sound that loops.
+fn wav_looped(samples: &[f32]) -> Vec<u8> {
+    wav_at(&upsample(samples, true))
+}
+
+fn wav_at(samples: &[f32]) -> Vec<u8> {
+    let data_len = (samples.len() * 4) as u32;
     let mut b = Vec::with_capacity(44 + data_len as usize);
     b.extend_from_slice(b"RIFF");
     b.extend_from_slice(&(36 + data_len).to_le_bytes());
     b.extend_from_slice(b"WAVEfmt ");
     b.extend_from_slice(&16u32.to_le_bytes());
-    b.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    b.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
     b.extend_from_slice(&1u16.to_le_bytes()); // mono
-    b.extend_from_slice(&SR.to_le_bytes());
-    b.extend_from_slice(&(SR * 2).to_le_bytes());
-    b.extend_from_slice(&2u16.to_le_bytes());
-    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(&OUT_SR.to_le_bytes());
+    b.extend_from_slice(&(OUT_SR * 4).to_le_bytes());
+    b.extend_from_slice(&4u16.to_le_bytes());
+    b.extend_from_slice(&32u16.to_le_bytes());
     b.extend_from_slice(b"data");
     b.extend_from_slice(&data_len.to_le_bytes());
     for s in samples {
-        b.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32000.0) as i16).to_le_bytes());
+        b.extend_from_slice(&s.clamp(-1.0, 1.0).to_le_bytes());
     }
     b
 }
@@ -829,112 +919,112 @@ pub const MOODS: [Mood; 4] = [Mood::Day, Mood::Night, Mood::Morning, Mood::Deep]
 /// How long each mood's piece of background music lasts (seconds).
 pub const MUSIC_SECS: f32 = 170.0;
 
-/// A mood's piece of background music, composed afresh from `seed`:
-/// a quiet intro, a tune (a short motif over a chord progression, repeated
-/// with changes), a contrasting middle that wanders higher, the tune again,
-/// and an outro that thins out and fades.
+/// The form for a piece of about `secs` seconds with bars `bar` seconds long:
+/// an intro, the tune, then the tune and the middle by turns, and an outro.
+pub(crate) fn plan_for(secs: f32, bar: f32) -> Vec<crate::compose::Sec> {
+    use crate::compose::Sec;
+    let most = (secs / bar) as i32;
+    let mut plan = vec![Sec::Intro, Sec::A];
+    let mut bars = 2 + 8;
+    for next in [Sec::B, Sec::A2, Sec::B, Sec::A, Sec::B, Sec::A2].into_iter().cycle() {
+        if bars + 8 + 4 > most {
+            break;
+        }
+        // (The last one before the outro is the tune, not the middle.)
+        let last = bars + 16 + 4 > most;
+        plan.push(if last && next == Sec::B { Sec::A2 } else { next });
+        bars += 8;
+    }
+    plan.push(Sec::Outro);
+    plan
+}
+
+/// How many bars a form runs.
+pub(crate) fn plan_bars(plan: &[crate::compose::Sec]) -> usize {
+    use crate::compose::Sec;
+    plan.iter().map(|s| match s {
+        Sec::Intro => 2,
+        Sec::Outro => 4,
+        _ => 8,
+    }).sum()
+}
+
+/// A mood's piece of background music, composed afresh from `seed` (see
+/// compose.rs: in a key, in phrases, the tune on the harmony): an intro, the
+/// tune, a contrasting middle and the tune again (ornamented), and an outro
+/// that comes home and fades.
 fn synth_music_mood(mood: Mood, seed: u64) -> Vec<f32> {
+    use crate::compose::{compose, hz, Key, Mode, Sec, Spec};
     let mut rng = Rng::new(seed ^ (mood as u64 * 0x9E37));
     let len = MUSIC_SECS;
     let mut v = vec![0.0f32; samples(len)];
-    // Scale, root, seconds a bar, the chords (as scale steps), lowest and highest melody step.
-    let (scale, root, bar, prog, low, high): (&[i32], f32, f32, &[i32], i32, i32) = match mood {
-        Mood::Day => (&[0, 2, 4, 7, 9], 196.0, 3.2, &[0, 3, 1, 4], 2, 11),
-        Mood::Night => (&[0, 2, 3, 5, 7, 8, 10], 174.6, 4.0, &[0, 5, 3, 4], 3, 12),
-        Mood::Morning => (&[0, 2, 4, 5, 7, 9, 11], 220.0, 2.6, &[0, 4, 5, 3], 4, 14),
-        Mood::Deep => (&[0, 1, 3, 7, 8], 98.0, 5.0, &[0, 3, 1, 0], 0, 8),
+    // Key, beats in a bar, tempo, the tune's range, how busy, pentatonic.
+    let (key, beats, bpm, (low, high), busy, pentatonic) = match mood {
+        Mood::Day => (Key { tonic: 55, mode: Mode::Major }, 4, 75.0, (67, 84), 0.35, true),
+        Mood::Night => (Key { tonic: 53, mode: Mode::Minor }, 4, 60.0, (65, 81), 0.15, false),
+        Mood::Morning => (Key { tonic: 57, mode: Mode::Major }, 3, 80.0, (69, 86), 0.55, false),
+        Mood::Deep => (Key { tonic: 43, mode: Mode::Minor }, 4, 48.0, (55, 70), 0.05, false),
     };
-    let n = scale.len() as i32;
-    let note = |deg: i32| -> f32 {
-        let st = scale[deg.rem_euclid(n) as usize] + deg.div_euclid(n) * 12;
-        root * 2f32.powf(st as f32 / 12.0)
+    let plan = plan_for(len - 10.0, 60.0 / bpm * beats as f32);
+    // Then just the tempo that fills the time with it (a little slower than asked, at most).
+    let spb = (len - 10.0) / (plan_bars(&plan) * beats as usize) as f32;
+    let bar = spb * beats as f32;
+    let spec = Spec { key, beats, plan, low, high, pentatonic, busy, sevenths: false };
+    let piece = compose(&spec, &mut rng);
+    let start = 1.5;
+    let at = |beat: f32| start + beat * spb;
+    // Quieter in the intro, and dying away through the outro.
+    let outro = piece.bars.iter().find(|b| b.sec == Sec::Outro).map(|b| b.start).unwrap_or(f32::MAX);
+    let level = |beat: f32| match piece.bar_at(beat).sec {
+        Sec::Intro => 0.75,
+        Sec::Outro => (1.0 - (beat - outro) / beats as f32 / 5.0).max(0.25),
+        _ => 1.0,
     };
-    // A motif: a few notes (offsets from the chord's root, and where in the bar).
-    let motif = |rng: &mut Rng, k: usize| -> Vec<(f32, i32)> {
-        let mut m = Vec::new();
-        let mut at = 0.0;
-        let mut d = rng.int(0, 2);
-        for _ in 0..k {
-            m.push((at, d));
-            at += [0.125, 0.25, 0.25, 0.375, 0.5][rng.int(0, 4) as usize];
-            if at >= 0.95 {
-                break;
-            }
-            d += rng.int(-2, 2);
+    for n in &piece.lead {
+        let g = level(n.at);
+        if mood == Mood::Deep {
+            pad(&mut v, at(n.at), n.len * spb * 1.05, hz(n.midi), 0.26 * g);
+        } else {
+            piano(&mut v, at(n.at), n.len * spb + 0.35, hz(n.midi), 0.4 * g);
         }
-        m
-    };
-    let (tune, middle) = (motif(&mut rng, 5), motif(&mut rng, 4));
-    // Sections: (kind, bars). 0 intro, 1 tune, 2 tune varied, 3 middle, 4 outro.
-    let bars_total = ((len - 8.0) / bar) as i32;
-    let intro = 2;
-    let outro = 3;
-    let body = (bars_total - intro - outro).max(8);
-    let plan = [(0, intro), (1, body * 3 / 10), (3, body * 2 / 10), (2, body * 3 / 10), (3, body / 10), (1, body - body * 3 / 10 * 2 - body * 2 / 10 - body / 10), (4, outro)];
-    let mut t = 1.5;
-    let mut b = 0usize;
-    for (kind, bars) in plan {
-        for k in 0..bars {
-            if t > len - 6.0 {
-                break;
-            }
-            let chord = prog[b % prog.len()];
-            b += 1;
-            let base = (low + high) / 2 - 2 + chord;
-            // Chords underneath (pads), soft in the intro and outro.
-            let soft = if kind == 0 || kind == 4 { 0.07 } else { 0.1 };
-            for d in [chord - n, chord - n + 2, chord - n + 4] {
-                pad(&mut v, t, bar * 1.1, note(d), soft);
-            }
-            // A low note on the bar (not in the Deep: that's all pads).
-            if mood != Mood::Deep && kind != 0 {
-                piano(&mut v, t, bar, note(chord - 2 * n), 0.22);
-            }
-            match kind {
-                1 | 2 => {
-                    let lift = if kind == 2 && k % 2 == 1 { rng.int(-1, 1) } else { 0 };
-                    for (i, &(at, d)) in tune.iter().enumerate() {
-                        // The varied tune leaves the odd note out, or adds a grace note.
-                        if kind == 2 && rng.chance(0.15) {
-                            continue;
-                        }
-                        let deg = (base + d + lift).clamp(low, high);
-                        let voice = if mood == Mood::Deep { 0.0 } else { 1.0 };
-                        if voice > 0.0 {
-                            piano(&mut v, t + at * bar, 3.0, note(deg), if i == 0 { 0.5 } else { 0.42 });
-                        } else {
-                            pad(&mut v, t + at * bar, bar * 0.8, note(deg), 0.3);
-                        }
-                        if kind == 2 && rng.chance(0.12) {
-                            piano(&mut v, t + at * bar - 0.12, 1.0, note(deg + 1), 0.2);
-                        }
-                    }
+    }
+    for (b, voicing) in piece.bars.iter().zip(&piece.voicings) {
+        let g = level(b.start);
+        match mood {
+            Mood::Morning => {
+                // Broken chords: up and back down the voicing, an eighth at a time.
+                let order: Vec<i32> = voicing.iter().chain(voicing.iter().rev().skip(1).take(voicing.len().saturating_sub(2))).copied().collect();
+                for e in 0..beats * 2 {
+                    let m = order[e as usize % order.len()];
+                    piano(&mut v, at(b.start + e as f32 * 0.5), spb * 0.5 + 0.4, hz(m), 0.13 * g);
                 }
-                3 => {
-                    // The middle: its own motif, an octave-ish higher, with space.
-                    for &(at, d) in &middle {
-                        let deg = (base + d + n - 1).clamp(low, high + 2);
-                        if mood == Mood::Deep {
-                            pad(&mut v, t + at * bar, bar * 0.9, note(deg), 0.25);
-                        } else {
-                            piano(&mut v, t + at * bar, 3.5, note(deg), 0.36);
-                        }
-                    }
-                    if mood == Mood::Morning && rng.chance(0.5) {
-                        for (j, step) in [1, 2, 4].iter().enumerate() {
-                            piano(&mut v, t + bar * 0.75 + 0.15 * j as f32, 1.5, note(base + step), 0.25);
-                        }
-                    }
-                }
-                4 => {
-                    // The outro: the tune's first note, fainter each bar.
-                    if let Some(&(_, d)) = tune.first() {
-                        piano(&mut v, t, 4.0, note((base + d).clamp(low, high)), 0.35 / (k + 1) as f32);
-                    }
-                }
-                _ => {}
             }
-            t += bar;
+            Mood::Deep => {
+                // Open fifths, long and low.
+                let root = voicing.iter().copied().min().unwrap_or(48);
+                for m in [root, root + 7] {
+                    pad(&mut v, at(b.start), bar * 1.1, hz(m), 0.12 * g);
+                }
+            }
+            _ => {
+                for &m in voicing {
+                    pad(&mut v, at(b.start), bar * 1.08, hz(m), 0.075 * g);
+                }
+            }
+        }
+    }
+    for n in &piece.bass {
+        let g = level(n.at);
+        if mood == Mood::Deep {
+            pad(&mut v, at(n.at), n.len * spb * 1.05, hz(n.midi), 0.2 * g);
+        } else {
+            piano(&mut v, at(n.at), n.len * spb + 0.3, hz(n.midi), 0.24 * g);
+        }
+    }
+    // The last chord rings on under the final note.
+    if let (Some(b), Some(voicing)) = (piece.bars.last(), piece.voicings.last()) {
+        for &m in voicing {
+            pad(&mut v, at(b.start + beats as f32), 4.0, hz(m), 0.06);
         }
     }
     reverb(&mut v, if mood == Mood::Deep { 0.8 } else { 0.45 }, if mood == Mood::Deep { 2.2 } else { 1.4 });
@@ -1006,7 +1096,7 @@ pub fn export_wavs(dir: &std::path::Path) -> std::io::Result<usize> {
     for (i, m) in MOODS.iter().enumerate() {
         std::fs::write(dir.join(format!("music_{}.wav", format!("{m:?}").to_lowercase())), wav(&synth_music_mood(*m, 7 + i as u64)))?;
     }
-    std::fs::write(dir.join("rain.wav"), wav(&synth_rain(&mut rng)))?;
+    std::fs::write(dir.join("rain.wav"), wav_looped(&synth_rain(&mut rng)))?;
     std::fs::write(dir.join("cave.wav"), wav(&synth_cave(&mut rng)))?;
     Ok(n + MOODS.len() + 2)
 }
@@ -1169,7 +1259,7 @@ impl Audio {
         let (rain, cave) = if dead {
             (None, None)
         } else {
-            (load_sound_from_bytes(&wav(&synth_rain(&mut rng))).await.ok(), load_sound_from_bytes(&wav(&synth_cave(&mut rng))).await.ok())
+            (load_sound_from_bytes(&wav_looped(&synth_rain(&mut rng))).await.ok(), load_sound_from_bytes(&wav(&synth_cave(&mut rng))).await.ok())
         };
         Audio {
             bank,
@@ -1438,7 +1528,7 @@ mod tests {
             assert!(v.iter().any(|x| x.abs() > 0.1), "{s:?} is silent");
             let w = wav(&v);
             assert_eq!(&w[..4], b"RIFF");
-            assert_eq!(w.len(), 44 + v.len() * 2);
+            assert_eq!(w.len(), 44 + v.len() * 2 * 4);
         }
         let m = synth_music(3);
         assert!(m.len() > SR as usize * 40 && m.iter().all(|x| x.is_finite()));
@@ -1467,4 +1557,97 @@ mod tests {
         let cave = synth_cave(&mut rng);
         assert!(cave.iter().any(|x| x.abs() > 0.2) && cave.iter().all(|x| x.is_finite()));
     }
+
+    /// In-place radix-2 FFT (for the tests).
+    fn fft(re: &mut [f64], im: &mut [f64]) {
+        let n = re.len();
+        let mut j = 0;
+        for i in 1..n {
+            let mut bit = n >> 1;
+            while j & bit != 0 {
+                j ^= bit;
+                bit >>= 1;
+            }
+            j |= bit;
+            if i < j {
+                re.swap(i, j);
+                im.swap(i, j);
+            }
+        }
+        let mut len = 2;
+        while len <= n {
+            let ang = -std::f64::consts::TAU / len as f64;
+            for start in (0..n).step_by(len) {
+                for k in 0..len / 2 {
+                    let (c, s) = ((ang * k as f64).cos(), (ang * k as f64).sin());
+                    let (a, b) = (start + k, start + k + len / 2);
+                    let (tr, ti) = (re[b] * c - im[b] * s, re[b] * s + im[b] * c);
+                    re[b] = re[a] - tr;
+                    im[b] = im[a] - ti;
+                    re[a] += tr;
+                    im[a] += ti;
+                }
+            }
+            len <<= 1;
+        }
+    }
+
+    /// How loud (dB, relative to everything) the sound at 44.1 kHz is above 12 kHz,
+    /// where nothing was ever meant to be.
+    fn above_12k_db(v: &[f32]) -> f64 {
+        const N: usize = 4096;
+        let (mut hi, mut all) = (0.0f64, 0.0f64);
+        for chunk in v.chunks_exact(N) {
+            let mut re: Vec<f64> = chunk.iter().enumerate().map(|(i, x)| *x as f64 * (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / N as f64).cos())).collect();
+            let mut im = vec![0.0; N];
+            fft(&mut re, &mut im);
+            for b in 1..N / 2 {
+                let p = re[b] * re[b] + im[b] * im[b];
+                all += p;
+                if b as f64 * OUT_SR as f64 / N as f64 > 12000.0 {
+                    hi += p;
+                }
+            }
+        }
+        10.0 * (hi / all.max(1e-30)).log10()
+    }
+
+    #[test]
+    fn sounds_reach_the_mixer_without_mirror_images() {
+        let mut rng = Rng::new(4);
+        let mut sounds: Vec<(String, Vec<f32>)> = [Sfx::Skitter, Sfx::Hiss, Sfx::Snip, Sfx::Step(Mat::Stone), Sfx::Moo].iter().map(|s| (format!("{s:?}"), synth(*s, &mut rng))).collect();
+        sounds.push(("rain".into(), synth_rain(&mut rng)));
+        sounds.push(("music".into(), synth_music_mood(Mood::Morning, 2)[..samples(20.0)].to_vec()));
+        for (name, v) in sounds {
+            // What quad-snd would make of it: every sample twice.
+            let doubled: Vec<f32> = v.iter().flat_map(|x| [*x, *x]).collect();
+            let (ours, theirs) = (above_12k_db(&upsample(&v, false)), above_12k_db(&doubled));
+            assert!(ours < -70.0, "{name}: {ours:.1} dB of junk above 12 kHz");
+            assert!(theirs > ours + 30.0, "{name}: doubling ({theirs:.1} dB) should be much worse than ours ({ours:.1} dB)");
+            // And the samples it started with are still there, untouched.
+            let up = upsample(&v, false);
+            assert!(v.iter().zip(up.iter().step_by(2)).all(|(a, b)| a == b));
+        }
+    }
+
+    #[test]
+    fn wavs_are_float_at_the_mixers_rate_and_loops_stay_seamless() {
+        let v: Vec<f32> = (0..2000).map(|i| (i as f32 * 0.05).sin() * 0.5).collect();
+        let w = wav(&v);
+        assert_eq!(u16::from_le_bytes([w[20], w[21]]), 3, "IEEE float");
+        assert_eq!(u32::from_le_bytes([w[24], w[25], w[26], w[27]]), OUT_SR);
+        assert_eq!(u16::from_le_bytes([w[34], w[35]]), 32);
+        // A quiet tail survives exactly (16-bit would have rounded it to nothing).
+        let tiny = [1e-6f32; 8];
+        let w = wav(&tiny);
+        let first = f32::from_le_bytes([w[44], w[45], w[46], w[47]]);
+        assert_eq!(first, 1e-6);
+        // Looping: the new samples across the seam come from both ends.
+        let tone: Vec<f32> = (0..400).map(|i| (i as f32 / 400.0 * TAU * 5.0).sin()).collect();
+        let up = upsample(&tone, true);
+        let jump = (up[up.len() - 1] - up[0]).abs();
+        let biggest = up.windows(2).fold(0.0f32, |a, w| a.max((w[1] - w[0]).abs()));
+        assert!(jump <= biggest * 1.01, "the loop seam clicks: {jump} vs {biggest}");
+    }
 }
+

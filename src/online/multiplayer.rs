@@ -794,6 +794,14 @@ impl Game {
                     self.host_use_vault(from, p);
                 }
             }
+            Msg::Interact { x, y, z, item: BONE_DUST } if crate::wilds::is_fungus(self.world.get(x, y, z)) => {
+                let p = IVec3::new(x, y, z);
+                let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
+                if near && self.peer_rate_ok(from, "interact", 0.2) && self.peer_take(from, BONE_DUST, 1) {
+                    let who = self.peers.get(&from).map(|q| crate::players::record_key(&q.name)).unwrap_or_default();
+                    self.grow_fungus(p, &who);
+                }
+            }
             Msg::Interact { x, y, z, item: BONE_DUST } if self.world.get(x, y, z) == MOSS_BLOCK => {
                 let p = IVec3::new(x, y, z);
                 let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
@@ -980,9 +988,10 @@ impl Game {
         if let (Some((f, o, true)), Some(base)) = (door_state(new), door_base(new)) {
             return replaceable(old) && self.world.get(x, y - 1, z) == door_of(base, f, o, false);
         }
-        // Fire only where it can burn.
-        if new == FIRE {
-            return crate::fire::can_burn_at(&self.world, IVec3::new(x, y, z));
+        // Fire only where it can burn (and blue only on soul ground).
+        if new == FIRE || new == SOUL_FIRE {
+            let p = IVec3::new(x, y, z);
+            return crate::fire::can_burn_at(&self.world, p) && (new == FIRE) != crate::wilds::is_soul_ground(self.world.get_v(p - IVec3::Y));
         }
         // Portals light only inside a real obsidian frame.
         if matches!(new, PORTAL_X | PORTAL_Z) {

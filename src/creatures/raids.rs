@@ -109,11 +109,18 @@ pub fn hero_price(mut t: crate::villagers::Trade) -> crate::villagers::Trade {
 }
 
 /// A Pilferer outpost: a dark wooden tower, a lookout, and a chest at the top.
-pub fn outpost_blocks(site: &Site) -> Vec<(IVec3, Id)> {
+pub fn outpost_blocks(site: &Site, detailed: bool) -> Vec<(IVec3, Id)> {
     let mut out = Vec::new();
     let o = site.origin;
     let mut put = |x: i32, y: i32, z: i32, id: Id| out.push((o + ivec3(x, y, z), id));
+    // (Older worlds keep the open frame of a tower they were made with.)
+    if detailed {
+        tower(&mut put);
+    }
     for x in -3..=3i32 {
+        if detailed {
+            break;
+        }
         for z in -3..=3i32 {
             // Footings into the ground, and room cleared all the way up.
             for y in -3..=0 {
@@ -156,6 +163,78 @@ pub fn outpost_blocks(site: &Site) -> Vec<(IVec3, Id)> {
         }
     }
     out
+}
+
+/// A newer outpost's tower: dark oak walls on a cobblestone footing, arrow
+/// slits, two floors, a lookout platform hanging over the walls with a railing,
+/// and a pyramid roof on posts. (The ladder, chest and cage are as before.)
+fn tower(put: &mut impl FnMut(i32, i32, i32, Id)) {
+    use crate::woods::{id, part};
+    const DARK: usize = 2;
+    let (log, planks) = (id(DARK, part::LOG), id(DARK, part::PLANKS));
+    let fence = |mask: Id| id(DARK, part::FENCE) + mask;
+    let stair = |f: u8| id(DARK, part::STAIRS) + f as Id;
+    for x in -4..=4i32 {
+        for z in -4..=4i32 {
+            let r = x.abs().max(z.abs());
+            for y in 1..=21 {
+                put(x, y, z, AIR);
+            }
+            if r <= 3 {
+                for y in -3..=0 {
+                    put(x, y, z, COBBLE);
+                }
+            }
+            if r == 3 {
+                let corner = x.abs() == 3 && z.abs() == 3;
+                let mid = x == 0 || z == 0;
+                for y in 1..=10 {
+                    let slit = mid && (y == 3 || y == 4 || y == 8 || y == 9);
+                    let doorway = x == 0 && z == 3 && y <= 2;
+                    let id = if corner {
+                        log
+                    } else if slit || doorway {
+                        AIR
+                    } else if y == 1 || y == 6 {
+                        // A cobblestone course at the bottom, a log band at the floor.
+                        if y == 1 { COBBLE } else { log }
+                    } else {
+                        planks
+                    };
+                    put(x, y, z, id);
+                }
+            }
+            // Floors, with a hole for the ladder; the top one is the lookout and hangs over.
+            if r <= 2 && (x, z) != (2, 2) {
+                put(x, 6, z, planks);
+            }
+            if (x, z) != (2, 2) {
+                put(x, 11, z, if r == 4 { id(DARK, part::SLAB) + 1 } else { planks });
+            }
+            // The lookout's railing.
+            if r == 4 {
+                let on = |x: i32, z: i32| x.abs().max(z.abs()) == 4;
+                let mask = [(1, 0, 1), (-1, 0, 2), (0, 1, 4), (0, -1, 8)].iter().filter(|&&(dx, dz, _)| on(x + dx, z + dz)).map(|t| t.2).sum::<Id>();
+                put(x, 12, z, fence(mask));
+            }
+            // Posts at the corners hold the roof up.
+            if x.abs() == 3 && z.abs() == 3 {
+                for y in 11..=16 {
+                    put(x, y, z, log);
+                }
+            }
+            // The roof: a pyramid of stairs, highest in the middle.
+            if r >= 1 {
+                let f = if x.abs() >= z.abs() { if x > 0 { 3 } else { 1 } } else if z > 0 { 0 } else { 2 };
+                put(x, 16 + 4 - r, z, stair(f));
+            } else {
+                put(x, 20, z, planks);
+                put(x, 21, z, log);
+            }
+        }
+    }
+    put(0, 15, 0, LANTERN_HANGING);
+    put(0, 5, 0, LANTERN_HANGING);
 }
 
 /// Where an outpost's caged Allay sits, from its chest (see `outpost_blocks`).
@@ -702,16 +781,20 @@ mod tests {
     #[test]
     fn outposts_have_a_lookout_with_a_chest() {
         let site = Site { kind: Kind::Outpost, origin: ivec3(10, 60, 10), facing: 0, seed: 3 };
-        let b = outpost_blocks(&site);
-        assert!(b.iter().any(|x| x.1 == CHEST && x.0.y == 72));
-        assert!(b.iter().filter(|x| crate::carpentry::is_ladder(x.1)).count() >= 10);
-        // The Allay's cage: fenced in on all sides, open inside.
-        let chest = b.iter().find(|x| x.1 == CHEST).map(|x| x.0).unwrap();
-        let cell = allay_cage(chest).floor().as_ivec3();
-        let last = |p: IVec3| b.iter().rev().find(|x| x.0 == p).map(|x| x.1);
-        assert_eq!(last(cell), Some(AIR));
-        for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
-            assert!(last(cell + d).is_some_and(|id| (FENCE_FIRST..FENCE_FIRST + 16).contains(&id)), "fenced {d}");
+        for detailed in [false, true] {
+            let b = outpost_blocks(&site, detailed);
+            assert!(b.iter().any(|x| x.1 == CHEST && x.0.y == 72));
+            assert!(b.iter().filter(|x| crate::carpentry::is_ladder(x.1)).count() >= 10);
+            // The Allay's cage: fenced in on all sides, open inside.
+            let chest = b.iter().find(|x| x.1 == CHEST).map(|x| x.0).unwrap();
+            let cell = allay_cage(chest).floor().as_ivec3();
+            let last = |p: IVec3| b.iter().rev().find(|x| x.0 == p).map(|x| x.1);
+            assert_eq!(last(cell), Some(AIR));
+            for d in [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z] {
+                assert!(last(cell + d).is_some_and(|id| (FENCE_FIRST..FENCE_FIRST + 16).contains(&id)), "fenced {d}");
+            }
+            // The chest stands on the lookout, with room above it.
+            assert!(last(chest - IVec3::Y).is_some_and(is_solid) && last(chest + IVec3::Y) == Some(AIR));
         }
     }
 }

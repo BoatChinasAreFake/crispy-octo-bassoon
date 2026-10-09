@@ -103,7 +103,7 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
 pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if kind == BREWING_STAND {
         return match slot {
-            INPUT => item == GUNPOWDER || crate::potions::BREWABLE.iter().any(|p| p.ingredient() == item),
+            INPUT => item == GUNPOWDER || crate::potions::BREWABLE.iter().any(|p| p.brews_from(item)),
             FUEL => crate::potions::is_bottle(item),
             _ => false,
         };
@@ -433,6 +433,7 @@ impl Game {
     pub fn open_container(&mut self, pos: IVec3) {
         if !self.is_client() {
             self.ensure_container(pos);
+            self.snouts_see_chest_opened(pos);
         }
         self.treasure_advancements(pos);
         self.open = Some(pos);
@@ -710,6 +711,9 @@ impl Game {
         let kind = store_kind(&self.world, &self.vehicles, p);
         if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST) {
             return;
+        }
+        if kind == CHEST {
+            self.snouts_see_chest_opened(p);
         }
         if let Some(k) = crate::stash::stash_of_key(p) {
             self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST));

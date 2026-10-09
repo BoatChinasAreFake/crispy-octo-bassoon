@@ -125,13 +125,18 @@ impl App {
         }
 
         // Chat-ish messages. While typing, the whole log (scrollable) instead.
+        // Long ones wrap onto more lines (and so does what you're typing).
         let typing = self.chat.is_some();
-        let lines: Vec<(&str, f32)> = if typing {
+        let wrap_w = w * 0.7 - 16.0 * s;
+        let typed: Vec<String> = self.chat.as_ref().map(|line| self.ui.wrap(&format!("> {line}_"), 9.0, w - 20.0 * s)).unwrap_or_default();
+        let lift = typed.len().saturating_sub(1) as f32 * 11.0 * s;
+        let lines: Vec<(String, f32)> = if typing {
             let n = g.chat_log.len();
             let end = n.saturating_sub(self.chat_scroll);
             // A backing panel and a scrollbar (drag it, or use the wheel or Page Up/Down).
             let widest = g.chat_log.iter().take(end).rev().take(CHAT_LINES).map(|m| self.ui.text_width(m, 9.0)).fold(0.0, f32::max);
             let (_, bar) = chat_layout(w, h, s, widest);
+            let bar = (bar.0, bar.1 - lift, bar.2, bar.3);
             self.chat_bar = bar;
             let (bx, top, bw, bh) = bar;
             draw_rectangle(4.0 * s, top, bx + bw - 4.0 * s, bh, Color::new(0.0, 0.0, 0.0, 0.3));
@@ -142,12 +147,13 @@ impl App {
                 let back = self.chat_scroll as f32 / (n - CHAT_LINES) as f32;
                 draw_rectangle(bx, top + (bh - thumb) * (1.0 - back), bw, thumb, Color::new(0.85, 0.85, 0.85, 0.9));
             }
-            g.chat_log.iter().take(end).rev().take(CHAT_LINES).map(|m| (m.as_str(), 1.0)).collect()
+            g.chat_log.iter().take(end).rev().flat_map(|m| self.ui.wrap(m, 9.0, wrap_w).into_iter().rev().map(|l| (l, 1.0))).take(CHAT_LINES).collect()
         } else {
-            g.messages.iter().rev().map(|(m, t)| (m.as_str(), t.min(1.0))).collect()
+            g.messages.iter().rev().flat_map(|(m, t)| self.ui.wrap(m, 9.0, wrap_w).into_iter().rev().map(move |l| (l, t.min(1.0)))).collect()
         };
-        let base = if typing { chat_layout(w, h, s, 0.0).0 } else { h - 40.0 * s };
+        let base = if typing { chat_layout(w, h, s, 0.0).0 - lift } else { h - 40.0 * s };
         for (i, (m, a)) in lines.into_iter().enumerate() {
+            let m = m.as_str();
             let y = base - i as f32 * 11.0 * s;
             let tw = self.ui.text_width(m, 9.0);
             draw_rectangle(4.0 * s, y - 9.0 * s, tw + 6.0 * s, 11.0 * s, Color::new(0.0, 0.0, 0.0, 0.4 * a));
@@ -155,6 +161,14 @@ impl App {
         }
         if typing {
             let hint = if self.chat_scroll > 0 { format!("(scrolled back {} lines: Page Down or the wheel to return)", self.chat_scroll) } else if g.chat_log.len() > CHAT_LINES { "(mouse wheel, Page Up or the scrollbar to read back)".to_string() } else { String::new() };
+            // What Tab can finish the command with, when there's a choice.
+            let hint = match &self.chat_options {
+                Some((o, _)) if o.len() > 1 => {
+                    let words: Vec<&str> = o.iter().map(|l| l.rsplit(' ').next().unwrap_or(l).trim_start_matches('/')).collect();
+                    self.ui.fit(&format!("Tab: {}", words.join("  ")), 8.0, w - 20.0 * s)
+                }
+                _ => hint,
+            };
             if !hint.is_empty() {
                 let y = base - (CHAT_LINES as f32 - 0.1) * 11.0 * s;
                 draw_rectangle(4.0 * s, y - 8.0 * s, self.ui.text_width(&hint, 8.0) + 6.0 * s, 10.0 * s, Color::new(0.0, 0.0, 0.0, 0.55));
@@ -162,11 +176,16 @@ impl App {
             }
         }
 
-        if let Some(line) = &self.chat {
-            let y = h - 30.0 * s;
-            draw_rectangle(4.0 * s, y - 10.0 * s, w - 8.0 * s, 13.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
-            let caret = if (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { " " };
-            self.ui.text(&format!("> {line}{caret}"), 7.0 * s, y, 9.0, WHITE);
+        if !typed.is_empty() {
+            let y = h - 30.0 * s - lift;
+            draw_rectangle(4.0 * s, y - 10.0 * s, w - 8.0 * s, 13.0 * s + lift, Color::new(0.0, 0.0, 0.0, 0.6));
+            let blink = (get_time() * 2.0) as i64 % 2 == 0;
+            let n = typed.len();
+            for (i, l) in typed.iter().enumerate() {
+                // (The caret blinks: it's the "_" on the end of the last line.)
+                let l = if i + 1 == n && !blink { l.strip_suffix('_').unwrap_or(l) } else { l.as_str() };
+                self.ui.text(l, 7.0 * s, y + i as f32 * 11.0 * s, 9.0, WHITE);
+            }
         }
 
         if self.show_debug {
@@ -178,7 +197,11 @@ impl App {
                 format!("Minceraft {} ({:.0} fps)", paths::version(), self.fps),
                 format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
                 format!("Facing: {facing}"),
-                format!("Biome: {} (surface {hgt})", biome.name()),
+                if crate::scorch::in_scorch(p.x) {
+                    format!("Biome: {}", g.world.scorch_biome_at(p).name())
+                } else {
+                    format!("Biome: {} (surface {hgt})", biome.name())
+                },
                 {
                     // The closest thing the generator built, within a few chunks.
                     let (pcx, pcz) = ((p.x / 16.0).floor() as i32, (p.z / 16.0).floor() as i32);

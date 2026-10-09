@@ -65,6 +65,8 @@ pub const FACES: [([i32; 3], [[f32; 3]; 4], f32); 6] = [
 const CORNER_UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
 /// How far merged faces are grown past their edges (see `merge_flats`).
 const SEAM: f32 = 1.0 / 2048.0;
+/// How far inside its edges a merged face's texture starts (in tiles).
+const UV_INSET: f32 = 1.0 / 64.0;
 const AO_CURVE: [f32; 4] = [0.58, 0.73, 0.87, 1.0];
 /// Face shading for foliage (same order as `FACES`). Light scatters through
 /// leaves, so their sides and undersides are much less dark than solid blocks',
@@ -242,7 +244,11 @@ fn merge_flats(flats: &[Flat], dims: [i32; 3], origin: [f32; 3], out: &mut MeshD
                         // several small ones (a T-junction) no pixel-wide gaps open up.
                         let grow = |k: usize| if k == t1 || k == t2 { (c[k] * 2.0 - 1.0) * SEAM } else { 0.0 };
                         let pos = [0, 1, 2].map(|k| origin[k] + p[k] as f32 + c[k] * ext[k] + grow(k));
-                        let uv = [CORNER_UV[i][0] * ext[u_axis], CORNER_UV[i][1] * ext[v_axis]];
+                        // (A hair inside the face's own edges, so a sample landing just past an
+                        // edge can't wrap round to the far side of the tile: no seam of the
+                        // top row of grass or snow along the bottom of a side.)
+                        let inset = |c: f32, e: f32| if c > 0.5 { e - UV_INSET } else { UV_INSET };
+                        let uv = [inset(CORNER_UV[i][0], ext[u_axis]), inset(CORNER_UV[i][1], ext[v_axis])];
                         v[i] = Vertex { pos, uv, light: key.light[i], tile: [u0, v0], tint: key.tint[i] };
                     }
                     // Flip the diagonal so shading gradients don't crease.
@@ -328,6 +334,29 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                                     None => p,
                                 })
                             });
+                            // Fire clings to what it's burning: a sheet of flame up the side of each
+                            // flammable block beside it, leaning in a little at the top. With no
+                            // floor under it, that's all there is (no flames standing on thin air).
+                            let mut sheets: Vec<[[f32; 3]; 4]> = Vec::new();
+                            if id == FIRE || id == SOUL_FIRE {
+                                const IN: f32 = 0.03;
+                                const LEAN: f32 = 0.25;
+                                for (dx, dz) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                                    if !crate::fire::flammable(hood.get(lx + dx, y, lz + dz)) {
+                                        continue;
+                                    }
+                                    // Bottom edge against the face, top edge leaning out into the cell.
+                                    let face = |t: f32, h: f32| {
+                                        let off = if h > 0.5 { IN + LEAN } else { IN };
+                                        let x = if dx > 0 { 1.0 - off } else if dx < 0 { off } else { t };
+                                        let z = if dz > 0 { 1.0 - off } else if dz < 0 { off } else { t };
+                                        [x, h, z]
+                                    };
+                                    sheets.push([face(0.0, 0.0), face(1.0, 0.0), face(1.0, 1.0), face(0.0, 1.0)]);
+                                }
+                            }
+                            let floored = is_solid(hood.get(lx, y - 1, lz));
+                            let diag: Vec<[[f32; 3]; 4]> = if (id == FIRE || id == SOUL_FIRE) && !floored && !sheets.is_empty() { sheets } else { diag.into_iter().chain(sheets).collect() };
                             for d in diag {
                                 let tint = tint_at(id, 0, wx + 0.5, wz + 0.5);
                                 let v = |i: usize| Vertex { tint, ..vert([wx + d[i][0], wy + d[i][1], wz + d[i][2]], tile, uv[i], [0.9, sky, blk]) };
@@ -423,6 +452,29 @@ pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
                             // box's position in the cell, so a slab shows half a tile.
                             let ((s0, b0), (s1, b1)) = (hood.lit(lx, y, lz), hood.lit(lx, y + 1, lz));
                             let (sky, blk) = (s0.max(s1), b0.max(b1));
+                            // Blocks with a detailed model are drawn from that (see models.rs).
+                            if let Some(pieces) = crate::models::pieces(id) {
+                                for pc in &pieces {
+                                    for (f, (nrm, corners, shade)) in FACES.iter().enumerate() {
+                                        if pc.hide & (1 << f) != 0 {
+                                            continue;
+                                        }
+                                        let axis = if nrm[0] != 0 { 0 } else if nrm[1] != 0 { 1 } else { 2 };
+                                        let flush = if nrm[axis] > 0 { pc.hi[axis] >= 1.0 } else { pc.lo[axis] <= 0.0 };
+                                        if flush && is_opaque(hood.get(lx + nrm[0], y + nrm[1], lz + nrm[2])) {
+                                            continue;
+                                        }
+                                        let mut v = [Vertex::default(); 4];
+                                        for i in 0..4 {
+                                            let c = corners[i];
+                                            let p = [0, 1, 2].map(|k| if c[k] > 0.5 { pc.hi[k] } else { pc.lo[k] });
+                                            v[i] = vert([wx + p[0], wy + p[1], wz + p[2]], pc.tiles[f], crate::models::face_uv(pc, f, p), [shade * 0.95, sky, blk]);
+                                        }
+                                        out.opaque.quad(v, false);
+                                    }
+                                }
+                                continue;
+                            }
                             let (boxes, n) = def.shape.boxes();
                             // A chest that's open has its lid drawn swinging (see chests.rs).
                             let n = if crate::chests::is_chest(id) && crate::chests::lid_lifted(macroquad::math::IVec3::new(wx as i32, y, wz as i32)) { 1 } else { n };
@@ -563,9 +615,9 @@ mod tests {
         let mut out = MeshData::default();
         merge_flats(&tops(dims, |_, _| Some(3)), dims, [0.0; 3], &mut out);
         assert_eq!(out.verts.len(), 4);
-        // The tile repeats sixteen times each way.
+        // The tile repeats sixteen times each way (from a hair inside each edge).
         let (lo, hi) = out.verts.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v.uv[0]), hi.max(v.uv[0])));
-        assert_eq!((lo, hi), (0.0, 16.0));
+        assert_eq!((lo, hi), (UV_INSET, 16.0 - UV_INSET));
         assert!(out.verts.iter().all(|v| v.tile[0] >= 0.0 && v.pos[1] == 1.0));
     }
 

@@ -184,6 +184,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     underground(&mut host, &mut team, &mut report, &mut touched);
     deeper(&mut host, &mut team, &mut report, &mut touched);
     wider(&mut host, &mut team, &mut report, &mut touched);
+    scorched(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -1250,6 +1251,153 @@ fn wider(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut H
     }
 }
 
+/// v0.3 part 2: huge fungi, Tuskers, soul fire, Sporelings and a bastion's chest.
+fn scorched(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::entity::MobKind;
+    let n = team.len();
+    revive(host, team);
+
+    // 31. A bot grows a huge fungus with Bone Dust: everyone sees the stem and cap.
+    let k = 0;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let spot = feet + IVec3::new(2, 0, 0);
+    for y in 0..12 {
+        for dz in -3..=3 {
+            for dx in -3..=3 {
+                let p = spot + IVec3::new(dx, y, dz);
+                host.world.set_v(p, AIR);
+                touched.insert(p);
+            }
+        }
+    }
+    host.world.set_v(spot - IVec3::Y, CRIMSON_NYLIUM);
+    host.world.set_v(spot, CRIMSON_FUNGUS);
+    host.give_peer(id, BONE_DUST, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == BONE_DUST)) {
+        g.inv.selected = slot;
+        g.farm_use(BONE_DUST, spot);
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("huge fungus");
+    let grown = |w: &crate::world::World| w.get_v(spot) == CRIMSON_STEM && (3..12).any(|y| w.get_v(spot + IVec3::new(2, y, 0)) == CRIMSON_WART || w.get_v(spot + IVec3::new(1, y, 1)) == CRIMSON_WART);
+    if !grown(&host.world) {
+        report.problems.push(format!("{} put Bone Dust on a fungus and the host's didn't grow", team[k].name));
+    } else {
+        for b in team.iter() {
+            if !grown(&b.game.world) {
+                report.problems.push(format!("{} never saw the huge fungus", b.name));
+            }
+        }
+    }
+
+    // 32. A bot feeds two Tuskers Crimson Fungus: a baby Tusker, for everyone.
+    let k = 1 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    pad(host, touched, team[k].game.player.body.pos.floor().as_ivec3(), 4);
+    let at = team[k].game.player.body.pos + Vec3::new(2.0, 0.3, 0.0);
+    host.give_peer(id, CRIMSON_FUNGUS, 2);
+    pump(host, team, 0.6, |_| idle());
+    // (Tuskers charge on sight: they're fed as soon as the bot knows they're there.)
+    let pair = [host.alloc_mob(MobKind::Tusker, at), host.alloc_mob(MobKind::Tusker, at + Vec3::new(0.0, 0.0, 0.9))];
+    pump(host, team, 0.3, |_| idle());
+    for t in pair {
+        let g = &mut team[k].game;
+        if let (Some(slot), Some(i)) = (g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == CRIMSON_FUNGUS)), g.mobs.iter().position(|m| m.id == t)) {
+            g.inv.selected = slot;
+            g.use_on_mob(i);
+        }
+        pump(host, team, 0.4, |_| idle());
+    }
+    pump(host, team, 3.0, |_| idle());
+    report.features.push("tusker");
+    let baby = |mobs: &[crate::entity::Mob]| mobs.iter().find(|m| m.kind == MobKind::Tusker && m.baby > 0.0).map(|m| m.id);
+    match baby(&host.mobs) {
+        Some(b) => {
+            for bot in team.iter() {
+                if !bot.game.mobs.iter().any(|m| m.id == b) {
+                    report.problems.push(format!("{} never saw the baby Tusker", bot.name));
+                }
+            }
+            host.mobs.retain(|m| m.id != b);
+        }
+        None => report.problems.push(format!("{} fed two Tuskers and the host saw no baby", team[k].name)),
+    }
+    host.mobs.retain(|m| !pair.contains(&m.id));
+
+    // 33. A bot lights Soul Soil with a Sparker: blue fire, for everyone.
+    revive(host, team);
+    let k = 2 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let soil = feet + IVec3::new(2, -1, 0);
+    host.world.set_v(soil, SOUL_SOIL);
+    host.give_peer(id, SPARKER, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == SPARKER)) {
+        g.inv.selected = slot;
+        g.spark(soil, IVec3::Y);
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("soul fire");
+    let lit = |w: &crate::world::World| w.get_v(soil + IVec3::Y) == SOUL_FIRE;
+    if !lit(&host.world) {
+        report.problems.push(format!("{} lit Soul Soil and the host has {} there", team[k].name, host.world.get_v(soil + IVec3::Y)));
+    } else {
+        for b in team.iter() {
+            if !lit(&b.game.world) {
+                report.problems.push(format!("{} never saw the soul fire", b.name));
+            }
+        }
+    }
+    host.world.set_v(soil + IVec3::Y, AIR);
+
+    // 34. A bot hits a Sporeling: the spores slow it down.
+    revive(host, team);
+    let k = 3 % n;
+    ground(host, team, k);
+    let me = team[k].game.my_id;
+    let from = team[k].game.player.body.pos;
+    let spore = host.alloc_mob(MobKind::Sporeling, from + Vec3::new(1.2, 0.2, 0.0));
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.net_send_msg(crate::net::Msg::Attack { mob: spore, dmg: 1.0, from });
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("sporeling");
+    if !team[k].game.has_effect(crate::potions::Potion::Slowness) {
+        report.problems.push(format!("{} hit a Sporeling and wasn't slowed (id {me})", team[k].name));
+    }
+    host.mobs.retain(|m| m.id != spore);
+
+    // 35. A bot opens a chest next to a Snout: the host's Snout gets cross.
+    revive(host, team);
+    let k = 4 % n;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let chest = feet + IVec3::new(1, 0, 1);
+    host.world.set_v(chest, CHEST);
+    let snout = host.alloc_mob(MobKind::Snout, feet.as_vec3() + Vec3::new(-1.5, 0.2, 0.5));
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.open_container(chest);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.close_container();
+    report.features.push("snout chest");
+    let cross = host.mobs.iter().any(|m| m.id == snout && m.angry);
+    if !cross {
+        report.problems.push(format!("{} opened a chest by a Snout and it didn't mind", team[k].name));
+    }
+    host.mobs.retain(|m| m.id != snout);
+    host.world.set_v(chest, AIR);
+}
+
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f64>().ok());
@@ -1290,7 +1438,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

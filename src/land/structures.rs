@@ -51,6 +51,10 @@ pub enum Kind {
     Igloo,
     /// On the deep sea floor (see monument.rs).
     Monument,
+    /// The Snouts' great gilded ruins (see bastion.rs), and (for loot only)
+    /// the treasure room in the middle of one.
+    Bastion,
+    BastionTreasure,
 }
 
 impl Kind {
@@ -77,6 +81,8 @@ impl Kind {
             Kind::Mineshaft => "Abandoned Mineshaft (Mind the Webs)",
             Kind::Igloo => "Igloo (Mind the Basement)",
             Kind::Monument => "Ocean Monument (Mind the Eyes)",
+            Kind::Bastion => "Snout Bastion (Gilded, Guarded)",
+            Kind::BastionTreasure => "Bastion Treasure Room (Mind the Brute)",
         }
     }
 
@@ -93,7 +99,8 @@ impl Kind {
             "ocean_ruins" | "ocean_ruin" => Kind::OceanRuins,
             "hushed_city" | "city" | "ancient_city" => Kind::HushedCity,
             "fortress" | "scorch_fortress" | "nether_fortress" => Kind::Fortress,
-            "snout_camp" | "camp" | "bastion" | "bastion_remnant" => Kind::SnoutCamp,
+            "snout_camp" | "camp" => Kind::SnoutCamp,
+            "bastion" | "snout_bastion" | "bastion_remnant" => Kind::Bastion,
             "outpost" | "pilferer_outpost" | "pillager_outpost" => Kind::Outpost,
             "trial_chambers" | "trial_chamber" | "trials" => Kind::TrialChambers,
             "shipwreck" | "wreck" => Kind::Shipwreck,
@@ -107,9 +114,14 @@ impl Kind {
         })
     }
 
+    /// Stands on the surface (so it's settled into the land around it).
+    fn on_surface(self) -> bool {
+        matches!(self, Kind::Hut | Kind::Tower | Kind::Well | Kind::Outpost | Kind::DesertPyramid | Kind::JungleTemple | Kind::Igloo)
+    }
+
     /// Wide enough that it reaches two chunks out.
     fn wide(self) -> bool {
-        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument)
+        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument | Kind::Bastion)
     }
 }
 
@@ -173,8 +185,9 @@ impl Generator {
         if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
-        // Pilferers build lookouts on open, flat ground.
-        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() && flat_r(7, 2) {
+        // Pilferers build lookouts on open, flat ground (and, in newer worlds, never within sight of a village).
+        let village_near = || self.opts.version >= 2 && (-7..=7).any(|dz| (-7..=7).any(|dx| self.village_spot(cx + dx, cz + dz)));
+        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() && flat_r(7, 2) && !village_near() {
             return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
         }
         if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
@@ -250,9 +263,16 @@ impl Generator {
     /// if the world was made that way).
     pub fn village_spot(&self, cx: i32, cz: i32) -> bool {
         let s = self.seed ^ 0x57_C0DE;
-        let (rx, rz) = (cx.div_euclid(6), cz.div_euclid(6));
-        let chance = if self.opts.version == 0 { 0.85 } else { [0.0, 0.45, 0.85, 0.95][self.opts.structures as usize % 4] };
-        cx == rx * 6 + 2 + (hash2(s ^ 0xA11, rx, rz) * 2.0) as i32 % 2 && cz == rz * 6 + 2 + (hash2(s ^ 0xA12, rx, rz) * 2.0) as i32 % 2 && hash2(s ^ 0x7111, rx, rz) < chance
+        // Newer worlds space them out more: one region in ten chunks, not six.
+        let (size, spread) = if self.opts.version >= 2 { (10, 4) } else { (6, 2) };
+        let (rx, rz) = (cx.div_euclid(size), cz.div_euclid(size));
+        let chance = match self.opts.version {
+            0 => 0.85,
+            1 => [0.0, 0.45, 0.85, 0.95][self.opts.structures as usize % 4],
+            _ => [0.0, 0.3, 0.55, 0.8][self.opts.structures as usize % 4],
+        };
+        let at = |r: i32, salt: u32| r * size + if size == 6 { 2 + (hash2(s ^ salt, rx, rz) * 2.0) as i32 % 2 } else { 3 + (hash2(s ^ salt, rx, rz) * spread as f32) as i32 % spread };
+        cx == at(rx, 0xA11) && cz == at(rz, 0xA12) && hash2(s ^ 0x7111, rx, rz) < chance
     }
 
     /// New worlds' structure slots: one chunk in the middle of each 4x4-chunk
@@ -289,9 +309,12 @@ impl Generator {
             Kind::Spire => {}
             Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => return ruin_blocks(site),
             Kind::HushedCity => return crate::deepdark::city_blocks(site),
-            Kind::Fortress => return crate::fortress::fortress_blocks(site),
+            Kind::Fortress => return crate::fortress::fortress_blocks(site, self.opts.version >= 2),
             Kind::SnoutCamp => return crate::fortress::camp_blocks(site),
-            Kind::Outpost => return crate::raids::outpost_blocks(site),
+            Kind::Bastion => return crate::bastion::bastion_blocks(site),
+            // (Never a site of its own: just a bastion's best chest.)
+            Kind::BastionTreasure => return Vec::new(),
+            Kind::Outpost => return crate::raids::outpost_blocks(site, self.opts.version >= 2),
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
             Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site),
             Kind::BuriedTreasure => return crate::treasure::treasure_blocks(site),
@@ -481,9 +504,14 @@ impl Generator {
         // The bell, on a post by the well (see raids.rs).
         out.push((ivec3(o.x - 2, o.y + 1, o.z + 2), FENCE_FIRST));
         out.push((ivec3(o.x - 2, o.y + 2, o.z + 2), BELL));
-        // Houses beside the paths, doors to the path (facing: 0 north .. 3 west).
+        // Houses beside the paths, doors to the path. Newer worlds have proper houses (see houses.rs).
+        if self.opts.version >= 2 {
+            for (at, facing, seed) in self.village_houses(site) {
+                out.extend(crate::houses::house_blocks(at, facing, seed));
+            }
+        }
         for (i, &(x, z, facing)) in [(9, -6, 2u8), (-9, -6, 2), (9, 6, 0), (6, 13, 3), (-6, -13, 1), (6, -14, 3)].iter().enumerate() {
-            if i >= 3 && hash2(s ^ 0x4053, i as i32, 0) < 0.35 {
+            if self.opts.version >= 2 || i >= 3 && hash2(s ^ 0x4053, i as i32, 0) < 0.35 {
                 continue;
             }
             let g = ground(x, z);
@@ -529,6 +557,19 @@ impl Generator {
         out
     }
 
+    /// A newer village's houses: where each stands (its ground floor), which
+    /// way its door faces (0 north .. 3 west), and its seed. Spaced so that
+    /// their roofs (a block over a 7×7 footprint) never meet.
+    pub fn village_houses(&self, site: &Site) -> Vec<(IVec3, u8, u32)> {
+        let (o, s) = (site.origin, site.seed);
+        [(9, -6, 2u8), (-9, -6, 2), (9, 6, 0), (6, 15, 3), (-6, -15, 1), (6, -15, 3)]
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i < 3 || hash2(s ^ 0x4053, i as i32, 0) >= 0.35)
+            .map(|(i, &(x, z, facing))| (ivec3(o.x + x, self.column(o.x + x, o.z + z).0, o.z + z), facing, s.wrapping_add(i as u32 * 7919)))
+            .collect()
+    }
+
     /// Where a village's farmland is (so it can be given soil when it first loads).
     pub fn village_farmland(&self, site: &Site) -> Vec<IVec3> {
         self.village_blocks(site).into_iter().filter(|b| b.1 == FARMLAND_WET).map(|b| b.0).collect()
@@ -537,13 +578,24 @@ impl Generator {
     /// Stamp every structure that reaches into chunk (cx, cz) onto its blocks.
     /// (Villages reach two chunks out; everything else, one.)
     pub fn place_structures(&self, cx: i32, cz: i32, b: &mut [Id]) {
-        for dz in -2..=2 {
-            for dx in -2..=2 {
+        let reach = self.site_reach(cx);
+        for dz in -reach..=reach {
+            for dx in -reach..=reach {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };
-                if (dx.abs() == 2 || dz.abs() == 2) && !site.kind.wide() {
+                if (dx.abs() >= 2 || dz.abs() >= 2) && !site.kind.wide() {
                     continue;
                 }
-                for (p, id) in self.site_blocks(&site) {
+                let blocks = self.site_blocks(&site);
+                // In newer worlds, buildings on the surface settle into the land (see `settle`).
+                if self.opts.version >= 2 && site.kind.on_surface() {
+                    self.settle(site.origin, &blocks, cx, cz, b);
+                }
+                if self.opts.version >= 2 && site.kind == Kind::Village {
+                    for (at, facing, seed) in self.village_houses(&site) {
+                        self.settle(at, &crate::houses::house_blocks(at, facing, seed), cx, cz, b);
+                    }
+                }
+                for (p, id) in blocks {
                     let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
                     if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (1..CH).contains(&p.y) {
                         b[crate::world::idx(lx, p.y, lz)] = id;
@@ -563,7 +615,13 @@ impl Generator {
             for (p, id) in blocks {
                 if id == CHEST && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz {
                     // A village's houses have hut chests; only the square's is the village's.
-                    let kind = if site.kind == Kind::Village && p != village_chest(&site) { Kind::Hut } else { site.kind };
+                    let kind = if site.kind == Kind::Village && p != village_chest(&site) {
+                        Kind::Hut
+                    } else if site.kind == Kind::Bastion && p == crate::bastion::treasure_chest(&site) {
+                        Kind::BastionTreasure
+                    } else {
+                        site.kind
+                    };
                     v.push((p, kind, site.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
                 }
             }
@@ -592,12 +650,79 @@ impl Generator {
     }
 
     /// Sites that can reach into chunk (cx, cz), with their blocks.
+    /// Settle a building into the land (newer worlds): fill in under it down
+    /// to the ground, and over a few blocks round it slope the land to meet it,
+    /// building up where it's low and cutting back where it's high, so nothing
+    /// stands on stilts of air or sits in a sheer-sided hole. `base` is the
+    /// building's ground floor (`origin.y`).
+    fn settle(&self, origin: IVec3, blocks: &[(IVec3, Id)], cx: i32, cz: i32, b: &mut [Id]) {
+        const R: i32 = 4;
+        let base = origin.y;
+        // The footprint: everything it builds at ground level.
+        let (mut x0, mut x1, mut z0, mut z1) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+        for (p, id) in blocks {
+            if *id != AIR && (base - 1..=base + 3).contains(&p.y) {
+                (x0, x1, z0, z1) = (x0.min(p.x), x1.max(p.x), z0.min(p.z), z1.max(p.z));
+            }
+        }
+        if x0 > x1 || x1 + R < cx * CW || x0 - R >= cx * CW + CW || z1 + R < cz * CW || z0 - R >= cz * CW + CW {
+            return;
+        }
+        let ground_like = |id: Id| is_solid(id) && !is_leaves(id) && !is_log(id) && !is_liquid(id);
+        for lz in 0..CW {
+            for lx in 0..CW {
+                let (x, z) = (cx * CW + lx, cz * CW + lz);
+                let d = (x0 - x).max(x - x1).max(0).max((z0 - z).max(z - z1).max(0));
+                if d > R {
+                    continue;
+                }
+                let at = |y: i32| crate::world::idx(lx, y, lz);
+                let top = (1..(base + R + 10).min(CH - 2)).rev().find(|&y| ground_like(b[at(y)])).unwrap_or(1);
+                let (cover, fill) = match self.column(x, z).1 {
+                    Biome::Desert | Biome::Badlands => (SAND, SAND),
+                    Biome::Snowy | Biome::IceSpikes => (SNOW_GRASS, DIRT),
+                    _ => (GRASS, DIRT),
+                };
+                if d == 0 {
+                    // Under the building: no gaps down to the ground.
+                    for y in (top + 1..base).rev() {
+                        if !ground_like(b[at(y)]) {
+                            b[at(y)] = if y < base - 3 { STONE } else { fill };
+                        }
+                    }
+                    continue;
+                }
+                let (lo, hi) = (base - d, base + d);
+                if top < lo {
+                    for y in top + 1..lo {
+                        b[at(y)] = fill;
+                    }
+                    b[at(lo)] = cover;
+                } else if top > hi && hi > 1 {
+                    for y in hi + 1..=top {
+                        b[at(y)] = AIR;
+                    }
+                    if ground_like(b[at(hi)]) {
+                        b[at(hi)] = cover;
+                    }
+                }
+            }
+        }
+    }
+
+    /// How many chunks out a site can reach into its neighbours. (Newer
+    /// worlds' Scorchlands fortresses are bigger: three chunks.)
+    fn site_reach(&self, cx: i32) -> i32 {
+        if self.opts.version >= 2 && cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL - 4 * CW { 3 } else { 2 }
+    }
+
     fn sites_near(&self, cx: i32, cz: i32) -> Vec<(Site, Vec<(IVec3, Id)>)> {
         let mut v = Vec::new();
-        for dz in -2..=2 {
-            for dx in -2..=2 {
+        let reach = self.site_reach(cx);
+        for dz in -reach..=reach {
+            for dx in -reach..=reach {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };
-                if (dx.abs() == 2 || dz.abs() == 2) && !site.kind.wide() {
+                if (dx.abs() >= 2 || dz.abs() >= 2) && !site.kind.wide() {
                     continue;
                 }
                 v.push((site, self.site_blocks(&site)));
@@ -808,6 +933,31 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (PRISMARINE_SHARD, 8, 0.5),
         ],
         Kind::Igloo => &[(GOLDEN_CHOP, 1, 1.0), (COAL, 4, 0.6), (APPLE, 3, 0.5), (BREAD, 2, 0.5), (WHEAT, 4, 0.3), (GOLD_INGOT, 2, 0.3), (SWORD_STONE, 1, 0.2)],
+        Kind::Bastion => &[
+            (GOLD_INGOT, 12, 0.8),
+            (GOLD_BLOCK, 2, 0.3),
+            (CRIMSON_FUNGUS, 6, 0.4),
+            (ARROW, 12, 0.4),
+            (CROSSBOW, 1, 0.3),
+            (IRON, 6, 0.4),
+            (MAGMA_CREAM, 4, 0.3),
+            (SCORCHITE_SCRAP, 1, 0.15),
+            (UPGRADE_TEMPLATE, 1, 0.12),
+            (GOLDEN_CHOP, 1, 0.2),
+            (DISC_FIRST + 7, 1, 0.08),
+        ],
+        Kind::BastionTreasure => &[
+            (UPGRADE_TEMPLATE, 1, 1.0),
+            (SCORCHITE_SCRAP, 3, 0.7),
+            (SCORCHITE_INGOT, 1, 0.3),
+            (DIAMOND, 5, 0.6),
+            (GOLD_BLOCK, 4, 0.6),
+            (ENCHANTED_BOOK, 1, 0.4),
+            (SWORD_DIAMOND, 1, 0.3),
+            (PICK_DIAMOND, 1, 0.25),
+            (GOLDEN_CHOP, 2, 0.4),
+            (DISC_FIRST + 7, 1, 0.2),
+        ],
         Kind::SnoutCamp => &[
             (GOLD_INGOT, 9, 0.8),
             (GOLD_BLOCK, 2, 0.3),
@@ -865,7 +1015,7 @@ fn loot_wear(item: Id, kind: Kind, rng: &mut Rng) -> Wear {
     let Some(max) = durability(item) else { return 0 };
     let used = rng.range(0.1, 0.7) * max as f32;
     let power = match kind {
-        Kind::Spire | Kind::HushedCity => 20,
+        Kind::Spire | Kind::HushedCity | Kind::BastionTreasure => 20,
         Kind::Dungeon => 15,
         Kind::Tower => 10,
         _ => 5,
@@ -880,7 +1030,10 @@ impl World {
         let mut best = chest.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5);
         for d in [IVec3::new(-2, 0, 2), IVec3::new(2, 0, 2), IVec3::new(-2, 0, -2), IVec3::new(2, 0, -2)] {
             let q = chest + d;
-            if self.get_v(q) == AIR && self.get_v(q + IVec3::Y) == AIR {
+            // (The Hmmer stands halfway there, so that has to be clear too, not in a wall.)
+            let half = chest + d / 2;
+            let clear = |p: IVec3| self.get_v(p) == AIR && self.get_v(p + IVec3::Y) == AIR;
+            if clear(q) && clear(half) {
                 best = q.as_vec3() + macroquad::math::Vec3::new(0.5, 0.0, 0.5);
                 break;
             }

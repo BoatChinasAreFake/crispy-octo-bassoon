@@ -53,12 +53,13 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         (from, d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()))
     };
     // The Scorchlands' structures are a long way east.
-    let (cx0, cz0) = if matches!(mode, "fortress" | "camp") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
+    let (cx0, cz0) = if matches!(mode, "fortress" | "camp" | "bastion") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
     let kind = match mode {
         "outpost" => Kind::Outpost,
         "trials" => Kind::TrialChambers,
         "fortress" => Kind::Fortress,
         "camp" => Kind::SnoutCamp,
+        "bastion" => Kind::Bastion,
         "raid" => Kind::Village,
         "hut" => Kind::Hut,
         "tower" => Kind::Tower,
@@ -97,6 +98,34 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                                 }
                             }
                         }
+                    }
+                }
+            }
+            return None;
+        }
+        "crimson" | "teal" | "basalt" | "soulvalley" => {
+            // Down in the Scorchlands, well inside the biome, on a floor with room to look about.
+            let want = match mode {
+                "crimson" => wilds::ScorchBiome::CrimsonForest,
+                "teal" => wilds::ScorchBiome::TealForest,
+                "basalt" => wilds::ScorchBiome::BasaltDeltas,
+                _ => wilds::ScorchBiome::SoulValley,
+            };
+            let (ox, oz) = (crate::scorch::SCORCH_ORIGIN, 0);
+            for r in 0..300 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = (ox + dx * 16 + 8, oz + dz * 16 + 8);
+                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.scorch_biome(x + i * 20, z + j * 20) == want));
+                    if !inside {
+                        continue;
+                    }
+                    // A wide floor: the same floor a few blocks either way along the view.
+                    let Some(y) = generator.scorch_floor(x, z, crate::scorch::LAVA_SEA + 4, 9) else { continue };
+                    let wide = (2..=8).step_by(3).all(|d| generator.scorch_floor(x - d, z + d, y - 2, 6).is_some_and(|y2| (y2 - y).abs() <= 3));
+                    // (Not standing in a huge fungus.)
+                    let clear = (-4..=4).all(|i| (-4..=4).all(|j| generator.fungus_at(x + i, z + j).is_none()));
+                    if wide && clear {
+                        return Some((Vec3::new(x as f32 + 0.5, y as f32 + 2.5, z as f32 + 0.5), -0.785, -0.12));
                     }
                 }
             }
@@ -249,8 +278,10 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Tower => look(o + Vec3::new(-11.0, 9.0, -11.0), o + Vec3::Y * 4.0),
                 Kind::Village => look(o + Vec3::new(-20.0, 18.0, -20.0), o + Vec3::Y * 2.0),
                 Kind::HushedCity => look(o + Vec3::new(-7.0, 4.5, -9.0), o + Vec3::new(0.0, 3.0, 0.0)),
-                Kind::Fortress => look(o + Vec3::new(-22.0, 22.0, -26.0), o + Vec3::new(0.0, 0.0, -4.0)),
+                Kind::Fortress => look(o + Vec3::new(1.5, 2.6, -21.5), o + Vec3::new(0.5, 4.0, 0.5)),
                 Kind::SnoutCamp => look(o + Vec3::new(-9.0, 6.0, -10.0), o + Vec3::Y * 1.5),
+                // From the ramparts' corner, over the courtyard to the treasure room.
+                Kind::Bastion => look(o + Vec3::new(13.5, 9.5, 13.5), o + Vec3::new(0.0, 2.0, -4.0)),
                 Kind::Outpost => look(o + Vec3::new(-14.0, 10.0, -14.0), o + Vec3::Y * 7.0),
                 Kind::TrialChambers => look(o + Vec3::new(-5.5, 5.5, -5.5), o + Vec3::new(2.0, 1.0, 2.0)),
                 Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => look(o + Vec3::new(-7.0, 7.0, -7.0), o + Vec3::new(1.0, 0.0, 0.0)),
@@ -276,7 +307,7 @@ impl App {
             "survival" | "creative" | "inventory" | "night" | "death" => {
                 // --seed N shows someone else's world (to look at a reported bug).
                 let seed = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--seed").and_then(|w| w[1].parse().ok()).unwrap_or(424242);
-                let mut g = Game::new(seed, s.mode == "creative", false);
+                let mut g = shot_game(seed, s.mode == "creative", false);
                 if s.mode == "inventory" {
                     for (item, n) in [(LOG, 12), (COBBLE, 20), (COAL, 5), (IRON, 3), (DIAMOND, 2), (GUNPOWDER, 5), (SAND, 9), (PORKCHOP, 3), (block::stairs(1, 0), 8), (block::slab(0, false), 12), (block::DOOR, 2)] {
                         g.inv.add(item, n);
@@ -305,21 +336,21 @@ impl App {
                 }
             }
             "host" => {
-                app.start_game(Game::new(424242, true, false));
+                app.start_game(shot_game(424242, true, false));
                 app.game.open_lan("Hosty", None).expect("open to LAN");
                 app.show_debug = true;
             }
             "showcase" => {
-                app.start_game(Game::new(424242, true, false));
+                app.start_game(shot_game(424242, true, false));
                 app.game.open_lan("Hosty", None).expect("open to LAN");
                 app.show_debug = false;
             }
             "parody" => {
-                app.start_game(Game::new(424242, true, false));
+                app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "newblocks" | "glider" => {
-                let mut g = Game::new(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" => {
+                let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
                     g.inv.slots[0] = Some((block::ROD, 1));
@@ -327,17 +358,22 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" => {
                 // Somewhere the generator built something (or the sky is doing something).
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
+                if s.mode == "aurora" {
+                    // Already out (it fades in over a while otherwise).
+                    g.aurora = 1.0;
+                }
                 match s.mode.as_str() {
                     "autumn" => {
                         g.rules.seasons = true;
                         g.day = seasons::SEASON_DAYS * 2 + 3;
                     }
                     "rainbow" => {
-                        g.rainbow = skies::RAINBOW_SECS;
+                        // (A little while after the rain, so it's fully in.)
+                        g.rainbow = skies::RAINBOW_SECS - 20.0;
                         g.time = s.time.unwrap_or(0.38);
                     }
                     // A Turtle Shell, to see further underwater.
@@ -370,7 +406,7 @@ impl App {
             }
             "cave" | "caverain" => {
                 // Standing in a roomy cave pocket near spawn, well below the surface.
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(0.3);
                 if s.mode == "caverain" {
                     // A storm overhead must stay overhead.
@@ -416,7 +452,7 @@ impl App {
             }
             "scorch" | "portal" => {
                 // Through a portal (built on the spot), or looking at one.
-                let mut g = Game::new(424242, s.mode == "scorch", false);
+                let mut g = shot_game(424242, s.mode == "scorch", false);
                 g.time = s.time.unwrap_or(0.3);
                 let spawn = g.spawn;
                 let here = IVec3::new(spawn.x.floor() as i32, spawn.y.floor() as i32, spawn.z.floor() as i32);
@@ -449,7 +485,7 @@ impl App {
             }
             "hollow" => {
                 // On the island's edge, looking in at the pillars (and whatever circles them).
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 let to = g.hollow_destination(IVec3::ZERO);
                 g.player.body.pos = to;
                 let o = hollow::ORIGIN.as_vec3();
@@ -465,13 +501,13 @@ impl App {
             }
             "zoo" | "animals" | "newmobs" | "music" | "modzoo" | "banners" | "golems" | "homestead" | "chat" => {
                 // Every mob in two rows, in daylight unless --time says otherwise, in creative (so nobody attacks).
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(0.2);
                 app.start_game(g);
                 app.show_debug = false;
             }
             "advancements" => {
-                let mut g = Game::new(424242, false, false);
+                let mut g = shot_game(424242, false, false);
                 for a in advancements::ALL.iter().step_by(3) {
                     g.advancements.grant(a.key);
                 }
@@ -480,7 +516,7 @@ impl App {
             }
             "portrait" | "beds" => {
                 // Mobs (--mob a,b,c) on a plain stone floor, close up, for checking their looks.
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(0.25);
                 let base = g.spawn.floor().as_ivec3();
                 for dz in -1..=1 {
@@ -510,7 +546,7 @@ impl App {
             }
             "shadowtest" => {
                 // A floating platform over flat ground: its shadow should land just beside it.
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(0.1);
                 let base = g.spawn.floor().as_ivec3();
                 for dz in -1..=1 {
@@ -541,7 +577,7 @@ impl App {
                 app.show_debug = false;
             }
             "recipes" => {
-                let mut g = Game::new(424242, false, false);
+                let mut g = shot_game(424242, false, false);
                 for (item, n) in [(LOG, 12), (PLANKS, 20), (COBBLE, 20), (IRON, 4), (STICK, 6), (COAL, 5), (WHEAT, 6), (HONEYCOMB, 3), (FEATHER, 2), (COPPER_INGOT, 2)] {
                     g.inv.add(item, n);
                 }
@@ -552,7 +588,7 @@ impl App {
                 app.book_search = "pick".into();
             }
             "journal" | "beelog" => {
-                let mut g = Game::new(424242, false, false);
+                let mut g = shot_game(424242, false, false);
                 for (i, c) in [(0, 0), (1, 2), (2, 1), (5, 0), (7, 3), (8, 1), (11, 0)] {
                     g.journal.note(SHARD_FIRST + i, c);
                 }
@@ -573,7 +609,7 @@ impl App {
                 app.set_screen(if s.mode == "journal" { Screen::Journal } else { Screen::BeeLog });
             }
             "bench" | "grindstone" => {
-                let mut g = Game::new(424242, false, false);
+                let mut g = shot_game(424242, false, false);
                 for (item, n) in [(UPGRADE_TEMPLATE, 2), (SCORCHITE_INGOT, 3), (PICK_DIAMOND, 1), (SWORD_DIAMOND, 1), (ARMOR_FIRST + 13, 1)] {
                     g.inv.add(item, n);
                 }
@@ -596,27 +632,27 @@ impl App {
                 app.screen = Screen::Bench;
             }
             "stats" => {
-                let mut g = Game::new(424242, false, false);
+                let mut g = shot_game(424242, false, false);
                 g.stats = stats::Stats { mined: 1843, placed: 1207, crafted: 311, kills: 58, deaths: 3, damage_dealt: 402.0, damage_taken: 131.0, walked: 18_420.0, swum: 960.0, flown: 0.0, ridden: 2_310.0, jumps: 4_107, played: 3.0 * 3600.0 + 1260.0, fish: 12, eaten: 96 };
                 app.start_game(g);
                 app.set_screen(Screen::Stats);
             }
             "mods" => {
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
                 app.set_screen(Screen::Mods);
             }
             "worlds" => {
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
                 app.open_worlds();
             }
             "backups" => {
                 // A saved world with a few backups made over the last days.
                 let (root, id) = (save::saves_dir(), "castle-town");
                 let _ = save::write_name(&root, id, "Castle Town");
-                app.game = Game::new(424242, false, false);
+                app.game = shot_game(424242, false, false);
                 app.current_world = Some(id.into());
                 let _ = app.write_current_world();
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                 for hours in [50, 26, 3] {
                     let _ = backups::back_up(&root, &backups::backups_dir(), id, now - hours * 3600);
@@ -628,7 +664,7 @@ impl App {
                 app.set_screen(Screen::Backups);
             }
             "createform" => {
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
                 app.form_name = "Cheese Kingdom".into();
                 app.form_seed = "cheese".into();
                 app.form_focus = 1;
@@ -643,13 +679,18 @@ impl App {
                 app.show_debug = true;
             }
             "palette" => {
-                app.start_game(Game::new(424242, true, false));
+                app.start_game(shot_game(424242, true, false));
                 app.set_screen(Screen::Inventory);
             }
             "internet" => {
-                app.start_game(Game::new(424242, true, false));
+                app.start_game(shot_game(424242, true, false));
                 app.mp_password = "sekrit".into();
                 app.open_to_internet();
+                app.set_screen(Screen::Paused);
+                app.pause_page = crate::PausePage::Share;
+            }
+            "pause" => {
+                app.start_game(shot_game(424242, true, false));
                 app.set_screen(Screen::Paused);
             }
             "join" => {
@@ -659,11 +700,11 @@ impl App {
                 app.set_screen(Screen::Multiplayer);
             }
             "options" => {
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
                 app.set_screen(Screen::Options { from_title: true });
             }
             "video" => {
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
                 app.settings.max_fps = 144;
                 app.settings.particles = 1;
                 app.settings.shadow_quality = 3;
@@ -671,7 +712,7 @@ impl App {
             }
             "reef" => {
                 // Under a warm sea, somewhere with coral (found once the chunks are in).
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(0.25);
                 if let Some((pos, yaw, pitch)) = scenic_view(&g, "ocean") {
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
@@ -681,7 +722,7 @@ impl App {
             }
             "spire" => {
                 // One of the Hollow's outer islands, from a little way off.
-                let mut g = Game::new(424242, true, false);
+                let mut g = shot_game(424242, true, false);
                 g.time = 0.25;
                 let seed = g.world.seed();
                 let spire = (1..12).flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)])).find_map(|(gx, gz)| hollow::outer_island(seed, gx, gz).filter(|i| i.2));
@@ -695,14 +736,14 @@ impl App {
                 app.show_debug = false;
             }
             "controls" => {
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
                 // Show a changed binding and one waiting for a key.
                 app.settings.binds.set(keybinds::Action::Sprint, true, keybinds::Bind::parse("F"));
                 app.set_screen(Screen::Controls { from_title: true });
                 app.rebinding = Some((keybinds::Action::Drop, true));
             }
             _ => {
-                app.game = Game::new(424242, true, true);
+                app.game = shot_game(424242, true, true);
             }
         }
     }
@@ -710,7 +751,7 @@ impl App {
     /// Each frame of a screenshot run: keep the camera put, and stage whatever the mode needs.
     pub(crate) fn shot_frame(&mut self, s: &ShotArgs, frames: u32) {
         let app = self;
-            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "mods" | "palette" | "worlds" | "newworld" | "createform") || (s.mode == "join" && app.game.is_client()) {
+            if !matches!(s.mode.as_str(), "title" | "inventory" | "join" | "internet" | "pause" | "mods" | "palette" | "worlds" | "newworld" | "createform") || (s.mode == "join" && app.game.is_client()) {
                 // Keep the demo camera looking at something interesting.
                 app.game.player.pitch = s.pitch;
                 app.game.player.yaw = s.yaw;
@@ -743,7 +784,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -895,8 +936,10 @@ impl App {
                 for i in 0..40 {
                     app.game.msg(format!("<Player{}> chat line number {i}", i % 3));
                 }
-                app.chat = Some("hello".into());
-                app.chat_scroll = 6;
+                app.game.msg("<Player1> and here's a much longer message, the kind somebody types when they're explaining exactly where they left the diamonds, which wraps onto the next line instead of running off the edge of the screen".to_string());
+                app.chat = Some("/g".into());
+                app.chat_options = Some((app.game.complete_command("/g"), usize::MAX));
+                app.chat_scroll = 0;
             }
             if s.mode == "homestead" && frames == 150 {
                 use entity::MobKind as K;
@@ -1260,6 +1303,45 @@ impl App {
                 app.game.world.set_v(at(3, -5, 2), block::CHEST);
                 app.game.world.set_v(at(4, -5, 1), block::HOPPER_FIRST + 1 + contraptions::facing_of(-f) as block::Id);
             }
+            if s.mode == "models" && frames == 125 {
+                // Two rows of shaped blocks to look at closely (the bug list's models).
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                let near = [block::BED_FACING_FIRST, block::SOUL_LANTERN, block::LANTERN, block::ENCHANTING_TABLE, block::DETECTOR_RAIL, block::BELL, block::SNOW_GRASS, block::GRINDSTONE];
+                let far = [block::POT_FIRST, block::SMITHING_TABLE, block::BOOKSHELF, block::SCAFFOLDING, block::CHAIN, block::CHARRED_SKULL, block::EYE_FRAME_FULL, block::BREWING_STAND];
+                // `--row 1..3` shows a few of them up close instead.
+                let row = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--row").and_then(|w| w[1].parse::<usize>().ok());
+                let all: Vec<block::Id> = near.into_iter().chain(far).collect();
+                let rows: Vec<(i32, Vec<block::Id>)> = match row {
+                    Some(k) => vec![(4, all.iter().copied().skip((k - 1) * 6).take(6).collect())],
+                    None => vec![(7, near.to_vec()), (11, far.to_vec())],
+                };
+                let gap = if row.is_some() { 1 } else { 2 };
+                for (row, ids) in rows {
+                    for (i, id) in ids.into_iter().enumerate() {
+                        let ro = i as i32 * gap - if gap == 1 { 3 } else { 7 };
+                        app.game.world.set_v(at(row, ro, 0), id);
+                        if id == block::CHAIN {
+                            app.game.world.set_v(at(row, ro, 1), id);
+                        }
+                    }
+                }
+                // A lit portal in a frame, off to one side.
+                for dy in -1..=3 {
+                    for dx in -1..=2 {
+                        let frame = dx == -1 || dx == 2 || dy == -1 || dy == 3;
+                        let c = at(14, dx, dy + 1);
+                        app.game.world.set_v(c, if frame { block::OBSIDIAN } else if f.z != 0 { block::PORTAL_X } else { block::PORTAL_Z });
+                    }
+                }
+                for (k, id) in [block::BELL, block::GRINDSTONE, block::BREWING_STAND, block::POT_FIRST, block::SCAFFOLDING, block::CHAIN, block::SOUL_LANTERN, block::CHARRED_SKULL, block::ENCHANTING_TABLE].into_iter().enumerate() {
+                    app.game.inv.slots[k] = Some((id, 1));
+                }
+            }
             if s.mode == "woods" && frames == 125 {
                 // v0.3's woods, one row each: log, leaves, planks, slab, stairs, fence and gate, door; a boat.
                 use crate::woods::{id, part};
@@ -1420,6 +1502,11 @@ impl App {
                 app.game.world.set_v(at(2, -3, 0), block::LOG);
                 app.game.world.set_v(at(2, -3, 1), block::FIRE);
                 app.game.world.set_v(at(2, -2, 0), block::FIRE);
+                // A plank post on fire up one side (the flames cling to it).
+                for up in 0..3 {
+                    app.game.world.set_v(at(4, -3, up), block::PLANKS);
+                    app.game.world.set_v(at(4, -2, up), block::FIRE);
+                }
             }
             if s.mode == "decor" && frames == 125 {
                 // A signpost, a framed sword on a wall, and a map in hand.
@@ -1798,4 +1885,15 @@ impl App {
                 }
             }
     }
+}
+
+/// A game for a scene. `--gen 2` makes it a newer world (see `GenOptions`);
+/// scenes are older worlds otherwise, so they keep looking as they always have.
+fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
+    let wanted = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--gen").and_then(|w| w[1].parse::<u8>().ok());
+    let opts = match wanted {
+        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(2), ..crate::world::GenOptions::DEFAULT },
+        _ => crate::world::GenOptions::LEGACY,
+    };
+    Game::new_with(seed, creative, menu, opts)
 }

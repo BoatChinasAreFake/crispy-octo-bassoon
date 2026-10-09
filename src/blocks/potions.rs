@@ -210,6 +210,10 @@ impl Potion {
             Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower | Potion::Slowness | Potion::Weakness | Potion::Poison | Potion::Hunger | Potion::Wilting => AIR,
         }
     }
+    /// Brewed from this ingredient? (Magma Cream makes Fire Resistance too.)
+    pub fn brews_from(self, item: Id) -> bool {
+        self.ingredient() == item || (self == Potion::FireResistance && item == MAGMA_CREAM)
+    }
     /// Over at once (healing) rather than lasting.
     pub fn instant(self) -> bool {
         self == Potion::Healing
@@ -245,7 +249,7 @@ pub fn potion_item(p: Potion, splash: bool) -> Id {
 /// What brewing `ingredient` into `bottle` makes.
 pub fn brew(bottle: Id, ingredient: Id) -> Option<Id> {
     if bottle == WATER_BOTTLE {
-        return BREWABLE.iter().find(|p| p.ingredient() == ingredient).map(|&p| potion_item(p, false));
+        return BREWABLE.iter().find(|p| p.brews_from(ingredient)).map(|&p| potion_item(p, false));
     }
     match potion_of(bottle) {
         Some((p, false)) if ingredient == GUNPOWDER => Some(potion_item(p, true)),
