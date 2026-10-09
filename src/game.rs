@@ -286,6 +286,8 @@ pub struct Game {
     pub seat_no: u8,
     /// When fireflies were last let out (see nature.rs).
     pub firefly_acc: f32,
+    /// When spores and ash were last let loose (see wilds.rs).
+    pub mote_acc: f32,
     /// Seconds since campfire smoke was last puffed (see home.rs).
     pub smoke_acc: f32,
     /// Seconds until a Wanderer might turn up (see villagers.rs).
@@ -560,6 +562,7 @@ impl Game {
             mounted: None,
             seat_no: 0,
             firefly_acc: 0.0,
+            mote_acc: 0.0,
             smoke_acc: 0.0,
             wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
             frost_acc: 0.0,
@@ -939,6 +942,11 @@ impl Game {
             return;
         }
         self.explore_timer = 0.0;
+        // Down below, it's the Scorchlands' own biomes (see wilds.rs).
+        if self.in_scorch() {
+            self.scorch_explore();
+            return;
+        }
         use crate::world::Biome;
         let p = self.player.body.pos;
         let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
@@ -1061,7 +1069,7 @@ impl Game {
 
     pub fn sky_color(&self) -> [f32; 3] {
         if self.in_scorch() {
-            return [0.24, 0.06, 0.03];
+            return self.world.scorch_haze(self.player.body.pos).0;
         }
         if self.in_hollow() {
             return [0.05, 0.02, 0.08];
@@ -1562,6 +1570,9 @@ impl Game {
         }
         if zoom {
             self.advance("zoomies");
+        }
+        if self.player.body.on_ground {
+            self.magma_feet(under);
         }
     }
 
@@ -2636,6 +2647,9 @@ impl Game {
             // Torches go on walls too.
             TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
             LEVER | BUTTON | PLATE | RAIL_FIRST | POWERED_RAIL | DETECTOR_RAIL | SIGN_FIRST if !is_solid(below) => return,
+            // Fungi and roots want rock or earth under them; vines hang from something.
+            CRIMSON_FUNGUS | TEAL_FUNGUS | CRIMSON_ROOTS | TEAL_ROOTS if !(crate::wilds::is_nylium(below) || matches!(below, SCORCHROCK | SOUL_SOIL | DIRT | GRASS | MYCELIUM)) => return,
+            WEEPING_VINES if !matches!(self.world.get_v(place + IVec3::Y), WEEPING_VINES) && !is_solid(self.world.get_v(place + IVec3::Y)) => return,
             // Kelp and seagrass only grow in water, on the floor (or on kelp).
             KELP | SEAGRASS if !(is_water(self.world.get_v(place)) && (is_solid(below) || below == KELP)) => return,
             // Frames and ladders go on walls.
@@ -3217,6 +3231,7 @@ impl Game {
         self.copper_golems_tick(dt);
         self.floaties_tick();
         self.fireflies_tick(dt);
+        self.motes_tick(dt);
         self.campfires_tick(dt);
         self.frost_tick(dt);
         self.critters_tick(dt);
@@ -4154,8 +4169,9 @@ impl Game {
             let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
             ([0.05, 0.12, 0.35], 0.0, if shell { 48.0 } else { 22.0 })
         } else if self.in_scorch() {
-            // Hazy, hot air.
-            (sky, far * 0.2, far * 0.8)
+            // Hazy, hot air (thick with ash in the basalt deltas).
+            let thick = self.world.scorch_haze(self.player.body.pos).1;
+            (sky, far * 0.2 * thick, far * 0.8 * thick)
         } else if self.in_hollow() {
             ([0.1, 0.05, 0.14], far * 0.4, far)
         } else if !self.fog_on {
@@ -5820,7 +5836,8 @@ looks_like = diamond
         let feet = IVec3::new(there.x.floor() as i32, there.y.floor() as i32, there.z.floor() as i32);
         assert!(is_portal(g.world.get_v(feet)), "arrived in a portal");
         assert!(g.advancements.has("hotter"));
-        assert_eq!(g.sky_color(), [0.24, 0.06, 0.03]);
+        // The air down there is the colour of whichever biome it is.
+        assert_eq!(g.sky_color(), g.world.scorch_haze(there).0);
         // Straight back through isn't possible without stepping out first.
         for _ in 0..60 {
             g.portal_tick(0.05);

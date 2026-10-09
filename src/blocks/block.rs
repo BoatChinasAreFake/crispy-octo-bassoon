@@ -417,7 +417,32 @@ pub const PACKED_ICE: Id = MYCELIUM + 4;
 pub const KELP: Id = MYCELIUM + 5;
 pub const SEAGRASS: Id = MYCELIUM + 6;
 pub const SEA_PICKLE: Id = MYCELIUM + 7;
-pub const NUM_BLOCKS: Id = MYCELIUM + 8;
+/// The Scorchlands' biomes (see wilds.rs): the crimson and teal fungus
+/// forests, the basalt deltas and the soul sand valleys.
+pub const CRIMSON_NYLIUM: Id = MYCELIUM + 8;
+pub const CRIMSON_STEM: Id = MYCELIUM + 9;
+pub const CRIMSON_WART: Id = MYCELIUM + 10;
+pub const CRIMSON_FUNGUS: Id = MYCELIUM + 11;
+pub const CRIMSON_ROOTS: Id = MYCELIUM + 12;
+pub const WEEPING_VINES: Id = MYCELIUM + 13;
+pub const SHROOMLIGHT: Id = MYCELIUM + 14;
+pub const TEAL_NYLIUM: Id = MYCELIUM + 15;
+pub const TEAL_STEM: Id = MYCELIUM + 16;
+pub const TEAL_WART: Id = MYCELIUM + 17;
+pub const TEAL_FUNGUS: Id = MYCELIUM + 18;
+pub const TEAL_ROOTS: Id = MYCELIUM + 19;
+pub const BASALT: Id = MYCELIUM + 20;
+pub const BLACKSTONE: Id = MYCELIUM + 21;
+pub const MAGMA_BLOCK: Id = MYCELIUM + 22;
+pub const SOUL_SOIL: Id = MYCELIUM + 23;
+pub const BONE_BLOCK: Id = MYCELIUM + 24;
+/// Blue fire: burns for ever on Soul Soil and Sorrow Sand, and never spreads.
+pub const SOUL_FIRE: Id = MYCELIUM + 25;
+/// Snout Bastions (see bastion.rs).
+pub const BLACKSTONE_BRICKS: Id = MYCELIUM + 26;
+pub const CRACKED_BLACKSTONE_BRICKS: Id = MYCELIUM + 27;
+pub const GILDED_BLACKSTONE: Id = MYCELIUM + 28;
+pub const NUM_BLOCKS: Id = MYCELIUM + 29;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -2508,6 +2533,7 @@ impl Registry {
         blocks.push(def("kelp", "Kelp (Seaweed, Ambitious)", Cross, false, false, [T_KELP; 3], 0.0, 0, false, KELP, 0.0, S_GRASS));
         blocks.push(def("seagrass", "Seagrass (Wet Lawn)", Cross, false, false, [T_SEAGRASS; 3], 0.0, 0, false, AIR, 0.0, S_GRASS));
         blocks.push(def("sea_pickle", "Sea Pickle (Not for Eating)", Cross, false, false, [T_SEA_PICKLE; 3], 0.0, 0, false, SEA_PICKLE, 6.0, S_GRASS));
+        blocks.extend(crate::wilds::defs());
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -3031,6 +3057,7 @@ impl Registry {
         recipes.push(r(&[(HEART_OF_THE_SEA, 1), (NAUTILUS_SHELL, 8)], (CONDUIT, 1)));
         recipes.push(r(&[(STRING, 6), (STICK, 1)], (ROPE, 2)));
         recipes.extend(crate::woods::recipes());
+        recipes.extend(crate::wilds::recipes());
         recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {

@@ -178,7 +178,11 @@ impl App {
                 format!("Minceraft {} ({:.0} fps)", paths::version(), self.fps),
                 format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
                 format!("Facing: {facing}"),
-                format!("Biome: {} (surface {hgt})", biome.name()),
+                if crate::scorch::in_scorch(p.x) {
+                    format!("Biome: {}", g.world.scorch_biome_at(p).name())
+                } else {
+                    format!("Biome: {} (surface {hgt})", biome.name())
+                },
                 {
                     // The closest thing the generator built, within a few chunks.
                     let (pcx, pcz) = ((p.x / 16.0).floor() as i32, (p.z / 16.0).floor() as i32);

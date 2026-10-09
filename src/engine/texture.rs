@@ -760,6 +760,34 @@ pub const T_KELP: u16 = 925;
 pub const T_SEAGRASS: u16 = 926;
 pub const T_SEA_PICKLE: u16 = 927;
 pub const T_DRIED_KELP: u16 = 928;
+/// The Scorchlands' biomes (see wilds.rs), then Snout Bastions' bricks.
+pub const T_CRIMSON_NYLIUM_TOP: u16 = 929;
+pub const T_CRIMSON_NYLIUM_SIDE: u16 = 930;
+pub const T_CRIMSON_STEM_SIDE: u16 = 931;
+pub const T_CRIMSON_STEM_TOP: u16 = 932;
+pub const T_CRIMSON_WART: u16 = 933;
+pub const T_CRIMSON_FUNGUS: u16 = 934;
+pub const T_CRIMSON_ROOTS: u16 = 935;
+pub const T_WEEPING_VINES: u16 = 936;
+pub const T_SHROOMLIGHT: u16 = 937;
+pub const T_TEAL_NYLIUM_TOP: u16 = 938;
+pub const T_TEAL_NYLIUM_SIDE: u16 = 939;
+pub const T_TEAL_STEM_SIDE: u16 = 940;
+pub const T_TEAL_STEM_TOP: u16 = 941;
+pub const T_TEAL_WART: u16 = 942;
+pub const T_TEAL_FUNGUS: u16 = 943;
+pub const T_TEAL_ROOTS: u16 = 944;
+pub const T_BASALT_SIDE: u16 = 945;
+pub const T_BASALT_TOP: u16 = 946;
+pub const T_BLACKSTONE: u16 = 947;
+pub const T_MAGMA: u16 = 948;
+pub const T_SOUL_SOIL: u16 = 949;
+pub const T_BONE_BLOCK_SIDE: u16 = 950;
+pub const T_BONE_BLOCK_TOP: u16 = 951;
+pub const T_SOUL_FIRE: u16 = 952;
+pub const T_BLACKSTONE_BRICKS: u16 = 953;
+pub const T_CRACKED_BLACKSTONE_BRICKS: u16 = 954;
+pub const T_GILDED_BLACKSTONE: u16 = 955;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3047,6 +3075,112 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         a.sprite(T_ACACIA_DOOR_ITEM + w as u16, &DOOR_ITEM, &[('#', shade(c, 0.45)), ('b', c), ('d', shade(c, 0.75)), ('w', rgb(60, 60, 60))]);
         a.sprite(T_ACACIA_BOAT_ITEM + w as u16, &BOAT_SPRITE, &[('#', shade(c, 0.4)), ('w', c), ('d', shade(c, 0.75))]);
     }
+    // ---- The Scorchlands' biomes: crimson and teal forests (nylium over
+    // Scorchrock, stems, wart, fungi, roots, vines, shroomlights), basalt
+    // deltas, soul sand valleys, and the Snouts' blackstone.
+    for (top, side, stem_side, stem_top, wart, fungus, roots, c, stem, inner) in [
+        (T_CRIMSON_NYLIUM_TOP, T_CRIMSON_NYLIUM_SIDE, T_CRIMSON_STEM_SIDE, T_CRIMSON_STEM_TOP, T_CRIMSON_WART, T_CRIMSON_FUNGUS, T_CRIMSON_ROOTS, rgb(150, 25, 30), [95, 30, 45], [150, 70, 80]),
+        (T_TEAL_NYLIUM_TOP, T_TEAL_NYLIUM_SIDE, T_TEAL_STEM_SIDE, T_TEAL_STEM_TOP, T_TEAL_WART, T_TEAL_FUNGUS, T_TEAL_ROOTS, rgb(30, 130, 125), [45, 60, 80], [60, 155, 145]),
+    ] {
+        a.each(top, |x, y, r, p| {
+            let n = p.noise2(x as f32 * 0.5 + top as f32, y as f32 * 0.5);
+            shade(c, 0.9 + n * 0.25 + r.range(-0.1, 0.1))
+        });
+        a.copy(T_SCORCHROCK, side);
+        for x in 0..TILE {
+            for y in 0..2 + (x * 7 % 5 == 0) as usize + (x % 3 == 1) as usize {
+                a.set(side, x, y, shade(c, 0.85 + ((x * 5 + y * 3) % 4) as f32 * 0.06));
+            }
+        }
+        a.each(stem_side, |x, y, r, _| {
+            let streak = (x * 5 + y / 3) % 7 == 0;
+            let glow = (x * 3 + y * 11) % 23 == 0;
+            if glow { shade(rgb(inner[0], inner[1], inner[2]), 1.4) } else { shade(rgb(stem[0], stem[1], stem[2]), if streak { 0.75 } else { r.range(0.88, 1.1) }) }
+        });
+        a.each(stem_top, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+            let d = dx.abs().max(dy.abs());
+            if d > 6.5 { shade(rgb(stem[0], stem[1], stem[2]), r.range(0.85, 1.05)) } else { shade(rgb(inner[0], inner[1], inner[2]), if (d as i32) % 3 == 0 { 0.85 } else { 1.0 } * r.range(0.92, 1.06)) }
+        });
+        a.each(wart, |x, y, r, p| {
+            let n = p.noise2(x as f32 * 0.4 + 9.0, y as f32 * 0.4 + wart as f32);
+            shade(c, 0.85 + n * 0.3 + r.range(-0.08, 0.08))
+        });
+        // A fungus: a stubby stalk and a round cap with spots.
+        a.each(fungus, |x, y, r, _| {
+            let (dx, dy) = (x as i32 - 8, y as i32 - 6);
+            let cap = dx * dx * 2 / 3 + dy * dy * 2 < 30 && y <= 8;
+            let stalk = (7..9).contains(&x) && y > 8;
+            if cap {
+                if (x + y * 3) % 7 == 0 { rgb(240, 200, 90) } else { shade(c, r.range(0.85, 1.15)) }
+            } else if stalk {
+                rgb(stem[0], stem[1], stem[2])
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+        // Roots: a tuft of thin strands.
+        a.each(roots, |x, y, r, _| {
+            let strand = (x % 3 == 1 && y > 4 + (x * 7) % 5) || (x % 5 == 3 && y > 7);
+            if strand { shade(c, r.range(0.75, 1.2)) } else { [0, 0, 0, 0] }
+        });
+    }
+    a.each(T_WEEPING_VINES, |x, y, r, _| {
+        let vine = (x == 7 || x == 8 || (x == 6 && y % 4 < 2) || (x == 9 && y % 5 > 2)) && y < 15;
+        let bud = (5..11).contains(&x) && y % 6 == 4 && r.chance(0.6);
+        if vine || bud { shade(rgb(150, 30, 35), r.range(0.8, 1.15)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SHROOMLIGHT, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.6 + 50.0, y as f32 * 0.6);
+        shade(if n > 0.1 { rgb(255, 205, 120) } else { rgb(240, 150, 70) }, r.range(0.92, 1.08))
+    });
+    a.each(T_BASALT_SIDE, |x, _, r, _| shade(rgb(80, 80, 85), if x % 4 == 0 { 0.7 } else { r.range(0.88, 1.1) }));
+    a.each(T_BASALT_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let ring = (dx * dx + dy * dy).sqrt() as i32 % 4 == 0;
+        shade(rgb(90, 90, 95), if ring { 0.75 } else { r.range(0.9, 1.08) })
+    });
+    a.each(T_BLACKSTONE, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.55 + 33.0, y as f32 * 0.55);
+        shade(rgb(45, 38, 45), 1.0 + n * 0.35 + r.range(-0.1, 0.1))
+    });
+    a.each(T_MAGMA, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.4 + 77.0, y as f32 * 0.4);
+        if n > 0.2 { shade(rgb(255, 140, 30), r.range(0.85, 1.1)) } else if n > 0.0 { rgb(200, 60, 20) } else { shade(rgb(80, 30, 20), r.range(0.8, 1.1)) }
+    });
+    a.each(T_SOUL_SOIL, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.5 + 12.0, y as f32 * 0.5 + 40.0);
+        shade(rgb(75, 58, 45), 1.0 + n * 0.3 + r.range(-0.1, 0.1))
+    });
+    a.each(T_BONE_BLOCK_SIDE, |x, _, r, _| shade(rgb(225, 220, 195), if x % 5 == 2 { 0.86 } else { r.range(0.93, 1.04) }));
+    a.each(T_BONE_BLOCK_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let marrow = dx * dx + dy * dy < 16.0;
+        shade(if marrow { rgb(190, 180, 150) } else { rgb(225, 220, 195) }, r.range(0.92, 1.04))
+    });
+    a.each(T_SOUL_FIRE, |x, y, r, p| {
+        let fx = x as f32 / 15.0;
+        let wave = p.noise2(fx * 5.0, 7.3) * 0.25;
+        let height = 0.85 - (fx - 0.5).abs() * 0.9 + wave;
+        let h = 1.0 - y as f32 / 15.0;
+        let core = h < height * 0.5 && (fx - 0.5).abs() < 0.25;
+        if h > height || (!core && r.chance(0.08)) {
+            return [0, 0, 0, 0];
+        }
+        if core { shade(rgb(150, 235, 245), r.range(0.9, 1.05)) } else { shade(rgb(50, 180, 205), r.range(0.8, 1.1)) }
+    });
+    for (tile, cracks) in [(T_BLACKSTONE_BRICKS, false), (T_CRACKED_BLACKSTONE_BRICKS, true)] {
+        a.each(tile, |x, y, r, _| {
+            let row = y / 4;
+            let mortar = y % 4 == 3 || (x + if row % 2 == 1 { 4 } else { 0 }) % 8 == 7;
+            let crack = cracks && ((x * 3 + y * 5) % 13 == 0 || (x == y + 2 && x % 3 != 0));
+            shade(if mortar || crack { rgb(22, 18, 24) } else { rgb(55, 46, 55) }, r.range(0.88, 1.08))
+        });
+    }
+    a.each(T_GILDED_BLACKSTONE, |x, y, r, p| {
+        let n = p.noise3(x as f32 * 0.6, y as f32 * 0.6, 57.0);
+        if n > 0.3 { shade(rgb(240, 200, 60), r.range(0.85, 1.1)) } else { shade(rgb(45, 38, 45), r.range(0.85, 1.12)) }
+    });
     a.each(T_PALE_LEAVES, |_, _, r, _| if r.chance(0.15) { [180, 185, 175, 0] } else { shade(rgb(165, 172, 162), r.range(0.78, 1.12)) });
     a.each(T_PALE_PLANKS, |x, y, r, _| {
         let board = y / 4;

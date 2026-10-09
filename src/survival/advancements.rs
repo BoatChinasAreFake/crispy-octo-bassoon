@@ -195,6 +195,12 @@ pub const ALL: &[Advancement] = &[
     adv("warm_welcome", "Warm Welcome", "Swim in a warm ocean."),
     adv("brr", "Brr", "Find a frozen ocean, icebergs and all."),
     adv("kelp_me", "Kelp Me", "Bring down a column of kelp."),
+    adv("seeing_red", "Seeing Red", "Find a Crimson Forest down in the Scorchlands."),
+    adv("teal_appeal", "Teal Appeal", "Find a Teal Forest. It's oddly calming."),
+    adv("delta_force", "Delta Force", "Find the Basalt Deltas. Mind the ash."),
+    adv("soul_searching", "Soul Searching", "Find a Soul Sand Valley."),
+    adv("hot_foot", "Hot Foot", "Stand on a Magma Block without sneaking. Ow."),
+    adv("fungal_growth", "Fungal Growth", "Grow a huge fungus with Bone Dust."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -214,7 +220,7 @@ const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
-    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me",
+    "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me", "fungal_growth",
 ];
 
 /// Which tab (1..) an advancement is on.

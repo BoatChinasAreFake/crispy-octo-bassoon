@@ -794,6 +794,14 @@ impl Game {
                     self.host_use_vault(from, p);
                 }
             }
+            Msg::Interact { x, y, z, item: BONE_DUST } if crate::wilds::is_fungus(self.world.get(x, y, z)) => {
+                let p = IVec3::new(x, y, z);
+                let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
+                if near && self.peer_rate_ok(from, "interact", 0.2) && self.peer_take(from, BONE_DUST, 1) {
+                    let who = self.peers.get(&from).map(|q| crate::players::record_key(&q.name)).unwrap_or_default();
+                    self.grow_fungus(p, &who);
+                }
+            }
             Msg::Interact { x, y, z, item: BONE_DUST } if self.world.get(x, y, z) == MOSS_BLOCK => {
                 let p = IVec3::new(x, y, z);
                 let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);

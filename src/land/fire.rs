@@ -73,7 +73,9 @@ impl Game {
             return false;
         }
         // Joined players' fire is lit by the host (which checks the Sparker); their edit goes over.
-        self.world.set_v(at, FIRE);
+        // (On Soul Soil and Sorrow Sand it burns blue, and for ever; see wilds.rs.)
+        let soul = crate::wilds::is_soul_ground(self.world.get_v(at - IVec3::Y));
+        self.world.set_v(at, if soul { SOUL_FIRE } else { FIRE });
         self.sfx(Sfx::Place(Mat::Wood), Some(at.as_vec3() + Vec3::splat(0.5)));
         self.use_tool(1);
         self.player.swing = 1.0;
@@ -179,7 +181,7 @@ impl Game {
 
 /// Is any part of this box in fire?
 pub fn touches_fire(world: &World, min: Vec3, max: Vec3) -> bool {
-    (min.y.floor() as i32..=max.y.floor() as i32).any(|y| (min.z.floor() as i32..=max.z.floor() as i32).any(|z| (min.x.floor() as i32..=max.x.floor() as i32).any(|x| matches!(world.get(x, y, z), FIRE | CAMPFIRE))))
+    (min.y.floor() as i32..=max.y.floor() as i32).any(|y| (min.z.floor() as i32..=max.z.floor() as i32).any(|z| (min.x.floor() as i32..=max.x.floor() as i32).any(|x| matches!(world.get(x, y, z), FIRE | SOUL_FIRE | CAMPFIRE))))
 }
 
 #[cfg(test)]

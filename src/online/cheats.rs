@@ -200,6 +200,21 @@ impl Game {
                 None => vec![format!("No {} within 2,500 blocks.", kind.name())],
             };
         }
+        // The Scorchlands' biomes: searched from here if you're down there, else from where a portal here would lead.
+        if let Some(biome) = crate::wilds::ScorchBiome::from_name(&what) {
+            let from = if crate::scorch::in_scorch(here.x) { here.floor().as_ivec3() } else { crate::scorch::destination(here.floor().as_ivec3()) };
+            for r in 0..120 {
+                let step = 8;
+                for k in 0..(r * 8).max(1) {
+                    let a = k as f32 / (r * 8).max(1) as f32 * std::f32::consts::TAU;
+                    let (x, z) = (from.x + (a.cos() * (r * step) as f32) as i32, from.z + (a.sin() * (r * step) as f32) as i32);
+                    if x > crate::scorch::SCORCH_X + 16 && g.scorch_biome(x, z) == biome {
+                        return vec![format!("The nearest {} is around {x}, {z}, down in the Scorchlands ({} blocks from {}, {}).", biome.name(), r * step, from.x, from.z)];
+                    }
+                }
+            }
+            return vec![format!("No {} within 1,000 blocks.", biome.name())];
+        }
         if let Some(biome) = crate::world::Biome::from_name(&what) {
             let (cx, cz) = (here.x as i32, here.z as i32);
             for r in 0..160 {

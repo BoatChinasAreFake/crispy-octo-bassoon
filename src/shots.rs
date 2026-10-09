@@ -102,6 +102,34 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
+        "crimson" | "teal" | "basalt" | "soulvalley" => {
+            // Down in the Scorchlands, well inside the biome, on a floor with room to look about.
+            let want = match mode {
+                "crimson" => wilds::ScorchBiome::CrimsonForest,
+                "teal" => wilds::ScorchBiome::TealForest,
+                "basalt" => wilds::ScorchBiome::BasaltDeltas,
+                _ => wilds::ScorchBiome::SoulValley,
+            };
+            let (ox, oz) = (crate::scorch::SCORCH_ORIGIN, 0);
+            for r in 0..300 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = (ox + dx * 16 + 8, oz + dz * 16 + 8);
+                    let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.scorch_biome(x + i * 20, z + j * 20) == want));
+                    if !inside {
+                        continue;
+                    }
+                    // A wide floor: the same floor a few blocks either way along the view.
+                    let Some(y) = generator.scorch_floor(x, z, crate::scorch::LAVA_SEA + 4, 9) else { continue };
+                    let wide = (2..=8).step_by(3).all(|d| generator.scorch_floor(x - d, z + d, y - 2, 6).is_some_and(|y2| (y2 - y).abs() <= 3));
+                    // (Not standing in a huge fungus.)
+                    let clear = (-4..=4).all(|i| (-4..=4).all(|j| generator.fungus_at(x + i, z + j).is_none()));
+                    if wide && clear {
+                        return Some((Vec3::new(x as f32 + 0.5, y as f32 + 2.5, z as f32 + 0.5), -0.785, -0.12));
+                    }
+                }
+            }
+            return None;
+        }
         "kelp" => {
             // Under the sea in a kelp forest, looking across the floor.
             for r in 0..200 {
@@ -327,7 +355,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = Game::new(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });

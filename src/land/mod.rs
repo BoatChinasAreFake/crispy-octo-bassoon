@@ -24,4 +24,5 @@ pub(crate) mod treasure;
 pub(crate) mod trees;
 pub(crate) mod trial;
 pub(crate) mod weather;
+pub(crate) mod wilds;
 pub(crate) mod world;
