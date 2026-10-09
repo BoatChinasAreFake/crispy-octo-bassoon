@@ -498,14 +498,12 @@ enum Voice {
     Organ,
 }
 
-/// How a disc goes.
+/// How a disc goes (its tune and chords are written by compose.rs).
 struct Style {
     bpm: f32,
     /// The key's root note (Hz).
     root: f32,
     minor: bool,
-    /// Chords, as scale degrees (0 is the root), one per bar.
-    prog: [i32; 4],
     /// Beats in a bar (3: a waltz).
     beats: u32,
     lead: Voice,
@@ -519,52 +517,22 @@ struct Style {
     jazz: bool,
     /// Drums wait for the second section.
     late_drums: bool,
+    /// How busy the tune is (0 to 1).
+    busy: f32,
 }
 
 fn style(n: usize) -> Style {
-    let s = |bpm, root, minor, prog, beats, lead, chords, bass, drums, swing| Style { bpm, root, minor, prog, beats, lead, chords, bass, drums, swing, jazz: false, late_drums: false };
+    let s = |bpm, root, minor, beats, lead, chords, bass, drums, swing, busy| Style { bpm, root, minor, beats, lead, chords, bass, drums, swing, jazz: false, late_drums: false, busy };
     match n {
-        0 => s(112.0, 261.6, false, [0, 5, 3, 4], 4, Voice::Piano, Voice::Pad, Voice::Pluck, 1, 0.15),
-        1 => s(124.0, 196.0, false, [0, 4, 5, 3], 4, Voice::Organ, Voice::Pluck, Voice::Pluck, 2, 0.0),
-        2 => s(140.0, 220.0, false, [0, 3, 4, 0], 4, Voice::Square, Voice::Square, Voice::Square, 2, 0.0),
-        3 => s(72.0, 146.8, true, [0, 5, 2, 6], 4, Voice::Bell, Voice::Pad, Voice::Pad, 0, 0.0),
-        4 => Style { jazz: true, ..s(96.0, 174.6, false, [1, 4, 0, 5], 4, Voice::Flute, Voice::Piano, Voice::Pluck, 1, 0.3) },
-        5 => s(132.0, 164.8, true, [0, 3, 4, 0], 3, Voice::Piano, Voice::Piano, Voice::Pluck, 0, 0.0),
-        6 => Style { late_drums: true, ..s(90.0, 146.8, false, [0, 4, 5, 3], 4, Voice::Piano, Voice::Pad, Voice::Pluck, 1, 0.0) },
-        _ => s(104.0, 220.0, true, [0, 0, 5, 6], 4, Voice::Square, Voice::Organ, Voice::Pluck, 3, 0.1),
+        0 => s(112.0, 261.6, false, 4, Voice::Piano, Voice::Pad, Voice::Pluck, 1, 0.15, 0.5),
+        1 => s(124.0, 196.0, false, 4, Voice::Organ, Voice::Pluck, Voice::Pluck, 2, 0.0, 0.55),
+        2 => s(140.0, 220.0, false, 4, Voice::Square, Voice::Square, Voice::Square, 2, 0.0, 0.7),
+        3 => s(72.0, 146.8, true, 4, Voice::Bell, Voice::Pad, Voice::Pad, 0, 0.0, 0.25),
+        4 => Style { jazz: true, ..s(96.0, 174.6, false, 4, Voice::Flute, Voice::Piano, Voice::Pluck, 1, 0.3, 0.5) },
+        5 => s(132.0, 164.8, true, 3, Voice::Piano, Voice::Piano, Voice::Pluck, 0, 0.0, 0.6),
+        6 => Style { late_drums: true, ..s(90.0, 146.8, false, 4, Voice::Piano, Voice::Pad, Voice::Pluck, 1, 0.0, 0.4) },
+        _ => s(104.0, 220.0, true, 4, Voice::Square, Voice::Organ, Voice::Pluck, 3, 0.1, 0.6),
     }
-}
-
-/// A note in a melody: when (in eighths from the bar's start), how long, and
-/// which scale step above the chord's root.
-#[derive(Clone, Copy, Debug)]
-struct Step {
-    at: u32,
-    len: u32,
-    deg: i32,
-}
-
-/// Two bars of tune: mostly chord tones on the beat, passing notes between.
-fn motif(rng: &mut Rng, eighths: u32) -> Vec<Vec<Step>> {
-    (0..2)
-        .map(|bar| {
-            let mut out = Vec::new();
-            let mut at = 0;
-            while at < eighths {
-                let len = *[1, 1, 2, 2, 2, 3, 4].get(rng.int(0, 6) as usize).unwrap_or(&2);
-                let len = len.min(eighths - at);
-                let on_beat = at % 2 == 0;
-                let deg = if on_beat { [0, 2, 4, 7][rng.int(0, 3) as usize] } else { rng.int(-1, 5) };
-                // The second bar ends on something restful.
-                let deg = if bar == 1 && at + len >= eighths { [0, 2, 4][rng.int(0, 2) as usize] } else { deg };
-                if rng.chance(0.85) || at == 0 {
-                    out.push(Step { at, len, deg });
-                }
-                at += len;
-            }
-            out
-        })
-        .collect()
 }
 
 fn play(v: &mut [f32], voice: Voice, t: f32, len: f32, f: f32, gain: f32, rng: &mut Rng) {
@@ -579,116 +547,100 @@ fn play(v: &mut [f32], voice: Voice, t: f32, len: f32, f: f32, gain: f32, rng: &
     }
 }
 
-/// Compose and play disc `n` (0..8): about fifty seconds of music.
+/// Compose and play disc `n` (0..8): about a minute of music, in its key and
+/// style: intro, tune, middle, the tune again, and home.
 pub fn synth_disc(n: usize) -> Vec<f32> {
+    use crate::compose::{compose, hz, midi_of, Key, Mode, Sec, Spec};
     let st = style(n);
     let mut rng = Rng::new(0xD15C ^ (n as u64 * 7919));
     let beat = 60.0 / st.bpm;
-    let eighths = st.beats * 2;
     let bar = beat * st.beats as f32;
-    // Intro, A A B A', outro: 20 bars (short bars play the middle twice).
-    let mut sections: Vec<(u8, u32)> = vec![(0, 2), (1, 4), (1, 4), (2, 4), (3, 4)];
-    if bar * 20.0 < 40.0 {
-        sections.extend([(2, 4), (3, 4)]);
-    }
-    sections.push((4, 2));
-    let total_bars: u32 = sections.iter().map(|s| s.1).sum();
-    let len = total_bars as f32 * bar + 4.0;
+    let tonic = midi_of(st.root);
+    let key = Key { tonic, mode: if st.minor { Mode::Minor } else { Mode::Major } };
+    let lead_low = 60 + (tonic - 60).rem_euclid(12);
+    let spec = Spec { key, beats: st.beats, plan: crate::sound::plan_for(72.0, bar), low: lead_low, high: lead_low + 19, pentatonic: false, busy: st.busy, sevenths: st.jazz };
+    let piece = compose(&spec, &mut rng);
+    let len = piece.total_beats() * beat + 4.0;
     let mut v = vec![0.0f32; samples(len)];
-    let scale: [i32; 7] = if st.minor { [0, 2, 3, 5, 7, 8, 10] } else { [0, 2, 4, 5, 7, 9, 11] };
-    let freq = |deg: i32, octave: i32| -> f32 {
-        let st_ = scale[deg.rem_euclid(7) as usize] + deg.div_euclid(7) * 12 + octave * 12;
-        st.root * 2f32.powf(st_ as f32 / 12.0)
+    let start = 0.5;
+    // Off-beat eighths come a little late when it swings.
+    let at = |b: f32| {
+        let e = (b * 2.0).round() as i32;
+        start + b * beat + if e % 2 == 1 { st.swing * beat * 0.5 } else { 0.0 }
     };
-    let a = motif(&mut rng, eighths);
-    let b = motif(&mut rng, eighths);
-    let swing = |e: u32| if e % 2 == 1 { st.swing * beat * 0.5 } else { 0.0 };
-    let mut bar_i = 0u32;
-    for (kind, bars) in sections {
-        for k in 0..bars {
-            let t0 = bar_i as f32 * bar + 0.5;
-            let chord = st.prog[(bar_i % 4) as usize];
-            let tones: Vec<i32> = if st.jazz { vec![chord, chord + 2, chord + 4, chord + 6] } else { vec![chord, chord + 2, chord + 4] };
-            // Chords.
-            if st.beats == 3 {
-                for b_ in 1..3 {
-                    for &d in &tones {
-                        play(&mut v, st.chords, t0 + b_ as f32 * beat, beat * 0.9, freq(d, 0), 0.12, &mut rng);
-                    }
-                }
-            } else if st.chords == Voice::Square {
-                // Chip arpeggios: the chord tones in quick turns.
-                for e in 0..(eighths * 2) {
-                    let d = tones[(e as usize) % tones.len()];
-                    play(&mut v, st.chords, t0 + e as f32 * beat * 0.25, beat * 0.22, freq(d, 1), 0.08, &mut rng);
-                }
-            } else {
-                for (j, &d) in tones.iter().enumerate() {
-                    play(&mut v, st.chords, t0 + j as f32 * 0.02, bar * 0.95, freq(d, 0), 0.11, &mut rng);
+    let mut seen_a = false;
+    for (i, (b, voicing)) in piece.bars.iter().zip(&piece.voicings).enumerate() {
+        let t0 = at(b.start);
+        let fs: Vec<f32> = voicing.iter().map(|&m| hz(m)).collect();
+        // Chords: on beats two and three in a waltz, quick turns on a chip, held otherwise.
+        if st.beats == 3 {
+            for k in 1..3 {
+                for &f in &fs {
+                    play(&mut v, st.chords, t0 + k as f32 * beat, beat * 0.9, f, 0.12, &mut rng);
                 }
             }
-            // Bass: the root (walking through the chord when jazzy).
-            if st.jazz {
-                for b_ in 0..st.beats {
-                    let d = tones[(b_ as usize) % tones.len()];
-                    play(&mut v, st.bass, t0 + b_ as f32 * beat, beat * 0.9, freq(d, -2), 0.35, &mut rng);
+        } else if st.chords == Voice::Square {
+            for e in 0..st.beats * 4 {
+                let f = fs[e as usize % fs.len()] * 2.0;
+                play(&mut v, st.chords, t0 + e as f32 * beat * 0.25, beat * 0.22, f, 0.08, &mut rng);
+            }
+        } else {
+            for (j, &f) in fs.iter().enumerate() {
+                play(&mut v, st.chords, t0 + j as f32 * 0.02, bar * 0.95, f, 0.11, &mut rng);
+            }
+        }
+        // Bass: walking quarters through the chord to the next root when jazzy.
+        if st.jazz {
+            let root = piece.bass.iter().find(|x| x.at == b.start).map(|x| x.midi).unwrap_or(tonic - 12);
+            let next = piece.bars.get(i + 1).map(|nb| piece.bass.iter().find(|x| x.at == nb.start).map(|x| x.midi).unwrap_or(root)).unwrap_or(root);
+            let third = root + key.pitch(b.chord + 2, b.chord) - key.pitch(b.chord, b.chord);
+            let walk = [root, third, root + 7, next - 1];
+            for (k, m) in walk.iter().enumerate().take(st.beats as usize) {
+                play(&mut v, st.bass, t0 + k as f32 * beat, beat * 0.9, hz(*m), 0.35, &mut rng);
+            }
+        }
+        // Drums (not in the intro or outro; some wait for the second section).
+        if b.sec == Sec::A && i > 0 && piece.bars[i - 1].sec != Sec::A {
+            seen_a = true;
+        }
+        let late = st.late_drums && b.sec == Sec::A && !piece.bars[..i].iter().any(|x| x.sec == Sec::B);
+        let drums_now = st.drums > 0 && !matches!(b.sec, Sec::Intro | Sec::Outro) && !late && seen_a;
+        if drums_now {
+            let eighths = st.beats * 2;
+            for e in 0..eighths {
+                let t = at(b.start + e as f32 * 0.5);
+                let on_beat = e % 2 == 0;
+                let beat_no = e / 2;
+                if on_beat && (beat_no == 0 || (st.drums >= 2 && beat_no == 2)) {
+                    kick(&mut v, t, 120.0, 0.6);
                 }
-            } else {
-                let hits: &[u32] = if st.beats == 3 { &[0] } else { &[0, 2] };
-                for &b_ in hits {
-                    play(&mut v, st.bass, t0 + b_ as f32 * beat, beat * 1.8, freq(chord, -2), 0.4, &mut rng);
+                if st.drums == 3 && e == 3 {
+                    kick(&mut v, t, 120.0, 0.5);
+                }
+                if st.drums >= 2 && on_beat && beat_no % 2 == 1 {
+                    snare(&mut v, t, 0.35, &mut rng);
+                }
+                if st.drums == 1 && on_beat && beat_no % 2 == 1 {
+                    hat(&mut v, t, 0.25, &mut rng);
+                }
+                if st.drums >= 2 || !on_beat {
+                    hat(&mut v, t, 0.12, &mut rng);
                 }
             }
-            // Drums (not in the intro or outro).
-            let drums_now = st.drums > 0 && (1..4).contains(&kind) && !(st.late_drums && kind == 1);
-            if drums_now {
-                for e in 0..eighths {
-                    let t = t0 + e as f32 * beat * 0.5 + swing(e);
-                    let on_beat = e % 2 == 0;
-                    let beat_no = e / 2;
-                    if on_beat && (beat_no == 0 || (st.drums >= 2 && beat_no == 2)) {
-                        kick(&mut v, t, 120.0, 0.6);
-                    }
-                    if st.drums == 3 && e == 3 {
-                        kick(&mut v, t, 120.0, 0.5);
-                    }
-                    if st.drums >= 2 && on_beat && beat_no % 2 == 1 {
-                        snare(&mut v, t, 0.35, &mut rng);
-                    }
-                    if st.drums == 1 && on_beat && beat_no % 2 == 1 {
-                        hat(&mut v, t, 0.25, &mut rng);
-                    }
-                    if st.drums >= 2 || !on_beat {
-                        hat(&mut v, t, 0.12, &mut rng);
-                    }
-                }
-            }
-            // The tune.
-            let tune = match kind {
-                1 => Some(&a),
-                2 => Some(&b),
-                3 => Some(&a),
-                _ => None,
-            };
-            if let Some(m) = tune {
-                for s in &m[(k % 2) as usize] {
-                    let mut deg = chord + s.deg;
-                    if kind == 3 && rng.chance(0.25) {
-                        // A' changes a few notes.
-                        deg += if rng.chance(0.5) { 1 } else { -1 };
-                    }
-                    let t = t0 + s.at as f32 * beat * 0.5 + swing(s.at);
-                    play(&mut v, st.lead, t, s.len as f32 * beat * 0.5 * 0.95, freq(deg, 1), 0.32, &mut rng);
-                }
-            }
-            if kind == 4 && k == bars - 1 {
-                // The last chord rings out.
-                for &d in &tones {
-                    play(&mut v, st.chords, t0 + bar, 3.0, freq(d, 0), 0.12, &mut rng);
-                }
-                play(&mut v, st.lead, t0 + bar, 3.0, freq(chord, 1), 0.25, &mut rng);
-            }
-            bar_i += 1;
+        }
+    }
+    if !st.jazz {
+        for x in &piece.bass {
+            play(&mut v, st.bass, at(x.at), x.len * beat * 0.95, hz(x.midi), 0.4, &mut rng);
+        }
+    }
+    for x in &piece.lead {
+        play(&mut v, st.lead, at(x.at), x.len * beat * 0.95, hz(x.midi), 0.32, &mut rng);
+    }
+    // The last chord rings out.
+    if let (Some(b), Some(voicing)) = (piece.bars.last(), piece.voicings.last()) {
+        for &m in voicing {
+            play(&mut v, st.chords, at(b.start + st.beats as f32), 3.0, hz(m), 0.12, &mut rng);
         }
     }
     reverb(&mut v, if n == 3 { 0.7 } else { 0.35 }, if n == 3 { 2.0 } else { 1.2 });
