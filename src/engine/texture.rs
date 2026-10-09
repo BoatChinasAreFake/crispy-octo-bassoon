@@ -816,6 +816,12 @@ pub const T_EYE_FRAME_EYE: u16 = 978;
 pub const T_BREWING_ROD: u16 = 979;
 pub const T_BREWING_BASE: u16 = 980;
 pub const T_BREWING_ITEM: u16 = 981;
+/// Mob fixes: a shaggier goat, and Grumblers' rags.
+pub const T_GOAT_FUR: u16 = 982;
+pub const T_GOAT_HOOF: u16 = 983;
+pub const T_GOAT_HORN_TILE: u16 = 984;
+pub const T_GRUMBLE_PANTS: u16 = 985;
+pub const T_GOAT_HEAD_SIDE: u16 = 986;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4168,6 +4174,38 @@ fn paint_models(a: &mut Atlas) {
             [0, 0, 0, 0]
         }
     });
+    // Goats: creamy hair that hangs in shaggy strands, dark hooves, ridged horns,
+    // eyes on the sides of the head and a pale muzzle in front.
+    a.each(T_GOAT, |x, y, r, _| shade(rgb(228, 222, 206), r.range(0.9, 1.05) * if (x * 7 + y * 3) % 9 == 0 { 0.86 } else { 1.0 }));
+    a.each(T_GOAT_FUR, |x, y, r, _| {
+        let strand = (x * 5 + 3) % 4 == 0;
+        let ragged = y > 11 && (x * 7) % 5 < 2;
+        if ragged { [0, 0, 0, 0] } else { shade(rgb(218, 210, 192), r.range(0.88, 1.05) * if strand { 0.85 } else { 1.0 }) }
+    });
+    a.each(T_GOAT_HOOF, |_, _, r, _| shade(rgb(55, 48, 40), r.range(0.85, 1.1)));
+    a.each(T_GOAT_HORN_TILE, |_, y, r, _| shade(rgb(180, 170, 150), r.range(0.9, 1.05) * if y % 3 == 0 { 0.8 } else { 1.0 }));
+    a.each(T_GOAT_HEAD_SIDE, |x, y, r, _| {
+        let eye = (6..8).contains(&y) && (5..8).contains(&x);
+        let pupil = y == 6 && x == 6;
+        if pupil { rgb(20, 15, 10) } else if eye { rgb(200, 160, 60) } else { shade(rgb(228, 222, 206), r.range(0.9, 1.05)) }
+    });
+    a.each(T_GOAT_FACE, |x, y, r, _| {
+        let nostril = y == 10 && (x == 5 || x == 10);
+        let mouth = y == 13 && (6..10).contains(&x);
+        let muzzle = y > 7;
+        if nostril || mouth { rgb(70, 55, 45) } else if muzzle { shade(rgb(205, 190, 175), r.range(0.92, 1.04)) } else { shade(rgb(228, 222, 206), r.range(0.9, 1.05)) }
+    });
+    // A Grumbler's rags: a torn brown cloth round the waist, rotting legs below.
+    a.each(T_GRUMBLE_PANTS, |x, y, r, _| {
+        let torn = y >= 5 + (x * 7 % 4);
+        if !torn {
+            shade(rgb(100, 70, 45), r.range(0.85, 1.05))
+        } else if (x * 3 + y * 5) % 7 == 0 {
+            rgb(110, 150, 90)
+        } else {
+            shade(rgb(210, 140, 130), r.range(0.88, 1.06))
+        }
+    });
     // The portal: a solid swirl with no gaps (the shader makes it flow, see render.rs).
     a.each(T_PORTAL, |x, y, r, p| {
         let swirl = (p.noise2(x as f32 * 0.35, y as f32 * 0.35 + 40.0) * 7.0).sin();
@@ -6083,24 +6121,6 @@ const TEAR_SPRITE: [&str; 16] = [
     "................",
     "................",
 ];
-const CROSSBOW_SPRITE: [&str; 16] = [
-    "................",
-    ".s..............",
-    "..s......####...",
-    "...s....#ww#....",
-    "....s..#ww#.....",
-    ".....s#ww#......",
-    "......#w#.......",
-    ".....#w#s.......",
-    "....#w#..s......",
-    "...#ww#...s.....",
-    "..#ww#.....s....",
-    ".#ww#.......s...",
-    "#ww#.........s..",
-    "##............s.",
-    "................",
-    "................",
-];
 const BACKPACK_SPRITE: [&str; 16] = [
     "................",
     "......####......",
@@ -6192,10 +6212,43 @@ fn paint_scorch_and_raids(a: &mut Atlas) {
     a.sprite(T_SIZZLE_POWDER, &POWDER_SPRITE, &[('h', rgb(255, 240, 150)), ('b', rgb(245, 170, 40)), ('d', rgb(190, 110, 20))]);
     a.sprite(T_WEEPER_TEAR, &TEAR_SPRITE, &[('#', rgb(120, 150, 170)), ('h', rgb(255, 255, 255)), ('b', rgb(210, 235, 245)), ('d', rgb(160, 200, 220))]);
     a.sprite(T_SHROOM_STICK, &ROD, &[('#', rgb(73, 54, 21)), ('o', rgb(137, 103, 39)), ('s', rgb(230, 230, 230)), ('k', rgb(230, 90, 40))]);
-    let bow = [('#', rgb(60, 40, 20)), ('w', rgb(130, 95, 55)), ('s', rgb(220, 220, 220))];
-    a.sprite(T_CROSSBOW, &CROSSBOW_SPRITE, &bow);
-    a.sprite(T_CROSSBOW_LOADED, &CROSSBOW_SPRITE, &bow);
-    a.sprite(T_CROSSBOW_LOADED, &["................", "................", "................", "................", "................", "................", "................", "........k.......", ".......k........", "......k.........", ".....k..........", "....k..........."], &[('k', rgb(180, 180, 190))]);
+    // Crossbows: a stock running up to the right, the bow across its front end, and
+    // the string from one tip of the bow to the other (pulled back to a nock when loaded).
+    for (tile, loaded) in [(T_CROSSBOW, false), (T_CROSSBOW_LOADED, true)] {
+        let seg = |p: (f32, f32), a: (f32, f32), b: (f32, f32)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+            ((p.0 - a.0 - t * dx).powi(2) + (p.1 - a.1 - t * dy).powi(2)).sqrt()
+        };
+        let (front, back) = ((10.6, 5.4), (2.0, 14.0));
+        let (tip0, tip1, bulge) = ((5.4, 1.8), (14.2, 10.6), (11.8, 4.2));
+        let nock = (8.0, 8.0);
+        a.each(tile, |x, y, r, _| {
+            let p = (x as f32 + 0.5, y as f32 + 0.5);
+            // The bow: a curve from tip to tip, bowed forward.
+            let bow_d = (0..=16).map(|k| {
+                let t = k as f32 / 16.0;
+                let q = ((1.0 - t).powi(2) * tip0.0 + 2.0 * t * (1.0 - t) * bulge.0 + t * t * tip1.0, (1.0 - t).powi(2) * tip0.1 + 2.0 * t * (1.0 - t) * bulge.1 + t * t * tip1.1);
+                ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt()
+            }).fold(f32::MAX, f32::min);
+            let string = if loaded { seg(p, tip0, nock).min(seg(p, nock, tip1)) } else { seg(p, tip0, tip1) };
+            let stock = seg(p, back, front);
+            let bolt = loaded && seg(p, nock, (12.5, 3.5)) < 0.55;
+            if bow_d < 0.75 {
+                shade(rgb(85, 85, 95), r.range(0.9, 1.1))
+            } else if bolt {
+                rgb(180, 180, 190)
+            } else if stock < 0.9 {
+                rgb(130, 95, 55)
+            } else if stock < 1.5 {
+                rgb(60, 40, 20)
+            } else if string < 0.5 {
+                rgb(225, 225, 225)
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
     a.sprite(T_TOTEM, &TOTEM_SPRITE, &[('#', rgb(120, 90, 20)), ('g', rgb(240, 200, 60)), ('G', rgb(120, 200, 90)), ('E', rgb(20, 120, 40))]);
     a.sprite(T_BANNER, &BANNER_SPRITE, &[('#', rgb(90, 60, 30)), ('w', rgb(235, 235, 230)), ('k', rgb(40, 40, 45)), ('d', rgb(140, 30, 30))]);
     // Mob skins.

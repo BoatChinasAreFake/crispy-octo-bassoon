@@ -1219,7 +1219,11 @@ impl Mob {
                     if fd > 1.1 {
                         want = Some((d.x.atan2(-d.z), 1.8));
                     } else {
-                        self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        // Turn to face it, unless standing right on it (where the way to
+                        // it swings about with every nudge, and so would the head).
+                        if fd > 0.5 {
+                            self.yaw += angle_diff(d.x.atan2(-d.z), self.yaw).clamp(-6.0 * dt, 6.0 * dt);
+                        }
                         may_wander = false;
                     }
                 }
@@ -1585,28 +1589,47 @@ impl Mob {
                 }
             }
             MobKind::Weeper => {
-                // Drifts about high and slow; opens its eyes, and cries a fireball.
+                // Drifts about high and slow between open spots it can reach in a
+                // straight line; on seeing someone it stops, turns slowly to face
+                // them, opens its eyes, and cries a fireball. (It remembers seeing
+                // them for a moment, so a flicker of rock between doesn't send it
+                // lurching back and forth.)
                 may_wander = false;
                 self.fuse += dt;
+                self.warp_cd = (self.warp_cd - dt).max(0.0);
                 let eye = self.eye();
                 let aim = player + Vec3::Y * 0.9 - eye;
-                let sees = player_visible && dist < 48.0 && world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                let clear = player_visible && dist < 48.0 && world.raycast(eye, aim.normalize_or_zero(), aim.length()).is_none();
+                if clear {
+                    self.warp_cd = 1.5;
+                }
+                let sees = player_visible && dist < 48.0 && self.warp_cd > 0.0;
                 self.angry = sees && self.attack_cd < 1.0;
-                if self.goal.is_none() || self.fuse > 9.0 || self.body.hit_wall || self.goal.is_some_and(|g| g.distance(self.body.pos) < 2.0) {
+                let arrived = self.goal.is_some_and(|g| g.distance(self.body.pos) < 2.0);
+                if self.goal.is_none() || self.fuse > 12.0 || arrived || (self.body.hit_wall && self.fuse > 1.0) {
                     self.fuse = 0.0;
-                    self.goal = Some(self.body.pos + Vec3::new(rng.range(-16.0, 16.0), rng.range(-3.0, 3.0), rng.range(-16.0, 16.0)));
+                    let here = self.body.pos + Vec3::Y * 2.0;
+                    let open = |c: Vec3| [Vec3::ZERO, Vec3::X * 2.5, Vec3::NEG_X * 2.5, Vec3::Z * 2.5, Vec3::NEG_Z * 2.5, Vec3::Y * 2.5].iter().all(|o| world.get_v((c + *o).floor().as_ivec3()) == AIR);
+                    self.goal = (0..10)
+                        .map(|_| self.body.pos + Vec3::new(rng.range(-14.0, 14.0), rng.range(-3.0, 3.0), rng.range(-14.0, 14.0)))
+                        .find(|&c| open(c + Vec3::Y * 2.0) && world.raycast(here, (c - self.body.pos).normalize_or_zero(), c.distance(self.body.pos)).is_none())
+                        .or(Some(self.body.pos));
                 }
-                if let Some(g) = self.goal {
-                    let d = g - self.body.pos;
-                    want = Some((d.x.atan2(-d.z), 1.4));
-                    fly_vy = Some((d.y * 0.5).clamp(-1.0, 1.0));
-                }
+                let bob = (self.wander_t * 1.3 + self.id as f32).sin() * 0.25;
+                self.wander_t += dt;
                 if sees {
-                    want = want.map(|(_, s)| (face, s * 0.5));
-                    if self.attack_cd <= 0.0 {
+                    self.yaw += angle_diff(face, self.yaw).clamp(-1.5 * dt, 1.5 * dt);
+                    fly_vy = Some(bob);
+                    if clear && self.attack_cd <= 0.0 && angle_diff(face, self.yaw).abs() < 0.5 {
                         ev.push(MobEvent::Fireball(eye + aim.normalize_or_zero() * 2.4, aim.normalize_or_zero() * 10.0, true));
                         self.attack_cd = rng.range(3.0, 5.0);
                     }
+                } else if let Some(g) = self.goal {
+                    let d = g - self.body.pos;
+                    if Vec3::new(d.x, 0.0, d.z).length() > 1.0 {
+                        want = Some((d.x.atan2(-d.z), 1.4));
+                    }
+                    fly_vy = Some((d.y * 0.5 + bob).clamp(-1.0, 1.0));
                 }
             }
             MobKind::Snout => {
@@ -1685,6 +1708,21 @@ impl Mob {
                                 self.attack_cd = cd;
                             }
                         }
+                    }
+                } else if let Some(g) = self.goal {
+                    // After a Hmmer (see villagers.rs; the blows land there): a Pilferer
+                    // keeps a shooting distance, the rest close in.
+                    let d = g - self.body.pos;
+                    let fd = Vec3::new(d.x, 0.0, d.z).length();
+                    let toward = d.x.atan2(-d.z);
+                    if self.kind == MobKind::Pilferer && fd < 6.0 {
+                        self.yaw += angle_diff(toward, self.yaw).clamp(-8.0 * dt, 8.0 * dt);
+                        may_wander = false;
+                        self.fuse = if self.attack_cd < 0.8 { 1.0 } else { 0.0 };
+                    } else if fd > 1.2 {
+                        want = Some((toward, if self.kind == MobKind::Rampager { 2.9 } else { 3.2 }));
+                    } else {
+                        may_wander = false;
                     }
                 } else if let Some(h) = self.home {
                     let d = h - self.body.pos;
@@ -2569,6 +2607,11 @@ pub enum Limb {
     Wing(f32),
     /// Held at a fixed lean (radians about x; negative leans forward).
     Tilt(f32),
+    /// An arm held out forward and turned in by this much (radians about y,
+    /// about its own shoulder): holding something in both hands.
+    Aim(f32),
+    /// Turned about the vertical by a fixed amount (a crossbow's drawn string).
+    Yaw(f32),
     /// A bird's wing: out and back while it falls, a little sway as it walks.
     /// The sign says which side (-1 left, 1 right).
     Flap(f32),
@@ -2875,7 +2918,7 @@ static SOGGY_ARMED: [Part; 7] = {
 
 static RATTLER: [Part; 6] = humanoid(T_BONE, T_RATTLER_FACE, T_BONE, T_BONE, Limb::Forward, Limb::Forward);
 
-static GRUMBLER: [Part; 6] = humanoid(T_GRUMBLE_SKIN, T_GRUMBLE_FACE, T_GRUMBLE_SKIN, T_GOLD, Limb::Swing(-0.8), Limb::Swing(0.8));
+static GRUMBLER: [Part; 6] = humanoid(T_GRUMBLE_SKIN, T_GRUMBLE_FACE, T_GRUMBLE_SKIN, T_GRUMBLE_PANTS, Limb::Swing(-0.8), Limb::Swing(0.8));
 
 /// A robe, arms folded, and a nose that means business.
 static HMMER: [Part; 7] = {
@@ -3146,16 +3189,39 @@ const fn illager(coat: u16, arms: Limb) -> [Part; 7] {
     let h = humanoid(T_ILLAGER, T_ILLAGER_FACE, coat, coat, arms, arms);
     [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.06, 1.55, -0.38], [0.12, 0.22, 0.14], [0.0; 3], Limb::Fixed, [T_ILLAGER; 6])]
 }
-static PILFERER: [Part; 7] = illager(T_PILFERER_COAT, Limb::Forward);
-/// A crossbow in a Pilferer's hands: stock, bow, string, and a bolt when loaded.
+/// A Pilferer: both hands on its crossbow (one at the stock, one reaching to the bow).
+static PILFERER: [Part; 7] = {
+    let h = illager(T_PILFERER_COAT, Limb::Fixed);
+    let (a, b) = (h[3], h[4]);
+    [
+        h[0],
+        h[1],
+        h[2],
+        part(a.min, a.size, [-0.375, 1.4, 0.0], Limb::Aim(-0.55), a.tiles),
+        part(b.min, b.size, [0.375, 1.4, 0.0], Limb::Aim(0.3), b.tiles),
+        h[5],
+        h[6],
+    ]
+};
+/// A crossbow in a Pilferer's hands: stock, bow, the string between the bow's
+/// tips (drawn back to a nock in two halves when loaded), and the grip.
+const STRING_HALF: f32 = 0.42;
+const STRING_TURN: f32 = 0.637;
 static CROSSBOW_HELD: [Part; 5] = [
-    part([-0.05, 1.3, -1.2], [0.1, 0.09, 0.62], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
-    part([-0.38, 1.32, -1.16], [0.76, 0.07, 0.08], [0.0; 3], Limb::Fixed, [T_PLANKS; 6]),
-    part([-0.36, 1.34, -1.0], [0.72, 0.025, 0.025], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
-    part([-0.04, 1.2, -0.72], [0.08, 0.12, 0.08], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
-    part([-0.02, 1.39, -1.35], [0.04, 0.04, 0.6], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
+    part([-0.05, 1.36, -0.95], [0.1, 0.09, 0.6], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
+    part([-0.38, 1.38, -0.88], [0.76, 0.06, 0.06], [0.0; 3], Limb::Fixed, [T_LANTERN_CAP; 6]),
+    part([-0.36, 1.4, -0.82], [0.72, 0.02, 0.02], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
+    part([-0.04, 1.26, -0.5], [0.08, 0.12, 0.08], [0.0; 3], Limb::Fixed, [T_LOG_SIDE; 6]),
+    part([-0.02, 1.46, -1.0], [0.04, 0.04, 0.45], [0.0; 3], Limb::Fixed, [T_WHITE; 6]),
 ];
-static CROSSBOW_LOADED: [Part; 5] = CROSSBOW_HELD;
+static CROSSBOW_LOADED: [Part; 6] = [
+    CROSSBOW_HELD[0],
+    CROSSBOW_HELD[1],
+    part([-0.36, 1.4, -0.82], [STRING_HALF, 0.02, 0.02], [-0.36, 1.4, -0.81], Limb::Yaw(-STRING_TURN), [T_WHITE; 6]),
+    part([0.36 - STRING_HALF, 1.4, -0.82], [STRING_HALF, 0.02, 0.02], [0.36, 1.4, -0.81], Limb::Yaw(STRING_TURN), [T_WHITE; 6]),
+    CROSSBOW_HELD[3],
+    CROSSBOW_HELD[4],
+];
 static HACKLER: [Part; 7] = illager(T_HACKLER_COAT, Limb::Swing(-1.0));
 static INVOICER: [Part; 7] = illager(T_INVOICER_ROBE, Limb::Fixed);
 /// The Invoicer casting: arms up.
@@ -3210,8 +3276,11 @@ static TURTLE: [Part; 7] = [
     part([-0.3, 0.02, -0.5], [0.6, 0.12, 1.0], [0.0; 3], Limb::Fixed, [TU; 6]),
 ];
 const DO: u16 = crate::texture::T_DOLPHIN;
-static DOLPHIN: [Part; 5] = [
+static DOLPHIN: [Part; 7] = [
     part([-0.25, 0.1, -0.6], [0.5, 0.45, 1.1], [0.0; 3], Limb::Fixed, [DO; 6]),
+    // Flippers out to the sides.
+    part([-0.5, 0.14, -0.38], [0.26, 0.05, 0.2], [-0.25, 0.16, -0.3], Limb::Wing(-0.35), [DO; 6]),
+    part([0.24, 0.14, -0.38], [0.26, 0.05, 0.2], [0.25, 0.16, -0.3], Limb::Wing(0.35), [DO; 6]),
     part([-0.2, 0.12, -0.95], [0.4, 0.38, 0.35], [0.0; 3], Limb::Fixed, [DO, DO, DO, DO, DO, crate::texture::T_DOLPHIN_FACE]),
     part([-0.06, 0.18, -1.15], [0.12, 0.1, 0.2], [0.0; 3], Limb::Fixed, [DO; 6]),
     part([-0.04, 0.55, -0.15], [0.08, 0.22, 0.3], [0.0; 3], Limb::Fixed, [DO; 6]),
@@ -3275,19 +3344,35 @@ static WANDERER: [Part; 8] = {
         part([-0.28, 1.75, -0.28], [0.56, 0.3, 0.56], [0.0; 3], Limb::Fixed, [crate::texture::T_WANDERER_ROBE; 6]),
     ]
 };
-static GOAT: [Part; 10] = [
-    part([-0.25, 0.6, -0.45], [0.5, 0.5, 0.9], [0.0; 3], Limb::Fixed, [GT; 6]),
-    part([-0.17, 0.85, -0.82], [0.34, 0.36, 0.42], [0.0; 3], Limb::Fixed, [GT, GT, GT, GT, GT, T_GOAT_FACE]),
-    // Beard and horns.
-    part([-0.05, 0.68, -0.8], [0.1, 0.2, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
-    part([-0.15, 1.2, -0.62], [0.08, 0.28, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
-    part([0.07, 1.2, -0.62], [0.08, 0.28, 0.08], [0.0; 3], Limb::Fixed, [T_BONE; 6]),
-    part([-0.24, 0.0, -0.4], [0.14, 0.6, 0.14], [0.0, 0.6, -0.33], Limb::Swing(1.0), [GT; 6]),
-    part([0.1, 0.0, -0.4], [0.14, 0.6, 0.14], [0.0, 0.6, -0.33], Limb::Swing(-1.0), [GT; 6]),
-    part([-0.24, 0.0, 0.26], [0.14, 0.6, 0.14], [0.0, 0.6, 0.33], Limb::Swing(-1.0), [GT; 6]),
-    part([0.1, 0.0, 0.26], [0.14, 0.6, 0.14], [0.0, 0.6, 0.33], Limb::Swing(1.0), [GT; 6]),
-    part([-0.05, 0.95, 0.42], [0.1, 0.12, 0.12], [0.0; 3], Limb::Fixed, [GT; 6]),
-];
+/// A goat: a long, shaggy body with hair hanging below, a narrow head held
+/// forward, horns sweeping back, ears out to the sides, a beard and dark hooves.
+static GOAT: [Part; 19] = {
+    const F: u16 = T_GOAT_FUR;
+    const HS: u16 = T_GOAT_HEAD_SIDE;
+    const H: u16 = T_GOAT_HORN_TILE;
+    const K: u16 = T_GOAT_HOOF;
+    [
+        part([-0.24, 0.66, -0.44], [0.48, 0.42, 0.88], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([-0.27, 0.5, -0.38], [0.54, 0.22, 0.76], [0.0; 3], Limb::Fixed, [F; 6]),
+        part([-0.12, 0.86, -0.62], [0.24, 0.32, 0.22], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([-0.14, 0.98, -0.9], [0.28, 0.28, 0.32], [0.0; 3], Limb::Fixed, [HS, HS, GT, GT, GT, GT]),
+        part([-0.1, 0.94, -1.06], [0.2, 0.22, 0.16], [0.0; 3], Limb::Fixed, [GT, GT, GT, GT, GT, T_GOAT_FACE]),
+        part([-0.04, 0.72, -1.0], [0.08, 0.22, 0.08], [0.0; 3], Limb::Fixed, [F; 6]),
+        part([-0.32, 1.13, -0.8], [0.18, 0.06, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([0.14, 1.13, -0.8], [0.18, 0.06, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
+        part([-0.13, 1.24, -0.8], [0.07, 0.34, 0.07], [-0.1, 1.24, -0.77], Limb::Tilt(0.75), [H; 6]),
+        part([0.06, 1.24, -0.8], [0.07, 0.34, 0.07], [0.1, 1.24, -0.77], Limb::Tilt(0.75), [H; 6]),
+        part([-0.22, 0.1, -0.38], [0.13, 0.56, 0.13], [0.0, 0.66, -0.32], Limb::Swing(1.0), [GT; 6]),
+        part([0.09, 0.1, -0.38], [0.13, 0.56, 0.13], [0.0, 0.66, -0.32], Limb::Swing(-1.0), [GT; 6]),
+        part([-0.22, 0.1, 0.25], [0.13, 0.56, 0.13], [0.0, 0.66, 0.32], Limb::Swing(-1.0), [GT; 6]),
+        part([0.09, 0.1, 0.25], [0.13, 0.56, 0.13], [0.0, 0.66, 0.32], Limb::Swing(1.0), [GT; 6]),
+        part([-0.22, 0.0, -0.38], [0.13, 0.1, 0.13], [0.0, 0.66, -0.32], Limb::Swing(1.0), [K; 6]),
+        part([0.09, 0.0, -0.38], [0.13, 0.1, 0.13], [0.0, 0.66, -0.32], Limb::Swing(-1.0), [K; 6]),
+        part([-0.22, 0.0, 0.25], [0.13, 0.1, 0.13], [0.0, 0.66, 0.32], Limb::Swing(-1.0), [K; 6]),
+        part([0.09, 0.0, 0.25], [0.13, 0.1, 0.13], [0.0, 0.66, 0.32], Limb::Swing(1.0), [K; 6]),
+        part([-0.05, 0.98, 0.42], [0.1, 0.14, 0.1], [0.0; 3], Limb::Fixed, [GT; 6]),
+    ]
+};
 const AX: u16 = T_AXOLOTL;
 static AXOLOTL: [Part; 9] = [
     part([-0.18, 0.08, -0.4], [0.36, 0.24, 0.62], [0.0; 3], Limb::Fixed, [AX; 6]),
@@ -3505,6 +3590,8 @@ fn draw_posed(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, flap: f3
             Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
             Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
             Limb::Tilt(t) => Mat4::from_rotation_x(t),
+            Limb::Aim(a) => Mat4::from_rotation_y(a) * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            Limb::Yaw(a) => Mat4::from_rotation_y(a),
             Limb::Flap(s) => Mat4::from_rotation_z(flap.sin().abs() * 1.3 * s) * Mat4::from_rotation_x(swing * 0.3 * s),
             Limb::Bob(s) => Mat4::from_translation(Vec3::Y * (anim * 2.0).sin() * 0.06 * s),
             Limb::Spin(s) => Mat4::from_rotation_y(anim * s),
