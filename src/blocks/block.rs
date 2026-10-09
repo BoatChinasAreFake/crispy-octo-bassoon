@@ -692,7 +692,10 @@ pub const BIRCH_BOAT: Id = FIRST_ITEM + 254;
 pub const DARK_OAK_BOAT: Id = FIRST_ITEM + 255;
 /// Kelp, dried in a furnace: a small snack.
 pub const DRIED_KELP: Id = FIRST_ITEM + 256;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 257;
+/// From Magma Bloops and Wisps (see beasts.rs).
+pub const MAGMA_CREAM: Id = FIRST_ITEM + 257;
+pub const SOUL_EMBER: Id = FIRST_ITEM + 258;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 259;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2799,6 +2802,8 @@ impl Registry {
         items.push(ItemDef { stack: 1, ..item("support_gauge", "Support Gauge (Is It Going to Hold?)", T_SUPPORT_GAUGE) });
         items.extend(crate::woods::items());
         items.push(ItemDef { food: Some(1.0), ..item("dried_kelp", "Dried Kelp (Crunchy Ocean)", T_DRIED_KELP) });
+        items.push(item("magma_cream", "Magma Cream (Do Not Moisturise)", T_MAGMA_CREAM));
+        items.push(item("soul_ember", "Soul Ember (Cold Comfort)", T_SOUL_EMBER));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };

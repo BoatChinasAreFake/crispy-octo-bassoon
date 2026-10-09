@@ -418,6 +418,9 @@ pub fn recipes() -> Vec<Recipe> {
         r(&[(BLACKSTONE, 4)], (BLACKSTONE_BRICKS, 4)),
         r(&[(BONE_DUST, 9)], (BONE_BLOCK, 1)),
         r(&[(BONE_BLOCK, 1)], (BONE_DUST, 9)),
+        // What the biomes' creatures leave (see beasts.rs).
+        r(&[(MAGMA_CREAM, 4)], (MAGMA_BLOCK, 1)),
+        r(&[(IRON, 1), (SOUL_EMBER, 1)], (SOUL_LANTERN, 1)),
     ]
 }
 

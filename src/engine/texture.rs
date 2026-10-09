@@ -788,6 +788,18 @@ pub const T_SOUL_FIRE: u16 = 952;
 pub const T_BLACKSTONE_BRICKS: u16 = 953;
 pub const T_CRACKED_BLACKSTONE_BRICKS: u16 = 954;
 pub const T_GILDED_BLACKSTONE: u16 = 955;
+/// The Scorchlands' biomes' creatures (see beasts.rs), and what they drop.
+pub const T_TUSKER_SKIN: u16 = 956;
+pub const T_TUSKER_FACE: u16 = 957;
+pub const T_SPORELING: u16 = 958;
+pub const T_SPORELING_FACE: u16 = 959;
+pub const T_MAGMA_BLOOP: u16 = 960;
+pub const T_MAGMA_BLOOP_FACE: u16 = 961;
+pub const T_WISP: u16 = 962;
+pub const T_WISP_FACE: u16 = 963;
+pub const T_BRUTE_TUNIC: u16 = 964;
+pub const T_MAGMA_CREAM: u16 = 965;
+pub const T_SOUL_EMBER: u16 = 966;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3142,7 +3154,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     });
     a.each(T_BLACKSTONE, |x, y, r, p| {
         let n = p.noise2(x as f32 * 0.55 + 33.0, y as f32 * 0.55);
-        shade(rgb(45, 38, 45), 1.0 + n * 0.35 + r.range(-0.1, 0.1))
+        shade(rgb(62, 53, 62), 1.0 + n * 0.35 + r.range(-0.1, 0.1))
     });
     a.each(T_MAGMA, |x, y, r, p| {
         let n = p.noise2(x as f32 * 0.4 + 77.0, y as f32 * 0.4);
@@ -3174,12 +3186,62 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             let row = y / 4;
             let mortar = y % 4 == 3 || (x + if row % 2 == 1 { 4 } else { 0 }) % 8 == 7;
             let crack = cracks && ((x * 3 + y * 5) % 13 == 0 || (x == y + 2 && x % 3 != 0));
-            shade(if mortar || crack { rgb(22, 18, 24) } else { rgb(55, 46, 55) }, r.range(0.88, 1.08))
+            shade(if mortar || crack { rgb(28, 23, 30) } else { rgb(78, 66, 78) }, r.range(0.88, 1.08))
         });
     }
     a.each(T_GILDED_BLACKSTONE, |x, y, r, p| {
         let n = p.noise3(x as f32 * 0.6, y as f32 * 0.6, 57.0);
         if n > 0.3 { shade(rgb(240, 200, 60), r.range(0.85, 1.1)) } else { shade(rgb(45, 38, 45), r.range(0.85, 1.12)) }
+    });
+    // A Tusker: coarse pinkish-brown bristles, small mean eyes, a broad snout.
+    a.each(T_TUSKER_SKIN, |x, y, r, _| shade(if (x * 3 + y * 7) % 5 == 0 { rgb(120, 70, 55) } else { rgb(170, 105, 85) }, r.range(0.85, 1.08)));
+    a.each(T_TUSKER_FACE, |x, y, r, _| {
+        let eye = y == 5 && (x == 3 || x == 12);
+        let snout = (4..12).contains(&x) && (9..15).contains(&y);
+        let nostril = y == 11 && (x == 6 || x == 9);
+        if eye { rgb(20, 15, 15) } else if nostril { rgb(60, 30, 30) } else if snout { shade(rgb(210, 150, 130), r.range(0.92, 1.05)) } else { shade(rgb(170, 105, 85), r.range(0.85, 1.08)) }
+    });
+    // A Sporeling: a pale stalk of a body with a little face.
+    a.each(T_SPORELING, |x, y, r, _| shade(if (x + y * 3) % 6 == 0 { rgb(120, 200, 190) } else { rgb(190, 215, 205) }, r.range(0.9, 1.06)));
+    a.each(T_SPORELING_FACE, |x, y, r, _| {
+        let eye = (5..7).contains(&y) && (x == 4 || x == 5 || x == 10 || x == 11);
+        let mouth = y == 10 && (6..10).contains(&x);
+        if eye { rgb(20, 40, 40) } else if mouth { rgb(70, 110, 105) } else { shade(rgb(190, 215, 205), r.range(0.9, 1.06)) }
+    });
+    // A Magma Bloop: cracked dark crust over glowing insides.
+    a.each(T_MAGMA_BLOOP, |x, y, r, p| {
+        let n = p.noise2(x as f32 * 0.45 + 140.0, y as f32 * 0.45);
+        if n > 0.15 { shade(rgb(255, 150, 40), r.range(0.85, 1.1)) } else { shade(rgb(70, 30, 25), r.range(0.8, 1.1)) }
+    });
+    a.copy(T_MAGMA_BLOOP, T_MAGMA_BLOOP_FACE);
+    for (x, y) in [(4, 5), (5, 5), (10, 5), (11, 5), (4, 6), (5, 6), (10, 6), (11, 6)] {
+        a.set(T_MAGMA_BLOOP_FACE, x, y, rgb(255, 230, 120));
+    }
+    // A Wisp: a blue flame with a hint of a face.
+    a.each(T_WISP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 9.0);
+        let core = dx * dx + dy * dy < 20.0;
+        shade(if core { rgb(170, 240, 250) } else { rgb(60, 190, 215) }, r.range(0.85, 1.1))
+    });
+    a.copy(T_WISP, T_WISP_FACE);
+    for (x, y) in [(5, 7), (5, 8), (10, 7), (10, 8)] {
+        a.set(T_WISP_FACE, x, y, rgb(20, 60, 80));
+    }
+    // A Snout Brute's tunic: black, with a gold belt.
+    a.each(T_BRUTE_TUNIC, |x, y, r, _| {
+        let belt = (9..11).contains(&y);
+        let buckle = belt && (7..9).contains(&x);
+        if buckle { rgb(255, 240, 150) } else if belt { shade(rgb(230, 190, 50), r.range(0.9, 1.05)) } else { shade(rgb(40, 32, 30), r.range(0.85, 1.1)) }
+    });
+    a.each(T_MAGMA_CREAM, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
+        let d = dx * dx + dy * dy;
+        if d < 22.0 { if d < 6.0 { rgb(255, 220, 90) } else { shade(rgb(230, 120, 40), r.range(0.85, 1.1)) } } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SOUL_EMBER, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        let flame = dx.abs() < 5.0 - (8.5 - y as f32).max(0.0) * 0.45 && y > 2 && y < 14;
+        if flame { if dx * dx + dy * dy < 6.0 { rgb(200, 250, 255) } else { shade(rgb(60, 190, 215), r.range(0.85, 1.1)) } } else { [0, 0, 0, 0] }
     });
     a.each(T_PALE_LEAVES, |_, _, r, _| if r.chance(0.15) { [180, 185, 175, 0] } else { shade(rgb(165, 172, 162), r.range(0.78, 1.12)) });
     a.each(T_PALE_PLANKS, |x, y, r, _| {

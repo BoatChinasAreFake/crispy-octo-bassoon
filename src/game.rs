@@ -288,6 +288,9 @@ pub struct Game {
     pub firefly_acc: f32,
     /// When spores and ash were last let loose (see wilds.rs).
     pub mote_acc: f32,
+    /// Bastions whose residents have moved in this session, and when they were last looked at (see bastion.rs).
+    pub bastions_peopled: HashSet<IVec3>,
+    pub bastion_timer: f32,
     /// Seconds since campfire smoke was last puffed (see home.rs).
     pub smoke_acc: f32,
     /// Seconds until a Wanderer might turn up (see villagers.rs).
@@ -563,6 +566,8 @@ impl Game {
             seat_no: 0,
             firefly_acc: 0.0,
             mote_acc: 0.0,
+            bastions_peopled: HashSet::new(),
+            bastion_timer: 0.0,
             smoke_acc: 0.0,
             wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
             frost_acc: 0.0,
@@ -3239,6 +3244,8 @@ impl Game {
         self.trials_tick(dt);
         self.creaking_tick(dt);
         self.snouts_tick(dt);
+        self.beasts_tick();
+        self.bastions_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
         self.zombie_hmmers_tick(dt);
@@ -3273,7 +3280,9 @@ impl Game {
                     MobKind::Mooer | MobKind::Mushmooer => noises.push((Sfx::Moo, m.body.pos)),
                     MobKind::Rattler => noises.push((Sfx::Rattle, m.body.pos)),
                     MobKind::Webber => noises.push((Sfx::Skitter, m.body.pos)),
-                    MobKind::Bloop => noises.push((Sfx::Bloop, m.body.pos)),
+                    MobKind::Bloop | MobKind::MagmaBloop => noises.push((Sfx::Bloop, m.body.pos)),
+                    MobKind::Tusker | MobKind::SnoutBrute => noises.push((Sfx::Oink, m.body.pos)),
+                    MobKind::Sporeling | MobKind::Wisp => {}
                     MobKind::Woofer => noises.push((Sfx::Woof, m.body.pos)),
                     MobKind::Hmmer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Grumbler => noises.push((Sfx::Oink, m.body.pos)),
@@ -3371,6 +3380,30 @@ impl Game {
                 MobEvent::Shush(from) => self.shush(from, target_id, target),
                 MobEvent::WindCharge(from, vel) => self.spawn_wind_charge(from, vel, None),
                 MobEvent::DropItem(at, item) => self.pop_drop(at, item, 1),
+                MobEvent::Toss(d, cause) => {
+                    // Up in the air you go (see beasts.rs).
+                    let d = self.rules.difficulty.mob_damage(d);
+                    let from = self.mobs.iter().find(|m| m.id == mob_id).map(|m| m.body.pos);
+                    let away = from.map(|f| (target - f).normalize_or_zero()).unwrap_or(Vec3::ZERO);
+                    if target_id == self.my_id {
+                        self.hurt_player_from(d, cause, from.map(|f| f + Vec3::Y * 0.9), false);
+                        self.player.body.vel += self.steadied(away * 6.0 + Vec3::Y * 9.0);
+                    } else if self.peers.contains_key(&target_id) {
+                        self.hurt_peer(target_id, d, cause, away * 6.0 + Vec3::Y * 9.0);
+                    }
+                }
+                MobEvent::Ignite(secs) => {
+                    if target_id == self.my_id && !self.creative && !self.has_effect(crate::potions::Potion::FireResistance) {
+                        self.on_fire = self.on_fire.max(secs);
+                    }
+                }
+                MobEvent::Spores(at) => {
+                    let kind = self.mobs.iter().find(|m| m.id == mob_id).map(|m| m.kind).unwrap_or(MobKind::Sporeling);
+                    self.spores(at, kind);
+                    if kind == MobKind::Sporeling && target_id == self.my_id && target.distance(at) < 5.0 && self.mobs.iter().any(|m| m.id == mob_id && m.flee > 3.5) {
+                        self.advance("spore_loser");
+                    }
+                }
                 MobEvent::Afflict(p, secs) => {
                     if target_id == self.my_id {
                         self.timed_effect(p, secs);
@@ -3442,6 +3475,11 @@ impl Game {
                             MobKind::Witch => self.advance("which_witch"),
                             MobKind::DesertGroaner | MobKind::SnowyRattler => self.advance("local_flavour"),
                             MobKind::CharredRattler => self.advance("char_broiled"),
+                            MobKind::Tusker => self.advance("pork_barrel"),
+                            MobKind::MagmaBloop => self.advance("magma_carta"),
+                            MobKind::Wisp => self.advance("snuffed_out"),
+                            MobKind::SnoutBrute => self.advance("brute_force"),
+                            MobKind::Sporeling => {}
                             MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Wilter => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
@@ -3450,12 +3488,12 @@ impl Game {
                             MobKind::Modded(_) => {}
                         }
                     }
-                    // Big Bloops split into smaller ones.
-                    if m.kind == MobKind::Bloop && m.size > 1.0 {
+                    // Big Bloops (and Magma Bloops) split into smaller ones.
+                    if matches!(m.kind, MobKind::Bloop | MobKind::MagmaBloop) && m.size > 1.0 {
                         let size = (m.size / 2.0) as u8;
                         for _ in 0..self.rng.int(2, 4) {
                             let off = Vec3::new(self.rng.range(-0.4, 0.4), 0.3, self.rng.range(-0.4, 0.4)) * m.size;
-                            self.alloc_mob_sized(MobKind::Bloop, m.body.pos + off, size);
+                            self.alloc_mob_sized(m.kind, m.body.pos + off, size);
                         }
                         self.sfx(Sfx::Bloop, Some(at));
                     }
@@ -3787,14 +3825,47 @@ impl Game {
         for y in y0..y0 + 12 {
             let floor = self.world.get(x, y - 1, z);
             let clear = (0..3).all(|h| self.world.get(x, y + h, z) == AIR);
-            if matches!(floor, SCORCHROCK | EMBERSAND | GILDED_SCORCHROCK | SCORCH_BRICKS | SORROW_SAND) && clear {
+            let ground = matches!(floor, SCORCHROCK | EMBERSAND | GILDED_SCORCHROCK | SCORCH_BRICKS | SORROW_SAND | CRIMSON_NYLIUM | TEAL_NYLIUM | BASALT | BLACKSTONE | SOUL_SOIL);
+            if ground && clear {
                 let at = Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5);
                 // Snouts keep near their camps.
-                let camp = self.world.generator.nearest_site(crate::structures::Kind::SnoutCamp, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0);
+                let camp = [crate::structures::Kind::SnoutCamp, crate::structures::Kind::Bastion].into_iter().any(|k| self.world.generator.nearest_site(k, at, 2).is_some_and(|o| o.as_vec3().distance(at) < 24.0));
                 let roll = self.rng.f32();
                 // Charred Rattlers walk the fortresses' halls.
                 if floor == SCORCH_BRICKS && roll < 0.5 {
                     self.alloc_mob(MobKind::CharredRattler, at);
+                    return;
+                }
+                // Each biome's own creatures (see beasts.rs), most of the time.
+                use crate::wilds::ScorchBiome;
+                let own = match self.world.generator.scorch_biome(x, z) {
+                    ScorchBiome::CrimsonForest => Some((MobKind::Tusker, 0.55, 3)),
+                    ScorchBiome::TealForest => Some((MobKind::Sporeling, 0.6, 2)),
+                    ScorchBiome::BasaltDeltas => Some((MobKind::MagmaBloop, 0.7, 1)),
+                    ScorchBiome::SoulValley => Some((MobKind::Wisp, 0.5, 2)),
+                    ScorchBiome::Wastes => None,
+                };
+                if let Some((kind, chance, most)) = own
+                    && !camp
+                    && roll < chance
+                {
+                    if kind_count(self, kind) >= 8 {
+                        return;
+                    }
+                    for i in 0..self.rng.int(1, most) {
+                        let p = at + Vec3::new(i as f32 * 0.9, if kind == MobKind::Wisp { 1.0 } else { 0.0 }, 0.0);
+                        if kind == MobKind::MagmaBloop {
+                            let size = [1, 2, 2, 4][self.rng.int(0, 3) as usize];
+                            self.alloc_mob_sized(kind, p, size);
+                        } else {
+                            self.alloc_mob(kind, p);
+                        }
+                    }
+                    return;
+                }
+                // (Teal forests are Starer country, as well.)
+                if own.is_some_and(|o| o.0 == MobKind::Sporeling) && roll < 0.8 {
+                    self.alloc_mob(MobKind::Starer, at);
                     return;
                 }
                 if camp && roll < 0.7 {

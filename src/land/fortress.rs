@@ -40,6 +40,8 @@ pub const FORTRESS_Y: i32 = LAVA_SEA + 10;
 pub const CAMP_Y: i32 = LAVA_SEA + 5;
 /// How far a fortress's bridges reach from the hall.
 const ARM: i32 = 26;
+/// Rolls under this (and over the camps') are a Snout Bastion.
+const BASTION_ROLL: f32 = 0.034;
 /// Seconds a Snout admires gold before it pays up.
 pub const ADMIRE_SECS: f32 = 6.0;
 /// Most Sizzlers a cage keeps around it.
@@ -74,6 +76,10 @@ impl Generator {
             Some(Site { kind: Kind::Fortress, origin: ivec3(ox, FORTRESS_Y, oz), facing, seed })
         } else if r < 0.024 {
             Some(Site { kind: Kind::SnoutCamp, origin: ivec3(ox, CAMP_Y, oz), facing, seed })
+        } else if r < BASTION_ROLL {
+            // A bastion is big: only where nothing else starts within three chunks (see bastion.rs).
+            let crowded = (-3..=3).any(|dz| (-3..=3).any(|dx| (dx, dz) != (0, 0) && hash2(s, cx + dx, cz + dz) < BASTION_ROLL));
+            (!crowded).then_some(Site { kind: Kind::Bastion, origin: ivec3(ox, crate::bastion::BASTION_Y, oz), facing, seed })
         } else {
             None
         }

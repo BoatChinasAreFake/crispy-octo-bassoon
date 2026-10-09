@@ -212,7 +212,8 @@ impl Game {
                 m.prey = None;
                 Interaction::Toggled
             }
-            k if k.passive() && k.breed_food().contains(&item) && m.ready_to_breed() => {
+            // Tuskers too, cross as they are (see beasts.rs).
+            k if (k.passive() || k == MobKind::Tusker) && k.breed_food().contains(&item) && m.ready_to_breed() => {
                 m.love = LOVE_SECS;
                 m.persistent = true;
                 self.hearts(pos, 4);
@@ -529,6 +530,9 @@ impl Game {
             self.mobs.push(b);
             if self.player.body.pos.distance(at) < 16.0 {
                 self.advance("the_birds_and_the_bees");
+                if kind == MobKind::Tusker {
+                    self.advance("raising_hell");
+                }
             }
         }
     }

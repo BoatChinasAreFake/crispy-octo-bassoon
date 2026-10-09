@@ -51,6 +51,10 @@ pub enum Kind {
     Igloo,
     /// On the deep sea floor (see monument.rs).
     Monument,
+    /// The Snouts' great gilded ruins (see bastion.rs), and (for loot only)
+    /// the treasure room in the middle of one.
+    Bastion,
+    BastionTreasure,
 }
 
 impl Kind {
@@ -77,6 +81,8 @@ impl Kind {
             Kind::Mineshaft => "Abandoned Mineshaft (Mind the Webs)",
             Kind::Igloo => "Igloo (Mind the Basement)",
             Kind::Monument => "Ocean Monument (Mind the Eyes)",
+            Kind::Bastion => "Snout Bastion (Gilded, Guarded)",
+            Kind::BastionTreasure => "Bastion Treasure Room (Mind the Brute)",
         }
     }
 
@@ -93,7 +99,8 @@ impl Kind {
             "ocean_ruins" | "ocean_ruin" => Kind::OceanRuins,
             "hushed_city" | "city" | "ancient_city" => Kind::HushedCity,
             "fortress" | "scorch_fortress" | "nether_fortress" => Kind::Fortress,
-            "snout_camp" | "camp" | "bastion" | "bastion_remnant" => Kind::SnoutCamp,
+            "snout_camp" | "camp" => Kind::SnoutCamp,
+            "bastion" | "snout_bastion" | "bastion_remnant" => Kind::Bastion,
             "outpost" | "pilferer_outpost" | "pillager_outpost" => Kind::Outpost,
             "trial_chambers" | "trial_chamber" | "trials" => Kind::TrialChambers,
             "shipwreck" | "wreck" => Kind::Shipwreck,
@@ -109,7 +116,7 @@ impl Kind {
 
     /// Wide enough that it reaches two chunks out.
     fn wide(self) -> bool {
-        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument)
+        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument | Kind::Bastion)
     }
 }
 
@@ -291,6 +298,9 @@ impl Generator {
             Kind::HushedCity => return crate::deepdark::city_blocks(site),
             Kind::Fortress => return crate::fortress::fortress_blocks(site),
             Kind::SnoutCamp => return crate::fortress::camp_blocks(site),
+            Kind::Bastion => return crate::bastion::bastion_blocks(site),
+            // (Never a site of its own: just a bastion's best chest.)
+            Kind::BastionTreasure => return Vec::new(),
             Kind::Outpost => return crate::raids::outpost_blocks(site),
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
             Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site),
@@ -563,7 +573,13 @@ impl Generator {
             for (p, id) in blocks {
                 if id == CHEST && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz {
                     // A village's houses have hut chests; only the square's is the village's.
-                    let kind = if site.kind == Kind::Village && p != village_chest(&site) { Kind::Hut } else { site.kind };
+                    let kind = if site.kind == Kind::Village && p != village_chest(&site) {
+                        Kind::Hut
+                    } else if site.kind == Kind::Bastion && p == crate::bastion::treasure_chest(&site) {
+                        Kind::BastionTreasure
+                    } else {
+                        site.kind
+                    };
                     v.push((p, kind, site.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
                 }
             }
@@ -808,6 +824,31 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (PRISMARINE_SHARD, 8, 0.5),
         ],
         Kind::Igloo => &[(GOLDEN_CHOP, 1, 1.0), (COAL, 4, 0.6), (APPLE, 3, 0.5), (BREAD, 2, 0.5), (WHEAT, 4, 0.3), (GOLD_INGOT, 2, 0.3), (SWORD_STONE, 1, 0.2)],
+        Kind::Bastion => &[
+            (GOLD_INGOT, 12, 0.8),
+            (GOLD_BLOCK, 2, 0.3),
+            (CRIMSON_FUNGUS, 6, 0.4),
+            (ARROW, 12, 0.4),
+            (CROSSBOW, 1, 0.3),
+            (IRON, 6, 0.4),
+            (MAGMA_CREAM, 4, 0.3),
+            (SCORCHITE_SCRAP, 1, 0.15),
+            (UPGRADE_TEMPLATE, 1, 0.12),
+            (GOLDEN_CHOP, 1, 0.2),
+            (DISC_FIRST + 7, 1, 0.08),
+        ],
+        Kind::BastionTreasure => &[
+            (UPGRADE_TEMPLATE, 1, 1.0),
+            (SCORCHITE_SCRAP, 3, 0.7),
+            (SCORCHITE_INGOT, 1, 0.3),
+            (DIAMOND, 5, 0.6),
+            (GOLD_BLOCK, 4, 0.6),
+            (ENCHANTED_BOOK, 1, 0.4),
+            (SWORD_DIAMOND, 1, 0.3),
+            (PICK_DIAMOND, 1, 0.25),
+            (GOLDEN_CHOP, 2, 0.4),
+            (DISC_FIRST + 7, 1, 0.2),
+        ],
         Kind::SnoutCamp => &[
             (GOLD_INGOT, 9, 0.8),
             (GOLD_BLOCK, 2, 0.3),
@@ -865,7 +906,7 @@ fn loot_wear(item: Id, kind: Kind, rng: &mut Rng) -> Wear {
     let Some(max) = durability(item) else { return 0 };
     let used = rng.range(0.1, 0.7) * max as f32;
     let power = match kind {
-        Kind::Spire | Kind::HushedCity => 20,
+        Kind::Spire | Kind::HushedCity | Kind::BastionTreasure => 20,
         Kind::Dungeon => 15,
         Kind::Tower => 10,
         _ => 5,
