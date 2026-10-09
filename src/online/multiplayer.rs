@@ -988,9 +988,10 @@ impl Game {
         if let (Some((f, o, true)), Some(base)) = (door_state(new), door_base(new)) {
             return replaceable(old) && self.world.get(x, y - 1, z) == door_of(base, f, o, false);
         }
-        // Fire only where it can burn.
-        if new == FIRE {
-            return crate::fire::can_burn_at(&self.world, IVec3::new(x, y, z));
+        // Fire only where it can burn (and blue only on soul ground).
+        if new == FIRE || new == SOUL_FIRE {
+            let p = IVec3::new(x, y, z);
+            return crate::fire::can_burn_at(&self.world, p) && (new == FIRE) != crate::wilds::is_soul_ground(self.world.get_v(p - IVec3::Y));
         }
         // Portals light only inside a real obsidian frame.
         if matches!(new, PORTAL_X | PORTAL_Z) {

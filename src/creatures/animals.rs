@@ -440,7 +440,10 @@ impl Game {
                 if let Some(j) = partner {
                     let other = self.mobs[j].body.pos;
                     goal = Some(other);
-                    if other.distance(pos) < 1.6 && i < j {
+                    // Close enough (big ones, like Tuskers, can't get as close as small ones).
+                    let d = other - pos;
+                    let reach = (me.body.half + self.mobs[j].body.half + 0.4).max(1.6);
+                    if Vec3::new(d.x, 0.0, d.z).length() < reach && d.y.abs() < 1.5 && i < j {
                         // Babies take after one parent or the other (and now and then, neither).
                         let pick = if self.rng.chance(0.5) { me.variant } else { self.mobs[j].variant };
                         let variant = if self.rng.chance(0.1) { crate::entity::roll_variant(kind, &mut self.rng) } else { pick };

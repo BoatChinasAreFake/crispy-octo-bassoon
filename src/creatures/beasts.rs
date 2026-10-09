@@ -27,8 +27,9 @@ use macroquad::math::{IVec3, Vec3};
 
 /// How close Teal Fungus has to be to put a Tusker off.
 pub const FUNGUS_FEAR: i32 = 6;
-/// How long a Sporeling's spores slow and weaken you.
+/// How long a Sporeling's spores slow and weaken you, and how far they reach.
 pub const SPORE_SECS: f32 = 8.0;
+pub const SPORE_REACH: f32 = 4.5;
 
 /// The nearest Teal Fungus (placed) within reach of `at`, if any.
 pub fn teal_fungus_near(world: &World, at: Vec3) -> Option<Vec3> {
@@ -104,14 +105,10 @@ pub fn update(m: &mut Mob, dt: f32, world: &World, player: Vec3, visible: bool, 
             }
         }
         MobKind::Sporeling => {
-            // Just hit: puff spores at whoever's close.
+            // Just hit: a cloud of spores over whoever's close.
             if m.temper == 1 {
                 m.temper = 0;
-                ev.push(MobEvent::Spores(m.body.pos + Vec3::Y * 0.6));
-                if visible && dist < 5.0 {
-                    ev.push(MobEvent::Afflict(crate::potions::Potion::Slowness, SPORE_SECS));
-                    ev.push(MobEvent::Afflict(crate::potions::Potion::Weakness, SPORE_SECS));
-                }
+                ev.push(MobEvent::SporeCloud(m.body.pos + Vec3::Y * 0.6));
             }
             if m.flee > 0.0 {
                 *want = Some((face + std::f32::consts::PI, 3.6));
@@ -181,6 +178,23 @@ impl crate::game::Game {
         }
     }
 
+    /// A Sporeling's cloud: everyone close is slowed and weakened (where the world lives).
+    pub fn spore_cloud(&mut self, at: Vec3) {
+        use crate::potions::Potion;
+        self.spores(at, MobKind::Sporeling);
+        self.spores(at, MobKind::Sporeling);
+        if !self.dedicated && self.dead.is_none() && !self.creative && (self.player.body.pos + Vec3::Y * 0.9).distance(at) < SPORE_REACH {
+            self.timed_effect(Potion::Slowness, SPORE_SECS);
+            self.timed_effect(Potion::Weakness, SPORE_SECS);
+            self.advance("spore_loser");
+        }
+        let near: Vec<u32> = self.peers.iter().filter(|(_, p)| p.alive() && (p.target + Vec3::Y * 0.9).distance(at) < SPORE_REACH).map(|(&id, _)| id).collect();
+        for id in near {
+            self.send_timed_effect(id, Potion::Slowness, SPORE_SECS, 0);
+            self.send_timed_effect(id, Potion::Weakness, SPORE_SECS, 0);
+        }
+    }
+
     /// Spores (or a Wisp's flicker) drifting up from `at`.
     pub fn spores(&mut self, at: Vec3, kind: MobKind) {
         if self.dedicated {
@@ -242,7 +256,7 @@ mod tests {
         m.damage(1.0, Vec3::new(2.0, 50.0, 0.5));
         let (mut want, mut fly, mut wander, mut ev) = (None, None, true, Vec::new());
         update(&mut m, 0.05, &g.world, Vec3::new(2.0, 50.0, 0.5), true, &mut rng, &mut want, &mut fly, &mut wander, &mut ev);
-        assert!(ev.iter().any(|e| matches!(e, MobEvent::Afflict(crate::potions::Potion::Slowness, _))));
+        assert!(ev.iter().any(|e| matches!(e, MobEvent::SporeCloud(_))));
         assert!(want.is_some_and(|(y, _)| y.sin() < 0.0), "running west, away");
     }
 }

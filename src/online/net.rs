@@ -33,7 +33,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v27: v0.2's mobs (Guardians, Witches, Allays, ...) and effects (Slowness, Poison, ...).
 /// v28: the Wilter, Charred Rattlers and Wilting.
 /// v29: new woods (doors, boats), the Mushmooer, kelp and sea plants.
-pub const PROTOCOL: u32 = 29;
+pub const PROTOCOL: u32 = 30;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

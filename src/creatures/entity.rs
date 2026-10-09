@@ -970,8 +970,10 @@ pub enum MobEvent {
     Toss(f32, &'static str),
     /// A Wisp sets the player it's after alight for this long.
     Ignite(f32),
-    /// A puff of spores (a Sporeling) or a flicker (a Wisp) here.
+    /// A wisp of spores (a Sporeling) or a flicker (a Wisp) here.
     Spores(Vec3),
+    /// A hit Sporeling's cloud of spores: everyone close is slowed and weakened.
+    SporeCloud(Vec3),
 }
 
 /// A spot a Starer can teleport to near `around`: standing room on solid ground.

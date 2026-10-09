@@ -3258,13 +3258,14 @@ impl Game {
                 continue;
             }
             let fuse_before = m.fuse;
-            // Chase whoever is closest.
+            // Chase whoever is closest (but not a host in creative: joined players still count).
             let (target_id, target) = targets
                 .iter()
                 .copied()
+                .filter(|t| visible || t.0 != self.my_id)
                 .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
                 .unwrap_or((u32::MAX, ppos));
-            let evs = m.update(dt, &self.world, target, visible && target_id != u32::MAX, daylight, &mut self.rng);
+            let evs = m.update(dt, &self.world, target, target_id != u32::MAX, daylight, &mut self.rng);
             let id = m.id;
             events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
             if fuse_before == 0.0 && m.fuse > 0.0 && !crate::monument::is_guardian(m.kind) {
@@ -3400,10 +3401,8 @@ impl Game {
                 MobEvent::Spores(at) => {
                     let kind = self.mobs.iter().find(|m| m.id == mob_id).map(|m| m.kind).unwrap_or(MobKind::Sporeling);
                     self.spores(at, kind);
-                    if kind == MobKind::Sporeling && target_id == self.my_id && target.distance(at) < 5.0 && self.mobs.iter().any(|m| m.id == mob_id && m.flee > 3.5) {
-                        self.advance("spore_loser");
-                    }
                 }
+                MobEvent::SporeCloud(at) => self.spore_cloud(at),
                 MobEvent::Afflict(p, secs) => {
                     if target_id == self.my_id {
                         self.timed_effect(p, secs);

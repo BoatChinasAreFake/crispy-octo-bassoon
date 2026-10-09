@@ -177,7 +177,7 @@ pub fn residents(site: &Site) -> Vec<(MobKind, IVec3)> {
     ];
     for side in [-1, 1] {
         v.push((MobKind::Tusker, ivec3(11 * side, 0, -11)));
-        if site.seed % 2 == 0 {
+        if site.seed.is_multiple_of(2) {
             v.push((MobKind::Tusker, ivec3(10 * side, 0, -10)));
         }
     }
@@ -221,8 +221,13 @@ impl Game {
 
     /// Opening a chest anywhere near Snouts makes them cross (they're touchy about their things).
     pub fn snouts_see_chest_opened(&mut self, pos: IVec3) {
-        if !self.is_client() && self.world.get_v(pos) == CHEST {
-            self.gold_taken(pos, CHEST);
+        if self.is_client() || self.world.get_v(pos) != CHEST {
+            return;
+        }
+        let at = pos.as_vec3();
+        for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Snout && m.body.pos.distance(at) < 16.0) {
+            m.angry = true;
+            m.seed = 0;
         }
     }
 }
