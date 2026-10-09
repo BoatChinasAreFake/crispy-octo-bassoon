@@ -59,8 +59,17 @@ impl Game {
         }
     }
 
+    /// Which dimension a player (by name) is in.
+    fn player_dim(&self, name: &str) -> Option<crate::dims::Dim> {
+        if self.is_local_player(name) {
+            Some(self.dim)
+        } else {
+            self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.dim)
+        }
+    }
+
     fn is_player(&self, name: &str) -> bool {
-        (!self.away() && name.eq_ignore_ascii_case(&self.player_name)) || self.peer_by_name(name).is_some()
+        (!self.dedicated && name.eq_ignore_ascii_case(&self.player_name)) || self.peer_by_name(name).is_some()
     }
 
     /// Run a cheat command. `me` is the caller's name ("" for the console).
@@ -107,18 +116,30 @@ impl Game {
             return vec!["The console has no body; say who to move: tp <player> <x y z | player>".into()];
         }
         let Some(from) = self.player_pos(&who) else { return vec![format!("No player called {who}.")] };
-        let to = match rest {
+        let Some(here) = self.player_dim(&who) else { return vec![format!("No player called {who}.")] };
+        let (to, dim) = match rest {
             [x, y, z] => match (coord(x, from.x), coord(y, from.y), coord(z, from.z)) {
-                (Some(x), Some(y), Some(z)) => Vec3::new(x, y, z),
+                (Some(x), Some(y), Some(z)) => (Vec3::new(x, y, z), here),
                 _ => return vec!["Usage: tp [player] <x y z> (numbers, or ~ for here)".into()],
             },
-            [target] => match self.player_pos(target) {
-                Some(p) => p,
-                None => return vec![format!("No player called {target}.")],
+            [target] => match (self.player_pos(target), self.player_dim(target)) {
+                (Some(p), Some(d)) => (p, d),
+                _ => return vec![format!("No player called {target}.")],
             },
             _ => return vec!["Usage: tp [player] <x y z | player>".into()],
         };
         let to = Vec3::new(to.x, to.y.clamp(-30.0, crate::world::CH as f32 + 60.0), to.z);
+        if dim != here {
+            // To someone in another dimension: there too.
+            let back = self.realm_dim();
+            if self.is_local_player(&who) {
+                self.move_local_player(dim, to);
+            } else if let Some(id) = self.peer_by_name(&who) {
+                self.move_peer(id, dim, to);
+            }
+            self.enter(back);
+            return vec![format!("Teleported {who} to {} at {:.1}, {:.1}, {:.1}.", dim.name(), to.x, to.y, to.z)];
+        }
         self.apply_cmds(vec![Cmd::Teleport(who.clone(), to)]);
         vec![format!("Teleported {who} to {:.1}, {:.1}, {:.1}.", to.x, to.y, to.z)]
     }

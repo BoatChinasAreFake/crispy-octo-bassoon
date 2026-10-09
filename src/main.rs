@@ -448,7 +448,7 @@ impl App {
         // A world of our own keeps its block edits in region files beside its save.
         if let Some(id) = &self.current_world {
             let dir = regions::region_dir(&save::world_file(&save::saves_dir(), id));
-            self.game.world.use_regions(dir);
+            self.game.use_regions(dir);
         }
         // We look like our settings say (joined players tell the host).
         let skin = self.settings.skin;
@@ -571,7 +571,7 @@ impl App {
     /// Write the game into its world slot (None if it has no slot, e.g. a joined server).
     fn write_current_world(&mut self) -> Option<std::io::Result<()>> {
         let id = self.current_world.clone()?;
-        if let Err(e) = self.game.world.flush_regions() {
+        if let Err(e) = self.game.flush_regions() {
             return Some(Err(e));
         }
         let data = self.game.to_save();

@@ -16,6 +16,7 @@ pub(crate) mod houses;
 pub(crate) mod liquids;
 pub(crate) mod monument;
 pub(crate) mod nature;
+pub(crate) mod realm_save;
 pub(crate) mod realms;
 pub(crate) mod rope;
 pub(crate) mod scorch;

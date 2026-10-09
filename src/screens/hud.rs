@@ -195,10 +195,12 @@ impl App {
             let hours = ((g.time * 24.0 + 6.0) % 24.0) as i32;
             let lines = [
                 format!("Minceraft {} ({:.0} fps)", paths::version(), self.fps),
-                format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
+                format!("XYZ: {:.2} / {:.2} / {:.2} in {}", p.x, p.y, p.z, g.dim.name()),
                 format!("Facing: {facing}"),
                 if g.world.is_scorch() {
                     format!("Biome: {}", g.world.scorch_biome_at(p).name())
+                } else if g.world.is_hollow() {
+                    "Biome: the Hollow".to_string()
                 } else {
                     format!("Biome: {} (surface {hgt})", biome.name())
                 },

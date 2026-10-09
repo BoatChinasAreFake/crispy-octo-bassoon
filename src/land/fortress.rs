@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn fortresses_have_cages_chests_and_bridges() {
-        let site = Site { kind: Kind::Fortress, origin: ivec3(SCORCH_X + 500, FORTRESS_Y, 40), facing: 0, seed: 7 };
+        let site = Site { kind: Kind::Fortress, origin: ivec3(500, FORTRESS_Y, 40), facing: 0, seed: 7 };
         let b = fortress_blocks(&site, false);
         assert!(b.iter().filter(|x| x.1 == SIZZLER_CAGE).count() >= 1);
         assert!(b.iter().filter(|x| x.1 == CHEST).count() >= 3);
@@ -639,7 +639,8 @@ mod tests {
         assert_eq!(g.mobs.iter().find(|m| m.id == id).unwrap().seed, 0);
         assert!(!g.drops.is_empty(), "something thrown back");
         // Take their gold and they're cross.
-        g.gold_taken(IVec3::new(SCORCH_X + 100, 50, 0), GOLD_BLOCK);
+        g.enter(crate::dims::Dim::Scorch);
+        g.gold_taken(IVec3::new(100, 50, 0), GOLD_BLOCK);
     }
 
     #[test]

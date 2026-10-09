@@ -167,6 +167,10 @@ impl Game {
             None => Realm::new(dim, &self.world, self.world.generator.opts),
         };
         r.swap_with(self);
+        // Personal Chests and backpacks are the same everywhere: they go
+        // with whichever world is active.
+        std::mem::swap(&mut self.world.stashes, &mut r.world.stashes);
+        std::mem::swap(&mut self.world.backpacks, &mut r.world.backpacks);
         // `r` now holds what was active.
         self.parked.insert(r.world.dim(), r);
     }

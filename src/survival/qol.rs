@@ -330,7 +330,7 @@ mod waypoints_tests {
         let list = g.waypoint_command("/wp list");
         assert_eq!(list.len(), 3);
         assert!(list[2].contains("The Mine"));
-        assert_eq!(decode(&encode(&g.waypoints)), g.waypoints);
+        assert_eq!(decode(&encode(&g.waypoints), false), g.waypoints);
         assert!(g.waypoint_command("/wp remove the mine")[0].contains("Forgot"));
         assert_eq!(g.waypoints.len(), 1);
         assert!(g.waypoint_command("/wp remove nowhere")[0].contains("No waypoint"));

@@ -36,8 +36,6 @@ pub const HOLLOW_X: i32 = -32_768;
 pub const GEN_ORIGIN: IVec3 = IVec3::new(HOLLOW_X - 1024, 50, 0);
 /// The island's middle, in the Hollow's own coordinates.
 pub const ORIGIN: IVec3 = IVec3::new(0, 50, 0);
-/// The bedrock band between the worlds.
-pub const WALL: i32 = 2048;
 /// The island's radius, and the pillars around its middle.
 pub const ISLAND: f32 = 64.0;
 pub const PILLARS: usize = 8;
@@ -435,7 +433,7 @@ impl Game {
         // Crystals heal it.
         let crystals: Vec<Vec3> = pillars(self.world.seed())
             .into_iter()
-            .map(|(x, z, h)| ivec3(x, h, z))
+            .map(|(x, z, h)| ivec3(x - GEN_ORIGIN.x, h, z))
             .filter(|p| self.world.get_v(*p) == WYRM_CRYSTAL)
             .map(|p| p.as_vec3() + Vec3::splat(0.5))
             .collect();
@@ -526,7 +524,7 @@ mod tests {
 
     #[test]
     fn the_hollow_is_an_island_with_pillars() {
-        let g = Generator::new(5);
+        let g = Generator::with_dim(5, crate::world::GenOptions::LEGACY, crate::dims::Dim::Hollow);
         let (cx, cz) = (ORIGIN.x.div_euclid(CW), ORIGIN.z.div_euclid(CW));
         let b = g.generate(cx, cz);
         let (lx, lz) = (ORIGIN.x.rem_euclid(CW), ORIGIN.z.rem_euclid(CW));
@@ -536,6 +534,7 @@ mod tests {
         let far = g.generate(cx + 12, cz + 12);
         assert!(far.iter().all(|&id| id == AIR));
         for (x, z, h) in pillars(5) {
+            let x = x - GEN_ORIGIN.x; // (generator coordinates to the Hollow's own)
             let c = g.generate(x.div_euclid(CW), z.div_euclid(CW));
             assert_eq!(c[crate::world::idx(x.rem_euclid(CW), h, z.rem_euclid(CW))], WYRM_CRYSTAL);
         }

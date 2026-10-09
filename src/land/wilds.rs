@@ -18,7 +18,7 @@
 use crate::block::*;
 use crate::game::Game;
 use crate::noise::{hash2, hash3};
-use crate::scorch::{LAVA_SEA, SCORCH_X};
+use crate::scorch::LAVA_SEA;
 use crate::sound::{Mat, Sfx};
 use crate::texture::*;
 use crate::world::{idx, Generator, World, CH, CW};
@@ -199,7 +199,7 @@ impl Generator {
     /// A huge fungus growing from this column: where it stands, how tall, and which kind.
     pub fn fungus_at(&self, x: i32, z: i32) -> Option<(IVec3, i32, bool)> {
         let s = self.seed ^ 0xF0F;
-        if x < SCORCH_X + 20 || hash2(s, x, z) >= 0.045 {
+        if hash2(s, x, z) >= 0.045 {
             return None;
         }
         let biome = self.scorch_biome(x, z);
@@ -220,9 +220,6 @@ impl Generator {
         for lz in 0..CW {
             for lx in 0..CW {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
-                if x < SCORCH_X + 16 {
-                    continue;
-                }
                 let biome = self.scorch_biome(x, z);
                 match biome {
                     ScorchBiome::Wastes => {}
@@ -326,7 +323,7 @@ impl Generator {
         }
         // The ribs of something very big and very dead.
         let (mx, mz) = (cx * CW + 8, cz * CW + 8);
-        if mx >= SCORCH_X + 24 && self.scorch_biome(mx, mz) == ScorchBiome::SoulValley && hash2(s ^ 0xF055, cx, cz) < 0.3
+        if self.scorch_biome(mx, mz) == ScorchBiome::SoulValley && hash2(s ^ 0xF055, cx, cz) < 0.3
             && let Some(y) = self.scorch_floor(mx, mz, LAVA_SEA + 2 + (hash2(s ^ 0xF056, cx, cz) * 30.0) as i32, 7)
         {
             for (p, id) in fossil(ivec3(8, y, 8), hash2(s ^ 0xF057, cx, cz) < 0.5) {
@@ -558,7 +555,7 @@ mod tests {
         let mut counts = std::collections::HashMap::new();
         for z in (-4000..4000).step_by(40) {
             for x in (0..8000).step_by(40) {
-                *counts.entry(g.scorch_biome(SCORCH_X + 100 + x, z)).or_insert(0) += 1;
+                *counts.entry(g.scorch_biome(crate::scorch::SCORCH_X + 100 + x, z)).or_insert(0) += 1;
             }
         }
         let total: i32 = counts.values().sum();
@@ -571,6 +568,9 @@ mod tests {
     #[test]
     fn each_biome_is_made_of_its_own_stuff() {
         let g = Generator::new(4242);
+        // (`find` gives generator coordinates; the Scorchlands' own are `off` chunks west.)
+        let gs = Generator::with_dim(4242, crate::world::GenOptions::LEGACY, crate::dims::Dim::Scorch);
+        let off = crate::dims::Dim::Scorch.gen_cx();
         let count = |b: &[Id], ids: &[Id]| b.iter().filter(|x| ids.contains(x)).count();
         for (biome, ids, min) in [
             (ScorchBiome::CrimsonForest, &[CRIMSON_NYLIUM, CRIMSON_STEM, CRIMSON_WART][..], 30),
@@ -583,7 +583,7 @@ mod tests {
             let mut n = 0;
             for dz in -1..=1 {
                 for dx in -1..=1 {
-                    n += count(&g.generate(cx + dx, cz + dz), ids);
+                    n += count(&gs.generate(cx - off + dx, cz + dz), ids);
                 }
             }
             assert!(n >= min, "{biome:?}: only {n}");
@@ -591,7 +591,7 @@ mod tests {
         // The forests grow huge fungi, with stems and caps.
         let (x, z) = find(&g, ScorchBiome::CrimsonForest);
         let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
-        let stems: usize = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| (dx, dz))).map(|(dx, dz)| count(&g.generate(cx + dx, cz + dz), &[CRIMSON_STEM])).sum();
+        let stems: usize = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| (dx, dz))).map(|(dx, dz)| count(&gs.generate(cx - off + dx, cz + dz), &[CRIMSON_STEM])).sum();
         assert!(stems > 8, "{stems} stems");
     }
 

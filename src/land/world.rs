@@ -621,10 +621,12 @@ pub struct Generator {
 impl Generator {
     /// A generator with the old rules (tests).
     #[cfg(test)]
+    #[cfg(test)]
     pub fn new(seed: u32) -> Self {
         Generator::with(seed, GenOptions::LEGACY)
     }
 
+    #[cfg(test)]
     pub fn with(seed: u32, opts: GenOptions) -> Self {
         Generator::with_dim(seed, opts, Dim::Over)
     }

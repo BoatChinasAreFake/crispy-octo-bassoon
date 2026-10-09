@@ -262,11 +262,11 @@ mod tests {
 
     #[test]
     fn bastions_turn_up_in_the_scorchlands_and_not_on_top_of_each_other() {
-        let g = crate::world::Generator::new(31);
+        let g = crate::world::Generator::with_dim(31, crate::world::GenOptions::LEGACY, crate::dims::Dim::Scorch);
         let mut found = Vec::new();
         for cz in -150..150 {
             for cx in 0..150 {
-                let cx = (crate::scorch::SCORCH_ORIGIN >> 4) - 75 + cx;
+                let cx = cx - 75;
                 if let Some(s) = g.site(cx, cz).filter(|s| s.kind == Kind::Bastion) {
                     found.push(s.origin);
                 }

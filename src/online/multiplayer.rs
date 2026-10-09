@@ -154,7 +154,7 @@ impl Game {
     }
 
     pub fn peer_name(&self, id: u32) -> String {
-        if id == self.my_id && !self.away() {
+        if id == self.my_id && !self.dedicated {
             return self.player_name.clone();
         }
         if id == 0 && !self.peers.contains_key(&0) {
@@ -853,6 +853,12 @@ impl Game {
                 }
             }
             Msg::Excavate { x, y, z, cracks } => self.host_excavate(from, IVec3::new(x, y, z), cracks),
+            Msg::Respawn => {
+                if self.realm_dim() != Dim::Over && self.peer_rate_ok(from, "respawn", 1.0) {
+                    let to = self.spawn;
+                    self.move_peer(from, Dim::Over, to);
+                }
+            }
             Msg::Died { cause } => {
                 // Told to everyone, like Minecraft's death messages.
                 if self.peer_rate_ok(from, "died", 1.0) {
@@ -1264,7 +1270,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn => {}
         }
     }
 
@@ -2443,15 +2449,24 @@ mod tests {
         for _ in 0..50 {
             client.portal_tick(0.05);
         }
-        assert!(pump(&mut host, &mut client, |_, c| crate::scorch::in_scorch(c.player.body.pos.x)));
-        assert!(crate::scorch::in_scorch(host.peers[&id].target.x));
+        assert!(pump(&mut host, &mut client, |_, c| c.dim == Dim::Scorch && c.realm_dim() == Dim::Scorch));
+        assert_eq!(host.peer_dim(id), Some(Dim::Scorch));
+        assert_eq!(host.peer_ref(id).unwrap().dim, Dim::Scorch);
+        // The host (still at home) keeps the Scorchlands going around them.
+        assert_eq!(host.realm_dim(), Dim::Over);
+        assert!(pump(&mut host, &mut client, |h, _| h.parked.get(&Dim::Scorch).is_some_and(|r| !r.world.chunks.is_empty())));
         // A portal they aren't standing in does nothing.
         client.net_send_msg(Msg::UsePortal { x: base.x, y: base.y, z: base.z });
         for _ in 0..40 {
             host.update(0.016, &idle());
             client.update(0.016, &idle());
         }
-        assert!(crate::scorch::in_scorch(client.player.body.pos.x));
+        assert_eq!(client.dim, Dim::Scorch);
+        // Dying there brings them home.
+        client.dead = Some("fell in lava".into());
+        client.respawn();
+        assert!(pump(&mut host, &mut client, |_, c| c.dim == Dim::Over));
+        assert_eq!(host.peer_dim(id), Some(Dim::Over));
     }
 
     #[test]

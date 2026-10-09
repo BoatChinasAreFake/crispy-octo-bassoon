@@ -104,6 +104,9 @@ pub struct Game {
     pub parked: HashMap<crate::dims::Dim, crate::realms::Realm>,
     /// The dimension the renderer's chunks are from.
     pub drawn: crate::dims::Dim,
+    /// Loaded from a save with the dimensions on one map; its region files
+    /// still need sorting out (see realm_save.rs).
+    pub old_layout: bool,
     pub player: Player,
     pub mobs: Vec<Mob>,
     pub particles: Vec<Particle>,
@@ -453,6 +456,7 @@ impl Game {
             dim: crate::dims::Dim::Over,
             parked: HashMap::new(),
             drawn: Default::default(),
+            old_layout: false,
             player,
             mobs: Vec::new(),
             particles: Vec::new(),
@@ -790,6 +794,8 @@ impl Game {
         if let Some((_, b)) = extras.iter().find(|(k, _)| k == "packs") {
             g.decode_packs(b);
         }
+        // The other dimensions (see realm_save.rs).
+        g.load_realms(&extras, remap.as_deref());
         g.msg("Welcome back. The world missed you (it's a HashMap, it can't feel).");
         g
     }
@@ -798,7 +804,12 @@ impl Game {
     #[allow(clippy::wrong_self_convention)]
     pub fn to_save(&mut self) -> SaveData {
         self.inv.return_cursor();
-        SaveData {
+        // The save's main part is the Overworld (the others go in sections).
+        let was = self.realm_dim();
+        self.enter(crate::dims::Dim::Over);
+        let mut extras = self.save_extras();
+        extras.extend(self.save_realms());
+        let d = SaveData {
             seed: self.world.seed(),
             creative: self.default_creative,
             time: self.time,
@@ -838,9 +849,11 @@ impl Game {
             hardcore: self.rules.hardcore,
             stats: self.stats.encode(),
             boxes: crate::boxes::encode(&self.boxes),
-            extras: self.save_extras(),
+            extras,
             version: crate::save::VERSION,
-        }
+        };
+        self.enter(was);
+        d
     }
 
     /// The save's named sections (see save.rs): each module packs its own.
@@ -1450,11 +1463,11 @@ impl Game {
     }
 
     pub fn is_local_player(&self, name: &str) -> bool {
-        !self.away() && (name.is_empty() || name.eq_ignore_ascii_case(&self.player_name))
+        !self.dedicated && (name.is_empty() || name.eq_ignore_ascii_case(&self.player_name))
     }
 
     pub fn player_names(&self) -> Vec<String> {
-        let mut v = if self.away() { vec![] } else { vec![self.player_name.clone()] };
+        let mut v = if self.dedicated { vec![] } else { vec![self.player_name.clone()] };
         v.extend(self.all_peers().map(|(_, p)| p.name.clone()));
         v
     }
@@ -3918,6 +3931,15 @@ impl Game {
     pub fn respawn(&mut self) {
         self.dead = None;
         self.player = Player::new(self.spawn);
+        // Everyone comes back in the Overworld.
+        if self.dim != crate::dims::Dim::Over {
+            if self.is_client() {
+                // (The host moves us.)
+                self.net_send_msg(Msg::Respawn);
+            } else {
+                self.move_local_player(crate::dims::Dim::Over, self.spawn);
+            }
+        }
         if self.net.is_none() {
             self.mobs.retain(|m| !m.menacing());
         }
@@ -5919,7 +5941,8 @@ looks_like = diamond
 
         #[test]
     fn portals_to_the_scorchlands_and_back() {
-        use crate::scorch::{in_scorch, is_portal};
+        use crate::dims::Dim;
+        use crate::scorch::is_portal;
         let mut g = arena(73);
         // A 4x5 obsidian frame (corners too), lit with a Sparker.
         let base = IVec3::new(3, 50, -3);
@@ -5951,7 +5974,8 @@ looks_like = diamond
             g.portal_tick(0.05);
         }
         let there = g.player.body.pos;
-        assert!(in_scorch(there.x), "at {there}");
+        assert_eq!((g.dim, g.realm_dim()), (Dim::Scorch, Dim::Scorch), "at {there}");
+        assert!(there.x.abs() < 1000.0, "near the Scorchlands' own middle: {there}");
         let feet = IVec3::new(there.x.floor() as i32, there.y.floor() as i32, there.z.floor() as i32);
         assert!(is_portal(g.world.get_v(feet)), "arrived in a portal");
         assert!(g.advancements.has("hotter"));
@@ -5961,7 +5985,7 @@ looks_like = diamond
         for _ in 0..60 {
             g.portal_tick(0.05);
         }
-        assert!(in_scorch(g.player.body.pos.x));
+        assert_eq!(g.dim, Dim::Scorch);
         // Step out, step back in: home again, to the portal we came from.
         g.player.body.pos += Vec3::new(0.0, 0.0, 2.0);
         g.portal_tick(0.05);
@@ -5970,7 +5994,7 @@ looks_like = diamond
             g.portal_tick(0.05);
         }
         let home = g.player.body.pos;
-        assert!(!in_scorch(home.x));
+        assert_eq!((g.dim, g.realm_dim()), (Dim::Over, Dim::Over));
         assert!(home.distance(base.as_vec3()) < 6.0, "back at the first portal: {home}");
         // The links are kept with the world.
         let back = Game::from_save(g.to_save());

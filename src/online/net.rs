@@ -153,6 +153,9 @@ pub enum Msg {
     /// Host → everyone: player `id` is now at (x, y, z) in dimension `dim`
     /// (see dims.rs). If that's you, forget the world you had and load this one.
     Dimension { id: u32, dim: u8, x: f32, y: f32, z: f32 },
+    /// A joined player respawning somewhere other than the Overworld: the host
+    /// brings them back to spawn there.
+    Respawn,
     /// host -> client: a firework burst, in one of the spark colours.
     Firework { at: Vec3, colour: u8 },
     Sound { sfx: u16, at: Vec3 },
@@ -797,6 +800,7 @@ impl Msg {
                 w.u32(*points);
             }
             Msg::FrostWalk => w.u8(86),
+            Msg::Respawn => w.u8(90),
             Msg::Dimension { id, dim, x, y, z } => {
                 w.u8(89);
                 w.u32(*id);
@@ -1188,6 +1192,7 @@ impl Msg {
             86 => Msg::FrostWalk,
             87 => Msg::SignStyle { x: r.i32()?, y: r.i32()?, z: r.i32()?, style: r.u8()?, item: r.u16()? },
             88 => Msg::ChestUpgrade { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            90 => Msg::Respawn,
             89 => Msg::Dimension { id: r.u32()?, dim: r.u8()?, x: r.f32()?, y: r.f32()?, z: r.f32()? },
             78 => Msg::LecternTake { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             73 => Msg::BundleUse { tag: r.u16()?, item: r.u16()?, n: r.u8()?, put: r.u8()? != 0 },
@@ -1787,6 +1792,7 @@ mod tests {
             Msg::FrostWalk,
             Msg::SignStyle { x: -4, y: 70, z: 9, style: 19, item: 0x805a },
             Msg::ChestUpgrade { x: 5, y: 60, z: -7 },
+            Msg::Respawn,
             Msg::Dimension { id: 4, dim: 2, x: 1.5, y: 70.0, z: -3.25 },
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
