@@ -34,7 +34,7 @@ Parts:
 - Part 1: items 1 to 5 and 9. **(released)**
 - Part 2: item 8 and the two originals (this is the last part). **(released)**
 
-## v0.3: A wider world
+## v0.3: A wider world (released)
 
 1. Surface biomes: savanna (acacia), birch forest, dark oak forest, mushroom islands (a red-spotted Mooer), ice spikes, meadows and stony peaks. Each new wood gets the full set (planks, slabs, stairs, fences, doors, boats).
 2. Busier seas: kelp, seagrass, sea pickles; warm, lukewarm and frozen ocean variants.
@@ -52,7 +52,7 @@ Parts:
 - Part 1: items 1 and 2. **(released)**
 - Part 2: items 3 and 4. **(released)**
 - Part 3: items 5, 6 and 7. **(released)**
-- Part 4: the two originals (this is the last part).
+- Part 4: the two originals (this is the last part). **(released)**
 
 ## v0.4: Together and tinkering
 
