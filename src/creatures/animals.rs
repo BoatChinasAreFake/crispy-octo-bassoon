@@ -54,12 +54,24 @@ pub enum Interaction {
     Mounted(u32),
     /// Brushed a Rollo (the brush wears once).
     Brushed,
+    /// Took a lead off it: the lead goes back to whoever did (see leads.rs).
+    Unleashed,
 }
 
 /// Would right-clicking this mob with `item` do anything? (Joined players
 /// guess the same way before the host decides, to wear their shears.)
 pub fn will_shear(m: &Mob, item: Id) -> bool {
     item == SHEARS && m.baby <= 0.0 && ((m.kind == MobKind::Fluffer && !m.sheared) || m.kind == MobKind::Mushmooer || (m.kind == MobKind::Galloper && m.barding > 0))
+}
+
+/// Can these two have young together? (A Galloper and a Donkey can: a Mule.)
+pub fn mates(a: MobKind, b: MobKind) -> bool {
+    a == b || matches!((a, b), (MobKind::Galloper, MobKind::Donkey) | (MobKind::Donkey, MobKind::Galloper))
+}
+
+/// What two parents' young is.
+pub fn foal_of(a: MobKind, b: MobKind) -> MobKind {
+    if a != b && mates(a, b) { MobKind::Mule } else { a }
 }
 
 impl Game {
@@ -84,6 +96,10 @@ impl Game {
         if self.mobs[i].kind == MobKind::Allay {
             return self.allay_interact(who, at, i, item);
         }
+        // Leads on and off (see leads.rs).
+        if let Some(r) = self.lead_interact(who, i, item) {
+            return r;
+        }
         let pos = self.mobs[i].body.pos + Vec3::Y * self.mobs[i].body.height;
         let m = &mut self.mobs[i];
         // Shears.
@@ -105,7 +121,7 @@ impl Game {
             self.sfx(Sfx::Snip, Some(pos));
             return Interaction::Sheared;
         }
-        if matches!(self.mobs[i].kind, MobKind::Galloper | MobKind::Strutter | MobKind::Camel | MobKind::Floaty | MobKind::Rotsteed) {
+        if matches!(self.mobs[i].kind, MobKind::Galloper | MobKind::Strutter | MobKind::Camel | MobKind::Floaty | MobKind::Rotsteed | MobKind::Donkey | MobKind::Mule) {
             let rider = if record_key(&self.player_name) == who && !self.away() {
                 self.my_id + 1
             } else {
@@ -316,6 +332,10 @@ impl Game {
                 true
             }
             Interaction::Toggled => true,
+            Interaction::Unleashed => {
+                self.give(LEAD, 1);
+                true
+            }
             Interaction::Mounted(id) => {
                 self.mount_mob(id);
                 true
@@ -335,6 +355,7 @@ impl Game {
             Interaction::Sheared => self.host_wear(from, SHEARS, 1),
             Interaction::Brushed => self.host_wear(from, item, 1),
             Interaction::Mounted(id) => self.net_send_to(from, Msg::MountMob { mob: id }),
+            Interaction::Unleashed => self.give_peer(from, LEAD, 1),
             _ => {}
         }
     }
@@ -434,7 +455,7 @@ impl Game {
                     .filter(|&j| j != i)
                     .filter(|&j| {
                         let o = &self.mobs[j];
-                        o.kind == kind && o.love > 0.0 && o.baby <= 0.0 && o.body.pos.distance(pos) < LOVE_RANGE && (kind != MobKind::Woofer || o.owner.is_some())
+                        mates(kind, o.kind) && o.love > 0.0 && o.baby <= 0.0 && o.body.pos.distance(pos) < LOVE_RANGE && (kind != MobKind::Woofer || o.owner.is_some())
                     })
                     .min_by(|&a, &b| self.mobs[a].body.pos.distance(pos).total_cmp(&self.mobs[b].body.pos.distance(pos)));
                 if let Some(j) = partner {
@@ -447,6 +468,7 @@ impl Game {
                         // Babies take after one parent or the other (and now and then, neither).
                         let pick = if self.rng.chance(0.5) { me.variant } else { self.mobs[j].variant };
                         let variant = if self.rng.chance(0.1) { crate::entity::roll_variant(kind, &mut self.rng) } else { pick };
+                        let kind = foal_of(kind, self.mobs[j].kind);
                         babies.push((kind, (pos + other) * 0.5, me.owner.clone(), variant));
                         for k in [i, j] {
                             let m = &mut self.mobs[k];
@@ -536,6 +558,9 @@ impl Game {
                 if kind == MobKind::Tusker {
                     self.advance("raising_hell");
                 }
+                if kind == MobKind::Mule {
+                    self.advance("hybrid_vigour");
+                }
             }
         }
     }
@@ -553,7 +578,7 @@ pub fn encode_mobs(mobs: &[Mob], names: &std::collections::HashMap<u32, String>)
     let mut out = Vec::new();
     let keep: Vec<&Mob> = mobs.iter().filter(|m| m.persistent && m.health > 0.0).collect();
     out.extend_from_slice(&(keep.len() as u32).to_le_bytes());
-    for m in keep {
+    for &m in &keep {
         // Base kinds store their stable index. A mod-defined kind stores a 255
         // sentinel then its "modid:name" key, so a save survives mods being
         // added, removed or reordered (an unknown key is dropped on load).
@@ -572,7 +597,7 @@ pub fn encode_mobs(mobs: &[Mob], names: &std::collections::HashMap<u32, String>)
         out.push(m.size as u8);
         let name = names.get(&m.id).map(String::as_str).unwrap_or("");
         let name = &name.as_bytes()[..name.len().min(64)];
-        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2 | (m.saddled as u8) << 3 | (!name.is_empty() as u8) << 4 | (m.barding.min(3)) << 5);
+        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2 | (m.saddled as u8) << 3 | (!name.is_empty() as u8) << 4 | (m.barding.min(3)) << 5 | (m.pack as u8) << 7);
         // (A seed's top byte is free: it carries the colouring.)
         out.extend_from_slice(&((m.seed & 0xFF_FFFF) | (m.variant as u32) << 24).to_le_bytes());
         let home = m.home.unwrap_or(Vec3::ZERO);
@@ -589,8 +614,24 @@ pub fn encode_mobs(mobs: &[Mob], names: &std::collections::HashMap<u32, String>)
             out.extend_from_slice(name);
         }
     }
+    // After them all (so older games still read the rest): which fence each is tied to.
+    out.extend_from_slice(LEASH_TAG);
+    for m in &keep {
+        match &m.leash {
+            Some(crate::leads::Leash::Fence(p)) => {
+                out.push(1);
+                for v in [p.x, p.y, p.z] {
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+            _ => out.push(0),
+        }
+    }
     out
 }
+
+/// Marks the fences mobs are tied to, after the mobs in a save.
+const LEASH_TAG: &[u8; 4] = b"LEAD";
 
 /// Unpack `encode_mobs` without the names.
 #[cfg(test)]
@@ -609,7 +650,11 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
         Some(s)
     };
     let Some(count) = take(4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])) else { return v };
+    // Which of `v` each record became (None: dropped), for the fences after.
+    let mut records: Vec<Option<usize>> = Vec::new();
+    let mut complete = true;
     for _ in 0..count.min(4096) {
+        complete = false;
         let Some(tag) = take(1).map(|s| s[0]) else { break };
         // A modded mob stored its key by name; resolve it against the loaded
         // mods, and skip (drop) the mob if that mod is no longer present.
@@ -636,7 +681,9 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
         } else {
             None
         };
+        complete = true;
         if !known || !f.iter().all(|x| x.is_finite()) {
+            records.push(None);
             continue;
         }
         let mut m = Mob::new(kind, Vec3::new(f[0], f[1], f[2]), rng).with_size(size.max(1));
@@ -648,12 +695,28 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
         m.sitting = flags & 2 != 0;
         m.saddled = flags & 8 != 0;
         m.barding = (flags >> 5) & 3;
+        m.pack = flags & 128 != 0 && matches!(kind, MobKind::Donkey | MobKind::Mule);
         m.owner = (!owner.is_empty()).then_some(owner);
         m.seed = seed & 0xFF_FFFF;
         m.variant = ((seed >> 24) as u8).min(crate::entity::variants(kind).saturating_sub(1));
         m.home = (flags & 4 != 0 && home.iter().all(|v| v.is_finite())).then(|| Vec3::new(home[0], home[1], home[2]));
         m.persistent = true;
+        records.push(Some(v.len()));
         v.push((m, name));
+    }
+    // Tied to fences (newer saves only).
+    if complete && take(4) == Some(&LEASH_TAG[..]) {
+        for r in records {
+            let Some(&[tied]) = take(1) else { break };
+            if tied == 0 {
+                continue;
+            }
+            let Some(s) = take(12) else { break };
+            let c = |k: usize| i32::from_le_bytes([s[k * 4], s[k * 4 + 1], s[k * 4 + 2], s[k * 4 + 3]]);
+            if let Some(i) = r {
+                v[i].0.leash = Some(crate::leads::Leash::Fence(macroquad::math::IVec3::new(c(0), c(1), c(2))));
+            }
+        }
     }
     v
 }
@@ -671,7 +734,14 @@ mod tests {
         m.variant = 3;
         m.persistent = true;
         m.barding = 2;
-        let back = decode_mobs(&encode_mobs(&[m], &HashMap::new()), &mut rng);
+        let mut d = Mob::new(MobKind::Donkey, Vec3::new(3.0, 60.0, 1.0), &mut rng);
+        d.pack = true;
+        d.persistent = true;
+        d.leash = Some(crate::leads::Leash::Fence(macroquad::math::IVec3::new(4, 60, -2)));
+        let back = decode_mobs(&encode_mobs(&[m, d], &HashMap::new()), &mut rng);
+        assert!(back[1].pack, "its chest is saved");
+        assert_eq!(back[1].leash, Some(crate::leads::Leash::Fence(macroquad::math::IVec3::new(4, 60, -2))), "and the fence it's tied to");
+        assert_eq!(back[0].leash, None);
         assert_eq!(back[0].variant, 3);
         assert_eq!(back[0].barding, 2, "its armour is saved");
         let blues = (0..5000).filter(|_| crate::entity::roll_variant(MobKind::Axolotl, &mut rng) == crate::entity::BLUE_AXOLOTL).count();

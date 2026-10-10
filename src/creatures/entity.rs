@@ -295,6 +295,12 @@ pub enum MobKind {
     Wisp,
     /// A Snout who guards a bastion: always cross, never bribed, golden axe.
     SnoutBrute,
+    /// Pack animals (see horses.rs): a Donkey, and a Mule (a Galloper's and a
+    /// Donkey's foal). Both ride and carry a chest. And a Snow Golem (see
+    /// golems.rs), built from snow and a pumpkin, which pelts monsters.
+    Donkey,
+    Mule,
+    SnowGolem,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
     Modded(u16),
@@ -310,7 +316,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 65] = [
+    pub const ALL: [MobKind; 68] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -377,6 +383,9 @@ impl MobKind {
         MobKind::MagmaBloop,
         MobKind::Wisp,
         MobKind::SnoutBrute,
+        MobKind::Donkey,
+        MobKind::Mule,
+        MobKind::SnowGolem,
     ];
 
     pub fn index(self) -> u8 {
@@ -486,6 +495,9 @@ impl MobKind {
             "magma bloop" | "magma_bloop" | "magmabloop" | "magma_cube" | "magma cube" => Some(MobKind::MagmaBloop),
             "wisp" => Some(MobKind::Wisp),
             "snout brute" | "snout_brute" | "snoutbrute" | "piglin_brute" | "brute" => Some(MobKind::SnoutBrute),
+            "donkey" => Some(MobKind::Donkey),
+            "mule" => Some(MobKind::Mule),
+            "snow golem" | "snow_golem" | "snowgolem" | "snowman" => Some(MobKind::SnowGolem),
             _ => None,
         }
     }
@@ -559,6 +571,9 @@ impl MobKind {
             MobKind::MagmaBloop => "Magma Bloop",
             MobKind::Wisp => "Wisp",
             MobKind::SnoutBrute => "Snout Brute",
+            MobKind::Donkey => "Donkey",
+            MobKind::Mule => "Mule",
+            MobKind::SnowGolem => "Snow Golem",
             MobKind::Modded(_) => "Creature",
         }
     }
@@ -580,6 +595,9 @@ impl MobKind {
             MobKind::MagmaBloop => (0.26, 0.52),
             MobKind::Wisp => (0.25, 0.6),
             MobKind::SnoutBrute => (0.3, 1.95),
+            MobKind::Donkey => (0.5, 1.45),
+            MobKind::Mule => (0.55, 1.55),
+            MobKind::SnowGolem => (0.35, 1.9),
             MobKind::Rattler => (0.3, 1.95),
             MobKind::Webber => (0.7, 0.9),
             MobKind::Bloop => (0.26, 0.52),
@@ -698,6 +716,9 @@ impl MobKind {
             MobKind::MagmaBloop => 1.5, // times size squared
             MobKind::Wisp => 8.0,
             MobKind::SnoutBrute => 50.0,
+            MobKind::Donkey => 18.0,
+            MobKind::Mule => 20.0,
+            MobKind::SnowGolem => 4.0,
             MobKind::Modded(_) => 10.0,
         }
     }
@@ -724,11 +745,11 @@ impl MobKind {
             // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Sporeling)
+        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Sporeling | MobKind::SnowGolem)
     }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
-        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::Turtle | MobKind::Panda | MobKind::Llama)
+        matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::Turtle | MobKind::Panda | MobKind::Llama | MobKind::Donkey | MobKind::Mule)
     }
     /// Flies (no gravity; steers up and down itself).
     pub fn flies(self) -> bool {
@@ -761,6 +782,8 @@ impl MobKind {
             MobKind::Turtle => &[LILY_PAD],
             MobKind::Panda => &[BAMBOO],
             MobKind::Llama => &[HAY],
+            // (Mules can't have foals.)
+            MobKind::Donkey => &[APPLE],
             MobKind::Woofer => &[PORKCHOP, COOKED_CHOP, MUTTON, COOKED_MUTTON, MOO_STEAK, STEAK, CLUCKETS, COOKED_CLUCKETS, GOO],
             MobKind::Modded(_) => self.mod_def().and_then(|d| d.breed_item.as_ref()).map(std::slice::from_ref).unwrap_or(&[]),
             _ => &[],
@@ -843,6 +866,12 @@ pub struct Mob {
     pub saddled: bool,
     /// Galloper armour: 0 none, 1 iron, 2 gold, 3 dimond (see homecraft.rs).
     pub barding: u8,
+    /// A Donkey or Mule carrying a chest (see wildlife.rs for the packs).
+    pub pack: bool,
+    /// On a lead: to whom or what (see leads.rs).
+    pub leash: Option<crate::leads::Leash>,
+    /// Where its lead's other end is (worked out by the host, sent to everyone).
+    pub leash_end: Option<Vec3>,
     /// How used to people it is (tamed at `horses::TAME_AT`).
     pub temper: u8,
     /// Who's riding it: 0 nobody, else player id + 1.
@@ -1042,12 +1071,15 @@ impl Mob {
             goal: None,
             // A boss stays until it's beaten.
             persistent: kind.mod_def().is_some_and(|d| d.boss),
-            seed: if kind == MobKind::Llama { crate::wildlife::llama_seed(rng) } else { 0 },
+            seed: if matches!(kind, MobKind::Llama | MobKind::Donkey | MobKind::Mule) { crate::wildlife::llama_seed(rng) } else { 0 },
             home: None,
             trades_used: [0; 8],
             restock: crate::villagers::RESTOCK_SECS,
             saddled: false,
             barding: 0,
+            pack: false,
+            leash: None,
+            leash_end: None,
             temper: 0,
             rider: 0,
             passenger: 0,
@@ -1214,7 +1246,7 @@ impl Mob {
         let face = flat.x.atan2(-flat.z);
         match self.kind {
             // (The Wyrm and the Wilter fly on their own, see hollow.rs and wilter.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Wilter | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer => {
+            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Wilter | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer | MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -2367,6 +2399,7 @@ impl Mob {
             MobKind::Sporeling if n > 0 => Some((TEAL_FUNGUS, n)),
             MobKind::Wisp if rng.chance(0.6) => Some((SOUL_EMBER, 1)),
             MobKind::SnoutBrute => Some((GOLD_INGOT, rng.int(1, 3) as u8)),
+            MobKind::SnowGolem => Some((SNOW_BLOCK, 1)),
             MobKind::Grumbler if n > 0 => Some((GOO, n)),
             MobKind::Clanker => Some((IRON, 3 + n)),
             MobKind::Fishy => Some(([COD, COD, SALMON, TROPICAL][rng.int(0, 3) as usize], 1)),
@@ -2487,6 +2520,12 @@ impl Mob {
         geo.begin(Pass::Opaque, tint, false);
         let swell = if self.kind == MobKind::Hisser { 1.0 + self.fuse * 0.08 } else { 1.0 };
         let mut scale = Vec3::splat(swell * self.size * if self.baby > 0.0 { 0.55 } else { 1.0 });
+        // Donkeys are a Galloper's shape, a size smaller (Mules in between).
+        if self.kind == MobKind::Donkey {
+            scale *= 0.86;
+        } else if self.kind == MobKind::Mule {
+            scale *= 0.93;
+        }
         if matches!(self.kind, MobKind::Bloop | MobKind::MagmaBloop) && !self.body.on_ground {
             // Stretch a little mid-hop.
             scale *= Vec3::new(0.9, 1.2, 0.9);
@@ -2561,6 +2600,9 @@ impl Mob {
             draw_model(geo, &root, &LLAMA_PACK, 0.0, sky, false);
         } else if self.saddled {
             draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
+        }
+        if self.pack && matches!(self.kind, MobKind::Donkey | MobKind::Mule) {
+            draw_model(geo, &root, &PACK_CHESTS, 0.0, sky, false);
         }
         if self.barding > 0 && self.kind == MobKind::Galloper {
             draw_posed(geo, &root, &BARDING[(self.barding.min(3) - 1) as usize], pose, self.flap, sky);
@@ -3072,6 +3114,28 @@ const fn retile<const N: usize>(mut parts: [Part; N], map: [(u16, u16); 4]) -> [
     }
     parts
 }
+/// A Donkey: a Galloper's shape, smaller (see `draw`), grey, with long ears.
+const fn long_ears<const N: usize>(mut parts: [Part; N]) -> [Part; N] {
+    parts[10].size[1] = 0.32;
+    parts[11].size[1] = 0.32;
+    parts
+}
+static DONKEY: [Part; 13] = long_ears(retile(GALLOPER_PARTS, [(GL, crate::texture::T_DONKEY), (T_GALLOP_MANE, crate::texture::T_DONKEY_MANE), (T_GALLOP_EYE, crate::texture::T_DONKEY_EYE), (T_GALLOP_FACE, crate::texture::T_DONKEY_FACE)]));
+static MULE: [Part; 13] = long_ears(retile(GALLOPER_PARTS, [(GL, crate::texture::T_MULE), (T_GALLOP_MANE, crate::texture::T_DONKEY_MANE), (T_GALLOP_EYE, crate::texture::T_MULE_EYE), (T_GALLOP_FACE, crate::texture::T_MULE_FACE)]));
+/// A Donkey's or Mule's chest, one on each side.
+static PACK_CHESTS: [Part; 2] = [
+    part([-0.5, 0.95, -0.25], [0.2, 0.42, 0.5], [0.0; 3], Limb::Fixed, [T_CHEST_SIDE; 6]),
+    part([0.3, 0.95, -0.25], [0.2, 0.42, 0.5], [0.0; 3], Limb::Fixed, [T_CHEST_SIDE; 6]),
+];
+const SG: u16 = crate::texture::T_SNOW;
+/// A Snow Golem: two snowballs, a pumpkin head, and stick arms.
+static SNOW_GOLEM: [Part; 5] = [
+    part([-0.32, 0.0, -0.32], [0.64, 0.64, 0.64], [0.0; 3], Limb::Fixed, [SG; 6]),
+    part([-0.24, 0.64, -0.24], [0.48, 0.6, 0.48], [0.0; 3], Limb::Fixed, [SG; 6]),
+    part([-0.25, 1.24, -0.25], [0.5, 0.5, 0.5], [0.0, 1.24, 0.0], Limb::Fixed, [T_PUMPKIN_SIDE, T_PUMPKIN_SIDE, T_PUMPKIN_TOP, T_PUMPKIN_TOP, T_PUMPKIN_SIDE, T_JACK_FACE]),
+    part([-0.75, 1.0, -0.04], [0.52, 0.07, 0.07], [-0.24, 1.04, 0.0], Limb::Swing(0.5), [T_LOG_SIDE; 6]),
+    part([0.23, 1.0, -0.04], [0.52, 0.07, 0.07], [0.24, 1.04, 0.0], Limb::Swing(-0.5), [T_LOG_SIDE; 6]),
+];
 static ROTSTEED: [Part; 13] = retile(GALLOPER_PARTS, [(GL, T_ROTSTEED), (T_GALLOP_MANE, T_ROTSTEED_FACE), (T_GALLOP_EYE, T_ROTSTEED_FACE), (T_GALLOP_FACE, T_ROTSTEED_FACE)]);
 const CG: u16 = T_COPPER_GOLEM;
 static COPPER_GOLEM: [Part; 9] = [
@@ -3499,6 +3563,9 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::MagmaBloop => &MAGMA_BLOOP,
         MobKind::Wisp => &WISP,
         MobKind::SnoutBrute => &SNOUT_BRUTE,
+        MobKind::Donkey => &DONKEY,
+        MobKind::Mule => &MULE,
+        MobKind::SnowGolem => &SNOW_GOLEM,
         MobKind::Rattler => &RATTLER,
         MobKind::Webber => &WEBBER,
         MobKind::Bloop => &BLOOP,
@@ -3801,6 +3868,8 @@ pub struct Arrow {
     pub wind: bool,
     /// Host-only: a firework rocket, by colour + 1 (0: not one; see fireworks.rs).
     pub firework: u8,
+    /// Host-only: a Snow Golem's snowball (it only hits monsters; see golems.rs).
+    pub snowball: bool,
     /// Host-only: a thrown splash potion (a Witch's): it bursts on whatever it
     /// meets, on everyone near (see night.rs).
     pub splash: bool,
@@ -3828,6 +3897,7 @@ impl Arrow {
             wind: false,
             firework: 0,
             splash: false,
+            snowball: false,
         }
     }
 
@@ -3881,6 +3951,7 @@ impl Arrow {
             wind: false,
             firework: 0,
             splash: false,
+            snowball: false,
         }
     }
 

@@ -212,6 +212,10 @@ pub const ALL: &[Advancement] = &[
     adv("compost_happens", "Compost Happens", "Get Compost out of a Composter."),
     adv("grounded", "Grounded", "Be near a Lightning Rod when it takes a strike."),
     adv("knight_errant", "Knight Errant", "Put armour on your Galloper."),
+    adv("beast_of_burden", "Beast of Burden", "Put a chest on a Donkey or a Mule."),
+    adv("hybrid_vigour", "Hybrid Vigour", "Breed a Galloper with a Donkey. It's a Mule. Of course it is."),
+    adv("snow_problem", "Snow Problem", "Build a Snow Golem."),
+    adv("walkies", "Walkies", "Put an animal on a Lead."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -227,6 +231,7 @@ const CREATURES: &[&str] = &[
     "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
     "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch", "char_broiled", "fungus_amongus",
     "pork_barrel", "raising_hell", "spore_loser", "magma_carta", "snuffed_out", "knight_errant",
+    "beast_of_burden", "hybrid_vigour", "snow_problem", "walkies",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",

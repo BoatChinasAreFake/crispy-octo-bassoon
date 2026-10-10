@@ -842,6 +842,16 @@ pub const T_DYED_WATER: u16 = 1003;
 pub const T_WOOL_WORN_DYED: u16 = 1011;
 pub const T_WOOL_ICON_DYED: u16 = 1019;
 pub const T_LIGHTNING_ROD_ITEM: u16 = 1051;
+/// Pack animals and leads.
+pub const T_DONKEY: u16 = 1052;
+pub const T_DONKEY_FACE: u16 = 1053;
+pub const T_DONKEY_EYE: u16 = 1054;
+pub const T_DONKEY_MANE: u16 = 1055;
+pub const T_MULE: u16 = 1056;
+pub const T_MULE_FACE: u16 = 1057;
+pub const T_MULE_EYE: u16 = 1058;
+pub const T_LEAD: u16 = 1059;
+pub const T_SNOWBALL: u16 = 1060;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4444,6 +4454,30 @@ fn homecraft_tiles(a: &mut Atlas) {
             shade(base, r.range(0.9, 1.05) * if plate { 0.72 } else { 1.0 })
         });
     }
+    // Donkeys (grey, pale muzzle) and Mules (brown): a Galloper's face and eyes.
+    for (body, face, eye, base) in [(T_DONKEY, T_DONKEY_FACE, T_DONKEY_EYE, rgb(128, 120, 112)), (T_MULE, T_MULE_FACE, T_MULE_EYE, rgb(105, 72, 45))] {
+        a.speckle(body, base, 0.08);
+        a.each(face, |x, y, r, _| {
+            let nostril = matches!((x, y), (4, 7) | (5, 7) | (10, 7) | (11, 7) | (4, 8) | (11, 8));
+            if nostril { rgb(40, 32, 28) } else if y > 5 { shade(rgb(200, 192, 180), r.range(0.92, 1.05)) } else { shade(base, r.range(0.92, 1.05)) }
+        });
+        a.copy(body, eye);
+        for (x, y, c) in [(7, 5, rgb(20, 15, 10)), (8, 5, rgb(20, 15, 10)), (7, 6, rgb(20, 15, 10)), (8, 6, rgb(240, 235, 225))] {
+            a.set(eye, x, y, c);
+        }
+    }
+    a.speckle(T_DONKEY_MANE, rgb(55, 48, 42), 0.1);
+    // A lead: a coil of rope with a loop.
+    a.each(T_LEAD, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let coil = (4.0..6.0).contains(&d) || (y < 5 && (6..10).contains(&x) && (x == 6 || x == 9 || y == 1));
+        if coil { shade(rgb(170, 135, 85), r.range(0.85, 1.08) * if (x + y) % 3 == 0 { 0.8 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SNOWBALL, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 5.5 { shade(rgb(240, 245, 250), r.range(0.88, 1.02) * if d > 4.5 { 0.85 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
     // Dyed woolly armour: the worn knit and the icons, in each colour.
     for c in 0..8u16 {
         let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };

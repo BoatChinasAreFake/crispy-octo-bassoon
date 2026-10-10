@@ -714,7 +714,9 @@ pub const SOUL_EMBER: Id = FIRST_ITEM + 258;
 pub const HORSE_ARMOR_IRON: Id = FIRST_ITEM + 259;
 pub const HORSE_ARMOR_GOLD: Id = FIRST_ITEM + 260;
 pub const HORSE_ARMOR_DIAMOND: Id = FIRST_ITEM + 261;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 262;
+/// A lead, to walk animals on and tie them to fences (see leads.rs).
+pub const LEAD: Id = FIRST_ITEM + 262;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 263;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2833,6 +2835,7 @@ impl Registry {
         items.push(item("magma_cream", "Magma Cream (Do Not Moisturise)", T_MAGMA_CREAM));
         items.push(item("soul_ember", "Soul Ember (Cold Comfort)", T_SOUL_EMBER));
         items.extend(crate::homecraft::items());
+        items.push(item("lead", "Lead (Walkies)", T_LEAD));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -3093,6 +3096,7 @@ impl Registry {
         recipes.extend(crate::woods::recipes());
         recipes.extend(crate::wilds::recipes());
         recipes.extend(crate::homecraft::recipes());
+        recipes.push(Recipe { inputs: vec![(STRING, 4), (GOO, 1)], output: (LEAD, 2) });
         recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {

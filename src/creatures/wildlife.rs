@@ -44,6 +44,11 @@ pub fn pack_of_key(p: IVec3) -> Option<u32> {
     (p.x == PACK_X && p.y == PACK_Y).then_some(p.z as u32)
 }
 
+/// Is this mob carrying a pack (a Llama given a chest, or a Donkey or Mule)?
+pub fn carries_pack(m: &Mob) -> bool {
+    (m.kind == MobKind::Llama && m.saddled) || (matches!(m.kind, MobKind::Donkey | MobKind::Mule) && m.pack)
+}
+
 fn ahead_is_water(m: &Mob, world: &World) -> bool {
     let ahead = m.body.pos + Vec3::new(m.yaw.sin(), 0.2, -m.yaw.cos()) * 0.9;
     is_wet(world.get(ahead.x.floor() as i32, ahead.y.floor() as i32, ahead.z.floor() as i32))
@@ -303,12 +308,15 @@ impl Game {
     pub fn wants_pack(&self, i: usize) -> bool {
         let m = &self.mobs[i];
         let mine = self.is_client() || m.owner.as_deref() == Some(crate::players::record_key(&self.player_name).as_str());
-        m.kind == MobKind::Llama && m.saddled && mine && self.inv.held() == AIR && !self.player.sneaking
+        // (Donkeys and Mules open theirs sneaking: a plain right-click rides.)
+        let llama = m.kind == MobKind::Llama && !self.player.sneaking;
+        let donkey = matches!(m.kind, MobKind::Donkey | MobKind::Mule) && self.player.sneaking;
+        carries_pack(m) && (llama || donkey) && mine && self.inv.held() == AIR
     }
 
     /// Is a Llama's pack in reach of `at` (and theirs, by record key)?
     pub fn pack_near(&self, mob: u32, at: Vec3, who: Option<&str>) -> bool {
-        self.mobs.iter().any(|m| m.id == mob && m.kind == MobKind::Llama && m.saddled && (m.body.pos + Vec3::Y).distance(at) < 6.0 && who.is_none_or(|w| m.owner.is_none() || m.owner.as_deref() == Some(w)))
+        self.mobs.iter().any(|m| m.id == mob && carries_pack(m) && (m.body.pos + Vec3::Y).distance(at) < 6.0 && who.is_none_or(|w| m.owner.is_none() || m.owner.as_deref() == Some(w)))
     }
 
     /// A Llama died: its pack spills, chest and all.
@@ -374,7 +382,7 @@ impl Game {
     /// Load: give each pack back to the llama with its seed.
     pub fn decode_packs(&mut self, b: &[u8]) {
         let by_seed = crate::stash::decode(b);
-        self.world.packs = self.mobs.iter().filter(|m| m.kind == MobKind::Llama && m.saddled).filter_map(|m| by_seed.get(&(m.seed as i32)).map(|c| (m.id, c.clone()))).collect();
+        self.world.packs = self.mobs.iter().filter(|m| carries_pack(m)).filter_map(|m| by_seed.get(&(m.seed as i32)).map(|c| (m.id, c.clone()))).collect();
     }
 }
 

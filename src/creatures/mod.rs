@@ -10,6 +10,7 @@ pub(crate) mod entity;
 pub(crate) mod floaty;
 pub(crate) mod golems;
 pub(crate) mod horses;
+pub(crate) mod leads;
 pub(crate) mod nametags;
 pub(crate) mod night;
 pub(crate) mod pathing;

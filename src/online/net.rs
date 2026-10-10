@@ -68,6 +68,8 @@ pub struct MobSnap {
     pub size: u8,
     /// `MOB_*` bits: baby, sheared, tamed, sitting, in love.
     pub flags: u8,
+    /// Where its lead's other end is, if it's on one (see leads.rs).
+    pub leash: Option<Vec3>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -85,6 +87,8 @@ pub const MOB_LOVE: u8 = 16;
 pub const MOB_SADDLED: u8 = 32;
 /// A Soggy Groaner carrying a spear.
 pub const MOB_ARMED: u8 = 64;
+/// A Donkey or Mule with a chest on its back.
+pub const MOB_PACK: u8 = 128;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
@@ -468,6 +472,13 @@ impl Msg {
                     w.u8(m.burning as u8);
                     w.u8(m.size);
                     w.u8(m.flags);
+                    match m.leash {
+                        Some(p) => {
+                            w.u8(1);
+                            w.v3(p);
+                        }
+                        None => w.u8(0),
+                    }
                 }
                 w.u32(tnts.len() as u32);
                 for &(p, f) in tnts {
@@ -1042,7 +1053,11 @@ impl Msg {
                 let n = r.count(32)?;
                 let mut mobs = Vec::with_capacity(n);
                 for _ in 0..n {
-                    mobs.push(MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0, size: r.u8()?, flags: r.u8()? });
+                    let mut m = MobSnap { id: r.u32()?, kind: r.u8()?, pos: r.v3()?, yaw: r.f32()?, fuse: r.f32()?, hurt: r.f32()?, burning: r.u8()? != 0, size: r.u8()?, flags: r.u8()?, leash: None };
+                    if r.u8()? != 0 {
+                        m.leash = Some(r.v3()?).filter(|p| p.is_finite());
+                    }
+                    mobs.push(m);
                 }
                 let n = r.count(16)?;
                 let mut tnts = Vec::with_capacity(n);
@@ -1804,7 +1819,7 @@ mod tests {
             Msg::ContainerMove { x: 5, y: 6, z: -7, slot: 26, item: 0x8010, n: 64, put: true, wear: 7 },
             Msg::Container { x: 0, y: 1, z: 2, slots: vec![(3, 1, 0), (0, 0, 0), (0x800c, 1, 99)], burn: 0.5, cook: 0.25 },
             Msg::Mobs {
-                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4, flags: MOB_BABY | MOB_TAMED }],
+                mobs: vec![MobSnap { id: 9, kind: 1, pos: Vec3::X, yaw: 0.1, fuse: 0.5, hurt: 0.0, burning: true, size: 4, flags: MOB_BABY | MOB_TAMED, leash: Some(Vec3::new(1.0, 2.0, 3.0)) }],
                 tnts: vec![(Vec3::Z, 2.0)],
                 arrows: vec![ArrowSnap {
                     pos: Vec3::Y,
@@ -1868,7 +1883,7 @@ mod tests {
         crate::mods::with_mods(&[("zoo", src)], |_reg| {
             let k = MobKind::from_name("zoo:mouse").expect("resolves");
             assert_eq!(k.index(), BASE_MOBS);
-            let snap = MobSnap { id: 7, kind: k.index(), pos: Vec3::X, yaw: 0.0, fuse: 0.0, hurt: 0.0, burning: false, size: 1, flags: 0 };
+            let snap = MobSnap { id: 7, kind: k.index(), pos: Vec3::X, yaw: 0.0, fuse: 0.0, hurt: 0.0, burning: false, size: 1, flags: 0, leash: None };
             let msg = Msg::Mobs { mobs: vec![snap.clone()], tnts: vec![], arrows: vec![], falling: vec![], fireballs: vec![] };
             let Msg::Mobs { mobs, .. } = Msg::decode(&msg.encode()).unwrap() else { panic!("not mobs") };
             assert_eq!(mobs, vec![snap]);

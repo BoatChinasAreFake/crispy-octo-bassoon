@@ -1383,6 +1383,23 @@ impl App {
                 m.id = 2300;
                 m.persistent = true;
                 app.game.mobs.push(m);
+                // Pack animals, a Snow Golem, and an Oinker tied to a fence.
+                for (k, (kind, fo, ro)) in [(entity::MobKind::Donkey, 8, -2), (entity::MobKind::Mule, 9, -5), (entity::MobKind::SnowGolem, 7, 5)].into_iter().enumerate() {
+                    let mut m = entity::Mob::new(kind, (base + f * fo + r * ro).as_vec3() + Vec3::new(0.5, 0.0, 0.5), &mut rng);
+                    m.id = 2301 + k as u32;
+                    m.yaw = s.yaw + 1.6;
+                    m.persistent = true;
+                    m.pack = kind != entity::MobKind::SnowGolem;
+                    m.saddled = kind == entity::MobKind::Donkey;
+                    app.game.mobs.push(m);
+                }
+                let post = at(2, 1, 0);
+                app.game.world.set_v(post, block::FENCE_FIRST);
+                let mut pig = entity::Mob::new(entity::MobKind::Oinker, (post - r * 3).as_vec3() + Vec3::new(0.5, 0.0, 0.5), &mut rng);
+                pig.id = 2310;
+                pig.persistent = true;
+                pig.leash = Some(leads::Leash::Fence(post));
+                app.game.mobs.push(pig);
                 for (k, (id, wear)) in [(block::ARMOR_FIRST, trims::with_dye(0, Some(2))), (block::ARMOR_FIRST + 1, trims::with_dye(0, Some(6))), (block::ARMOR_FIRST + 2, trims::with_dye(0, Some(4))), (block::CAULDRON, 0), (block::COMPOSTER, 0), (block::LIGHTNING_ROD, 0), (block::HORSE_ARMOR_IRON, 0), (block::HORSE_ARMOR_GOLD, 0), (block::HORSE_ARMOR_DIAMOND, 0)].into_iter().enumerate() {
                     app.game.inv.slots[k] = Some((id, 1));
                     app.game.inv.wear[k] = wear;

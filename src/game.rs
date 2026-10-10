@@ -1927,8 +1927,8 @@ impl Game {
             };
             match a.shooter {
                 Some(pid) => {
-                    // Players' arrows hit mobs.
-                    let Some(m) = self.mobs.iter_mut().find(|m| hit_box(m.body.min(), m.body.max())) else { return true };
+                    // Players' arrows hit mobs (a Snow Golem's snowballs, only monsters).
+                    let Some(m) = self.mobs.iter_mut().find(|m| (!a.snowball || m.kind.hostile()) && hit_box(m.body.min(), m.body.max())) else { return true };
                     m.hurt = 0.0;
                     m.damage(a.damage, a.pos - a.vel);
                     m.last_attacker = pid;
@@ -1936,7 +1936,7 @@ impl Game {
                     self.sfx(Sfx::hurt_of(kind), Some(at));
                     if let Some(spear) = a.spear {
                         landed.push((a.pos - a.dir * 0.5, spear));
-                    } else if pid == self.my_id && !self.away() {
+                    } else if pid == self.my_id && !self.away() && !a.snowball {
                         self.advance("robin_hood");
                     }
                     false
@@ -2327,6 +2327,9 @@ impl Game {
                 return;
             }
             if crate::homecraft::is_composter(id) && self.use_composter(pos) {
+                return;
+            }
+            if crate::carpentry::is_fence(id) && self.use_fence_for_leads(pos) {
                 return;
             }
             if id == VAULT || id == VAULT_OMINOUS {
@@ -2763,6 +2766,7 @@ impl Game {
         if matches!(held, PUMPKIN | JACK) && !self.is_client() {
             let me = crate::players::record_key(&self.player_name);
             self.try_build_copper_golem(place, &me);
+            self.try_build_snow_golem(place, &me);
         }
         if held == CHARRED_SKULL && !self.is_client() {
             let me = crate::players::record_key(&self.player_name);
@@ -3281,6 +3285,9 @@ impl Game {
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
         self.wildlife_tick(dt);
+        // (Leads after that too: they decide where led animals go.)
+        self.leads_tick(dt);
+        self.snow_golems_tick(dt);
         self.allays_tick();
         self.copper_golems_tick(dt);
         self.floaties_tick();
@@ -3361,6 +3368,7 @@ impl Game {
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama => {}
+                    MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
                 }
@@ -3479,8 +3487,12 @@ impl Game {
             let far = !m.persistent && (self.away() || m.body.pos.distance(self.player.body.pos) > 110.0) && self.peers.values().all(|p| m.body.pos.distance(p.target) > 110.0);
             if m.health <= 0.0 || far {
                 let m = self.mobs.swap_remove(i);
-                if m.kind == MobKind::Llama && m.health <= 0.0 {
+                if crate::wildlife::carries_pack(&m) && m.health <= 0.0 {
                     self.spill_pack(m.id, m.body.pos + Vec3::Y * 0.8);
+                }
+                // Its lead drops where it fell.
+                if m.leash.is_some() && m.health <= 0.0 {
+                    self.pop_drop(m.body.pos + Vec3::Y * 0.5, LEAD, 1);
                 }
                 if m.health <= 0.0 && m.kind.raider() {
                     self.raider_died(&m);
@@ -3531,6 +3543,7 @@ impl Game {
                             MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Wilter => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
+                            MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
                             MobKind::Modded(_) => {}
@@ -3782,6 +3795,8 @@ impl Game {
                 MobKind::Ribbit
             } else if top == SNOW_GRASS || top == MUD {
                 return;
+            } else if (biome == Biome::Plains && self.rng.chance(0.04)) || (biome == Biome::Savanna && self.rng.chance(0.1)) {
+                MobKind::Donkey
             } else if (biome == Biome::Plains && self.rng.chance(0.15)) || (biome == Biome::Savanna && self.rng.chance(0.35)) {
                 MobKind::Galloper
             } else if biome == Biome::Jungle && self.rng.chance(0.5) {
@@ -4193,6 +4208,7 @@ impl Game {
         }
         self.draw_vehicles(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
+        self.draw_leads(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
         self.draw_stands(&mut g, eye, 48.0);
         self.draw_banners(&mut g, eye, (render_distance * 16) as f32);

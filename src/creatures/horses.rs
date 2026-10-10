@@ -35,6 +35,8 @@ pub const SEAT_SHIFT: u32 = 30;
 pub const SEAT_MASK: u32 = 3 << SEAT_SHIFT;
 /// A Rotsteed: not quite as quick as a living Galloper.
 pub const ROTSTEED_SPEED: f32 = 8.0;
+/// Donkeys and Mules: slower, but they carry a chest.
+pub const DONKEY_SPEED: f32 = 7.0;
 /// A Camel: slower than a Galloper, but it dashes (Space) every few seconds.
 pub const CAMEL_SPEED: f32 = 6.5;
 pub const CAMEL_DASH: f32 = 14.0;
@@ -94,6 +96,15 @@ impl Game {
         if item == SADDLE && !m.saddled {
             m.saddled = true;
             self.sfx(Sfx::Place(crate::sound::Mat::Wood), Some(pos));
+            return Interaction::Ate;
+        }
+        // A chest on a Donkey's or Mule's back: a pack to fill (see wildlife.rs).
+        if item == CHEST && matches!(m.kind, MobKind::Donkey | MobKind::Mule) && !m.pack && m.baby <= 0.0 {
+            m.pack = true;
+            let id = m.id;
+            self.world.packs.insert(id, crate::containers::Container::for_block(CHEST));
+            self.sfx(Sfx::Place(crate::sound::Mat::Wood), Some(pos));
+            self.advance_for(who, "beast_of_burden");
             return Interaction::Ate;
         }
         // Galloper armour on (shears take it off again).
@@ -222,6 +233,8 @@ impl Game {
             crate::floaty::FLY_SPEED
         } else if self.mobs[i].kind == MobKind::Rotsteed {
             ROTSTEED_SPEED
+        } else if matches!(self.mobs[i].kind, MobKind::Donkey | MobKind::Mule) {
+            DONKEY_SPEED
         } else if !strutter {
             RIDE_SPEED
         } else if self.inv.held() == SHROOM_STICK {
@@ -335,6 +348,41 @@ impl Game {
 mod tests {
     use super::*;
     use crate::entity::{Mob, MobKind};
+
+    #[test]
+    fn donkeys_carry_chests_and_mules_come_of_gallopers_and_donkeys() {
+        let mut g = crate::game::tests::arena(95);
+        let me = crate::players::record_key(&g.player_name);
+        let at = g.player.body.pos;
+        let d = g.alloc_mob(MobKind::Donkey, Vec3::new(2.5, 50.0, 0.5));
+        let h = g.alloc_mob(MobKind::Galloper, Vec3::new(3.5, 50.0, 0.5));
+        for _ in 0..30 {
+            g.interact_mob(&me, at, d, APPLE);
+            g.interact_mob(&me, at, h, APPLE);
+        }
+        let i = g.mobs.iter().position(|m| m.id == d).unwrap();
+        assert_eq!(g.mobs[i].owner.as_deref(), Some(me.as_str()), "tamed like a Galloper");
+        assert_eq!(g.interact_mob(&me, at, d, CHEST), Interaction::Ate);
+        assert!(g.mobs[i].pack && g.world.packs.contains_key(&d) && crate::wildlife::carries_pack(&g.mobs[i]));
+        assert_eq!(g.interact_mob(&me, at, d, CHEST), Interaction::Nothing, "one chest's enough");
+        assert!(crate::animals::mates(MobKind::Galloper, MobKind::Donkey) && !crate::animals::mates(MobKind::Galloper, MobKind::Mooer));
+        assert_eq!(crate::animals::foal_of(MobKind::Donkey, MobKind::Galloper), MobKind::Mule);
+        assert_eq!(crate::animals::foal_of(MobKind::Donkey, MobKind::Donkey), MobKind::Donkey);
+        assert!(MobKind::Mule.breed_food().is_empty(), "Mules have no foals");
+        // In love together: a Mule.
+        for m in g.mobs.iter_mut() {
+            m.love = crate::animals::LOVE_SECS;
+            m.breed_cd = 0.0;
+        }
+        let spot = Vec3::new(3.0, 50.0, 0.5);
+        for _ in 0..100 {
+            g.animals_tick(0.05);
+            for m in g.mobs.iter_mut() {
+                m.body.pos = spot;
+            }
+        }
+        assert!(g.mobs.iter().any(|m| m.kind == MobKind::Mule && m.baby > 0.0), "a baby Mule");
+    }
 
     #[test]
     fn tame_saddle_ride() {

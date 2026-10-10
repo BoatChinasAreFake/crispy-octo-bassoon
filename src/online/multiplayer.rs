@@ -579,6 +579,7 @@ impl Game {
                     if matches!(id, PUMPKIN | JACK) && old != id {
                         let who = self.peer_name(from);
                         self.try_build_copper_golem(IVec3::new(x, y, z), &crate::players::record_key(&who));
+                        self.try_build_snow_golem(IVec3::new(x, y, z), &crate::players::record_key(&who));
                     }
                     if id == ROPE && old != id {
                         self.unroll(IVec3::new(x, y, z));
@@ -844,6 +845,13 @@ impl Game {
             Msg::Interact { x, y, z, item } if crate::homecraft::is_composter(self.world.get(x, y, z)) => {
                 if self.peer_rate_ok(from, "interact", 0.15) {
                     self.host_composter(from, IVec3::new(x, y, z), item);
+                }
+            }
+            Msg::Interact { x, y, z, .. } if crate::carpentry::is_fence(self.world.get(x, y, z)) => {
+                let p = IVec3::new(x, y, z);
+                if self.peer_near(from, p) && self.peer_rate_ok(from, "interact", 0.15) {
+                    let who = crate::players::record_key(&self.peer_name(from));
+                    self.tie_leads(&who, p);
                 }
             }
             Msg::Interact { x, y, z, .. } if self.world.get(x, y, z) == BELL => {
@@ -1326,6 +1334,8 @@ impl Game {
                 m.set_baby(if s.flags & MOB_BABY != 0 { 1.0 } else { 0.0 });
             }
             m.sheared = s.flags & MOB_SHEARED != 0;
+            m.pack = s.flags & MOB_PACK != 0;
+            m.leash_end = s.leash;
             m.owner = (s.flags & MOB_TAMED != 0).then(String::new);
             m.sitting = s.flags & MOB_SITTING != 0;
             m.love = if s.flags & MOB_LOVE != 0 { 1.0 } else { 0.0 };
@@ -1508,7 +1518,8 @@ impl Game {
                         burning: m.burning,
                         // Its size (low half) and colouring (high half).
                         size: (m.size as u8).min(15) | (m.variant & 15) << 4,
-                        flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((matches!(m.kind, MobKind::Soggy | MobKind::Pilferer | MobKind::Snout) && m.seed == 1) as u8 * MOB_ARMED),
+                        flags: ((m.baby > 0.0) as u8 * MOB_BABY) | (m.sheared as u8 * MOB_SHEARED) | (m.owner.is_some() as u8 * MOB_TAMED) | (m.sitting as u8 * MOB_SITTING) | ((m.love > 0.0) as u8 * MOB_LOVE) | (m.saddled as u8 * MOB_SADDLED) | ((matches!(m.kind, MobKind::Soggy | MobKind::Pilferer | MobKind::Snout) && m.seed == 1) as u8 * MOB_ARMED) | (m.pack as u8 * MOB_PACK),
+                        leash: m.leash_end,
                     })
                     .collect();
                 let tnts = self.tnts.iter().map(|t| (t.pos, t.fuse)).collect();
