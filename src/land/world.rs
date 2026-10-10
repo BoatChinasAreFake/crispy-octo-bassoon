@@ -557,7 +557,8 @@ pub struct GenOptions {
     /// 0: legacy (the old rules), 1: these options, 2: rarer villages
     /// (and outposts kept away from them), bigger and rarer fortresses, less
     /// Deep Dark, taller ice spikes, and structures that settle into the land.
-    /// 3: the sea at 63 (and the land with it; see `sea`).
+    /// 3: the sea at 63 (and the land with it; see `sea`). 4: Woodland
+    /// Mansions in the dark forests (see mansion.rs).
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -570,7 +571,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 3, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 4, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -581,7 +582,7 @@ impl GenOptions {
         if version == 0 {
             return GenOptions::LEGACY;
         }
-        GenOptions { version: version.min(3), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+        GenOptions { version: version.min(4), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
     }
 
     /// Sea level: version 3 (the world grew to 256 tall) lifts it to 63;
@@ -1646,6 +1647,10 @@ impl World {
 
     /// The nearest structure of a kind to `at` (this dimension's coordinates).
     pub fn nearest_site(&self, kind: crate::structures::Kind, at: Vec3, radius: i32) -> Option<IVec3> {
+        // (Mansions are far apart: they have their own search, and only grow up here.)
+        if kind == crate::structures::Kind::Mansion {
+            return (self.dim() == crate::dims::Dim::Over).then(|| self.generator.nearest_mansion(at)).flatten();
+        }
         let off = self.dim().gen_x();
         self.generator.nearest_site(kind, at + Vec3::new(off as f32, 0.0, 0.0), radius).map(|p| p - ivec3(off, 0, 0))
     }

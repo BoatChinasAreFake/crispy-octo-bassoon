@@ -852,6 +852,7 @@ pub const T_MULE_FACE: u16 = 1057;
 pub const T_MULE_EYE: u16 = 1058;
 pub const T_LEAD: u16 = 1059;
 pub const T_SNOWBALL: u16 = 1060;
+pub const T_WOODLAND_MAP: u16 = 1061;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4378,6 +4379,8 @@ fn home_tiles(a: &mut Atlas) {
         });
     }
     a.sprite(T_TREASURE_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(215, 190, 140)), ('g', rgb(190, 160, 110)), ('b', rgb(80, 120, 210)), ('r', rgb(220, 30, 30))]);
+    // The woodland map: green forest where the treasure map has sea, and a dark red mark.
+    a.sprite(T_WOODLAND_MAP, &MAP_SPRITE, &[('#', rgb(70, 55, 35)), ('p', rgb(205, 195, 150)), ('g', rgb(150, 160, 110)), ('b', rgb(40, 90, 40)), ('r', rgb(120, 30, 30))]);
     // Backpacks: the same bag in leather, iron-trimmed and gold-trimmed.
     for (t, trim) in [(T_BACKPACK, rgb(110, 70, 40)), (T_BIG_BACKPACK, rgb(190, 190, 200)), (T_HUGE_BACKPACK, rgb(240, 200, 60))] {
         a.sprite(t, &BACKPACK_SPRITE, &[('#', rgb(60, 35, 20)), ('b', rgb(150, 95, 55)), ('d', rgb(115, 70, 40)), ('t', trim), ('k', rgb(30, 20, 15))]);

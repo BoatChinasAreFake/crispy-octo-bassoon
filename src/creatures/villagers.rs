@@ -158,6 +158,7 @@ pub fn trades_for(job: Job, seed: u32) -> Vec<Trade> {
             t((GOLD_INGOT, 2), none, (COMPASS, 1)),
             t((GOLD_INGOT, 2), none, (BANNER, 1)),
             t((GOLD_INGOT, 7), (COMPASS, 1), (TREASURE_MAP, 1)),
+            t((GOLD_INGOT, 14), (COMPASS, 1), (WOODLAND_MAP, 1)),
         ],
         Job::Butcher => vec![
             t((PORKCHOP, 7), none, (GOLD_INGOT, 1)),
@@ -636,6 +637,9 @@ impl Game {
         if t.get.0 == TREASURE_MAP {
             return self.world.nearest_site(crate::structures::Kind::BuriedTreasure, at, crate::treasure::MAP_RANGE).map(crate::treasure::mark).unwrap_or(0);
         }
+        if t.get.0 == WOODLAND_MAP {
+            return self.world.nearest_site(crate::structures::Kind::Mansion, at, 0).map(crate::treasure::mark).unwrap_or(0);
+        }
         t.wear
     }
 
@@ -702,6 +706,7 @@ mod tests {
             assert!(list.iter().any(|t| t.get.0 == GOLD_INGOT) && list.iter().any(|t| t.give[0].0 == GOLD_INGOT), "{job:?}");
         }
         assert!(trades_for(Job::Cartographer, 1).iter().any(|t| t.get.0 == TREASURE_MAP));
+        assert!(trades_for(Job::Cartographer, 1).iter().any(|t| t.get.0 == WOODLAND_MAP), "a map to a mansion");
         assert!(trades_for(Job::Cleric, 1).iter().any(|t| t.get.0 == GOLDEN_CHOP));
     }
 

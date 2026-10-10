@@ -12,7 +12,7 @@ mod survival;
 mod online;
 
 pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
-pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, monument, realms, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
+pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, monument, realms, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, sniffers, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
@@ -1700,7 +1700,7 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
         if boxes::box_id(wear) != 0 {
             s += " [packed]";
         }
-    } else if id == TREASURE_MAP {
+    } else if id == TREASURE_MAP || id == WOODLAND_MAP {
         if let Some((x, z)) = treasure::marked(wear) {
             s += &format!(" [X at {x}, {z}]");
         }

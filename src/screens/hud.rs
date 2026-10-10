@@ -443,7 +443,7 @@ impl App {
                 draw_triangle(vec2(cx + fx * k, cy + fy * k), vec2(cx - fx * k * 0.6 + rx * k * 0.6, cy - fy * k * 0.6 + ry * k * 0.6), vec2(cx - fx * k * 0.6 - rx * k * 0.6, cy - fy * k * 0.6 - ry * k * 0.6), Color::new(0.9, 0.1, 0.1, 1.0));
             }
         }
-        if held == block::TREASURE_MAP {
+        if held == block::TREASURE_MAP || held == block::WOODLAND_MAP {
             self.treasure_map_hud(dt);
         }
     }
@@ -457,7 +457,7 @@ impl App {
         let size = 150.0 * s;
         let (x, y) = (w - size - 10.0 * s, 10.0 * s);
         draw_rectangle(x - 4.0 * s, y - 4.0 * s, size + 8.0 * s, size + 8.0 * s, Color::new(0.55, 0.43, 0.26, 1.0));
-        let caption = treasure::caption(wear, me);
+        let caption = treasure::caption_for(self.game.inv.held(), wear, me);
         if let Some((tx, tz)) = treasure::marked(wear) {
             const SCALE: i32 = 2;
             self.map_timer -= dt;

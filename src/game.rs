@@ -300,6 +300,9 @@ pub struct Game {
     /// Bastions whose residents have moved in this session, and when they were last looked at (see bastion.rs).
     pub bastions_peopled: HashSet<IVec3>,
     pub bastion_timer: f32,
+    /// The same for Woodland Mansions (see mansion.rs).
+    pub mansions_peopled: HashSet<IVec3>,
+    pub mansion_timer: f32,
     /// Seconds since campfire smoke was last puffed (see home.rs).
     pub smoke_acc: f32,
     /// Seconds until a Wanderer might turn up (see villagers.rs).
@@ -583,6 +586,8 @@ impl Game {
             mote_acc: 0.0,
             bastions_peopled: HashSet::new(),
             bastion_timer: 0.0,
+            mansions_peopled: HashSet::new(),
+            mansion_timer: 0.0,
             smoke_acc: 0.0,
             wanderer_timer: crate::villagers::WANDER_SECS / 4.0,
             frost_acc: 0.0,
@@ -3302,6 +3307,7 @@ impl Game {
         self.snouts_tick(dt);
         self.beasts_tick();
         self.bastions_tick(dt);
+        self.mansions_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
         self.zombie_hmmers_tick(dt);

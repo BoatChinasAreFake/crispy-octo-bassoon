@@ -216,6 +216,7 @@ pub const ALL: &[Advancement] = &[
     adv("hybrid_vigour", "Hybrid Vigour", "Breed a Galloper with a Donkey. It's a Mule. Of course it is."),
     adv("snow_problem", "Snow Problem", "Build a Snow Golem."),
     adv("walkies", "Walkies", "Put an animal on a Lead."),
+    adv("secret_passage", "Secret Passage", "Find the chest in a Woodland Mansion's secret room."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
