@@ -186,6 +186,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     wider(&mut host, &mut team, &mut report, &mut touched);
     scorched(&mut host, &mut team, &mut report, &mut touched);
     travelled(&mut host, &mut team, &mut report, &mut touched);
+    homely(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -1501,6 +1502,153 @@ fn travelled(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &m
     }
 }
 
+/// v0.3 part 3: cauldrons, composters, leads, pack animals and Galloper armour.
+fn homely(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::entity::MobKind;
+    let n = team.len();
+    revive(host, team);
+    // 37. A bot fills a cauldron and dyes the water: everyone sees the colour.
+    let k = 0;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let pot = feet + IVec3::new(2, 0, 0);
+    host.world.set_v(pot, CAULDRON);
+    host.give_peer(id, WATER_BUCKET, 1);
+    host.give_peer(id, DYE_FIRST + 6, 1);
+    pump(host, team, 1.0, |_| idle());
+    for item in [WATER_BUCKET, DYE_FIRST + 6] {
+        let g = &mut team[k].game;
+        if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)) {
+            g.inv.selected = slot;
+            g.use_cauldron(pot);
+        }
+        pump(host, team, 0.5, |_| idle());
+    }
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("cauldron");
+    let blue = crate::homecraft::cauldron_block(3, Some(6));
+    if host.world.get_v(pot) != blue {
+        report.problems.push(format!("{} filled and dyed a cauldron and the host has {}", team[k].name, host.world.get_v(pot)));
+    } else {
+        for b in team.iter() {
+            if b.game.world.get_v(pot) != blue {
+                report.problems.push(format!("{} never saw the blue cauldron", b.name));
+            }
+        }
+    }
+    host.world.set_v(pot, AIR);
+
+    // 38. A bot empties a full composter: Compost for them, an empty composter for everyone.
+    let k = 1 % n;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let bin = feet + IVec3::new(-2, 0, 0);
+    host.world.set_v(bin, COMPOSTER + 7);
+    pump(host, team, 1.0, |_| idle());
+    let had = team[k].game.inv.count(COMPOST);
+    let g = &mut team[k].game;
+    g.inv.selected = g.inv.slots.iter().position(|s| s.is_none()).unwrap_or(0);
+    g.inv.slots[g.inv.selected] = None;
+    g.use_composter(bin);
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("composter");
+    if team[k].game.inv.count(COMPOST) <= had {
+        report.problems.push(format!("{} emptied a composter and got no Compost", team[k].name));
+    }
+    for b in team.iter() {
+        if b.game.world.get_v(bin) != COMPOSTER {
+            report.problems.push(format!("{} sees the composter still full ({})", b.name, b.game.world.get_v(bin)));
+        }
+    }
+    host.world.set_v(bin, AIR);
+
+    // 39. A bot leads a Mooer and ties it to a fence: everyone sees the rope.
+    let k = 2 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let cow = host.alloc_mob(MobKind::Mooer, feet.as_vec3() + Vec3::new(1.5, 0.2, 1.5));
+    host.give_peer(id, LEAD, 1);
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let (Some(slot), Some(i)) = (g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == LEAD)), g.mobs.iter().position(|m| m.id == cow)) {
+        g.inv.selected = slot;
+        g.use_on_mob(i);
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("lead");
+    let led = host.mobs.iter().find(|m| m.id == cow).is_some_and(|m| matches!(m.leash, Some(crate::leads::Leash::Player(_))));
+    if !led {
+        report.problems.push(format!("{} put a lead on a Mooer and the host's isn't on one", team[k].name));
+    } else {
+        for b in team.iter() {
+            if !b.game.mobs.iter().any(|m| m.id == cow && m.leash_end.is_some()) {
+                report.problems.push(format!("{} never saw the Mooer's lead", b.name));
+            }
+        }
+        let fence = feet + IVec3::new(-1, 0, 1);
+        host.world.set_v(fence, FENCE_FIRST);
+        touched.insert(fence);
+        pump(host, team, 0.5, |_| idle());
+        team[k].game.use_fence_for_leads(fence);
+        pump(host, team, 1.0, |_| idle());
+        let tied = host.mobs.iter().find(|m| m.id == cow).is_some_and(|m| m.leash == Some(crate::leads::Leash::Fence(fence)));
+        if !tied {
+            report.problems.push(format!("{} tied their Mooer to a fence and the host's isn't", team[k].name));
+        }
+        host.world.set_v(fence, AIR);
+    }
+    host.mobs.retain(|m| m.id != cow);
+
+    // 40. A bot puts a chest on its Donkey and armour on its Galloper: everyone sees both.
+    let k = 3 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let who = crate::players::record_key(&team[k].game.player_name);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let donkey = host.alloc_mob(MobKind::Donkey, feet.as_vec3() + Vec3::new(1.5, 0.2, 0.5));
+    let horse = host.alloc_mob(MobKind::Galloper, feet.as_vec3() + Vec3::new(-1.5, 0.2, 0.5));
+    for m in host.mobs.iter_mut().filter(|m| m.id == donkey || m.id == horse) {
+        m.owner = Some(who.clone());
+        m.persistent = true;
+    }
+    host.give_peer(id, CHEST, 1);
+    host.give_peer(id, HORSE_ARMOR_GOLD, 1);
+    pump(host, team, 1.0, |_| idle());
+    for (mob, item) in [(donkey, CHEST), (horse, HORSE_ARMOR_GOLD)] {
+        let g = &mut team[k].game;
+        if let (Some(slot), Some(i)) = (g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)), g.mobs.iter().position(|m| m.id == mob)) {
+            g.inv.selected = slot;
+            g.use_on_mob(i);
+        }
+        pump(host, team, 0.6, |_| idle());
+    }
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("donkey pack");
+    report.features.push("galloper armour");
+    if !host.mobs.iter().any(|m| m.id == donkey && m.pack) {
+        report.problems.push(format!("{} gave their Donkey a chest and the host's has none", team[k].name));
+    }
+    if !host.mobs.iter().any(|m| m.id == horse && m.barding == 2) {
+        report.problems.push(format!("{} armoured their Galloper and the host's isn't", team[k].name));
+    }
+    for b in team.iter() {
+        if !b.game.mobs.iter().any(|m| m.id == donkey && m.pack) {
+            report.problems.push(format!("{} never saw the Donkey's chest", b.name));
+        }
+        if !b.game.mobs.iter().any(|m| m.id == horse && m.barding == 2) {
+            report.problems.push(format!("{} never saw the Galloper's gold armour", b.name));
+        }
+    }
+    host.world.packs.remove(&donkey);
+    host.mobs.retain(|m| m.id != donkey && m.id != horse);
+}
+
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).and_then(|v| v.parse::<f64>().ok());
@@ -1541,7 +1689,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

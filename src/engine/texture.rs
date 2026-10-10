@@ -824,11 +824,40 @@ pub const T_GRUMBLE_PANTS: u16 = 985;
 pub const T_GOAT_HEAD_SIDE: u16 = 986;
 /// The Hollow Wyrm's horns, spines and tail spade.
 pub const T_WYRM_HORN: u16 = 987;
+/// Home and craft (see homecraft.rs).
+pub const T_CAULDRON_SIDE: u16 = 988;
+pub const T_CAULDRON_TOP: u16 = 989;
+pub const T_CAULDRON_INNER: u16 = 990;
+pub const T_COMPOSTER_SIDE: u16 = 991;
+pub const T_COMPOSTER_TOP: u16 = 992;
+pub const T_COMPOSTER_FILL: u16 = 993;
+pub const T_COMPOSTER_READY: u16 = 994;
+pub const T_LIGHTNING_ROD: u16 = 995;
+pub const T_LIGHTNING_ROD_ON: u16 = 996;
+pub const T_HORSE_ARMOR_ITEMS: u16 = 997;
+pub const T_HORSE_ARMOR_WORN: u16 = 1000;
+/// Dyed water in a cauldron, one per colour.
+pub const T_DYED_WATER: u16 = 1003;
+/// Dyed woolly armour: worn (one per colour), then icons (colour * 4 + slot).
+pub const T_WOOL_WORN_DYED: u16 = 1011;
+pub const T_WOOL_ICON_DYED: u16 = 1019;
+pub const T_LIGHTNING_ROD_ITEM: u16 = 1051;
+/// Pack animals and leads.
+pub const T_DONKEY: u16 = 1052;
+pub const T_DONKEY_FACE: u16 = 1053;
+pub const T_DONKEY_EYE: u16 = 1054;
+pub const T_DONKEY_MANE: u16 = 1055;
+pub const T_MULE: u16 = 1056;
+pub const T_MULE_FACE: u16 = 1057;
+pub const T_MULE_EYE: u16 = 1058;
+pub const T_LEAD: u16 = 1059;
+pub const T_SNOWBALL: u16 = 1060;
+pub const T_WOODLAND_MAP: u16 = 1061;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
-/// keeps the first 1024 tiles; mods look textures up by name, so this can move).
-pub const FIRST_MOD_TILE: u16 = 1024;
+/// keeps the first 1280 tiles; mods look textures up by name, so this can move).
+pub const FIRST_MOD_TILE: u16 = 1280;
 
 /// Names mods can use to refer to built-in textures.
 pub const BASE_TEXTURES: &[(&str, u16)] = &[
@@ -4350,6 +4379,8 @@ fn home_tiles(a: &mut Atlas) {
         });
     }
     a.sprite(T_TREASURE_MAP, &MAP_SPRITE, &[('#', rgb(90, 70, 40)), ('p', rgb(215, 190, 140)), ('g', rgb(190, 160, 110)), ('b', rgb(80, 120, 210)), ('r', rgb(220, 30, 30))]);
+    // The woodland map: green forest where the treasure map has sea, and a dark red mark.
+    a.sprite(T_WOODLAND_MAP, &MAP_SPRITE, &[('#', rgb(70, 55, 35)), ('p', rgb(205, 195, 150)), ('g', rgb(150, 160, 110)), ('b', rgb(40, 90, 40)), ('r', rgb(120, 30, 30))]);
     // Backpacks: the same bag in leather, iron-trimmed and gold-trimmed.
     for (t, trim) in [(T_BACKPACK, rgb(110, 70, 40)), (T_BIG_BACKPACK, rgb(190, 190, 200)), (T_HUGE_BACKPACK, rgb(240, 200, 60))] {
         a.sprite(t, &BACKPACK_SPRITE, &[('#', rgb(60, 35, 20)), ('b', rgb(150, 95, 55)), ('d', rgb(115, 70, 40)), ('t', trim), ('k', rgb(30, 20, 15))]);
@@ -4368,6 +4399,102 @@ fn home_tiles(a: &mut Atlas) {
     monument_tiles(a);
     night_tiles(a);
     wilter_tiles(a);
+    homecraft_tiles(a);
+}
+
+/// Cauldrons, composters, lightning rods, Galloper armour and dyed woolly armour.
+fn homecraft_tiles(a: &mut Atlas) {
+    // A cauldron: dark iron with rivets, a rim on top, and a sooty inside.
+    a.each(T_CAULDRON_SIDE, |x, y, r, _| {
+        let rim = y < 2 || y == 15 || (y > 12 && (4..12).contains(&x));
+        let rivet = (y == 3 || y == 10) && (x == 2 || x == 13);
+        shade(rgb(62, 62, 68), r.range(0.85, 1.08) * if rivet { 1.5 } else if rim { 0.75 } else { 1.0 })
+    });
+    a.each(T_CAULDRON_TOP, |x, y, r, _| {
+        let edge = x < 2 || y < 2 || x > 13 || y > 13;
+        if edge { shade(rgb(75, 75, 80), r.range(0.85, 1.08)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_CAULDRON_INNER, |_, _, r, _| shade(rgb(38, 36, 40), r.range(0.85, 1.1)));
+    // Dyed water: the water's ripples in each dye's colour.
+    for c in 0..8u16 {
+        let [cr, cg, cb] = crate::carpentry::colour_rgb(c as usize);
+        a.each(T_DYED_WATER + c, |x, y, r, p| {
+            let w = (p.noise2(x as f32 * 0.25, y as f32 * 0.5 + 3.0) * 6.0).sin() * 0.1;
+            shade(rgb(cr, cg, cb), 0.85 + w + r.range(-0.03, 0.03))
+        });
+    }
+    // A composter: a slatted wooden box, and what's in it.
+    a.each(T_COMPOSTER_SIDE, |x, y, r, _| {
+        let post = !(2..=13).contains(&x);
+        let gap = !post && y % 4 == 3;
+        shade(rgb(150, 105, 60), r.range(0.88, 1.06) * if gap { 0.55 } else if post { 0.8 } else { 1.0 })
+    });
+    a.each(T_COMPOSTER_TOP, |x, y, r, _| {
+        let edge = x < 2 || y < 2 || x > 13 || y > 13;
+        if edge { shade(rgb(130, 90, 50), r.range(0.88, 1.06)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_COMPOSTER_FILL, |_, _, r, _| if r.chance(0.2) { shade(rgb(90, 140, 50), r.range(0.8, 1.1)) } else { shade(rgb(85, 60, 35), r.range(0.8, 1.15)) });
+    a.each(T_COMPOSTER_READY, |_, _, r, _| if r.chance(0.12) { rgb(230, 230, 220) } else { shade(rgb(70, 50, 30), r.range(0.8, 1.15)) });
+    // A copper rod (it glows white for a moment when struck).
+    a.each(T_LIGHTNING_ROD, |x, y, r, _| shade(rgb(205, 115, 75), r.range(0.85, 1.1) * if (x + y) % 5 == 0 { 0.8 } else { 1.0 }));
+    a.each(T_LIGHTNING_ROD_ON, |_, _, r, _| shade(rgb(250, 245, 230), r.range(0.92, 1.05)));
+    a.each(T_LIGHTNING_ROD_ITEM, |x, y, r, _| {
+        let rod = (7..9).contains(&x) && y > 4;
+        let knob = (6..10).contains(&x) && (1..5).contains(&y);
+        if rod || knob { shade(rgb(205, 115, 75), r.range(0.85, 1.1) * if x == 8 || y == 1 { 0.75 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
+    // Galloper armour: a blanket of plates with a crest, in iron, gold and dimond.
+    for (k, base) in [rgb(200, 200, 205), rgb(245, 205, 60), rgb(100, 230, 225)].into_iter().enumerate() {
+        a.each(T_HORSE_ARMOR_ITEMS + k as u16, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
+            let body = dx.abs() < 6.5 && (4.0..12.0).contains(&(dy + 8.0)) && !(y > 9 && (5..11).contains(&x));
+            let crest = (2..5).contains(&y) && (6..10).contains(&x);
+            let edge = dx.abs() > 5.5 || y == 4 || y == 11;
+            if crest { shade(rgb(190, 40, 40), r.range(0.9, 1.05)) } else if body { shade(base, r.range(0.9, 1.05) * if edge { 0.65 } else { 1.0 }) } else { [0, 0, 0, 0] }
+        });
+        a.each(T_HORSE_ARMOR_WORN + k as u16, |x, y, r, _| {
+            let plate = x % 4 == 0 || y % 5 == 0;
+            shade(base, r.range(0.9, 1.05) * if plate { 0.72 } else { 1.0 })
+        });
+    }
+    // Donkeys (grey, pale muzzle) and Mules (brown): a Galloper's face and eyes.
+    for (body, face, eye, base) in [(T_DONKEY, T_DONKEY_FACE, T_DONKEY_EYE, rgb(128, 120, 112)), (T_MULE, T_MULE_FACE, T_MULE_EYE, rgb(105, 72, 45))] {
+        a.speckle(body, base, 0.08);
+        a.each(face, |x, y, r, _| {
+            let nostril = matches!((x, y), (4, 7) | (5, 7) | (10, 7) | (11, 7) | (4, 8) | (11, 8));
+            if nostril { rgb(40, 32, 28) } else if y > 5 { shade(rgb(200, 192, 180), r.range(0.92, 1.05)) } else { shade(base, r.range(0.92, 1.05)) }
+        });
+        a.copy(body, eye);
+        for (x, y, c) in [(7, 5, rgb(20, 15, 10)), (8, 5, rgb(20, 15, 10)), (7, 6, rgb(20, 15, 10)), (8, 6, rgb(240, 235, 225))] {
+            a.set(eye, x, y, c);
+        }
+    }
+    a.speckle(T_DONKEY_MANE, rgb(55, 48, 42), 0.1);
+    // A lead: a coil of rope with a loop.
+    a.each(T_LEAD, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let coil = (4.0..6.0).contains(&d) || (y < 5 && (6..10).contains(&x) && (x == 6 || x == 9 || y == 1));
+        if coil { shade(rgb(170, 135, 85), r.range(0.85, 1.08) * if (x + y) % 3 == 0 { 0.8 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_SNOWBALL, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 5.5 { shade(rgb(240, 245, 250), r.range(0.88, 1.02) * if d > 4.5 { 0.85 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
+    // Dyed woolly armour: the worn knit and the icons, in each colour.
+    for c in 0..8u16 {
+        let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };
+        a.each(T_WOOL_WORN_DYED + c, |x, y, r, _| {
+            let rim = x == 0 || y == 0 || x == 15 || y == 15;
+            let knit = (x + y) % 4 == 0;
+            shade(base, r.range(0.9, 1.05) * if rim { 0.7 } else if knit { 0.85 } else { 1.0 })
+        });
+        let pal = [('#', shade(base, 0.3)), ('b', base), ('d', shade(base, 0.72)), ('h', shade(base, 1.2))];
+        for (slot, rows) in [&HELMET, &CHESTPLATE, &LEGGINGS, &BOOTS].into_iter().enumerate() {
+            a.each(T_WOOL_ICON_DYED + c * 4 + slot as u16, |_, _, _, _| [0, 0, 0, 0]);
+            a.sprite(T_WOOL_ICON_DYED + c * 4 + slot as u16, rows, &pal);
+        }
+    }
 }
 
 /// v0.2's night threats and small creatures.

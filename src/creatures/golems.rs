@@ -21,6 +21,15 @@ use crate::game::Game;
 use crate::sound::Sfx;
 use macroquad::math::{IVec3, Vec3};
 
+/// A Snow Golem: how far it sees monsters, how often it throws, and how fast
+/// heat or rain melts it (health a second).
+pub const SNOW_RANGE: f32 = 10.0;
+pub const SNOW_THROW_SECS: f32 = 1.0;
+pub const SNOW_MELT: f32 = 0.5;
+/// A snowball's thump, and who "threw" it (nobody that's playing).
+pub const SNOWBALL_DAMAGE: f32 = 1.0;
+pub const SNOWBALL_SHOOTER: u32 = u32::MAX - 7;
+
 /// How far a Clanker wanders from its square, and how far it looks for trouble.
 pub const HOME_RANGE: f32 = 14.0;
 pub const GUARD_RANGE: f32 = 16.0;
@@ -91,6 +100,82 @@ impl Game {
         self.sfx(Sfx::Place(crate::sound::Mat::Stone), Some(at));
         self.advance_for(who, "copper_golem");
         true
+    }
+
+    /// A pumpkin just went on top of `top`: on two blocks of snow, out steps a
+    /// Snow Golem (where the world lives).
+    pub fn try_build_snow_golem(&mut self, top: IVec3, who: &str) -> bool {
+        if !matches!(self.world.get_v(top), PUMPKIN | JACK) || self.world.get_v(top - IVec3::Y) != SNOW_BLOCK || self.world.get_v(top - IVec3::Y * 2) != SNOW_BLOCK {
+            return false;
+        }
+        for k in 0..3 {
+            self.world.set_v(top - IVec3::Y * k, AIR);
+        }
+        let at = (top - IVec3::Y * 2).as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+        let id = self.alloc_mob(MobKind::SnowGolem, at);
+        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+            m.persistent = true;
+        }
+        self.smoke(at + Vec3::Y, 10, 0.4);
+        self.sfx(Sfx::Place(crate::sound::Mat::Sand), Some(at));
+        self.advance_for(who, "snow_problem");
+        true
+    }
+
+    /// Snow Golems pelt monsters with snowballs, leave snow where they walk
+    /// in the cold, and melt in the heat and the rain.
+    pub fn snow_golems_tick(&mut self, dt: f32) {
+        if self.is_client() {
+            return;
+        }
+        let targets: Vec<(u32, Vec3)> = self.mobs.iter().filter(|m| m.menacing() && m.health > 0.0).map(|m| (m.id, m.body.pos + Vec3::Y * m.body.height * 0.5)).collect();
+        let mut throws: Vec<(Vec3, Vec3)> = Vec::new();
+        let mut snow: Vec<IVec3> = Vec::new();
+        for i in 0..self.mobs.len() {
+            if self.mobs[i].kind != MobKind::SnowGolem || self.mobs[i].health <= 0.0 {
+                continue;
+            }
+            let pos = self.mobs[i].body.pos;
+            let cell = pos.floor().as_ivec3();
+            let biome = self.world.generator.column(cell.x, cell.z).1;
+            let hot = !self.world.dim().open_sky() || matches!(biome, crate::world::Biome::Desert | crate::world::Biome::Badlands | crate::world::Biome::Savanna | crate::world::Biome::Jungle | crate::world::Biome::Mangrove);
+            let wet = self.mobs[i].body.in_water || self.rained_on(cell.x, cell.y + 2, cell.z);
+            let m = &mut self.mobs[i];
+            if hot || wet {
+                // Melting, slowly.
+                m.health -= dt * SNOW_MELT;
+            } else if m.body.on_ground && self.rng.chance(dt * 2.0) && self.world.get_v(cell) == AIR && is_solid(self.world.get_v(cell - IVec3::Y)) && is_opaque(self.world.get_v(cell - IVec3::Y)) {
+                snow.push(cell);
+            }
+            m.attack_cd -= dt;
+            let Some(&(_, aim)) = targets.iter().filter(|t| t.1.distance(pos) < SNOW_RANGE).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos))) else { continue };
+            let hand = pos + Vec3::Y * 1.2;
+            let d = aim - hand;
+            m.yaw = d.x.atan2(-d.z);
+            if m.attack_cd <= 0.0 {
+                m.attack_cd = SNOW_THROW_SECS;
+                // A lob: aim a little high for the distance.
+                let flat = Vec3::new(d.x, 0.0, d.z).length();
+                let speed = 16.0;
+                let vel = (d + Vec3::Y * flat * 0.12).normalize_or_zero() * speed;
+                throws.push((hand + vel.normalize_or_zero() * 0.4, vel));
+            }
+        }
+        for c in snow {
+            self.world.set_v(c, SNOW_LAYER_FIRST);
+        }
+        for (from, vel) in throws {
+            self.throw_snowball(from, vel);
+        }
+    }
+
+    /// A snowball: it hits monsters (not people or animals) with a thump.
+    pub fn throw_snowball(&mut self, from: Vec3, vel: Vec3) {
+        let mut a = crate::entity::Arrow::new(from, vel, Some(SNOWBALL_SHOOTER), SNOWBALL_DAMAGE);
+        a.appearance = ProjectileAppearance { model: ProjectileModel::Billboard, tile: Some(crate::texture::T_SNOWBALL), scale: 0.45 };
+        a.snowball = true;
+        self.arrows.push(a);
+        self.sfx(Sfx::Pop, Some(from));
     }
 
     /// Chests of `kind` within reach of `from`, nearest first.
@@ -303,5 +388,37 @@ mod tests {
         assert_eq!(count(dirt_chest, DIRT), 11, "dirt went with the dirt");
         assert_eq!(count(empty, COBBLE), 5, "cobble went to the empty chest");
         assert_eq!(count(copper, DIRT) + count(copper, COBBLE), 0);
+    }
+
+    #[test]
+    fn snow_golems_are_built_and_pelt_monsters() {
+        let mut g = crate::game::tests::arena(97);
+        let base = IVec3::new(3, 51, 3);
+        g.world.set_v(base, SNOW_BLOCK);
+        g.world.set_v(base + IVec3::Y, SNOW_BLOCK);
+        assert!(!g.try_build_snow_golem(base + IVec3::Y, ""), "no head yet");
+        g.world.set_v(base + IVec3::Y * 2, PUMPKIN);
+        assert!(g.try_build_snow_golem(base + IVec3::Y * 2, ""));
+        assert_eq!(g.world.get_v(base), AIR);
+        assert!(g.mobs.iter().any(|m| m.kind == MobKind::SnowGolem && m.persistent));
+        // A monster in range: a snowball flies at it, and hits.
+        let h = g.alloc_mob(MobKind::Groaner, Vec3::new(9.5, 51.0, 3.5));
+        let before = g.mobs.iter().find(|m| m.id == h).unwrap().health;
+        g.snow_golems_tick(0.1);
+        assert!(g.arrows.iter().any(|a| a.snowball), "a snowball");
+        for _ in 0..60 {
+            g.update_arrows(0.02);
+        }
+        let after = g.mobs.iter().find(|m| m.id == h).unwrap().health;
+        assert!(after < before, "{before} -> {after}");
+        // Snowballs leave people and animals alone.
+        g.arrows.clear();
+        g.throw_snowball(Vec3::new(-3.0, 52.0, 0.5), Vec3::new(-10.0, 0.0, 0.0));
+        let o = g.alloc_mob(MobKind::Oinker, Vec3::new(-5.5, 51.5, 0.5));
+        let oh = g.mobs.iter().find(|m| m.id == o).unwrap().health;
+        for _ in 0..20 {
+            g.update_arrows(0.02);
+        }
+        assert_eq!(g.mobs.iter().find(|m| m.id == o).unwrap().health, oh);
     }
 }

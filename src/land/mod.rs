@@ -3,6 +3,7 @@
 
 pub(crate) mod archaeology;
 pub(crate) mod bastion;
+pub(crate) mod mansion;
 pub(crate) mod caveins;
 pub(crate) mod caves;
 pub(crate) mod copper;

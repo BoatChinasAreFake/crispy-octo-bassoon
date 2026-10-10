@@ -304,6 +304,10 @@ impl Game {
             }
             return true;
         }
+        // Cauldrons and composters only change through `Msg::Interact` (see homecraft.rs).
+        if (crate::homecraft::is_cauldron(old) && crate::homecraft::is_cauldron(new)) || (crate::homecraft::is_composter(old) && crate::homecraft::is_composter(new)) {
+            return false;
+        }
         // Doors, gates and trapdoors swing for free; a slab onto a slab costs the second slab.
         if is_door(old) && is_door(new) {
             return true;

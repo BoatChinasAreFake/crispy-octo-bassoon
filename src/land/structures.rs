@@ -56,6 +56,10 @@ pub enum Kind {
     /// the treasure room in the middle of one.
     Bastion,
     BastionTreasure,
+    /// Dark oak mansions in the dark forests (see mansion.rs), and (for loot
+    /// only) the chests in their secret rooms.
+    Mansion,
+    MansionSecret,
 }
 
 impl Kind {
@@ -84,6 +88,8 @@ impl Kind {
             Kind::Monument => "Ocean Monument (Mind the Eyes)",
             Kind::Bastion => "Snout Bastion (Gilded, Guarded)",
             Kind::BastionTreasure => "Bastion Treasure Room (Mind the Brute)",
+            Kind::Mansion => "Woodland Mansion (Pilferers' Country House)",
+            Kind::MansionSecret => "Mansion Secret Room (Shh)",
         }
     }
 
@@ -111,18 +117,19 @@ impl Kind {
             "mineshaft" | "abandoned_mineshaft" => Kind::Mineshaft,
             "igloo" => Kind::Igloo,
             "monument" | "ocean_monument" => Kind::Monument,
+            "mansion" | "woodland_mansion" => Kind::Mansion,
             _ => return None,
         })
     }
 
     /// Stands on the surface (so it's settled into the land around it).
     fn on_surface(self) -> bool {
-        matches!(self, Kind::Hut | Kind::Tower | Kind::Well | Kind::Outpost | Kind::DesertPyramid | Kind::JungleTemple | Kind::Igloo)
+        matches!(self, Kind::Hut | Kind::Tower | Kind::Well | Kind::Outpost | Kind::DesertPyramid | Kind::JungleTemple | Kind::Igloo | Kind::Mansion)
     }
 
     /// Wide enough that it reaches two chunks out.
     fn wide(self) -> bool {
-        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument | Kind::Bastion)
+        matches!(self, Kind::Village | Kind::HushedCity | Kind::Fortress | Kind::TrialChambers | Kind::Mineshaft | Kind::Monument | Kind::Bastion | Kind::Mansion)
     }
 }
 
@@ -167,7 +174,9 @@ impl Generator {
         let shaft_spot = self.opts.structures > 0 && !trial_spot && (cx.rem_euclid(6), cz.rem_euclid(6)) == (3, 3) && hash2(s ^ 0x5AF7, cx.div_euclid(6), cz.div_euclid(6)) < 0.45;
         // Ocean Monuments: rare, on a grid of their own, on the deep sea floor.
         let monument_spot = self.opts.structures > 0 && (cx.rem_euclid(8), cz.rem_euclid(8)) == (4, 4) && hash2(s ^ 0x30A, cx.div_euclid(8), cz.div_euclid(8)) < 0.6;
-        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll && !shaft_spot && !monument_spot {
+        // Woodland Mansions: rarer still, on their own grid, in dark forests (see mansion.rs).
+        let mansion_spot = self.mansion_spot(cx, cz);
+        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll && !shaft_spot && !monument_spot && !mansion_spot {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -186,6 +195,9 @@ impl Generator {
             let (hh, b) = self.column(ox + dx, oz + dz);
             (hh - h).abs() <= 4 && !b.is_ocean()
         });
+        if mansion_spot && let Some(m) = self.mansion_site(ox, oz, h, biome, facing, seed) {
+            return Some(m);
+        }
         if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 58 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
@@ -318,6 +330,8 @@ impl Generator {
             Kind::Bastion => return crate::bastion::bastion_blocks(site),
             // (Never a site of its own: just a bastion's best chest.)
             Kind::BastionTreasure => return Vec::new(),
+            Kind::Mansion => return crate::mansion::mansion_blocks(site),
+            Kind::MansionSecret => return Vec::new(),
             Kind::Outpost => return crate::raids::outpost_blocks(site, self.opts.version >= 2),
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
             Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site, self.sea()),
@@ -628,6 +642,8 @@ impl Generator {
                         Kind::Hut
                     } else if site.kind == Kind::Bastion && p == crate::bastion::treasure_chest(&site) {
                         Kind::BastionTreasure
+                    } else if site.kind == Kind::Mansion && crate::mansion::secret_chests(&site).contains(&p) {
+                        Kind::MansionSecret
                     } else {
                         site.kind
                     };
@@ -818,7 +834,7 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         Kind::Tower => &[(ARROW, 12, 0.6), (BOW, 1, 0.3), (IRON, 4, 0.5), (BREAD, 2, 0.4), (DIAMOND, 1, 0.1), (ARMOR_FIRST + 4, 1, 0.2), (ARMOR_FIRST + 4 + BOOTS as Id, 1, 0.2), (STONE_BRICKS, 16, 0.3), (PEARL, 2, 0.15)],
         Kind::Hut => &[(BREAD, 4, 0.7), (WHEAT_SEEDS, 8, 0.6), (CARROT, 4, 0.4), (POTATO, 4, 0.4), (TORCH, 8, 0.6), (HOE, 1, 0.3), (COOKED_CHOP, 3, 0.3), (PLANKS, 16, 0.4), (ROD, 1, 0.2), (BOOKSHELF, 1, 0.1)],
         Kind::Well => &[(BOOT, 1, 0.8), (GOLD_INGOT, 6, 0.5), (BOTTLE, 1, 0.6), (DIAMOND, 1, 0.15)],
-        Kind::Village => &[(BREAD, 6, 0.8), (APPLE, 4, 0.6), (IRON, 4, 0.5), (GOLD_INGOT, 5, 0.5), (BOOK, 2, 0.4), (SADDLE, 1, 0.2), (NAME_TAG, 1, 0.25), (WHEAT_SEEDS, 12, 0.5), (TORCH, 12, 0.5)],
+        Kind::Village => &[(BREAD, 6, 0.8), (APPLE, 4, 0.6), (IRON, 4, 0.5), (GOLD_INGOT, 5, 0.5), (BOOK, 2, 0.4), (SADDLE, 1, 0.2), (NAME_TAG, 1, 0.25), (WHEAT_SEEDS, 12, 0.5), (TORCH, 12, 0.5), (HORSE_ARMOR_IRON, 1, 0.1)],
         Kind::Spire => &[
             (GLIDER, 1, 0.45),
             (ROCKET, 16, 0.7),
@@ -859,6 +875,8 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (ARMOR_FIRST + 8 + CHESTPLATE as Id, 1, 0.15),
             (SCORCHITE_SCRAP, 1, 0.08),
             (DRIED_FLOATY, 1, 0.12),
+            (HORSE_ARMOR_GOLD, 1, 0.15),
+            (HORSE_ARMOR_DIAMOND, 1, 0.06),
         ],
         Kind::Outpost => &[
             (CROSSBOW, 1, 0.5),
@@ -919,8 +937,11 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (GOLDEN_CHOP, 1, 0.2),
             (GUNPOWDER, 4, 0.4),
             (SAND, 8, 0.3),
+            (HORSE_ARMOR_IRON, 1, 0.12),
+            (HORSE_ARMOR_GOLD, 1, 0.08),
+            (HORSE_ARMOR_DIAMOND, 1, 0.04),
         ],
-        Kind::JungleTemple => &[(BONE, 6, 0.6), (GOO, 6, 0.5), (GOLD_INGOT, 6, 0.5), (IRON, 5, 0.5), (DIAMOND, 2, 0.25), (SADDLE, 1, 0.25), (ENCHANTED_BOOK, 1, 0.25), (BAMBOO, 8, 0.4), (ARROW, 8, 0.4)],
+        Kind::JungleTemple => &[(BONE, 6, 0.6), (GOO, 6, 0.5), (GOLD_INGOT, 6, 0.5), (IRON, 5, 0.5), (DIAMOND, 2, 0.25), (SADDLE, 1, 0.25), (ENCHANTED_BOOK, 1, 0.25), (BAMBOO, 8, 0.4), (ARROW, 8, 0.4), (HORSE_ARMOR_IRON, 1, 0.1), (HORSE_ARMOR_GOLD, 1, 0.06)],
         Kind::Mineshaft => &[
             (RAIL_FIRST, 12, 0.6),
             (TORCH, 12, 0.5),
@@ -958,6 +979,30 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (UPGRADE_TEMPLATE, 1, 0.12),
             (GOLDEN_CHOP, 1, 0.2),
             (DISC_FIRST + 7, 1, 0.08),
+        ],
+        Kind::Mansion => &[
+            (BREAD, 4, 0.5),
+            (WHEAT, 6, 0.4),
+            (IRON, 4, 0.4),
+            (GOLD_INGOT, 3, 0.3),
+            (ARROW, 12, 0.4),
+            (CROSSBOW, 1, 0.25),
+            (BOOK, 3, 0.3),
+            (LEAD, 2, 0.3),
+            (NAME_TAG, 1, 0.2),
+            (ENCHANTED_BOOK, 1, 0.15),
+            (HORSE_ARMOR_IRON, 1, 0.1),
+            (DISC_FIRST + 2, 1, 0.08),
+        ],
+        Kind::MansionSecret => &[
+            (DIAMOND, 4, 0.8),
+            (ENCHANTED_BOOK, 2, 0.6),
+            (GOLD_BLOCK, 1, 0.5),
+            (GOLDEN_CHOP, 2, 0.4),
+            (HORSE_ARMOR_DIAMOND, 1, 0.25),
+            (PICK_DIAMOND, 1, 0.25),
+            (ARMOR_FIRST + 12 + CHESTPLATE as Id, 1, 0.2),
+            (NAME_TAG, 1, 0.3),
         ],
         Kind::BastionTreasure => &[
             (UPGRADE_TEMPLATE, 1, 1.0),
@@ -1028,7 +1073,7 @@ fn loot_wear(item: Id, kind: Kind, rng: &mut Rng) -> Wear {
     let Some(max) = durability(item) else { return 0 };
     let used = rng.range(0.1, 0.7) * max as f32;
     let power = match kind {
-        Kind::Spire | Kind::HushedCity | Kind::BastionTreasure => 20,
+        Kind::Spire | Kind::HushedCity | Kind::BastionTreasure | Kind::MansionSecret => 20,
         Kind::Dungeon => 15,
         Kind::Tower => 10,
         _ => 5,

@@ -141,6 +141,51 @@ pub fn pieces(id: Id) -> Option<Vec<Piece>> {
             bx([3.5, 10.0, 7.5], [7.0, 11.0, 8.5], T_BREWING_ROD),
             bx([3.5, 10.0, 3.5], [4.5, 11.0, 12.5], T_BREWING_ROD),
         ],
+        _ if crate::homecraft::is_cauldron(id) => {
+            // Four walls on stubby feet, a floor, and the water (or dye) inside.
+            let mut v = vec![
+                bx([0.0, 3.0, 0.0], [16.0, 16.0, 2.0], T_CAULDRON_SIDE).caps(T_CAULDRON_TOP, T_CAULDRON_INNER),
+                bx([0.0, 3.0, 14.0], [16.0, 16.0, 16.0], T_CAULDRON_SIDE).caps(T_CAULDRON_TOP, T_CAULDRON_INNER),
+                bx([0.0, 3.0, 2.0], [2.0, 16.0, 14.0], T_CAULDRON_SIDE).caps(T_CAULDRON_TOP, T_CAULDRON_INNER),
+                bx([14.0, 3.0, 2.0], [16.0, 16.0, 14.0], T_CAULDRON_SIDE).caps(T_CAULDRON_TOP, T_CAULDRON_INNER),
+                bx([2.0, 3.0, 2.0], [14.0, 4.0, 14.0], T_CAULDRON_INNER),
+                bx([0.0, 0.0, 0.0], [4.0, 3.0, 4.0], T_CAULDRON_SIDE),
+                bx([12.0, 0.0, 0.0], [16.0, 3.0, 4.0], T_CAULDRON_SIDE),
+                bx([0.0, 0.0, 12.0], [4.0, 3.0, 16.0], T_CAULDRON_SIDE),
+                bx([12.0, 0.0, 12.0], [16.0, 3.0, 16.0], T_CAULDRON_SIDE),
+            ];
+            let (level, dye) = crate::homecraft::cauldron_state(id);
+            if level > 0 {
+                let top = 4.0 + level as f32 * 3.6;
+                let tile = dye.map_or(T_WATER, |c| T_DYED_WATER + c as u16);
+                v.push(bx([2.0, top - 0.5, 2.0], [14.0, top, 14.0], tile).hiding(!(1 << 2)));
+            }
+            v
+        }
+        _ if crate::homecraft::is_composter(id) => {
+            let level = (id - COMPOSTER) as f32;
+            let mut v = vec![
+                bx([0.0, 0.0, 0.0], [16.0, 16.0, 2.0], T_COMPOSTER_SIDE).caps(T_COMPOSTER_TOP, T_COMPOSTER_SIDE),
+                bx([0.0, 0.0, 14.0], [16.0, 16.0, 16.0], T_COMPOSTER_SIDE).caps(T_COMPOSTER_TOP, T_COMPOSTER_SIDE),
+                bx([0.0, 0.0, 2.0], [2.0, 16.0, 14.0], T_COMPOSTER_SIDE).caps(T_COMPOSTER_TOP, T_COMPOSTER_SIDE),
+                bx([14.0, 0.0, 2.0], [16.0, 16.0, 14.0], T_COMPOSTER_SIDE).caps(T_COMPOSTER_TOP, T_COMPOSTER_SIDE),
+                bx([2.0, 0.0, 2.0], [14.0, 2.0, 14.0], T_COMPOSTER_SIDE).caps(T_COMPOSTER_SIDE, T_COMPOSTER_SIDE),
+            ];
+            if level > 0.0 {
+                let tile = if level >= 7.0 { T_COMPOSTER_READY } else { T_COMPOSTER_FILL };
+                v.push(bx([2.0, 2.0, 2.0], [14.0, 2.0 + level * 1.85, 14.0], tile).hiding(0b110011));
+            }
+            v
+        }
+        _ if crate::homecraft::is_head(id) => vec![
+            // A head facing south, sitting on the floor.
+            bx([4.0, 0.0, 4.0], [12.0, 8.0, 12.0], t[0]).face(4, t[1]).stretched(ALL),
+        ],
+        LIGHTNING_ROD | LIGHTNING_ROD_ON => vec![
+            // A thin copper rod with a knob on top.
+            bx([7.0, 0.0, 7.0], [9.0, 13.0, 9.0], t[0]),
+            bx([6.0, 13.0, 6.0], [10.0, 16.0, 10.0], t[0]).stretched(ALL),
+        ],
         _ => return None,
     })
 }
@@ -154,6 +199,7 @@ pub fn flat_icon(id: Id) -> Option<u16> {
         BELL => Some(T_BELL_ITEM),
         CHAIN => Some(T_CHAIN),
         BREWING_STAND => Some(T_BREWING_ITEM),
+        LIGHTNING_ROD | LIGHTNING_ROD_ON => Some(T_LIGHTNING_ROD_ITEM),
         _ => None,
     }
 }

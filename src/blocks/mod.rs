@@ -19,6 +19,7 @@ pub(crate) mod decor;
 pub(crate) mod enchant;
 pub(crate) mod fireworks;
 pub(crate) mod home;
+pub(crate) mod homecraft;
 pub(crate) mod hoppers;
 pub(crate) mod masonry;
 pub(crate) mod models;

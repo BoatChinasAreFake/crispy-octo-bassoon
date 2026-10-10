@@ -442,7 +442,22 @@ pub const SOUL_FIRE: Id = MYCELIUM + 25;
 pub const BLACKSTONE_BRICKS: Id = MYCELIUM + 26;
 pub const CRACKED_BLACKSTONE_BRICKS: Id = MYCELIUM + 27;
 pub const GILDED_BLACKSTONE: Id = MYCELIUM + 28;
-pub const NUM_BLOCKS: Id = MYCELIUM + 29;
+/// Home and craft (see homecraft.rs). An empty cauldron, then water in it
+/// (`CAULDRON_WATER + level - 1`, levels 1 to 3), then dyed water
+/// (`CAULDRON_DYED + colour * 3 + level - 1`).
+pub const CAULDRON: Id = MYCELIUM + 29;
+pub const CAULDRON_WATER: Id = MYCELIUM + 30;
+pub const CAULDRON_DYED: Id = MYCELIUM + 33;
+/// A composter `COMPOSTER + level`, 0 (empty) to 7 (ready).
+pub const COMPOSTER: Id = MYCELIUM + 57;
+/// Mob heads, now and then from the mobs they came off.
+pub const GROANER_HEAD: Id = MYCELIUM + 65;
+pub const RATTLER_SKULL: Id = MYCELIUM + 66;
+pub const HISSER_HEAD: Id = MYCELIUM + 67;
+pub const LIGHTNING_ROD: Id = MYCELIUM + 68;
+/// Just struck: Zappy power for a moment.
+pub const LIGHTNING_ROD_ON: Id = MYCELIUM + 69;
+pub const NUM_BLOCKS: Id = MYCELIUM + 70;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -695,7 +710,15 @@ pub const DRIED_KELP: Id = FIRST_ITEM + 256;
 /// From Magma Bloops and Wisps (see beasts.rs).
 pub const MAGMA_CREAM: Id = FIRST_ITEM + 257;
 pub const SOUL_EMBER: Id = FIRST_ITEM + 258;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 259;
+/// Galloper armour: iron, gold and dimond (see homecraft.rs).
+pub const HORSE_ARMOR_IRON: Id = FIRST_ITEM + 259;
+pub const HORSE_ARMOR_GOLD: Id = FIRST_ITEM + 260;
+pub const HORSE_ARMOR_DIAMOND: Id = FIRST_ITEM + 261;
+/// A lead, to walk animals on and tie them to fences (see leads.rs).
+pub const LEAD: Id = FIRST_ITEM + 262;
+/// A Cartographer's map to the nearest Woodland Mansion (see mansion.rs).
+pub const WOODLAND_MAP: Id = FIRST_ITEM + 263;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 264;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -709,7 +732,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) || crate::tripwire::is_tripwire(id) || crate::tripwire::is_hook(id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON | LIGHTNING_ROD | LIGHTNING_ROD_ON) || crate::tripwire::is_tripwire(id) || crate::tripwire::is_hook(id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -2545,6 +2568,7 @@ impl Registry {
         blocks.push(def("seagrass", "Seagrass (Wet Lawn)", Cross, false, false, [T_SEAGRASS; 3], 0.0, 0, false, AIR, 0.0, S_GRASS));
         blocks.push(def("sea_pickle", "Sea Pickle (Not for Eating)", Cross, false, false, [T_SEA_PICKLE; 3], 0.0, 0, false, SEA_PICKLE, 6.0, S_GRASS));
         blocks.extend(crate::wilds::defs());
+        blocks.extend(crate::homecraft::defs());
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2812,6 +2836,9 @@ impl Registry {
         items.push(ItemDef { food: Some(1.0), ..item("dried_kelp", "Dried Kelp (Crunchy Ocean)", T_DRIED_KELP) });
         items.push(item("magma_cream", "Magma Cream (Do Not Moisturise)", T_MAGMA_CREAM));
         items.push(item("soul_ember", "Soul Ember (Cold Comfort)", T_SOUL_EMBER));
+        items.extend(crate::homecraft::items());
+        items.push(item("lead", "Lead (Walkies)", T_LEAD));
+        items.push(ItemDef { stack: 1, consume: false, ..item("woodland_map", "Woodland Explorer Map (Here Be Pilferers)", T_WOODLAND_MAP) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -3071,6 +3098,8 @@ impl Registry {
         recipes.push(r(&[(STRING, 6), (STICK, 1)], (ROPE, 2)));
         recipes.extend(crate::woods::recipes());
         recipes.extend(crate::wilds::recipes());
+        recipes.extend(crate::homecraft::recipes());
+        recipes.push(Recipe { inputs: vec![(STRING, 4), (GOO, 1)], output: (LEAD, 2) });
         recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {

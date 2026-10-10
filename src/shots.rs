@@ -83,6 +83,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "mineshaft" => Kind::Mineshaft,
         "igloo" => Kind::Igloo,
         "monument" => Kind::Monument,
+        "mansion" | "mansionhall" => Kind::Mansion,
         "dripstone" | "lush" => {
             // Standing in a roomy cave in that cave biome, looking along it.
             let (want, ground) = if mode == "dripstone" { (caves::CaveBiome::Dripstone, DRIPSTONE_BLOCK) } else { (caves::CaveBiome::Lush, MOSS_BLOCK) };
@@ -298,6 +299,9 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 Kind::Mineshaft => look(o + Vec3::new(0.5, 2.6, 0.5), o + Vec3::new(0.5, 2.2, -14.0)),
                 Kind::Igloo => look(o + Vec3::new(-7.0, 5.0, 9.0), o + Vec3::Y * 2.0),
                 Kind::Monument => look(o + Vec3::new(-11.0, 10.0, 18.0), o + Vec3::Y * 5.0),
+                // From the south-west, or (`mansionhall`) along the ground floor's corridor.
+                Kind::Mansion if mode == "mansionhall" => look(o + Vec3::new(-12.5, 1.6, 0.5), o + Vec3::new(12.0, 1.4, 0.5)),
+                Kind::Mansion => look(o + Vec3::new(-27.0, 16.0, 33.0), o + Vec3::Y * 9.0),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -356,7 +360,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -365,7 +369,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -799,7 +803,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1357,6 +1361,54 @@ impl App {
                     app.game.inv.slots[k] = Some((id, 1));
                 }
             }
+            if s.mode == "homecraft" && frames == 125 {
+                // v0.3's home and craft: cauldrons, composters, heads and a rod; an armoured Galloper.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                use crate::homecraft::cauldron_block;
+                let near = [block::CAULDRON, cauldron_block(3, None), cauldron_block(3, Some(2)), cauldron_block(1, Some(6)), block::COMPOSTER, block::COMPOSTER + 4, block::COMPOSTER + 7];
+                let far = [block::GROANER_HEAD, block::RATTLER_SKULL, block::HISSER_HEAD, block::LIGHTNING_ROD];
+                for (i, id) in near.into_iter().enumerate() {
+                    app.game.world.set_v(at(4, i as i32 - 3, 0), id);
+                }
+                for (i, id) in far.into_iter().enumerate() {
+                    app.game.world.set_v(at(6, i as i32 * 2 - 3, 0), id);
+                }
+                let mut rng = crate::noise::Rng::new(5);
+                let mut m = entity::Mob::new(entity::MobKind::Galloper, (base + f * 8 + r * 2).as_vec3() + Vec3::new(0.5, 0.0, 0.5), &mut rng);
+                m.owner = Some("you".into());
+                m.saddled = true;
+                m.barding = 3;
+                m.yaw = s.yaw + 1.2;
+                m.id = 2300;
+                m.persistent = true;
+                app.game.mobs.push(m);
+                // Pack animals, a Snow Golem, and an Oinker tied to a fence.
+                for (k, (kind, fo, ro)) in [(entity::MobKind::Donkey, 8, -2), (entity::MobKind::Mule, 9, -5), (entity::MobKind::SnowGolem, 7, 5)].into_iter().enumerate() {
+                    let mut m = entity::Mob::new(kind, (base + f * fo + r * ro).as_vec3() + Vec3::new(0.5, 0.0, 0.5), &mut rng);
+                    m.id = 2301 + k as u32;
+                    m.yaw = s.yaw + 1.6;
+                    m.persistent = true;
+                    m.pack = kind != entity::MobKind::SnowGolem;
+                    m.saddled = kind == entity::MobKind::Donkey;
+                    app.game.mobs.push(m);
+                }
+                let post = at(2, 1, 0);
+                app.game.world.set_v(post, block::FENCE_FIRST);
+                let mut pig = entity::Mob::new(entity::MobKind::Oinker, (post - r * 3).as_vec3() + Vec3::new(0.5, 0.0, 0.5), &mut rng);
+                pig.id = 2310;
+                pig.persistent = true;
+                pig.leash = Some(leads::Leash::Fence(post));
+                app.game.mobs.push(pig);
+                for (k, (id, wear)) in [(block::ARMOR_FIRST, trims::with_dye(0, Some(2))), (block::ARMOR_FIRST + 1, trims::with_dye(0, Some(6))), (block::ARMOR_FIRST + 2, trims::with_dye(0, Some(4))), (block::CAULDRON, 0), (block::COMPOSTER, 0), (block::LIGHTNING_ROD, 0), (block::HORSE_ARMOR_IRON, 0), (block::HORSE_ARMOR_GOLD, 0), (block::HORSE_ARMOR_DIAMOND, 0)].into_iter().enumerate() {
+                    app.game.inv.slots[k] = Some((id, 1));
+                    app.game.inv.wear[k] = wear;
+                }
+            }
             if s.mode == "woods" && frames == 125 {
                 // v0.3's woods, one row each: log, leaves, planks, slab, stairs, fence and gate, door; a boat.
                 use crate::woods::{id, part};
@@ -1907,7 +1959,7 @@ impl App {
 fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
     let wanted = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--gen").and_then(|w| w[1].parse::<u8>().ok());
     let opts = match wanted {
-        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(3), ..crate::world::GenOptions::DEFAULT },
+        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(4), ..crate::world::GenOptions::DEFAULT },
         _ => crate::world::GenOptions::LEGACY,
     };
     Game::new_with(seed, creative, menu, opts)

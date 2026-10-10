@@ -29,13 +29,23 @@ pub fn marked(w: Wear) -> Option<(i32, i32)> {
     (x != 0 || z != 0).then_some((x, z))
 }
 
-/// How far and which way the X is from `from`, for the map's caption.
-pub fn caption(w: Wear, from: Vec3) -> String {
-    let Some((x, z)) = marked(w) else { return "A blank map. Look in shipwrecks for a marked one.".into() };
+/// How far and which way the X is from `from`, for a Treasure Map's (or a
+/// Woodland Explorer Map's) caption.
+pub fn caption_for(map: Id, w: Wear, from: Vec3) -> String {
+    let mansion = map == WOODLAND_MAP;
+    let Some((x, z)) = marked(w) else {
+        return if mansion { "A blank map: no mansion anywhere near where it was drawn.".into() } else { "A blank map. Look in shipwrecks for a marked one.".into() };
+    };
     let (dx, dz) = (x as f32 + 0.5 - from.x, z as f32 + 0.5 - from.z);
     let d = (dx * dx + dz * dz).sqrt();
     if d < 3.0 {
-        return "X marks the spot: dig here!".into();
+        return if mansion { "You're here. Mind the Pilferers.".into() } else { "X marks the spot: dig here!".into() };
+    }
+    if mansion {
+        let ns = if dz < -d * 0.38 { "north" } else if dz > d * 0.38 { "south" } else { "" };
+        let ew = if dx > d * 0.38 { "east" } else if dx < -d * 0.38 { "west" } else { "" };
+        let way = if !ns.is_empty() && !ew.is_empty() { format!("{ns}-{ew}") } else { format!("{ns}{ew}") };
+        return format!("Mansion: {} blocks {way}", d as i32);
     }
     let ns = if dz < -d * 0.38 { "north" } else if dz > d * 0.38 { "south" } else { "" };
     let ew = if dx > d * 0.38 { "east" } else if dx < -d * 0.38 { "west" } else { "" };
@@ -111,6 +121,16 @@ impl crate::game::Game {
                 }
             }
         }
+        // A mansion's secret room (they're further from the middle).
+        for dz in -2..=2 {
+            for dx in -2..=2 {
+                if let Some(s) = self.world.site(cx + dx, cz + dz).filter(|s| s.kind == Kind::Mansion)
+                    && crate::mansion::secret_chests(&s).contains(&pos)
+                {
+                    self.advance("secret_passage");
+                }
+            }
+        }
     }
 }
 
@@ -125,9 +145,11 @@ mod tests {
         }
         assert_eq!(marked(0), None);
         assert_eq!(crate::inventory::sanitize_wear(TREASURE_MAP, mark(ivec3(-40, 0, 90))), mark(ivec3(-40, 0, 90)), "the mark survives the trip");
-        assert!(caption(mark(ivec3(100, 0, 0)), Vec3::new(0.0, 60.0, 0.0)).contains("east"));
-        assert!(caption(mark(ivec3(0, 0, -100)), Vec3::new(5.0, 60.0, 0.0)).contains("north"));
-        assert!(caption(mark(ivec3(10, 0, 10)), Vec3::new(10.5, 60.0, 10.5)).contains("dig"));
+        assert!(caption_for(TREASURE_MAP, mark(ivec3(100, 0, 0)), Vec3::new(0.0, 60.0, 0.0)).contains("east"));
+        assert!(caption_for(TREASURE_MAP, mark(ivec3(0, 0, -100)), Vec3::new(5.0, 60.0, 0.0)).contains("north"));
+        assert!(caption_for(TREASURE_MAP, mark(ivec3(10, 0, 10)), Vec3::new(10.5, 60.0, 10.5)).contains("dig"));
+        assert!(caption_for(WOODLAND_MAP, mark(ivec3(300, 0, 0)), Vec3::new(0.0, 60.0, 0.0)).starts_with("Mansion: 300 blocks east"));
+        assert!(caption_for(WOODLAND_MAP, 0, Vec3::ZERO).contains("no mansion"));
     }
 
     #[test]
