@@ -174,8 +174,61 @@ impl Generator {
         }
     }
 
+    /// How much each kind of ground shapes a column of the Scorchlands, from
+    /// version 3: (basalt spikes, soul valley, fungus hills), each 0..1 and
+    /// fading into each other across biome borders.
+    fn scorch_shape(&self, x: i32, z: i32) -> (f32, f32, f32) {
+        let bs = self.opts.biome_scale().sqrt();
+        let (fx, fz) = (x as f32 / (110.0 * bs), z as f32 / (110.0 * bs));
+        let heat = self.temp.fbm2(fx + 913.0, fz - 407.0, 3);
+        let damp = self.moist.fbm2(fx - 655.0, fz + 821.0, 3);
+        let s = crate::world::smoothstep;
+        let (hot, cold, wet) = (s(0.05, 0.15, heat), s(-0.05, -0.15, heat), s(-0.06, 0.06, damp));
+        (hot * (1.0 - wet), cold * (1.0 - wet), (hot + cold).min(1.0) * wet)
+    }
+
+    /// Solid rock at this spot of the Scorchlands, from version 3: big
+    /// caverns as before, shaped by the biome above them (spiky basalt
+    /// floors, wide flat valleys, rolling fungus hills), with great pillars
+    /// from floor to ceiling and ledges out from the walls.
+    fn scorch_solid_v3(&self, x: i32, y: i32, z: i32) -> bool {
+        let (fx, fy, fz) = (x as f32, y as f32, z as f32);
+        let (spiky, valley, hilly) = self.scorch_shape(x, z);
+        // The caverns: wider in the valleys.
+        let n = self.scorch.noise3(fx / 44.0, fy / 30.0, fz / 44.0) + self.scorch.noise3(fx / 15.0, fy / 11.0, fz / 15.0) * 0.32 - valley * 0.16;
+        let edge = ((y - 64) as f32 / 58.0).powi(2);
+        if n + edge * 1.1 > 0.18 {
+            return true;
+        }
+        // Floors by biome: basalt spikes, valley flats and fungus hills.
+        let spikes = LAVA_SEA as f32 + 2.0 + (1.0 - self.scorch.noise2(fx / 7.0 + 300.0, fz / 7.0).abs() * 2.2).max(0.0) * 26.0;
+        let flat = LAVA_SEA as f32 + 5.0 + self.scorch.noise2(fx / 40.0, fz / 40.0 - 90.0) * 2.0;
+        let hills = LAVA_SEA as f32 + 4.0 + (self.scorch.noise2(fx / 26.0 - 400.0, fz / 26.0) + 0.6) * 10.0;
+        let floor = (spikes * spiky).max(flat * valley).max(hills * hilly);
+        if fy < floor {
+            return true;
+        }
+        // Pillars: one in some cells of a 56-block grid, bulging and pinching as they rise.
+        let (gx, gz) = (x.div_euclid(56), z.div_euclid(56));
+        let s = self.seed ^ 0x9177;
+        if hash2(s, gx, gz) < 0.45 {
+            let (px, pz) = (gx * 56 + 12 + (hash2(s ^ 1, gx, gz) * 32.0) as i32, gz * 56 + 12 + (hash2(s ^ 2, gx, gz) * 32.0) as i32);
+            let r = 3.0 + hash2(s ^ 3, gx, gz) * 4.0;
+            let r = r * (1.0 + 0.35 * (fy / 9.0 + hash2(s ^ 4, gx, gz) * 6.0).sin()) + self.scorch.noise3(fx / 5.0, fy / 5.0, fz / 5.0) * 1.2;
+            if ((x - px).pow(2) + (z - pz).pow(2)) as f32 <= r * r {
+                return true;
+            }
+        }
+        // Ledges: thin shelves every 17 blocks, out from the rock nearby.
+        let shelf = (y - LAVA_SEA).rem_euclid(17) == 0 && y > LAVA_SEA + 8;
+        shelf && n + edge * 1.1 > 0.02 && self.scorch.noise2(fx / 11.0 + 50.0, fz / 11.0 + fy) > 0.1
+    }
+
     /// Solid rock (before anything else is done to it) at this spot of the Scorchlands' caverns?
     pub fn scorch_solid(&self, x: i32, y: i32, z: i32) -> bool {
+        if self.opts.version >= 3 {
+            return self.scorch_solid_v3(x, y, z);
+        }
         let n = self.scorch.noise3(x as f32 / 38.0, y as f32 / 26.0, z as f32 / 38.0) + self.scorch.noise3(x as f32 / 13.0, y as f32 / 10.0, z as f32 / 13.0) * 0.3;
         let edge = ((y - 64) as f32 / 58.0).powi(2);
         n + edge * 1.1 > 0.18
@@ -634,4 +687,39 @@ mod tests {
         g.magma_feet(MAGMA_BLOCK);
         assert!(g.player.health < h);
     }
+
+    #[test]
+    fn newer_scorchlands_have_pillars_spikes_and_magma() {
+        use crate::world::GenOptions;
+        let g = Generator::with_dim(4242, GenOptions::DEFAULT, crate::dims::Dim::Scorch);
+        let off = crate::dims::Dim::Scorch.gen_x();
+        // Somewhere, rock runs unbroken from the lava sea to high up: a pillar.
+        let pillar = (-300..300).step_by(3).any(|x| (-300..300).step_by(3).any(|z| (LAVA_SEA + 2..LAVA_SEA + 60).all(|y| g.scorch_solid(x + off, y, z))));
+        assert!(pillar, "no pillars");
+        // Basalt deltas' floors are spikier than soul valleys'.
+        let roughness = |want: ScorchBiome| {
+            let (mut sum, mut n) = (0, 0);
+            for x in (-2000..2000).step_by(5) {
+                for z in (-2000..2000).step_by(97) {
+                    if g.scorch_biome(x + off, z) != want || g.scorch_biome(x + off + 1, z) != want {
+                        continue;
+                    }
+                    let floor = |x| (LAVA_SEA + 1..LAVA_SEA + 40).find(|&y| !g.scorch_solid(x, y, z));
+                    if let (Some(a), Some(b)) = (floor(x + off), floor(x + off + 1)) {
+                        sum += (a - b).abs();
+                        n += 1;
+                    }
+                }
+            }
+            sum as f32 / n.max(1) as f32
+        };
+        let (spiky, flat) = (roughness(ScorchBiome::BasaltDeltas), roughness(ScorchBiome::SoulValley));
+        assert!(spiky > flat * 1.5, "basalt {spiky}, valleys {flat}");
+        // Magma lines the lava sea's shores, and older worlds are as they were.
+        let magma = (-20..20).any(|cx| (-6..6).any(|cz| g.generate(cx, cz).contains(&MAGMA_BLOCK)));
+        assert!(magma, "no magma by the lava");
+        let old = Generator::with_dim(4242, GenOptions::LEGACY, crate::dims::Dim::Scorch);
+        assert!(!(0..8).any(|cx| old.generate(cx, 0).contains(&MAGMA_BLOCK)));
+    }
+
 }

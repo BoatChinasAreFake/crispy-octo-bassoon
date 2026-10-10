@@ -104,11 +104,48 @@ impl Generator {
                 }
             }
         }
+        if self.opts.version >= 3 {
+            self.dress_scorch_v3(cx, cz, &mut b);
+        }
         // Fungus forests, basalt deltas and soul sand valleys (see wilds.rs).
         self.decorate_scorch(cx, cz, &mut b);
         // Fortresses and Snout camps (see fortress.rs).
         self.place_structures(cx, cz, &mut b);
         b
+    }
+}
+
+impl Generator {
+    /// From version 3: magma along the shores of the lava sea, and glowrock
+    /// hanging in bigger clusters.
+    fn dress_scorch_v3(&self, cx: i32, cz: i32, b: &mut [Id]) {
+        use crate::world::idx;
+        let s = self.seed ^ 0x3A63A;
+        let at = |b: &[Id], lx: i32, y: i32, lz: i32| if (0..CW).contains(&lx) && (0..CW).contains(&lz) { b[idx(lx, y, lz)] } else { AIR };
+        for lz in 0..CW {
+            for lx in 0..CW {
+                let (x, z) = (cx * CW + lx, cz * CW + lz);
+                for y in LAVA_SEA - 2..=LAVA_SEA + 1 {
+                    let i = idx(lx, y, lz);
+                    let by_lava = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0)].iter().any(|&(dx, dy, dz)| at(b, lx + dx, y + dy, lz + dz) == LAVA);
+                    if b[i] == SCORCHROCK && by_lava && hash3(s, x, y, z) < 0.55 {
+                        b[i] = MAGMA_BLOCK;
+                    }
+                }
+                // (Upward, so a cluster just made isn't grown again.)
+                for y in LAVA_SEA + 4..SCORCH_TOP - 5 {
+                    if b[idx(lx, y, lz)] == GLOWROCK && b[idx(lx, y - 1, lz)] == AIR && hash3(s ^ 1, x >> 1, y, z >> 1) < 0.7 {
+                        let n = 1 + (hash3(s ^ 2, x, y, z) * 3.0) as i32;
+                        for k in 1..=n {
+                            if b[idx(lx, y - k, lz)] != AIR {
+                                break;
+                            }
+                            b[idx(lx, y - k, lz)] = GLOWROCK;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
