@@ -1647,6 +1647,62 @@ fn homely(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut 
     }
     host.world.packs.remove(&donkey);
     host.mobs.retain(|m| m.id != donkey && m.id != horse);
+
+    // 41. A bot cooks a stew in a pot on a campfire and serves it: everyone sees the pot.
+    let k = 4 % n;
+    ground(host, team, k);
+    let id = team[k].game.my_id;
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let fire = feet + IVec3::new(2, 0, -1);
+    let pot = fire + IVec3::Y;
+    touched.insert(fire);
+    touched.insert(pot);
+    host.world.set_v(fire, CAMPFIRE);
+    host.world.set_v(pot, COOKING_POT);
+    for item in [PORKCHOP, CARROT, SALT, BOWL] {
+        host.give_peer(id, item, 1);
+    }
+    pump(host, team, 1.0, |_| idle());
+    for item in [PORKCHOP, CARROT, SALT] {
+        let g = &mut team[k].game;
+        if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)) {
+            g.inv.selected = slot;
+            g.use_cooking_pot(pot);
+        }
+        pump(host, team, 0.4, |_| idle());
+    }
+    report.features.push("cooking pot");
+    for b in team.iter() {
+        if b.game.world.get_v(pot) != COOKING_POT_FULL {
+            report.problems.push(format!("{} sees the pot as {}, not cooking", b.name, b.game.world.get_v(pot)));
+        }
+    }
+    // (A stew wants half a minute on the fire.)
+    if let Some(p) = host.pots.get_mut(&pot) {
+        p.cooked = 30.0;
+    }
+    pump(host, team, 1.0, |_| idle());
+    let g = &mut team[k].game;
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == BOWL)) {
+        g.inv.selected = slot;
+        g.use_cooking_pot(pot);
+    }
+    pump(host, team, 1.5, |_| idle());
+    let stew = crate::cooking::Dish::HeartyStew.item();
+    if !team[k].game.inv.slots.iter().any(|s| s.is_some_and(|s| s.0 == stew)) {
+        report.problems.push(format!("{} served from a pot and got no stew", team[k].name));
+    }
+    if team[k].game.cookbook[crate::cooking::Dish::HeartyStew.index()] == 0 {
+        report.problems.push(format!("{} made a stew and it's not in their Cookbook", team[k].name));
+    }
+    for b in team.iter() {
+        if b.game.world.get_v(pot) != COOKING_POT {
+            report.problems.push(format!("{} sees the pot still full after serving", b.name));
+        }
+    }
+    host.world.set_v(pot, AIR);
+    host.world.set_v(fire, AIR);
 }
 
 /// The `--playtest` command.
@@ -1689,7 +1745,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

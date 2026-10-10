@@ -3,6 +3,7 @@
 
 pub(crate) mod advancements;
 pub(crate) mod combat;
+pub(crate) mod cooking;
 pub(crate) mod drops;
 pub(crate) mod farming;
 pub(crate) mod fishing;

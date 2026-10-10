@@ -842,6 +842,11 @@ impl Game {
                     self.host_cauldron(from, IVec3::new(x, y, z), item);
                 }
             }
+            Msg::Interact { x, y, z, item } if crate::cooking::is_pot(self.world.get(x, y, z)) => {
+                if self.peer_rate_ok(from, "interact", 0.15) {
+                    self.host_cooking_pot(from, IVec3::new(x, y, z), item);
+                }
+            }
             Msg::Interact { x, y, z, item } if crate::homecraft::is_composter(self.world.get(x, y, z)) => {
                 if self.peer_rate_ok(from, "interact", 0.15) {
                     self.host_composter(from, IVec3::new(x, y, z), item);
@@ -1179,6 +1184,8 @@ impl Game {
                 if valid_item(item) && n > 0 {
                     self.give_worn(item, n, wear);
                     self.inv_sync.note_host(item, n as i64);
+                    // A dish from a pot: into our Cookbook.
+                    self.note_dish(item, wear);
                 }
             }
             Msg::Inventory { items } => self.apply_inventory(items),

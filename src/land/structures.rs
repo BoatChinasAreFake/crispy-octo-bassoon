@@ -60,6 +60,8 @@ pub enum Kind {
     /// only) the chests in their secret rooms.
     Mansion,
     MansionSecret,
+    /// A steaming pool in snowy mountains (see springs.rs).
+    HotSpring,
 }
 
 impl Kind {
@@ -90,6 +92,7 @@ impl Kind {
             Kind::BastionTreasure => "Bastion Treasure Room (Mind the Brute)",
             Kind::Mansion => "Woodland Mansion (Pilferers' Country House)",
             Kind::MansionSecret => "Mansion Secret Room (Shh)",
+            Kind::HotSpring => "Hot Spring (Bring a Towel)",
         }
     }
 
@@ -118,6 +121,7 @@ impl Kind {
             "igloo" => Kind::Igloo,
             "monument" | "ocean_monument" => Kind::Monument,
             "mansion" | "woodland_mansion" => Kind::Mansion,
+            "hot_spring" | "spring" | "hotspring" => Kind::HotSpring,
             _ => return None,
         })
     }
@@ -176,7 +180,9 @@ impl Generator {
         let monument_spot = self.opts.structures > 0 && (cx.rem_euclid(8), cz.rem_euclid(8)) == (4, 4) && hash2(s ^ 0x30A, cx.div_euclid(8), cz.div_euclid(8)) < 0.6;
         // Woodland Mansions: rarer still, on their own grid, in dark forests (see mansion.rs).
         let mansion_spot = self.mansion_spot(cx, cz);
-        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll && !shaft_spot && !monument_spot && !mansion_spot {
+        // Hot springs: in snowy mountains (see springs.rs).
+        let spring_spot = self.spring_spot(cx, cz);
+        if !common && !village_spot && !trial_spot && !wreck_roll && !treasure_roll && !outpost_roll && !city_roll && !shaft_spot && !monument_spot && !mansion_spot && !spring_spot {
             return None;
         }
         let ox = cx * CW + 5 + (hash2(s ^ 1, cx, cz) * 6.0) as i32;
@@ -196,6 +202,9 @@ impl Generator {
             (hh - h).abs() <= 4 && !b.is_ocean()
         });
         if mansion_spot && let Some(m) = self.mansion_site(ox, oz, h, biome, facing, seed) {
+            return Some(m);
+        }
+        if spring_spot && let Some(m) = self.spring_site(ox, oz, h, biome, facing, seed) {
             return Some(m);
         }
         if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 58 && wide_flat() {
@@ -332,6 +341,7 @@ impl Generator {
             Kind::BastionTreasure => return Vec::new(),
             Kind::Mansion => return crate::mansion::mansion_blocks(site),
             Kind::MansionSecret => return Vec::new(),
+            Kind::HotSpring => return crate::springs::spring_blocks(site),
             Kind::Outpost => return crate::raids::outpost_blocks(site, self.opts.version >= 2),
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
             Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site, self.sea()),
@@ -994,6 +1004,8 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (HORSE_ARMOR_IRON, 1, 0.1),
             (DISC_FIRST + 2, 1, 0.08),
         ],
+        // (No chests at a spring.)
+        Kind::HotSpring => &[],
         Kind::MansionSecret => &[
             (DIAMOND, 4, 0.8),
             (ENCHANTED_BOOK, 2, 0.6),

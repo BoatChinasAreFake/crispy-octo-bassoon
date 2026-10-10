@@ -853,6 +853,17 @@ pub const T_MULE_EYE: u16 = 1058;
 pub const T_LEAD: u16 = 1059;
 pub const T_SNOWBALL: u16 = 1060;
 pub const T_WOODLAND_MAP: u16 = 1061;
+/// Cooking (see cooking.rs) and hot springs (springs.rs).
+pub const T_COOKPOT_SIDE: u16 = 1062;
+pub const T_COOKPOT_INNER: u16 = 1063;
+pub const T_COOKPOT_STEW: u16 = 1064;
+pub const T_COOKPOT_READY: u16 = 1065;
+pub const T_BOWL: u16 = 1066;
+pub const T_SALT: u16 = 1067;
+pub const T_HERBS: u16 = 1068;
+pub const T_COOKBOOK: u16 = 1069;
+pub const T_DISH_FIRST: u16 = 1070;
+pub const T_SPRING_ROCK: u16 = 1079;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4402,6 +4413,70 @@ fn home_tiles(a: &mut Atlas) {
     homecraft_tiles(a);
 }
 
+/// The cooking pot, bowls, seasonings, the Cookbook and the dishes, and Spring Rock.
+fn cooking_tiles(a: &mut Atlas) {
+    a.each(T_COOKPOT_SIDE, |x, y, r, _| {
+        let band = y == 2 || y == 3;
+        let rivet = band && x % 4 == 1;
+        shade(rgb(55, 55, 60), r.range(0.85, 1.08) * if rivet { 1.6 } else if band { 0.75 } else { 1.0 })
+    });
+    a.each(T_COOKPOT_INNER, |x, y, r, _| {
+        let rim = !(2..14).contains(&x) || !(2..14).contains(&y);
+        shade(if rim { rgb(70, 70, 75) } else { rgb(30, 28, 30) }, r.range(0.85, 1.08))
+    });
+    for (tile, base) in [(T_COOKPOT_STEW, rgb(150, 105, 60)), (T_COOKPOT_READY, rgb(190, 120, 50))] {
+        a.each(tile, |x, y, r, _| {
+            let rim = !(2..14).contains(&x) || !(2..14).contains(&y);
+            let lump = (x * 7 + y * 3) % 11 == 0;
+            if rim { shade(rgb(70, 70, 75), r.range(0.85, 1.08)) } else if lump { shade(rgb(220, 160, 90), r.range(0.9, 1.1)) } else { shade(base, r.range(0.85, 1.1)) }
+        });
+    }
+    // A bowl, and the dishes: the bowl with each one's colour in it.
+    let bowl = |x: usize, y: usize| -> Option<bool> {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 6.0);
+        if (6..=12).contains(&y) && dx * dx / 49.0 + dy * dy / 49.0 < 1.0 { Some(y == 6 || dx.abs() > 6.0 - (y as f32 - 6.0) * 0.6) } else { None }
+    };
+    a.each(T_BOWL, |x, y, r, _| match bowl(x, y) {
+        Some(_) => shade(rgb(150, 105, 60), r.range(0.85, 1.08) * if y > 10 { 0.8 } else { 1.0 }),
+        None => [0, 0, 0, 0],
+    });
+    let fills = [rgb(140, 70, 40), rgb(230, 220, 190), rgb(120, 170, 70), rgb(225, 210, 160), rgb(200, 60, 90), rgb(235, 225, 195), rgb(200, 140, 60), rgb(60, 110, 60), rgb(130, 115, 90)];
+    for (k, fill) in fills.into_iter().enumerate() {
+        a.each(T_DISH_FIRST + k as u16, |x, y, r, _| match bowl(x, y) {
+            Some(_) if y >= 6 => shade(rgb(150, 105, 60), r.range(0.85, 1.08) * if y > 10 { 0.8 } else { 1.0 }),
+            _ if (4..6).contains(&y) && (2..14).contains(&x) => shade(fill, r.range(0.85, 1.12)),
+            _ if y == 3 && (4..12).contains(&x) => shade(fill, r.range(0.9, 1.15)),
+            _ => [0, 0, 0, 0],
+        });
+        // (Pie has a crust; stew a bit of steam.)
+        if k == 6 {
+            for x in 4..12 {
+                a.set(T_DISH_FIRST + 6, x, 3, rgb(220, 170, 90));
+            }
+        }
+    }
+    a.each(T_SALT, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 10.0);
+        if dx * dx * 0.5 + dy * dy < 14.0 && y > 6 { shade(rgb(240, 240, 245), r.range(0.85, 1.05)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_HERBS, |x, y, r, _| {
+        let stem = x == 8 && y > 8;
+        let leaf = (x as i32 - 8).abs() + (y as i32 - 6).abs() < 5 && (x + y) % 2 == 0;
+        if stem { rgb(70, 110, 40) } else if leaf { shade(rgb(80, 160, 60), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_COOKBOOK, |x, y, r, _| {
+        let cover = (2..14).contains(&x) && (2..15).contains(&y);
+        let spine = x < 4;
+        let bowl_mark = (6..11).contains(&x) && (7..10).contains(&y);
+        if !cover { [0, 0, 0, 0] } else if bowl_mark { rgb(240, 220, 160) } else if spine { shade(rgb(110, 40, 30), r.range(0.9, 1.05)) } else { shade(rgb(170, 60, 45), r.range(0.9, 1.05)) }
+    });
+    // Spring Rock: pale, crusted ochre travertine.
+    a.each(T_SPRING_ROCK, |x, y, r, _| {
+        let band = (y + x / 5) % 4 == 0;
+        shade(if band { rgb(205, 160, 105) } else { rgb(225, 205, 165) }, r.range(0.88, 1.06))
+    });
+}
+
 /// Cauldrons, composters, lightning rods, Galloper armour and dyed woolly armour.
 fn homecraft_tiles(a: &mut Atlas) {
     // A cauldron: dark iron with rivets, a rim on top, and a sooty inside.
@@ -4481,6 +4556,7 @@ fn homecraft_tiles(a: &mut Atlas) {
         let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
         if d < 5.5 { shade(rgb(240, 245, 250), r.range(0.88, 1.02) * if d > 4.5 { 0.85 } else { 1.0 }) } else { [0, 0, 0, 0] }
     });
+    cooking_tiles(a);
     // Dyed woolly armour: the worn knit and the icons, in each colour.
     for c in 0..8u16 {
         let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };

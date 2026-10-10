@@ -12,10 +12,10 @@ mod survival;
 mod online;
 
 pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
-pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, monument, realms, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
+pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, sniffers, villagers, wildlife, wilter};
-pub(crate) use survival::{advancements, combat, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
+pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, ledger, mods, multiplayer, net, players, playtest, scripting, server};
 mod screens;
 mod shots;
@@ -1711,6 +1711,9 @@ fn label(stack: Option<(Id, u8)>, wear: inventory::Wear) -> Option<String> {
         s += &format!(" [{t}]");
     }
     if let Some(t) = trims::describe_dye(wear).filter(|_| trims::is_woolly(id)) {
+        s += &format!(" [{t}]");
+    }
+    if let Some(t) = cooking::describe(id, wear) {
         s += &format!(" [{t}]");
     }
     if let Some(max) = inventory::max_uses(id, wear) {

@@ -84,6 +84,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "igloo" => Kind::Igloo,
         "monument" => Kind::Monument,
         "mansion" | "mansionhall" => Kind::Mansion,
+        "hotspring" => Kind::HotSpring,
         "dripstone" | "lush" => {
             // Standing in a roomy cave in that cave biome, looking along it.
             let (want, ground) = if mode == "dripstone" { (caves::CaveBiome::Dripstone, DRIPSTONE_BLOCK) } else { (caves::CaveBiome::Lush, MOSS_BLOCK) };
@@ -302,6 +303,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 // From the south-west, or (`mansionhall`) along the ground floor's corridor.
                 Kind::Mansion if mode == "mansionhall" => look(o + Vec3::new(-12.5, 1.6, 0.5), o + Vec3::new(12.0, 1.4, 0.5)),
                 Kind::Mansion => look(o + Vec3::new(-27.0, 16.0, 33.0), o + Vec3::Y * 9.0),
+                Kind::HotSpring => look(o + Vec3::new(-7.0, 4.0, 7.0), o),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
         }
@@ -360,7 +362,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -369,7 +371,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -803,7 +805,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1360,6 +1362,31 @@ impl App {
                 for (k, id) in [block::BELL, block::GRINDSTONE, block::BREWING_STAND, block::POT_FIRST, block::SCAFFOLDING, block::CHAIN, block::SOUL_LANTERN, block::CHARRED_SKULL, block::ENCHANTING_TABLE].into_iter().enumerate() {
                     app.game.inv.slots[k] = Some((id, 1));
                 }
+            }
+            if s.mode == "cooking" && frames == 125 {
+                // Three pots on campfires (empty, cooking, ready), dishes in hand, and the Cookbook open.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                for (k, pot) in [block::COOKING_POT, block::COOKING_POT_FULL, block::COOKING_POT_READY].into_iter().enumerate() {
+                    let at = base + f * 3 + r * (k as i32 * 2 - 2);
+                    app.game.world.set_v(at, block::CAMPFIRE);
+                    app.game.world.set_v(at + IVec3::Y, pot);
+                }
+                app.game.cookbook = [5, 0, 3, 6, 0, 2, 4, 0, 1];
+                app.game.chill = 60.0;
+                let mut slots = vec![(block::COOKBOOK, 0)];
+                for (k, g) in [(0usize, 4u32), (3, 5), (6, 3), (2, 2)] {
+                    slots.push((cooking::ALL_DISHES[k].item(), g));
+                }
+                slots.extend([(block::BOWL, 0), (block::SALT, 0), (block::HERBS, 0), (block::MOO_STEAK, 0)]);
+                for (k, (id, wear)) in slots.into_iter().enumerate() {
+                    app.game.inv.slots[k] = Some((id, 1));
+                    app.game.inv.wear[k] = wear;
+                }
+                app.game.inv.selected = 0;
             }
             if s.mode == "homecraft" && frames == 125 {
                 // v0.3's home and craft: cauldrons, composters, heads and a rod; an armoured Galloper.
@@ -1959,7 +1986,7 @@ impl App {
 fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
     let wanted = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--gen").and_then(|w| w[1].parse::<u8>().ok());
     let opts = match wanted {
-        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(4), ..crate::world::GenOptions::DEFAULT },
+        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(5), ..crate::world::GenOptions::DEFAULT },
         _ => crate::world::GenOptions::LEGACY,
     };
     Game::new_with(seed, creative, menu, opts)
