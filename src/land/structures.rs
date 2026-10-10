@@ -635,6 +635,8 @@ impl Generator {
                 }
             }
         }
+        // The Crypts' side rooms (see hollow.rs).
+        v.extend(self.crypt_chests(cx, cz).into_iter().map(|p| (p, Kind::Dungeon, self.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.z as u32).wrapping_mul(7))));
         v
     }
 

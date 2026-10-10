@@ -738,8 +738,12 @@ impl App {
                 let seed = g.world.seed();
                 let spire = (1..12).flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)])).find_map(|(gx, gz)| hollow::outer_island(seed, gx, gz).filter(|i| i.2));
                 if let Some((c, _, _)) = spire {
-                    let from = c.as_vec3() + Vec3::new(14.0, 9.0, 14.0);
-                    let d = c.as_vec3() + Vec3::new(0.5, 4.0, 0.5) - from;
+                    // (The island is in generator coordinates; the Hollow's own are shifted; see dims.rs.)
+                    let c = c - IVec3::new(hollow::GEN_ORIGIN.x, 0, 0);
+                    let tall = hollow::spire_height(g.world.generator.opts.version >= 3) as f32;
+                    let from = c.as_vec3() + Vec3::new(18.0, tall * 0.6, 18.0);
+                    let d = c.as_vec3() + Vec3::new(0.5, tall * 0.45, 0.5) - from;
+                    g.move_local_player(crate::dims::Dim::Hollow, from);
                     (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
                 }
                 g.player.flying = true;

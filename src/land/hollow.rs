@@ -117,6 +117,51 @@ pub fn spire_block(dx: i32, dy: i32, dz: i32) -> Option<Id> {
     })
 }
 
+/// How tall a spire stands (worlds from version 3 have the taller, round ones).
+pub fn spire_height(tall: bool) -> i32 {
+    if tall { 18 } else { 9 }
+}
+
+/// A taller spire, from version 3: a round obsidian tower banded with Hollow
+/// Stone, with glowing windows, buttresses at its foot and a pointed roof
+/// with a glowing tip; the chest stands inside on a pedestal, as before.
+pub fn tall_spire_block(dx: i32, dy: i32, dz: i32) -> Option<Id> {
+    if dx.abs() > 3 || dz.abs() > 3 || !(1..=18).contains(&dy) {
+        return None;
+    }
+    let d = ((dx * dx + dz * dz) as f32).sqrt();
+    // Buttresses on the diagonals at the foot.
+    if dx.abs() == dz.abs() && dx.abs() == 3 {
+        return (dy <= 4).then_some(OBSIDIAN);
+    }
+    let r = match dy {
+        1..=11 => 2.9,
+        12..=14 => 2.2,
+        15 => 1.6,
+        16 => 1.0,
+        _ => 0.5,
+    };
+    if dy == 18 {
+        return (dx == 0 && dz == 0).then_some(GLOWROCK);
+    }
+    // (Nothing outside the tower: None. Inside, even air is part of it.)
+    if d > r {
+        return None;
+    }
+    let wall = d > r - 1.0 || dy >= 15;
+    let axis = dx == 0 || dz == 0;
+    Some(match () {
+        _ if dy == 1 => HOLLOW_STONE,
+        _ if dx == 0 && dz == 0 && dy == 2 => CHEST,
+        // The door, facing +z.
+        _ if dz > 0 && dx == 0 && (2..=4).contains(&dy) => AIR,
+        _ if !wall => AIR,
+        _ if axis && matches!(dy, 6 | 7 | 12) => GLOWROCK,
+        _ if dy % 5 == 0 => HOLLOW_STONE,
+        _ => OBSIDIAN,
+    })
+}
+
 /// The chest in each outer spire in chunk (cx, cz), with a seed for its loot
 /// (all in generator coordinates).
 pub fn spire_chests(seed: u32, cx: i32, cz: i32) -> Vec<(IVec3, u32)> {
@@ -179,8 +224,123 @@ pub fn ring(c: IVec3) -> Vec<IVec3> {
     v
 }
 
-/// A Crypt's blocks: a stone brick room with the ring of frames around a pit.
-pub fn crypt_blocks(c: IVec3, seed: u32) -> Vec<(IVec3, Id)> {
+/// How far a Crypt's rooms reach from its middle (worlds from version 3;
+/// older ones have the single room, 6 out).
+pub const CRYPT_REACH: i32 = 27;
+
+/// A hollow box of stone brick (mossy here and there) from `lo` to `hi`, inclusive.
+fn crypt_box(v: &mut Vec<(IVec3, Id)>, seed: u32, lo: IVec3, hi: IVec3) {
+    for y in lo.y..=hi.y {
+        for z in lo.z..=hi.z {
+            for x in lo.x..=hi.x {
+                let p = ivec3(x, y, z);
+                let wall = x == lo.x || x == hi.x || y == lo.y || y == hi.y || z == lo.z || z == hi.z;
+                let id = if !wall {
+                    AIR
+                } else if hash3(seed ^ 0xC419, x, y, z) < 0.2 {
+                    MOSSY_COBBLE
+                } else {
+                    STONE_BRICKS
+                };
+                v.push((p, id));
+            }
+        }
+    }
+}
+
+/// A Crypt's blocks. The portal room: a ring of frames round a pit. In
+/// worlds from version 3 (`big`), corridors lead off it to four side rooms:
+/// a library, a store, cells and a flooded well room.
+pub fn crypt_blocks(c: IVec3, seed: u32, big: bool) -> Vec<(IVec3, Id)> {
+    if !big {
+        return crypt_room(c, seed);
+    }
+    let mut v = Vec::new();
+    // The corridors and rooms first, then the portal room over them, then the doorways.
+    let dirs = [ivec3(0, 0, -1), ivec3(1, 0, 0), ivec3(0, 0, 1), ivec3(-1, 0, 0)];
+    // Which room is down which corridor (by the seed and the spot).
+    let turn = (hash2(seed ^ 0xC420, c.x, c.z) * 4.0) as usize;
+    let mut doors = Vec::new();
+    for (k, d) in dirs.iter().enumerate() {
+        let side = ivec3(d.z.abs(), 0, d.x.abs());
+        // A corridor 3 wide and 3 tall, from the room's wall out 10.
+        let (a, b) = (c + *d * 6, c + *d * 17);
+        let lo = a.min(b) - side * 2 + ivec3(0, -1, 0);
+        let hi = a.max(b) + side * 2 + ivec3(0, 3, 0);
+        crypt_box(&mut v, seed, lo, hi);
+        // A room at the end, 11 across and 6 tall.
+        let mid = c + *d * 22;
+        crypt_box(&mut v, seed, mid - ivec3(5, 1, 5), mid + ivec3(5, 5, 5));
+        // Torches along the corridor, cobwebs in its corners.
+        for t in [8, 12, 16] {
+            v.push((c + *d * t + side * 2 + ivec3(0, 1, 0), TORCH));
+            if hash3(seed ^ 0xC421, k as i32, t, 0) < 0.5 {
+                v.push((c + *d * t - side + ivec3(0, 2, 0), COBWEB));
+            }
+        }
+        doors.push((c + *d * 6, c + *d * 17, side));
+        match (k + turn) % 4 {
+            0 => {
+                // The library: shelves along the walls, a lectern, a chest.
+                for i in -4..=4 {
+                    for y in 0..=3 {
+                        for q in [mid + side * 4 + *d * i, mid - side * 4 + *d * i] {
+                            v.push((q + ivec3(0, y, 0), BOOKSHELF));
+                        }
+                    }
+                }
+                v.push((mid + *d * 2, LECTERN));
+                v.push((mid + *d * 4, CHEST));
+            }
+            1 => {
+                // The store: barrels and chests.
+                for i in -3..=3 {
+                    let q = mid + side * 4 + *d * i;
+                    v.push((q, if i % 3 == 0 { CHEST } else { BARREL }));
+                    v.push((mid - side * 4 + *d * i, BARREL));
+                }
+            }
+            2 => {
+                // The cells: little stone bays, webbed, one with a chest.
+                for i in [-3, 0, 3] {
+                    for y in 0..=3 {
+                        v.push((mid + side * 2 + *d * (i + 1) + ivec3(0, y, 0), STONE_BRICKS));
+                        v.push((mid - side * 2 + *d * (i + 1) + ivec3(0, y, 0), STONE_BRICKS));
+                    }
+                    v.push((mid + side * 4 + *d * i + ivec3(0, 2, 0), COBWEB));
+                }
+                v.push((mid - side * 4 + *d * 3, CHEST));
+            }
+            _ => {
+                // The well room: a pool in the middle, lanterns round it.
+                for z in -2..=2 {
+                    for x in -2..=2 {
+                        v.push((mid + ivec3(x, -1, z), WATER));
+                        v.push((mid + ivec3(x, -2, z), STONE_BRICKS));
+                    }
+                }
+                for q in [ivec3(4, 0, 4), ivec3(-4, 0, 4), ivec3(4, 0, -4), ivec3(-4, 0, -4)] {
+                    v.push((mid + q, LANTERN));
+                }
+            }
+        }
+    }
+    v.extend(crypt_room(c, seed));
+    // Doorways through the walls at each end of each corridor.
+    for (inner, outer, side) in doors {
+        for s in -1..=1 {
+            for y in 0..=2 {
+                v.push((inner + side * s + ivec3(0, y, 0), AIR));
+                v.push((outer + side * s + ivec3(0, y, 0), AIR));
+            }
+        }
+    }
+    // (The portal room's own torches sit in its corners, clear of the doorways.)
+    v
+}
+
+/// The portal room: a stone brick room with the ring of frames around a pit.
+fn crypt_room(c: IVec3, seed: u32) -> Vec<(IVec3, Id)> {
     let mut v = Vec::new();
     let (r, h): (i32, i32) = (6, 6);
     for dy in -1..=h {
@@ -246,7 +406,19 @@ impl Generator {
                     }
                 }
                 // Outer islands, some with a spire.
+                let tall = self.opts.version >= 3;
                 for (c, r, spire) in outer_islands_near(s, x, z) {
+                    if tall {
+                        self.outer_island_column(x, z, c, r, &mut b, lx, lz);
+                        if spire {
+                            for dy in 1..=spire_height(true) {
+                                if let Some(id) = tall_spire_block(x - c.x, dy, z - c.z) {
+                                    b[i(c.y + dy)] = id;
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     let d = ((x - c.x) as f32).hypot((z - c.z) as f32);
                     let edge = r as f32 + self.scorch.noise3(x as f32 / 9.0, c.y as f32, z as f32 / 9.0) * 3.0;
                     if d < edge {
@@ -277,16 +449,96 @@ impl Generator {
 }
 
 impl Generator {
+    /// One column of an outer island, from version 3: two to four lobes at
+    /// slightly different heights, a craggy underside, and a few rocks
+    /// drifting nearby.
+    #[allow(clippy::too_many_arguments)]
+    fn outer_island_column(&self, x: i32, z: i32, c: IVec3, r: i32, b: &mut [Id], lx: i32, lz: i32) {
+        let s = self.seed ^ 0x0157;
+        let i = |y: i32| crate::world::idx(lx, y, lz);
+        let key = (c.x, c.z);
+        let mut lobes = vec![(c, r as f32)];
+        for k in 0..3 {
+            if hash3(s, key.0, k, key.1) < 0.65 {
+                let a = hash3(s ^ 1, key.0, k, key.1) * std::f32::consts::TAU;
+                let off = r as f32 * (0.55 + hash3(s ^ 2, key.0, k, key.1) * 0.35);
+                let rise = (hash3(s ^ 3, key.0, k, key.1) * 5.0) as i32 - 2;
+                let at = c + ivec3((a.cos() * off) as i32, rise, (a.sin() * off) as i32);
+                lobes.push((at, r as f32 * (0.45 + hash3(s ^ 4, key.0, k, key.1) * 0.3)));
+            }
+        }
+        // Rocks drifting round it.
+        for k in 0..3 {
+            if hash3(s ^ 5, key.0, k, key.1) < 0.6 {
+                let a = hash3(s ^ 6, key.0, k, key.1) * std::f32::consts::TAU;
+                let off = r as f32 + 6.0 + hash3(s ^ 7, key.0, k, key.1) * 8.0;
+                let up = (hash3(s ^ 8, key.0, k, key.1) * 16.0) as i32 - 6;
+                lobes.push((c + ivec3((a.cos() * off) as i32, up, (a.sin() * off) as i32), 2.0 + hash3(s ^ 9, key.0, k, key.1) * 2.5));
+            }
+        }
+        for (m, rr) in lobes {
+            let d = ((x - m.x) as f32).hypot((z - m.z) as f32);
+            let edge = rr + self.scorch.noise3(x as f32 / 7.0, m.y as f32, z as f32 / 7.0) * (rr * 0.3).min(3.0);
+            if d >= edge {
+                continue;
+            }
+            let k = 1.0 - d / edge;
+            // A craggy underside: deeper in the middle, in uneven teeth.
+            let crag = (self.scorch.noise3(x as f32 / 3.0, 40.0, z as f32 / 3.0) + 1.0) * 3.0;
+            let depth = (k.sqrt() * (rr * 0.9 + 2.0) + crag * k) as i32 + 1;
+            // A gently uneven top (flat under the spire, which stands on the middle).
+            let bump = if d < 4.0 { 0.0 } else { self.scorch.noise3(x as f32 / 11.0, 9.0, z as f32 / 11.0) * 1.6 * k };
+            let top = m.y + bump as i32;
+            for y in (top - depth).max(1)..=top {
+                if b[i(y)] == AIR {
+                    b[i(y)] = HOLLOW_STONE;
+                }
+            }
+        }
+    }
+
+    /// Chests in the Crypts' side rooms that fall in chunk (cx, cz) (filled like a dungeon's).
+    pub fn crypt_chests(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        if self.opts.version < 3 || self.dim != Dim::Over {
+            return Vec::new();
+        }
+        let (rx, rz) = ((cx * CW).div_euclid(CRYPT_REGION), (cz * CW).div_euclid(CRYPT_REGION));
+        let mut v = Vec::new();
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                let Some(c) = crypt_in_region(self.seed, rx + dx, rz + dz) else { continue };
+                if (c.x - (cx * CW + 8)).abs() > CRYPT_REACH + 8 || (c.z - (cz * CW + 8)).abs() > CRYPT_REACH + 8 {
+                    continue;
+                }
+                v.extend(crypt_blocks(c, self.seed, true).into_iter().filter(|&(p, id)| id == CHEST && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
+            }
+        }
+        v.sort_unstable_by_key(|p| (p.x, p.y, p.z));
+        v.dedup();
+        v
+    }
+
+    /// Every chest in the Crypt at `c`.
+    #[cfg(test)]
+    pub fn crypt_chests_all(&self, c: IVec3) -> Vec<IVec3> {
+        let mut v: Vec<IVec3> = crypt_blocks(c, self.seed, self.opts.version >= 3).into_iter().filter(|&(_, id)| id == CHEST).map(|(p, _)| p).collect();
+        v.sort_unstable_by_key(|p| (p.x, p.y, p.z));
+        v.dedup();
+        v
+    }
+
     /// Crypts whose rooms reach into chunk (cx, cz).
     pub fn place_crypts(&self, cx: i32, cz: i32, b: &mut [Id]) {
         let (rx, rz) = ((cx * CW).div_euclid(CRYPT_REGION), (cz * CW).div_euclid(CRYPT_REGION));
         for dz in -1..=1 {
             for dx in -1..=1 {
                 let Some(c) = crypt_in_region(self.seed, rx + dx, rz + dz) else { continue };
-                if (c.x - (cx * CW + 8)).abs() > 16 || (c.z - (cz * CW + 8)).abs() > 16 {
+                let big = self.opts.version >= 3;
+                let reach = if big { CRYPT_REACH + 8 } else { 16 };
+                if (c.x - (cx * CW + 8)).abs() > reach || (c.z - (cz * CW + 8)).abs() > reach {
                     continue;
                 }
-                for (p, id) in crypt_blocks(c, self.seed) {
+                for (p, id) in crypt_blocks(c, self.seed, big) {
                     let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
                     if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (1..CH).contains(&p.y) {
                         b[crate::world::idx(lx, p.y, lz)] = id;
@@ -538,6 +790,50 @@ mod tests {
             let c = g.generate(x.div_euclid(CW), z.div_euclid(CW));
             assert_eq!(c[crate::world::idx(x.rem_euclid(CW), h, z.rem_euclid(CW))], WYRM_CRYSTAL);
         }
+    }
+
+    #[test]
+    fn newer_spires_are_tall_round_and_open() {
+        use crate::world::GenOptions;
+        let g = Generator::with_dim(9, GenOptions::DEFAULT, Dim::Hollow);
+        let (c, _, _) = (1..12).flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)])).find_map(|(gx, gz)| outer_island(9, gx, gz).filter(|i| i.2)).expect("a spire");
+        let at = |p: IVec3| g.generate_hollow(p.x.div_euclid(CW), p.z.div_euclid(CW))[crate::world::idx(p.x.rem_euclid(CW), p.y, p.z.rem_euclid(CW))];
+        assert_eq!(at(c + ivec3(0, 2, 0)), CHEST, "the chest where the loot goes");
+        assert_eq!(at(c + ivec3(0, spire_height(true), 0)), GLOWROCK, "a glowing tip");
+        // Round: the corners of its square are open, its sides are wall; the door is open.
+        assert_eq!(at(c + ivec3(3, 8, 3)), AIR);
+        assert_eq!(at(c + ivec3(2, 8, 0)), OBSIDIAN);
+        assert!((2..=4).all(|y| at(c + ivec3(0, y, 2)) == AIR));
+        assert!(spire_chests(9, (c.x).div_euclid(CW), (c.z).div_euclid(CW)).iter().any(|(p, _)| *p == c + ivec3(0, 2, 0)));
+    }
+
+    #[test]
+    fn newer_crypts_have_corridors_and_side_rooms() {
+        use crate::world::GenOptions;
+        let g = Generator::with(77, GenOptions::DEFAULT);
+        let c = nearest_crypt(77, Vec3::ZERO).expect("a crypt");
+        let mut w = crate::world::World::with_options(77, GenOptions::DEFAULT);
+        w.structure_loot = true;
+        let reach = (CRYPT_REACH + 8) / CW + 1;
+        for dz in -reach..=reach {
+            for dx in -reach..=reach {
+                w.load_now(c.x.div_euclid(CW) + dx, c.z.div_euclid(CW) + dz);
+            }
+        }
+        // The ring is there, and so are the four corridors and the rooms at their ends.
+        assert!(ring(c).iter().all(|&p| matches!(w.get_v(p), EYE_FRAME | EYE_FRAME_FULL)));
+        for d in [ivec3(0, 0, -1), ivec3(1, 0, 0), ivec3(0, 0, 1), ivec3(-1, 0, 0)] {
+            for t in [6, 10, 17, 19, 22] {
+                let p = c + d * t;
+                assert!(w.get_v(p) == AIR || !is_solid(w.get_v(p)), "{t} along {d}: {}", w.get_v(p));
+            }
+        }
+        // Loot in the side rooms' chests.
+        let chests = g.crypt_chests_all(c);
+        assert!(chests.len() >= 3, "{} chests", chests.len());
+        assert!(chests.iter().any(|p| w.containers.get(p).is_some_and(|ch| ch.slots.iter().any(|s| s.is_some()))), "the chests were filled");
+        // Older worlds keep the single room.
+        assert!(crypt_blocks(c, 77, false).iter().all(|(p, _)| (p.x - c.x).abs() <= 6 && (p.z - c.z).abs() <= 6));
     }
 
     #[test]

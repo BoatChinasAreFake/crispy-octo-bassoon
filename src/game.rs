@@ -987,6 +987,10 @@ impl Game {
             self.scorch_explore();
             return;
         }
+        // (The Hollow has no biomes of its own to find.)
+        if !self.world.dim().open_sky() {
+            return;
+        }
         use crate::world::Biome;
         let p = self.player.body.pos;
         let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
