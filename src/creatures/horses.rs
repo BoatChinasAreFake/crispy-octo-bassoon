@@ -96,6 +96,23 @@ impl Game {
             self.sfx(Sfx::Place(crate::sound::Mat::Wood), Some(pos));
             return Interaction::Ate;
         }
+        // Galloper armour on (shears take it off again).
+        let level = crate::homecraft::barding_of(item);
+        if level > 0 && m.kind == MobKind::Galloper && m.barding == 0 && m.baby <= 0.0 {
+            m.barding = level;
+            self.sfx(Sfx::Place(crate::sound::Mat::Glass), Some(pos));
+            self.advance_for(who, "knight_errant");
+            return Interaction::Ate;
+        }
+        if item == SHEARS && m.barding > 0 {
+            let old = crate::homecraft::barding_item(m.barding);
+            m.barding = 0;
+            if let Some(it) = old {
+                self.pop_drop(pos, it, 1);
+            }
+            self.sfx(Sfx::Snip, Some(pos));
+            return Interaction::Sheared;
+        }
         if m.kind.breed_food().contains(&item) && m.ready_to_breed() {
             m.love = crate::animals::LOVE_SECS;
             self.hearts(pos, 4);

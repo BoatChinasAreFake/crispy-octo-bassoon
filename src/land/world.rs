@@ -1521,6 +1521,8 @@ pub struct World {
     pub conduits: HashSet<IVec3>,
     /// Every cell of Spelunker's Rope (see rope.rs), for maps.
     pub ropes: HashSet<IVec3>,
+    /// Lightning rods (see homecraft.rs).
+    pub rods: HashSet<IVec3>,
     /// Underground cells players have dug out (see caveins.rs). Not saved:
     /// a room left alone long enough to reload has settled.
     pub dug: HashSet<IVec3>,
@@ -1593,6 +1595,7 @@ impl World {
             beacons: HashSet::new(),
             conduits: HashSet::new(),
             ropes: HashSet::new(),
+            rods: HashSet::new(),
             dug: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
@@ -1701,7 +1704,7 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
+                    if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::homecraft::is_rod(id) || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
@@ -1710,6 +1713,7 @@ impl World {
                             FIRE => self.fires.insert(p),
                             CONDUIT => self.conduits.insert(p),
                             ROPE => self.ropes.insert(p),
+                            b if crate::homecraft::is_rod(b) => self.rods.insert(p),
                             b if crate::beacon::is_beacon(b) => self.beacons.insert(p),
                             b if crate::music::is_jukebox(b) => self.jukeboxes.insert(p),
                             _ => self.comparators.insert(p),
@@ -1946,6 +1950,11 @@ impl World {
             self.ropes.insert(p);
         } else if old == ROPE {
             self.ropes.remove(&p);
+        }
+        if crate::homecraft::is_rod(id) {
+            self.rods.insert(p);
+        } else if crate::homecraft::is_rod(old) {
+            self.rods.remove(&p);
         }
         if crate::fortress::is_cage(id) {
             self.cages.insert(p);

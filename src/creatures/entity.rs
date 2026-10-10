@@ -841,6 +841,8 @@ pub struct Mob {
     pub restock: f32,
     // ---- Gallopers (see horses.rs)
     pub saddled: bool,
+    /// Galloper armour: 0 none, 1 iron, 2 gold, 3 dimond (see homecraft.rs).
+    pub barding: u8,
     /// How used to people it is (tamed at `horses::TAME_AT`).
     pub temper: u8,
     /// Who's riding it: 0 nobody, else player id + 1.
@@ -1045,6 +1047,7 @@ impl Mob {
             trades_used: [0; 8],
             restock: crate::villagers::RESTOCK_SECS,
             saddled: false,
+            barding: 0,
             temper: 0,
             rider: 0,
             passenger: 0,
@@ -1114,6 +1117,8 @@ impl Mob {
         let amount = if self.kind == MobKind::Rollo && self.fuse > 0.0 { amount * 0.25 } else { amount };
         // Woofer armour soaks up hits until it wears through (see critters.rs).
         let amount = if self.kind == MobKind::Woofer && self.saddled { crate::critters::armour_soak(self, amount) } else { amount };
+        // Galloper armour takes a share of every hit.
+        let amount = amount * (1.0 - crate::homecraft::BARDING_SOAK[self.barding.min(3) as usize]);
         self.health -= amount;
         self.hurt = 0.5;
         let mut dir = self.body.pos - from;
@@ -2557,6 +2562,9 @@ impl Mob {
         } else if self.saddled {
             draw_model(geo, &root, &SADDLE_PART, 0.0, sky, false);
         }
+        if self.barding > 0 && self.kind == MobKind::Galloper {
+            draw_posed(geo, &root, &BARDING[(self.barding.min(3) - 1) as usize], pose, self.flap, sky);
+        }
         if self.kind == MobKind::Pilferer && self.seed == 1 {
             draw_model(geo, &root, &BANNER_BACK, 0.0, sky, false);
         }
@@ -3032,8 +3040,17 @@ const GALLOPER_PARTS: [Part; 13] = [
     part([0.06, 1.86, -1.12], [0.07, 0.13, 0.06], HEAD, Limb::Tilt(-0.5), [GL; 6]),
     part([-0.16, 1.62, -1.3], [0.32, 0.06, 0.06], HEAD, Limb::Tilt(-0.5), [T_GALLOP_MANE; 6]),
 ];
-/// A saddle on a Galloper's back.
 static GALLOPER: [Part; 13] = GALLOPER_PARTS;
+/// Galloper armour: a blanket over the body, a collar up the neck and a plate
+/// over the face, in iron, gold or dimond.
+const fn barding(tile: u16) -> [Part; 3] {
+    [
+        part([-0.32, 0.83, -0.77], [0.64, 0.64, 1.54], [0.0; 3], Limb::Fixed, [tile; 6]),
+        part([-0.16, 1.08, -1.0], [0.32, 0.84, 0.46], NECK, Limb::Tilt(-0.45), [tile; 6]),
+        part([-0.17, 1.66, -1.43], [0.34, 0.23, 0.4], HEAD, Limb::Tilt(-0.5), [tile; 6]),
+    ]
+}
+static BARDING: [[Part; 3]; 3] = [barding(crate::texture::T_HORSE_ARMOR_WORN), barding(crate::texture::T_HORSE_ARMOR_WORN + 1), barding(crate::texture::T_HORSE_ARMOR_WORN + 2)];
 /// The same shape in other tiles (`map`: (from, to) pairs).
 const fn retile<const N: usize>(mut parts: [Part; N], map: [(u16, u16); 4]) -> [Part; N] {
     let mut i = 0;
@@ -3648,7 +3665,10 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f3
     let mut parts = Vec::new();
     let mut add = |slot: usize, list: &[ArmorPiece]| {
         let t = tier(slot);
+        let look5 = (trims >> (slot * 5)) & 0x1F;
         let tile = match t as usize {
+            // Dyed woolly armour (see trims::look).
+            1 if look5 >= 17 => crate::texture::T_WOOL_WORN_DYED + (look5 as u16 - 17) % 8,
             1..=4 => T_ARMOR_WORN + t - 1,
             t if t == COPPER_TIER + 1 => T_COPPER_ARMOR_WORN,
             t if t == TURTLE_TIER + 1 => crate::texture::T_TURTLE_WORN,
@@ -3659,8 +3679,8 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f3
             parts.push(part(min, size, pivot, limb, [tile; 6]));
         }
         // Its trim, picked out over the top (see trims.rs).
-        let t = (trims >> (slot * 5)) & 0x1F;
-        if t > 0 {
+        let t = look5;
+        if (1..17).contains(&t) {
             let (pattern, material) = ((t as usize - 1) / 4, (t as usize - 1) % 4);
             let tile = crate::trims::MATERIAL_TILES[material];
             for &(min, size, pivot, limb) in list {

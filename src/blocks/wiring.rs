@@ -35,7 +35,7 @@ pub fn is_wire(id: Id) -> bool {
 
 /// A switch that's on (or the block that always is).
 pub fn source_on(id: Id) -> bool {
-    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK | SCULK_SENSOR_ACTIVE) || crate::vehicles::detector_on(id) || crate::tripwire::tripped(id)
+    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK | SCULK_SENSOR_ACTIVE | LIGHTNING_ROD_ON) || crate::vehicles::detector_on(id) || crate::tripwire::tripped(id)
 }
 
 /// Things that sit on the floor and fall off when it goes.
@@ -128,6 +128,10 @@ impl Game {
             if self.world.get_v(p) == BUTTON_ON {
                 self.world.set_v(p, BUTTON);
                 self.sfx(Sfx::Click, Some(p.as_vec3() + Vec3::splat(0.5)));
+            }
+            // (A struck lightning rod cools off the same way.)
+            if self.world.get_v(p) == LIGHTNING_ROD_ON {
+                self.world.set_v(p, LIGHTNING_ROD);
             }
         }
         self.pressure_plates(dt);

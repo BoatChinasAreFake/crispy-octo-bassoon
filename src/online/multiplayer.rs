@@ -836,6 +836,16 @@ impl Game {
                     self.grow_moss(p);
                 }
             }
+            Msg::Interact { x, y, z, item } if crate::homecraft::is_cauldron(self.world.get(x, y, z)) => {
+                if self.peer_rate_ok(from, "interact", 0.15) {
+                    self.host_cauldron(from, IVec3::new(x, y, z), item);
+                }
+            }
+            Msg::Interact { x, y, z, item } if crate::homecraft::is_composter(self.world.get(x, y, z)) => {
+                if self.peer_rate_ok(from, "interact", 0.15) {
+                    self.host_composter(from, IVec3::new(x, y, z), item);
+                }
+            }
             Msg::Interact { x, y, z, .. } if self.world.get(x, y, z) == BELL => {
                 let p = IVec3::new(x, y, z);
                 let near = self.peers.get(&from).is_some_and(|q| (q.target + Vec3::Y * 1.6).distance(p.as_vec3() + Vec3::splat(0.5)) <= REACH);
@@ -1305,6 +1315,10 @@ impl Game {
                 m.health = s.fuse;
                 m.fuse = 0.0;
             }
+            if kind == MobKind::Galloper {
+                m.barding = (s.fuse as u8).min(3);
+                m.fuse = 0.0;
+            }
             m.hurt = m.hurt.max(s.hurt);
             m.burning = s.burning;
             // Animals: just what's needed to draw them (and guess at shearing).
@@ -1488,7 +1502,8 @@ impl Game {
                         // Starers send "angry" and Hmmers their seed (it decides their trades) here.
                         // (Sneakers send what they're carrying.)
                         // (Bosses send their health, for the boss bar.)
-                        fuse: if m.is_boss() { m.health } else if matches!(m.kind, MobKind::Hmmer | MobKind::Wanderer | MobKind::Sneaker | MobKind::CopperGolem) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
+                        // (Gallopers send their armour.)
+                        fuse: if m.is_boss() { m.health } else if m.kind == MobKind::Galloper { m.barding as f32 } else if matches!(m.kind, MobKind::Hmmer | MobKind::Wanderer | MobKind::Sneaker | MobKind::CopperGolem) { m.seed as f32 } else if m.angry && matches!(m.kind, MobKind::Starer | MobKind::Weeper) { 1.0 } else { m.fuse },
                         hurt: m.hurt,
                         burning: m.burning,
                         // Its size (low half) and colouring (high half).

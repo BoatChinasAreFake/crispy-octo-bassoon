@@ -2323,6 +2323,12 @@ impl Game {
                 self.ring_bell(pos);
                 return;
             }
+            if crate::homecraft::is_cauldron(id) && self.use_cauldron(pos) {
+                return;
+            }
+            if crate::homecraft::is_composter(id) && self.use_composter(pos) {
+                return;
+            }
             if id == VAULT || id == VAULT_OMINOUS {
                 self.use_vault(pos);
                 return;
@@ -3558,7 +3564,8 @@ impl Game {
                         0
                     };
                     let extra = if looting > 0 { self.rng.int(0, looting as i32) as u8 } else { 0 };
-                    let drops = [m.loot(&mut self.rng).map(|(i, n)| (i, n.saturating_add(extra))), m.extra_loot(&mut self.rng)];
+                    let head = if m.baby > 0.0 { None } else { crate::homecraft::head_drop(m.kind, &mut self.rng) };
+                    let drops = [m.loot(&mut self.rng).map(|(i, n)| (i, n.saturating_add(extra))), m.extra_loot(&mut self.rng), head];
                     for (item, n) in drops.into_iter().flatten() {
                         if !self.creative {
                             self.pop_drop(m.body.pos + Vec3::Y * 0.5, item, n);
@@ -4286,6 +4293,11 @@ impl Game {
             }
         } else {
             let tile = crate::models::flat_tile(held);
+            // (Dyed woolly armour in its colour.)
+            let tile = match crate::trims::dye_of(self.inv.wear[self.inv.selected]) {
+                Some(c) if crate::trims::is_woolly(held) => crate::texture::T_WOOL_ICON_DYED + c as u16 * 4 + (held - ARMOR_FIRST),
+                _ => tile,
+            };
             // Tools and weapons (anything that wears out) are gripped by the handle
             // and tilted up and in; other things are held up flat to look at.
             let tool = crate::block::durability(held).is_some();

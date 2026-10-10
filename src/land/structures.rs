@@ -818,7 +818,7 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         Kind::Tower => &[(ARROW, 12, 0.6), (BOW, 1, 0.3), (IRON, 4, 0.5), (BREAD, 2, 0.4), (DIAMOND, 1, 0.1), (ARMOR_FIRST + 4, 1, 0.2), (ARMOR_FIRST + 4 + BOOTS as Id, 1, 0.2), (STONE_BRICKS, 16, 0.3), (PEARL, 2, 0.15)],
         Kind::Hut => &[(BREAD, 4, 0.7), (WHEAT_SEEDS, 8, 0.6), (CARROT, 4, 0.4), (POTATO, 4, 0.4), (TORCH, 8, 0.6), (HOE, 1, 0.3), (COOKED_CHOP, 3, 0.3), (PLANKS, 16, 0.4), (ROD, 1, 0.2), (BOOKSHELF, 1, 0.1)],
         Kind::Well => &[(BOOT, 1, 0.8), (GOLD_INGOT, 6, 0.5), (BOTTLE, 1, 0.6), (DIAMOND, 1, 0.15)],
-        Kind::Village => &[(BREAD, 6, 0.8), (APPLE, 4, 0.6), (IRON, 4, 0.5), (GOLD_INGOT, 5, 0.5), (BOOK, 2, 0.4), (SADDLE, 1, 0.2), (NAME_TAG, 1, 0.25), (WHEAT_SEEDS, 12, 0.5), (TORCH, 12, 0.5)],
+        Kind::Village => &[(BREAD, 6, 0.8), (APPLE, 4, 0.6), (IRON, 4, 0.5), (GOLD_INGOT, 5, 0.5), (BOOK, 2, 0.4), (SADDLE, 1, 0.2), (NAME_TAG, 1, 0.25), (WHEAT_SEEDS, 12, 0.5), (TORCH, 12, 0.5), (HORSE_ARMOR_IRON, 1, 0.1)],
         Kind::Spire => &[
             (GLIDER, 1, 0.45),
             (ROCKET, 16, 0.7),
@@ -859,6 +859,8 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (ARMOR_FIRST + 8 + CHESTPLATE as Id, 1, 0.15),
             (SCORCHITE_SCRAP, 1, 0.08),
             (DRIED_FLOATY, 1, 0.12),
+            (HORSE_ARMOR_GOLD, 1, 0.15),
+            (HORSE_ARMOR_DIAMOND, 1, 0.06),
         ],
         Kind::Outpost => &[
             (CROSSBOW, 1, 0.5),
@@ -919,8 +921,11 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
             (GOLDEN_CHOP, 1, 0.2),
             (GUNPOWDER, 4, 0.4),
             (SAND, 8, 0.3),
+            (HORSE_ARMOR_IRON, 1, 0.12),
+            (HORSE_ARMOR_GOLD, 1, 0.08),
+            (HORSE_ARMOR_DIAMOND, 1, 0.04),
         ],
-        Kind::JungleTemple => &[(BONE, 6, 0.6), (GOO, 6, 0.5), (GOLD_INGOT, 6, 0.5), (IRON, 5, 0.5), (DIAMOND, 2, 0.25), (SADDLE, 1, 0.25), (ENCHANTED_BOOK, 1, 0.25), (BAMBOO, 8, 0.4), (ARROW, 8, 0.4)],
+        Kind::JungleTemple => &[(BONE, 6, 0.6), (GOO, 6, 0.5), (GOLD_INGOT, 6, 0.5), (IRON, 5, 0.5), (DIAMOND, 2, 0.25), (SADDLE, 1, 0.25), (ENCHANTED_BOOK, 1, 0.25), (BAMBOO, 8, 0.4), (ARROW, 8, 0.4), (HORSE_ARMOR_IRON, 1, 0.1), (HORSE_ARMOR_GOLD, 1, 0.06)],
         Kind::Mineshaft => &[
             (RAIL_FIRST, 12, 0.6),
             (TORCH, 12, 0.5),

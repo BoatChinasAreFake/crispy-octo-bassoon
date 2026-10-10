@@ -218,6 +218,13 @@ impl Ui {
     pub fn stack_worn(&self, stack: Option<(Id, u8)>, wear: crate::inventory::Wear, x: f32, y: f32, size: f32, show_count: bool) {
         self.stack(stack, x, y, size, show_count);
         let Some((id, _)) = stack else { return };
+        // Dyed woolly armour shows its colour.
+        if crate::trims::is_woolly(id)
+            && let Some(c) = crate::trims::dye_of(wear)
+        {
+            let pad = size * 0.12;
+            self.tile(crate::texture::T_WOOL_ICON_DYED + c as u16 * 4 + (id - ARMOR_FIRST), x + pad, y + pad, size - pad * 2.0, WHITE);
+        }
         if crate::enchant::is_enchanted(wear) {
             // A shimmer on enchanted things.
             let t = (get_time() as f32 * 3.0 + x * 0.05).sin() * 0.5 + 0.5;

@@ -59,7 +59,7 @@ pub enum Interaction {
 /// Would right-clicking this mob with `item` do anything? (Joined players
 /// guess the same way before the host decides, to wear their shears.)
 pub fn will_shear(m: &Mob, item: Id) -> bool {
-    item == SHEARS && m.baby <= 0.0 && ((m.kind == MobKind::Fluffer && !m.sheared) || m.kind == MobKind::Mushmooer)
+    item == SHEARS && m.baby <= 0.0 && ((m.kind == MobKind::Fluffer && !m.sheared) || m.kind == MobKind::Mushmooer || (m.kind == MobKind::Galloper && m.barding > 0))
 }
 
 impl Game {
@@ -572,7 +572,7 @@ pub fn encode_mobs(mobs: &[Mob], names: &std::collections::HashMap<u32, String>)
         out.push(m.size as u8);
         let name = names.get(&m.id).map(String::as_str).unwrap_or("");
         let name = &name.as_bytes()[..name.len().min(64)];
-        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2 | (m.saddled as u8) << 3 | (!name.is_empty() as u8) << 4);
+        out.push(m.sheared as u8 | (m.sitting as u8) << 1 | (m.home.is_some() as u8) << 2 | (m.saddled as u8) << 3 | (!name.is_empty() as u8) << 4 | (m.barding.min(3)) << 5);
         // (A seed's top byte is free: it carries the colouring.)
         out.extend_from_slice(&((m.seed & 0xFF_FFFF) | (m.variant as u32) << 24).to_le_bytes());
         let home = m.home.unwrap_or(Vec3::ZERO);
@@ -647,6 +647,7 @@ pub fn decode_mobs_named(b: &[u8], rng: &mut crate::noise::Rng) -> Vec<(Mob, Opt
         m.sheared = flags & 1 != 0;
         m.sitting = flags & 2 != 0;
         m.saddled = flags & 8 != 0;
+        m.barding = (flags >> 5) & 3;
         m.owner = (!owner.is_empty()).then_some(owner);
         m.seed = seed & 0xFF_FFFF;
         m.variant = ((seed >> 24) as u8).min(crate::entity::variants(kind).saturating_sub(1));
@@ -669,8 +670,10 @@ mod tests {
         let mut m = Mob::new(MobKind::Galloper, Vec3::new(1.0, 60.0, 1.0), &mut rng);
         m.variant = 3;
         m.persistent = true;
+        m.barding = 2;
         let back = decode_mobs(&encode_mobs(&[m], &HashMap::new()), &mut rng);
         assert_eq!(back[0].variant, 3);
+        assert_eq!(back[0].barding, 2, "its armour is saved");
         let blues = (0..5000).filter(|_| crate::entity::roll_variant(MobKind::Axolotl, &mut rng) == crate::entity::BLUE_AXOLOTL).count();
         assert!((20..250).contains(&blues), "{blues} blues in 5000");
         assert_eq!(crate::entity::roll_variant(MobKind::Oinker, &mut rng), 0);

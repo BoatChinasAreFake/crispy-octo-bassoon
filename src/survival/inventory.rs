@@ -18,13 +18,13 @@ pub const NOT_ENCHANTS: Wear = 0x8000_FFFF;
 /// Uses so far (a trimmed piece of armour keeps its trim in the top of
 /// the low half; see trims.rs).
 pub fn uses(w: Wear) -> u16 {
-    if w & crate::trims::TRIMMED != 0 { (w & 0xFFF) as u16 } else { w as u16 }
+    if w & crate::trims::TRIMMED != 0 { (w & 0x7FF) as u16 } else { w as u16 }
 }
 
 /// The same item with a different number of uses (enchantments and trim kept).
 pub fn with_uses(w: Wear, uses: u16) -> Wear {
     if w & crate::trims::TRIMMED != 0 {
-        (w & !0xFFF) | uses.min(0xFFF) as u32
+        (w & !0x7FF) | uses.min(0x7FF) as u32
     } else {
         (w & 0xFFFF_0000) | uses as u32
     }

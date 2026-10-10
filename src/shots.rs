@@ -356,7 +356,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -799,7 +799,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1355,6 +1355,37 @@ impl App {
                 }
                 for (k, id) in [block::BELL, block::GRINDSTONE, block::BREWING_STAND, block::POT_FIRST, block::SCAFFOLDING, block::CHAIN, block::SOUL_LANTERN, block::CHARRED_SKULL, block::ENCHANTING_TABLE].into_iter().enumerate() {
                     app.game.inv.slots[k] = Some((id, 1));
+                }
+            }
+            if s.mode == "homecraft" && frames == 125 {
+                // v0.3's home and craft: cauldrons, composters, heads and a rod; an armoured Galloper.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                use crate::homecraft::cauldron_block;
+                let near = [block::CAULDRON, cauldron_block(3, None), cauldron_block(3, Some(2)), cauldron_block(1, Some(6)), block::COMPOSTER, block::COMPOSTER + 4, block::COMPOSTER + 7];
+                let far = [block::GROANER_HEAD, block::RATTLER_SKULL, block::HISSER_HEAD, block::LIGHTNING_ROD];
+                for (i, id) in near.into_iter().enumerate() {
+                    app.game.world.set_v(at(4, i as i32 - 3, 0), id);
+                }
+                for (i, id) in far.into_iter().enumerate() {
+                    app.game.world.set_v(at(6, i as i32 * 2 - 3, 0), id);
+                }
+                let mut rng = crate::noise::Rng::new(5);
+                let mut m = entity::Mob::new(entity::MobKind::Galloper, (base + f * 8 + r * 2).as_vec3() + Vec3::new(0.5, 0.0, 0.5), &mut rng);
+                m.owner = Some("you".into());
+                m.saddled = true;
+                m.barding = 3;
+                m.yaw = s.yaw + 1.2;
+                m.id = 2300;
+                m.persistent = true;
+                app.game.mobs.push(m);
+                for (k, (id, wear)) in [(block::ARMOR_FIRST, trims::with_dye(0, Some(2))), (block::ARMOR_FIRST + 1, trims::with_dye(0, Some(6))), (block::ARMOR_FIRST + 2, trims::with_dye(0, Some(4))), (block::CAULDRON, 0), (block::COMPOSTER, 0), (block::LIGHTNING_ROD, 0), (block::HORSE_ARMOR_IRON, 0), (block::HORSE_ARMOR_GOLD, 0), (block::HORSE_ARMOR_DIAMOND, 0)].into_iter().enumerate() {
+                    app.game.inv.slots[k] = Some((id, 1));
+                    app.game.inv.wear[k] = wear;
                 }
             }
             if s.mode == "woods" && frames == 125 {

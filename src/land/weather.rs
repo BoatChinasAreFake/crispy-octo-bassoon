@@ -216,6 +216,9 @@ impl Game {
 
     /// Lightning hits `at` (where the world lives): everyone close gets hurt, TNT goes off.
     pub fn lightning_strike(&mut self, at: Vec3) {
+        // A lightning rod in reach takes it (and nothing catches fire).
+        let caught = if self.is_client() { None } else { self.rod_catch(at) };
+        let at = caught.unwrap_or(at);
         self.net_broadcast(Msg::Lightning { at });
         self.lightning_effects(at);
         let under = macroquad::math::ivec3(at.x.floor() as i32, at.y.floor() as i32 - 1, at.z.floor() as i32);
@@ -225,7 +228,7 @@ impl Game {
         }
         // Lightning starts fires.
         let at_cell = under + macroquad::math::IVec3::Y;
-        if !self.is_client() {
+        if !self.is_client() && caught.is_none() {
             self.ignite(at_cell);
         }
         let cause = "was struck by lightning. Statistically impressive";

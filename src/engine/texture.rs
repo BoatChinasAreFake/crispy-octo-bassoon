@@ -824,11 +824,29 @@ pub const T_GRUMBLE_PANTS: u16 = 985;
 pub const T_GOAT_HEAD_SIDE: u16 = 986;
 /// The Hollow Wyrm's horns, spines and tail spade.
 pub const T_WYRM_HORN: u16 = 987;
+/// Home and craft (see homecraft.rs).
+pub const T_CAULDRON_SIDE: u16 = 988;
+pub const T_CAULDRON_TOP: u16 = 989;
+pub const T_CAULDRON_INNER: u16 = 990;
+pub const T_COMPOSTER_SIDE: u16 = 991;
+pub const T_COMPOSTER_TOP: u16 = 992;
+pub const T_COMPOSTER_FILL: u16 = 993;
+pub const T_COMPOSTER_READY: u16 = 994;
+pub const T_LIGHTNING_ROD: u16 = 995;
+pub const T_LIGHTNING_ROD_ON: u16 = 996;
+pub const T_HORSE_ARMOR_ITEMS: u16 = 997;
+pub const T_HORSE_ARMOR_WORN: u16 = 1000;
+/// Dyed water in a cauldron, one per colour.
+pub const T_DYED_WATER: u16 = 1003;
+/// Dyed woolly armour: worn (one per colour), then icons (colour * 4 + slot).
+pub const T_WOOL_WORN_DYED: u16 = 1011;
+pub const T_WOOL_ICON_DYED: u16 = 1019;
+pub const T_LIGHTNING_ROD_ITEM: u16 = 1051;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
-/// keeps the first 1024 tiles; mods look textures up by name, so this can move).
-pub const FIRST_MOD_TILE: u16 = 1024;
+/// keeps the first 1536 tiles; mods look textures up by name, so this can move).
+pub const FIRST_MOD_TILE: u16 = 1536;
 
 /// Names mods can use to refer to built-in textures.
 pub const BASE_TEXTURES: &[(&str, u16)] = &[
@@ -4368,6 +4386,78 @@ fn home_tiles(a: &mut Atlas) {
     monument_tiles(a);
     night_tiles(a);
     wilter_tiles(a);
+    homecraft_tiles(a);
+}
+
+/// Cauldrons, composters, lightning rods, Galloper armour and dyed woolly armour.
+fn homecraft_tiles(a: &mut Atlas) {
+    // A cauldron: dark iron with rivets, a rim on top, and a sooty inside.
+    a.each(T_CAULDRON_SIDE, |x, y, r, _| {
+        let rim = y < 2 || y == 15 || (y > 12 && (4..12).contains(&x));
+        let rivet = (y == 3 || y == 10) && (x == 2 || x == 13);
+        shade(rgb(62, 62, 68), r.range(0.85, 1.08) * if rivet { 1.5 } else if rim { 0.75 } else { 1.0 })
+    });
+    a.each(T_CAULDRON_TOP, |x, y, r, _| {
+        let edge = x < 2 || y < 2 || x > 13 || y > 13;
+        if edge { shade(rgb(75, 75, 80), r.range(0.85, 1.08)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_CAULDRON_INNER, |_, _, r, _| shade(rgb(38, 36, 40), r.range(0.85, 1.1)));
+    // Dyed water: the water's ripples in each dye's colour.
+    for c in 0..8u16 {
+        let [cr, cg, cb] = crate::carpentry::colour_rgb(c as usize);
+        a.each(T_DYED_WATER + c, |x, y, r, p| {
+            let w = (p.noise2(x as f32 * 0.25, y as f32 * 0.5 + 3.0) * 6.0).sin() * 0.1;
+            shade(rgb(cr, cg, cb), 0.85 + w + r.range(-0.03, 0.03))
+        });
+    }
+    // A composter: a slatted wooden box, and what's in it.
+    a.each(T_COMPOSTER_SIDE, |x, y, r, _| {
+        let post = !(2..=13).contains(&x);
+        let gap = !post && y % 4 == 3;
+        shade(rgb(150, 105, 60), r.range(0.88, 1.06) * if gap { 0.55 } else if post { 0.8 } else { 1.0 })
+    });
+    a.each(T_COMPOSTER_TOP, |x, y, r, _| {
+        let edge = x < 2 || y < 2 || x > 13 || y > 13;
+        if edge { shade(rgb(130, 90, 50), r.range(0.88, 1.06)) } else { [0, 0, 0, 0] }
+    });
+    a.each(T_COMPOSTER_FILL, |_, _, r, _| if r.chance(0.2) { shade(rgb(90, 140, 50), r.range(0.8, 1.1)) } else { shade(rgb(85, 60, 35), r.range(0.8, 1.15)) });
+    a.each(T_COMPOSTER_READY, |_, _, r, _| if r.chance(0.12) { rgb(230, 230, 220) } else { shade(rgb(70, 50, 30), r.range(0.8, 1.15)) });
+    // A copper rod (it glows white for a moment when struck).
+    a.each(T_LIGHTNING_ROD, |x, y, r, _| shade(rgb(205, 115, 75), r.range(0.85, 1.1) * if (x + y) % 5 == 0 { 0.8 } else { 1.0 }));
+    a.each(T_LIGHTNING_ROD_ON, |_, _, r, _| shade(rgb(250, 245, 230), r.range(0.92, 1.05)));
+    a.each(T_LIGHTNING_ROD_ITEM, |x, y, r, _| {
+        let rod = (7..9).contains(&x) && y > 4;
+        let knob = (6..10).contains(&x) && (1..5).contains(&y);
+        if rod || knob { shade(rgb(205, 115, 75), r.range(0.85, 1.1) * if x == 8 || y == 1 { 0.75 } else { 1.0 }) } else { [0, 0, 0, 0] }
+    });
+    // Galloper armour: a blanket of plates with a crest, in iron, gold and dimond.
+    for (k, base) in [rgb(200, 200, 205), rgb(245, 205, 60), rgb(100, 230, 225)].into_iter().enumerate() {
+        a.each(T_HORSE_ARMOR_ITEMS + k as u16, |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
+            let body = dx.abs() < 6.5 && (4.0..12.0).contains(&(dy + 8.0)) && !(y > 9 && (5..11).contains(&x));
+            let crest = (2..5).contains(&y) && (6..10).contains(&x);
+            let edge = dx.abs() > 5.5 || y == 4 || y == 11;
+            if crest { shade(rgb(190, 40, 40), r.range(0.9, 1.05)) } else if body { shade(base, r.range(0.9, 1.05) * if edge { 0.65 } else { 1.0 }) } else { [0, 0, 0, 0] }
+        });
+        a.each(T_HORSE_ARMOR_WORN + k as u16, |x, y, r, _| {
+            let plate = x % 4 == 0 || y % 5 == 0;
+            shade(base, r.range(0.9, 1.05) * if plate { 0.72 } else { 1.0 })
+        });
+    }
+    // Dyed woolly armour: the worn knit and the icons, in each colour.
+    for c in 0..8u16 {
+        let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };
+        a.each(T_WOOL_WORN_DYED + c, |x, y, r, _| {
+            let rim = x == 0 || y == 0 || x == 15 || y == 15;
+            let knit = (x + y) % 4 == 0;
+            shade(base, r.range(0.9, 1.05) * if rim { 0.7 } else if knit { 0.85 } else { 1.0 })
+        });
+        let pal = [('#', shade(base, 0.3)), ('b', base), ('d', shade(base, 0.72)), ('h', shade(base, 1.2))];
+        for (slot, rows) in [&HELMET, &CHESTPLATE, &LEGGINGS, &BOOTS].into_iter().enumerate() {
+            a.each(T_WOOL_ICON_DYED + c * 4 + slot as u16, |_, _, _, _| [0, 0, 0, 0]);
+            a.sprite(T_WOOL_ICON_DYED + c * 4 + slot as u16, rows, &pal);
+        }
+    }
 }
 
 /// v0.2's night threats and small creatures.
