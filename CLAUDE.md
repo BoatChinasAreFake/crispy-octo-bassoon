@@ -70,7 +70,7 @@ Originals:
 - Post boxes: send items and letters to another player, delivered even if they're offline, carried by a slightly put-upon Cluckster.
 
 Parts:
-- Part 1: items 1, 2 and 3.
+- Part 1: items 1, 2 and 3. **(released)**
 - Part 2: items 4 and 5.
 - Part 3: items 6, 7 and 8.
 - Part 4: the two originals (this is the last part).
