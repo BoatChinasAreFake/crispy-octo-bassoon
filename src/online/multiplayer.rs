@@ -440,12 +440,7 @@ impl Game {
                 name = format!("{}{}", name.chars().take(13).collect::<String>(), from);
             }
             let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.default_creative, spawn: self.spawn, keep_inventory: self.rules.keep_inventory, worldgen: self.world.generator.opts.pack() };
-            let mods: Vec<Msg> = self
-                .world
-                .mods
-                .iter()
-                .map(|(&(cx, cz), m)| Msg::Mods { cx, cz, entries: m.iter().map(|(&i, &b)| (i, b)).collect() })
-                .collect();
+            let mods = self.world_msgs();
             let mut roster = Vec::new();
             if !self.away() {
                 roster.push(Msg::PlayerJoin { id: self.my_id, name: self.player_name.clone() });
@@ -464,11 +459,6 @@ impl Game {
             roster.extend(self.mob_names.iter().map(|(&mob, name)| Msg::MobName { mob, name: name.clone() }));
             roster.push(self.rules_msg());
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
-            // Words on signs and things in frames.
-            roster.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
-            roster.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
-            roster.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
-            roster.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -489,6 +479,18 @@ impl Game {
             self.welcome_back(from, &name);
             self.fire("on_player_join", vec![name.clone().into()]);
         }
+    }
+
+    /// What a joined player needs of the active dimension when they arrive
+    /// (joining, or coming through a portal): every edit, then the words on
+    /// signs, the things in frames and the banners.
+    pub fn world_msgs(&self) -> Vec<Msg> {
+        let mut v: Vec<Msg> = self.world.mods.iter().map(|(&(cx, cz), m)| Msg::Mods { cx, cz, entries: m.iter().map(|(&i, &b)| (i, b)).collect() }).collect();
+        v.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
+        v.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
+        v.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+        v.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
+        v
     }
 
     fn rules_msg(&self) -> Msg {

@@ -185,6 +185,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     deeper(&mut host, &mut team, &mut report, &mut touched);
     wider(&mut host, &mut team, &mut report, &mut touched);
     scorched(&mut host, &mut team, &mut report, &mut touched);
+    travelled(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -1396,6 +1397,108 @@ fn scorched(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mu
     }
     host.mobs.retain(|m| m.id != snout);
     host.world.set_v(chest, AIR);
+}
+
+/// Walk bot `k` into the portal at `base` and wait for the host to move it.
+fn through_portal(host: &mut Game, team: &mut [Bot], k: usize, base: IVec3) {
+    let g = &mut team[k].game;
+    g.player.body.pos = base.as_vec3() + Vec3::new(1.0, 0.0, 0.5);
+    g.player.body.vel = Vec3::ZERO;
+    g.portal_cooldown = 0.0;
+    g.left_portal = true;
+    let from = g.dim;
+    for _ in 0..60 {
+        if team[k].game.dim != from {
+            // (Standing in the portal at the other end, as a player would be.)
+            team[k].game.left_portal = false;
+            break;
+        }
+        team[k].game.portal_tick(0.05);
+        pump(host, team, 0.05, |_| idle());
+    }
+    pump(host, team, 1.0, |_| idle());
+    // (Bots have no renderer to load the land around them.)
+    let at = team[k].game.player.body.pos;
+    load_around(&mut team[k].game, at);
+}
+
+/// Separate dimensions (see realms.rs): bots go through a portal, see each
+/// other (and what's built) there and not at home, and come back on dying.
+fn travelled(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::dims::Dim;
+    let n = team.len();
+    revive(host, team);
+    // 36. A portal by spawn takes a bot to the Scorchlands.
+    let (a, b) = (0, 1 % n);
+    ground(host, team, a);
+    let feet = team[a].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let base = feet + IVec3::new(0, 0, 3);
+    crate::scorch::build_portal(&mut host.world, base);
+    for dx in -1..=2 {
+        for dy in -1..=3 {
+            touched.insert(base + IVec3::new(dx, dy, 0));
+        }
+    }
+    pump(host, team, 1.0, |_| idle());
+    let ida = team[a].game.my_id;
+    through_portal(host, team, a, base);
+    report.features.push("dimensions");
+    if team[a].game.dim != Dim::Scorch || host.peer_dim(ida) != Some(Dim::Scorch) {
+        report.problems.push(format!("{} walked into a portal and is in {:?} (the host says {:?})", team[a].name, team[a].game.dim, host.peer_dim(ida)));
+        return;
+    }
+    // Something built down there is seen by whoever's there, and nobody at home.
+    let there = team[a].game.player.body.pos.floor().as_ivec3() + IVec3::new(2, 0, 0);
+    host.in_realm(Dim::Scorch, |h| h.world.set_v(there, GOLD_BLOCK));
+    pump(host, team, 1.0, |_| idle());
+    if team[a].game.world.get_v(there) != GOLD_BLOCK {
+        report.problems.push(format!("{} never saw the gold block built next to it in the Scorchlands", team[a].name));
+    }
+    for (k, bot) in team.iter().enumerate() {
+        if k != a && bot.game.peers.contains_key(&ida) {
+            report.problems.push(format!("{} can still see {} (who's in the Scorchlands)", bot.name, team[a].name));
+        }
+    }
+    // A second bot follows, and the two see each other.
+    if b != a {
+        let idb = team[b].game.my_id;
+        ground(host, team, b);
+        through_portal(host, team, b, base);
+        if team[b].game.dim != Dim::Scorch {
+            report.problems.push(format!("{} followed through the portal and is in {:?}", team[b].name, team[b].game.dim));
+        } else {
+            pump(host, team, 1.0, |_| idle());
+            if !team[b].game.peers.contains_key(&ida) || !team[a].game.peers.contains_key(&idb) {
+                let sees = |g: &Game, id: u32| format!("{:?}", g.realm_dims().into_iter().map(|d| (d, g.peer_dim(id))).collect::<Vec<_>>());
+                report.problems.push(format!("{} and {} are both in the Scorchlands and can't see each other ({} {}; {:?} {:?} {:?})", team[a].name, team[b].name, sees(&team[a].game, idb), sees(&team[b].game, ida), team[a].game.dim, host.peer_dim(ida), host.peer_dim(idb)));
+            }
+            if team[b].game.world.get_v(there) != GOLD_BLOCK {
+                report.problems.push(format!("{} arrived in the Scorchlands without the gold block that's there", team[b].name));
+            }
+        }
+    }
+    host.in_realm(Dim::Scorch, |h| h.world.set_v(there, AIR));
+    // Dying there brings everyone home (and the Overworld's edits with it).
+    for k in [a, b] {
+        if team[k].game.dim != Dim::Over {
+            team[k].game.dead = Some("tripped over a Snout".into());
+            team[k].game.respawn();
+        }
+    }
+    pump(host, team, 2.0, |_| idle());
+    for k in [a, b] {
+        if team[k].game.dim != Dim::Over || host.peer_dim(team[k].game.my_id) != Some(Dim::Over) {
+            report.problems.push(format!("{} respawned and isn't back in the Overworld", team[k].name));
+        }
+        load_around(&mut team[k].game, host.spawn);
+        if team[k].game.world.get_v(base) != PORTAL_X {
+            report.problems.push(format!("{} came home and the portal by spawn is gone (it has {})", team[k].name, team[k].game.world.get_v(base)));
+        }
+    }
+    for k in 0..n {
+        ground(host, team, k);
+    }
 }
 
 /// The `--playtest` command.

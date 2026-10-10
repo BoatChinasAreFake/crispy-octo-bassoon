@@ -43,9 +43,16 @@ pub(crate) fn parse_args() -> Option<ShotArgs> {
 }
 
 
+/// Scenes down in the Scorchlands (`scenic_view` finds them in generator
+/// coordinates; see dims.rs).
+fn scorch_scene(mode: &str) -> bool {
+    matches!(mode, "fortress" | "camp" | "bastion" | "crimson" | "teal" | "basalt" | "soulvalley")
+}
+
 pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
     use structures::Kind;
-    let generator = &g.world.generator;
+    let scorch = scorch_scene(mode).then(|| world::Generator::with_dim(g.world.seed(), g.world.generator.opts, crate::dims::Dim::Scorch));
+    let generator = scorch.as_ref().unwrap_or(&*g.world.generator);
     let (cx0, cz0) = ((g.spawn.x / 16.0).floor() as i32, (g.spawn.z / 16.0).floor() as i32);
     let ring = |r: i32| (-r..=r).flat_map(move |dz| (-r..=r).map(move |dx| (dx, dz))).filter(move |(dx, dz)| dx.abs().max(dz.abs()) == r);
     let look = |from: Vec3, to: Vec3| {
@@ -390,7 +397,11 @@ impl App {
                     g.weather.strength = 1.0;
                     g.rules.weather_cycle = false;
                 }
-                if let Some((pos, yaw, pitch)) = scenic_view(&g, &s.mode) {
+                if let Some((mut pos, yaw, pitch)) = scenic_view(&g, &s.mode) {
+                    if scorch_scene(&s.mode) {
+                        pos.x -= crate::scorch::SCORCH_ORIGIN as f32;
+                        g.move_local_player(crate::dims::Dim::Scorch, pos);
+                    }
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
                 }
                 // Look up at the sky: north for an aurora, away from the sun for a rainbow.

@@ -237,6 +237,10 @@ impl Game {
         self.enter(dim);
         self.peers.insert(id, peer);
         self.net_broadcast_all(crate::net::Msg::Dimension { id, dim: dim.index(), x: to.x, y: to.y, z: to.z });
+        // They start that world afresh: everything changed in it so far.
+        for m in self.world_msgs() {
+            self.net_send_to(id, m);
+        }
     }
 
     /// The host: keep the active dimension going for the joined players in it
