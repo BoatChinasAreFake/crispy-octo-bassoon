@@ -128,7 +128,7 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::SEA;
+
     use macroquad::math::ivec3;
 
     /// A pool, 8 deep, over the arena's floor.
@@ -197,7 +197,7 @@ mod tests {
                 let (h, b) = g.column(x, z);
                 if b.is_ocean() {
                     seen.insert(format!("{b:?}"));
-                    if let Some((p, _)) = floor_plant(&g, b, x, z, SEA - h) {
+                    if let Some((p, _)) = floor_plant(&g, b, x, z, g.sea() - h) {
                         plants.insert(p);
                     }
                 }

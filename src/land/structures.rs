@@ -16,7 +16,7 @@ use crate::block::*;
 use crate::containers::Container;
 use crate::inventory::Wear;
 use crate::noise::{hash2, hash3, Rng};
-use crate::world::{Biome, Generator, World, CH, CW, SEA};
+use crate::world::{Biome, Generator, World, CH, CW};
 use macroquad::math::{ivec3, IVec3};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -186,29 +186,29 @@ impl Generator {
             let (hh, b) = self.column(ox + dx, oz + dz);
             (hh - h).abs() <= 4 && !b.is_ocean()
         });
-        if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && wide_flat() {
+        if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 58 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
         // Pilferers build lookouts on open, flat ground (and, in newer worlds, never within sight of a village).
         let village_near = || self.opts.version >= 2 && (-7..=7).any(|dz| (-7..=7).any(|dx| self.village_spot(cx + dx, cz + dz)));
-        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() && flat_r(7, 2) && !village_near() {
+        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 58 && flat() && flat_r(7, 2) && !village_near() {
             return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
         }
-        if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
+        if trial_spot && h > self.sea() + 4 && !self.deep_dark(ox, oz) {
             return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
         }
-        if monument_spot && biome.is_ocean() && h <= SEA - crate::monument::DEPTH {
+        if monument_spot && biome.is_ocean() && h <= self.sea() - crate::monument::DEPTH {
             // Deep, open sea all round (it levels its own basin; see monument.rs).
             let r = crate::monument::BASIN;
             let open = [(-r, -r), (r, -r), (-r, r), (r, r), (0, r), (0, -r), (r, 0), (-r, 0)].iter().all(|&(dx, dz)| {
                 let (hh, b) = self.column(ox + dx, oz + dz);
-                b.is_ocean() && hh < SEA - 2 && hh >= h - crate::monument::FILL
+                b.is_ocean() && hh < self.sea() - 2 && hh >= h - crate::monument::FILL
             });
             if open {
                 return Some(Site { kind: Kind::Monument, origin: ivec3(ox, h, oz), facing, seed });
             }
         }
-        if shaft_spot && h > 50 && !biome.is_ocean() {
+        if shaft_spot && h > self.sea() + 10 && !biome.is_ocean() {
             let y = 20 + (hash2(s ^ 0x5AF8, cx, cz) * (h - 45).clamp(1, 20) as f32) as i32;
             return Some(Site { kind: Kind::Mineshaft, origin: ivec3(ox, y, oz), facing, seed });
         }
@@ -217,39 +217,39 @@ impl Generator {
             return Some(Site { kind: Kind::HushedCity, origin: ivec3(ox, crate::deepdark::CITY_Y, oz), facing, seed });
         }
         // Wrecks lie on the sea bed; treasure is buried in beaches (see treasure.rs).
-        if wreck_roll && biome.is_ocean() && h < SEA - 7 && h > 6 {
+        if wreck_roll && biome.is_ocean() && h < self.sea() - 7 && h > 6 {
             return Some(Site { kind: Kind::Shipwreck, origin: ivec3(ox, h, oz), facing, seed });
         }
-        if treasure_roll && (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::Mangrove) {
+        if treasure_roll && (self.sea() - 1..=self.sea() + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::Mangrove) {
             return Some(Site { kind: Kind::BuriedTreasure, origin: ivec3(ox, h - 2, oz), facing, seed });
         }
         if !common {
             return None;
         }
         let kind = if r < 0.055 {
-            if h < 30 || biome.is_ocean() {
+            if h < self.sea() - 10 || biome.is_ocean() {
                 return None;
             }
             Kind::Dungeon
-        } else if biome == Biome::Jungle && h > SEA + 1 && h < CH - 30 && r < 0.085 && flat_r(6, 3) {
+        } else if biome == Biome::Jungle && h > self.sea() + 1 && h < self.sea() + 58 && r < 0.085 && flat_r(6, 3) {
             // (Rolls nothing else took, so older worlds' sites stay put.)
             Kind::JungleTemple
-        } else if biome == Biome::Snowy && h > SEA + 1 && r >= 0.085 && flat_r(5, 2) {
+        } else if biome == Biome::Snowy && h > self.sea() + 1 && r >= 0.085 && flat_r(5, 2) {
             Kind::Igloo
-        } else if biome == Biome::Desert && h > SEA + 1 && h < CH - 20 && (0.075..0.09).contains(&r) && flat() && flat_r(7, 2) {
+        } else if biome == Biome::Desert && h > self.sea() + 1 && h < self.sea() + 68 && (0.075..0.09).contains(&r) && flat() && flat_r(7, 2) {
             Kind::DesertPyramid
-        } else if r < 0.057 && matches!(biome, Biome::Plains | Biome::Forest) && h > SEA + 1 && flat() {
+        } else if r < 0.057 && matches!(biome, Biome::Plains | Biome::Forest) && h > self.sea() + 1 && flat() {
             // A lone hut now and then (villages are where the houses are).
             Kind::Hut
-        } else if r < 0.085 && matches!(biome, Biome::Plains | Biome::Forest | Biome::Snowy) && h > SEA + 1 && h < CH - 20 && flat() {
+        } else if r < 0.085 && matches!(biome, Biome::Plains | Biome::Forest | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 68 && flat() {
             Kind::Tower
-        } else if biome == Biome::Desert && h > SEA + 1 && r < 0.075 {
+        } else if biome == Biome::Desert && h > self.sea() + 1 && r < 0.075 {
             Kind::DesertRuins
-        } else if biome == Biome::Desert && h > SEA + 1 && flat() {
+        } else if biome == Biome::Desert && h > self.sea() + 1 && flat() {
             Kind::Well
-        } else if matches!(biome, Biome::Forest | Biome::Taiga | Biome::Jungle | Biome::Plains) && h > SEA + 1 && r >= 0.085 && flat() {
+        } else if matches!(biome, Biome::Forest | Biome::Taiga | Biome::Jungle | Biome::Plains) && h > self.sea() + 1 && r >= 0.085 && flat() {
             Kind::TrailRuins
-        } else if biome.is_ocean() && h < SEA - 4 && h > 8 && r < 0.09 {
+        } else if biome.is_ocean() && h < self.sea() - 4 && h > 8 && r < 0.09 {
             Kind::OceanRuins
         } else {
             return None;
@@ -320,13 +320,13 @@ impl Generator {
             Kind::BastionTreasure => return Vec::new(),
             Kind::Outpost => return crate::raids::outpost_blocks(site, self.opts.version >= 2),
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
-            Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site),
+            Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site, self.sea()),
             Kind::BuriedTreasure => return crate::treasure::treasure_blocks(site),
             Kind::DesertPyramid => return crate::temples::pyramid_blocks(site),
             Kind::JungleTemple => return crate::temples::jungle_temple_blocks(site),
             Kind::Mineshaft => return crate::temples::mineshaft_blocks(site),
             Kind::Igloo => return crate::temples::igloo_blocks(site),
-            Kind::Monument => return crate::monument::monument_blocks(site),
+            Kind::Monument => return crate::monument::monument_blocks(site, self.sea()),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {

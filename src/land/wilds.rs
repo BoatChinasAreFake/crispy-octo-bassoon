@@ -21,7 +21,8 @@ use crate::noise::{hash2, hash3};
 use crate::scorch::LAVA_SEA;
 use crate::sound::{Mat, Sfx};
 use crate::texture::*;
-use crate::world::{idx, Generator, World, CH, CW};
+use crate::world::{idx, Generator, World, CW};
+use crate::scorch::SCORCH_TOP;
 use macroquad::math::{ivec3, IVec3, Vec3};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -183,7 +184,7 @@ impl Generator {
     /// The first floor at or above `from` with `room` clear blocks over it (the cell above the floor).
     pub fn scorch_floor(&self, x: i32, z: i32, from: i32, room: i32) -> Option<i32> {
         let mut y = from.max(LAVA_SEA + 2);
-        while y < CH - 12 - room {
+        while y < SCORCH_TOP - 12 - room {
             if self.scorch_solid(x, y - 1, z) && !self.scorch_solid(x, y, z) {
                 match (1..room).find(|k| self.scorch_solid(x, y + k, z)) {
                     None => return Some(y),
@@ -227,7 +228,7 @@ impl Generator {
                         any_forest = true;
                         let teal = biome == ScorchBiome::TealForest;
                         let (nylium, _, _, fungus, roots) = forest_blocks(teal);
-                        for y in LAVA_SEA + 1..CH - 5 {
+                        for y in LAVA_SEA + 1..SCORCH_TOP - 5 {
                             let i = idx(lx, y, lz);
                             if b[i] == EMBER_SHROOM {
                                 b[i] = AIR;
@@ -259,7 +260,7 @@ impl Generator {
                         }
                     }
                     ScorchBiome::BasaltDeltas => {
-                        for y in 1..CH - 1 {
+                        for y in 1..SCORCH_TOP - 1 {
                             let i = idx(lx, y, lz);
                             if solid_rock(b[i]) {
                                 let n = self.scorch.noise3(x as f32 / 7.0, y as f32 / 5.0 + 300.0, z as f32 / 7.0);
@@ -268,7 +269,7 @@ impl Generator {
                                 b[i] = AIR;
                             }
                         }
-                        for y in LAVA_SEA + 2..CH - 5 {
+                        for y in LAVA_SEA + 2..SCORCH_TOP - 5 {
                             let (i, j) = (idx(lx, y, lz), idx(lx, y - 1, lz));
                             if b[i] != AIR || !matches!(b[j], BASALT | BLACKSTONE) {
                                 continue;
@@ -289,7 +290,7 @@ impl Generator {
                             let h = 3 + (hash2(s ^ 0xBA7, x, z) * 8.0) as i32;
                             for k in 0..h {
                                 let c = idx(lx, y + k, lz);
-                                if y + k >= CH - 2 || b[c] != AIR {
+                                if y + k >= SCORCH_TOP - 2 || b[c] != AIR {
                                     break;
                                 }
                                 b[c] = BASALT;
@@ -297,7 +298,7 @@ impl Generator {
                         }
                     }
                     ScorchBiome::SoulValley => {
-                        for y in LAVA_SEA + 1..CH - 5 {
+                        for y in LAVA_SEA + 1..SCORCH_TOP - 5 {
                             let i = idx(lx, y, lz);
                             if b[i] == EMBER_SHROOM {
                                 b[i] = AIR;
@@ -328,7 +329,7 @@ impl Generator {
         {
             for (p, id) in fossil(ivec3(8, y, 8), hash2(s ^ 0xF057, cx, cz) < 0.5) {
                 let c = idx(p.x, p.y, p.z);
-                if (0..CW).contains(&p.x) && (0..CW).contains(&p.z) && (1..CH - 1).contains(&p.y) && b[c] == AIR {
+                if (0..CW).contains(&p.x) && (0..CW).contains(&p.z) && (1..SCORCH_TOP - 1).contains(&p.y) && b[c] == AIR {
                     b[c] = id;
                 }
             }
@@ -343,7 +344,7 @@ impl Generator {
                 let stem = forest_blocks(teal).1;
                 for (p, id) in huge_fungus(base, height, teal, self.seed ^ x as u32 ^ (z as u32).rotate_left(16)) {
                     let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
-                    if !(0..CW).contains(&lx) || !(0..CW).contains(&lz) || !(1..CH - 1).contains(&p.y) {
+                    if !(0..CW).contains(&lx) || !(0..CW).contains(&lz) || !(1..SCORCH_TOP - 1).contains(&p.y) {
                         continue;
                     }
                     let c = idx(lx, p.y, lz);

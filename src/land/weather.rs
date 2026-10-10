@@ -94,7 +94,7 @@ impl Game {
         let e = self.player.eye().floor().as_ivec3();
         let sky = self.world.sky_light(e.x, e.y, e.z);
         let biome = self.world.generator.column(e.x, e.z).1;
-        let deep = self.elsewhere() || (self.world.sky_level(e.x, e.y, e.z) == 0 && e.y < crate::world::SEA);
+        let deep = self.elsewhere() || (self.world.sky_level(e.x, e.y, e.z) == 0 && e.y < self.world.sea());
         let mood = if deep {
             Mood::Deep
         } else if self.daylight() < 0.35 {

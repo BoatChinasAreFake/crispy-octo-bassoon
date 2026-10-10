@@ -3744,7 +3744,7 @@ impl Game {
             return;
         }
         // Turtles on beaches, Pandas in jungles, Polar Bears on the snow, Llamas on the plains (see wildlife.rs).
-        if !self.is_night() && passive < 8 && matches!(top, SAND | GRASS | SNOW_GRASS | SNOW_BLOCK | STONE) && clear(&self.world, y + 1) && (top != SAND || (crate::world::SEA - 1..=crate::world::SEA + 2).contains(&y))
+        if !self.is_night() && passive < 8 && matches!(top, SAND | GRASS | SNOW_GRASS | SNOW_BLOCK | STONE) && clear(&self.world, y + 1) && (top != SAND || (self.world.sea() - 1..=self.world.sea() + 2).contains(&y))
             && let Some(kind) = crate::wildlife::spawn_kind(biome, top, &mut self.rng)
         {
             for i in 0..self.rng.int(1, 2) {
@@ -3762,7 +3762,7 @@ impl Game {
         if !self.is_night() && passive < 8 && matches!(top, GRASS | SNOW_GRASS | MUD) && clear(&self.world, y + 1) {
             let kind = if woofy && self.rng.chance(if biome == Biome::Taiga { 0.4 } else { 0.25 }) {
                 MobKind::Woofer
-            } else if matches!(biome, Biome::Taiga | Biome::Snowy) && (y > crate::world::SEA + 22 || self.rng.chance(0.12)) {
+            } else if matches!(biome, Biome::Taiga | Biome::Snowy) && (y > self.world.sea() + 22 || self.rng.chance(0.12)) {
                 // Goats like it high up and cold.
                 MobKind::Goat
             } else if matches!(biome, Biome::Taiga | Biome::Snowy) && self.rng.chance(0.35) {
@@ -3859,7 +3859,7 @@ impl Game {
                 return;
             }
         }
-        let y0 = self.rng.int(sea + 1, CH - 10);
+        let y0 = self.rng.int(sea + 1, crate::scorch::SCORCH_TOP - 10);
         for y in y0..y0 + 12 {
             let floor = self.world.get(x, y - 1, z);
             let clear = (0..3).all(|h| self.world.get(x, y + h, z) == AIR);
@@ -3988,7 +3988,7 @@ impl Game {
         self.draw_lids(&mut g);
 
         // Clouds: a scrolling blocky layer.
-        let cloud_y = 112.0;
+        let cloud_y = (self.world.sea() + 72) as f32;
         let cell = 12.0;
         let scroll = self.clock * 1.2 + self.time * DAY_SECONDS;
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);

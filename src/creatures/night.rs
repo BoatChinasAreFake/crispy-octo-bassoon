@@ -295,7 +295,7 @@ impl Game {
             let squid = self.mobs.iter().filter(|m| m.kind == MobKind::GlowSquid).count();
             let cy = self.rng.int(6, surface.max(7));
             let water = (0..2).all(|h| is_water(self.world.get(x, cy + h, z)));
-            let dark = self.world.sky_light(x, cy, z) < 0.15 || (self.is_night() && cy < crate::world::SEA - 3);
+            let dark = self.world.sky_light(x, cy, z) < 0.15 || (self.is_night() && cy < self.world.sea() - 3);
             if squid < 4 && water && dark {
                 self.alloc_mob(MobKind::GlowSquid, Vec3::new(x as f32 + 0.5, cy as f32 + 0.2, z as f32 + 0.5));
                 return true;

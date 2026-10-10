@@ -25,6 +25,9 @@ pub const SCORCH_X: i32 = 32_768;
 pub const SCORCH_ORIGIN: i32 = SCORCH_X + 1024;
 /// Lava sea level down there.
 pub const LAVA_SEA: i32 = 31;
+/// The Scorchlands' bedrock roof is just under this (it was the top of the
+/// world when the world was 128 tall, and stays put so old worlds do).
+pub const SCORCH_TOP: i32 = 128;
 /// Seconds standing in a portal before it takes you (creative: less).
 pub const PORTAL_SECS: f32 = 2.0;
 /// Biggest frame interior a Sparker will light.
@@ -55,10 +58,10 @@ impl Generator {
         for lz in 0..CW {
             for lx in 0..CW {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
-                for y in 0..CH {
+                for y in 0..SCORCH_TOP {
                     let i = crate::world::idx(lx, y, lz);
                     // Bedrock floor and ceiling, a little ragged.
-                    if y == 0 || y == CH - 1 || (y <= 3 && hash3(s, x, y, z) < 0.5) || (y >= CH - 4 && hash3(s ^ 1, x, y, z) < 0.5) {
+                    if y == 0 || y == SCORCH_TOP - 1 || (y <= 3 && hash3(s, x, y, z) < 0.5) || (y >= SCORCH_TOP - 4 && hash3(s ^ 1, x, y, z) < 0.5) {
                         b[i] = BEDROCK;
                         continue;
                     }
@@ -80,7 +83,7 @@ impl Generator {
                     };
                 }
                 // Ember sand on the shores of the lava sea, glowrock hanging from ceilings.
-                for y in LAVA_SEA + 1..CH - 5 {
+                for y in LAVA_SEA + 1..SCORCH_TOP - 5 {
                     let i = crate::world::idx(lx, y, lz);
                     let below = b[crate::world::idx(lx, y - 1, lz)];
                     if b[i] == AIR && below == SCORCHROCK && y < LAVA_SEA + 6 && self.scorch.noise3(x as f32 / 9.0, 7.0, z as f32 / 9.0) > 0.15 {
@@ -240,7 +243,7 @@ impl Game {
         let mut best: Option<(i32, IVec3)> = None;
         for dz in -16..=16 {
             for dx in -16..=16 {
-                for y in 1..CH - 1 {
+                for y in 1..SCORCH_TOP - 1 {
                     let p = IVec3::new(dest.x + dx, y, dest.z + dz);
                     if is_portal(self.world.get_v(p)) && !is_portal(self.world.get_v(p - IVec3::Y)) {
                         let d = dx * dx + dz * dz + (y - dest.y).pow(2) / 4;
@@ -265,7 +268,7 @@ impl Game {
         let fits = |p: IVec3| -> bool {
             (-1..=2).all(|dx| (-1..=1).all(|dz| is_solid(w.get_v(p + IVec3::new(dx, -1, dz))) && (0..4).all(|dy| !is_solid(w.get_v(p + IVec3::new(dx, dy, dz))) && !is_liquid(w.get_v(p + IVec3::new(dx, dy, dz))))))
         };
-        let ys: Vec<i32> = if w.is_scorch() { (LAVA_SEA + 2..CH - 8).collect() } else { vec![] };
+        let ys: Vec<i32> = if w.is_scorch() { (LAVA_SEA + 2..SCORCH_TOP - 8).collect() } else { vec![] };
         for r in 0..12i32 {
             for dz in -r..=r {
                 for dx in -r..=r {
@@ -467,7 +470,7 @@ mod tests {
         let count = |id: Id| b.iter().filter(|&&x| x == id).count();
         assert!(count(SCORCHROCK) > 1000 && count(LAVA) > 50 && count(AIR) > 1000);
         // A bedrock sky; and it goes on in every direction (no wall any more).
-        assert!((0..CW).all(|x| b[crate::world::idx(x, CH - 1, 0)] == BEDROCK));
+        assert!((0..CW).all(|x| b[crate::world::idx(x, SCORCH_TOP - 1, 0)] == BEDROCK));
         let west = g.generate(-200, 0);
         assert!(west.iter().filter(|&&x| x == SCORCHROCK).count() > 1000);
         // The same as the old shared map had at the old place (old worlds carry on).

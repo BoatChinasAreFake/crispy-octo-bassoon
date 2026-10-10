@@ -57,7 +57,7 @@ pub fn is_prismarine(id: Id) -> bool {
 }
 
 /// A monument (see the top of this file), its entrance on the south side.
-pub fn monument_blocks(site: &Site) -> Vec<(IVec3, Id)> {
+pub fn monument_blocks(site: &Site, sea: i32) -> Vec<(IVec3, Id)> {
     let o = site.origin;
     let s = site.seed;
     let mut out = Vec::new();
@@ -68,7 +68,7 @@ pub fn monument_blocks(site: &Site) -> Vec<(IVec3, Id)> {
             for y in -FILL..0 {
                 put(x, y, z, SAND);
             }
-            for y in 0..=crate::world::SEA - o.y {
+            for y in 0..=sea - o.y {
                 put(x, y, z, WATER);
             }
         }
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn the_monument_is_wet_and_golden() {
-        let b = monument_blocks(&site());
+        let b = monument_blocks(&site(), crate::world::OLD_SEA);
         let count = |id: Id| b.iter().filter(|x| x.1 == id).count();
         assert_eq!(count(GOLD_BLOCK), 8);
         assert_eq!(count(CHEST), 1);
