@@ -91,6 +91,7 @@ Everything here is legally distinct, and most of it is a little sillier than you
 ### Worlds
 
 - **Infinite procedural terrain.** Seeded Perlin noise makes oceans, beaches, plains, forests, deserts, snowy land, swamps, jungles, badlands, taigas, savannas, birch and dark forests, meadows, ridged mountains, spaghetti caves, big caverns (the deepest ones flooded), ravines, ore veins (gold included, for all the good it'll do you), lava lakes and four kinds of sea. The sea is shallow by the shore and drops away to 10–25 blocks deep further out. Chunks generate and light themselves on background threads. The world is 256 blocks tall, with the sea at 63 (worlds made before it grew keep their sea at 40 and their land as it was, and get the extra room to build up into).
+- **Biomes change by degrees** in new worlds: they come in bands of temperature, so snow always gives way to taiga before plains or forest, and the desert's heat to savanna. Grass, leaf and water colours blend over twenty-odd blocks, the ground (snow, sand, grass) is ragged where two biomes meet rather than ruled, and swamps and mangroves sink gently to the water instead of dropping off a step. Biomes are a bit smaller than before, too.
 - **Biomes.**
   - **Swamps** sink to just around sea level: pools with lily pads, mud, and wide oaks trailing leaves. **Mangrove Swamps** are warmer, with trees standing on tangled roots over the water.
   - **Jungles** grow very tall trees, thick undergrowth, **Melons** and **Bamboo**.

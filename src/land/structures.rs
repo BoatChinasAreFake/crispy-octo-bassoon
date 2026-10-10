@@ -1281,7 +1281,9 @@ mod tests {
             }
             sq / sum * 4.0
         };
-        let (old, new) = (typical(&Generator::new(31337)), typical(&g));
+        // (Version 2 grew them; version 3 trims them back a bit; see world.rs.)
+        let v2 = Generator::with(31337, GenOptions { version: 2, ..GenOptions::DEFAULT });
+        let (old, new) = (typical(&Generator::new(31337)), typical(&v2));
         assert!(new > old * 1.4, "old {old}, new {new}");
         // The options pack into the save and the join message.
         let o = GenOptions { version: 1, structures: 3, biome_size: 2, terrain: 0 };
