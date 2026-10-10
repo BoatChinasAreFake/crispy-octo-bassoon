@@ -856,8 +856,8 @@ pub const T_WOODLAND_MAP: u16 = 1061;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
-/// keeps the first 1536 tiles; mods look textures up by name, so this can move).
-pub const FIRST_MOD_TILE: u16 = 1536;
+/// keeps the first 1280 tiles; mods look textures up by name, so this can move).
+pub const FIRST_MOD_TILE: u16 = 1280;
 
 /// Names mods can use to refer to built-in textures.
 pub const BASE_TEXTURES: &[(&str, u16)] = &[

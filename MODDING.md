@@ -427,7 +427,7 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 
 ## Limits
 
-- Up to **32,000 mod blocks**, **32,000 mod items**, **222 mod mobs** and about **3,800 mod textures**, across all mods together.
+- Up to **32,000 mod blocks**, **32,000 mod items**, **187 mod mobs** and about **2,800 mod textures**, across all mods together.
 - 1 MB per file, and 4 MB for all of a server's mods together.
 
 ## Worlds and multiplayer

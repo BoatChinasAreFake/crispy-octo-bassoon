@@ -271,10 +271,11 @@ impl Game {
 
     /// A joined player used `item` on the cauldron at `pos`.
     pub fn host_cauldron(&mut self, from: u32, pos: IVec3, item: Id) {
-        if !self.peer_near(from, pos) || self.verified_held(from) != item {
+        // (What they hold may not have reached us yet: it's enough that they have it.)
+        if !self.peer_near(from, pos) || !self.peer_has(from, item) {
             return;
         }
-        let ench = self.verified_ench(from);
+        let ench = if self.verified_held(from) == item { self.verified_ench(from) } else { 0 };
         let block = self.world.get_v(pos);
         // The host can't see whether their armour is dyed: in plain water, take it that it is.
         let wear = if crate::trims::is_woolly(item) { crate::trims::with_dye(0, Some(0)) } else { (ench as Wear) << 16 };
