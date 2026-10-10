@@ -222,6 +222,8 @@ pub const ALL: &[Advancement] = &[
     adv("cordon_bleu", "Cordon Bleu", "Cook every dish in the Cookbook."),
     adv("hot_tub", "Hot Tub", "Bathe in a hot spring."),
     adv("thawed", "Thawed", "Go from freezing to warm again in a hot spring."),
+    adv("looking_sharp", "Looking Sharp", "Wear a skin of your own."),
+    adv("lan_party", "LAN Party", "Join a game that turned up on your network by itself."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).

@@ -25,6 +25,8 @@ pub struct Settings {
     pub binds: crate::keybinds::Bindings,
     /// How you look (see nametags.rs).
     pub skin: u8,
+    /// A skin of our own from the skins folder (empty: the built-in `skin`).
+    pub skin_file: String,
     /// Captions for sounds, and colours that don't lean on red and green (see access.rs).
     pub subtitles: bool,
     pub colour_blind: bool,
@@ -89,6 +91,7 @@ impl Default for Settings {
             mp_addr: "127.0.0.1".into(),
             binds: Default::default(),
             skin: 0,
+            skin_file: String::new(),
             subtitles: false,
             colour_blind: false,
             waving_leaves: true,
@@ -129,7 +132,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nskin_file={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -139,6 +142,7 @@ impl Settings {
             clean(&self.mp_name, 16),
             clean(&self.mp_addr, 128),
             self.skin,
+            clean(&self.skin_file, 64),
             self.subtitles,
             self.colour_blind,
             self.waving_leaves,
@@ -190,6 +194,7 @@ impl Settings {
                 "name" => s.mp_name = clean(v, 16),
                 "server" => s.mp_addr = clean(v, 128),
                 "skin" => s.skin = v.parse::<u8>().unwrap_or(0) % crate::nametags::SKINS.len() as u8,
+                "skin_file" => s.skin_file = clean(v, 64),
                 "subtitles" => s.subtitles = flag(s.subtitles),
                 "colour_blind" | "color_blind" => s.colour_blind = flag(s.colour_blind),
                 "waving_leaves" => s.waving_leaves = flag(s.waving_leaves),
@@ -282,6 +287,7 @@ mod tests {
                 b
             },
             skin: 3,
+            skin_file: "mine.png".into(),
             subtitles: true,
             colour_blind: true,
             waving_leaves: false,

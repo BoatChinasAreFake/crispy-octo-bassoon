@@ -7,7 +7,7 @@
 use crate::block::build::{def, item, leak};
 use crate::block::*;
 use crate::noise::Rng;
-use crate::texture::{base_texture, FIRST_MOD_TILE, TILE, TILES_PER_ROW};
+use crate::texture::{base_texture, FIRST_MOD_TILE, TILE};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -343,8 +343,9 @@ impl Ctx<'_> {
     }
 
     fn alloc_tile(&mut self, px: Vec<u8>, errs: &mut Vec<String>, line: usize) -> Option<u16> {
-        if self.next_tile >= TILES_PER_ROW * TILES_PER_ROW {
-            errs.push(format!("line {line}: out of texture space ({} mod textures max)", TILES_PER_ROW * TILES_PER_ROW - FIRST_MOD_TILE));
+        // (The atlas's last rows hold players' own skins; see skins.rs.)
+        if self.next_tile >= crate::skins::FIRST_SKIN_TILE {
+            errs.push(format!("line {line}: out of texture space ({} mod textures max)", crate::skins::FIRST_SKIN_TILE - FIRST_MOD_TILE));
             return None;
         }
         let t = self.next_tile;

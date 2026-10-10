@@ -362,7 +362,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -662,6 +662,30 @@ impl App {
                 app.game = shot_game(424242, true, true);
                 app.open_worlds();
             }
+            "servers" => {
+                // The server list: a LAN game, and saved servers up, down and on another version.
+                app.game = shot_game(424242, true, true);
+                let mut list = servers::ServerList::default();
+                for (name, addr) in [("Castle Town", "play.castle.example:25565"), ("Bob's Farm", "10.0.0.7"), ("Old Faithful", "old.example.net"), ("Nightly", "203.0.113.9:25570")] {
+                    list.add(name, addr);
+                }
+                app.servers = list;
+                let up = |name: &str, players, max, ping, protocol| {
+                    let version = if protocol == net::PROTOCOL { "v0.4-part1" } else { "v0.3-part4" };
+                    ServerState::Up(servers::Status { name: name.into(), players, max, protocol, version: version.into(), password: players > 3, ping_ms: ping, key: [0; 32] })
+                };
+                app.server_states.insert(servers::norm("play.castle.example:25565"), up("Castle Town", 5, 16, 34, net::PROTOCOL));
+                app.server_states.insert(servers::norm("10.0.0.7"), up("Bob's Farm", 1, 8, 140, net::PROTOCOL));
+                app.server_states.insert(servers::norm("old.example.net"), up("Old Faithful", 2, 20, 61, net::PROTOCOL - 2));
+                app.server_states.insert(servers::norm("203.0.113.9:25570"), ServerState::Down("connection refused".into()));
+                let mut scan = servers::LanScan::new().expect("a socket");
+                let info = servers::LanInfo { port: 25565, players: 2, max: 8, protocol: net::PROTOCOL, password: false, name: "Stove's world".into() };
+                scan.games.push(servers::LanGame { addr: "192.168.1.23:25565".into(), info, seen: std::time::Instant::now() + std::time::Duration::from_secs(600) });
+                app.lan = Some(scan);
+                app.mp_sel = Some(1);
+                app.mp_addr = "play.castle.example:25565".into();
+                app.set_screen(Screen::Multiplayer);
+            }
             "backups" => {
                 // A saved world with a few backups made over the last days.
                 let (root, id) = (save::saves_dir(), "castle-town");
@@ -805,7 +829,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -950,6 +974,22 @@ impl App {
                         m.variant = v;
                     }
                     app.game.mobs.push(m);
+                }
+            }
+            if s.mode == "skins" && frames == 125 {
+                // Players in skins of their own: the template (Stove), and a
+                // test card from the front, the back and each side.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let template = skins::unfold_builtin(&app.base_atlas, 0);
+                let card = skins::test_card();
+                let turns = [std::f32::consts::PI, std::f32::consts::PI, 0.0, std::f32::consts::FRAC_PI_2, -std::f32::consts::FRAC_PI_2];
+                for (i, turn) in turns.into_iter().enumerate() {
+                    let mut peer = multiplayer::Peer::new(format!("Skin{i}"), p + fwd * 5.0 + right * (i as f32 - 2.0) * 1.4 - Vec3::Y * 0.0);
+                    peer.yaw = s.yaw + turn;
+                    peer.own_skin = Some(if i == 0 { template.clone() } else { card.clone() });
+                    app.game.peers.insert(500 + i as u32, peer);
                 }
             }
             if s.mode == "chat" && frames == 60 {

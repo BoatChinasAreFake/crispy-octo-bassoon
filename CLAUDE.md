@@ -69,6 +69,12 @@ Originals:
 - Land claims: a Survey Post marks out an area only you and the friends you name can build in (opt-in per server).
 - Post boxes: send items and letters to another player, delivered even if they're offline, carried by a slightly put-upon Cluckster.
 
+Parts:
+- Part 1: items 1, 2 and 3. **(released)**
+- Part 2: items 4 and 5.
+- Part 3: items 6, 7 and 8.
+- Part 4: the two originals (this is the last part).
+
 ## v0.5: Villages and people
 
 1. Villages that live: Hmmers claim beds and workstations, take their job from the station, have babies when there are free beds, and go indoors at night.

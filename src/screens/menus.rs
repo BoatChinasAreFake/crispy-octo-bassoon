@@ -342,49 +342,133 @@ impl App {
     }
 
     pub(crate) fn multiplayer_screen(&mut self) {
+        self.tend_server_list();
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
-        self.ui.text_centered("Multiplayer", w / 2.0, h * 0.11, 16.0, WHITE);
-        let bw = (240.0 * s).min(w * 0.85);
-        let bh = 20.0 * s;
-        let x = w / 2.0 - bw / 2.0;
-        let mut y = h * 0.19;
+        self.ui.text_centered("Multiplayer", w / 2.0, h * 0.06, 16.0, WHITE);
+        let pw = (320.0 * s).min(w * 0.92);
+        let x = w / 2.0 - pw / 2.0;
+        let bh = 18.0 * s;
+        let gap = 5.0 * s;
+        let half = (pw - gap) / 2.0;
+        // Name and password side by side, the address under the list.
+        let mut y = h * 0.06 + 18.0 * s;
         let masked = "*".repeat(self.mp_password.chars().count());
-        let fields: [(&str, &str); 3] = [
-            ("Your name", &self.mp_name),
-            ("Server address: IP, IP:port, [IPv6]:port or a hostname", &self.mp_addr),
-            ("Password (leave empty if the server has none)", &masked),
-        ];
         let mut clicked = None;
-        for (i, (label, value)) in fields.iter().enumerate() {
-            self.ui.text(label, x, y - 3.0 * s, 9.0, GRAY);
-            if self.ui.text_field(Rect::new(x, y, bw, bh), value, self.mp_focus == i) {
-                clicked = Some(i);
+        self.ui.text("Your name", x, y - 3.0 * s, 8.0, GRAY);
+        self.ui.text("Password (if the server has one)", x + half + gap, y - 3.0 * s, 8.0, GRAY);
+        if self.ui.text_field(Rect::new(x, y, half, bh), &self.mp_name, self.mp_focus == 0) {
+            clicked = Some(0);
+        }
+        if self.ui.text_field(Rect::new(x + half + gap, y, half, bh), &masked, self.mp_focus == 2) {
+            clicked = Some(2);
+        }
+        y += bh + 6.0 * s;
+
+        // The list: games found on the LAN, then the saved servers.
+        let rows = self.server_rows();
+        let row_h = 25.0 * s;
+        let top = y;
+        let bottom = h - 86.0 * s;
+        let fit = (((bottom - top) / row_h).floor() as usize).max(1);
+        if rows.is_empty() {
+            self.ui.text_centered("No servers yet. Games on your network show up here by themselves;", w / 2.0, top + 20.0 * s, 9.0, WHITE);
+            self.ui.text_centered("type an address below and press Add to List to keep one.", w / 2.0, top + 32.0 * s, 9.0, WHITE);
+        }
+        let wheel = mouse_wheel().1;
+        if wheel.abs() > 0.1 {
+            let max = rows.len().saturating_sub(fit);
+            self.mp_scroll = if wheel > 0.0 { self.mp_scroll.saturating_sub(1) } else { (self.mp_scroll + 1).min(max) };
+        }
+        self.mp_scroll = self.mp_scroll.min(rows.len().saturating_sub(fit));
+        let mut join_now = None;
+        for (i, row) in rows.iter().enumerate().skip(self.mp_scroll).take(fit) {
+            let ry = top + (i - self.mp_scroll) as f32 * row_h;
+            let r = Rect::new(x, ry, pw, row_h - 3.0 * s);
+            let selected = self.mp_sel == Some(i);
+            let hov = self.ui.hovered(r);
+            let bg = if selected { Color::new(0.25, 0.3, 0.45, 0.95) } else if hov { Color::new(0.18, 0.18, 0.22, 0.95) } else { Color::new(0.1, 0.1, 0.12, 0.9) };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            if selected {
+                draw_rectangle_lines(r.x, r.y, r.w, r.h, s, WHITE);
             }
-            y += bh + 14.0 * s;
+            let (first, second, right, right_col, second_col) = self.describe_row(row);
+            let rw = self.ui.text_width(&right, 9.0);
+            self.ui.text(&self.ui.fit(&first, 10.0, pw - rw - 16.0 * s), r.x + 4.0 * s, r.y + 10.0 * s, 10.0, WHITE);
+            self.ui.text(&right, r.x + r.w - rw - 4.0 * s, r.y + 10.0 * s, 9.0, right_col);
+            self.ui.text(&self.ui.fit(&second, 8.0, pw - 8.0 * s), r.x + 4.0 * s, r.y + 19.0 * s, 8.0, second_col);
+            if hov && self.ui.clicked {
+                // Double-click to join.
+                let now = get_time();
+                if self.last_click.0 == i && now - self.last_click.1 < 0.4 {
+                    join_now = Some(i);
+                }
+                self.last_click = (i, now);
+                self.mp_sel = Some(i);
+                self.mp_addr = row.addr.clone();
+            }
+        }
+
+        let mut y = h - 82.0 * s;
+        self.ui.text("Address: IP, IP:port, [IPv6]:port or a hostname", x, y - 3.0 * s, 8.0, GRAY);
+        if self.ui.text_field(Rect::new(x, y, pw, bh), &self.mp_addr, self.mp_focus == 1) {
+            clicked = Some(1);
         }
         if let Some(i) = clicked {
             self.mp_focus = i;
         }
-        y -= 4.0 * s;
+        y += bh + gap;
+        let quarter = (pw - 3.0 * gap) / 4.0;
         let busy = self.joining.is_some() || self.connect_next.is_some();
-        let label = if busy { "Connecting..." } else { "Join Server" };
-        if self.ui.button(Rect::new(x, y, bw, bh), label, !busy) {
-            self.connect_next = Some(self.mp_addr.clone());
+        let sel = self.mp_sel.and_then(|i| rows.get(i));
+        let saved = sel.and_then(|r| r.saved);
+        if self.ui.button(Rect::new(x, y, quarter, bh), if busy { "Connecting..." } else { "Join" }, !busy && !self.mp_addr.trim().is_empty()) {
+            join_now = self.mp_sel.filter(|&i| rows.get(i).is_some_and(|r| r.addr == self.mp_addr)).or(Some(usize::MAX));
         }
-        y += bh + 5.0 * s;
-        if self.ui.button(Rect::new(x, y, bw, bh), "Back", true) {
+        if self.ui.button(Rect::new(x + quarter + gap, y, quarter, bh), "Add to List", !self.mp_addr.trim().is_empty()) {
+            let addr = self.mp_addr.trim().to_string();
+            let name = sel.filter(|r| r.addr == addr).map(|r| r.name.clone()).unwrap_or_default();
+            if self.servers.add(&name, &addr) {
+                self.servers.save();
+                self.server_states.insert(servers::norm(&addr), ServerState::Asking);
+                self.prober.ask(&addr);
+            }
+        }
+        if self.ui.button(Rect::new(x + 2.0 * (quarter + gap), y, quarter, bh), "Remove", saved.is_some())
+            && let Some(i) = saved
+        {
+            self.servers.remove(i);
+            self.servers.save();
+            self.mp_sel = None;
+        }
+        if self.ui.button(Rect::new(x + 3.0 * (quarter + gap), y, quarter, bh), "Refresh", true) {
+            self.refresh_servers();
+        }
+        y += bh + gap;
+        let key_known = sel.is_some_and(|r| self.servers.key_of(&r.addr).is_some());
+        if self.ui.button(Rect::new(x, y, half, bh), "Forget Key", key_known)
+            && let Some(r) = sel
+        {
+            self.servers.forget_key(&r.addr);
+            self.servers.save();
+            self.status = Some((format!("Forgot {}'s key: the next one it shows will be trusted.", r.addr), 5.0));
+        }
+        if self.ui.button(Rect::new(x + half + gap, y, half, bh), "Back", true) {
             self.joining = None;
+            self.lan = None;
             self.set_screen(Screen::Title);
+            return;
         }
-        y += bh + 14.0 * s;
-        for line in [
-            "Host from a world: Esc > \"Open to LAN\" or \"Open to Internet\". Your password above protects it.",
-            "Or run a dedicated server: minceraft --server --password <pw>. Default port 25565.",
-            "Tab switches fields. Enter joins.",
-        ] {
-            self.ui.text_centered(line, w / 2.0, y, 9.0, Color::new(0.85, 0.85, 0.85, 1.0));
-            y += 12.0 * s;
+        y += bh + 8.0 * s;
+        self.ui.text_centered("Host from a world: Esc > Open to LAN. Or run minceraft --server. All play is encrypted.", w / 2.0, y, 8.0, Color::new(0.8, 0.8, 0.8, 1.0));
+        if let Some(i) = join_now {
+            match rows.get(i) {
+                Some(r) => self.join_server(&r.addr.clone(), r.lan),
+                None => {
+                    let addr = self.mp_addr.clone();
+                    self.join_server(&addr, false);
+                }
+            }
         }
     }
 

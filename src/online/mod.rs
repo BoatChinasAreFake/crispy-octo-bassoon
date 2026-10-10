@@ -3,6 +3,7 @@
 
 pub(crate) mod admin;
 pub(crate) mod cheats;
+pub(crate) mod crypto;
 pub(crate) mod ledger;
 pub(crate) mod mods;
 pub(crate) mod multiplayer;
@@ -11,3 +12,4 @@ pub(crate) mod players;
 pub(crate) mod playtest;
 pub(crate) mod scripting;
 pub(crate) mod server;
+pub(crate) mod servers;

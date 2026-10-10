@@ -28,6 +28,7 @@ OPTIONS:
     --keep-inventory    Players keep their things when they die (default: they drop them)
     --difficulty <D>    peaceful, easy, normal or hard (default: the world's own, normal if new)
     --max-players <N>   Player limit (default 16)
+    --motd <TEXT>       The name shown in players' server lists
     --allow-list        Only let in players on allow-list.txt (and operators)
     --upnp              Ask your router to forward the port (for home servers)
     --help              Show this help
@@ -112,6 +113,12 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     log(&format!("Listening on TCP port {port} (IPv4{}), max {max_players} players", if crate::net::public_ipv6().is_some() { " + IPv6" } else { "" }));
+    if let Some(Net::Host(s)) = &mut game.net {
+        if let Some(motd) = get("--motd") {
+            s.motd = motd.chars().filter(|c| !c.is_control()).take(48).collect();
+        }
+        log(&format!("Server list name: {}. Encrypted; host key fingerprint {} (in {})", s.motd, crate::crypto::fingerprint(&s.identity.1), crate::net::HOST_KEY_FILE));
+    }
     let bans = crate::admin::Admin::load_bans(std::path::Path::new("."));
     if !bans.is_empty() {
         log(&format!("{} banned address(es) loaded from {}", bans.len(), crate::admin::BAN_FILE));

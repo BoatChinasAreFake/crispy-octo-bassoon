@@ -161,7 +161,7 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 - **Beds and sleep.** A bed faces away from whoever put it down. Right-click it at night to lie down; the screen fades, and if nobody gets you up the night is skipped and you step out beside the bed. Jumping, sneaking or getting hurt gets you up early. It refuses if monsters are nearby, sets where you come back after dying, and clears a storm. (Don't try it in the Scorchlands or the Hollow.)
 - **Death.** Dying drops your things where you fell (they wait five minutes), and everyone is told how you died ("Bot5 was struck down by a command. Harsh."). Held maps and the **Recovery Compass** show where.
 - **Game modes.** Survival, Creative (flight, instant breaking, infinite blocks) and **Spectator** (fly through everything, touch nothing). **Hardcore** is one life on Hard; die and you can only spectate.
-- **Advancements** (209 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
+- **Advancements** (211 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
 
 ### Building
 
@@ -238,18 +238,24 @@ Legally distinct redstone, simplified. Power comes from levers, buttons, pressur
 - **Distant Land.** Past the loaded world, a low-detail picture of the land carries on to the horizon, so mountains and coasts show from far off: **Blocky**, **Smooth** (gently sloped tiles) or **OFF**.
 - **Accessibility.** **Subtitles** caption what you hear, with an arrow toward it; **Colour-blind** mode makes red and green differences show up as brightness and blue; **UI Size** scales the menus and HUD.
 - **Creative inventory.** Tabs (Building Blocks, Plants and Nature, Tools and Armour, Food, Everything Else), a search box, and a button to switch between the palette and your own inventory. Drag the scrollbar or use the wheel; right-click an item in your hotbar to pick up another of it. Save up to three hotbars and load them back.
-- **Skins.** **Options > Skin** picks one of six looks (Stove, Alexa, Kettle, Toaster, Blender, Fridge) that everyone else sees too.
+- **Skins.** **Options > Skin** picks one of six looks (Stove, Alexa, Kettle, Toaster, Blender, Fridge), or a skin of your own: put a 64×64 PNG in the usual layout (old 64×32 ones work too) in the `skins` folder in the data folder, and it's on the list after the six. The folder starts with `template.png`, Stove unfolded, to paint over. In multiplayer the server passes your skin to everyone else.
 - **Commands.** In single player, and for operators on a server: `/tp`, `/give` (items by key or name, like `/give dimond pickaxe`), `/gamemode`, `/weather`, `/seed`, `/summon`, `/locate`, `/setblock` and `/kill`. `/help` lists them all.
 - **Saved settings** live in `settings.txt` in the data folder: plain `key=value` text you can edit by hand. Anything it can't make sense of falls back to the default.
 
 ## Multiplayer
 
-Open any world to friends from the pause menu, or run a headless dedicated server. Blocks, players, mobs, weather, chat, containers and the rest stay in sync, and the host remembers every player's things between visits. It all uses the Rust standard library, with no accounts and no central server.
+Open any world to friends from the pause menu, or run a headless dedicated server. Blocks, players, mobs, weather, chat, containers and the rest stay in sync, and the host remembers every player's things between visits. Everything sent is encrypted. It all uses the Rust standard library, with no accounts and no central server.
+
+### The server list
+
+The **Multiplayer** screen lists games on your network (they turn up by themselves within a couple of seconds) and the servers you've saved, each with its player count and ping, or why it can't be reached (offline, or on another version). Click a server to choose it and double-click (or **Join**) to play; type an address and press **Add to List** to keep it, **Remove** to drop it, **Refresh** to ask them all again. The list is kept in `servers.txt` in the data folder.
+
+The game remembers the key each server showed the first time you reached it. If a server's key ever changes, joining stops with a warning, since someone may be pretending to be that server. If you know its owner reset it (a reinstall, a new computer), choose it and press **Forget Key**.
 
 ### On the same network (LAN)
 
 1. **Host:** start or continue a world, press **Esc**, then click **Open to LAN**. The pause menu shows your address, for example `192.168.1.20:25565`.
-2. **Friends:** on the title screen, click **Multiplayer**, type a name and the host's address, then click **Join Server**. For a second copy on the same computer, use `127.0.0.1`.
+2. **Friends:** on the title screen, click **Multiplayer** and type a name. The host's game shows up in the list by itself: double-click it. (Or type its address and click **Join**; for a second copy on the same computer, use `127.0.0.1`.)
 3. Press **T** to chat.
 
 ### Over the internet, from your own world
@@ -277,6 +283,7 @@ cargo build --release
 | `--keep-inventory` | Players keep their things when they die |
 | `--difficulty peaceful\|easy\|normal\|hard` | Overrides the world's difficulty |
 | `--max-players N` | Player limit (default 16) |
+| `--motd TEXT` | The name players see in their server lists |
 | `--allow-list` | Only let in players on the allow-list (and operators) |
 | `--upnp` | Ask the router to forward the port, for servers at home |
 
@@ -296,7 +303,8 @@ The world autosaves every 5 minutes and on `stop` (Ctrl+C loses anything since t
 ### How it works
 
 - **The host runs the world:** mobs, TNT, time, weather and saving. Players send it their edits, movement and attacks, and it passes them on. A joining player gets the seed plus the edits, so only changes travel, never whole chunks. If the host leaves, everyone returns to the title screen.
-- **Passwords** are checked with a SHA-256 challenge-response, so the password itself is never sent. **Everything else is unencrypted**, so don't share secrets in chat.
+- **Encryption.** Each connection opens with a key exchange (X25519), and from then on every message both ways is encrypted and sealed (ChaCha20-Poly1305), with keys made fresh for that connection: nobody in between can read it, change it or replay it. The host also has a lasting key of its own (`host_key.txt` beside the settings, or in a dedicated server's folder; its fingerprint is in the server's log), which takes part in every exchange, so only the real host can finish one; players' games remember it (see the server list). All of it is written out in `src/online/crypto.rs` and checked against the standards' own test vectors, so the game still needs nothing but the standard library.
+- **Passwords** are checked with a challenge-response tied to that one connection's secret, so the password itself is never sent and a proof can't be passed on to the real server by someone in the middle.
 - **The host doesn't take a player's word for anything.**
   - Block edits must be within reach, at a human rate, and follow the rules (no turning stone into Dimond ore, no breaking bedrock). Rejected edits are undone on the player's screen. Movement must make sense, and attacks, ignitions and fishing must be within reach and at a human pace. Chat is rate-limited, and nobody can call themselves "Server".
   - **The ledger.** Each player's inventory lives on their own machine, so it feels instant, but the host keeps a ledger of what every player really owns, built only from what it saw happen: drops it rolled, loot it sent, recipes it allowed, blocks placed, arrows shot, food eaten. Placing, crafting, shooting and the rest need the items in the ledger; every few seconds the counts are compared and the host's win. Tool wear, experience, enchantments, anvil repairs, dropped items and deaths all go through the host too.
@@ -335,9 +343,9 @@ Each folder's `mod.rs` starts with a note on what's in it, and every file starts
 | `src/engine/` | Rendering (`render`, `mesher`, `texture`, `light`, `tint`, `lod`), chunk storage (`palette`), noise, sound, UI widgets, controls (`keybinds`, `pad`), settings, saving (`save`, `regions`, `backups`), the data folder, updates, UPnP and accessibility |
 | `src/land/` | The world and its generator (`world`), the dimensions (`dims`) and the realm each lives in (`realms`, saved by `realm_save`), structures, weather, seasons, skies, liquids, fire, falling blocks, trees and ground cover, random ticks (`copper`), the Scorchlands, their biomes (`wilds`), fortresses, bastions and Woodland Mansions, hot springs and the chill (`springs`), the Hollow, the Deep Dark, Trial Chambers, treasure and archaeology |
 | `src/blocks/` | The block and item registry (`block`), building blocks, doors, decor, containers, chests, beds, backpacks, Personal Chests, Hollow Boxes, Zappy wiring and contraptions, hoppers, crafting, enchanting, anvils, smithing, trims, brewing, beacons, banners, books, fireworks, music, and cauldrons, composters, heads and lightning rods (`homecraft`) |
-| `src/creatures/` | Mob physics, models and AI (`entity`), pathfinding, animals, wildlife, critters, the Scorchlands' beasts, bees, horses (and Donkeys and Mules), leads, Floaties, golems (Snow Golems too), villagers, raids, Sniffers, the Creaking and name tags |
+| `src/creatures/` | Mob physics, models and AI (`entity`), pathfinding, animals, wildlife, critters, the Scorchlands' beasts, bees, horses (and Donkeys and Mules), leads, Floaties, golems (Snow Golems too), villagers, raids, Sniffers, the Creaking, name tags and players' own skins (`skins`) |
 | `src/survival/` | The player, inventory, items on the ground, hunger and breath, cooking, experience, combat, tools, gadgets, navigation, gliders, vehicles, farming, fishing, advancements, statistics, game modes, world rules, waypoints and other handy things (`qol`) |
-| `src/online/` | The network protocol, hosting and joining, the dedicated server, admin, the host's ledger, remembered players, cheats, mods, scripting and the playtest bots |
+| `src/online/` | The network protocol and its encryption (`crypto.rs`), hosting and joining, the server list and LAN discovery (`servers.rs`), the dedicated server, admin, the host's ledger, remembered players, cheats, mods, scripting and the playtest bots |
 | `build.rs`, `assets/minceraft.ico` | The Windows exe's icon (drawn from the game's textures by `--export-icon`) |
 
 Not affiliated with any block-game company.

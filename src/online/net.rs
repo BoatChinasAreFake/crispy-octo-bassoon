@@ -1,5 +1,16 @@
 //! LAN multiplayer transport: a tiny length-prefixed binary protocol over
 //! non-blocking TCP, using only the standard library.
+//!
+//! Everything after the first few bytes is encrypted. Each side opens with a
+//! hello: `MCE1` and a fresh X25519 key (the host adds its long-lasting host
+//! key, from `host_key.txt`). Both work out the same secrets from those
+//! (HKDF over both key exchanges), and every frame after is ChaCha20-Poly1305
+//! with its own key each way and a counter for the nonce: nobody in between
+//! can read it, change it, replay it or drop part of it unseen. Because the
+//! host key takes part, only the real host can finish the handshake; the
+//! game remembers each server's key (see `servers.rs`) and warns if it
+//! changes. Passwords are proven against this one connection's secret, so a
+//! proof can't be relayed to the real server by someone in the middle.
 
 use crate::block::{Id, ProjectileAppearance};
 use macroquad::math::Vec3;
@@ -33,7 +44,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v27: v0.2's mobs (Guardians, Witches, Allays, ...) and effects (Slowness, Poison, ...).
 /// v28: the Wilter, Charred Rattlers and Wilting.
 /// v29: new woods (doors, boats), the Mushmooer, kelp and sea plants.
-pub const PROTOCOL: u32 = 33;
+/// v34: everything encrypted (see the top of this file), the server list's
+/// status query (StatusAsk, Status), and players' own skins (SkinData).
+pub const PROTOCOL: u32 = 34;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -280,9 +293,19 @@ pub enum Msg {
     PlayerSkin { id: u32, skin: u8 },
     /// host -> client: a beacon's effect on you, for a little longer (the potion item says which).
     BeaconEffect { item: Id },
+    /// client -> host, before logging in: what are you? (For the server list.)
+    StatusAsk,
+    /// host -> client: the answer (then the host hangs up).
+    Status { name: String, players: u16, max: u16, protocol: u32, version: String, password: bool },
+    /// Both ways: a player's own skin, 64x64 RGBA (empty: back to a built-in
+    /// one; client -> host: mine, `id` is ignored).
+    SkinData { id: u32, pixels: Vec<u8> },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
+
+/// A player's own skin: 64x64 RGBA.
+pub const SKIN_BYTES: usize = 64 * 64 * 4;
 
 pub const FLAG_SNEAK: u8 = 1;
 pub const FLAG_SWING: u8 = 2;
@@ -985,6 +1008,22 @@ impl Msg {
                 w.u8(62);
                 w.u16(*item);
             }
+            Msg::StatusAsk => w.u8(91),
+            Msg::Status { name, players, max, protocol, version, password } => {
+                w.u8(92);
+                w.str(name);
+                w.u16(*players);
+                w.u16(*max);
+                w.u32(*protocol);
+                w.str(version);
+                w.u8(*password as u8);
+            }
+            Msg::SkinData { id, pixels } => {
+                w.u8(93);
+                w.u32(*id);
+                w.u32(pixels.len() as u32);
+                w.bytes(pixels);
+            }
             Msg::RideMob { mob, pos, yaw, off } => {
                 w.u8(59);
                 w.u32(*mob);
@@ -1254,6 +1293,16 @@ impl Msg {
             60 => Msg::MobName { mob: r.u32()?, name: r.str()? },
             61 => Msg::PlayerSkin { id: r.u32()?, skin: r.u8()? },
             62 => Msg::BeaconEffect { item: r.u16()? },
+            91 => Msg::StatusAsk,
+            92 => Msg::Status { name: r.str()?, players: r.u16()?, max: r.u16()?, protocol: r.u32()?, version: r.str()?, password: r.u8()? != 0 },
+            93 => {
+                let id = r.u32()?;
+                let n = r.u32()? as usize;
+                if n != 0 && n != SKIN_BYTES {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "a skin must be 64x64"));
+                }
+                Msg::SkinData { id, pixels: r.take(n)?.to_vec() }
+            }
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -1266,7 +1315,30 @@ impl Msg {
 
 // ------------------------------------------------------------------ sockets
 
-/// One framed, non-blocking TCP connection.
+/// What starts every connection: the magic, then the keys.
+const MAGIC: &[u8; 4] = b"MCE1";
+const CLIENT_HELLO: usize = 4 + 32;
+const SERVER_HELLO: usize = 4 + 64;
+const TAG: usize = 16;
+
+/// A host's long-lasting key pair: (secret, public).
+pub type Identity = ([u8; 32], [u8; 32]);
+
+/// Keys for the two directions, once the handshake is done.
+struct Crypt {
+    tx: [u8; 32],
+    rx: [u8; 32],
+    tx_n: u64,
+    rx_n: u64,
+}
+
+fn nonce(n: u64) -> [u8; 12] {
+    let mut out = [0u8; 12];
+    out[4..].copy_from_slice(&n.to_le_bytes());
+    out
+}
+
+/// One framed, encrypted, non-blocking TCP connection.
 pub struct Conn {
     stream: TcpStream,
     rbuf: Vec<u8>,
@@ -1276,14 +1348,43 @@ pub struct Conn {
     last_recv: Instant,
     /// Biggest frame accepted from the other end.
     max_frame: usize,
+    /// Our half of the handshake (this connection's own key, and the host
+    /// key if we're the host) until it's done.
+    hello: Option<([u8; 32], [u8; 32], Option<Identity>)>,
+    crypt: Option<Crypt>,
+    /// Messages sent before the handshake finished.
+    pending: Vec<Vec<u8>>,
+    /// The host's key (on a joining player's side), once known.
+    pub host_key: Option<[u8; 32]>,
+    /// A secret only the two ends of this connection share.
+    pub session: [u8; 32],
 }
 
 impl Conn {
-    fn new(stream: TcpStream) -> io::Result<Conn> {
+    fn new(stream: TcpStream, identity: Option<Identity>) -> io::Result<Conn> {
         stream.set_nonblocking(true)?;
         stream.set_nodelay(true)?;
         let now = Instant::now();
-        Ok(Conn { stream, rbuf: Vec::new(), wbuf: Vec::new(), closed: None, opened: now, last_recv: now, max_frame: MAX_FRAME })
+        let (secret, public) = crate::crypto::keypair();
+        let mut wbuf = MAGIC.to_vec();
+        wbuf.extend_from_slice(&public);
+        if let Some((_, host)) = identity {
+            wbuf.extend_from_slice(&host);
+        }
+        Ok(Conn {
+            stream,
+            rbuf: Vec::new(),
+            wbuf,
+            closed: None,
+            opened: now,
+            last_recv: now,
+            max_frame: MAX_FRAME,
+            hello: Some((secret, public, identity)),
+            crypt: None,
+            pending: Vec::new(),
+            host_key: None,
+            session: [0; 32],
+        })
     }
 
     /// Seconds since anything arrived.
@@ -1305,20 +1406,43 @@ impl Conn {
         let mut last = io::Error::new(io::ErrorKind::NotFound, "no address found");
         for t in targets {
             match TcpStream::connect_timeout(&t, Duration::from_secs(4)) {
-                Ok(s) => return Conn::new(s),
+                Ok(s) => return Conn::new(s, None),
                 Err(e) => last = e,
             }
         }
         Err(last)
     }
 
+    /// Is the handshake done (so everything from here on is encrypted)?
+    pub fn secure(&self) -> bool {
+        self.crypt.is_some()
+    }
+
+    /// Proof that we know `password`, for this connection only.
+    pub fn auth_proof(&self, nonce: &[u8; 16], password: &str) -> [u8; 32] {
+        auth_proof(nonce, &self.session, password)
+    }
+
     pub fn send(&mut self, m: &Msg) {
+        self.send_body(&m.encode());
+    }
+
+    /// Send an already-encoded message.
+    fn send_body(&mut self, body: &[u8]) {
         if self.closed.is_some() {
             return;
         }
-        let body = m.encode();
-        self.wbuf.extend_from_slice(&(body.len() as u32).to_le_bytes());
-        self.wbuf.extend_from_slice(&body);
+        let Some(c) = &mut self.crypt else {
+            self.pending.push(body.to_vec());
+            return;
+        };
+        let len = (body.len() as u32).to_le_bytes();
+        let mut data = body.to_vec();
+        let tag = crate::crypto::seal(&c.tx, &nonce(c.tx_n), &len, &mut data);
+        c.tx_n += 1;
+        self.wbuf.extend_from_slice(&len);
+        self.wbuf.extend_from_slice(&data);
+        self.wbuf.extend_from_slice(&tag);
         if self.wbuf.len() > 32 << 20 {
             self.closed = Some("fell too far behind".into());
         }
@@ -1338,12 +1462,64 @@ impl Conn {
         }
     }
 
+    /// Finish the handshake once the other side's hello is in. False if
+    /// it isn't all here yet.
+    fn handshake(&mut self) -> bool {
+        let Some((secret, public, identity)) = self.hello else { return true };
+        let need = if identity.is_some() { CLIENT_HELLO } else { SERVER_HELLO };
+        if self.rbuf.len() < 4 || &self.rbuf[..4] != MAGIC {
+            if !self.rbuf.is_empty() && !MAGIC.starts_with(&self.rbuf[..self.rbuf.len().min(4)]) {
+                self.closed = Some("the other side isn't speaking the same (encrypted) language: is one of you on an older version?".into());
+            }
+            return false;
+        }
+        if self.rbuf.len() < need {
+            return false;
+        }
+        let key = |at: usize| -> [u8; 32] { self.rbuf[at..at + 32].try_into().unwrap() };
+        use crate::crypto::x25519;
+        // (client key, host's key for this connection, host key) and both exchanges.
+        let (c, e, s, dh1, dh2) = match identity {
+            Some((host_secret, host_public)) => {
+                let c = key(4);
+                (c, public, host_public, x25519(&secret, &c), x25519(&host_secret, &c))
+            }
+            None => {
+                let (e, s) = (key(4), key(36));
+                (public, e, s, x25519(&secret, &e), x25519(&secret, &s))
+            }
+        };
+        self.rbuf.drain(..need);
+        if dh1 == [0; 32] || dh2 == [0; 32] {
+            self.closed = Some("a bad key in the handshake".into());
+            return false;
+        }
+        let salt = crate::crypto::sha256_parts(&[MAGIC, &c, &e, &s]);
+        let okm = crate::crypto::hkdf(&salt, &[dh1, dh2].concat(), b"minceraft stream v1", 96);
+        let (c2s, s2c): ([u8; 32], [u8; 32]) = (okm[..32].try_into().unwrap(), okm[32..64].try_into().unwrap());
+        self.session = okm[64..].try_into().unwrap();
+        let host = identity.is_some();
+        self.crypt = Some(if host { Crypt { tx: s2c, rx: c2s, tx_n: 0, rx_n: 0 } } else { Crypt { tx: c2s, rx: s2c, tx_n: 0, rx_n: 0 } });
+        if !host {
+            self.host_key = Some(s);
+        }
+        self.hello = None;
+        for body in std::mem::take(&mut self.pending) {
+            self.send_body(&body);
+        }
+        // What was waiting goes now (callers may not flush again for a while).
+        self.flush();
+        true
+    }
+
     /// Read everything available and return complete messages.
     pub fn poll(&mut self) -> Vec<Msg> {
         let mut buf = [0u8; 16384];
         while self.closed.is_none() && self.rbuf.len() < POLL_READ_CAP {
             match self.stream.read(&mut buf) {
-                Ok(0) => self.closed = Some("connection closed".into()),
+                Ok(0) => {
+                    self.closed = Some(if self.crypt.is_some() { "connection closed".into() } else { "connection closed during the handshake (is the other side on an older version?)".into() });
+                }
                 Ok(n) => {
                     self.rbuf.extend_from_slice(&buf[..n]);
                     self.last_recv = Instant::now();
@@ -1354,24 +1530,36 @@ impl Conn {
             }
         }
         let mut out = Vec::new();
+        if !self.handshake() {
+            return out;
+        }
+        let Some(c) = &mut self.crypt else { return out };
         let mut at = 0;
         while self.rbuf.len() - at >= 4 && out.len() < POLL_MSG_CAP {
-            let len = u32::from_le_bytes(self.rbuf[at..at + 4].try_into().unwrap()) as usize;
+            let len_bytes: [u8; 4] = self.rbuf[at..at + 4].try_into().unwrap();
+            let len = u32::from_le_bytes(len_bytes) as usize;
             if len > self.max_frame {
                 self.closed = Some("oversized message".into());
                 break;
             }
-            if self.rbuf.len() - at - 4 < len {
+            if self.rbuf.len() - at - 4 < len + TAG {
                 break;
             }
-            match Msg::decode(&self.rbuf[at + 4..at + 4 + len]) {
+            let mut body = self.rbuf[at + 4..at + 4 + len].to_vec();
+            let tag: [u8; TAG] = self.rbuf[at + 4 + len..at + 4 + len + TAG].try_into().unwrap();
+            if !crate::crypto::open(&c.rx, &nonce(c.rx_n), &len_bytes, &mut body, &tag) {
+                self.closed = Some("a message was tampered with on the way".into());
+                break;
+            }
+            c.rx_n += 1;
+            match Msg::decode(&body) {
                 Ok(m) => out.push(m),
                 Err(e) => {
                     self.closed = Some(format!("bad data: {e}"));
                     break;
                 }
             }
-            at += 4 + len;
+            at += 4 + len + TAG;
         }
         self.rbuf.drain(..at);
         out
@@ -1405,6 +1593,14 @@ pub struct Server {
     lockouts: HashMap<IpAddr, Instant>,
     /// Connections being closed politely (see `linger`), until when.
     closing: Vec<(Conn, Instant, bool)>,
+    /// The host key (see the top of this file).
+    pub identity: Identity,
+    /// Answers LAN games' callers (see servers.rs).
+    lan: Option<std::net::UdpSocket>,
+    /// What the server calls itself in server lists.
+    pub motd: String,
+    /// Someone plays on the host itself (counted in the player count).
+    pub host_plays: bool,
 }
 
 /// IPv4 addresses arriving on a dual-stack socket look like ::ffff:1.2.3.4.
@@ -1453,6 +1649,10 @@ impl Server {
                     failures: HashMap::new(),
                     lockouts: HashMap::new(),
                     closing: Vec::new(),
+                    identity: host_identity(),
+                    lan: crate::servers::lan_socket(),
+                    motd: "A Minceraft server".into(),
+                    host_plays: false,
                 });
             }
         }
@@ -1471,12 +1671,16 @@ impl Server {
         let now = Instant::now();
         self.lockouts.retain(|_, until| *until > now);
         self.tend_closing();
+        if let Some(sock) = &self.lan {
+            let info = crate::servers::LanInfo { port: self.port, players: self.player_count(), max: self.max_players as u16, protocol: PROTOCOL, password: self.password.is_some(), name: self.motd.clone() };
+            crate::servers::answer_lan(sock, &info);
+        }
         for stream in streams {
             // Hard cap on half-open logins so a flood can't exhaust us.
             if self.clients.len() >= self.max_players + 8 {
                 continue;
             }
-            if let Ok(mut conn) = Conn::new(stream) {
+            if let Ok(mut conn) = Conn::new(stream, Some(self.identity)) {
                 conn.max_frame = CLIENT_MAX_FRAME;
                 if let Some(ip) = conn.peer_ip() {
                     let refuse = if self.banned.contains(&ip) {
@@ -1525,6 +1729,16 @@ impl Server {
         self.get(id).and_then(|c| c.conn.peer_ip())
     }
 
+    /// Players in the game, the host's own included.
+    pub fn player_count(&self) -> u16 {
+        (self.joined_count() + self.host_plays as usize) as u16
+    }
+
+    /// The answer to a server list's question.
+    pub fn status(&self) -> Msg {
+        Msg::Status { name: self.motd.clone(), players: self.player_count(), max: self.max_players as u16, protocol: PROTOCOL, version: crate::paths::version().into(), password: self.password.is_some() }
+    }
+
     pub fn joined_count(&self) -> usize {
         self.clients.iter().filter(|c| c.joined).count()
     }
@@ -1568,22 +1782,20 @@ impl Server {
     fn tend_closing(&mut self) {
         let now = Instant::now();
         self.closing.retain_mut(|(conn, until, shut)| {
+            // (The goodbye may still be waiting on the handshake: keep reading.)
+            if conn.closed.is_none() {
+                let _ = conn.poll();
+                conn.rbuf.clear();
+            }
             if !*shut {
                 conn.flush();
-                if conn.wbuf.is_empty() || conn.closed.is_some() {
+                if (conn.wbuf.is_empty() && conn.pending.is_empty()) || conn.closed.is_some() {
                     let _ = conn.stream.shutdown(std::net::Shutdown::Write);
                     *shut = true;
                 }
             }
-            let mut buf = [0u8; 4096];
-            loop {
-                match conn.stream.read(&mut buf) {
-                    Ok(0) => return false,
-                    Ok(_) => {}
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                    Err(_) => return false,
-                }
+            if *shut && conn.closed.is_some() {
+                return false;
             }
             now < *until
         });
@@ -1607,10 +1819,7 @@ impl Server {
     pub fn broadcast_where(&mut self, m: &Msg, keep: impl Fn(u32) -> bool) {
         let body = m.encode();
         for c in self.clients.iter_mut().filter(|c| c.joined && keep(c.id)) {
-            if c.conn.closed.is_none() {
-                c.conn.wbuf.extend_from_slice(&(body.len() as u32).to_le_bytes());
-                c.conn.wbuf.extend_from_slice(&body);
-            }
+            c.conn.send_body(&body);
         }
     }
 
@@ -1635,87 +1844,39 @@ pub fn with_default_port(addr: &str) -> String {
     }
 }
 
-/// A fresh random-ish challenge. Not cryptographic-grade randomness, but unique
-/// per login, which is all the challenge needs to defeat replay.
+/// A fresh random challenge.
 pub fn make_nonce() -> [u8; 16] {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let mut seed = Vec::new();
-    seed.extend_from_slice(&t.to_le_bytes());
-    seed.extend_from_slice(&COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes());
-    seed.extend_from_slice(&(std::process::id() as u64).to_le_bytes());
-    seed.extend_from_slice(&(&seed as *const _ as usize as u64).to_le_bytes());
-    let h = sha256(&seed);
-    h[..16].try_into().unwrap()
+    let mut n = [0u8; 16];
+    crate::crypto::random_bytes(&mut n);
+    n
 }
 
-/// Proof that the client knows the password, without sending it.
-pub fn auth_proof(nonce: &[u8; 16], password: &str) -> [u8; 32] {
-    let mut data = nonce.to_vec();
-    data.extend_from_slice(password.as_bytes());
-    sha256(&data)
+/// Proof that the client knows the password, without sending it, for one
+/// connection (`session`) only.
+pub fn auth_proof(nonce: &[u8; 16], session: &[u8; 32], password: &str) -> [u8; 32] {
+    crate::crypto::hmac(session, &[nonce, password.as_bytes()])
+}
+
+/// Where the host key is kept (beside the settings, or in the server's folder).
+pub const HOST_KEY_FILE: &str = "host_key.txt";
+
+/// This computer's host key: read from `host_key.txt`, or made (and saved)
+/// the first time. Tests get a fresh one each time.
+pub fn host_identity() -> Identity {
+    if cfg!(test) {
+        return crate::crypto::keypair();
+    }
+    if let Some(secret) = std::fs::read_to_string(HOST_KEY_FILE).ok().and_then(|s| crate::crypto::from_hex::<32>(s.lines().next().unwrap_or(""))) {
+        return (secret, crate::crypto::x25519_public(&secret));
+    }
+    let (secret, public) = crate::crypto::keypair();
+    let _ = std::fs::write(HOST_KEY_FILE, format!("{}\n# This server's secret key: keep it private. Players' games remember the key that goes with it,\n# and warn them if it ever changes. Delete this file to make a new one.\n", crate::crypto::to_hex(&secret)));
+    (secret, public)
 }
 
 /// Constant-time comparison so response timing doesn't leak how close a guess was.
 pub fn proof_matches(a: &[u8; 32], b: &[u8; 32]) -> bool {
     a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-/// Plain SHA-256 (FIPS 180-4).
-pub fn sha256(data: &[u8]) -> [u8; 32] {
-    const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-    ];
-    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
-    let mut msg = data.to_vec();
-    let bit_len = (data.len() as u64).wrapping_mul(8);
-    msg.push(0x80);
-    while msg.len() % 64 != 56 {
-        msg.push(0);
-    }
-    msg.extend_from_slice(&bit_len.to_be_bytes());
-    for block in msg.chunks(64) {
-        let mut w = [0u32; 64];
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes(block[i * 4..i * 4 + 4].try_into().unwrap());
-        }
-        for i in 16..64 {
-            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
-        }
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
-        for i in 0..64 {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let ch = (e & f) ^ (!e & g);
-            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let maj = (a & b) ^ (a & c) ^ (b & c);
-            let t2 = s0.wrapping_add(maj);
-            hh = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(t1);
-            d = c;
-            c = b;
-            b = a;
-            a = t1.wrapping_add(t2);
-        }
-        for (x, v) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
-            *x = x.wrapping_add(v);
-        }
-    }
-    let mut out = [0u8; 32];
-    for (i, v) in h.iter().enumerate() {
-        out[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
-    }
-    out
 }
 
 /// This machine's global IPv6 address, if it has one. With IPv6, friends can
@@ -1812,6 +1973,10 @@ mod tests {
             Msg::BundleState { old: 0, new: 7, contents: vec![(4, 40), (0x8010, 12)] },
             Msg::MobName { mob: 42, name: "Sir Oinks".into() },
             Msg::PlayerSkin { id: 3, skin: 4 },
+            Msg::StatusAsk,
+            Msg::Status { name: "Bob's world".into(), players: 2, max: 8, protocol: PROTOCOL, version: "v0.4".into(), password: true },
+            Msg::SkinData { id: 5, pixels: vec![7; SKIN_BYTES] },
+            Msg::SkinData { id: 5, pixels: Vec::new() },
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
@@ -1893,6 +2058,7 @@ mod tests {
 
     #[test]
     fn sha256_matches_known_vectors() {
+        use crate::crypto::sha256;
         let hex = |b: [u8; 32]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
         assert_eq!(hex(sha256(b"")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         assert_eq!(hex(sha256(b"abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
@@ -1903,8 +2069,9 @@ mod tests {
         );
         let n = make_nonce();
         assert_ne!(n, make_nonce());
-        assert!(proof_matches(&auth_proof(&n, "pw"), &auth_proof(&n, "pw")));
-        assert!(!proof_matches(&auth_proof(&n, "pw"), &auth_proof(&n, "pW")));
+        assert!(proof_matches(&auth_proof(&n, &[1; 32], "pw"), &auth_proof(&n, &[1; 32], "pw")));
+        assert!(!proof_matches(&auth_proof(&n, &[1; 32], "pw"), &auth_proof(&n, &[1; 32], "pW")));
+        assert!(!proof_matches(&auth_proof(&n, &[1; 32], "pw"), &auth_proof(&n, &[2; 32], "pw")), "bound to one connection");
     }
 
     #[test]
@@ -1927,11 +2094,64 @@ mod tests {
         let start = std::time::Instant::now();
         while got.len() < 2 && start.elapsed() < Duration::from_secs(5) {
             server.accept();
+            client.poll();
             for c in server.clients.iter_mut() {
                 got.extend(c.conn.poll());
             }
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(got, vec![Msg::Hello { protocol: PROTOCOL, name: "a".into() }, Msg::Time(0.5)]);
+        // Both ends are encrypted, agree on a secret, and the player knows the host's key.
+        let host = &server.clients[0].conn;
+        assert!(client.secure() && host.secure());
+        assert_eq!(client.session, host.session);
+        assert_eq!(client.host_key, Some(server.identity.1));
+    }
+
+    #[test]
+    fn the_stream_is_encrypted_and_tamper_proof() {
+        // Two ends of a real socket pair, host and player.
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let identity = crate::crypto::keypair();
+        let mut player = Conn::new(TcpStream::connect(("127.0.0.1", port)).unwrap(), None).unwrap();
+        let mut host = Conn::new(l.accept().unwrap().0, Some(identity)).unwrap();
+        let secret = "the password is swordfish";
+        player.send(&Msg::Chat { from: 1, text: secret.into() });
+        let pump = |a: &mut Conn, b: &mut Conn| {
+            let mut got = Vec::new();
+            for _ in 0..200 {
+                a.flush();
+                b.flush();
+                got.extend(b.poll());
+                a.poll();
+                if !got.is_empty() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            got
+        };
+        assert_eq!(pump(&mut player, &mut host), vec![Msg::Chat { from: 1, text: secret.into() }]);
+        // What goes over the wire doesn't show the text.
+        player.send(&Msg::Chat { from: 1, text: secret.into() });
+        let wire = player.wbuf.clone();
+        assert!(!wire.windows(secret.len()).any(|w| w == secret.as_bytes()));
+        // A flipped bit on the way is caught, and the connection dropped.
+        player.wbuf[8] ^= 1;
+        assert!(pump(&mut player, &mut host).is_empty());
+        assert!(host.closed.as_deref().is_some_and(|r| r.contains("tampered")), "{:?}", host.closed);
+        // Someone speaking the old (plain) protocol is told apart.
+        let mut old = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        old.write_all(&[5, 0, 0, 0, 1, 2, 3, 4, 5]).unwrap();
+        let mut host2 = Conn::new(l.accept().unwrap().0, Some(identity)).unwrap();
+        for _ in 0..100 {
+            host2.poll();
+            if host2.closed.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(host2.closed.as_deref().is_some_and(|r| r.contains("older version")), "{:?}", host2.closed);
     }
 }

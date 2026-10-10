@@ -27,7 +27,7 @@
 
 use crate::block::*;
 use crate::game::{Controls, Game};
-use crate::net::{auth_proof, Conn, Msg, PROTOCOL};
+use crate::net::{Conn, Msg, PROTOCOL};
 use crate::noise::Rng;
 use crate::player::Input;
 use macroquad::math::{IVec3, Vec3};
@@ -72,7 +72,8 @@ pub fn connect(host: &mut Game, port: u16, name: &str) -> Result<Game, String> {
             return Err(reason.clone());
         }
         if let Some(Msg::Challenge { nonce, .. }) = msgs.iter().find(|m| matches!(m, Msg::Challenge { .. })) {
-            conn.send(&Msg::Auth { proof: auth_proof(nonce, "") });
+            let proof = conn.auth_proof(nonce, "");
+            conn.send(&Msg::Auth { proof });
             conn.flush();
         }
         if let Some(i) = msgs.iter().position(|m| matches!(m, Msg::Welcome { .. })) {
@@ -1703,6 +1704,65 @@ fn homely(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut 
     }
     host.world.set_v(pot, AIR);
     host.world.set_v(fire, AIR);
+
+    // 42. A bot wears a skin of its own: the host and every other bot get it,
+    // and it goes again when the bot changes back.
+    let k = 5 % n;
+    let id = team[k].game.my_id;
+    let card = crate::skins::test_card();
+    team[k].game.set_own_skin(Some(card.clone()));
+    pump(host, team, 1.5, |_| idle());
+    report.features.push("own skin");
+    if host.peers.get(&id).and_then(|p| p.own_skin.as_ref()) != Some(&card) {
+        report.problems.push(format!("{} put on a skin of its own and the host doesn't have it", team[k].name));
+    }
+    for (j, b) in team.iter().enumerate().filter(|(j, _)| *j != k) {
+        if b.game.peers.get(&id).and_then(|p| p.own_skin.as_ref()) != Some(&card) {
+            report.problems.push(format!("{} never saw {}'s own skin", team[j].name, team[k].name));
+        }
+    }
+    team[k].game.set_own_skin(None);
+    pump(host, team, 2.0, |_| idle());
+    for b in team.iter().filter(|b| b.game.my_id != id) {
+        if b.game.peers.get(&id).is_some_and(|p| p.own_skin.is_some()) {
+            report.problems.push(format!("{} still sees {}'s old skin", b.name, team[k].name));
+        }
+    }
+
+    // 43. While everyone plays, a server list asks the host how it is (over
+    // its own encrypted connection) and finds it on the LAN.
+    let port = match &host.net {
+        Some(crate::multiplayer::Net::Host(s)) => s.port,
+        _ => 0,
+    };
+    let asking = std::thread::spawn(move || crate::servers::ask_status(&format!("127.0.0.1:{port}")));
+    let mut scan = crate::servers::LanScan::new();
+    let start = Instant::now();
+    while !asking.is_finished() && start.elapsed() < Duration::from_secs(10) {
+        pump(host, team, 0.1, |_| idle());
+        if let Some(s) = &mut scan {
+            s.tick();
+        }
+    }
+    for _ in 0..30 {
+        if scan.as_ref().is_none_or(|s| s.games.iter().any(|g| g.info.port == port)) {
+            break;
+        }
+        pump(host, team, 0.1, |_| idle());
+        if let Some(s) = &mut scan {
+            s.tick();
+        }
+    }
+    report.features.push("server status");
+    match asking.join() {
+        Ok(Ok(st)) if st.players as usize == n && st.protocol == PROTOCOL => {}
+        Ok(Ok(st)) => report.problems.push(format!("the server list was told {} players (protocol {}), not {n}", st.players, st.protocol)),
+        Ok(Err(e)) => report.problems.push(format!("the server list couldn't ask the host: {e}")),
+        Err(_) => report.problems.push("asking the host's status crashed".into()),
+    }
+    if scan.is_some_and(|s| !s.games.iter().any(|g| g.info.port == port)) {
+        report.problems.push("the host never turned up on the LAN".into());
+    }
 }
 
 /// The `--playtest` command.
@@ -1745,7 +1805,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

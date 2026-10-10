@@ -41,8 +41,11 @@ pub struct Peer {
     pub ledger: crate::ledger::Ledger,
     /// Their last report of their inventory, health and hunger (see players.rs).
     pub report: Option<crate::players::Report>,
-    /// How they look (see nametags.rs).
+    /// How they look (see nametags.rs), and their own skin if they have one (skins.rs).
     pub skin: u8,
+    pub own_skin: Option<Vec<u8>>,
+    /// Their skin changed faster than it's passed on: pass on the latest soon.
+    skin_due: bool,
     /// Their game mode (the host decides; see modes.rs).
     pub mode: crate::modes::GameMode,
     /// Their latest statistics (see stats.rs), kept with the world.
@@ -55,7 +58,7 @@ pub struct Peer {
 
 impl Peer {
     pub(crate) fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, own_skin: None, skin_due: false, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -98,6 +101,10 @@ impl Game {
     pub fn open_lan(&mut self, name: &str, password: Option<String>) -> std::io::Result<u16> {
         let port = self.open_server(DEFAULT_PORT, password, 8)?;
         self.player_name = sanitize_name(name);
+        if let Some(Net::Host(s)) = &mut self.net {
+            s.motd = format!("{}'s world", self.player_name);
+            s.host_plays = true;
+        }
         self.msg(format!("Opened to LAN on port {port}. Tell your friends (or your other computer)."));
         Ok(port)
     }
@@ -344,6 +351,9 @@ impl Game {
                 self.client_handle(m);
             }
         }
+        if self.is_host() {
+            self.pass_on_skins();
+        }
         // (Including anyone kicked just now.)
         if let Some(Net::Host(s)) = &mut self.net {
             for c in s.clients.iter().filter(|c| c.conn.closed.is_some() && c.joined) {
@@ -376,6 +386,15 @@ impl Game {
         if !joined {
             // Login: Hello -> Challenge -> Auth -> Welcome. Nothing else is accepted before.
             match m {
+                // A server list asking how we are: answer, and hang up.
+                Msg::StatusAsk => {
+                    let status = server.status();
+                    if let Some(c) = server.get(from) {
+                        c.conn.send(&status);
+                        c.conn.flush();
+                        c.conn.closed = Some("kicked: status given".into());
+                    }
+                }
                 Msg::Hello { protocol, name } => {
                     if protocol != PROTOCOL {
                         server.kick(from, &format!("Version mismatch (host speaks protocol {PROTOCOL}, you speak {protocol}). Update your game."));
@@ -407,7 +426,7 @@ impl Game {
                     let Some(c) = server.get(from) else { return };
                     let Some(nonce) = c.nonce else { return };
                     if let Some(pw) = pw
-                        && !proof_matches(&proof, &auth_proof(&nonce, &pw)) {
+                        && !proof_matches(&proof, &c.conn.auth_proof(&nonce, &pw)) {
                             let who = c.conn.peer_addr();
                             let locked = server.record_failure(from);
                             server.kick(from, "Wrong password.");
@@ -451,6 +470,12 @@ impl Game {
                 roster.push(Msg::PlayerSkin { id: self.my_id, skin: self.skin });
             }
             roster.extend(self.all_peers().map(|(&id, p)| Msg::PlayerSkin { id, skin: p.skin }));
+            if !self.away()
+                && let Some(px) = &self.my_skin
+            {
+                roster.push(Msg::SkinData { id: self.my_id, pixels: px.clone() });
+            }
+            roster.extend(self.all_peers().filter_map(|(&id, p)| p.own_skin.as_ref().map(|px| Msg::SkinData { id, pixels: px.clone() })));
             // Who's somewhere else (so they aren't drawn here).
             if !self.dedicated && self.dim != Dim::Over {
                 roster.push(Msg::Dimension { id: self.my_id, dim: self.dim.index(), x: 0.0, y: 0.0, z: 0.0 });
@@ -730,6 +755,15 @@ impl Game {
                 }
                 self.relay_all(from, Msg::PlayerSkin { id: from, skin });
             }
+            Msg::SkinData { pixels, .. } => {
+                // (Its size was checked on the way in.) Passed on not too
+                // often, as it's big: the latest goes once it may.
+                self.note_peer_skin(from, pixels);
+                if let Some(p) = self.peers.get_mut(&from) {
+                    p.skin_due = true;
+                }
+                self.pass_on_skins();
+            }
             Msg::UseItem { item } => {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
                     self.host_fill_bottle(from);
@@ -1000,6 +1034,20 @@ impl Game {
     }
 
     /// Allow `what` from this player at most once per `secs` (by the game clock).
+    /// Pass on players' changed skins (at most one each every second).
+    fn pass_on_skins(&mut self) {
+        let due: Vec<u32> = self.peers.iter().filter(|(_, p)| p.skin_due).map(|(&id, _)| id).collect();
+        for id in due {
+            if self.peer_rate_ok(id, "skin", 1.0)
+                && let Some(p) = self.peers.get_mut(&id)
+            {
+                p.skin_due = false;
+                let pixels = p.own_skin.clone().unwrap_or_default();
+                self.relay_all(id, Msg::SkinData { id, pixels });
+            }
+        }
+    }
+
     pub fn peer_rate_ok(&mut self, from: u32, what: &'static str, secs: f32) -> bool {
         let clock = self.clock;
         let Some(p) = self.peers.get_mut(&from) else { return false };
@@ -1251,6 +1299,7 @@ impl Game {
                     p.skin = skin % crate::nametags::SKINS.len() as u8;
                 }
             }
+            Msg::SkinData { id, pixels } => self.note_peer_skin(id, pixels),
             Msg::PotionEffect { item } => {
                 if let Some((p, false)) = crate::potions::potion_of(item) {
                     self.apply_potion(p);
@@ -1297,7 +1346,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } => {}
         }
     }
 
@@ -1682,7 +1731,8 @@ mod tests {
             let msgs = bad.poll();
             if let Some(Msg::Challenge { nonce, password }) = msgs.iter().find(|m| matches!(m, Msg::Challenge { .. })) {
                 assert!(*password);
-                bad.send(&Msg::Auth { proof: auth_proof(nonce, "hunter3") });
+                let proof = bad.auth_proof(nonce, "hunter3");
+                bad.send(&Msg::Auth { proof });
                 bad.flush();
             }
             if let Some(Msg::Kick { reason }) = msgs.iter().find(|m| matches!(m, Msg::Kick { .. })) {
@@ -1702,7 +1752,8 @@ mod tests {
             host.update(0.016, &idle());
             let mut msgs = conn.poll();
             if let Some(Msg::Challenge { nonce, .. }) = msgs.iter().find(|m| matches!(m, Msg::Challenge { .. })) {
-                conn.send(&Msg::Auth { proof: auth_proof(nonce, "hunter2") });
+                let proof = conn.auth_proof(nonce, "hunter2");
+                conn.send(&Msg::Auth { proof });
                 conn.flush();
             }
             if let Some(i) = msgs.iter().position(|m| matches!(m, Msg::Welcome { .. })) {
@@ -1778,7 +1829,8 @@ mod tests {
                 return Err(reason.clone());
             }
             if let Some(Msg::Challenge { nonce, .. }) = msgs.iter().find(|m| matches!(m, Msg::Challenge { .. })) {
-                conn.send(&Msg::Auth { proof: auth_proof(nonce, password) });
+                let proof = conn.auth_proof(nonce, password);
+                conn.send(&Msg::Auth { proof });
                 conn.flush();
             }
             if let Some(i) = msgs.iter().position(|m| matches!(m, Msg::Welcome { .. })) {
@@ -1794,6 +1846,55 @@ mod tests {
         let mut client = Game::new_client(id, seed, worldgen, time, creative, spawn, conn, name, leftover);
         load_around(&mut client, spawn);
         Ok(client)
+    }
+
+    #[test]
+    fn servers_are_found_asked_and_their_skins_shared() {
+        let mut host = Game::new(781, false, false);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let host_key = match &host.net {
+            Some(Net::Host(s)) => s.identity.1,
+            _ => unreachable!(),
+        };
+        // A server list asks how it is (in the background, as the game does).
+        let addr = format!("127.0.0.1:{port}");
+        let asking = std::thread::spawn({
+            let a = addr.clone();
+            move || crate::servers::ask_status(&a)
+        });
+        let start = Instant::now();
+        while !asking.is_finished() && start.elapsed() < Duration::from_secs(10) {
+            host.update(0.016, &idle());
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        let st = asking.join().unwrap().expect("the host answers");
+        assert_eq!((st.name.as_str(), st.players, st.max, st.protocol, st.password), ("Hosty's world", 1, 8, PROTOCOL, false));
+        assert_eq!(st.key, host_key, "and shows its key");
+        // It turns up on the LAN by itself.
+        let mut scan = crate::servers::LanScan::new().unwrap();
+        let start = Instant::now();
+        while !scan.games.iter().any(|g| g.info.port == port && g.info.name == "Hosty's world") && start.elapsed() < Duration::from_secs(10) {
+            scan.tick();
+            host.update(0.016, &idle());
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(scan.games.iter().any(|g| g.info.port == port), "found on the LAN");
+        // Skins: one player's own skin reaches the host and anyone who joins later.
+        let mut a = join(&mut host, port, "Painter", "").unwrap();
+        let a_id = a.my_id;
+        a.set_own_skin(Some(vec![200; crate::net::SKIN_BYTES]));
+        assert!(pump(&mut host, &mut a, |h, _| h.peers.get(&a_id).is_some_and(|p| p.own_skin.is_some())));
+        host.set_own_skin(Some(vec![100; crate::net::SKIN_BYTES]));
+        assert!(pump(&mut host, &mut a, |_, c| c.peers.get(&0).is_some_and(|p| p.own_skin.as_ref().is_some_and(|s| s[0] == 100))));
+        let mut b = join(&mut host, port, "Looker", "").unwrap();
+        assert!(pump(&mut host, &mut b, |_, c| c.peers.get(&a_id).is_some_and(|p| p.own_skin.is_some()) && c.peers.get(&0).is_some_and(|p| p.own_skin.is_some())));
+        b.refresh_skin_slots();
+        assert!(b.skin_slot(a_id).is_some() && b.skin_slot(0).is_some());
+        // Back to a built-in look.
+        a.set_own_skin(None);
+        assert!(pump(&mut host, &mut a, |h, _| h.peers.get(&a_id).is_some_and(|p| p.own_skin.is_none())));
     }
 
     #[test]
