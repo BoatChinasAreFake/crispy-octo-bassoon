@@ -108,6 +108,22 @@ impl App {
                 if g.player.air < max_air - 0.01 {
                     self.ui.air_bar(g.player.air, max_air, x0 + slot * 9.0, y0 - 29.0 * s);
                 }
+                // The chill (see springs.rs): a word over the hunger bar, frost round the edges.
+                if let Some(word) = crate::springs::chill_words(g.chill) {
+                    let c = if g.chill >= crate::springs::FREEZING { Color::new(0.55, 0.8, 1.0, 1.0) } else { Color::new(0.8, 0.92, 1.0, 1.0) };
+                    let up = if g.player.air < max_air - 0.01 { 40.0 } else { 29.0 };
+                    self.ui.text(word, x0 + slot * 9.0 + 2.0 * s, y0 - up * s, 10.0, c);
+                }
+                if g.chill > 20.0 {
+                    let a = ((g.chill - 20.0) / 80.0).min(1.0) * 0.35;
+                    let (sw, sh) = (screen_width(), screen_height());
+                    let e = 28.0 * s;
+                    let frost = Color::new(0.75, 0.88, 1.0, a);
+                    draw_rectangle(0.0, 0.0, sw, e, frost);
+                    draw_rectangle(0.0, sh - e, sw, e, frost);
+                    draw_rectangle(0.0, e, e, sh - 2.0 * e, frost);
+                    draw_rectangle(sw - e, e, e, sh - 2.0 * e, frost);
+                }
             }
             // The Support Gauge, in hand, says how the room's held up (see caveins.rs).
             if let Some(r) = g.gauge_reading {
@@ -445,6 +461,27 @@ impl App {
         }
         if held == block::TREASURE_MAP || held == block::WOODLAND_MAP {
             self.treasure_map_hud(dt);
+        }
+        if held == block::COOKBOOK {
+            self.cookbook_hud();
+        }
+    }
+
+    /// The Cookbook, held: each dish, with the best grade made (or a hint).
+    fn cookbook_hud(&mut self) {
+        use crate::cooking::{ALL_DISHES, GRADES};
+        let s = self.ui.s;
+        let (w, h) = (230.0 * s, (24.0 + 13.0 * ALL_DISHES.len() as f32) * s);
+        let (x, y) = (screen_width() - w - 10.0 * s, 10.0 * s);
+        draw_rectangle(x, y, w, h, Color::new(0.93, 0.88, 0.75, 0.95));
+        draw_rectangle_lines(x, y, w, h, 2.0 * s, Color::new(0.45, 0.25, 0.15, 1.0));
+        let found = self.game.cookbook.iter().filter(|&&b| b > 0).count();
+        self.ui.text(&format!("Cookbook ({found} of {})", ALL_DISHES.len()), x + 8.0 * s, y + 6.0 * s, 10.0, Color::new(0.35, 0.15, 0.1, 1.0));
+        for (k, d) in ALL_DISHES.iter().enumerate() {
+            let best = self.game.cookbook[k];
+            let line = if best > 0 { format!("{}: best {}", d.name(), GRADES[(best - 1) as usize]) } else { format!("???: {}", d.hint()) };
+            let c = if best > 0 { Color::new(0.2, 0.15, 0.1, 1.0) } else { Color::new(0.45, 0.4, 0.35, 1.0) };
+            self.ui.text(&line, x + 8.0 * s, y + (20.0 + 13.0 * k as f32) * s, 8.0, c);
         }
     }
 

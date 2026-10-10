@@ -217,6 +217,11 @@ pub const ALL: &[Advancement] = &[
     adv("snow_problem", "Snow Problem", "Build a Snow Golem."),
     adv("walkies", "Walkies", "Put an animal on a Lead."),
     adv("secret_passage", "Secret Passage", "Find the chest in a Woodland Mansion's secret room."),
+    adv("first_course", "First Course", "Cook a dish in a Cooking Pot."),
+    adv("chefs_kiss", "Chef's Kiss", "Cook a dish of Grade S."),
+    adv("cordon_bleu", "Cordon Bleu", "Cook every dish in the Cookbook."),
+    adv("hot_tub", "Hot Tub", "Bathe in a hot spring."),
+    adv("thawed", "Thawed", "Go from freezing to warm again in a hot spring."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -239,7 +244,7 @@ const HOME: &[&str] = &[
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
     "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me", "fungal_growth",
-    "dye_job", "compost_happens", "grounded",
+    "dye_job", "compost_happens", "grounded", "first_course", "chefs_kiss", "cordon_bleu", "hot_tub", "thawed",
 ];
 
 /// Which tab (1..) an advancement is on.

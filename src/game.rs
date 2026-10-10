@@ -384,6 +384,14 @@ pub struct Game {
     /// Beekeeping (see bees.rs): every colony by its nest or hive, the log,
     /// the hive clock, and the bees buzzing about for show.
     pub hives: HashMap<IVec3, crate::bees::Colony>,
+    /// Cooking (see cooking.rs): what's in each pot, and the local player's Cookbook.
+    pub pots: HashMap<IVec3, crate::cooking::Pot>,
+    pub cookbook: [u8; crate::cooking::DISHES],
+    /// The local player's chill, and the clocks for a spring's healing and the
+    /// cold's bite (see springs.rs).
+    pub chill: f32,
+    pub spring_heal: f32,
+    pub chill_bite: f32,
     pub bee_log: crate::bees::BeeLog,
     pub hive_timer: f32,
     pub buzz: Vec<crate::bees::Buzz>,
@@ -636,6 +644,11 @@ impl Game {
             learn_timer: 0.0,
             at_table: false,
             hives: HashMap::new(),
+            pots: HashMap::new(),
+            cookbook: [0; crate::cooking::DISHES],
+            chill: 0.0,
+            spring_heal: 0.0,
+            chill_bite: 0.0,
             bee_log: Default::default(),
             hive_timer: 0.0,
             buzz: Vec::new(),
@@ -866,6 +879,9 @@ impl Game {
         let mut v = vec![
             ("known".to_string(), crate::crafting::encode_known(&self.known).into_bytes()),
             ("hives".to_string(), crate::bees::encode(&self.hives)),
+            ("pots".to_string(), crate::cooking::encode(&self.pots)),
+            ("cookbook".to_string(), crate::cooking::encode_book(&self.cookbook)),
+            ("chill".to_string(), self.chill.to_le_bytes().to_vec()),
             ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
             ("banners".to_string(), crate::banners::encode(&self.banners)),
             ("stashes".to_string(), crate::stash::encode(&self.world.stashes)),
@@ -927,6 +943,16 @@ impl Game {
         }
         if let Some(b) = extra("hives") {
             self.hives = crate::bees::decode(b);
+        }
+        if let Some(b) = extra("pots") {
+            self.pots = crate::cooking::decode(b);
+        }
+        if let Some(b) = extra("cookbook") {
+            self.cookbook = crate::cooking::decode_book(b);
+        }
+        if let Some(b) = extra("chill").and_then(|b| b.get(..4)) {
+            let c = f32::from_le_bytes(b.try_into().unwrap());
+            self.chill = if c.is_finite() { c.clamp(0.0, crate::springs::MAX_CHILL) } else { 0.0 };
         }
         if let Some(b) = extra("bee_log") {
             self.bee_log = crate::bees::BeeLog::decode(b);
@@ -1338,6 +1364,9 @@ impl Game {
             self.player.body.vel += push * dt * if self.player.body.in_lava { 2.0 } else { 9.0 };
         }
         self.hunger_tick(dt);
+        self.chill_tick(dt);
+        self.spring_steam(dt);
+        self.pot_steam(dt);
         self.breath_tick(dt);
         self.lids_tick(dt);
         let landed = self.player.landed.take();
@@ -2334,6 +2363,9 @@ impl Game {
             if crate::homecraft::is_composter(id) && self.use_composter(pos) {
                 return;
             }
+            if crate::cooking::is_pot(id) && self.use_cooking_pot(pos) {
+                return;
+            }
             if crate::carpentry::is_fence(id) && self.use_fence_for_leads(pos) {
                 return;
             }
@@ -2536,6 +2568,13 @@ impl Game {
                 self.use_up_held();
             }
             return;
+        }
+        // A dish from the Cooking Pot (see cooking.rs).
+        if crate::cooking::Dish::of_item(held).is_some() {
+            let wear = self.inv.wear[self.inv.selected];
+            if self.eat_dish(held, wear) {
+                return;
+            }
         }
         // Food fills the hunger bar (a full bar is what heals you). Legendary
         // food can be eaten any time, and heals you outright.
@@ -3070,7 +3109,8 @@ impl Game {
             self.player.hunger.saturation = self.player.hunger.saturation.max(5.0);
         }
         let change = self.player.hunger.tick(dt, self.player.health, difficulty.starve_floor());
-        if change > 0.0 {
+        // (Too chilly to heal by yourself; see springs.rs.)
+        if change > 0.0 && self.chill < crate::springs::CHILLY {
             self.player.health = (self.player.health + change).min(MAX_HEALTH);
         } else if change < 0.0 {
             self.player.hurt = 0.0;
@@ -3293,6 +3333,7 @@ impl Game {
         // (Leads after that too: they decide where led animals go.)
         self.leads_tick(dt);
         self.snow_golems_tick(dt);
+        self.pots_tick(dt);
         self.allays_tick();
         self.copper_golems_tick(dt);
         self.floaties_tick();

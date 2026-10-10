@@ -97,6 +97,7 @@ impl Game {
         put(&mut out, "mobs", &crate::animals::encode_mobs(&self.mobs, &self.mob_names));
         put(&mut out, "vehicles", &crate::vehicles::encode(&self.vehicles));
         put(&mut out, "hives", &crate::bees::encode(&self.hives));
+        put(&mut out, "pots", &crate::cooking::encode(&self.pots));
         put(&mut out, "banners", &crate::banners::encode(&self.banners));
         put(&mut out, "lecterns", &crate::books::encode(&HashMap::new(), &self.lecterns));
         put(&mut out, "packs", &self.encode_packs());
@@ -165,6 +166,7 @@ impl Game {
                     }
                 }
                 "hives" => self.hives = crate::bees::decode(body),
+                "pots" => self.pots = crate::cooking::decode(body),
                 "banners" => self.banners = crate::banners::decode(body),
                 "lecterns" => self.lecterns = crate::books::decode(body).1,
                 "packs" => packs = Some(body),

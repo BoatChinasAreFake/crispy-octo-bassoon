@@ -457,7 +457,13 @@ pub const HISSER_HEAD: Id = MYCELIUM + 67;
 pub const LIGHTNING_ROD: Id = MYCELIUM + 68;
 /// Just struck: Zappy power for a moment.
 pub const LIGHTNING_ROD_ON: Id = MYCELIUM + 69;
-pub const NUM_BLOCKS: Id = MYCELIUM + 70;
+/// A Cooking Pot: empty, with something in it, and ready (see cooking.rs).
+pub const COOKING_POT: Id = MYCELIUM + 70;
+pub const COOKING_POT_FULL: Id = MYCELIUM + 71;
+pub const COOKING_POT_READY: Id = MYCELIUM + 72;
+/// The warm rock under a hot spring (see springs.rs).
+pub const SPRING_ROCK: Id = MYCELIUM + 73;
+pub const NUM_BLOCKS: Id = MYCELIUM + 74;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -718,7 +724,14 @@ pub const HORSE_ARMOR_DIAMOND: Id = FIRST_ITEM + 261;
 pub const LEAD: Id = FIRST_ITEM + 262;
 /// A Cartographer's map to the nearest Woodland Mansion (see mansion.rs).
 pub const WOODLAND_MAP: Id = FIRST_ITEM + 263;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 264;
+/// Cooking (see cooking.rs): bowls to serve in, seasonings, the Cookbook,
+/// and the dishes (`DISH_FIRST + Dish::index`).
+pub const BOWL: Id = FIRST_ITEM + 264;
+pub const SALT: Id = FIRST_ITEM + 265;
+pub const HERBS: Id = FIRST_ITEM + 266;
+pub const COOKBOOK: Id = FIRST_ITEM + 267;
+pub const DISH_FIRST: Id = FIRST_ITEM + 268;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 277;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2569,6 +2582,8 @@ impl Registry {
         blocks.push(def("sea_pickle", "Sea Pickle (Not for Eating)", Cross, false, false, [T_SEA_PICKLE; 3], 0.0, 0, false, SEA_PICKLE, 6.0, S_GRASS));
         blocks.extend(crate::wilds::defs());
         blocks.extend(crate::homecraft::defs());
+        blocks.extend(crate::cooking::defs());
+        blocks.push(def("spring_rock", "Spring Rock (Warm to the Touch)", Cube, true, true, [T_SPRING_ROCK; 3], 1.5, 1, true, SPRING_ROCK, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2839,6 +2854,7 @@ impl Registry {
         items.extend(crate::homecraft::items());
         items.push(item("lead", "Lead (Walkies)", T_LEAD));
         items.push(ItemDef { stack: 1, consume: false, ..item("woodland_map", "Woodland Explorer Map (Here Be Pilferers)", T_WOODLAND_MAP) });
+        items.extend(crate::cooking::items());
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -3100,6 +3116,7 @@ impl Registry {
         recipes.extend(crate::wilds::recipes());
         recipes.extend(crate::homecraft::recipes());
         recipes.push(Recipe { inputs: vec![(STRING, 4), (GOO, 1)], output: (LEAD, 2) });
+        recipes.extend(crate::cooking::recipes());
         recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {

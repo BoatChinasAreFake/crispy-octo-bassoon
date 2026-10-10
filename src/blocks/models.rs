@@ -177,6 +177,23 @@ pub fn pieces(id: Id) -> Option<Vec<Piece>> {
             }
             v
         }
+        _ if crate::cooking::is_pot(id) => vec![
+            // A round-bellied iron pot on stubby feet, its contents on top.
+            bx([4.0, 1.0, 4.0], [12.0, 8.0, 12.0], T_COOKPOT_SIDE).caps(t[0], T_COOKPOT_SIDE).stretched(ALL),
+            bx([4.5, 0.0, 4.5], [5.5, 1.0, 5.5], T_COOKPOT_SIDE),
+            bx([10.5, 0.0, 10.5], [11.5, 1.0, 11.5], T_COOKPOT_SIDE),
+            bx([10.5, 0.0, 4.5], [11.5, 1.0, 5.5], T_COOKPOT_SIDE),
+            bx([4.5, 0.0, 10.5], [5.5, 1.0, 11.5], T_COOKPOT_SIDE),
+            bx([3.0, 6.0, 7.5], [4.0, 7.0, 8.5], T_COOKPOT_SIDE),
+            bx([12.0, 6.0, 7.5], [13.0, 7.0, 8.5], T_COOKPOT_SIDE),
+            // A tripod down to the campfire under it (left out of the icon: see `item_parts`).
+            bx([2.0, -9.0, 7.5], [3.0, 1.0, 8.5], T_COOKPOT_SIDE).hiding(1 << 2),
+            bx([13.0, -9.0, 7.5], [14.0, 1.0, 8.5], T_COOKPOT_SIDE).hiding(1 << 2),
+            bx([7.5, -9.0, 13.0], [8.5, 1.0, 14.0], T_COOKPOT_SIDE).hiding(1 << 2),
+            bx([2.0, 0.0, 7.5], [4.5, 1.0, 8.5], T_COOKPOT_SIDE).hiding(1 << 3),
+            bx([11.5, 0.0, 7.5], [14.0, 1.0, 8.5], T_COOKPOT_SIDE).hiding(1 << 3),
+            bx([7.5, 0.0, 11.5], [8.5, 1.0, 14.0], T_COOKPOT_SIDE).hiding(1 << 3),
+        ],
         _ if crate::homecraft::is_head(id) => vec![
             // A head facing south, sitting on the floor.
             bx([4.0, 0.0, 4.0], [12.0, 8.0, 12.0], t[0]).face(4, t[1]).stretched(ALL),

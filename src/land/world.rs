@@ -558,7 +558,8 @@ pub struct GenOptions {
     /// (and outposts kept away from them), bigger and rarer fortresses, less
     /// Deep Dark, taller ice spikes, and structures that settle into the land.
     /// 3: the sea at 63 (and the land with it; see `sea`). 4: Woodland
-    /// Mansions in the dark forests (see mansion.rs).
+    /// Mansions in the dark forests (see mansion.rs). 5: hot springs in
+    /// snowy mountains (see springs.rs).
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -571,7 +572,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 4, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 5, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -582,7 +583,7 @@ impl GenOptions {
         if version == 0 {
             return GenOptions::LEGACY;
         }
-        GenOptions { version: version.min(4), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+        GenOptions { version: version.min(5), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
     }
 
     /// Sea level: version 3 (the world grew to 256 tall) lifts it to 63;
@@ -1522,8 +1523,9 @@ pub struct World {
     pub conduits: HashSet<IVec3>,
     /// Every cell of Spelunker's Rope (see rope.rs), for maps.
     pub ropes: HashSet<IVec3>,
-    /// Lightning rods (see homecraft.rs).
+    /// Lightning rods (see homecraft.rs), and Cooking Pots (cooking.rs, for their steam).
     pub rods: HashSet<IVec3>,
+    pub cook_pots: HashSet<IVec3>,
     /// Underground cells players have dug out (see caveins.rs). Not saved:
     /// a room left alone long enough to reload has settled.
     pub dug: HashSet<IVec3>,
@@ -1597,6 +1599,7 @@ impl World {
             conduits: HashSet::new(),
             ropes: HashSet::new(),
             rods: HashSet::new(),
+            cook_pots: HashSet::new(),
             dug: HashSet::new(),
             leaf_checks: HashSet::new(),
             signs: HashMap::new(),
@@ -1709,7 +1712,7 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::homecraft::is_rod(id) || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
+                    if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::homecraft::is_rod(id) || crate::cooking::is_pot(id) || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
@@ -1719,6 +1722,7 @@ impl World {
                             CONDUIT => self.conduits.insert(p),
                             ROPE => self.ropes.insert(p),
                             b if crate::homecraft::is_rod(b) => self.rods.insert(p),
+                            b if crate::cooking::is_pot(b) => self.cook_pots.insert(p),
                             b if crate::beacon::is_beacon(b) => self.beacons.insert(p),
                             b if crate::music::is_jukebox(b) => self.jukeboxes.insert(p),
                             _ => self.comparators.insert(p),
@@ -1960,6 +1964,11 @@ impl World {
             self.rods.insert(p);
         } else if crate::homecraft::is_rod(old) {
             self.rods.remove(&p);
+        }
+        if crate::cooking::is_pot(id) {
+            self.cook_pots.insert(p);
+        } else if crate::cooking::is_pot(old) {
+            self.cook_pots.remove(&p);
         }
         if crate::fortress::is_cage(id) {
             self.cages.insert(p);

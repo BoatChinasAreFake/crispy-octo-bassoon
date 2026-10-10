@@ -22,6 +22,7 @@ pub(crate) mod realms;
 pub(crate) mod rope;
 pub(crate) mod scorch;
 pub(crate) mod seas;
+pub(crate) mod springs;
 pub(crate) mod seasons;
 pub(crate) mod skies;
 pub(crate) mod structures;
