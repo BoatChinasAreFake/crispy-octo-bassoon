@@ -1,17 +1,16 @@
 //! The Scorchlands: a second, hotter world under a bedrock sky, reached
 //! through portals of obsidian.
 //!
-//! It lives in the same `World` as everything else, a long way east
-//! (past `SCORCH_X`): saves, multiplayer, liquids and mobs all work there
-//! without knowing it's special. A band of bedrock keeps anyone from simply
-//! walking in. Travel is by portal: every block in the Scorchlands is eight
-//! in the ordinary world, Minecraft style, and a portal is built at the other
-//! end if there isn't one near already.
+//! It's a dimension of its own (see dims.rs and realms.rs). Travel is by
+//! portal: every block in the Scorchlands is eight in the ordinary world,
+//! Minecraft style, and a portal is built at the other end if there isn't one
+//! near already.
 //!
 //! Build a frame of obsidian (at least 4 wide and 5 tall, corners optional)
 //! and light it with a Sparker; stand in it for a couple of seconds.
 
 use crate::block::*;
+use crate::dims::Dim;
 use crate::game::Game;
 use crate::net::Msg;
 use crate::noise::hash3;
@@ -19,40 +18,36 @@ use crate::sound::Sfx;
 use crate::world::{Generator, World, CH, CW};
 use macroquad::math::{IVec3, Vec3};
 
-/// Where the Scorchlands start (blocks east), and where their middle is.
+/// Where the Scorchlands used to start (blocks east), when they shared the
+/// ordinary world's map, and where their middle was: they're still generated
+/// there (see dims.rs).
 pub const SCORCH_X: i32 = 32_768;
 pub const SCORCH_ORIGIN: i32 = SCORCH_X + 1024;
-/// The bedrock band between the two, in the ordinary world.
-pub const WALL: i32 = 2048;
 /// Lava sea level down there.
 pub const LAVA_SEA: i32 = 31;
+/// The Scorchlands' bedrock roof is just under this (it was the top of the
+/// world when the world was 128 tall, and stays put so old worlds do).
+pub const SCORCH_TOP: i32 = 128;
 /// Seconds standing in a portal before it takes you (creative: less).
 pub const PORTAL_SECS: f32 = 2.0;
 /// Biggest frame interior a Sparker will light.
 const MAX_PORTAL: i32 = 21;
 
-pub fn in_scorch(x: f32) -> bool {
-    x >= (SCORCH_X - 16) as f32
-}
-
-/// In the bedrock band that separates the worlds.
-pub fn in_wall(x: i32) -> bool {
-    (SCORCH_X - WALL..SCORCH_X).contains(&x)
-}
-
 pub fn is_portal(id: Id) -> bool {
     id == PORTAL_X || id == PORTAL_Z
 }
 
-/// Where a portal at `from` leads (before looking for a place to stand).
-pub fn destination(from: IVec3) -> IVec3 {
-    let reach = (SCORCH_ORIGIN - SCORCH_X - 64) * 8;
-    if in_scorch(from.x as f32) {
-        IVec3::new((from.x - SCORCH_ORIGIN) * 8, 70, from.z * 8)
+/// Where a portal at `from` in `dim` leads (before looking for a place to stand).
+pub fn destination(dim: Dim, from: IVec3) -> (Dim, IVec3) {
+    if dim == Dim::Scorch {
+        (Dim::Over, IVec3::new(from.x * 8, 70, from.z * 8))
     } else {
-        IVec3::new(SCORCH_ORIGIN + from.x.clamp(-reach, reach) / 8, 64, from.z / 8)
+        (Dim::Scorch, IVec3::new(from.x / 8, 64, from.z / 8))
     }
 }
+
+/// A place in some dimension (see dims.rs): for links between portals.
+pub type Spot = (Dim, IVec3);
 
 impl Generator {
     /// A chunk of the Scorchlands, or of the bedrock band before them.
@@ -63,17 +58,10 @@ impl Generator {
         for lz in 0..CW {
             for lx in 0..CW {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
-                // The wall between the worlds, and the Scorchlands' own west edge.
-                if in_wall(x) || (SCORCH_X..SCORCH_X + 16).contains(&x) {
-                    for y in 0..CH {
-                        b[crate::world::idx(lx, y, lz)] = BEDROCK;
-                    }
-                    continue;
-                }
-                for y in 0..CH {
+                for y in 0..SCORCH_TOP {
                     let i = crate::world::idx(lx, y, lz);
                     // Bedrock floor and ceiling, a little ragged.
-                    if y == 0 || y == CH - 1 || (y <= 3 && hash3(s, x, y, z) < 0.5) || (y >= CH - 4 && hash3(s ^ 1, x, y, z) < 0.5) {
+                    if y == 0 || y == SCORCH_TOP - 1 || (y <= 3 && hash3(s, x, y, z) < 0.5) || (y >= SCORCH_TOP - 4 && hash3(s ^ 1, x, y, z) < 0.5) {
                         b[i] = BEDROCK;
                         continue;
                     }
@@ -95,7 +83,7 @@ impl Generator {
                     };
                 }
                 // Ember sand on the shores of the lava sea, glowrock hanging from ceilings.
-                for y in LAVA_SEA + 1..CH - 5 {
+                for y in LAVA_SEA + 1..SCORCH_TOP - 5 {
                     let i = crate::world::idx(lx, y, lz);
                     let below = b[crate::world::idx(lx, y - 1, lz)];
                     if b[i] == AIR && below == SCORCHROCK && y < LAVA_SEA + 6 && self.scorch.noise3(x as f32 / 9.0, 7.0, z as f32 / 9.0) > 0.15 {
@@ -116,11 +104,48 @@ impl Generator {
                 }
             }
         }
+        if self.opts.version >= 3 {
+            self.dress_scorch_v3(cx, cz, &mut b);
+        }
         // Fungus forests, basalt deltas and soul sand valleys (see wilds.rs).
         self.decorate_scorch(cx, cz, &mut b);
         // Fortresses and Snout camps (see fortress.rs).
         self.place_structures(cx, cz, &mut b);
         b
+    }
+}
+
+impl Generator {
+    /// From version 3: magma along the shores of the lava sea, and glowrock
+    /// hanging in bigger clusters.
+    fn dress_scorch_v3(&self, cx: i32, cz: i32, b: &mut [Id]) {
+        use crate::world::idx;
+        let s = self.seed ^ 0x3A63A;
+        let at = |b: &[Id], lx: i32, y: i32, lz: i32| if (0..CW).contains(&lx) && (0..CW).contains(&lz) { b[idx(lx, y, lz)] } else { AIR };
+        for lz in 0..CW {
+            for lx in 0..CW {
+                let (x, z) = (cx * CW + lx, cz * CW + lz);
+                for y in LAVA_SEA - 2..=LAVA_SEA + 1 {
+                    let i = idx(lx, y, lz);
+                    let by_lava = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, 1, 0)].iter().any(|&(dx, dy, dz)| at(b, lx + dx, y + dy, lz + dz) == LAVA);
+                    if b[i] == SCORCHROCK && by_lava && hash3(s, x, y, z) < 0.55 {
+                        b[i] = MAGMA_BLOCK;
+                    }
+                }
+                // (Upward, so a cluster just made isn't grown again.)
+                for y in LAVA_SEA + 4..SCORCH_TOP - 5 {
+                    if b[idx(lx, y, lz)] == GLOWROCK && b[idx(lx, y - 1, lz)] == AIR && hash3(s ^ 1, x >> 1, y, z >> 1) < 0.7 {
+                        let n = 1 + (hash3(s ^ 2, x, y, z) * 3.0) as i32;
+                        for k in 1..=n {
+                            if b[idx(lx, y - k, lz)] != AIR {
+                                break;
+                            }
+                            b[idx(lx, y - k, lz)] = GLOWROCK;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -187,13 +212,10 @@ impl Game {
             self.net_send_msg(Msg::UsePortal { x: feet.x, y: feet.y, z: feet.z });
             return;
         }
-        let to = self.travel(feet);
-        self.player.body.pos = to;
-        self.player.body.vel = Vec3::ZERO;
-        self.player.fall_start = to.y;
-        self.ready = false;
+        let (dim, to) = self.travel(feet);
+        self.move_local_player(dim, to);
         self.sfx(Sfx::Warp, None);
-        if in_scorch(to.x) {
+        if dim == Dim::Scorch {
             self.advance("hotter");
             self.msg("Welcome to the Scorchlands. Mind the lava. Also everything else.");
         }
@@ -205,31 +227,26 @@ impl Game {
         let near = p.target.distance(at.as_vec3() + Vec3::splat(0.5)) < 3.0;
         // The Hollow's portals go straight there (or home).
         if near && self.world.get_v(at) == HOLLOW_PORTAL {
-            let to = self.hollow_destination(at);
-            if let Some(p) = self.peers.get_mut(&from) {
-                p.target = to;
-                p.pos = to;
-            }
-            self.net_send_to(from, Msg::Effect { heal: 0.0, teleport: Some(to), launch: None, take: None });
+            let (dim, to) = self.hollow_destination(at);
+            self.move_peer(from, dim, to);
             return;
         }
         let here = is_portal(self.world.get_v(at)) || is_portal(self.world.get_v(at + IVec3::Y));
         if !near || !here {
             return;
         }
-        let to = self.travel(at);
-        if let Some(p) = self.peers.get_mut(&from) {
-            p.target = to;
-            p.pos = to;
-        }
-        self.net_send_to(from, Msg::Effect { heal: 0.0, teleport: Some(to), launch: None, take: None });
+        let (dim, to) = self.travel(at);
+        self.move_peer(from, dim, to);
     }
 
     /// Where the world lives: find (or build) the portal at the other end, and a place to stand in it.
     /// Portals remember each other, so a round trip comes back where it started.
-    pub fn travel(&mut self, from: IVec3) -> Vec3 {
-        let key = portal_key(&self.world, from);
-        if let Some(&to) = self.portal_links.get(&key) {
+    /// Leaves the realm at the other end active (see realms.rs).
+    pub fn travel(&mut self, from: IVec3) -> (Dim, Vec3) {
+        let here = self.realm_dim();
+        let key = (here, portal_key(&self.world, from));
+        if let Some(&(dim, to)) = self.portal_links.get(&key) {
+            self.enter(dim);
             let (cx, cz) = (to.x.div_euclid(CW), to.z.div_euclid(CW));
             for dz in -1..=1 {
                 for dx in -1..=1 {
@@ -237,20 +254,22 @@ impl Game {
                 }
             }
             if is_portal(self.world.get_v(to)) {
-                return stand_in(&self.world, to);
+                return (dim, stand_in(&self.world, to));
             }
             self.portal_links.remove(&key);
+            self.enter(here);
         }
-        let there = self.find_or_build_portal(from);
-        let there_key = portal_key(&self.world, there);
+        let (dim, dest) = destination(here, from);
+        self.enter(dim);
+        let there = self.find_or_build_portal(dest);
+        let there_key = (dim, portal_key(&self.world, there));
         self.portal_links.insert(key, there_key);
         self.portal_links.insert(there_key, key);
-        stand_in(&self.world, there_key)
+        (dim, stand_in(&self.world, there_key.1))
     }
 
-    /// A portal near where `from` leads (an existing one close by, or a new one). Returns one of its cells.
-    fn find_or_build_portal(&mut self, from: IVec3) -> IVec3 {
-        let dest = destination(from);
+    /// A portal near `dest` in the active realm (an existing one close by, or a new one). Returns one of its cells.
+    fn find_or_build_portal(&mut self, dest: IVec3) -> IVec3 {
         let (cx, cz) = (dest.x.div_euclid(CW), dest.z.div_euclid(CW));
         for dz in -2..=2 {
             for dx in -2..=2 {
@@ -261,7 +280,7 @@ impl Game {
         let mut best: Option<(i32, IVec3)> = None;
         for dz in -16..=16 {
             for dx in -16..=16 {
-                for y in 1..CH - 1 {
+                for y in 1..SCORCH_TOP - 1 {
                     let p = IVec3::new(dest.x + dx, y, dest.z + dz);
                     if is_portal(self.world.get_v(p)) && !is_portal(self.world.get_v(p - IVec3::Y)) {
                         let d = dx * dx + dz * dz + (y - dest.y).pow(2) / 4;
@@ -286,7 +305,7 @@ impl Game {
         let fits = |p: IVec3| -> bool {
             (-1..=2).all(|dx| (-1..=1).all(|dz| is_solid(w.get_v(p + IVec3::new(dx, -1, dz))) && (0..4).all(|dy| !is_solid(w.get_v(p + IVec3::new(dx, dy, dz))) && !is_liquid(w.get_v(p + IVec3::new(dx, dy, dz))))))
         };
-        let ys: Vec<i32> = if in_scorch(dest.x as f32) { (LAVA_SEA + 2..CH - 8).collect() } else { vec![] };
+        let ys: Vec<i32> = if w.is_scorch() { (LAVA_SEA + 2..SCORCH_TOP - 8).collect() } else { vec![] };
         for r in 0..12i32 {
             for dz in -r..=r {
                 for dx in -r..=r {
@@ -311,7 +330,7 @@ impl Game {
             }
         }
         // Nowhere nice: carve a room.
-        let y = if in_scorch(dest.x as f32) { 64 } else { w.surface_y(dest.x, dest.z) + 1 };
+        let y = if w.is_scorch() { 64 } else { w.surface_y(dest.x, dest.z) + 1 };
         IVec3::new(dest.x, y, dest.z)
     }
 }
@@ -351,28 +370,45 @@ fn stand_in(world: &World, key: IVec3) -> Vec3 {
     p
 }
 
-/// Pack portal links for the save file.
-pub fn encode_links(links: &std::collections::HashMap<IVec3, IVec3>) -> Vec<u8> {
+/// Pack portal links for the save file: each end as its dimension and place.
+pub fn encode_links(links: &std::collections::HashMap<Spot, Spot>) -> Vec<u8> {
     let mut out = Vec::new();
-    let mut pairs: Vec<(&IVec3, &IVec3)> = links.iter().collect();
-    pairs.sort_by_key(|(a, _)| (a.x, a.y, a.z));
+    let mut pairs: Vec<(&Spot, &Spot)> = links.iter().collect();
+    pairs.sort_by_key(|(a, _)| (a.0, a.1.x, a.1.y, a.1.z));
     out.extend_from_slice(&(pairs.len() as u32).to_le_bytes());
     for (a, b) in pairs {
-        for v in [a.x, a.y, a.z, b.x, b.y, b.z] {
-            out.extend_from_slice(&v.to_le_bytes());
+        for (d, p) in [a, b] {
+            out.push(d.index());
+            for v in [p.x, p.y, p.z] {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
         }
     }
     out
 }
 
-pub fn decode_links(b: &[u8]) -> std::collections::HashMap<IVec3, IVec3> {
+/// Unpack portal links. `old`: from a save made when the dimensions shared
+/// one map (their ends are told apart by where they were; see dims.rs).
+pub fn decode_links(b: &[u8], old: bool) -> std::collections::HashMap<Spot, Spot> {
     let mut map = std::collections::HashMap::new();
     let n = b.get(0..4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).unwrap_or(0) as usize;
+    let int = |s: &[u8], i: usize| i32::from_le_bytes([s[i], s[i + 1], s[i + 2], s[i + 3]]);
+    let size = if old { 24 } else { 26 };
     for k in 0..n.min(100_000) {
-        let at = 4 + k * 24;
-        let Some(s) = b.get(at..at + 24) else { break };
-        let v: Vec<i32> = (0..6).map(|i| i32::from_le_bytes([s[i * 4], s[i * 4 + 1], s[i * 4 + 2], s[i * 4 + 3]])).collect();
-        map.insert(IVec3::new(v[0], v[1], v[2]), IVec3::new(v[3], v[4], v[5]));
+        let at = 4 + k * size;
+        let Some(s) = b.get(at..at + size) else { break };
+        let (a, b) = if old {
+            let spot = |p: IVec3| -> Spot {
+                let d = Dim::of_old_x(p.x);
+                (d, p - IVec3::new(d.gen_x(), 0, 0))
+            };
+            (spot(IVec3::new(int(s, 0), int(s, 4), int(s, 8))), spot(IVec3::new(int(s, 12), int(s, 16), int(s, 20))))
+        } else {
+            let spot = |o: usize| -> Option<Spot> { Some((Dim::from_index(s[o])?, IVec3::new(int(s, o + 1), int(s, o + 5), int(s, o + 9)))) };
+            let (Some(a), Some(b)) = (spot(0), spot(13)) else { continue };
+            (a, b)
+        };
+        map.insert(a, b);
     }
     map
 }
@@ -450,26 +486,31 @@ mod tests {
 
     #[test]
     fn destinations_scale_by_eight() {
-        let d = destination(IVec3::new(800, 70, -160));
-        assert_eq!((d.x, d.z), (SCORCH_ORIGIN + 100, -20));
-        assert!(in_scorch(d.x as f32));
-        let back = destination(IVec3::new(SCORCH_ORIGIN + 100, 40, -20));
-        assert_eq!((back.x, back.z), (800, -160));
-        assert!(!in_scorch(back.x as f32));
-        // Far out in the ordinary world still lands inside the Scorchlands.
-        assert!(destination(IVec3::new(1_000_000, 70, 0)).x > SCORCH_X + 16);
-        assert!(in_wall(SCORCH_X - 5) && !in_wall(SCORCH_X - WALL - 1));
+        let (dim, d) = destination(Dim::Over, IVec3::new(800, 70, -160));
+        assert_eq!((dim, d.x, d.z), (Dim::Scorch, 100, -20));
+        let (dim, back) = destination(Dim::Scorch, IVec3::new(100, 40, -20));
+        assert_eq!((dim, back.x, back.z), (Dim::Over, 800, -160));
+        // Portal links survive a save, old (one shared map) or new.
+        let links = std::collections::HashMap::from([((Dim::Over, IVec3::new(1, 2, 3)), (Dim::Scorch, IVec3::new(-4, 5, 6)))]);
+        assert_eq!(decode_links(&encode_links(&links), false), links);
+        let mut old = 1u32.to_le_bytes().to_vec();
+        for v in [1, 2, 3, SCORCH_ORIGIN - 4, 5, 6] {
+            old.extend_from_slice(&i32::to_le_bytes(v));
+        }
+        assert_eq!(decode_links(&old, true), links);
     }
 
     #[test]
     fn the_scorchlands_are_hot_and_enclosed() {
-        let g = Generator::new(77);
-        let b = g.generate(SCORCH_ORIGIN / CW, 0);
+        let g = Generator::with_dim(77, crate::world::GenOptions::LEGACY, Dim::Scorch);
+        let b = g.generate(0, 0);
         let count = |id: Id| b.iter().filter(|&&x| x == id).count();
         assert!(count(SCORCHROCK) > 1000 && count(LAVA) > 50 && count(AIR) > 1000);
-        // A bedrock sky, and bedrock in the band before it.
-        assert!((0..CW).all(|x| b[crate::world::idx(x, CH - 1, 0)] == BEDROCK));
-        let wall = g.generate((SCORCH_X - 100) / CW, 0);
-        assert!(wall.iter().all(|&x| x == BEDROCK));
+        // A bedrock sky; and it goes on in every direction (no wall any more).
+        assert!((0..CW).all(|x| b[crate::world::idx(x, SCORCH_TOP - 1, 0)] == BEDROCK));
+        let west = g.generate(-200, 0);
+        assert!(west.iter().filter(|&&x| x == SCORCHROCK).count() > 1000);
+        // The same as the old shared map had at the old place (old worlds carry on).
+        assert_eq!(b, g.generate_scorch(SCORCH_ORIGIN / CW, 0));
     }
 }

@@ -175,7 +175,7 @@ impl Game {
                         m.goal = None;
                         if back {
                             m.warp_cd = SULK;
-                        } else if left < n && !self.dedicated && self.player.body.pos.distance(pos) < 32.0 {
+                        } else if left < n && !self.away() && self.player.body.pos.distance(pos) < 32.0 {
                             self.advance("sorted");
                         }
                         self.sfx(Sfx::Place(crate::sound::Mat::Wood), Some(pos));
@@ -239,7 +239,7 @@ impl Game {
                 o.damage(PUNCH, from);
                 o.body.vel.y = 10.0;
                 let at = o.body.pos;
-                if !self.dedicated && self.player.body.pos.distance(at) < GUARD_RANGE {
+                if !self.away() && self.player.body.pos.distance(at) < GUARD_RANGE {
                     self.advance("clank_you");
                 }
                 self.sfx(Sfx::Thud, Some(at));

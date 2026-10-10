@@ -258,7 +258,7 @@ impl Game {
         };
         let sting = |pos: Vec3| if shooter.is_none() && pos.distance(at) < 1.2 { 1.0 } else { 0.0 };
         let me = self.player.body.pos + Vec3::Y * 0.9;
-        if !self.dedicated && !self.spectator && self.dead.is_none()
+        if !self.away() && !self.spectator && self.dead.is_none()
             && let Some(push) = fling(me)
         {
             let dmg = sting(me);

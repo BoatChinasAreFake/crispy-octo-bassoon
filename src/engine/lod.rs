@@ -25,7 +25,7 @@
 use crate::block::*;
 use crate::mesher::{MeshData, Vertex};
 use crate::texture::T_WHITE;
-use crate::world::{Biome, Generator, CW, SEA};
+use crate::world::{Biome, Generator, CW};
 use macroquad::math::Vec3;
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
@@ -56,9 +56,9 @@ pub struct FarLand {
 
 /// What a column looks like from far off: its top block, and a colour
 /// multiplier for grass, leaves and water.
-fn surface(h: i32, biome: Biome) -> (Id, [f32; 3]) {
-    let beach = (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands);
-    if h < SEA - 1 {
+fn surface(h: i32, biome: Biome, sea: i32) -> (Id, [f32; 3]) {
+    let beach = (sea - 1..=sea + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands);
+    if h < sea - 1 {
         return (WATER, crate::tint::water(biome));
     }
     match biome {
@@ -93,9 +93,9 @@ fn canopy(biome: Biome) -> Option<(Id, f32)> {
 
 /// The colour a column shows from far off, from the blocks' own colours (see
 /// `navigation::block_colors`; a plain guess if they're not known yet).
-fn colour(h: i32, biome: Biome, colours: &[[u8; 3]]) -> [u8; 3] {
+fn colour(h: i32, biome: Biome, colours: &[[u8; 3]], sea: i32) -> [u8; 3] {
     let of = |id: Id| colours.get(id as usize).copied().filter(|c| *c != [0, 0, 0]);
-    let (id, tint) = surface(h, biome);
+    let (id, tint) = surface(h, biome, sea);
     let base = of(id).unwrap_or(match id {
         WATER => [60, 95, 200],
         SAND => [215, 200, 150],
@@ -109,7 +109,7 @@ fn colour(h: i32, biome: Biome, colours: &[[u8; 3]]) -> [u8; 3] {
     }
     if id == WATER {
         // Deeper is darker.
-        let deep = 1.0 - ((SEA - h) as f32 / 30.0).clamp(0.0, 0.45);
+        let deep = 1.0 - ((sea - h) as f32 / 30.0).clamp(0.0, 0.45);
         c = c.map(|v| v * deep);
     } else if let Some((leaves, amount)) = canopy(biome) {
         let l = of(leaves).unwrap_or([60, 110, 50]);
@@ -149,8 +149,8 @@ fn smooth_tile(mesh: &mut MeshData, generator: &Generator, colours: &[[u8; 3]], 
         for i in 0..w {
             let (x, z) = (x0 + (i as i32 - 1) * step, z0 + (j as i32 - 1) * step);
             let (h, biome) = generator.column(x, z);
-            hs[j * w + i] = (h.max(SEA - 1) + 1) as f32;
-            cs[j * w + i] = colour(h, biome, colours);
+            hs[j * w + i] = (h.max(generator.sea() - 1) + 1) as f32;
+            cs[j * w + i] = colour(h, biome, colours, generator.sea());
         }
     }
     let at = |i: usize, j: usize| -> (Vec3, f32, [u8; 3]) {
@@ -204,7 +204,7 @@ pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, ski
     // The top face of a column, from far off (the sea's surface over water).
     let top = |x: i32, z: i32| {
         let (h, biome) = generator.column(x, z);
-        (h.max(SEA - 1) + 1, h, biome)
+        (h.max(generator.sea() - 1) + 1, h, biome)
     };
     for dz in -outer..=outer {
         for dx in -outer..=outer {
@@ -214,9 +214,6 @@ pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, ski
             }
             let (cx, cz) = (pcx + dx, pcz + dz);
             let x0 = cx * CW;
-            if crate::scorch::in_scorch(x0 as f32) || crate::scorch::in_scorch((x0 + CW) as f32) || crate::hollow::in_hollow(x0 as f32) {
-                continue;
-            }
             let step = if d2 <= near * near { NEAR_STEP } else { FAR_STEP };
             let start = land.mesh.idx.len() as u32;
             if smooth {
@@ -231,7 +228,7 @@ pub fn build(generator: &Generator, colours: &[[u8; 3]], pcx: i32, pcz: i32, ski
                     let (x, z) = (x0 + i * step, cz * CW + j * step);
                     let (mx, mz) = (x + step / 2, z + step / 2);
                     let (y, h, biome) = top(mx, mz);
-                    let c = colour(h, biome, colours);
+                    let c = colour(h, biome, colours, generator.sea());
                     let (xa, za, xb, zb, yf) = (x as f32, z as f32, (x + step) as f32, (z + step) as f32, y as f32);
                     face(&mut land.mesh, [Vec3::new(xa, yf, zb), Vec3::new(xb, yf, zb), Vec3::new(xb, yf, za), Vec3::new(xa, yf, za)], 1.0, c);
                     // Walls down to any lower neighbour (each wall belongs to the higher side).
@@ -352,7 +349,8 @@ mod tests {
             assert_eq!(ta[&(144, z)], tb[&(144, z)], "the edge at z={z}");
         }
         // Sea looks like water, deserts like sand.
-        assert_eq!(surface(SEA - 10, Biome::Ocean).0, WATER);
-        assert_eq!(surface(SEA + 10, Biome::Desert).0, SAND);
+        let sea = crate::world::OLD_SEA;
+        assert_eq!(surface(sea - 10, Biome::Ocean, sea).0, WATER);
+        assert_eq!(surface(sea + 10, Biome::Desert, sea).0, SAND);
     }
 }

@@ -43,9 +43,16 @@ pub(crate) fn parse_args() -> Option<ShotArgs> {
 }
 
 
+/// Scenes down in the Scorchlands (`scenic_view` finds them in generator
+/// coordinates; see dims.rs).
+fn scorch_scene(mode: &str) -> bool {
+    matches!(mode, "fortress" | "camp" | "bastion" | "crimson" | "teal" | "basalt" | "soulvalley")
+}
+
 pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
     use structures::Kind;
-    let generator = &g.world.generator;
+    let scorch = scorch_scene(mode).then(|| world::Generator::with_dim(g.world.seed(), g.world.generator.opts, crate::dims::Dim::Scorch));
+    let generator = scorch.as_ref().unwrap_or(&*g.world.generator);
     let (cx0, cz0) = ((g.spawn.x / 16.0).floor() as i32, (g.spawn.z / 16.0).floor() as i32);
     let ring = |r: i32| (-r..=r).flat_map(move |dz| (-r..=r).map(move |dx| (dx, dz))).filter(move |(dx, dz)| dx.abs().max(dz.abs()) == r);
     let look = |from: Vec3, to: Vec3| {
@@ -137,7 +144,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 for (dx, dz) in ring(r) {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
                     let (h, biome) = generator.column(x, z);
-                    let deep = world::SEA - h;
+                    let deep = generator.sea() - h;
                     let kelpy = (-2..=2).filter(|k| crate::seas::floor_plant(generator, biome, x + k * 3, z, deep).is_some_and(|p| p.0 == block::KELP)).count();
                     if biome.is_ocean() && deep >= 8 && kelpy >= 2 {
                         return Some((Vec3::new(x as f32 + 0.5, h as f32 + 3.0, z as f32 + 0.5), 0.7, 0.05));
@@ -225,7 +232,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
                     let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.column(x + i * spread, z + j * spread).1 == want));
                     if inside {
-                        let h = generator.column(x, z).0.max(world::SEA);
+                        let h = generator.column(x, z).0.max(generator.sea());
                         return Some((Vec3::new(x as f32 + 0.5, h as f32 + lift, z as f32 + 0.5), 0.8, -0.35));
                     }
                 }
@@ -238,8 +245,8 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 for (dx, dz) in ring(r) {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
                     let (h, biome) = generator.column(x, z);
-                    if biome.is_ocean() && h < world::SEA - 6 && !generator.cold(x, z) {
-                        return Some((Vec3::new(x as f32 + 0.5, world::SEA as f32 - 3.0, z as f32 + 0.5), 0.8, -0.4));
+                    if biome.is_ocean() && h < generator.sea() - 6 && !generator.cold(x, z) {
+                        return Some((Vec3::new(x as f32 + 0.5, generator.sea() as f32 - 3.0, z as f32 + 0.5), 0.8, -0.4));
                     }
                 }
             }
@@ -250,7 +257,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 for (dx, dz) in ring(r) {
                     let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
                     let (h, biome) = generator.column(x, z);
-                    let open = generator.site(cx0 + dx, cz0 + dz).is_none() && h > world::SEA + 2;
+                    let open = generator.site(cx0 + dx, cz0 + dz).is_none() && h > generator.sea() + 2;
                     if mode == "snow" {
                         if biome == world::Biome::Snowy && open {
                             return Some((Vec3::new(x as f32 + 0.5, h as f32 + 8.0, z as f32 + 0.5), 2.4, -0.35));
@@ -260,7 +267,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                         if biome == world::Biome::Plains && open && clear {
                             return Some((Vec3::new(x as f32 + 0.5, h as f32 + 3.0, z as f32 + 0.5), 2.4, -0.1));
                         }
-                    } else if generator.ravine_floor(x, z).is_some() && h > world::SEA + 4 {
+                    } else if generator.ravine_floor(x, z).is_some() && h > generator.sea() + 4 {
                         return Some((Vec3::new(x as f32 + 0.5, h as f32 + 14.0, z as f32 + 0.5), 2.4, -1.1));
                     }
                 }
@@ -390,7 +397,11 @@ impl App {
                     g.weather.strength = 1.0;
                     g.rules.weather_cycle = false;
                 }
-                if let Some((pos, yaw, pitch)) = scenic_view(&g, &s.mode) {
+                if let Some((mut pos, yaw, pitch)) = scenic_view(&g, &s.mode) {
+                    if scorch_scene(&s.mode) {
+                        pos.x -= crate::scorch::SCORCH_ORIGIN as f32;
+                        g.move_local_player(crate::dims::Dim::Scorch, pos);
+                    }
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
                 }
                 // Look up at the sky: north for an aurora, away from the sun for a rainbow.
@@ -457,8 +468,8 @@ impl App {
                 let spawn = g.spawn;
                 let here = IVec3::new(spawn.x.floor() as i32, spawn.y.floor() as i32, spawn.z.floor() as i32);
                 if s.mode == "scorch" {
-                    let to = g.travel(here);
-                    g.player.body.pos = to;
+                    let (dim, to) = g.travel(here);
+                    g.move_local_player(dim, to);
                     if s.pos.is_none() {
                         s.pos = Some(to + Vec3::new(0.0, 0.0, 1.0));
                         s.yaw = std::f32::consts::PI;
@@ -486,8 +497,8 @@ impl App {
             "hollow" => {
                 // On the island's edge, looking in at the pillars (and whatever circles them).
                 let mut g = shot_game(424242, true, false);
-                let to = g.hollow_destination(IVec3::ZERO);
-                g.player.body.pos = to;
+                let (dim, to) = g.hollow_destination(IVec3::ZERO);
+                g.move_local_player(dim, to);
                 let o = hollow::ORIGIN.as_vec3();
                 g.world.load_now(hollow::ORIGIN.x.div_euclid(16), 0);
                 g.alloc_mob(entity::MobKind::Wyrm, o + Vec3::new(20.0, 24.0, -10.0));
@@ -727,8 +738,12 @@ impl App {
                 let seed = g.world.seed();
                 let spire = (1..12).flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)])).find_map(|(gx, gz)| hollow::outer_island(seed, gx, gz).filter(|i| i.2));
                 if let Some((c, _, _)) = spire {
-                    let from = c.as_vec3() + Vec3::new(14.0, 9.0, 14.0);
-                    let d = c.as_vec3() + Vec3::new(0.5, 4.0, 0.5) - from;
+                    // (The island is in generator coordinates; the Hollow's own are shifted; see dims.rs.)
+                    let c = c - IVec3::new(hollow::GEN_ORIGIN.x, 0, 0);
+                    let tall = hollow::spire_height(g.world.generator.opts.version >= 3) as f32;
+                    let from = c.as_vec3() + Vec3::new(18.0, tall * 0.6, 18.0);
+                    let d = c.as_vec3() + Vec3::new(0.5, tall * 0.45, 0.5) - from;
+                    g.move_local_player(crate::dims::Dim::Hollow, from);
                     (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
                 }
                 g.player.flying = true;
@@ -1892,7 +1907,7 @@ impl App {
 fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
     let wanted = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--gen").and_then(|w| w[1].parse::<u8>().ok());
     let opts = match wanted {
-        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(2), ..crate::world::GenOptions::DEFAULT },
+        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(3), ..crate::world::GenOptions::DEFAULT },
         _ => crate::world::GenOptions::LEGACY,
     };
     Game::new_with(seed, creative, menu, opts)

@@ -12,7 +12,7 @@ mod survival;
 mod online;
 
 pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
-pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, falling, fire, fortress, hollow, houses, liquids, monument, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
+pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, monument, realms, scorch, seas, seasons, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, nametags, night, pathing, raids, sniffers, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
@@ -448,7 +448,7 @@ impl App {
         // A world of our own keeps its block edits in region files beside its save.
         if let Some(id) = &self.current_world {
             let dir = regions::region_dir(&save::world_file(&save::saves_dir(), id));
-            self.game.world.use_regions(dir);
+            self.game.use_regions(dir);
         }
         // We look like our settings say (joined players tell the host).
         let skin = self.settings.skin;
@@ -571,7 +571,7 @@ impl App {
     /// Write the game into its world slot (None if it has no slot, e.g. a joined server).
     fn write_current_world(&mut self) -> Option<std::io::Result<()>> {
         let id = self.current_world.clone()?;
-        if let Err(e) = self.game.world.flush_regions() {
+        if let Err(e) = self.game.flush_regions() {
             return Some(Err(e));
         }
         let data = self.game.to_save();

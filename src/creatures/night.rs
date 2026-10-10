@@ -167,7 +167,7 @@ impl Game {
         let Some(e) = effect else { return };
         let r = crate::potions::SPLASH_RADIUS * 0.75;
         let me = self.player.body.pos + Vec3::Y * 0.9;
-        if !self.dedicated && !self.spectator && self.dead.is_none() && !self.creative && me.distance(at) <= r {
+        if !self.away() && !self.spectator && self.dead.is_none() && !self.creative && me.distance(at) <= r {
             self.timed_effect_amplified(e.kind, e.duration, e.amplifier);
         }
         let hit: Vec<u32> = self.peers.iter().filter(|(_, p)| p.alive() && (p.target + Vec3::Y * 0.9).distance(at) <= r).map(|(&id, _)| id).collect();
@@ -178,7 +178,7 @@ impl Game {
 
     /// A Glow Squid's ink: a dark, glinting cloud.
     pub fn ink_cloud(&mut self, at: Vec3) {
-        if self.dedicated {
+        if self.away() {
             return;
         }
         for _ in 0..14 {
@@ -207,7 +207,7 @@ impl Game {
             m.persistent = true;
             let pos = m.body.pos;
             self.sfx(crate::sound::Sfx::Chime, Some(pos));
-            if !self.dedicated && who == crate::players::record_key(&self.player_name) {
+            if !self.away() && who == crate::players::record_key(&self.player_name) {
                 self.advance("fetch");
             }
             return Interaction::Ate;
@@ -230,7 +230,7 @@ impl Game {
             return;
         }
         let mut people: Vec<(String, Vec3)> = self.peers.values().filter(|p| p.alive()).map(|p| (crate::players::record_key(&p.name), p.target)).collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             people.push((crate::players::record_key(&self.player_name), self.player.body.pos));
         }
         for i in 0..self.mobs.len() {
@@ -295,7 +295,7 @@ impl Game {
             let squid = self.mobs.iter().filter(|m| m.kind == MobKind::GlowSquid).count();
             let cy = self.rng.int(6, surface.max(7));
             let water = (0..2).all(|h| is_water(self.world.get(x, cy + h, z)));
-            let dark = self.world.sky_light(x, cy, z) < 0.15 || (self.is_night() && cy < crate::world::SEA - 3);
+            let dark = self.world.sky_light(x, cy, z) < 0.15 || (self.is_night() && cy < self.world.sea() - 3);
             if squid < 4 && water && dark {
                 self.alloc_mob(MobKind::GlowSquid, Vec3::new(x as f32 + 0.5, cy as f32 + 0.2, z as f32 + 0.5));
                 return true;

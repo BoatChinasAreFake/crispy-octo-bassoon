@@ -229,7 +229,7 @@ impl Game {
 
     /// Used a compass on a Lodestone: it points there from now on.
     pub fn link_lodestone(&mut self, p: IVec3) {
-        self.lodestone = Some(p);
+        self.lodestone = Some((self.dim, p));
         self.player.swing = 1.0;
         self.sfx(Sfx::Chime, Some(p.as_vec3() + Vec3::splat(0.5)));
         self.msg("The compass needle swings round to the Lodestone.");
@@ -238,10 +238,12 @@ impl Game {
 
     /// Where the compass points: the linked Lodestone (if it's still there), or home.
     /// `None` means it's spinning: the Lodestone is gone.
+    /// Where the compass points (None: it spins, like it does where its target isn't).
     pub fn compass_target(&self) -> Option<Vec3> {
         match self.lodestone {
-            None => Some(self.spawn),
-            Some(p) => {
+            None => (self.dim == crate::dims::Dim::Over).then_some(self.spawn),
+            Some((dim, _)) if dim != self.dim => None,
+            Some((_, p)) => {
                 let loaded = self.world.is_loaded(p.x, p.z);
                 // (Too far to know: point anyway; there and broken: spin.)
                 (!loaded || self.world.get_v(p) == LODESTONE).then(|| p.as_vec3() + Vec3::splat(0.5))

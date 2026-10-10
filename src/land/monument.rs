@@ -57,7 +57,7 @@ pub fn is_prismarine(id: Id) -> bool {
 }
 
 /// A monument (see the top of this file), its entrance on the south side.
-pub fn monument_blocks(site: &Site) -> Vec<(IVec3, Id)> {
+pub fn monument_blocks(site: &Site, sea: i32) -> Vec<(IVec3, Id)> {
     let o = site.origin;
     let s = site.seed;
     let mut out = Vec::new();
@@ -68,7 +68,7 @@ pub fn monument_blocks(site: &Site) -> Vec<(IVec3, Id)> {
             for y in -FILL..0 {
                 put(x, y, z, SAND);
             }
-            for y in 0..=crate::world::SEA - o.y {
+            for y in 0..=sea - o.y {
                 put(x, y, z, WATER);
             }
         }
@@ -229,7 +229,7 @@ impl Game {
         }
         self.monument_acc -= 1.0;
         let mut people: Vec<(u32, Vec3)> = self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target)).collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             people.push((self.my_id, self.player.body.pos));
         }
         // More Guardians in a monument's water while someone's about.
@@ -318,7 +318,7 @@ impl Game {
     /// thickening as it charges.
     pub fn draw_lasers(&self, g: &mut crate::render::DynGeo) {
         let mut people: Vec<Vec3> = self.peers.values().filter(|p| p.alive()).map(|p| p.target).collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             people.push(self.player.body.pos);
         }
         for m in self.mobs.iter().filter(|m| is_guardian(m.kind) && m.fuse > 0.0) {
@@ -354,7 +354,7 @@ mod tests {
 
     #[test]
     fn the_monument_is_wet_and_golden() {
-        let b = monument_blocks(&site());
+        let b = monument_blocks(&site(), crate::world::OLD_SEA);
         let count = |id: Id| b.iter().filter(|x| x.1 == id).count();
         assert_eq!(count(GOLD_BLOCK), 8);
         assert_eq!(count(CHEST), 1);

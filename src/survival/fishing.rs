@@ -16,7 +16,7 @@
 
 use crate::block::*;
 use crate::noise::Rng;
-use crate::world::{Biome, World, SEA};
+use crate::world::{Biome, World};
 use macroquad::math::Vec3;
 use std::collections::BTreeMap;
 
@@ -251,7 +251,7 @@ pub fn roll_catch(world: &World, p: Vec3, time: f32, level: u32, bait: bool, rng
     let (depth, area) = water_info(world, p);
     let puddle = area < 6 || depth < 2;
     let (_, biome) = world.generator.column(p.x.floor() as i32, p.z.floor() as i32);
-    let ocean = biome.is_ocean() || p.y < SEA as f32 - 2.0;
+    let ocean = biome.is_ocean() || p.y < world.sea() as f32 - 2.0;
     let edge = time_factor(time) < 1.0;
     let lvl = level as f32;
     let r = rng.f32();
@@ -279,7 +279,7 @@ pub fn roll_catch(world: &World, p: Vec3, time: f32, level: u32, bait: bool, rng
         }
         Category::Fish => {
             let warm = matches!(biome, Biome::Desert | Biome::Plains | Biome::Jungle | Biome::Swamp | Biome::Badlands);
-            let cold = matches!(biome, Biome::Snowy | Biome::Taiga) || world.get(p.x.floor() as i32, SEA, p.z.floor() as i32) == ICE;
+            let cold = matches!(biome, Biome::Snowy | Biome::Taiga) || world.get(p.x.floor() as i32, world.sea(), p.z.floor() as i32) == ICE;
             let f = rng.f32();
             let (item, min, max) = if f < 0.08 {
                 (PUFFER, 15.0, 35.0)

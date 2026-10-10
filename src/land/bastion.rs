@@ -196,16 +196,16 @@ impl Game {
         }
         self.bastion_timer = 2.0;
         for (_, at, _) in self.player_spots() {
-            if !crate::scorch::in_scorch(at.x) {
+            if !self.world.is_scorch() {
                 continue;
             }
-            let Some(o) = self.world.generator.nearest_site(Kind::Bastion, at, 3) else { continue };
+            let Some(o) = self.world.nearest_site(Kind::Bastion, at, 3) else { continue };
             if self.bastions_peopled.contains(&o) || o.as_vec3().distance(at) > NEAR || !self.world.is_loaded(o.x, o.z) {
                 continue;
             }
             self.bastions_peopled.insert(o);
             let (cx, cz) = (o.x.div_euclid(crate::world::CW), o.z.div_euclid(crate::world::CW));
-            let Some(site) = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| (dx, dz))).filter_map(|(dx, dz)| self.world.generator.site(cx + dx, cz + dz)).find(|s| s.kind == Kind::Bastion && s.origin == o) else { continue };
+            let Some(site) = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| (dx, dz))).filter_map(|(dx, dz)| self.world.site(cx + dx, cz + dz)).find(|s| s.kind == Kind::Bastion && s.origin == o) else { continue };
             for (kind, p) in residents(&site) {
                 let pos = (o + p).as_vec3() + Vec3::new(0.5, 0.0, 0.5);
                 if is_solid(self.world.get_v(o + p)) {
@@ -262,11 +262,11 @@ mod tests {
 
     #[test]
     fn bastions_turn_up_in_the_scorchlands_and_not_on_top_of_each_other() {
-        let g = crate::world::Generator::new(31);
+        let g = crate::world::Generator::with_dim(31, crate::world::GenOptions::LEGACY, crate::dims::Dim::Scorch);
         let mut found = Vec::new();
         for cz in -150..150 {
             for cx in 0..150 {
-                let cx = (crate::scorch::SCORCH_ORIGIN >> 4) - 75 + cx;
+                let cx = cx - 75;
                 if let Some(s) = g.site(cx, cz).filter(|s| s.kind == Kind::Bastion) {
                     found.push(s.origin);
                 }

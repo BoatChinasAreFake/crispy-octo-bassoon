@@ -170,12 +170,12 @@ fn seed_of(crop: Crop) -> Id {
 
 impl Game {
     pub fn ledger(&mut self, from: u32) -> Option<&mut Ledger> {
-        self.peers.get_mut(&from).map(|p| &mut p.ledger)
+        self.peer_mut(from).map(|p| &mut p.ledger)
     }
 
     /// The item a player is holding, if they really own one (else bare hands).
     pub fn verified_held(&self, from: u32) -> Id {
-        match self.peers.get(&from) {
+        match self.peer_ref(from) {
             Some(p) if p.mode != crate::modes::GameMode::Survival || p.ledger.bag.has(p.ledger.held) => p.ledger.held,
             _ => AIR,
         }
@@ -183,7 +183,7 @@ impl Game {
 
     /// The enchantments on what a player is holding, if the host knows they really have them.
     pub fn verified_ench(&self, from: u32) -> u16 {
-        match self.peers.get(&from) {
+        match self.peer_ref(from) {
             Some(p) if p.mode != crate::modes::GameMode::Survival || p.ledger.owns_enchanted(self.verified_held(from), p.ledger.held_ench) => p.ledger.held_ench,
             _ => 0,
         }
@@ -207,7 +207,7 @@ impl Game {
 
     /// Does this player own at least one? (Always yes in creative.)
     pub fn peer_has(&self, from: u32, id: Id) -> bool {
-        self.peer_free(from) || self.peers.get(&from).map(|p| p.ledger.bag.has(id)).unwrap_or(false)
+        self.peer_free(from) || self.peer_ref(from).map(|p| p.ledger.bag.has(id)).unwrap_or(false)
     }
 
     /// Use up one of the player's items; false if they don't have it. (Free in creative.)

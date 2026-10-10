@@ -49,7 +49,7 @@ impl Game {
         while self.random_tick_acc >= 0.25 {
             self.random_tick_acc -= 0.25;
             let mut centres: Vec<(i32, i32)> = self.peers.values().map(|p| (p.target.x.floor() as i32, p.target.z.floor() as i32)).collect();
-            if !self.dedicated {
+            if !self.away() {
                 let p = self.player.body.pos;
                 centres.push((p.x.floor() as i32, p.z.floor() as i32));
             }
@@ -84,7 +84,7 @@ impl Game {
         if is_copper(id) && id < COPPER_FIRST + 3 {
             if self.rng.chance(WEATHER_CHANCE) {
                 self.world.set_v(p, id + 1);
-                if id + 1 == COPPER_FIRST + 3 && !self.dedicated && p.as_vec3().distance(self.player.body.pos) < 24.0 {
+                if id + 1 == COPPER_FIRST + 3 && !self.away() && p.as_vec3().distance(self.player.body.pos) < 24.0 {
                     self.advance("patina");
                 }
             }

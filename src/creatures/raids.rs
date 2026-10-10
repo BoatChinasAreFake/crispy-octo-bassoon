@@ -247,17 +247,17 @@ pub fn allay_cage(chest: IVec3) -> Vec3 {
 impl Game {
     /// The village square near `at`, if `at` is in a village.
     pub fn village_at(&self, at: Vec3) -> Option<Vec3> {
-        if crate::scorch::in_scorch(at.x) || crate::hollow::in_hollow(at.x) {
+        if !self.world.dim().open_sky() {
             return None;
         }
-        let o = self.world.generator.nearest_site(Kind::Village, at, 5)?;
+        let o = self.world.nearest_site(Kind::Village, at, 5)?;
         let centre = o.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
         (Vec3::new(centre.x - at.x, 0.0, centre.z - at.z).length() < VILLAGE_RANGE).then_some(centre)
     }
 
     /// `who` (a player id; ours for the local player) gets Bad Omen.
     pub fn give_effect_to(&mut self, who: u32, effect: Potion, secs: f32) {
-        if who == self.my_id && !self.dedicated {
+        if who == self.my_id && !self.away() {
             self.timed_effect(effect, secs);
         } else if self.peers.contains_key(&who) {
             self.send_timed_effect(who, effect, secs, 0);
@@ -422,7 +422,7 @@ impl Game {
                 };
                 let mut spawned = false;
                 if pending.candidates.is_empty() {
-                    let mix = wave_mix(pending.wave, r.waves, self.peers.len() + (!self.dedicated) as usize);
+                    let mix = wave_mix(pending.wave, r.waves, self.peers.len() + (!self.away()) as usize);
                     for (k, kind) in mix.into_iter().enumerate() {
                         // Generate and try candidates together on the first attempt so loaded
                         // worlds retain the existing offset/mob RNG call order. An entirely
@@ -505,7 +505,7 @@ impl Game {
             return;
         }
         let at = spots[self.rng.int(0, spots.len() as i32 - 1) as usize].1;
-        if crate::scorch::in_scorch(at.x) || crate::hollow::in_hollow(at.x) || self.village_at(at).is_some() {
+        if !self.world.dim().open_sky() || self.village_at(at).is_some() {
             return;
         }
         let a = self.rng.range(0.0, std::f32::consts::TAU);
@@ -535,10 +535,10 @@ impl Game {
             return;
         }
         for (_, at, _) in self.player_spots() {
-            if crate::scorch::in_scorch(at.x) || crate::hollow::in_hollow(at.x) {
+            if !self.world.dim().open_sky() {
                 continue;
             }
-            let Some(o) = self.world.generator.nearest_site(Kind::Outpost, at, 3) else { continue };
+            let Some(o) = self.world.nearest_site(Kind::Outpost, at, 3) else { continue };
             let base = o.as_vec3() + Vec3::new(0.5, 1.0, 0.5);
             if base.distance(at) > 48.0 || !self.world.is_loaded(o.x, o.z) {
                 continue;
@@ -597,7 +597,7 @@ impl Game {
         let flat = Vec3::new(to.x - from.x, 0.0, to.z - from.z);
         let dir = flat.normalize_or_zero();
         let steps = (flat.length().ceil() as i32 + 2).min(14);
-        let me = !self.dedicated && self.dead.is_none() && !self.creative;
+        let me = !self.away() && self.dead.is_none() && !self.creative;
         let mut hit_me = false;
         let mut hit_peers: Vec<u32> = Vec::new();
         for k in 1..=steps {
@@ -659,7 +659,7 @@ impl Game {
     /// Players where the world lives, by id (ours too), and where they are.
     pub fn player_spots_by_id(&self) -> Vec<(u32, Vec3)> {
         let mut v: Vec<(u32, Vec3)> = self.peers.iter().filter(|(_, p)| p.alive()).map(|(&id, p)| (id, p.target)).collect();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             v.push((self.my_id, self.player.body.pos));
         }
         v

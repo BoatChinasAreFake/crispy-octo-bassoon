@@ -2971,16 +2971,44 @@ static WOOFER: [Part; 11] = [
     part([-0.05, 0.55, 0.4], [0.1, 0.1, 0.38], [0.0, 0.6, 0.4], Limb::SwingY(1.5), [WF; 6]),
 ];
 const WY: u16 = T_WYRM_SKIN;
-static WYRM: [Part; 8] = [
-    // A long body, neck and head, two great wings, and a tail.
-    part([-0.8, 1.0, -2.0], [1.6, 1.0, 4.0], [0.0; 3], Limb::Fixed, [WY; 6]),
-    part([-0.35, 1.3, -3.6], [0.7, 0.6, 1.7], [0.0; 3], Limb::Fixed, [WY; 6]),
-    part([-0.55, 1.2, -4.8], [1.1, 0.8, 1.3], [0.0; 3], Limb::Fixed, [WY, WY, WY, WY, WY, T_WYRM_FACE]),
-    part([-4.8, 1.8, -1.2], [4.0, 0.15, 2.4], [-0.8, 1.9, 0.0], Limb::Wing(1.0), [T_WYRM_WING; 6]),
-    part([0.8, 1.8, -1.2], [4.0, 0.15, 2.4], [0.8, 1.9, 0.0], Limb::Wing(-1.0), [T_WYRM_WING; 6]),
-    part([-0.3, 1.2, 2.0], [0.6, 0.5, 2.5], [0.0, 1.45, 2.0], Limb::SwingY(0.6), [WY; 6]),
-    part([-0.8, 0.2, -1.2], [0.4, 0.8, 0.4], [0.0; 3], Limb::Fixed, [WY; 6]),
-    part([0.4, 0.2, -1.2], [0.4, 0.8, 0.4], [0.0; 3], Limb::Fixed, [WY; 6]),
+const WF2: u16 = T_WYRM_FACE;
+/// The Wyrm's wings fold from the shoulders, and its tail sweeps from the hips.
+const WYRM_WL: [f32; 3] = [-0.9, 2.05, -1.0];
+const WYRM_WR: [f32; 3] = [0.9, 2.05, -1.0];
+const WYRM_WT: [f32; 3] = [0.0, 1.35, 1.8];
+static WYRM: [Part; 25] = [
+    // A deep chest and narrower hips.
+    part([-0.9, 0.9, -2.2], [1.8, 1.3, 2.4], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.75, 0.85, 0.2], [1.5, 1.1, 1.6], [0.0; 3], Limb::Fixed, [WY; 6]),
+    // A neck curving up and forward, and a long head: skull (eyes on its sides), snout, jaw.
+    part([-0.42, 1.5, -3.2], [0.84, 0.75, 1.1], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.36, 1.85, -4.2], [0.72, 0.65, 1.1], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.55, 2.0, -5.4], [1.1, 0.8, 1.2], [0.0; 3], Limb::Fixed, [WF2, WF2, WY, WY, WY, WY]),
+    part([-0.36, 2.0, -6.3], [0.72, 0.5, 0.95], [0.0; 3], Limb::Fixed, [WY, WY, WY, WY, WY, WF2]),
+    part([-0.3, 1.72, -6.15], [0.6, 0.26, 1.0], [0.0; 3], Limb::Fixed, [WY; 6]),
+    // Horns swept back.
+    part([-0.5, 2.75, -5.1], [0.16, 0.16, 1.0], [-0.42, 2.8, -5.1], Limb::Tilt(0.45), [T_WYRM_HORN; 6]),
+    part([0.34, 2.75, -5.1], [0.16, 0.16, 1.0], [0.42, 2.8, -5.1], Limb::Tilt(0.45), [T_WYRM_HORN; 6]),
+    // Spines along the back.
+    part([-0.08, 2.2, -1.9], [0.16, 0.4, 0.35], [0.0; 3], Limb::Fixed, [T_WYRM_HORN; 6]),
+    part([-0.08, 2.2, -0.9], [0.16, 0.45, 0.35], [0.0; 3], Limb::Fixed, [T_WYRM_HORN; 6]),
+    part([-0.08, 1.95, 0.4], [0.16, 0.4, 0.35], [0.0; 3], Limb::Fixed, [T_WYRM_HORN; 6]),
+    // Each wing: a bony arm along the front, and the skin in two spans behind it.
+    part([-6.2, 2.0, -1.25], [5.3, 0.2, 0.22], WYRM_WL, Limb::Wing(1.0), [WY; 6]),
+    part([-3.2, 2.0, -1.05], [2.3, 0.08, 2.3], WYRM_WL, Limb::Wing(1.0), [T_WYRM_WING; 6]),
+    part([-6.2, 2.0, -1.05], [3.0, 0.06, 3.0], WYRM_WL, Limb::Wing(1.0), [T_WYRM_WING; 6]),
+    part([0.9, 2.0, -1.25], [5.3, 0.2, 0.22], WYRM_WR, Limb::Wing(-1.0), [WY; 6]),
+    part([0.9, 2.0, -1.05], [2.3, 0.08, 2.3], WYRM_WR, Limb::Wing(-1.0), [T_WYRM_WING; 6]),
+    part([3.2, 2.0, -1.05], [3.0, 0.06, 3.0], WYRM_WR, Limb::Wing(-1.0), [T_WYRM_WING; 6]),
+    // A long tail, thinning and sweeping more toward the spade at its end.
+    part([-0.5, 1.0, 1.8], [1.0, 0.8, 1.6], WYRM_WT, Limb::SwingY(0.25), [WY; 6]),
+    part([-0.35, 1.05, 3.3], [0.7, 0.6, 1.6], WYRM_WT, Limb::SwingY(0.4), [WY; 6]),
+    part([-0.22, 1.1, 4.8], [0.44, 0.42, 1.6], WYRM_WT, Limb::SwingY(0.55), [WY; 6]),
+    part([-0.45, 1.18, 6.3], [0.9, 0.12, 0.7], WYRM_WT, Limb::SwingY(0.6), [T_WYRM_HORN; 6]),
+    // Legs with claws (the front ones tucked up as it flies).
+    part([-0.8, 0.45, -1.9], [0.4, 0.6, 0.45], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([0.4, 0.45, -1.9], [0.4, 0.6, 0.45], [0.0; 3], Limb::Fixed, [WY; 6]),
+    part([-0.7, 0.05, 0.7], [1.4, 0.85, 0.5], [0.0; 3], Limb::Fixed, [WY, WY, WY, T_WYRM_HORN, WY, WY]),
 ];
 const GL: u16 = T_GALLOPER;
 /// Where a Galloper's neck and head bend from, and by how much.

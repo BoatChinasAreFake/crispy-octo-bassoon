@@ -66,7 +66,7 @@ impl Game {
     /// The players' record keys and where they are (for owners and food).
     pub(crate) fn player_spots(&self) -> Vec<(String, Vec3, Id)> {
         let mut v = Vec::new();
-        if !self.dedicated && self.dead.is_none() {
+        if !self.away() && self.dead.is_none() {
             v.push((record_key(&self.player_name), self.player.body.pos, self.inv.held()));
         }
         for p in self.peers.values().filter(|p| p.alive()) {
@@ -106,7 +106,7 @@ impl Game {
             return Interaction::Sheared;
         }
         if matches!(self.mobs[i].kind, MobKind::Galloper | MobKind::Strutter | MobKind::Camel | MobKind::Floaty | MobKind::Rotsteed) {
-            let rider = if record_key(&self.player_name) == who && !self.dedicated {
+            let rider = if record_key(&self.player_name) == who && !self.away() {
                 self.my_id + 1
             } else {
                 self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| id + 1).unwrap_or(0)
@@ -341,7 +341,7 @@ impl Game {
 
     /// A message for one player (by record key).
     pub fn tell(&mut self, who: &str, text: &str) {
-        if record_key(&self.player_name) == who && !self.dedicated {
+        if record_key(&self.player_name) == who && !self.away() {
             self.msg(text);
         } else if let Some(id) = self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| *id) {
             self.system_message(Some(id), text);
@@ -350,14 +350,14 @@ impl Game {
 
     /// Advancements are only for the local player.
     pub fn advance_for(&mut self, who: &str, key: &str) {
-        if record_key(&self.player_name) == who && !self.dedicated {
+        if record_key(&self.player_name) == who && !self.away() {
             self.advance(key);
         }
     }
 
     /// Little hearts floating up.
     pub fn hearts(&mut self, at: Vec3, n: usize) {
-        if self.dedicated {
+        if self.away() {
             return;
         }
         for _ in 0..n {

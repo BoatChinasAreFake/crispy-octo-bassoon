@@ -47,7 +47,7 @@ impl Game {
         }
         self.smoke(at + Vec3::Y * 0.5, 6, 0.3);
         self.sfx(Sfx::Splash, Some(at));
-        if !self.dedicated && self.player.body.pos.distance(at) < 24.0 {
+        if !self.away() && self.player.body.pos.distance(at) < 24.0 {
             self.advance("floaty_born");
         }
     }

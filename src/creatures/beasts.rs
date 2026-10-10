@@ -183,7 +183,7 @@ impl crate::game::Game {
         use crate::potions::Potion;
         self.spores(at, MobKind::Sporeling);
         self.spores(at, MobKind::Sporeling);
-        if !self.dedicated && self.dead.is_none() && !self.creative && (self.player.body.pos + Vec3::Y * 0.9).distance(at) < SPORE_REACH {
+        if !self.away() && self.dead.is_none() && !self.creative && (self.player.body.pos + Vec3::Y * 0.9).distance(at) < SPORE_REACH {
             self.timed_effect(Potion::Slowness, SPORE_SECS);
             self.timed_effect(Potion::Weakness, SPORE_SECS);
             self.advance("spore_loser");
@@ -197,7 +197,7 @@ impl crate::game::Game {
 
     /// Spores (or a Wisp's flicker) drifting up from `at`.
     pub fn spores(&mut self, at: Vec3, kind: MobKind) {
-        if self.dedicated {
+        if self.away() {
             return;
         }
         let tile = if kind == MobKind::Wisp { crate::texture::T_SOUL_FIRE } else { crate::texture::T_TEAL_NYLIUM_TOP };

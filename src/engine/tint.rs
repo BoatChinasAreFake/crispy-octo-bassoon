@@ -107,11 +107,73 @@ impl Field {
     /// The overworld chunk at (cx, cz)'s colours; None in the other dimensions
     /// (nothing there is tinted).
     pub fn of(world: &World, cx: i32, cz: i32) -> Option<Field> {
-        let mid = (cx * CW + CW / 2) as f32;
-        if crate::scorch::in_scorch(mid) || crate::hollow::in_hollow(mid) {
+        if world.dim() != crate::dims::Dim::Over {
             return None;
         }
-        Some(Field::from_biomes(|x, z| world.generator.column(x, z).1, cx, cz))
+        let biome_at = |x, z| world.generator.column(x, z).1;
+        // (Worlds from version 3 blend over about twenty blocks, so one biome's
+        // colours fade into the next's instead of changing at a line.)
+        Some(if world.generator.opts.version >= 3 { Field::wide(biome_at, cx, cz) } else { Field::from_biomes(biome_at, cx, cz) })
+    }
+
+    /// The colours blended widely: biomes sampled every `STEP` blocks (on a
+    /// grid shared by every chunk), each sample averaged with its neighbours
+    /// `WIDE` steps around, then smoothly in between.
+    pub fn wide(biome_at: impl Fn(i32, i32) -> Biome, cx: i32, cz: i32) -> Field {
+        const STEP: i32 = 4;
+        const WIDE: i32 = 2;
+        let (g0x, g0z) = (cx * CW / STEP - WIDE, cz * CW / STEP - WIDE);
+        let n = (CW / STEP + 1 + 2 * WIDE) as usize;
+        let mut g = vec![[0.0f32; 3]; n * n];
+        let mut w = vec![[0.0f32; 3]; n * n];
+        for j in 0..n {
+            for i in 0..n {
+                let b = biome_at((g0x + i as i32) * STEP, (g0z + j as i32) * STEP);
+                g[j * n + i] = grass(b);
+                w[j * n + i] = water(b);
+            }
+        }
+        let inner = (CW / STEP + 1) as usize;
+        let blur = |src: &[[f32; 3]]| -> Vec<[f32; 3]> {
+            let mut out = vec![[0.0f32; 3]; inner * inner];
+            let k = ((2 * WIDE + 1) * (2 * WIDE + 1)) as f32;
+            for j in 0..inner {
+                for i in 0..inner {
+                    let mut s = [0.0; 3];
+                    for dj in 0..=2 * WIDE as usize {
+                        for di in 0..=2 * WIDE as usize {
+                            let c = src[(j + dj) * n + i + di];
+                            (0..3).for_each(|q| s[q] += c[q]);
+                        }
+                    }
+                    out[j * inner + i] = s.map(|v| v / k);
+                }
+            }
+            out
+        };
+        let corners = |b: &[[f32; 3]], season: [f32; 3]| -> Vec<[u8; 4]> {
+            let m = (CW + 1) as usize;
+            let mut out = vec![NEUTRAL; m * m];
+            for z in 0..m {
+                for x in 0..m {
+                    let (fx, fz) = (x as f32 / STEP as f32, z as f32 / STEP as f32);
+                    let (i, j) = ((fx as usize).min(inner - 2), (fz as usize).min(inner - 2));
+                    let (u, v) = (fx - i as f32, fz - j as f32);
+                    let at = |a: usize, b: usize| b * inner + a;
+                    let mut s = [0.0; 3];
+                    for q in 0..3 {
+                        let top = b[at(i, j)][q] * (1.0 - u) + b[at(i + 1, j)][q] * u;
+                        let bottom = b[at(i, j + 1)][q] * (1.0 - u) + b[at(i + 1, j + 1)][q] * u;
+                        s[q] = (top * (1.0 - v) + bottom * v) * season[q];
+                    }
+                    out[z * m + x] = pack(s);
+                }
+            }
+            out
+        };
+        let season = crate::seasons::shown();
+        let g = blur(&g);
+        Field { grass: corners(&g, crate::seasons::grass_tint(season)), leaves: corners(&g, crate::seasons::leaf_tint(season)), water: corners(&blur(&w), [1.0; 3]) }
     }
 
     /// The colours, given each column's biome.
@@ -213,6 +275,23 @@ mod tests {
         for z in 0..=CW {
             assert_eq!(a.at(Kind::Water, CW, z), b.at(Kind::Water, 0, z));
             assert_eq!(a.at(Kind::Grass, CW, z), b.at(Kind::Grass, 0, z));
+        }
+    }
+
+    #[test]
+    fn wide_blending_is_gentle_and_seamless() {
+        let split = |x: i32, _| if x < 8 { Biome::Plains } else { Biome::Desert };
+        let row: Vec<u8> = (-2..=2).flat_map(|cx| (0..CW).map(move |x| (cx, x))).map(|(cx, x)| Field::wide(split, cx, 0).at(Kind::Grass, x, 5)[2]).collect();
+        for w in row.windows(2) {
+            assert!(w[0].abs_diff(w[1]) <= 4, "blends gently: {row:?}");
+        }
+        assert!(row.iter().filter(|&&b| b != 128 && b != pack(grass(Biome::Desert))[2]).count() >= 14, "over many blocks: {row:?}");
+        let biome = |x: i32, z: i32| if (x / 9 + z / 5).rem_euclid(3) == 0 { Biome::Swamp } else { Biome::Jungle };
+        let (a, b) = (Field::wide(biome, 0, 0), Field::wide(biome, 1, 0));
+        let (c, d) = (Field::wide(biome, 0, -1), Field::wide(biome, 0, 0));
+        for k in 0..=CW {
+            assert_eq!(a.at(Kind::Water, CW, k), b.at(Kind::Water, 0, k));
+            assert_eq!(c.at(Kind::Grass, k, CW), d.at(Kind::Grass, k, 0));
         }
     }
 

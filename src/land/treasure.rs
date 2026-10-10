@@ -13,7 +13,6 @@ use crate::block::*;
 use crate::inventory::Wear;
 use crate::noise::hash3;
 use crate::structures::{Kind, Site};
-use crate::world::SEA;
 use macroquad::math::{ivec3, IVec3, Vec3};
 
 /// How far (chunks) a map looks for treasure to mark.
@@ -55,7 +54,7 @@ fn half_width(z: i32) -> i32 {
 
 /// A wreck's blocks, in world coordinates: a broken hull of planks on the sea
 /// bed with a snapped mast, water inside, and a chest at each end.
-pub fn shipwreck_blocks(site: &Site) -> Vec<(IVec3, Id)> {
+pub fn shipwreck_blocks(site: &Site, sea: i32) -> Vec<(IVec3, Id)> {
     let (o, s) = (site.origin, site.seed);
     let mut out = Vec::new();
     // Lengthways along z, or along x.
@@ -64,7 +63,7 @@ pub fn shipwreck_blocks(site: &Site) -> Vec<(IVec3, Id)> {
         let (x, z) = if along_x { (z, x) } else { (x, z) };
         out.push((ivec3(o.x + x, o.y + y, o.z + z), id));
     };
-    let fill = |y: i32| if o.y + y <= SEA { WATER } else { AIR };
+    let fill = |y: i32| if o.y + y <= sea { WATER } else { AIR };
     for z in -6..=6 {
         let w = half_width(z);
         for x in -w..=w {
@@ -104,7 +103,7 @@ impl crate::game::Game {
         let (cx, cz) = (pos.x.div_euclid(crate::world::CW), pos.z.div_euclid(crate::world::CW));
         for dz in -1..=1 {
             for dx in -1..=1 {
-                match self.world.generator.site(cx + dx, cz + dz) {
+                match self.world.site(cx + dx, cz + dz) {
                     Some(s) if s.kind == Kind::BuriedTreasure && s.origin == pos => self.advance("x_marks_the_spot"),
                     Some(s) if s.kind == Kind::Shipwreck && s.origin.as_vec3().distance(pos.as_vec3()) < 8.0 => self.advance("ahoy"),
                     Some(s) if s.kind == Kind::Bastion && crate::bastion::treasure_chest(&s) == pos => self.advance("gilded_age"),
@@ -135,13 +134,13 @@ mod tests {
     fn wrecks_lie_on_the_sea_bed_with_chests_and_maps_find_treasure() {
         let g = crate::world::Generator::new(7);
         let wreck = (0..200).flat_map(|cx| (-100..100).map(move |cz| (cx, cz))).find_map(|(cx, cz)| g.site(cx, cz).filter(|s| s.kind == Kind::Shipwreck)).expect("a wreck somewhere");
-        assert!(wreck.origin.y < SEA - 3, "under the sea");
-        let blocks = shipwreck_blocks(&wreck);
+        assert!(wreck.origin.y < g.sea() - 3, "under the sea");
+        let blocks = shipwreck_blocks(&wreck, g.sea());
         assert_eq!(blocks.iter().filter(|b| b.1 == CHEST).count(), 2);
         assert!(blocks.iter().any(|b| b.1 == SPRUCE_LOG) && blocks.iter().filter(|b| b.1 == PLANKS).count() > 30);
         let t = g.nearest_site(Kind::BuriedTreasure, wreck.origin.as_vec3(), MAP_RANGE).expect("treasure near the coast");
         let (h, _) = g.column(t.x, t.z);
-        assert!((SEA - 1..=SEA + 1).contains(&h) && t.y == h - 2, "buried in a beach: {t} (ground {h})");
+        assert!((g.sea() - 1..=g.sea() + 1).contains(&h) && t.y == h - 2, "buried in a beach: {t} (ground {h})");
         // Loot: wreck chests often hold a map, treasure chests hold riches.
         let maps = (0..40u32).filter(|&s| crate::structures::loot(Kind::Shipwreck, s.wrapping_mul(2_654_435_761)).slots.iter().flatten().any(|s| s.0 == TREASURE_MAP)).count();
         assert!(maps > 15, "{maps}/40 with a map");
@@ -154,7 +153,7 @@ mod tests {
         let mut g = crate::game::tests::arena(141);
         let generator = g.world.generator.clone();
         let wreck = (0..200).flat_map(|cx| (-100..100).map(move |cz| (cx, cz))).find_map(|(cx, cz)| generator.site(cx, cz).filter(|s| s.kind == Kind::Shipwreck)).unwrap();
-        let chest = shipwreck_blocks(&wreck).into_iter().find(|b| b.1 == CHEST).unwrap().0;
+        let chest = shipwreck_blocks(&wreck, g.world.sea()).into_iter().find(|b| b.1 == CHEST).unwrap().0;
         g.world.set_v(chest, CHEST);
         let mut c = crate::containers::Container::for_block(CHEST);
         c.slots[3] = Some((TREASURE_MAP, 1));

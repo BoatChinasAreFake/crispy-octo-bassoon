@@ -634,7 +634,7 @@ impl Game {
     /// What a bought item's wear is: a Treasure Map is marked from the trader's home.
     fn trade_wear(&self, t: Trade, at: macroquad::math::Vec3) -> Wear {
         if t.get.0 == TREASURE_MAP {
-            return self.world.generator.nearest_site(crate::structures::Kind::BuriedTreasure, at, crate::treasure::MAP_RANGE).map(crate::treasure::mark).unwrap_or(0);
+            return self.world.nearest_site(crate::structures::Kind::BuriedTreasure, at, crate::treasure::MAP_RANGE).map(crate::treasure::mark).unwrap_or(0);
         }
         t.wear
     }

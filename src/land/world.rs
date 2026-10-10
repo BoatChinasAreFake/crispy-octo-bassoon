@@ -1,5 +1,6 @@
 //! Chunked voxel world: storage, threaded terrain generation, edits and raycasts.
 
+use crate::dims::Dim;
 use crate::block::*;
 use crate::noise::{hash2, hash3, Perlin};
 use crate::containers::{is_container, Container};
@@ -11,13 +12,23 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 pub const CW: i32 = 16;
-pub const CH: i32 = 128;
-pub const SEA: i32 = 40;
+/// The height of the world (every dimension's).
+pub const CH: i32 = 256;
+/// Sea level in worlds made before the world grew to 256 (generator version
+/// below 3; see `GenOptions::sea`), and in new ones.
+pub const OLD_SEA: i32 = 40;
+pub const NEW_SEA: i32 = 63;
 /// How deep (below the sea) the shallow coastal shelf goes before the sea floor drops away.
 const SEA_SHELF: f32 = 2.0;
 const CHUNK_VOL: usize = (CW * CW * CH) as usize;
 
 #[inline]
+/// 0 below `a`, 1 above `b`, and a smooth S between.
+pub fn smoothstep(a: f32, b: f32, v: f32) -> f32 {
+    let k = ((v - a) / (b - a)).clamp(0.0, 1.0);
+    k * k * (3.0 - 2.0 * k)
+}
+
 pub fn idx(lx: i32, y: i32, lz: i32) -> usize {
     ((y * CW + lz) * CW + lx) as usize
 }
@@ -546,6 +557,7 @@ pub struct GenOptions {
     /// 0: legacy (the old rules), 1: these options, 2: rarer villages
     /// (and outposts kept away from them), bigger and rarer fortresses, less
     /// Deep Dark, taller ice spikes, and structures that settle into the land.
+    /// 3: the sea at 63 (and the land with it; see `sea`).
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -558,7 +570,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 2, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 3, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -569,11 +581,21 @@ impl GenOptions {
         if version == 0 {
             return GenOptions::LEGACY;
         }
-        GenOptions { version: version.min(2), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+        GenOptions { version: version.min(3), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+    }
+
+    /// Sea level: version 3 (the world grew to 256 tall) lifts it to 63;
+    /// older worlds keep theirs, and their land with it.
+    pub fn sea(self) -> i32 {
+        if self.version >= 3 { NEW_SEA } else { OLD_SEA }
     }
 
     /// How much bigger than the old ones biomes are.
     pub fn biome_scale(self) -> f32 {
+        // (From version 3 they're measured afresh, and smaller: "normal" had grown too big.)
+        if self.version >= 3 {
+            return [0.65, 1.0, 1.5, 2.2][self.biome_size as usize % 4];
+        }
         [1.0, 2.2, 3.0, 4.5][self.biome_size as usize % 4]
     }
 
@@ -599,6 +621,9 @@ impl GenOptions {
 pub struct Generator {
     pub seed: u32,
     pub opts: GenOptions,
+    /// Which dimension this generates (see dims.rs): it works in that
+    /// dimension's generator coordinates, its own plus `dim.gen_x()`.
+    pub dim: Dim,
     continent: Perlin,
     hills: Perlin,
     ridges: Perlin,
@@ -617,15 +642,22 @@ pub struct Generator {
 impl Generator {
     /// A generator with the old rules (tests).
     #[cfg(test)]
+    #[cfg(test)]
     pub fn new(seed: u32) -> Self {
         Generator::with(seed, GenOptions::LEGACY)
     }
 
+    #[cfg(test)]
     pub fn with(seed: u32, opts: GenOptions) -> Self {
+        Generator::with_dim(seed, opts, Dim::Over)
+    }
+
+    pub fn with_dim(seed: u32, opts: GenOptions, dim: Dim) -> Self {
         let s = seed as u64;
         Generator {
             seed,
             opts,
+            dim,
             continent: Perlin::new(s),
             hills: Perlin::new(s + 1),
             ridges: Perlin::new(s + 2),
@@ -640,8 +672,16 @@ impl Generator {
         }
     }
 
+    /// Sea level (see `GenOptions::sea`).
+    pub fn sea(&self) -> i32 {
+        self.opts.sea()
+    }
+
     /// Surface height and biome for a column.
     pub fn column(&self, x: i32, z: i32) -> (i32, Biome) {
+        if self.opts.version >= 3 {
+            return self.column_v3(x, z);
+        }
         let (fx, fz) = (x as f32, z as f32);
         // Bigger biomes come with bigger land and sea to hold them.
         let bs = self.opts.biome_scale();
@@ -654,31 +694,32 @@ impl Generator {
         // (Below the sea, relief only matters by half: oceans stay oceans.)
         let lift = c * 20.0 + hills * 9.0 * (0.4 + mount) + mount * r * r * 48.0;
         let lift = if lift > -3.0 { lift * relief } else { lift * (0.5 + relief * 0.5) };
-        let h = SEA as f32 + 3.0 + lift;
+        let h = self.sea() as f32 + 3.0 + lift;
         // Tall peaks ease off toward the top of the world instead of being cut flat.
-        let knee = (CH - 44) as f32;
+        // (Heights here are from the sea, so older worlds' land stays put.)
+        let knee = (self.sea() + 44) as f32;
         let h = if h > knee { knee + (h - knee) / (1.0 + (h - knee) / 24.0) } else { h };
         // The sea floor falls away offshore: shallow by the coast, deep out at sea.
-        let d = SEA as f32 - 1.0 - h;
+        let d = self.sea() as f32 - 1.0 - h;
         let h = if d > 0.0 {
             let deep = d * 1.6 + (d - SEA_SHELF).max(0.0) * 1.4;
             // (Easing off toward the bottom, so it never reaches the world's floor.)
-            SEA as f32 - 1.0 - deep / (1.0 + deep / 60.0)
+            self.sea() as f32 - 1.0 - deep / (1.0 + deep / 60.0)
         } else {
             h
         };
-        let h = (h as i32).clamp(4, CH - 20);
+        let h = (h as i32).clamp(4, self.sea() + 68);
         let t = self.temp.fbm2(fx / (520.0 * bs) + 300.0, fz / (520.0 * bs), 3);
         let m = self.moist.fbm2(fx / (380.0 * bs), fz / (380.0 * bs) - 200.0, 3);
         // Swamps: where it's wet but not hot, the land sinks toward the sea.
         let swampy = ((m - 0.18) / 0.1).clamp(0.0, 1.0) * (1.0 - ((t - 0.15) / 0.1).clamp(0.0, 1.0)) * ((t + 0.15) / 0.1).clamp(0.0, 1.0);
         // ...to a bumpy level just under it: pools and islands of mud and grass.
-        let bumps = SEA as f32 - 0.6 + self.hills.noise2(fx / 9.0, fz / 9.0) * 2.2;
-        let h = if swampy > 0.0 && h > SEA - 3 { (h as f32 + (bumps - h as f32) * swampy.min(0.95)).round() as i32 } else { h };
+        let bumps = self.sea() as f32 - 0.6 + self.hills.noise2(fx / 9.0, fz / 9.0) * 2.2;
+        let h = if swampy > 0.0 && h > self.sea() - 3 { (h as f32 + (bumps - h as f32) * swampy.min(0.95)).round() as i32 } else { h };
         // Badlands: hot and dry land rises into steep, stripy hills.
         let mesa = ((t - 0.4) / 0.1).clamp(0.0, 1.0) * ((0.05 - m) / 0.1).clamp(0.0, 1.0);
-        let h = if mesa > 0.0 && h > SEA { (h + ((h - SEA) as f32 * 0.9 * mesa) as i32).min(CH - 20) } else { h };
-        let biome = if h < SEA - 1 {
+        let h = if mesa > 0.0 && h > self.sea() { (h + ((h - self.sea()) as f32 * 0.9 * mesa) as i32).min(self.sea() + 68) } else { h };
+        let biome = if h < self.sea() - 1 {
             // Seas by temperature.
             if t > 0.3 {
                 Biome::WarmOcean
@@ -689,13 +730,13 @@ impl Generator {
             } else {
                 Biome::Ocean
             }
-        } else if h > 92 && t > -0.05 {
+        } else if h > self.sea() + 52 && t > -0.05 {
             // Mountaintops too warm for snow are bare rock.
             Biome::StonyPeaks
-        } else if t < -0.3 || h > 92 {
+        } else if t < -0.3 || h > self.sea() + 52 {
             // Here and there in the snow, fields of ice spikes.
-            if h <= 92 && self.temp.noise2(fx / 140.0 - 700.0, fz / 140.0 + 300.0) > 0.3 { Biome::IceSpikes } else { Biome::Snowy }
-        } else if swampy > 0.5 && h <= SEA + 2 {
+            if h <= self.sea() + 52 && self.temp.noise2(fx / 140.0 - 700.0, fz / 140.0 + 300.0) > 0.3 { Biome::IceSpikes } else { Biome::Snowy }
+        } else if swampy > 0.5 && h <= self.sea() + 2 {
             Biome::Swamp
         } else if t < -0.12 && m > -0.05 {
             Biome::Taiga
@@ -706,12 +747,12 @@ impl Generator {
         } else if t > 0.25 && m < 0.15 {
             // Warm, but not desert-dry: grassland and acacias.
             Biome::Savanna
-        } else if t > 0.15 && m > 0.15 && h <= SEA + 3 {
+        } else if t > 0.15 && m > 0.15 && h <= self.sea() + 3 {
             // Where the jungle meets the sea: mangroves on the mudflats.
             Biome::Mangrove
         } else if t > 0.15 && m > 0.15 {
             Biome::Jungle
-        } else if t > 0.0 && t < 0.2 && m > -0.02 && m < 0.1 && h > SEA + 5 {
+        } else if t > 0.0 && t < 0.2 && m > -0.02 && m < 0.1 && h > self.sea() + 5 {
             // Mild, slightly damp hills: cherry groves.
             Biome::Cherry
         } else if (-0.12..-0.02).contains(&t) && m > 0.14 {
@@ -724,20 +765,20 @@ impl Generator {
             Biome::BirchForest
         } else if m > 0.08 {
             Biome::Forest
-        } else if h > SEA + 16 && m > -0.08 && (-0.12..0.15).contains(&t) {
+        } else if h > self.sea() + 16 && m > -0.08 && (-0.12..0.15).contains(&t) {
             // High, gentle grassland: meadows.
             Biome::Meadow
         } else {
             Biome::Plains
         };
         // Far out in deep water, now and then, the sea floor rises into a mushroom island.
-        let (h, biome) = if biome.is_ocean() && h < SEA - 4 {
+        let (h, biome) = if biome.is_ocean() && h < self.sea() - 4 {
             let k = self.mushroom_isle(x, z);
             if k > 0.0 {
                 // A steep shore, then a low hump up to five blocks above the sea.
-                let top = SEA as f32 + 1.0 + (k - 0.5).max(0.0) * 10.0;
+                let top = self.sea() as f32 + 1.0 + (k - 0.5).max(0.0) * 10.0;
                 let hh = (h as f32 + (top - h as f32) * (k * 2.0).min(1.0)).round() as i32;
-                (hh, if hh >= SEA - 1 { Biome::MushroomIslands } else { biome })
+                (hh, if hh >= self.sea() - 1 { Biome::MushroomIslands } else { biome })
             } else {
                 (h, biome)
             }
@@ -749,8 +790,152 @@ impl Generator {
         (h, biome)
     }
 
+    /// Temperature and moisture at a column, in worlds from version 3 (roughly
+    /// -0.7 to 0.7 each). Their borders are bent by a little noise, so no
+    /// climate edge runs in a straight line.
+    pub fn climate(&self, x: i32, z: i32) -> (f32, f32) {
+        let (fx, fz) = (x as f32, z as f32);
+        let bs = self.opts.biome_scale();
+        let warp = 26.0 * bs.sqrt();
+        let (wx, wz) = (self.hills.noise2(fx / 61.0 + 410.0, fz / 61.0) * warp, self.hills.noise2(fx / 61.0, fz / 61.0 - 520.0) * warp);
+        let t = self.temp.fbm2((fx + wx) / (400.0 * bs) + 300.0, (fz + wz) / (400.0 * bs), 3);
+        let m = self.moist.fbm2((fx - wz) / (300.0 * bs), (fz + wx) / (300.0 * bs) - 200.0, 3);
+        (t, m)
+    }
+
+    /// Surface height and biome for a column, in worlds from version 3.
+    ///
+    /// - Biomes come in temperature bands, so the land changes by degrees:
+    ///   snow gives way to taiga before anything temperate, and the dry heat
+    ///   to savanna before plains. Moisture picks within a band.
+    /// - Everything that bends the land for a biome (swamps sinking to the
+    ///   water, badlands rising) fades in over a wide margin, so there are no
+    ///   cliffs where one biome meets another.
+    fn column_v3(&self, x: i32, z: i32) -> (i32, Biome) {
+        let (fx, fz) = (x as f32, z as f32);
+        let sea = self.sea();
+        let seaf = sea as f32;
+        let bs = self.opts.biome_scale();
+        // (Land and sea keep the size they had: only the biomes on them got smaller.)
+        let cs = 620.0 * bs.sqrt();
+        let c = self.continent.fbm2(fx / cs, fz / cs, 4);
+        let hills = self.hills.fbm2(fx / 110.0, fz / 110.0, 4);
+        let r = 1.0 - self.ridges.fbm2(fx / 180.0, fz / 180.0, 3).abs();
+        let mount = ((c - 0.1) / 0.45).clamp(0.0, 1.0);
+        let relief = self.opts.relief();
+        let lift = c * 20.0 + hills * 9.0 * (0.4 + mount) + mount * r * r * 48.0;
+        let lift = if lift > -3.0 { lift * relief } else { lift * (0.5 + relief * 0.5) };
+        let mut h = seaf + 3.0 + lift;
+        let knee = seaf + 44.0;
+        if h > knee {
+            h = knee + (h - knee) / (1.0 + (h - knee) / 24.0);
+        }
+        let d = seaf - 1.0 - h;
+        if d > 0.0 {
+            let deep = d * 1.6 + (d - SEA_SHELF).max(0.0) * 1.4;
+            h = seaf - 1.0 - deep / (1.0 + deep / 60.0);
+        }
+        let (t, m) = self.climate(x, z);
+        // Swamps: wet and mild. The land sinks toward a bumpy level just under
+        // the sea, fading in with the wet, and not at all on high ground or
+        // out at sea (so it never makes a step).
+        let swampy = smoothstep(0.12, 0.3, m) * smoothstep(-0.28, -0.12, t) * (1.0 - smoothstep(0.1, 0.26, t));
+        let bumps = seaf - 0.6 + self.hills.noise2(fx / 9.0, fz / 9.0) * 2.2;
+        let low = (1.0 - smoothstep(seaf + 4.0, seaf + 26.0, h)) * smoothstep(seaf - 14.0, seaf - 3.0, h);
+        h += (bumps - h) * swampy * low * 0.95;
+        // Mangroves: the same where it's wet and hot (mudflats, in and out of the water).
+        let marsh = smoothstep(0.1, 0.24, m) * smoothstep(0.16, 0.28, t);
+        h += (bumps - h) * marsh * low * 0.9;
+        // Badlands: hot and dry land rises into steep hills (by how high it already is).
+        let mesa = smoothstep(0.3, 0.46, t) * (1.0 - smoothstep(-0.08, 0.06, m));
+        h += (h - seaf).max(0.0) * 0.9 * mesa;
+        let h = (h.round() as i32).clamp(4, sea + 68);
+        let biome = if h < sea - 1 {
+            if t > 0.3 {
+                Biome::WarmOcean
+            } else if t > 0.12 {
+                Biome::LukewarmOcean
+            } else if t < -0.32 {
+                Biome::FrozenOcean
+            } else {
+                Biome::Ocean
+            }
+        } else if h > sea + 52 {
+            if t > -0.05 { Biome::StonyPeaks } else { Biome::Snowy }
+        } else if t < -0.32 {
+            // Frozen.
+            if self.temp.noise2(fx / 140.0 - 700.0, fz / 140.0 + 300.0) > 0.3 { Biome::IceSpikes } else { Biome::Snowy }
+        } else if t < -0.17 {
+            // Cold: always taiga, between the snow and everything milder.
+            Biome::Taiga
+        } else if t < 0.22 {
+            // Temperate.
+            if swampy > 0.5 && h <= sea + 2 {
+                Biome::Swamp
+            } else if m > 0.24 && t > -0.02 {
+                Biome::DarkForest
+            } else if m > 0.16 && t < -0.04 {
+                Biome::PaleGarden
+            } else if m > 0.06 && (0.04..0.16).contains(&t) {
+                Biome::BirchForest
+            } else if m > 0.06 {
+                Biome::Forest
+            } else if (0.02..0.18).contains(&t) && (-0.04..0.06).contains(&m) && h > sea + 5 {
+                Biome::Cherry
+            } else if h > sea + 16 && m > -0.1 {
+                Biome::Meadow
+            } else {
+                Biome::Plains
+            }
+        } else if t < 0.36 {
+            // Warm: savanna between the temperate land and the heat, or jungle where it's wet.
+            if m > 0.16 {
+                if h <= sea + 1 && marsh > 0.3 { Biome::Mangrove } else { Biome::Jungle }
+            } else {
+                Biome::Savanna
+            }
+        } else if m > 0.12 {
+            if h <= sea + 1 && marsh > 0.3 { Biome::Mangrove } else { Biome::Jungle }
+        } else if mesa > 0.5 {
+            Biome::Badlands
+        } else {
+            Biome::Desert
+        };
+        // Far out in deep water, now and then, the sea floor rises into a mushroom island.
+        let (h, biome) = if biome.is_ocean() && h < sea - 4 {
+            let k = self.mushroom_isle(x, z);
+            if k > 0.0 {
+                let top = seaf + 1.0 + (k - 0.5).max(0.0) * 10.0;
+                let hh = (h as f32 + (top - h as f32) * (k * 2.0).min(1.0)).round() as i32;
+                (hh, if hh >= sea - 1 { Biome::MushroomIslands } else { biome })
+            } else {
+                (h, biome)
+            }
+        } else {
+            (h, biome)
+        };
+        (h, biome)
+    }
+
+    /// The biome whose ground covers a column: its own, but near a border
+    /// sometimes the neighbour's, so edges come out ragged rather than ruled
+    /// (worlds from version 3; older ones use the column's own).
+    pub fn ground_biome(&self, x: i32, z: i32, own: Biome) -> Biome {
+        if self.opts.version < 3 {
+            return own;
+        }
+        let jx = ((hash2(self.seed ^ 0xB1E, x, z) - 0.5) * 9.0) as i32;
+        let jz = ((hash2(self.seed ^ 0xB1F, x, z) - 0.5) * 9.0) as i32;
+        let other = self.column(x + jx, z + jz).1;
+        // (Only between land biomes: the shore stays where the water is.)
+        if other.is_ocean() || own.is_ocean() || matches!(other, Biome::StonyPeaks | Biome::MushroomIslands) || matches!(own, Biome::StonyPeaks | Biome::MushroomIslands) { own } else { other }
+    }
+
     /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
     pub fn cold(&self, x: i32, z: i32) -> bool {
+        if self.opts.version >= 3 {
+            return self.climate(x, z).0 < -0.32;
+        }
         let bs = self.opts.biome_scale();
         self.temp.fbm2(x as f32 / (520.0 * bs) + 300.0, z as f32 / (520.0 * bs), 3) < -0.3
     }
@@ -792,7 +977,7 @@ impl Generator {
             _ => 0.0,
         };
         // Swamp trees and mangroves stand in the shallows too.
-        let ground = if matches!(biome, Biome::Swamp | Biome::Mangrove) { SEA - 2 } else { SEA + 1 };
+        let ground = if matches!(biome, Biome::Swamp | Biome::Mangrove) { self.sea() - 2 } else { self.sea() + 1 };
         if h <= ground || hash2(self.seed ^ 0x7EE, x, z) >= density {
             return None;
         }
@@ -847,7 +1032,7 @@ impl Generator {
             return false;
         }
         // Keep the sea floor sealed so oceans don't pour into nowhere.
-        if surface <= SEA + 1 && y >= surface - 5 {
+        if surface <= self.sea() + 1 && y >= surface - 5 {
             return false;
         }
         let (fx, fy, fz) = (x as f32, y as f32, z as f32);
@@ -859,15 +1044,17 @@ impl Generator {
         y < 36 && self.cavern.noise3(fx / 55.0, fy / 28.0, fz / 55.0) > 0.42
     }
 
+    /// Chunk (cx, cz) of this generator's dimension (in its own coordinates).
     pub fn generate(&self, cx: i32, cz: i32) -> Vec<Id> {
-        // Far east: the wall, then the Scorchlands (see scorch.rs).
-        if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL {
-            return self.generate_scorch(cx, cz);
+        match self.dim {
+            Dim::Over => self.generate_over(cx, cz),
+            // (The other dimensions are generated in generator coordinates; see dims.rs.)
+            Dim::Scorch => self.generate_scorch(cx + self.dim.gen_cx(), cz),
+            Dim::Hollow => self.generate_hollow(cx + self.dim.gen_cx(), cz),
         }
-        // Far west: the wall, then the Hollow (see hollow.rs).
-        if cx * CW < crate::hollow::HOLLOW_X + crate::hollow::WALL {
-            return self.generate_hollow(cx, cz);
-        }
+    }
+
+    fn generate_over(&self, cx: i32, cz: i32) -> Vec<Id> {
         let mut b = vec![AIR; CHUNK_VOL];
         let s = self.seed;
         let mut cols = [(0i32, Biome::Plains); 256];
@@ -877,7 +1064,9 @@ impl Generator {
                 let (x, z) = (cx * CW + lx, cz * CW + lz);
                 let (h, biome) = self.column(x, z);
                 cols[(lz * CW + lx) as usize] = (h, biome);
-                let beach = (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::MushroomIslands | Biome::IceSpikes | Biome::StonyPeaks);
+                // (What the ground is made of: ragged at the borders; see `ground_biome`.)
+                let biome = self.ground_biome(x, z, biome);
+                let beach = (self.sea() - 1..=self.sea() + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::MushroomIslands | Biome::IceSpikes | Biome::StonyPeaks);
                 let peaks = biome == Biome::StonyPeaks;
                 // (Mangrove mudflats are muddier swamps.)
                 let swamp = matches!(biome, Biome::Swamp | Biome::Mangrove);
@@ -887,7 +1076,7 @@ impl Generator {
                 let steep = badlands && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| (self.column(x + dx, z + dz).0 - h).abs() >= 2);
                 // Badlands stripes wobble a little up and down across the land.
                 let wobble = (self.hills.noise2(x as f32 / 40.0, z as f32 / 40.0) * 3.0) as i32;
-                for y in 0..CH.min(h.max(SEA) + 1) {
+                for y in 0..CH.min(h.max(self.sea()) + 1) {
                     let id = if y == 0 || (y <= 2 && hash3(s, x, y, z) < 0.5) {
                         BEDROCK
                     } else if badlands && y >= h - 14 && (y < h || (y == h && steep)) {
@@ -898,7 +1087,7 @@ impl Generator {
                         if biome == Biome::Desert && y >= h - 8 { SANDSTONE } else { STONE }
                     } else if y < h {
                         if biome == Biome::Desert || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else if peaks { STONE } else { DIRT }
-                    } else if y == h && h >= SEA - 1 && matches!(biome, Biome::StonyPeaks | Biome::MushroomIslands | Biome::IceSpikes) {
+                    } else if y == h && h >= self.sea() - 1 && matches!(biome, Biome::StonyPeaks | Biome::MushroomIslands | Biome::IceSpikes) {
                         match biome {
                             // Bare rock, with patches of gravel and calcite.
                             Biome::StonyPeaks => {
@@ -911,9 +1100,9 @@ impl Generator {
                     } else if y == h {
                         if swamp {
                             let mud = if mangrove { 0.65 } else { 0.3 };
-                            if hash2(s ^ 0x3D, x, z) < mud { MUD } else if h < SEA { DIRT } else { GRASS }
-                        } else if h < SEA - 1 {
-                            if hash2(s ^ 0x6A, x, z) < 0.3 { GRAVEL } else if h > SEA - 6 { SAND } else { DIRT }
+                            if hash2(s ^ 0x3D, x, z) < mud { MUD } else if h < self.sea() { DIRT } else { GRASS }
+                        } else if h < self.sea() - 1 {
+                            if hash2(s ^ 0x6A, x, z) < 0.3 { GRAVEL } else if h > self.sea() - 6 { SAND } else { DIRT }
                         } else if badlands && !steep {
                             RED_SAND
                         } else if biome == Biome::Desert || beach {
@@ -929,7 +1118,7 @@ impl Generator {
                     b[idx(lx, y, lz)] = id;
                 }
                 // Caves, ravines and ores
-                let ravine = if h > SEA + 2 && !biome.is_ocean() { self.ravine_floor(x, z) } else { None };
+                let ravine = if h > self.sea() + 2 && !biome.is_ocean() { self.ravine_floor(x, z) } else { None };
                 for y in 1..h + 1 {
                     let i = idx(lx, y, lz);
                     if b[i] == BEDROCK {
@@ -1080,10 +1269,10 @@ impl Generator {
                     Biome::LukewarmOcean => 0.12,
                     _ => 0.0,
                 };
-                let reef = (SEA - 18..SEA - 3).contains(&h) && hash2(s ^ 0xC0A1, x >> 3, z >> 3) < reefs && hash2(s ^ 0xC0A2, x, z) < 0.75;
-                if !reef && biome.is_ocean() && h < SEA - 1 && b[idx(lx, h + 1, lz)] == WATER {
+                let reef = (self.sea() - 18..self.sea() - 3).contains(&h) && hash2(s ^ 0xC0A1, x >> 3, z >> 3) < reefs && hash2(s ^ 0xC0A2, x, z) < 0.75;
+                if !reef && biome.is_ocean() && h < self.sea() - 1 && b[idx(lx, h + 1, lz)] == WATER {
                     // Kelp, seagrass and sea pickles on the rest of the sea floor (see seas.rs).
-                    if let Some((plant, tall)) = crate::seas::floor_plant(self, biome, x, z, SEA - h) {
+                    if let Some((plant, tall)) = crate::seas::floor_plant(self, biome, x, z, self.sea() - h) {
                         for y in h + 1..=h + tall {
                             b[idx(lx, y, lz)] = plant;
                         }
@@ -1093,10 +1282,10 @@ impl Generator {
                 if biome == Biome::FrozenOcean {
                     let berg = self.iceberg(x, z);
                     if berg > 0 {
-                        for y in (SEA - berg / 2).max(h + 1)..=SEA + berg {
+                        for y in (self.sea() - berg / 2).max(h + 1)..=self.sea() + berg {
                             b[idx(lx, y, lz)] = PACKED_ICE;
                         }
-                        b[idx(lx, SEA + berg + 1, lz)] = SNOW_BLOCK;
+                        b[idx(lx, self.sea() + berg + 1, lz)] = SNOW_BLOCK;
                     }
                 }
                 if reef {
@@ -1114,8 +1303,8 @@ impl Generator {
                 if top < CH && badlands && b[idx(lx, h, lz)] == RED_SAND && b[idx(lx, top, lz)] == AIR && hash2(s ^ 0xDB, x, z) < 0.02 {
                     b[idx(lx, top, lz)] = DEAD_BUSH;
                 }
-                if swamp && h < SEA && b[idx(lx, SEA, lz)] == WATER && hash2(s ^ 0x111, x, z) < 0.08 {
-                    b[idx(lx, SEA + 1, lz)] = LILY_PAD;
+                if swamp && h < self.sea() && b[idx(lx, self.sea(), lz)] == WATER && hash2(s ^ 0x111, x, z) < 0.08 {
+                    b[idx(lx, self.sea() + 1, lz)] = LILY_PAD;
                 }
                 // Pokey Plants in the desert (and badlands), 1-3 tall (on dry land only).
                 if biome.dry() && top + 3 < CH && matches!(b[idx(lx, h, lz)], SAND | RED_SAND) && b[idx(lx, top, lz)] == AIR && hash2(s ^ 0xCAC, x, z) < 0.005 {
@@ -1125,8 +1314,8 @@ impl Generator {
                     }
                 }
                 // Cold seas freeze over.
-                if h < SEA && b[idx(lx, SEA, lz)] == WATER && self.cold(x, z) {
-                    b[idx(lx, SEA, lz)] = ICE;
+                if h < self.sea() && b[idx(lx, self.sea(), lz)] == WATER && self.cold(x, z) {
+                    b[idx(lx, self.sea(), lz)] = ICE;
                 }
                 if top < CH && b[idx(lx, top, lz)] == AIR {
                     let below = b[idx(lx, h, lz)];
@@ -1152,7 +1341,7 @@ impl Generator {
                     }
                     let i = idx(lx, p.y, lz);
                     // Mangrove roots in the water (or at the water's edge) are waterlogged.
-                    let id = if id == MANGROVE_ROOTS && (is_water(b[i]) || (p.y <= SEA && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| self.column(p.x + dx, p.z + dz).0 < p.y))) {
+                    let id = if id == MANGROVE_ROOTS && (is_water(b[i]) || (p.y <= self.sea() && [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| self.column(p.x + dx, p.z + dz).0 < p.y))) {
                         MANGROVE_ROOTS_WET
                     } else {
                         id
@@ -1351,7 +1540,12 @@ impl World {
     }
 
     pub fn with_options(seed: u32, opts: GenOptions) -> Self {
-        let generator = Arc::new(Generator::with(seed, opts));
+        World::with_dim(seed, opts, Dim::Over)
+    }
+
+    /// A world for dimension `dim` (see dims.rs).
+    pub fn with_dim(seed: u32, opts: GenOptions, dim: Dim) -> Self {
+        let generator = Arc::new(Generator::with_dim(seed, opts, dim));
         let (req_tx, req_rx) = channel::<(i32, i32)>();
         let (res_tx, res_rx) = channel();
         let req_rx = Arc::new(Mutex::new(req_rx));
@@ -1416,6 +1610,41 @@ impl World {
 
     pub fn seed(&self) -> u32 {
         self.generator.seed
+    }
+
+    /// Which dimension this is.
+    /// Sea level (see `GenOptions::sea`).
+    pub fn sea(&self) -> i32 {
+        self.generator.sea()
+    }
+
+    pub fn dim(&self) -> Dim {
+        self.generator.dim
+    }
+
+    pub fn is_scorch(&self) -> bool {
+        self.dim() == Dim::Scorch
+    }
+
+    pub fn is_hollow(&self) -> bool {
+        self.dim() == Dim::Hollow
+    }
+
+    /// The structure that starts in chunk (cx, cz), in this dimension's own coordinates.
+    pub fn site(&self, cx: i32, cz: i32) -> Option<crate::structures::Site> {
+        let off = self.dim().gen_x();
+        self.generator.site(cx + self.dim().gen_cx(), cz).map(|s| crate::structures::Site { origin: s.origin - ivec3(off, 0, 0), ..s })
+    }
+
+    /// The kind of structure whose middle is within `r` of `p` (this dimension's coordinates).
+    pub fn site_near(&self, p: Vec3, r: f32) -> Option<crate::structures::Kind> {
+        self.generator.site_near(p + Vec3::new(self.dim().gen_x() as f32, 0.0, 0.0), r)
+    }
+
+    /// The nearest structure of a kind to `at` (this dimension's coordinates).
+    pub fn nearest_site(&self, kind: crate::structures::Kind, at: Vec3, radius: i32) -> Option<IVec3> {
+        let off = self.dim().gen_x();
+        self.generator.nearest_site(kind, at + Vec3::new(off as f32, 0.0, 0.0), radius).map(|p| p - ivec3(off, 0, 0))
     }
 
     /// Queue generation for chunks around a point and absorb finished ones.
@@ -1878,7 +2107,7 @@ impl World {
                 let (h, biome) = self.generator.column(x, z);
                 // Solid ground: no cave mouth or ravine to drop straight into.
                 let solid = (h - 4..=h).all(|y| !self.generator.is_cave(x, y, z, h)) && self.generator.ravine_floor(x, z).is_none();
-                if h > SEA + 1 && !biome.is_ocean() && solid && self.generator.tree_at(x, z).is_none() {
+                if h > self.sea() + 1 && !biome.is_ocean() && solid && self.generator.tree_at(x, z).is_none() {
                     return Vec3::new(x as f32 + 0.5, h as f32 + 1.0, z as f32 + 0.5);
                 }
             }
@@ -1960,7 +2189,7 @@ mod biome_tests {
             for x in (-6000..6000).step_by(40) {
                 let (h, b) = g.column(x, z);
                 seen.entry(b.name()).or_insert((x, z));
-                if h > SEA + 3 {
+                if h > g.sea() + 3 {
                     inland.entry(b.name()).or_insert((x, z));
                 }
             }
@@ -2006,7 +2235,7 @@ mod biome_tests {
                             for lx in 0..CW {
                                 let id = chunk[idx(lx, y, lz)];
                                 if id == CACTUS {
-                                    assert!(y > SEA && !is_water(chunk[idx(lx, y + 1, lz)]), "a cactus in the water at {} {y} {}", ccx * CW + lx, ccz * CW + lz);
+                                    assert!(y > g.sea() && !is_water(chunk[idx(lx, y + 1, lz)]), "a cactus in the water at {} {y} {}", ccx * CW + lx, ccz * CW + lz);
                                 }
                                 if id == MANGROVE_ROOTS_WET {
                                     wet += 1;
@@ -2046,5 +2275,87 @@ mod biome_tests {
             let under = chunk[idx(x.rem_euclid(CW), s.y as i32 - 1, z.rem_euclid(CW))];
             assert!(is_solid(under), "seed {seed}: spawn at {s} stands on {}", block(under).name);
         }
+    }
+}
+
+#[cfg(test)]
+mod v3_tests {
+    use super::*;
+
+    /// Median length of a land biome's stretch along lines across the world.
+    fn median_run(g: &Generator) -> i32 {
+        let mut runs = Vec::new();
+        for z in (-4000..4000).step_by(400) {
+            let (mut prev, mut run) = (None, 0);
+            for x in (-4000..4000).step_by(8) {
+                let b = g.column(x, z).1;
+                if Some(b) == prev {
+                    run += 8;
+                } else {
+                    if prev.is_some_and(|p: Biome| !p.is_ocean()) {
+                        runs.push(run);
+                    }
+                    (prev, run) = (Some(b), 8);
+                }
+            }
+        }
+        runs.sort_unstable();
+        runs[runs.len() / 2]
+    }
+
+    #[test]
+    fn new_worlds_change_by_degrees() {
+        let g = Generator::with(2024, GenOptions::DEFAULT);
+        use Biome::*;
+        let frozen = |b: Biome| matches!(b, Snowy | IceSpikes);
+        let mild = |b: Biome| matches!(b, Plains | Forest | BirchForest | DarkForest | Cherry | Meadow | PaleGarden | Swamp);
+        let hot = |b: Biome| matches!(b, Desert | Badlands);
+        let warm = |b: Biome| matches!(b, Savanna | Jungle | Mangrove);
+        let mut count: HashMap<Biome, usize> = HashMap::new();
+        let mut worst_swamp_step = 0;
+        for z in (-3000..3000).step_by(24) {
+            for x in (-3000..3000).step_by(2) {
+                let ((h1, a), (h2, b)) = (g.column(x, z), g.column(x + 2, z));
+                *count.entry(a).or_insert(0) += 1;
+                // Snow meets taiga (or the sea, or peaks), never the mild or hot lands.
+                // (Snow on high mountaintops can meet anything that climbs that high.)
+                let high = h1.max(h2) > g.sea() + 40;
+                assert!(high || !(frozen(a) && (mild(b) || hot(b) || warm(b))) && !(frozen(b) && (mild(a) || hot(a) || warm(a))), "{a:?} next to {b:?} at {x},{z}");
+                // Desert and badlands meet savanna or jungle, not the temperate lands.
+                assert!(!(hot(a) && (mild(b) || b == Taiga)) && !(hot(b) && (mild(a) || a == Taiga)), "{a:?} next to {b:?} at {x},{z}");
+                if [a, b].iter().any(|b| matches!(b, Swamp | Mangrove)) {
+                    worst_swamp_step = worst_swamp_step.max((h1 - h2).abs());
+                }
+            }
+        }
+        assert!(worst_swamp_step <= 4, "swamps meet their neighbours gently (worst step {worst_swamp_step} over 2 blocks)");
+        let total: usize = count.values().sum();
+        for (b, n) in &count {
+            assert!(*n as f32 / (total as f32) < 0.25, "{b:?} covers too much");
+        }
+        // Smaller than "normal" was before version 3.
+        let before = Generator::with(2024, GenOptions { version: 2, ..GenOptions::DEFAULT });
+        let (now, then) = (median_run(&g), median_run(&before));
+        assert!(now * 3 < then * 2 && now >= 16, "median stretch {now} blocks (it was {then})");
+    }
+
+    #[test]
+    fn ground_cover_is_ragged_at_borders() {
+        let g = Generator::with(7, GenOptions::DEFAULT);
+        // Somewhere taiga meets plains: the ground there mixes the two.
+        let (mut mixed, mut seen) = (0, 0);
+        for z in (-2000..2000).step_by(37) {
+            for x in (-2000..2000).step_by(3) {
+                let own = g.column(x, z).1;
+                if own == Biome::Plains && g.column(x + 3, z).1 == Biome::Taiga {
+                    seen += 1;
+                    mixed += (-4..=4).filter(|d| g.ground_biome(x + d, z, g.column(x + d, z).1) != g.column(x + d, z).1).count();
+                }
+            }
+        }
+        assert!(seen > 5 && mixed > seen, "{mixed} mixed columns at {seen} borders");
+        // Older worlds keep their straight edges.
+        let old = Generator::with(7, GenOptions { version: 2, ..GenOptions::DEFAULT });
+        assert_eq!(old.ground_biome(5, 5, Biome::Plains), Biome::Plains);
     }
 }

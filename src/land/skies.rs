@@ -48,7 +48,7 @@ fn spot(g: &mut DynGeo, centre: Vec3, dir: Vec3, size: f32, rgb: [u8; 3]) {
 impl Game {
     /// Shooting stars come and go; a rainbow follows the rain.
     pub fn skies_tick(&mut self, dt: f32) {
-        if self.dedicated || self.elsewhere() {
+        if self.away() || self.elsewhere() {
             return;
         }
         let wet = self.weather.kind.wet();

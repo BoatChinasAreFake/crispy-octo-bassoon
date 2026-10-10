@@ -230,7 +230,7 @@ impl Game {
         // Anyone under it.
         let under = |p: Vec3| still.iter().any(|q| (p.x - (q.x as f32 + 0.5)).abs() < 1.0 && (p.z - (q.z as f32 + 0.5)).abs() < 1.0 && (p.y - q.y as f32).abs() < 3.0);
         let cause = "was buried in a cave-in. Should have propped it up";
-        if !self.dedicated && self.dead.is_none() && under(self.player.body.pos) {
+        if !self.away() && self.dead.is_none() && under(self.player.body.pos) {
             self.player.hurt = 0.0;
             self.hurt_player(CRUSH, cause);
             self.advance("sinking_feeling");
@@ -244,7 +244,7 @@ impl Game {
 
     /// A message to everyone within earshot of `at` (the local player, and joined players).
     fn tell_near(&mut self, at: Vec3, text: &str) {
-        if !self.dedicated && self.player.body.pos.distance(at) < 24.0 {
+        if !self.away() && self.player.body.pos.distance(at) < 24.0 {
             self.msg(text.to_string());
         }
         let near: Vec<u32> = self.peers.iter().filter(|(_, p)| p.target.distance(at) < 24.0).map(|(&id, _)| id).collect();
@@ -265,7 +265,7 @@ impl Game {
         self.cave_ins.retain(|c| !held(c));
         for at in settled {
             self.tell_near(at, "The ceiling settles. That'll hold.");
-            if !self.dedicated && self.player.body.pos.distance(at) < 24.0 {
+            if !self.away() && self.player.body.pos.distance(at) < 24.0 {
                 self.advance("propped_up");
             }
         }

@@ -822,6 +822,8 @@ pub const T_GOAT_HOOF: u16 = 983;
 pub const T_GOAT_HORN_TILE: u16 = 984;
 pub const T_GRUMBLE_PANTS: u16 = 985;
 pub const T_GOAT_HEAD_SIDE: u16 = 986;
+/// The Hollow Wyrm's horns, spines and tail spade.
+pub const T_WYRM_HORN: u16 = 987;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -3730,11 +3732,33 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         let d = dx * dx + dy * dy;
         if d < 6 { rgb(10, 20, 15) } else if d < 30 { rgb(40, 170, 120) } else if d < 40 { rgb(20, 90, 70) } else { [0, 0, 0, 0] }
     });
-    a.each(T_WYRM_SKIN, |x, y, r, _| shade(rgb(30, 25, 40), r.range(0.7, 1.2) * if (x + y) % 6 == 0 { 0.7 } else { 1.0 }));
-    a.each(T_WYRM_WING, |x, _, r, _| shade(rgb(55, 40, 70), r.range(0.8, 1.1) * if x % 4 == 0 { 0.6 } else { 1.0 }));
+    // Overlapping scales: each row offset from the last, dark at their lower edges.
+    a.each(T_WYRM_SKIN, |x, y, r, _| {
+        let (row, k) = (y / 3, (x + (y / 3 % 2) * 2) % 4);
+        let edge = y % 3 == 2 || k == 0;
+        let glint = (row + x / 4) % 5 == 0 && y % 3 == 0;
+        shade(rgb(34, 27, 46), r.range(0.85, 1.1) * if edge { 0.62 } else if glint { 1.35 } else { 1.0 })
+    });
+    // Thin skin, darker veins fanning out from the front edge.
+    a.each(T_WYRM_WING, |x, y, r, _| {
+        let vein = (x + y / 2) % 6 == 0 || (x as i32 - y as i32).rem_euclid(9) == 0;
+        shade(rgb(70, 46, 92), r.range(0.9, 1.08) * if vein { 0.55 } else { 1.0 })
+    });
+    a.each(T_WYRM_HORN, |_, y, r, _| shade(rgb(205, 195, 170), r.range(0.85, 1.05) * if y % 4 == 0 { 0.8 } else { 1.0 }));
+    // The face: glowing eyes under a heavy brow, and a row of teeth.
     a.copy(T_WYRM_SKIN, T_WYRM_FACE);
-    for (x, y) in [(3, 6), (4, 6), (11, 6), (12, 6)] {
-        a.set(T_WYRM_FACE, x, y, rgb(200, 60, 230));
+    for x in 2..14 {
+        a.set(T_WYRM_FACE, x, 4, rgb(18, 14, 24));
+    }
+    for (x, y) in [(3, 6), (4, 6), (5, 6), (4, 7), (10, 6), (11, 6), (12, 6), (11, 7)] {
+        a.set(T_WYRM_FACE, x, y, rgb(215, 90, 245));
+    }
+    for (x, y) in [(4, 5), (11, 5)] {
+        a.set(T_WYRM_FACE, x, y, rgb(250, 190, 255));
+    }
+    for x in (2..14).step_by(2) {
+        a.set(T_WYRM_FACE, x, 13, rgb(225, 220, 205));
+        a.set(T_WYRM_FACE, x + 1, 14, rgb(225, 220, 205));
     }
     a.copy(T_COBBLE, T_DISPENSER_FACE);
     for y in 5..11 {

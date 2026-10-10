@@ -388,7 +388,7 @@ impl Game {
         // Riders who've left leave their seats empty.
         if host {
             let peers: Vec<u32> = self.peers.keys().copied().collect();
-            let local = if self.dedicated { None } else { self.riding };
+            let local = if self.away() { None } else { self.riding };
             for v in self.vehicles.iter_mut() {
                 let gone = v.rider != 0 && v.rider != me && !peers.contains(&(v.rider - 1));
                 if gone || (v.rider == me && local != Some(v.id)) {

@@ -195,10 +195,12 @@ impl App {
             let hours = ((g.time * 24.0 + 6.0) % 24.0) as i32;
             let lines = [
                 format!("Minceraft {} ({:.0} fps)", paths::version(), self.fps),
-                format!("XYZ: {:.2} / {:.2} / {:.2}", p.x, p.y, p.z),
+                format!("XYZ: {:.2} / {:.2} / {:.2} in {}", p.x, p.y, p.z, g.dim.name()),
                 format!("Facing: {facing}"),
-                if crate::scorch::in_scorch(p.x) {
+                if g.world.is_scorch() {
                     format!("Biome: {}", g.world.scorch_biome_at(p).name())
+                } else if g.world.is_hollow() {
+                    "Biome: the Hollow".to_string()
                 } else {
                     format!("Biome: {} (surface {hgt})", biome.name())
                 },
@@ -207,7 +209,7 @@ impl App {
                     let (pcx, pcz) = ((p.x / 16.0).floor() as i32, (p.z / 16.0).floor() as i32);
                     let near = (-6..=6)
                         .flat_map(|dz| (-6..=6).map(move |dx| (pcx + dx, pcz + dz)))
-                        .filter_map(|(cx, cz)| g.world.generator.site(cx, cz))
+                        .filter_map(|(cx, cz)| g.world.site(cx, cz))
                         .min_by_key(|s| (s.origin.x as f32 - p.x).hypot(s.origin.z as f32 - p.z) as i32);
                     match near {
                         Some(s) => format!("Nearest structure: {} at {}, {}, {}", s.kind.name(), s.origin.x, s.origin.y, s.origin.z),
@@ -349,7 +351,7 @@ impl App {
             let (dx, dy) = (a.sin(), -a.cos());
             draw_line(cx, cy, cx + dx * r * 0.85, cy + dy * r * 0.85, 3.0 * s, Color::new(0.85, 0.1, 0.1, 1.0));
             draw_line(cx, cy, cx - dx * r * 0.5, cy - dy * r * 0.5, 3.0 * s, Color::new(0.3, 0.3, 0.35, 1.0));
-            if !scorch::in_scorch(g.player.body.pos.x) {
+            if target.is_some() || g.lodestone.is_some() {
                 let what = if g.lodestone.is_some() { "Lodestone" } else { "Home" };
                 let text = match target {
                     Some(t) => format!("{what}: {} blocks", Vec2::new(t.x - g.player.body.pos.x, t.z - g.player.body.pos.z).length() as i32),
@@ -425,7 +427,7 @@ impl App {
                     }
                 }
                 // Where you last died: a dark cross.
-                if let Some(d) = self.game.last_death.filter(|_| !scorch::in_scorch(me.x)) {
+                if let Some(d) = self.game.last_death.filter(|d| d.0 == self.game.dim).map(|d| d.1) {
                     let (dx, dz) = ((d.x - me.x) / scale, (d.z - me.z) / scale);
                     let half = navigation::MAP_SIZE as f32 / 2.0;
                     if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {

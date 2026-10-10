@@ -227,7 +227,7 @@ impl Game {
             return false;
         }
         // Water boils away in the Scorchlands.
-        if liquid == WATER && crate::scorch::in_scorch(place.x as f32) {
+        if liquid == WATER && self.world.is_scorch() {
             if !self.creative {
                 let slot = self.inv.selected;
                 self.inv.slots[slot] = Some((BUCKET, 1));

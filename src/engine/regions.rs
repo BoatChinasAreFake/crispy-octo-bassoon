@@ -47,6 +47,136 @@ pub fn region_dir(world_file: &Path) -> PathBuf {
     world_file.with_extension("regions")
 }
 
+/// Where dimension `dim`'s regions go, given the world's region folder.
+pub fn dim_dir(base: &Path, dim: crate::dims::Dim) -> PathBuf {
+    match dim {
+        crate::dims::Dim::Over => base.to_path_buf(),
+        d => base.join(format!("dim{}", d.index())),
+    }
+}
+
+impl Regions {
+    /// A fresh store for another dimension of the same world.
+    pub fn for_dim(&self, dim: crate::dims::Dim) -> Regions {
+        let (io_tx, io_rx) = spawn_reader();
+        Regions { dir: dim_dir(&self.base, dim), base: self.base.clone(), loaded: HashSet::new(), dirty: HashSet::new(), reading: HashMap::new(), ticket: 0, io_tx, io_rx, news: Vec::new() }
+    }
+}
+
+/// One region's worth of things, owned (for `split_old_regions`).
+#[derive(Default)]
+struct Part {
+    chunks: HashMap<(i32, i32), HashMap<u32, Id>>,
+    farm: HashMap<IVec3, Soil>,
+    containers: HashMap<IVec3, Container>,
+    signs: HashMap<IVec3, [String; crate::decor::LINES]>,
+    frames: HashMap<IVec3, (Id, Wear)>,
+}
+
+impl Part {
+    fn read(path: &Path) -> io::Result<(Part, Vec<(Id, String)>)> {
+        let d = decode(&std::fs::read(path)?)?;
+        let (signs, frames) = crate::decor::decode(&d.decor);
+        let part = Part {
+            chunks: d.chunks.into_iter().map(|(k, e)| (k, e.into_iter().collect())).collect(),
+            farm: crate::farming::decode(&d.farm),
+            containers: crate::containers::decode(&d.containers, 4),
+            signs,
+            frames,
+        };
+        Ok((part, d.palette))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.chunks.is_empty() && self.farm.is_empty() && self.containers.is_empty() && self.signs.is_empty() && self.frames.is_empty()
+    }
+
+    fn write(&self, path: &Path, palette: &[(Id, String)]) -> io::Result<()> {
+        if self.is_empty() {
+            return match std::fs::remove_file(path) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            };
+        }
+        let mut chunks: Vec<ChunkEdits> = self.chunks.iter().map(|(k, m)| (*k, m)).collect();
+        chunks.sort_unstable_by_key(|c| c.0);
+        let bytes = encode(&chunks, palette, &crate::farming::encode(&self.farm), &crate::containers::encode(&self.containers), &crate::decor::encode(&self.signs, &self.frames));
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("tmp");
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(tmp, path)
+    }
+}
+
+/// A world from when the dimensions shared one map: move what its region
+/// files hold for the Scorchlands and the Hollow into those dimensions'
+/// folders, in their own coordinates (see realm_save.rs). Anything already
+/// there (an earlier try that was cut short) is kept.
+pub fn split_old_regions(base: &Path) -> io::Result<()> {
+    use crate::dims::Dim;
+    let Ok(listing) = std::fs::read_dir(base) else { return Ok(()) };
+    let mut files: Vec<PathBuf> = listing.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "mnrg")).collect();
+    files.sort();
+    for path in files {
+        let (part, palette) = Part::read(&path)?;
+        let mut stay = Part::default();
+        let mut away: HashMap<(Dim, (i32, i32)), Part> = HashMap::new();
+        let shift = |p: IVec3| {
+            let d = Dim::of_old_x(p.x);
+            (d, p - IVec3::new(d.gen_x(), 0, 0))
+        };
+        for ((cx, cz), m) in part.chunks {
+            match Dim::of_old_x(cx * crate::world::CW + 8) {
+                Dim::Over => {
+                    stay.chunks.insert((cx, cz), m);
+                }
+                d => {
+                    let k = (cx - d.gen_cx(), cz);
+                    away.entry((d, region_of(k.0, k.1))).or_default().chunks.insert(k, m);
+                }
+            }
+        }
+        macro_rules! sort {
+            ($f:ident) => {
+                for (p, v) in part.$f {
+                    match shift(p) {
+                        (Dim::Over, _) => {
+                            stay.$f.insert(p, v);
+                        }
+                        (d, q) => {
+                            away.entry((d, region_at(q))).or_default().$f.insert(q, v);
+                        }
+                    }
+                }
+            };
+        }
+        sort!(farm);
+        sort!(containers);
+        sort!(signs);
+        sort!(frames);
+        if away.is_empty() {
+            continue;
+        }
+        for ((d, key), mut moved) in away {
+            let to = file_of(&dim_dir(base, d), key);
+            if to.exists() {
+                // Keep what's there; it wins.
+                let (have, _) = Part::read(&to)?;
+                moved.chunks.extend(have.chunks);
+                moved.farm.extend(have.farm);
+                moved.containers.extend(have.containers);
+                moved.signs.extend(have.signs);
+                moved.frames.extend(have.frames);
+            }
+            moved.write(&to, &palette)?;
+        }
+        stay.write(&path, &palette)?;
+    }
+    Ok(())
+}
+
 pub fn region_of(cx: i32, cz: i32) -> (i32, i32) {
     (cx.div_euclid(REGION), cz.div_euclid(REGION))
 }
@@ -71,6 +201,9 @@ pub type ChunkRead = ((i32, i32), Vec<(u32, Id)>);
 /// and which are being read.
 pub struct Regions {
     pub dir: PathBuf,
+    /// The world's region folder (the Overworld's); the other dimensions
+    /// keep theirs in a folder inside it (see `for_dim`).
+    pub base: PathBuf,
     loaded: HashSet<(i32, i32)>,
     dirty: HashSet<(i32, i32)>,
     /// Regions being read in the background, and the ticket of the read that counts.
@@ -190,7 +323,11 @@ impl World {
             .chain(self.farm.keys().chain(self.containers.keys()).chain(self.signs.keys()).chain(self.frames.keys()).map(|&p| region_at(p)))
             .collect();
         let (io_tx, io_rx) = spawn_reader();
-        self.regions = Some(Regions { dir, loaded: held.clone(), dirty: held, reading: HashMap::new(), ticket: 0, io_tx, io_rx, news: Vec::new() });
+        self.regions = Some(Regions { base: dir.clone(), dir, loaded: held.clone(), dirty: held, reading: HashMap::new(), ticket: 0, io_tx, io_rx, news: Vec::new() });
+        let dim = self.dim();
+        if let Some(r) = &mut self.regions {
+            r.dir = dim_dir(&r.base, dim);
+        }
     }
 
     /// Start reading a region in the background, if it isn't in memory or on its way.
@@ -445,6 +582,36 @@ mod tests {
         assert_eq!(decode(&v1).unwrap().chunks, vec![((0, 0), vec![(9, TORCH)])]);
         assert_eq!(region_of(-1, 31), (-1, 0));
         assert_eq!(region_of(32, -33), (1, -2));
+    }
+
+    #[test]
+    fn old_one_map_regions_are_sorted_into_dimensions() {
+        use crate::dims::Dim;
+        let dir = temp_dir("split");
+        let far = crate::scorch::SCORCH_ORIGIN;
+        let (fcx, home) = (far / CW, (2, 3));
+        let mut hot = HashMap::new();
+        hot.insert(1, STONE);
+        let mut cool = HashMap::new();
+        cool.insert(2, TORCH);
+        // One region file per place, as the old layout wrote them.
+        let sign = ["Hot".to_string(), String::new(), String::new(), String::new()];
+        let signs: HashMap<IVec3, [String; crate::decor::LINES]> = HashMap::from([(ivec3(far + 5, 40, 7), sign)]);
+        std::fs::create_dir_all(&dir).unwrap();
+        let palette = crate::game::mod_palette(reg());
+        std::fs::write(file_of(&dir, region_of(fcx, 0)), encode(&[((fcx, 0), &hot)], &palette, &[], &[], &crate::decor::encode(&signs, &HashMap::new()))).unwrap();
+        std::fs::write(file_of(&dir, region_of(home.0, home.1)), encode(&[(home, &cool)], &palette, &[], &[], &[])).unwrap();
+        split_old_regions(&dir).unwrap();
+        // The Overworld's stays; the Scorchlands' moves to its own folder and coordinates.
+        assert!(file_of(&dir, region_of(home.0, home.1)).exists());
+        assert!(!file_of(&dir, region_of(fcx, 0)).exists());
+        let moved = decode(&std::fs::read(file_of(&dim_dir(&dir, Dim::Scorch), region_of(0, 0))).unwrap()).unwrap();
+        assert_eq!(moved.chunks, vec![((0, 0), vec![(1, STONE)])]);
+        assert!(crate::decor::decode(&moved.decor).0.contains_key(&ivec3(5, 40, 7)));
+        // Doing it again changes nothing.
+        split_old_regions(&dir).unwrap();
+        assert!(file_of(&dim_dir(&dir, Dim::Scorch), region_of(0, 0)).exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

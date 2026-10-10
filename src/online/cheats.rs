@@ -55,7 +55,16 @@ impl Game {
         if self.is_local_player(name) {
             Some(self.player.body.pos)
         } else {
-            self.peer_by_name(name).and_then(|id| self.peers.get(&id)).map(|p| p.target)
+            self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.target)
+        }
+    }
+
+    /// Which dimension a player (by name) is in.
+    fn player_dim(&self, name: &str) -> Option<crate::dims::Dim> {
+        if self.is_local_player(name) {
+            Some(self.dim)
+        } else {
+            self.peer_by_name(name).and_then(|id| self.peer_ref(id)).map(|p| p.dim)
         }
     }
 
@@ -107,18 +116,30 @@ impl Game {
             return vec!["The console has no body; say who to move: tp <player> <x y z | player>".into()];
         }
         let Some(from) = self.player_pos(&who) else { return vec![format!("No player called {who}.")] };
-        let to = match rest {
+        let Some(here) = self.player_dim(&who) else { return vec![format!("No player called {who}.")] };
+        let (to, dim) = match rest {
             [x, y, z] => match (coord(x, from.x), coord(y, from.y), coord(z, from.z)) {
-                (Some(x), Some(y), Some(z)) => Vec3::new(x, y, z),
+                (Some(x), Some(y), Some(z)) => (Vec3::new(x, y, z), here),
                 _ => return vec!["Usage: tp [player] <x y z> (numbers, or ~ for here)".into()],
             },
-            [target] => match self.player_pos(target) {
-                Some(p) => p,
-                None => return vec![format!("No player called {target}.")],
+            [target] => match (self.player_pos(target), self.player_dim(target)) {
+                (Some(p), Some(d)) => (p, d),
+                _ => return vec![format!("No player called {target}.")],
             },
             _ => return vec!["Usage: tp [player] <x y z | player>".into()],
         };
         let to = Vec3::new(to.x, to.y.clamp(-30.0, crate::world::CH as f32 + 60.0), to.z);
+        if dim != here {
+            // To someone in another dimension: there too.
+            let back = self.realm_dim();
+            if self.is_local_player(&who) {
+                self.move_local_player(dim, to);
+            } else if let Some(id) = self.peer_by_name(&who) {
+                self.move_peer(id, dim, to);
+            }
+            self.enter(back);
+            return vec![format!("Teleported {who} to {} at {:.1}, {:.1}, {:.1}.", dim.name(), to.x, to.y, to.z)];
+        }
         self.apply_cmds(vec![Cmd::Teleport(who.clone(), to)]);
         vec![format!("Teleported {who} to {:.1}, {:.1}, {:.1}.", to.x, to.y, to.z)]
     }
@@ -156,7 +177,7 @@ impl Game {
         if self.is_local_player(me) {
             return (self.player.body.pos, self.player.look_dir());
         }
-        match self.peer_by_name(me).and_then(|id| self.peers.get(&id)) {
+        match self.peer_by_name(me).and_then(|id| self.peer_ref(id)) {
             Some(p) => (p.target, Vec3::new(p.yaw.sin(), 0.0, -p.yaw.cos())),
             None => (self.spawn, Vec3::Z),
         }
@@ -202,13 +223,13 @@ impl Game {
         }
         // The Scorchlands' biomes: searched from here if you're down there, else from where a portal here would lead.
         if let Some(biome) = crate::wilds::ScorchBiome::from_name(&what) {
-            let from = if crate::scorch::in_scorch(here.x) { here.floor().as_ivec3() } else { crate::scorch::destination(here.floor().as_ivec3()) };
+            let from = if self.world.is_scorch() { here.floor().as_ivec3() } else { crate::scorch::destination(self.realm_dim(), here.floor().as_ivec3()).1 };
             for r in 0..120 {
                 let step = 8;
                 for k in 0..(r * 8).max(1) {
                     let a = k as f32 / (r * 8).max(1) as f32 * std::f32::consts::TAU;
                     let (x, z) = (from.x + (a.cos() * (r * step) as f32) as i32, from.z + (a.sin() * (r * step) as f32) as i32);
-                    if x > crate::scorch::SCORCH_X + 16 && g.scorch_biome(x, z) == biome {
+                    if self.world.scorch_biome(x, z) == biome {
                         return vec![format!("The nearest {} is around {x}, {z}, down in the Scorchlands ({} blocks from {}, {}).", biome.name(), r * step, from.x, from.z)];
                     }
                 }
@@ -388,8 +409,8 @@ impl Game {
         let (last, done) = words.split_last().map(|(l, d)| (*l, d)).unwrap_or(("", &[]));
         let lower = last.to_ascii_lowercase();
         let players = || {
-            let mut v: Vec<String> = self.peers.values().map(|p| p.name.clone()).collect();
-            if !self.dedicated {
+            let mut v: Vec<String> = self.all_peers().map(|(_, p)| p.name.clone()).collect();
+            if !self.away() {
                 v.push(self.player_name.clone());
             }
             v

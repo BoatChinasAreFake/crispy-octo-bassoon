@@ -679,7 +679,7 @@ impl Game {
         let w = self.weather.kind;
         Conditions {
             daylight: if self.is_night() { 0.0 } else { self.daylight() },
-            raining: w.wet() && !crate::scorch::in_scorch(p.x as f32),
+            raining: w.wet() && self.world.dim().open_sky(),
             thunder: w == crate::weather::Weather::Thunder,
             biome,
             watched: players.iter().any(|q| q.distance(p.as_vec3()) < 6.0),
@@ -1105,7 +1105,7 @@ impl Game {
 
     /// Bees buzzing between hives and flowers near the camera (for show).
     pub fn buzz_tick(&mut self, dt: f32) {
-        if self.menu || self.dedicated {
+        if self.menu || self.away() {
             return;
         }
         let rain = self.weather.kind.wet();

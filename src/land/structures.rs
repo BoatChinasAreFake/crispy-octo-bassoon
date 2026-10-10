@@ -11,11 +11,12 @@
 //! who keeps monsters off the place. It moves in when the square's chest is
 //! first filled, like a hut's Hmmer.
 
+use crate::dims::Dim;
 use crate::block::*;
 use crate::containers::Container;
 use crate::inventory::Wear;
 use crate::noise::{hash2, hash3, Rng};
-use crate::world::{Biome, Generator, World, CH, CW, SEA};
+use crate::world::{Biome, Generator, World, CH, CW};
 use macroquad::math::{ivec3, IVec3};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -137,9 +138,12 @@ pub struct Site {
 
 impl Generator {
     /// The structure (if any) that starts in chunk (cx, cz).
+    /// (In generator coordinates; see dims.rs.)
     pub fn site(&self, cx: i32, cz: i32) -> Option<Site> {
-        if cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL - 2 * CW {
-            return self.scorch_site(cx, cz);
+        match self.dim {
+            Dim::Scorch => return self.scorch_site(cx, cz),
+            Dim::Hollow => return None,
+            Dim::Over => {}
         }
         let s = self.seed ^ 0x57_C0DE;
         let village_spot = self.village_spot(cx, cz);
@@ -182,29 +186,29 @@ impl Generator {
             let (hh, b) = self.column(ox + dx, oz + dz);
             (hh - h).abs() <= 4 && !b.is_ocean()
         });
-        if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && wide_flat() {
+        if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 58 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
         // Pilferers build lookouts on open, flat ground (and, in newer worlds, never within sight of a village).
         let village_near = || self.opts.version >= 2 && (-7..=7).any(|dz| (-7..=7).any(|dx| self.village_spot(cx + dx, cz + dz)));
-        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > SEA + 1 && h < CH - 30 && flat() && flat_r(7, 2) && !village_near() {
+        if outpost_roll && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 58 && flat() && flat_r(7, 2) && !village_near() {
             return Some(Site { kind: Kind::Outpost, origin: ivec3(ox, h, oz), facing, seed });
         }
-        if trial_spot && h > 44 && !self.deep_dark(ox, oz) {
+        if trial_spot && h > self.sea() + 4 && !self.deep_dark(ox, oz) {
             return Some(Site { kind: Kind::TrialChambers, origin: ivec3(ox, crate::trial::chamber_y(s, cx, cz), oz), facing, seed });
         }
-        if monument_spot && biome.is_ocean() && h <= SEA - crate::monument::DEPTH {
+        if monument_spot && biome.is_ocean() && h <= self.sea() - crate::monument::DEPTH {
             // Deep, open sea all round (it levels its own basin; see monument.rs).
             let r = crate::monument::BASIN;
             let open = [(-r, -r), (r, -r), (-r, r), (r, r), (0, r), (0, -r), (r, 0), (-r, 0)].iter().all(|&(dx, dz)| {
                 let (hh, b) = self.column(ox + dx, oz + dz);
-                b.is_ocean() && hh < SEA - 2 && hh >= h - crate::monument::FILL
+                b.is_ocean() && hh < self.sea() - 2 && hh >= h - crate::monument::FILL
             });
             if open {
                 return Some(Site { kind: Kind::Monument, origin: ivec3(ox, h, oz), facing, seed });
             }
         }
-        if shaft_spot && h > 50 && !biome.is_ocean() {
+        if shaft_spot && h > self.sea() + 10 && !biome.is_ocean() {
             let y = 20 + (hash2(s ^ 0x5AF8, cx, cz) * (h - 45).clamp(1, 20) as f32) as i32;
             return Some(Site { kind: Kind::Mineshaft, origin: ivec3(ox, y, oz), facing, seed });
         }
@@ -213,39 +217,39 @@ impl Generator {
             return Some(Site { kind: Kind::HushedCity, origin: ivec3(ox, crate::deepdark::CITY_Y, oz), facing, seed });
         }
         // Wrecks lie on the sea bed; treasure is buried in beaches (see treasure.rs).
-        if wreck_roll && biome.is_ocean() && h < SEA - 7 && h > 6 {
+        if wreck_roll && biome.is_ocean() && h < self.sea() - 7 && h > 6 {
             return Some(Site { kind: Kind::Shipwreck, origin: ivec3(ox, h, oz), facing, seed });
         }
-        if treasure_roll && (SEA - 1..=SEA + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::Mangrove) {
+        if treasure_roll && (self.sea() - 1..=self.sea() + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::Mangrove) {
             return Some(Site { kind: Kind::BuriedTreasure, origin: ivec3(ox, h - 2, oz), facing, seed });
         }
         if !common {
             return None;
         }
         let kind = if r < 0.055 {
-            if h < 30 || biome.is_ocean() {
+            if h < self.sea() - 10 || biome.is_ocean() {
                 return None;
             }
             Kind::Dungeon
-        } else if biome == Biome::Jungle && h > SEA + 1 && h < CH - 30 && r < 0.085 && flat_r(6, 3) {
+        } else if biome == Biome::Jungle && h > self.sea() + 1 && h < self.sea() + 58 && r < 0.085 && flat_r(6, 3) {
             // (Rolls nothing else took, so older worlds' sites stay put.)
             Kind::JungleTemple
-        } else if biome == Biome::Snowy && h > SEA + 1 && r >= 0.085 && flat_r(5, 2) {
+        } else if biome == Biome::Snowy && h > self.sea() + 1 && r >= 0.085 && flat_r(5, 2) {
             Kind::Igloo
-        } else if biome == Biome::Desert && h > SEA + 1 && h < CH - 20 && (0.075..0.09).contains(&r) && flat() && flat_r(7, 2) {
+        } else if biome == Biome::Desert && h > self.sea() + 1 && h < self.sea() + 68 && (0.075..0.09).contains(&r) && flat() && flat_r(7, 2) {
             Kind::DesertPyramid
-        } else if r < 0.057 && matches!(biome, Biome::Plains | Biome::Forest) && h > SEA + 1 && flat() {
+        } else if r < 0.057 && matches!(biome, Biome::Plains | Biome::Forest) && h > self.sea() + 1 && flat() {
             // A lone hut now and then (villages are where the houses are).
             Kind::Hut
-        } else if r < 0.085 && matches!(biome, Biome::Plains | Biome::Forest | Biome::Snowy) && h > SEA + 1 && h < CH - 20 && flat() {
+        } else if r < 0.085 && matches!(biome, Biome::Plains | Biome::Forest | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 68 && flat() {
             Kind::Tower
-        } else if biome == Biome::Desert && h > SEA + 1 && r < 0.075 {
+        } else if biome == Biome::Desert && h > self.sea() + 1 && r < 0.075 {
             Kind::DesertRuins
-        } else if biome == Biome::Desert && h > SEA + 1 && flat() {
+        } else if biome == Biome::Desert && h > self.sea() + 1 && flat() {
             Kind::Well
-        } else if matches!(biome, Biome::Forest | Biome::Taiga | Biome::Jungle | Biome::Plains) && h > SEA + 1 && r >= 0.085 && flat() {
+        } else if matches!(biome, Biome::Forest | Biome::Taiga | Biome::Jungle | Biome::Plains) && h > self.sea() + 1 && r >= 0.085 && flat() {
             Kind::TrailRuins
-        } else if biome.is_ocean() && h < SEA - 4 && h > 8 && r < 0.09 {
+        } else if biome.is_ocean() && h < self.sea() - 4 && h > 8 && r < 0.09 {
             Kind::OceanRuins
         } else {
             return None;
@@ -316,13 +320,13 @@ impl Generator {
             Kind::BastionTreasure => return Vec::new(),
             Kind::Outpost => return crate::raids::outpost_blocks(site, self.opts.version >= 2),
             Kind::TrialChambers => return crate::trial::chamber_blocks(site.origin, site.seed),
-            Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site),
+            Kind::Shipwreck => return crate::treasure::shipwreck_blocks(site, self.sea()),
             Kind::BuriedTreasure => return crate::treasure::treasure_blocks(site),
             Kind::DesertPyramid => return crate::temples::pyramid_blocks(site),
             Kind::JungleTemple => return crate::temples::jungle_temple_blocks(site),
             Kind::Mineshaft => return crate::temples::mineshaft_blocks(site),
             Kind::Igloo => return crate::temples::igloo_blocks(site),
-            Kind::Monument => return crate::monument::monument_blocks(site),
+            Kind::Monument => return crate::monument::monument_blocks(site, self.sea()),
             Kind::Dungeon => {
                 for x in -4..=4i32 {
                     for z in -4..=4i32 {
@@ -570,6 +574,8 @@ impl Generator {
             .collect()
     }
 
+    /// (The next few are in generator coordinates; `World` has versions in a
+    /// dimension's own, see dims.rs.)
     /// Where a village's farmland is (so it can be given soil when it first loads).
     pub fn village_farmland(&self, site: &Site) -> Vec<IVec3> {
         self.village_blocks(site).into_iter().filter(|b| b.1 == FARMLAND_WET).map(|b| b.0).collect()
@@ -578,7 +584,7 @@ impl Generator {
     /// Stamp every structure that reaches into chunk (cx, cz) onto its blocks.
     /// (Villages reach two chunks out; everything else, one.)
     pub fn place_structures(&self, cx: i32, cz: i32, b: &mut [Id]) {
-        let reach = self.site_reach(cx);
+        let reach = self.site_reach();
         for dz in -reach..=reach {
             for dx in -reach..=reach {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };
@@ -606,9 +612,12 @@ impl Generator {
     }
 
     /// Chests of structures that sit in chunk (cx, cz), with what kind of place they're in.
+    /// (Chunk (cx, cz) and what's returned are in the dimension's own
+    /// coordinates; the sites are found in generator coordinates, see dims.rs.)
     pub fn structure_chests(&self, cx: i32, cz: i32) -> Vec<(IVec3, Kind, u32)> {
-        if crate::hollow::in_hollow((cx * CW) as f32) {
-            return crate::hollow::spire_chests(self.seed, cx, cz).into_iter().map(|(p, s)| (p, Kind::Spire, s)).collect();
+        let (cx, back) = (cx + self.dim.gen_cx(), ivec3(self.dim.gen_x(), 0, 0));
+        if self.dim == Dim::Hollow {
+            return crate::hollow::spire_chests(self.seed, cx, cz).into_iter().map(|(p, s)| (p - back, Kind::Spire, s)).collect();
         }
         let mut v = Vec::new();
         for (site, blocks) in self.sites_near(cx, cz) {
@@ -622,19 +631,22 @@ impl Generator {
                     } else {
                         site.kind
                     };
-                    v.push((p, kind, site.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
+                    v.push((p - back, kind, site.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
                 }
             }
         }
+        // The Crypts' side rooms (see hollow.rs).
+        v.extend(self.crypt_chests(cx, cz).into_iter().map(|p| (p, Kind::Dungeon, self.seed ^ (p.x as u32).wrapping_mul(31) ^ (p.z as u32).wrapping_mul(7))));
         v
     }
 
     /// Dispensers built into chunk (cx, cz) (jungle temples' traps).
     pub fn structure_dispensers(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        let (cx, back) = (cx + self.dim.gen_cx(), ivec3(self.dim.gen_x(), 0, 0));
         let mut v = Vec::new();
         for (site, blocks) in self.sites_near(cx, cz) {
             if site.kind == Kind::JungleTemple {
-                v.extend(blocks.into_iter().filter(|(p, id)| crate::contraptions::is_dispenser(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
+                v.extend(blocks.into_iter().filter(|(p, id)| crate::contraptions::is_dispenser(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p - back));
             }
         }
         v
@@ -642,9 +654,10 @@ impl Generator {
 
     /// Monster and Sizzler Cages built into chunk (cx, cz) (see fortress.rs).
     pub fn structure_cages(&self, cx: i32, cz: i32) -> Vec<IVec3> {
+        let (cx, back) = (cx + self.dim.gen_cx(), ivec3(self.dim.gen_x(), 0, 0));
         let mut v = Vec::new();
         for (_, blocks) in self.sites_near(cx, cz) {
-            v.extend(blocks.into_iter().filter(|(p, id)| crate::fortress::is_cage(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p));
+            v.extend(blocks.into_iter().filter(|(p, id)| crate::fortress::is_cage(*id) && p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz).map(|(p, _)| p - back));
         }
         v
     }
@@ -712,13 +725,13 @@ impl Generator {
 
     /// How many chunks out a site can reach into its neighbours. (Newer
     /// worlds' Scorchlands fortresses are bigger: three chunks.)
-    fn site_reach(&self, cx: i32) -> i32 {
-        if self.opts.version >= 2 && cx * CW >= crate::scorch::SCORCH_X - crate::scorch::WALL - 4 * CW { 3 } else { 2 }
+    fn site_reach(&self) -> i32 {
+        if self.opts.version >= 2 && self.dim == Dim::Scorch { 3 } else { 2 }
     }
 
     fn sites_near(&self, cx: i32, cz: i32) -> Vec<(Site, Vec<(IVec3, Id)>)> {
         let mut v = Vec::new();
-        let reach = self.site_reach(cx);
+        let reach = self.site_reach();
         for dz in -reach..=reach {
             for dx in -reach..=reach {
                 let Some(site) = self.site(cx + dx, cz + dz) else { continue };
@@ -1270,7 +1283,9 @@ mod tests {
             }
             sq / sum * 4.0
         };
-        let (old, new) = (typical(&Generator::new(31337)), typical(&g));
+        // (Version 2 grew them; version 3 trims them back a bit; see world.rs.)
+        let v2 = Generator::with(31337, GenOptions { version: 2, ..GenOptions::DEFAULT });
+        let (old, new) = (typical(&Generator::new(31337)), typical(&v2));
         assert!(new > old * 1.4, "old {old}, new {new}");
         // The options pack into the save and the join message.
         let o = GenOptions { version: 1, structures: 3, biome_size: 2, terrain: 0 };

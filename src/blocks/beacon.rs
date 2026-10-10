@@ -127,7 +127,7 @@ impl Game {
             let effect = effect_of(id);
             let star = starred(id);
             let (at, reach) = (p.as_vec3() + Vec3::splat(0.5), reach(id, t));
-            if !self.dedicated && self.dead.is_none() && self.player.body.pos.distance(at) < reach {
+            if !self.away() && self.dead.is_none() && self.player.body.pos.distance(at) < reach {
                 if star && !effect.instant() {
                     self.timed_effect_amplified(effect, LASTS, 1);
                 } else {

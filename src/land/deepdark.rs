@@ -214,7 +214,7 @@ impl Game {
         self.sfx(Sfx::Shriek, Some(q.as_vec3() + Vec3::splat(0.5)));
         // Darkness for everyone nearby.
         let at = q.as_vec3();
-        if self.player.body.pos.distance(at) < 40.0 && !self.dedicated {
+        if self.player.body.pos.distance(at) < 40.0 && !self.away() {
             self.darkness = self.darkness.max(12.0);
         }
         let near: Vec<u32> = self.peers.iter().filter(|(_, p)| p.target.distance(at) < 40.0).map(|(&id, _)| id).collect();
@@ -228,7 +228,7 @@ impl Game {
         w.0 += 1;
         w.1 = 600.0;
         let level = w.0;
-        let to_me = warned == self.my_id && !self.dedicated;
+        let to_me = warned == self.my_id && !self.away();
         let line = match level {
             1 => "A shrieker shrieks. Something, far below, stirs.",
             2 => "Another shriek. Something is listening. Tiptoe.",
@@ -288,7 +288,7 @@ impl Game {
         }
         self.step_timer = 0.6;
         let mut steps: Vec<(Vec3, Option<u32>)> = Vec::new();
-        if !self.dedicated && self.dead.is_none() && !self.spectator {
+        if !self.away() && self.dead.is_none() && !self.spectator {
             let b = &self.player.body;
             let moving = Vec3::new(b.vel.x, 0.0, b.vel.z).length() > 1.0;
             if moving && b.on_ground && !self.player.sneaking && !self.player.flying {

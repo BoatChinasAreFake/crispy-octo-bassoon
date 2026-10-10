@@ -295,7 +295,7 @@ impl Game {
 
     /// Riders who've left free their Gallopers.
     pub fn free_riderless(&mut self) {
-        let me = if self.dedicated { 0 } else { self.my_id + 1 };
+        let me = if self.away() { 0 } else { self.my_id + 1 };
         let local = self.mounted;
         let gone = |who: u32, id: u32| if who == me { local != Some(id) } else { !self.peers.contains_key(&(who - 1)) };
         for m in self.mobs.iter_mut() {

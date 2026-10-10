@@ -4,6 +4,7 @@
 
 use crate::block::*;
 use crate::entity::{Arrow, Mob, MobKind, PrimedTnt};
+use crate::dims::Dim;
 use crate::game::Game;
 use crate::net::*;
 use crate::player::Player;
@@ -48,11 +49,13 @@ pub struct Peer {
     pub stats: Vec<u8>,
     /// Where they were at the last footstep check (see deepdark.rs).
     pub last_step: Vec3,
+    /// Which dimension they're in (see realms.rs).
+    pub dim: crate::dims::Dim,
 }
 
 impl Peer {
     pub(crate) fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos }
+        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -147,7 +150,7 @@ impl Game {
     }
 
     pub fn player_count(&self) -> usize {
-        1 + self.peers.len()
+        1 + self.all_peers().count()
     }
 
     pub fn peer_name(&self, id: u32) -> String {
@@ -157,18 +160,29 @@ impl Game {
         if id == 0 && !self.peers.contains_key(&0) {
             return "Server".into();
         }
-        self.peers.get(&id).map(|p| p.name.clone()).unwrap_or_else(|| format!("Player{id}"))
+        self.peer_ref(id).map(|p| p.name.clone()).unwrap_or_else(|| format!("Player{id}"))
     }
 
+    /// To the host, or (the host) to everyone in this dimension.
     pub fn net_send_msg(&mut self, m: Msg) {
         match &mut self.net {
             Some(Net::Client(c)) => c.send(&m),
-            Some(Net::Host(s)) => s.broadcast(&m, None),
+            Some(Net::Host(_)) => self.net_broadcast(m),
             None => {}
         }
     }
 
+    /// The host: to everyone in the active dimension (what happens in a world
+    /// only matters to the people in it; see realms.rs).
     pub fn net_broadcast(&mut self, m: Msg) {
+        let here: Vec<u32> = self.peers.keys().copied().collect();
+        if let Some(Net::Host(s)) = &mut self.net {
+            s.broadcast_where(&m, |id| here.contains(&id));
+        }
+    }
+
+    /// The host: to everyone, wherever they are (chat, the time, who's here).
+    pub fn net_broadcast_all(&mut self, m: Msg) {
         if let Some(Net::Host(s)) = &mut self.net {
             s.broadcast(&m, None);
         }
@@ -246,7 +260,7 @@ impl Game {
         }
         self.msg(format!("<{me}> {text}"));
         let m = Msg::Chat { from: self.my_id, text };
-        self.net_send_msg(m);
+        self.net_broadcast_all(m);
     }
 
     /// A private line to one remote player, or to everyone with `None`.
@@ -254,12 +268,12 @@ impl Game {
         let m = Msg::Chat { from: SYSTEM, text: text.into() };
         match to {
             Some(id) => self.net_send_to(id, m),
-            None => self.net_broadcast(m),
+            None => self.net_broadcast_all(m),
         }
     }
 
     pub fn peer_by_name(&self, name: &str) -> Option<u32> {
-        self.peers.iter().find(|(_, p)| p.name.eq_ignore_ascii_case(name)).map(|(&id, _)| id)
+        self.all_peers().find(|(_, p)| p.name.eq_ignore_ascii_case(name)).map(|(&id, _)| id)
     }
 
     pub fn disconnect(&mut self) {
@@ -280,7 +294,7 @@ impl Game {
 
     pub fn net_receive(&mut self, dt: f32) {
         // Smooth remote players toward their latest positions.
-        for p in self.peers.values_mut() {
+        for p in self.peers.values_mut().chain(self.parked.values_mut().flat_map(|r| r.peers.values_mut())) {
             let before = p.pos;
             let k = (dt * 12.0).min(1.0);
             p.pos += (p.target - p.pos) * k;
@@ -308,7 +322,7 @@ impl Game {
                 for c in s.clients.iter_mut() {
                     inbox.extend(c.conn.poll().into_iter().map(|m| (c.id, m)));
                     c.edit_budget = (c.edit_budget + dt * 60.0).min(200.0);
-                    if let Some(p) = self.peers.get_mut(&c.id) {
+                    if let Some(p) = self.peers.get_mut(&c.id).or_else(|| self.parked.values_mut().find_map(|r| r.peers.get_mut(&c.id))) {
                         p.chat_tokens = (p.chat_tokens + dt).min(5.0);
                     }
                     if c.conn.closed.is_none() {
@@ -339,9 +353,13 @@ impl Game {
         }
         for (id, name, why) in left {
             self.remember_peer(id);
-            self.peers.remove(&id);
-            self.forget_viewer(id);
-            self.net_broadcast(Msg::PlayerLeave { id });
+            if let Some(d) = self.peer_dim(id) {
+                self.in_realm(d, |g| {
+                    g.peers.remove(&id);
+                    g.forget_viewer(id);
+                });
+            }
+            self.net_broadcast_all(Msg::PlayerLeave { id });
             // Ordinary goodbyes stay short; anything odd is worth a line in the log.
             if why == "connection closed" || why.starts_with("kicked") {
                 self.msg(format!("{name} left the game"));
@@ -405,7 +423,9 @@ impl Game {
             }
             return;
         }
-        self.host_handle_joined(from, m);
+        // Whatever they do happens where they are.
+        let Some(dim) = self.peer_dim(from) else { return };
+        self.in_realm(dim, |g| g.host_handle_joined(from, m));
     }
 
     fn complete_join(&mut self, from: u32) {
@@ -415,35 +435,30 @@ impl Game {
         };
         let Some(mut name) = name else { return };
         {
-            let taken = |n: &str| n == self.player_name || self.peers.values().any(|p| p.name == n);
+            let taken = |n: &str| n == self.player_name || self.all_peers().any(|(_, p)| p.name == n);
             if taken(&name) {
                 name = format!("{}{}", name.chars().take(13).collect::<String>(), from);
             }
             let welcome = Msg::Welcome { id: from, seed: self.world.seed(), time: self.time, creative: self.default_creative, spawn: self.spawn, keep_inventory: self.rules.keep_inventory, worldgen: self.world.generator.opts.pack() };
-            let mods: Vec<Msg> = self
-                .world
-                .mods
-                .iter()
-                .map(|(&(cx, cz), m)| Msg::Mods { cx, cz, entries: m.iter().map(|(&i, &b)| (i, b)).collect() })
-                .collect();
+            let mods = self.world_msgs();
             let mut roster = Vec::new();
-            if !self.dedicated {
+            if !self.away() {
                 roster.push(Msg::PlayerJoin { id: self.my_id, name: self.player_name.clone() });
             }
-            roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
+            roster.extend(self.all_peers().map(|(&id, p)| Msg::PlayerJoin { id, name: p.name.clone() }));
             // How everyone looks, and what the mobs are called.
-            if !self.dedicated {
+            if !self.away() {
                 roster.push(Msg::PlayerSkin { id: self.my_id, skin: self.skin });
             }
-            roster.extend(self.peers.iter().map(|(&id, p)| Msg::PlayerSkin { id, skin: p.skin }));
+            roster.extend(self.all_peers().map(|(&id, p)| Msg::PlayerSkin { id, skin: p.skin }));
+            // Who's somewhere else (so they aren't drawn here).
+            if !self.dedicated && self.dim != Dim::Over {
+                roster.push(Msg::Dimension { id: self.my_id, dim: self.dim.index(), x: 0.0, y: 0.0, z: 0.0 });
+            }
+            roster.extend(self.all_peers().filter(|(_, p)| p.dim != Dim::Over).map(|(&id, p)| Msg::Dimension { id, dim: p.dim.index(), x: p.target.x, y: p.target.y, z: p.target.z }));
             roster.extend(self.mob_names.iter().map(|(&mob, name)| Msg::MobName { mob, name: name.clone() }));
             roster.push(self.rules_msg());
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
-            // Words on signs and things in frames.
-            roster.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
-            roster.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
-            roster.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
-            roster.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
                 c.name = name.clone();
@@ -466,6 +481,18 @@ impl Game {
         }
     }
 
+    /// What a joined player needs of the active dimension when they arrive
+    /// (joining, or coming through a portal): every edit, then the words on
+    /// signs, the things in frames and the banners.
+    pub fn world_msgs(&self) -> Vec<Msg> {
+        let mut v: Vec<Msg> = self.world.mods.iter().map(|(&(cx, cz), m)| Msg::Mods { cx, cz, entries: m.iter().map(|(&i, &b)| (i, b)).collect() }).collect();
+        v.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
+        v.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
+        v.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+        v.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
+        v
+    }
+
     fn rules_msg(&self) -> Msg {
         let r = self.rules;
         Msg::Rules { keep_inventory: r.keep_inventory, difficulty: r.difficulty.index(), daylight_cycle: r.daylight_cycle, weather_cycle: r.weather_cycle, hardcore: r.hardcore, seasons: r.seasons, border: r.border }
@@ -478,7 +505,7 @@ impl Game {
         }
         self.rules = rules;
         let m = self.rules_msg();
-        self.net_broadcast(m);
+        self.net_broadcast_all(m);
     }
 
     fn host_handle_joined(&mut self, from: u32, m: Msg) {
@@ -686,7 +713,7 @@ impl Game {
                     return;
                 }
                 self.msg(format!("<{who}> {text}"));
-                self.relay(from, Msg::Chat { from, text });
+                self.relay_all(from, Msg::Chat { from, text });
             }
             Msg::Splash { item, at } => self.host_splash(from, item, at),
             Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
@@ -700,7 +727,7 @@ impl Game {
                 if let Some(p) = self.peers.get_mut(&from) {
                     p.skin = skin;
                 }
-                self.relay(from, Msg::PlayerSkin { id: from, skin });
+                self.relay_all(from, Msg::PlayerSkin { id: from, skin });
             }
             Msg::UseItem { item } => {
                 if item == GLASS_BOTTLE && self.peer_rate_ok(from, "bottle", 0.1) {
@@ -828,6 +855,12 @@ impl Game {
                 }
             }
             Msg::Excavate { x, y, z, cracks } => self.host_excavate(from, IVec3::new(x, y, z), cracks),
+            Msg::Respawn => {
+                if self.realm_dim() != Dim::Over && self.peer_rate_ok(from, "respawn", 1.0) {
+                    let to = self.spawn;
+                    self.move_peer(from, Dim::Over, to);
+                }
+            }
             Msg::Died { cause } => {
                 // Told to everyone, like Minecraft's death messages.
                 if self.peer_rate_ok(from, "died", 1.0) {
@@ -1035,7 +1068,16 @@ impl Game {
         }
     }
 
+    /// The host: pass on to everyone else in this dimension.
     fn relay(&mut self, except: u32, m: Msg) {
+        let here: Vec<u32> = self.peers.keys().copied().filter(|&id| id != except).collect();
+        if let Some(Net::Host(s)) = &mut self.net {
+            s.broadcast_where(&m, |id| here.contains(&id));
+        }
+    }
+
+    /// ... and to everyone else anywhere.
+    fn relay_all(&mut self, except: u32, m: Msg) {
         if let Some(Net::Host(s)) = &mut self.net {
             s.broadcast(&m, Some(except));
         }
@@ -1044,6 +1086,17 @@ impl Game {
     fn client_handle(&mut self, m: Msg) {
         match m {
             Msg::Kick { reason } => self.net_error = Some(format!("Kicked: {reason}")),
+            Msg::Dimension { id, dim, x, y, z } => {
+                let Some(dim) = Dim::from_index(dim) else { return };
+                let to = Vec3::new(x, y, z);
+                if id == self.my_id {
+                    if to.is_finite() {
+                        self.client_change_dimension(dim, to);
+                    }
+                } else {
+                    self.client_peer_dimension(id, dim);
+                }
+            }
             Msg::Mods { cx, cz, entries } => {
                 for (i, id) in entries {
                     let (lx, rest) = ((i % 16) as i32, i / 16);
@@ -1062,7 +1115,10 @@ impl Game {
             }
             Msg::PlayerJoin { id, name } => {
                 if id != self.my_id {
-                    self.peers.insert(id, Peer::new(name.clone(), self.spawn));
+                    // (They start in the Overworld; we're told if not.)
+                    let mut p = Peer::new(name.clone(), self.spawn);
+                    p.dim = Dim::Over;
+                    self.in_realm(Dim::Over, |g| g.peers.insert(id, p));
                     // The roster sent on join arrives before our terrain is ready; only
                     // announce people who join afterwards.
                     if self.ready {
@@ -1071,7 +1127,7 @@ impl Game {
                 }
             }
             Msg::PlayerLeave { id } => {
-                if let Some(p) = self.peers.remove(&id) {
+                if let Some(p) = self.remove_peer(id) {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
@@ -1216,7 +1272,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn => {}
         }
     }
 
@@ -1326,35 +1382,34 @@ impl Game {
         if self.net.is_none() {
             return;
         }
-        // Block edits (both directions; the host echoes everyone's).
-        let edits = std::mem::take(&mut self.world.edit_log);
-        for chunk in edits.chunks(4096) {
-            self.net_send_msg(Msg::Blocks(chunk.to_vec()));
-        }
-        // What was just read from a region file goes to everyone (they may be near it).
-        let news = self.world.regions.as_mut().map(|r| std::mem::take(&mut r.news)).unwrap_or_default();
-        if matches!(self.net, Some(Net::Host(_))) && !news.is_empty() {
-            for &(cx, cz) in &news {
-                if let Some(m) = self.world.mods.get(&(cx, cz)) {
-                    let entries = m.iter().map(|(&i, &b)| (i, b)).collect();
-                    self.net_send_msg(Msg::Mods { cx, cz, entries });
-                }
-            }
-            // And the signs and frames in them.
-            let chunks: std::collections::HashSet<(i32, i32)> = news.into_iter().collect();
-            let inside = |p: &IVec3| chunks.contains(&(p.x.div_euclid(16), p.z.div_euclid(16)));
-            let mut out: Vec<Msg> = self.world.signs.iter().filter(|(p, _)| inside(p)).map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }).collect();
-            out.extend(self.world.frames.iter().filter(|(p, _)| inside(p)).map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
-            out.extend(self.world.sign_styles.iter().filter(|(p, _)| inside(p)).map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
-            for m in out {
-                self.net_send_msg(m);
-            }
-        }
-
         for t in self.net_timers.iter_mut() {
             *t -= dt;
         }
-        if self.net_timers[0] <= 0.0 && !self.dedicated {
+        let mobs_due = self.is_host() && self.net_timers[1] <= 0.0;
+        if mobs_due {
+            self.net_timers[1] = 0.1;
+        }
+        let (drops_due, orbs_due) = if self.is_host() { (self.send_drops(dt), self.send_orbs(dt)) } else { (false, false) };
+        self.net_send_world(mobs_due);
+        // The same for the other dimensions people are in (see realms.rs).
+        if self.is_host() {
+            for d in self.realm_dims() {
+                if d == self.realm_dim() || self.parked.get(&d).is_none_or(|r| r.peers.is_empty()) {
+                    continue;
+                }
+                self.in_realm(d, |g| {
+                    if drops_due {
+                        g.broadcast_drops();
+                    }
+                    if orbs_due {
+                        g.broadcast_orbs();
+                    }
+                    g.net_send_world(mobs_due);
+                    g.sounds.clear();
+                });
+            }
+        }
+        if self.net_timers[0] <= 0.0 && !self.away() {
             self.net_timers[0] = 0.05;
             let p = &self.player;
             let mut flags = 0;
@@ -1382,9 +1437,46 @@ impl Game {
             let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) };
             self.net_send_msg(m);
         }
+        if self.is_host() && self.net_timers[2] <= 0.0 {
+            self.net_timers[2] = 2.0;
+            self.net_broadcast_all(self.time_msg());
+        }
+        match &mut self.net {
+            Some(Net::Client(c)) => c.flush(),
+            Some(Net::Host(s)) => s.flush(),
+            None => {}
+        }
+    }
+
+    /// What's happened in the active dimension, to the people in it (the
+    /// host also sends where the mobs are when `mobs_due`).
+    fn net_send_world(&mut self, mobs_due: bool) {
+        // Block edits (both directions; the host echoes everyone's).
+        let edits = std::mem::take(&mut self.world.edit_log);
+        for chunk in edits.chunks(4096) {
+            self.net_send_msg(Msg::Blocks(chunk.to_vec()));
+        }
+        // What was just read from a region file goes to everyone (they may be near it).
+        let news = self.world.regions.as_mut().map(|r| std::mem::take(&mut r.news)).unwrap_or_default();
+        if matches!(self.net, Some(Net::Host(_))) && !news.is_empty() {
+            for &(cx, cz) in &news {
+                if let Some(m) = self.world.mods.get(&(cx, cz)) {
+                    let entries = m.iter().map(|(&i, &b)| (i, b)).collect();
+                    self.net_send_msg(Msg::Mods { cx, cz, entries });
+                }
+            }
+            // And the signs and frames in them.
+            let chunks: std::collections::HashSet<(i32, i32)> = news.into_iter().collect();
+            let inside = |p: &IVec3| chunks.contains(&(p.x.div_euclid(16), p.z.div_euclid(16)));
+            let mut out: Vec<Msg> = self.world.signs.iter().filter(|(p, _)| inside(p)).map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }).collect();
+            out.extend(self.world.frames.iter().filter(|(p, _)| inside(p)).map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+            out.extend(self.world.sign_styles.iter().filter(|(p, _)| inside(p)).map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
+            for m in out {
+                self.net_send_msg(m);
+            }
+        }
         if self.is_host() {
-            if self.net_timers[1] <= 0.0 {
-                self.net_timers[1] = 0.1;
+            if mobs_due {
                 let mobs = self
                     .mobs
                     .iter()
@@ -1414,12 +1506,6 @@ impl Game {
                 let fireballs = self.fireballs.iter().map(|f| (f.pos, f.vel, f.big)).collect();
                 self.net_broadcast(Msg::Mobs { mobs, tnts, arrows, falling, fireballs });
             }
-            self.send_drops(dt);
-            self.send_orbs(dt);
-            if self.net_timers[2] <= 0.0 {
-                self.net_timers[2] = 2.0;
-                self.net_broadcast(self.time_msg());
-            }
             let fwd: Vec<Msg> = self
                 .sounds
                 .iter()
@@ -1428,11 +1514,6 @@ impl Game {
             for m in fwd {
                 self.net_broadcast(m);
             }
-        }
-        match &mut self.net {
-            Some(Net::Client(c)) => c.flush(),
-            Some(Net::Host(s)) => s.flush(),
-            None => {}
         }
     }
 }
@@ -2370,15 +2451,24 @@ mod tests {
         for _ in 0..50 {
             client.portal_tick(0.05);
         }
-        assert!(pump(&mut host, &mut client, |_, c| crate::scorch::in_scorch(c.player.body.pos.x)));
-        assert!(crate::scorch::in_scorch(host.peers[&id].target.x));
+        assert!(pump(&mut host, &mut client, |_, c| c.dim == Dim::Scorch && c.realm_dim() == Dim::Scorch));
+        assert_eq!(host.peer_dim(id), Some(Dim::Scorch));
+        assert_eq!(host.peer_ref(id).unwrap().dim, Dim::Scorch);
+        // The host (still at home) keeps the Scorchlands going around them.
+        assert_eq!(host.realm_dim(), Dim::Over);
+        assert!(pump(&mut host, &mut client, |h, _| h.parked.get(&Dim::Scorch).is_some_and(|r| !r.world.chunks.is_empty())));
         // A portal they aren't standing in does nothing.
         client.net_send_msg(Msg::UsePortal { x: base.x, y: base.y, z: base.z });
         for _ in 0..40 {
             host.update(0.016, &idle());
             client.update(0.016, &idle());
         }
-        assert!(crate::scorch::in_scorch(client.player.body.pos.x));
+        assert_eq!(client.dim, Dim::Scorch);
+        // Dying there brings them home.
+        client.dead = Some("fell in lava".into());
+        client.respawn();
+        assert!(pump(&mut host, &mut client, |_, c| c.dim == Dim::Over));
+        assert_eq!(host.peer_dim(id), Some(Dim::Over));
     }
 
     #[test]

@@ -332,7 +332,7 @@ impl Game {
     pub fn lectern_give(&mut self, p: IVec3, who: u32) {
         let Some((item, tag)) = self.lecterns.remove(&p) else { return };
         self.world.set_v(p, LECTERN);
-        if who == self.my_id && !self.dedicated {
+        if who == self.my_id && !self.away() {
             self.give_worn(item, 1, box_wear(tag));
         } else {
             self.give_peer_worn(who, item, 1, box_wear(tag));

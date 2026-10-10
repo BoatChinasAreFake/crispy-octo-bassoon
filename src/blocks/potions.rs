@@ -433,7 +433,7 @@ impl Game {
     /// Where the world lives: a splash potion bursts at `at`.
     pub fn burst(&mut self, p: Potion, at: Vec3) {
         self.smoke(at, 16, 0.5);
-        if !self.dedicated && self.player.body.pos.distance(at) < SPLASH_RADIUS {
+        if !self.away() && self.player.body.pos.distance(at) < SPLASH_RADIUS {
             self.apply_potion(p);
         }
         let hit: Vec<u32> = self.peers.iter().filter(|(_, q)| q.target.distance(at) < SPLASH_RADIUS).map(|(&id, _)| id).collect();

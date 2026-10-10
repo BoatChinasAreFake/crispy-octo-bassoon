@@ -140,7 +140,7 @@ fn distance(m: f64) -> String {
 impl Game {
     /// Count this frame's travel: how far the player moved, and how.
     pub fn track_travel(&mut self, before: Vec3, dt: f32) {
-        if self.menu || self.dedicated || self.dead.is_some() {
+        if self.menu || self.away() || self.dead.is_some() {
             return;
         }
         self.stats.played += dt as f64;
