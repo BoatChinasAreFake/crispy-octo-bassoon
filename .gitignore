@@ -4,3 +4,6 @@
 /settings.txt
 /vendor/quad-snd/target
 /vendor/quad-snd/Cargo.lock
+/host_key.txt
+/servers.txt
+/skins

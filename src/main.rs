@@ -14,9 +14,9 @@ mod online;
 pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods};
-pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, sniffers, villagers, wildlife, wilter};
+pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, skins, sniffers, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
-pub(crate) use online::{admin, cheats, ledger, mods, multiplayer, net, players, playtest, scripting, server};
+pub(crate) use online::{admin, cheats, crypto, ledger, mods, multiplayer, net, players, playtest, scripting, server, servers};
 mod screens;
 mod shots;
 use shots::parse_args;
@@ -109,6 +109,22 @@ enum Screen {
     Backups,
 }
 
+/// How a server on the list answered.
+enum ServerState {
+    Asking,
+    Up(servers::Status),
+    Down(String),
+}
+
+/// A row of the server list.
+struct ServerRow {
+    name: String,
+    addr: String,
+    lan: bool,
+    /// Its place on the saved list, if it's there.
+    saved: Option<usize>,
+}
+
 struct App {
     screen: Screen,
     game: Game,
@@ -152,6 +168,18 @@ struct App {
     connect_next: Option<String>,
     /// Connected, waiting for the host's Welcome.
     joining: Option<(net::Conn, f64)>,
+    /// Where we're joining, and whether it turned up on the LAN by itself.
+    joining_addr: (String, bool),
+    /// The saved server list (see servers.rs), how each server answered,
+    /// and who's asking them.
+    servers: servers::ServerList,
+    server_states: std::collections::HashMap<String, ServerState>,
+    prober: servers::Prober,
+    /// Looking for LAN games (while the Multiplayer screen is up).
+    lan: Option<servers::LanScan>,
+    /// The chosen row of the server list, and how far it's scrolled.
+    mp_sel: Option<usize>,
+    mp_scroll: usize,
     /// Chat line being typed, if the chat box is open.
     chat: Option<String>,
     /// Lines already sent (Up/Down bring them back), which one is showing,
@@ -182,6 +210,8 @@ struct App {
     base_atlas: Vec<u8>,
     /// Registry generation the GPU atlas was built from.
     atlas_gen: u32,
+    /// The game's `skin_gen` the atlas has the skins of.
+    skin_gen: u32,
     /// Map colours per block, the map picture, and seconds until it's redrawn (see navigation.rs).
     map_colors: Vec<[u8; 3]>,
     map_tex: Option<Texture2D>,
@@ -445,16 +475,35 @@ impl App {
         gl.flush();
         self.renderer.clear(gl.quad_context);
         self.game = game;
+        // (A new game's skins aren't in the atlas yet, whatever its count says.)
+        self.skin_gen = u32::MAX;
         // A world of our own keeps its block edits in region files beside its save.
         if let Some(id) = &self.current_world {
             let dir = regions::region_dir(&save::world_file(&save::saves_dir(), id));
             self.game.use_regions(dir);
         }
         // We look like our settings say (joined players tell the host).
-        let skin = self.settings.skin;
-        self.game.set_skin(skin);
+        self.apply_skin();
         self.game.shield_banner = self.settings.shield_banner;
         self.set_screen(Screen::Playing);
+    }
+
+    /// Look the way the settings say: a built-in skin, or our own from the skins folder.
+    fn apply_skin(&mut self) {
+        let skin = self.settings.skin;
+        self.game.set_skin(skin);
+        let own = if self.settings.skin_file.is_empty() {
+            None
+        } else {
+            match skins::load_file(&self.settings.skin_file) {
+                Ok(px) => Some(px),
+                Err(e) => {
+                    self.status = Some((format!("Couldn't use the skin {}: {e}", self.settings.skin_file), 6.0));
+                    None
+                }
+            }
+        };
+        self.game.set_own_skin(own);
     }
 
     fn open_worlds(&mut self) {
@@ -781,10 +830,13 @@ impl App {
             }
             if is_key_pressed(KeyCode::Escape) {
                 self.joining = None;
+                self.lan = None;
                 self.set_screen(Screen::Title);
             }
             if is_key_pressed(KeyCode::Enter) && self.joining.is_none() && self.connect_next.is_none() {
-                self.connect_next = Some(self.mp_addr.clone());
+                let addr = self.mp_addr.clone();
+                let lan = self.lan.as_ref().is_some_and(|l| l.games.iter().any(|g| g.addr == addr));
+                self.join_server(&addr, lan);
             }
             return;
         }
@@ -1049,11 +1101,15 @@ impl App {
             }
         }
 
-        // Mods changed (reload, or joined a server with mods): repaint the atlas.
-        if block::generation() != self.atlas_gen {
+        // Mods changed (reload, or joined a server with mods), or someone's
+        // skin did: repaint the atlas.
+        self.game.refresh_skin_slots();
+        if block::generation() != self.atlas_gen || self.game.skin_gen != self.skin_gen {
             self.atlas_gen = block::generation();
+            self.skin_gen = self.game.skin_gen;
             let mut atlas = self.base_atlas.clone();
             texture::apply_mod_textures(&mut atlas);
+            skins::paint(&mut atlas, &self.game.skin_paint());
             self.map_colors = navigation::block_colors(&atlas);
             let gl = unsafe { get_internal_gl() };
             self.renderer.update_atlas(gl.quad_context, &atlas);
@@ -1102,9 +1158,106 @@ impl App {
         }
     }
 
+    /// Start joining a server (on the next frame, so "Connecting..." shows first).
+    fn join_server(&mut self, addr: &str, lan: bool) {
+        if addr.trim().is_empty() || self.joining.is_some() || self.connect_next.is_some() {
+            return;
+        }
+        self.mp_addr = addr.to_string();
+        self.joining_addr = (addr.to_string(), lan);
+        self.connect_next = Some(addr.to_string());
+    }
+
+    /// The server list's rows: LAN games first, then the saved servers.
+    fn server_rows(&self) -> Vec<ServerRow> {
+        let mut rows: Vec<ServerRow> = self.lan.iter().flat_map(|l| l.games.iter()).map(|g| ServerRow { name: g.info.name.clone(), addr: g.addr.clone(), lan: true, saved: None }).collect();
+        rows.extend(self.servers.servers.iter().enumerate().map(|(i, e)| ServerRow { name: e.name.clone(), addr: e.addr.clone(), lan: false, saved: Some(i) }));
+        rows
+    }
+
+    /// What a row says: name, address and news, players and ping (and colours).
+    fn describe_row(&self, row: &ServerRow) -> (String, String, String, Color, Color) {
+        let grey = Color::new(0.75, 0.75, 0.75, 1.0);
+        let (red, green, amber) = (Color::new(1.0, 0.45, 0.4, 1.0), Color::new(0.5, 1.0, 0.5, 1.0), Color::new(1.0, 0.85, 0.4, 1.0));
+        if row.lan
+            && let Some(g) = self.lan.as_ref().and_then(|l| l.games.iter().find(|g| g.addr == row.addr))
+        {
+            let mut second = format!("On your network - {}", g.addr);
+            if g.info.password {
+                second += " - password";
+            }
+            if g.info.protocol != net::PROTOCOL {
+                return (row.name.clone(), format!("{second} - a different version (protocol {})", g.info.protocol), "LAN".into(), red, red);
+            }
+            return (row.name.clone(), second, format!("{}/{}  LAN", g.info.players, g.info.max), green, grey);
+        }
+        match self.server_states.get(&servers::norm(&row.addr)) {
+            Some(ServerState::Up(st)) => {
+                let mut second = row.addr.clone();
+                if st.name != row.name {
+                    second = format!("{} - {second}", st.name);
+                }
+                if st.password {
+                    second += " - password";
+                }
+                if self.servers.key_of(&row.addr).is_some_and(|k| k != st.key) {
+                    return (row.name.clone(), format!("{second} - ITS KEY HAS CHANGED: is it really the same server?"), "Key changed!".into(), red, red);
+                }
+                if st.protocol != net::PROTOCOL {
+                    let which = if st.protocol > net::PROTOCOL { "a newer" } else { "an older" };
+                    return (row.name.clone(), format!("{second} - runs {which} version ({})", st.version), "Version".into(), red, red);
+                }
+                let ping_col = if st.ping_ms < 80 { green } else if st.ping_ms < 250 { amber } else { red };
+                (row.name.clone(), second, format!("{}/{}  {} ms", st.players, st.max, st.ping_ms), ping_col, grey)
+            }
+            Some(ServerState::Down(e)) => (row.name.clone(), format!("{} - can't reach it: {e}", row.addr), "Offline".into(), red, grey),
+            Some(ServerState::Asking) | None => (row.name.clone(), row.addr.clone(), "...".into(), grey, grey),
+        }
+    }
+
+    /// Ask every saved server how it is again.
+    fn refresh_servers(&mut self) {
+        self.server_states.clear();
+        for e in &self.servers.servers {
+            self.server_states.insert(servers::norm(&e.addr), ServerState::Asking);
+            self.prober.ask(&e.addr);
+        }
+    }
+
+    /// Keep the server list up to date while it's open.
+    fn tend_server_list(&mut self) {
+        if self.lan.is_none() {
+            // Just opened: load the list, ask everyone, start looking on the LAN.
+            self.servers = servers::ServerList::load();
+            self.lan = servers::LanScan::new();
+            self.mp_sel = None;
+            self.refresh_servers();
+        }
+        if let Some(l) = &mut self.lan {
+            l.tick();
+        }
+        let mut learned = false;
+        for (addr, answer) in self.prober.answers() {
+            let state = match answer {
+                Ok(st) => {
+                    learned |= self.servers.learn_name(&addr, &st.name);
+                    ServerState::Up(st)
+                }
+                Err(e) => ServerState::Down(e),
+            };
+            self.server_states.insert(servers::norm(&addr), state);
+        }
+        if learned {
+            self.servers.save();
+        }
+    }
+
     /// Drive the connect -> Hello -> Welcome handshake without freezing the menu.
     fn update_joining(&mut self) {
         if let Some(addr) = self.connect_next.take() {
+            if self.joining_addr.0 != addr {
+                self.joining_addr = (addr.clone(), false);
+            }
             match net::Conn::connect(&addr) {
                 Ok(mut conn) => {
                     conn.send(&net::Msg::Hello { protocol: net::PROTOCOL, name: multiplayer::sanitize_name(&self.mp_name) });
@@ -1134,12 +1287,28 @@ impl App {
             }
         }
         if let Some(net::Msg::Challenge { nonce, password }) = msgs.iter().find(|m| matches!(m, net::Msg::Challenge { .. })) {
+            // Is it the same server as last time? (Trust on first use; see servers.rs.)
+            if self.servers == Default::default() {
+                self.servers = servers::ServerList::load();
+            }
+            let addr = self.joining_addr.0.clone();
+            match conn.host_key.map(|k| self.servers.check_key(&addr, k)) {
+                Some(servers::KeyCheck::Changed(old)) => {
+                    let now = conn.host_key.map(|k| crypto::fingerprint(&k)).unwrap_or_default();
+                    self.joining = None;
+                    self.status = Some((format!("Stopped: {addr} shows a different key than last time ({} before, {now} now). Someone may be pretending to be it. If its owner reset it, choose it and press Forget Key.", crypto::fingerprint(&old)), 12.0));
+                    return;
+                }
+                Some(servers::KeyCheck::New) => self.servers.save(),
+                _ => {}
+            }
             if *password && self.mp_password.is_empty() {
                 self.joining = None;
                 self.status = Some(("This server needs a password. Type it in the Password box.".into(), 6.0));
                 return;
             }
-            conn.send(&net::Msg::Auth { proof: net::auth_proof(nonce, &self.mp_password) });
+            let proof = conn.auth_proof(nonce, &self.mp_password);
+            conn.send(&net::Msg::Auth { proof });
         }
         conn.flush();
         if let Some(i) = msgs.iter().position(|m| matches!(m, net::Msg::Welcome { .. })) {
@@ -1148,7 +1317,11 @@ impl App {
             let (conn, _) = self.joining.take().unwrap();
             let mut g = Game::new_client(id, seed, worldgen, time, creative, spawn, conn, &self.mp_name, leftover);
             g.rules.keep_inventory = keep_inventory;
+            self.lan = None;
             self.start_game(g);
+            if self.joining_addr.1 {
+                self.game.advance("lan_party");
+            }
             return;
         }
         let failure = if let Some(net::Msg::Kick { reason }) = msgs.iter().find(|m| matches!(m, net::Msg::Kick { .. })) {
@@ -1814,6 +1987,13 @@ async fn game_main() {
         mp_focus: 1,
         connect_next: None,
         joining: None,
+        joining_addr: (String::new(), false),
+        servers: Default::default(),
+        server_states: Default::default(),
+        prober: Default::default(),
+        lan: None,
+        mp_sel: None,
+        mp_scroll: 0,
         chat: None,
         chat_sent: Vec::new(),
         name_line: String::new(),
@@ -1832,6 +2012,7 @@ async fn game_main() {
         map_colors: navigation::block_colors(&base_atlas),
         base_atlas,
         atlas_gen: block::generation(),
+        skin_gen: 0,
         map_tex: None,
         map_timer: 0.0,
         sign_lines: Default::default(),
@@ -1888,6 +2069,8 @@ async fn game_main() {
         pacing::set_vsync(saved.vsync);
         app.settings = saved;
         app.updates = updates::UpdateCheck::start(app.settings.check_updates);
+        // A skins folder with a template to paint over (see skins.rs).
+        skins::make_folder(&app.base_atlas);
     }
     if let Some(d) = shot.as_ref().and_then(|s| s.distance) {
         app.settings.render_distance = d.clamp(3, settings::MAX_RENDER_DISTANCE);

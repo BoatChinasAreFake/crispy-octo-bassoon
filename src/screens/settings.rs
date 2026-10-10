@@ -30,11 +30,20 @@ impl App {
         if self.ui.button(Rect::new(left, y, half, bh), music, true) {
             self.audio.music_on = !self.audio.music_on;
         }
-        let skin = format!("Skin: {}", nametags::skin_name(self.settings.skin));
+        // The six built-in looks, then any PNGs in the skins folder (see skins.rs).
+        let skin = if self.settings.skin_file.is_empty() { format!("Skin: {}", nametags::skin_name(self.settings.skin)) } else { format!("Skin: {}", self.settings.skin_file) };
         if self.ui.button(Rect::new(right, y, half, bh), &skin, true) {
-            self.settings.skin = (self.settings.skin + 1) % nametags::SKINS.len() as u8;
-            let k = self.settings.skin;
-            self.game.set_skin(k);
+            let files = crate::skins::list();
+            let n = nametags::SKINS.len();
+            let at = if self.settings.skin_file.is_empty() { self.settings.skin as usize } else { files.iter().position(|f| *f == self.settings.skin_file).map_or(n, |i| n + i) };
+            let next = (at + 1) % (n + files.len());
+            if next < n {
+                self.settings.skin = next as u8;
+                self.settings.skin_file.clear();
+            } else {
+                self.settings.skin_file = files[next - n].clone();
+            }
+            self.apply_skin();
         }
         y += bh + 5.0 * s;
         if self.ui.button(Rect::new(left, y, half, bh), "Video Settings...", true) {

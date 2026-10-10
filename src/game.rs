@@ -334,6 +334,11 @@ pub struct Game {
     pub mob_names: HashMap<u32, String>,
     /// How the local player looks (see nametags.rs).
     pub skin: u8,
+    /// Our own skin (see skins.rs), who has the skin slots, and a count that
+    /// goes up whenever the atlas needs the skins painted again.
+    pub my_skin: Option<Vec<u8>>,
+    pub skin_slots: Vec<u32>,
+    pub skin_gen: u32,
     /// The mob a Name Tag is being written for (the name screen is open).
     pub naming: Option<u32>,
     /// Draw the world through the colour-blind filter (a setting; see access.rs).
@@ -614,6 +619,9 @@ impl Game {
             chat_log: Default::default(),
             mob_names: HashMap::new(),
             skin: 0,
+            my_skin: None,
+            skin_slots: Vec::new(),
+            skin_gen: 0,
             naming: None,
             colour_blind: false,
             report_timer: 0.0,
@@ -4207,7 +4215,7 @@ impl Game {
             }
         }
         // Other players
-        for p in self.peers.values().filter(|p| p.alive()) {
+        for (id, p) in self.peers.iter().filter(|(_, p)| p.alive()) {
             let sky = self.world.sky_shade(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
             let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
@@ -4221,7 +4229,10 @@ impl Game {
             } else {
                 Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding)
             };
-            draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true);
+            match self.skin_slot(*id) {
+                Some(slot) => draw_model(&mut g, &root, &crate::skins::model(slot), p.anim, sky, true),
+                None => draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true),
+            }
             crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
         }
         // The player, in third person
@@ -4234,7 +4245,10 @@ impl Game {
                 Some(s) => crate::beds::pose(s.bed, crate::beds::facing(self.world.get_v(s.bed))),
                 None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding),
             };
-            draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true);
+            match self.skin_slot(crate::skins::ME) {
+                Some(slot) => draw_model(&mut g, &root, &crate::skins::model(slot), p.bob * 2.0, sky, true),
+                None => draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true),
+            }
             crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), crate::trims::look(&self.inv.armor, &self.inv.armor_wear), p.bob * 2.0, sky, p.gliding);
         }
         // Primed TNT
@@ -4345,7 +4359,11 @@ impl Game {
             let sw = w + 0.016;
             let sleeve = frame * Mat4::from_translation(Vec3::new(-sw / 2.0, -sw / 2.0, -len * 0.45)) * Mat4::from_scale(Vec3::new(sw, sw, len * 0.45 + 0.3));
             let light = sky;
-            let [tone, _, shirt, _] = crate::nametags::skin_tiles(self.skin as u16 % 6);
+            let [tone, _, shirt, _] = match self.skin_slot(crate::skins::ME) {
+                // Our own skin: the right arm's front, and its top for the sleeve.
+                Some(slot) => [crate::skins::tile(slot, 4, 5), 0, crate::skins::tile(slot, 4, 2), 0],
+                None => crate::nametags::skin_tiles(self.skin as u16 % 6),
+            };
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
             g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
         } else if crate::models::drawn_as_block(held) {
