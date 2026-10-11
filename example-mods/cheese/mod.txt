@@ -376,6 +376,121 @@ block = cheese_flower
 on = grass
 chance = 0.01
 
+// ---------------------------------------------------------------- biomes, structures, a dimension
+[texture rind]
+noise = #c8862a
+variation = 0.08
+
+[texture moon_dust]
+noise = #d8d4c4
+variation = 0.05
+
+[texture moon_portal]
+noise = #f2d35a
+variation = 0.15
+
+[block rind]
+name = Cheese Rind
+texture = rind
+hardness = 0.6
+sound = wood
+
+[block moon_rock]
+name = Moon Rock (Suspiciously Cheesy)
+texture = moon_dust
+hardness = 1.5
+tool = pickaxe
+
+[block moon_gate]
+name = Moon Gate Frame
+texture = wheel_top
+hardness = 3
+
+// A biome: a share of the plains and meadows becomes this.
+[biome cheddar_plains]
+name = Cheddar Plains
+in = plains, meadow
+share = 0.3
+size = 250
+top = butter
+under = rind
+plant = cheese_flower 0.06
+// tree = <log> <leaves> <chance> <height>
+tree = wheel butter 0.004 4
+
+// A structure, from a block template: layers from the bottom up, each a few
+// rows of letters (north to south, west to east). '.' is air, '_' leaves
+// whatever's there; every other letter is in the legend.
+[structure cheese_hut]
+name = Cheese Hut
+in = cheddar_plains
+spacing = 12
+chance = 0.6
+// What its chests hold: item, up to how many, chance.
+loot = slice 8 0.9, cheese_pickaxe 1 0.3, wheel 4 0.5
+block # = wheel
+block b = butter
+block c = chest
+block . = air
+layer
+#####
+#bbb#
+#bbb#
+#bbb#
+#####
+layer
+#####
+#..c#
+.....
+#...#
+#####
+layer
+#####
+#...#
+.....
+#...#
+#####
+layer
+bbbbb
+bbbbb
+bbbbb
+bbbbb
+bbbbb
+
+// A whole dimension: build a frame of moon_gate blocks (like an obsidian
+// portal) and light it with a Sparker.
+[dimension moon]
+name = The Cheese Moon
+stone = moon_rock
+top = moon_rock
+under = rind
+height = 50
+hills = 14
+hill_size = 60
+sky = #10142a
+light = 0.55
+frame = moon_gate
+portal_texture = moon_portal
+
+[biome moon_maria]
+name = Butter Maria
+in = moon
+share = 0.4
+top = butter
+plant = stinky_cheese 0.004
+
+[ore moon_cheese]
+block = cheese_ore
+replace = moon_rock
+dimension = moon
+min_y = 2
+max_y = 60
+chance = 0.01
+
+[recipe]
+inputs = wheel 4
+output = moon_gate 1
+
 [splashes]
 Now with 100% more cheese!
 Cheddar than ever!

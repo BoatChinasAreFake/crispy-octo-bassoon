@@ -33,16 +33,43 @@ pub const PORTAL_SECS: f32 = 2.0;
 /// Biggest frame interior a Sparker will light.
 const MAX_PORTAL: i32 = 21;
 
+/// A portal's sheet: the Scorchlands' or a mod dimension's (see modgen.rs).
 pub fn is_portal(id: Id) -> bool {
-    id == PORTAL_X || id == PORTAL_Z
+    id == PORTAL_X || id == PORTAL_Z || (id >= NUM_BLOCKS && crate::modgen::portal_dim(id).is_some())
+}
+
+/// Which portal a sheet belongs to: `Some(None)` the Scorchlands' (obsidian),
+/// `Some(Some(k))` mod dimension k's.
+pub fn portal_kind(id: Id) -> Option<Option<usize>> {
+    if id == PORTAL_X || id == PORTAL_Z {
+        return Some(None);
+    }
+    crate::modgen::portal_dim(id).map(Some)
+}
+
+/// The frame a kind of portal stands in.
+pub fn frame_block(kind: Option<usize>) -> Id {
+    kind.and_then(|k| reg().dims.get(k)).map_or(OBSIDIAN, |d| d.frame)
+}
+
+/// A kind of portal's sheets: across x, across z.
+pub fn sheets(kind: Option<usize>) -> [Id; 2] {
+    kind.and_then(|k| reg().dims.get(k)).map_or([PORTAL_X, PORTAL_Z], |d| d.portal)
 }
 
 /// Where a portal at `from` in `dim` leads (before looking for a place to stand).
 pub fn destination(dim: Dim, from: IVec3) -> (Dim, IVec3) {
-    if dim == Dim::Scorch {
-        (Dim::Over, IVec3::new(from.x * 8, 70, from.z * 8))
-    } else {
-        (Dim::Scorch, IVec3::new(from.x / 8, 64, from.z / 8))
+    destination_of(dim, from, None)
+}
+
+/// The same, for a kind of portal: the Scorchlands' scale distances by eight;
+/// a mod dimension's lead to the same place there (and back to the Overworld).
+pub fn destination_of(dim: Dim, from: IVec3, kind: Option<usize>) -> (Dim, IVec3) {
+    match kind {
+        Some(k) if dim == Dim::Mod(k as u8) => (Dim::Over, IVec3::new(from.x, 70, from.z)),
+        Some(k) => (Dim::Mod(k as u8), IVec3::new(from.x, 64, from.z)),
+        None if dim == Dim::Scorch => (Dim::Over, IVec3::new(from.x * 8, 70, from.z * 8)),
+        None => (Dim::Scorch, IVec3::new(from.x / 8, 64, from.z / 8)),
     }
 }
 
@@ -168,17 +195,21 @@ impl Game {
             return false; // TNT has its own right-click
         }
         let start = hit + normal;
-        for axis_x in [true, false] {
-            if let Some(cells) = portal_frame(&self.world, start, axis_x) {
-                let pid = if axis_x { PORTAL_X } else { PORTAL_Z };
-                for c in cells {
-                    self.world.set_v(c, pid);
+        // The Scorchlands' obsidian frame, or a mod dimension's own.
+        let kinds: Vec<Option<usize>> = std::iter::once(None).chain((0..reg().dims.len()).map(Some)).collect();
+        for kind in kinds {
+            for axis_x in [true, false] {
+                if let Some(cells) = portal_frame_of(&self.world, start, axis_x, kind) {
+                    let pid = sheets(kind)[if axis_x { 0 } else { 1 }];
+                    for c in cells {
+                        self.world.set_v(c, pid);
+                    }
+                    self.sfx(Sfx::Warp, Some(start.as_vec3()));
+                    self.use_tool(1);
+                    self.player.swing = 1.0;
+                    self.advance("portal_open");
+                    return true;
                 }
-                self.sfx(Sfx::Warp, Some(start.as_vec3()));
-                self.use_tool(1);
-                self.player.swing = 1.0;
-                self.advance("portal_open");
-                return true;
             }
         }
         // Not a portal: set it alight.
@@ -218,6 +249,10 @@ impl Game {
         if dim == Dim::Scorch {
             self.advance("hotter");
             self.msg("Welcome to the Scorchlands. Mind the lava. Also everything else.");
+        }
+        if let Dim::Mod(_) = dim {
+            self.advance("off_the_map");
+            self.msg(format!("Welcome to {}. Somebody made this.", dim.name()));
         }
     }
 
@@ -259,9 +294,10 @@ impl Game {
             self.portal_links.remove(&key);
             self.enter(here);
         }
-        let (dim, dest) = destination(here, from);
+        let kind = portal_kind(self.world.get_v(from)).or_else(|| portal_kind(self.world.get_v(from + IVec3::Y))).unwrap_or(None);
+        let (dim, dest) = destination_of(here, from, kind);
         self.enter(dim);
-        let there = self.find_or_build_portal(dest);
+        let there = self.find_or_build_portal(dest, kind);
         let there_key = (dim, portal_key(&self.world, there));
         self.portal_links.insert(key, there_key);
         self.portal_links.insert(there_key, key);
@@ -269,7 +305,7 @@ impl Game {
     }
 
     /// A portal near `dest` in the active realm (an existing one close by, or a new one). Returns one of its cells.
-    fn find_or_build_portal(&mut self, dest: IVec3) -> IVec3 {
+    fn find_or_build_portal(&mut self, dest: IVec3, kind: Option<usize>) -> IVec3 {
         let (cx, cz) = (dest.x.div_euclid(CW), dest.z.div_euclid(CW));
         for dz in -2..=2 {
             for dx in -2..=2 {
@@ -280,9 +316,10 @@ impl Game {
         let mut best: Option<(i32, IVec3)> = None;
         for dz in -16..=16 {
             for dx in -16..=16 {
-                for y in 1..SCORCH_TOP - 1 {
+                for y in 1..(if self.world.is_scorch() { SCORCH_TOP } else { CH }) - 1 {
                     let p = IVec3::new(dest.x + dx, y, dest.z + dz);
-                    if is_portal(self.world.get_v(p)) && !is_portal(self.world.get_v(p - IVec3::Y)) {
+                    let id = self.world.get_v(p);
+                    if is_portal(id) && portal_kind(id) == Some(kind) && !is_portal(self.world.get_v(p - IVec3::Y)) {
                         let d = dx * dx + dz * dz + (y - dest.y).pow(2) / 4;
                         if best.is_none_or(|b| d < b.0) {
                             best = Some((d, p));
@@ -295,7 +332,7 @@ impl Game {
             return p;
         }
         let base = self.portal_site(dest);
-        build_portal(&mut self.world, base);
+        build_portal_of(&mut self.world, base, kind);
         base
     }
 
@@ -415,8 +452,17 @@ pub fn decode_links(b: &[u8], old: bool) -> std::collections::HashMap<Spot, Spot
 
 /// The cells inside an obsidian frame around `start`, in the x-y plane
 /// (`axis_x`) or the z-y plane. None if it isn't a closed frame.
+#[cfg(test)]
 pub fn portal_frame(world: &World, start: IVec3, axis_x: bool) -> Option<Vec<IVec3>> {
-    if !matches!(world.get_v(start), AIR | PORTAL_X | PORTAL_Z) {
+    portal_frame_of(world, start, axis_x, None)
+}
+
+/// The inside of a frame for a kind of portal (see `portal_kind`) round `start`, if it's a whole one.
+pub fn portal_frame_of(world: &World, start: IVec3, axis_x: bool, kind: Option<usize>) -> Option<Vec<IVec3>> {
+    let frame = frame_block(kind);
+    let [sx, sz] = sheets(kind);
+    let first = world.get_v(start);
+    if first != AIR && first != sx && first != sz {
         return None;
     }
     let side = if axis_x { IVec3::X } else { IVec3::Z };
@@ -429,11 +475,11 @@ pub fn portal_frame(world: &World, start: IVec3, axis_x: bool) -> Option<Vec<IVe
         for d in [side, -side, IVec3::Y, IVec3::NEG_Y] {
             let q = p + d;
             let id = world.get_v(q);
-            if id == OBSIDIAN || seen.contains(&q) {
+            if id == frame || seen.contains(&q) {
                 continue;
             }
             // Cells already lit (a joined player's edits arrive one at a time) count as inside.
-            let lit = if axis_x { PORTAL_X } else { PORTAL_Z };
+            let lit = if axis_x { sx } else { sz };
             if id != AIR && id != lit {
                 return None;
             }
@@ -456,12 +502,18 @@ pub fn portal_frame(world: &World, start: IVec3, axis_x: bool) -> Option<Vec<IVe
 /// A 4x5 obsidian frame with a lit portal, standing on `base` (bottom-left of the inside),
 /// with a platform and room to step out.
 pub fn build_portal(world: &mut World, base: IVec3) {
+    build_portal_of(world, base, None);
+}
+
+/// The same for a kind of portal (see `portal_kind`): its own frame and sheets.
+pub fn build_portal_of(world: &mut World, base: IVec3, kind: Option<usize>) {
+    let (frame_id, sheet) = (frame_block(kind), sheets(kind)[0]);
     for dx in -1..=2 {
         for dz in -1..=1 {
             // A floor to stand on, and clear air around it.
             let floor = base + IVec3::new(dx, -1, dz);
             if !is_solid(world.get_v(floor)) || is_liquid(world.get_v(floor)) {
-                world.set_v(floor, OBSIDIAN);
+                world.set_v(floor, frame_id);
             }
             for dy in 0..4 {
                 let p = base + IVec3::new(dx, dy, dz);
@@ -475,7 +527,7 @@ pub fn build_portal(world: &mut World, base: IVec3) {
         for dy in -1..=3 {
             let p = base + IVec3::new(dx, dy, 0);
             let frame = dx == -1 || dx == 2 || dy == -1 || dy == 3;
-            world.set_v(p, if frame { OBSIDIAN } else { PORTAL_X });
+            world.set_v(p, if frame { frame_id } else { sheet });
         }
     }
 }

@@ -68,7 +68,7 @@ impl Game {
         let centre = pos.as_vec3() + Vec3::splat(0.5);
         self.sfx(Sfx::Note(inst.index(), pitch), Some(centre));
         self.note_particle(centre + Vec3::Y * 0.7, pitch);
-        self.vibrate(centre, None);
+        self.vibrate_kind(centre, None, crate::zapparts::Vibe::Music);
     }
 
     /// A little coloured note floats up (green low, through to red high).

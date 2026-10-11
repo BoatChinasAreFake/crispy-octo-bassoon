@@ -217,6 +217,10 @@ impl App {
                     format!("Biome: {}", g.world.scorch_biome_at(p).name())
                 } else if g.world.is_hollow() {
                     "Biome: the Hollow".to_string()
+                } else if let Some(i) = g.world.generator.mod_biome_at(p.x.floor() as i32, p.z.floor() as i32, biome) {
+                    format!("Biome: {} (surface {hgt})", block::reg().biomes[i].name)
+                } else if g.world.generator.mod_dim().is_some() {
+                    format!("Surface {hgt}")
                 } else {
                     format!("Biome: {} (surface {hgt})", biome.name())
                 },

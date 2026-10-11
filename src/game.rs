@@ -354,6 +354,8 @@ pub struct Game {
     /// Zappy Dust (see wiring.rs): time since the last update, pressed
     /// buttons and plates with their time left, doors held open by power.
     pub zap_timer: f32,
+    /// Until daylight sensors look at the sky again (see zapparts.rs).
+    pub sky_timer: f32,
     pub buttons: HashMap<IVec3, f32>,
     pub plates: HashMap<IVec3, f32>,
     pub powered_doors: HashSet<IVec3>,
@@ -630,6 +632,7 @@ impl Game {
             lava_waiting: HashSet::new(),
             on_fire: 0.0,
             zap_timer: 0.0,
+            sky_timer: 0.0,
             buttons: HashMap::new(),
             plates: HashMap::new(),
             powered_doors: HashSet::new(),
@@ -1021,6 +1024,15 @@ impl Game {
             return;
         }
         self.explore_timer = 0.0;
+        // Mods' biomes, anywhere (see modgen.rs).
+        {
+            let p = self.player.body.pos;
+            let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
+            let g = &self.world.generator;
+            if !g.biomes.is_empty() && g.mod_biome_at(x, z, g.column(x, z).1).is_some() {
+                self.advance("homebrew");
+            }
+        }
         // Down below, it's the Scorchlands' own biomes (see wilds.rs).
         if self.in_scorch() {
             self.scorch_explore();
@@ -1130,6 +1142,10 @@ impl Game {
     }
 
     pub fn daylight(&self) -> f32 {
+        // A mod dimension's light is its own, with no sun to change it.
+        if let Some(d) = self.mod_dim_here() {
+            return d.light.max(0.18);
+        }
         let s = self.sun_angle().sin();
         let t = ((s + 0.15) / 0.4).clamp(0.0, 1.0);
         let clear = 0.18 + 0.82 * t * t * (3.0 - 2.0 * t);
@@ -1142,7 +1158,12 @@ impl Game {
 
     /// Somewhere other than the ordinary world (no weather, its own sky)?
     pub fn elsewhere(&self) -> bool {
-        self.in_scorch() || self.in_hollow()
+        self.in_scorch() || self.in_hollow() || self.mod_dim_here().is_some()
+    }
+
+    /// The mod dimension the active realm is, if it's one (see modgen.rs).
+    pub fn mod_dim_here(&self) -> Option<&crate::modgen::ModDim> {
+        if self.menu { None } else { self.world.generator.mod_dim() }
     }
 
     /// Is the active realm (where the local player is, unless the host is
@@ -1152,6 +1173,9 @@ impl Game {
     }
 
     pub fn sky_color(&self) -> [f32; 3] {
+        if let Some(d) = self.mod_dim_here() {
+            return d.sky;
+        }
         if self.in_scorch() {
             return self.world.scorch_haze(self.player.body.pos).0;
         }
@@ -1200,7 +1224,7 @@ impl Game {
             renderer.drop_chunk(ctx, k);
         }
         // The far-off land, kept up with where we are.
-        if self.distant_terrain && !self.in_scorch() && !self.in_hollow() {
+        if self.distant_terrain && !self.elsewhere() {
             let generator = self.world.generator.clone();
             if let Some(land) = self.lod.tick(&generator, &self.map_colors, center, radius, self.smooth_far) {
                 renderer.set_far(ctx, Some(&land));
@@ -1314,6 +1338,7 @@ impl Game {
         self.weather_tick(dt);
         self.liquid_tick(dt);
         self.zap_tick(dt);
+        self.zapparts_tick(dt);
         self.deep_dark_tick(dt);
         self.buzz_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
@@ -1893,6 +1918,8 @@ impl Game {
         let mut winds: Vec<(Vec3, Option<u32>)> = Vec::new();
         let mut bursts: Vec<(Vec3, u8, f32, Option<u32>)> = Vec::new();
         let mut splashes: Vec<(Vec3, Option<crate::block::ProjectileEffect>)> = Vec::new();
+        // Blocks hit (a Target switches on; see zapparts.rs).
+        let mut struck: Vec<(IVec3, Option<u32>)> = Vec::new();
         let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
             if a.homing > 0.0 && !a.stuck {
@@ -1948,6 +1975,7 @@ impl Game {
             }
             if thunk {
                 self.sfx(Sfx::Thunk, Some(a.pos));
+                struck.push(((a.pos + a.dir * 0.3).floor().as_ivec3(), a.shooter));
             }
             // A spear that hits the ground drops, ready to be picked up.
             if let Some(spear) = a.spear
@@ -2041,6 +2069,9 @@ impl Game {
         }
         for (at, colour, damage, shooter) in bursts {
             self.firework_burst(at, colour, damage, shooter);
+        }
+        for (p, shooter) in struck {
+            self.projectile_hit_block(p, shooter);
         }
         for (at, (item, wear)) in landed {
             self.spawn_drop(at, item, 1, wear, Vec3::ZERO, 0.5);
@@ -2655,7 +2686,7 @@ impl Game {
         let hit_y = self.player.eye().y + self.player.look_dir().y * h.dist - hit_pos.y as f32;
         let hit_id = self.world.get_v(hit_pos);
         // Levers and buttons (sneak to place against one instead).
-        if !self.player.sneaking && self.use_switch(hit_pos, hit_id) {
+        if !self.player.sneaking && (self.use_switch(hit_pos, hit_id) || self.use_zappart(hit_pos, hit_id)) {
             return;
         }
         // Item frames take what you're holding.
@@ -2804,6 +2835,8 @@ impl Game {
             self.editing_sign = Some(place);
         }
         self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
+        // Heard (joined players' placing is heard by the host as it arrives).
+        self.vibrate_kind(place.as_vec3() + Vec3::splat(0.5), None, crate::zapparts::Vibe::Block);
         self.stats.placed += 1;
         self.player.swing = 1.0;
         if !self.creative {
@@ -2964,7 +2997,7 @@ impl Game {
         if crate::archaeology::is_pot(old) {
             self.pot_broken(pos, old);
         }
-        self.vibrate(pos.as_vec3() + Vec3::splat(0.5), None);
+        self.vibrate_kind(pos.as_vec3() + Vec3::splat(0.5), None, crate::zapparts::Vibe::Block);
     }
 
     /// Carry out mod-defined behaviour (see MODDING.md).
@@ -3616,7 +3649,7 @@ impl Game {
                     let points = m.kind.xp_value(m.size, &mut self.rng);
                     self.spawn_orbs(m.body.pos + Vec3::Y * 0.5, points);
                     self.sculk_spread(at, points);
-                    self.vibrate(at, None);
+                    self.vibrate_kind(at, None, crate::zapparts::Vibe::Mob);
                     if let Some(d) = m.kind.mod_def().filter(|d| d.boss) {
                         let t = format!("The {} has been defeated!", d.name);
                         self.msg(t.clone());
@@ -4075,7 +4108,7 @@ impl Game {
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
         let reach = if scorch || !self.clouds_on { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
         // With the distant land showing, clouds go on out over it (as flat ones past the near boxes).
-        let far_land = self.distant_terrain && !self.in_scorch() && !self.in_hollow();
+        let far_land = self.distant_terrain && !self.elsewhere();
         let far_reach = if reach < 0 || !far_land { reach } else { reach.max((crate::lod::far_for(render_distance) as f32 / cell) as i32 + 2) };
         // Each row's runs of cloudy cells become one strip (Fast) or one box
         // (Fancy). Edges come from whole cells plus one shared fraction, so
@@ -4401,7 +4434,7 @@ impl Game {
         let underwater = !self.menu && self.player.head_in_water(&self.world);
         let sky = self.sky_color();
         let far = (render_distance * 16) as f32;
-        let far_land = self.distant_terrain && renderer.has_far() && !self.in_scorch() && !self.in_hollow();
+        let far_land = self.distant_terrain && renderer.has_far() && !self.elsewhere();
         let (fog_color, fog_start, fog_end) = if underwater {
             // A Turtle Shell lets you see a good way further.
             let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
@@ -4412,6 +4445,8 @@ impl Game {
             (sky, far * 0.2 * thick, far * 0.8 * thick)
         } else if self.in_hollow() {
             ([0.1, 0.05, 0.14], far * 0.4, far)
+        } else if self.mod_dim_here().is_some() {
+            (sky, far * 0.5, far - 4.0)
         } else if !self.fog_on {
             (sky, 0.0, 0.0)
         } else if far_land {
@@ -4429,7 +4464,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = sun_step(self.sun_angle()); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.elsewhere(), sun_dir: { let a = sun_step(self.sun_angle()); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
     }
 }
 

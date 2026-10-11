@@ -147,7 +147,7 @@ pub fn crafter_recipe(slots: &[Option<(Id, u8)>]) -> Option<&'static Recipe> {
 
 /// Everything in this module, for the wiring's "is this zappy?" check.
 pub fn is_contraption(id: Id) -> bool {
-    (ZTORCH_ON..DISPENSER_FIRST + 6).contains(&id) || is_comparator(id) || is_observer(id) || is_crafter(id) || matches!(id, COPPER_BULB | COPPER_BULB_ON)
+    (ZTORCH_ON..DISPENSER_FIRST + 6).contains(&id) || crate::zapparts::is_dropper(id) || is_comparator(id) || is_observer(id) || is_crafter(id) || matches!(id, COPPER_BULB | COPPER_BULB_ON)
 }
 
 /// The item a family member is placed from (and drops as).
@@ -162,6 +162,8 @@ pub fn family(id: Id) -> Option<Id> {
         Some(STICKY_FIRST)
     } else if is_dispenser(id) {
         Some(DISPENSER_FIRST)
+    } else if crate::zapparts::is_dropper(id) {
+        Some(DROPPER_FIRST)
     } else if is_comparator(id) {
         Some(COMPARATOR_FIRST)
     } else if is_observer(id) {
@@ -185,6 +187,8 @@ pub fn face_tile(id: Id, face: usize) -> Option<u16> {
         (f, if sticky { T_STICKY_FACE } else { T_PISTON_FACE }, T_PISTON_SIDE)
     } else if is_dispenser(id) {
         ((id - DISPENSER_FIRST) as u8, T_DISPENSER_FACE, T_COBBLE)
+    } else if crate::zapparts::is_dropper(id) {
+        ((id - DROPPER_FIRST) as u8, T_DROPPER_FACE, T_COBBLE)
     } else if is_observer(id) {
         let (f, on) = observer_state(id);
         (f, T_OBSERVER_FACE, if on { T_OBSERVER_BACK_ON } else { T_OBSERVER_BACK })
@@ -204,7 +208,7 @@ pub fn face_tile(id: Id, face: usize) -> Option<u16> {
         front
     } else if n == -d {
         back
-    } else if is_dispenser(id) {
+    } else if is_dispenser(id) || crate::zapparts::is_dropper(id) {
         T_COBBLE
     } else if is_observer(id) {
         T_OBSERVER_SIDE
@@ -217,7 +221,7 @@ pub fn face_tile(id: Id, face: usize) -> Option<u16> {
 
 /// Can a piston move this block?
 pub fn movable(id: Id) -> bool {
-    let fixed = block(id).hardness < 0.0 || matches!(id, OBSIDIAN | BEDROCK) || crate::containers::is_container(id) || is_door(id) || is_head(id) || is_dispenser(id) || is_crafter(id) || crate::scorch::is_portal(id);
+    let fixed = block(id).hardness < 0.0 || matches!(id, OBSIDIAN | BEDROCK) || crate::containers::is_container(id) || is_door(id) || is_head(id) || is_dispenser(id) || crate::zapparts::is_dropper(id) || is_crafter(id) || crate::scorch::is_portal(id);
     if fixed {
         return false;
     }
@@ -283,7 +287,7 @@ impl Game {
             } else if !on && extended {
                 self.piston_pull(p, f, sticky);
             }
-        } else if is_dispenser(id) || is_crafter(id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) {
+        } else if is_dispenser(id) || crate::zapparts::is_dropper(id) || is_crafter(id) || matches!(id, COPPER_BULB | COPPER_BULB_ON) {
             // These act when power arrives (not while it stays).
             let on = crate::wiring::powered(&self.world, p);
             let was = self.dispensers_on.contains(&p);
@@ -291,6 +295,8 @@ impl Game {
                 self.dispensers_on.insert(p);
                 if is_dispenser(id) {
                     self.dispense(p, (id - DISPENSER_FIRST) as u8);
+                } else if crate::zapparts::is_dropper(id) {
+                    self.drop_one(p, (id - DROPPER_FIRST) as u8);
                 } else if is_crafter(id) {
                     self.craft_at(p, (id - CRAFTER_FIRST) as u8);
                 } else {

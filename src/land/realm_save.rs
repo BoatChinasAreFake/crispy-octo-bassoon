@@ -18,6 +18,14 @@ use std::collections::HashMap;
 
 type Mods = HashMap<(i32, i32), HashMap<u32, Id>>;
 
+/// A dimension's save section.
+fn realm_section(d: Dim) -> String {
+    match d {
+        Dim::Mod(_) => format!("realm_{}", d.save_name()),
+        d => format!("realm{}", d.index()),
+    }
+}
+
 fn put(out: &mut Vec<u8>, key: &str, b: &[u8]) {
     out.push(key.len() as u8);
     out.extend_from_slice(key.as_bytes());
@@ -183,10 +191,14 @@ impl Game {
     /// it's what the rest of the save holds).
     pub fn save_realms(&mut self) -> Vec<(String, Vec<u8>)> {
         let mut v = vec![("dims".to_string(), vec![1]), ("dim".to_string(), vec![self.dim.index()])];
-        for d in [Dim::Scorch, Dim::Hollow] {
+        // (Mods' dimensions by name, so they're found whatever else the mods add.)
+        if let Dim::Mod(_) = self.dim {
+            v.push(("dim_name".to_string(), self.dim.save_name().into_bytes()));
+        }
+        for d in Dim::every().into_iter().skip(1) {
             if self.parked.contains_key(&d) {
                 let b = self.in_realm(d, |g| g.realm_part());
-                v.push((format!("realm{}", d.index()), b));
+                v.push((realm_section(d), b));
             }
         }
         v
@@ -198,13 +210,19 @@ impl Game {
             self.split_old_layout();
             return;
         }
-        for d in [Dim::Scorch, Dim::Hollow] {
-            let key = format!("realm{}", d.index());
+        for d in Dim::every().into_iter().skip(1) {
+            let key = realm_section(d);
             if let Some((_, b)) = extras.iter().find(|(k, _)| *k == key) {
                 self.in_realm(d, |g| g.load_realm_part(b, remap));
             }
         }
-        let dim = extras.iter().find(|(k, _)| k == "dim").and_then(|(_, b)| b.first()).and_then(|&d| Dim::from_index(d)).unwrap_or_default();
+        let named = extras.iter().find(|(k, _)| k == "dim_name").and_then(|(_, b)| Dim::from_save_name(&String::from_utf8_lossy(b)));
+        let dim = match extras.iter().find(|(k, _)| k == "dim").and_then(|(_, b)| b.first()) {
+            // (A mod's dimension whose mod is gone: back to the Overworld.)
+            Some(&d) if d >= 3 => named.unwrap_or_default(),
+            Some(&d) => Dim::from_index(d).unwrap_or_default(),
+            None => Dim::Over,
+        };
         self.enter(dim);
         self.dim = dim;
     }

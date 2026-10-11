@@ -1763,7 +1763,101 @@ fn homely(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut 
     if scan.is_some_and(|s| !s.games.iter().any(|g| g.info.port == port)) {
         report.problems.push("the host never turned up on the LAN".into());
     }
+
+    // 44. A bot opens a trapped chest: the lamp beside it lights for everyone,
+    // and goes out again when the bot closes it.
+    let k = 6 % n;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    let chest = feet + IVec3::new(2, 0, 0);
+    let lamp = chest + IVec3::Z;
+    for p in [chest, lamp] {
+        touched.insert(p);
+    }
+    host.world.set_v(chest, TRAPPED_CHEST);
+    host.world.set_v(lamp, LAMP);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.open_container(chest);
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("trapped chest");
+    if host.world.get_v(chest) != TRAPPED_CHEST_ON {
+        report.problems.push(format!("{} opened a trapped chest and the host's isn't sprung", team[k].name));
+    }
+    for b in team.iter() {
+        if b.game.world.get_v(lamp) != LAMP_ON {
+            report.problems.push(format!("{} never saw the lamp by the sprung trapped chest light", b.name));
+        }
+    }
+    team[k].game.close_container();
+    pump(host, team, 1.0, |_| idle());
+    for b in team.iter() {
+        if b.game.world.get_v(lamp) != LAMP {
+            report.problems.push(format!("{} still sees the trapped chest's lamp lit after it was shut", b.name));
+        }
+    }
+    host.world.set_v(chest, AIR);
+    host.world.set_v(lamp, AIR);
+
+    // 45. A daylight sensor wakes up with the sun: everyone sees its lamp.
+    let sensor = feet + IVec3::new(-2, 0, 1);
+    let lamp = sensor + IVec3::X;
+    for p in [sensor, lamp] {
+        touched.insert(p);
+    }
+    host.world.set_v(sensor, DAYLIGHT_SENSOR);
+    host.world.set_v(lamp, LAMP);
+    let before = host.time;
+    host.time = 0.3;
+    pump(host, team, 2.0, |_| idle());
+    report.features.push("daylight sensor");
+    for b in team.iter() {
+        if b.game.world.get_v(lamp) != LAMP_ON {
+            report.problems.push(format!("{} never saw the daylight sensor's lamp come on in the morning", b.name));
+        }
+    }
+    host.time = before;
+    host.world.set_v(sensor, AIR);
+    host.world.set_v(lamp, AIR);
+
+    // 46. With a mod's dimension installed: a bot goes through its portal,
+    // and the host and the bot agree where it is.
+    if !crate::block::reg().dims.is_empty() {
+        let k = 7 % n;
+        revive(host, team);
+        ground(host, team, k);
+        let feet = team[k].game.player.body.pos.floor().as_ivec3();
+        pad(host, touched, feet, 4);
+        let base = feet + IVec3::new(0, 0, 3);
+        crate::scorch::build_portal_of(&mut host.world, base, Some(0));
+        for dx in -1..=2 {
+            for dy in -1..=3 {
+                touched.insert(base + IVec3::new(dx, dy, 0));
+            }
+        }
+        pump(host, team, 1.0, |_| idle());
+        let id = team[k].game.my_id;
+        through_portal(host, team, k, base);
+        report.features.push("mod dimension");
+        let there = crate::dims::Dim::Mod(0);
+        if team[k].game.dim != there || host.peer_dim(id) != Some(there) {
+            report.problems.push(format!("{} walked into a mod's portal and is in {:?} (the host says {:?})", team[k].name, team[k].game.dim, host.peer_dim(id)));
+        }
+        // Home again.
+        team[k].game.dead = Some("fell off the moon".into());
+        team[k].game.respawn();
+        pump(host, team, 2.0, |_| idle());
+        load_around(&mut team[k].game, host.spawn);
+        if team[k].game.dim != crate::dims::Dim::Over {
+            report.problems.push(format!("{} respawned and is still in {:?}", team[k].name, team[k].game.dim));
+        }
+    }
 }
+
+/// A small mod the `--playtest` command installs, so the bots can try a mod's
+/// dimension (see modgen.rs). (Not for the unit test: it would change the
+/// blocks under every other test running alongside.)
+const PLAYTEST_MOD: &str = "[mod]\nname = Playtest Moon\n[block moon_rock]\ntexture = stone\n[block moon_frame]\ntexture = white\n[dimension moon]\nname = The Playtest Moon\nstone = moon_rock\ntop = moon_rock\nunder = moon_rock\nframe = moon_frame\nheight = 40\nhills = 4\n";
 
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
@@ -1773,6 +1867,7 @@ pub fn run(args: &[String]) -> i32 {
     let seed = get("--seed").map(|v| v as u32).unwrap_or(1234);
     let port = get("--port").map(|v| v as u16).unwrap_or(crate::net::DEFAULT_PORT);
     println!("Playtest: a host and {bots} bots for {seconds} seconds (seed {seed})...");
+    crate::mods::install_sources(vec![crate::mods::ModSource { id: "playtestmoon".into(), files: [("mod.txt".to_string(), PLAYTEST_MOD.as_bytes().to_vec())].into_iter().collect() }], &[]);
     let started = Instant::now();
     match playtest(bots, seconds, seed, port) {
         Err(e) => {
@@ -1805,7 +1900,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

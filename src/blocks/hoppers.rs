@@ -97,7 +97,7 @@ impl Game {
 
     /// Move one item from container `from` (only `slots` of it) to `to`
     /// (arriving from above or the side). True if one moved.
-    fn move_one(&mut self, from: IVec3, slots: Option<Vec<usize>>, to: IVec3, from_above: bool) -> bool {
+    pub(crate) fn move_one(&mut self, from: IVec3, slots: Option<Vec<usize>>, to: IVec3, from_above: bool) -> bool {
         use crate::containers::{store, store_kind, store_ref};
         let (src_kind, dst_kind) = (store_kind(&self.world, &self.vehicles, from), store_kind(&self.world, &self.vehicles, to));
         let (Some(src), Some(dst)) = (store_ref(&self.world, &self.vehicles, from), store_ref(&self.world, &self.vehicles, to)) else { return false };
@@ -119,6 +119,10 @@ impl Game {
     fn hopper_carts(&mut self) {
         let carts: Vec<(u32, IVec3, Vec3)> = self.vehicles.iter().filter(|v| v.kind == crate::vehicles::HOPPER_CART_KIND).map(|v| (v.id, v.cell(), v.pos)).collect();
         for (id, cell, pos) in carts {
+            // (A powered activator rail switches it off.)
+            if crate::zapparts::activator_on(self.world.get_v(cell)) {
+                continue;
+            }
             let key = crate::vehicles::cart_key(id);
             let above = cell + IVec3::Y;
             if is_container(self.world.get_v(above)) && self.move_one(above, None, key, true) {

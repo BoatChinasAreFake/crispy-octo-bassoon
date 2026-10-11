@@ -159,10 +159,12 @@ impl Game {
     /// Something made a noise at `at` (where the world lives): sensors hear
     /// it, shriekers may shriek, the Hush comes looking. `who`: the player
     /// responsible, if any (their warnings go up).
-    pub fn vibrate(&mut self, at: Vec3, who: Option<u32>) {
+    pub fn vibrate_kind(&mut self, at: Vec3, who: Option<u32>, kind: crate::zapparts::Vibe) {
         if self.is_client() || self.menu {
             return;
         }
+        // Calibrated sensors hear their kind of noise anywhere (see zapparts.rs).
+        self.hear_calibrated(at, kind);
         // The Hush hears everything.
         for m in self.mobs.iter_mut().filter(|m| m.kind == MobKind::Hush) {
             if m.body.pos.distance(at) < HUSH_HEARS {
@@ -273,8 +275,11 @@ impl Game {
         }
         for p in off {
             self.sensors_on.remove(&p);
-            if self.world.get_v(p) == SCULK_SENSOR_ACTIVE {
+            let id = self.world.get_v(p);
+            if id == SCULK_SENSOR_ACTIVE {
                 self.world.set_v(p, SCULK_SENSOR);
+            } else if crate::zapparts::is_calibrated(id) {
+                self.world.set_v(p, crate::zapparts::calibrated(crate::zapparts::calibrated_state(id).0, false));
             }
         }
         for w in self.warnings.values_mut() {
@@ -305,7 +310,7 @@ impl Game {
             p.last_step = p.target;
         }
         for (at, who) in steps {
-            self.vibrate(at, who);
+            self.vibrate_kind(at, who, crate::zapparts::Vibe::Step);
         }
     }
 

@@ -864,6 +864,20 @@ pub const T_HERBS: u16 = 1068;
 pub const T_COOKBOOK: u16 = 1069;
 pub const T_DISH_FIRST: u16 = 1070;
 pub const T_SPRING_ROCK: u16 = 1079;
+// More Zappy parts (see zapparts.rs).
+pub const T_DAYLIGHT_TOP: u16 = 1080;
+pub const T_DAYLIGHT_TOP_NIGHT: u16 = 1081;
+pub const T_DAYLIGHT_SIDE: u16 = 1082;
+pub const T_TARGET_TOP: u16 = 1083;
+pub const T_TARGET_SIDE: u16 = 1084;
+pub const T_DROPPER_FACE: u16 = 1085;
+/// Four: north-south and east-west, off and on.
+pub const T_ACTIVATOR_RAIL: u16 = 1086;
+pub const T_TRAPPED_CHEST_TOP: u16 = 1090;
+pub const T_TRAPPED_CHEST_SIDE: u16 = 1091;
+/// Four: one for each kind of noise it listens for.
+pub const T_CALIBRATED_TOP: u16 = 1092;
+pub const T_CALIBRATED_SIDE: u16 = 1096;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4477,6 +4491,104 @@ fn cooking_tiles(a: &mut Atlas) {
     });
 }
 
+/// Daylight sensors, the Target, the dropper's face, activator rails, the
+/// Trapped Chest and calibrated sculk sensors.
+fn zappart_tiles(a: &mut Atlas) {
+    // Daylight sensor: a pane of glass in a wooden frame (blue by night).
+    for (tile, night) in [(T_DAYLIGHT_TOP, false), (T_DAYLIGHT_TOP_NIGHT, true)] {
+        a.each(tile, |x, y, r, _| {
+            let frame = !(2..14).contains(&x) || !(2..14).contains(&y);
+            let bar = x == 7 || x == 8 || y == 7 || y == 8;
+            if frame || bar {
+                shade(rgb(150, 115, 70), r.range(0.85, 1.05))
+            } else if night {
+                shade(rgb(70, 90, 160), r.range(0.9, 1.1))
+            } else {
+                shade(rgb(225, 225, 205), r.range(0.92, 1.05))
+            }
+        });
+    }
+    a.each(T_DAYLIGHT_SIDE, |_, y, r, _| shade(rgb(150, 115, 70), r.range(0.85, 1.05) * if y % 4 == 0 { 0.85 } else { 1.0 }));
+    // Target: a hay bale with red and white rings.
+    let rings = |a: &mut Atlas, tile: u16| {
+        a.each(tile, |x, y, r, _| {
+            let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+            match d as u32 {
+                0..=1 | 4 | 7 => shade(rgb(200, 40, 40), r.range(0.9, 1.05)),
+                2..=3 | 5..=6 => shade(rgb(235, 225, 205), r.range(0.9, 1.05)),
+                _ => shade(rgb(200, 175, 90), r.range(0.85, 1.05)),
+            }
+        });
+    };
+    rings(a, T_TARGET_TOP);
+    rings(a, T_TARGET_SIDE);
+    // Dropper: a dispenser's face with a wide-open mouth instead of a slot.
+    a.copy(T_COBBLE, T_DROPPER_FACE);
+    for y in 4..12 {
+        for x in 4..12 {
+            let edge = y == 4 || y == 11 || x == 4 || x == 11;
+            a.set(T_DROPPER_FACE, x, y, if edge { rgb(70, 70, 70) } else { rgb(30, 30, 30) });
+        }
+    }
+    // Activator rail: rails over dark sleepers with a red stripe down the middle.
+    for k in 0..4u16 {
+        let (ew, on) = (k >= 2, k % 2 == 1);
+        a.each(T_ACTIVATOR_RAIL + k, |x, y, r, _| {
+            let (across, along) = if ew { (y as f32 + 0.5, x as f32 + 0.5) } else { (x as f32 + 0.5, y as f32 + 0.5) };
+            if (3.0..5.0).contains(&across) || (11.0..13.0).contains(&across) {
+                shade(rgb(170, 170, 178), r.range(0.9, 1.1))
+            } else if (7.0..9.0).contains(&across) && along.rem_euclid(4.0) < 3.0 {
+                if on { rgb(255, 60, 40) } else { rgb(110, 20, 15) }
+            } else if (2.0..14.0).contains(&across) && along.rem_euclid(4.0) < 2.0 {
+                shade(rgb(70, 55, 40), r.range(0.85, 1.05))
+            } else {
+                [0, 0, 0, 0]
+            }
+        });
+    }
+    // Trapped Chest: an ordinary chest with a red tripwire hook on its latch.
+    a.copy(T_CHEST_TOP, T_TRAPPED_CHEST_TOP);
+    a.copy(T_CHEST_SIDE, T_TRAPPED_CHEST_SIDE);
+    for y in 4..9 {
+        for x in 6..10 {
+            if (y == 4 || x == 6 || x == 9) && y < 8 {
+                a.set(T_TRAPPED_CHEST_SIDE, x, y, rgb(190, 40, 35));
+            }
+        }
+    }
+    for x in 1..15 {
+        a.set(T_TRAPPED_CHEST_TOP, x, 1, rgb(170, 35, 30));
+    }
+    // Calibrated sculk sensors: the sensor's tendrils, with an amethyst stripe in the colour of what they hear.
+    let tints = [rgb(150, 210, 90), rgb(200, 160, 90), rgb(210, 110, 230), rgb(230, 80, 80)];
+    for (k, tint) in tints.into_iter().enumerate() {
+        a.each(T_CALIBRATED_TOP + k as u16, |x, y, r, _| {
+            let tendril = (x == 4 || x == 11) && (3..13).contains(&y);
+            let stripe = (7..9).contains(&y) && (2..14).contains(&x);
+            let rim = x == 0 || y == 0 || x == 15 || y == 15;
+            if stripe {
+                shade(tint, r.range(0.9, 1.1))
+            } else if tendril {
+                rgb(60, 190, 200)
+            } else if rim {
+                rgb(120, 70, 160)
+            } else {
+                shade(rgb(15, 50, 60), r.range(0.85, 1.1))
+            }
+        });
+    }
+    a.each(T_CALIBRATED_SIDE, |x, y, r, _| {
+        let crystal = y < 5 && (x % 5 == 1 || x % 5 == 2);
+        if crystal {
+            shade(rgb(170, 110, 220), r.range(0.9, 1.1))
+        } else if y < 8 {
+            shade(rgb(10, 32, 40), r.range(0.85, 1.1))
+        } else {
+            shade(rgb(15, 50, 60), r.range(0.85, 1.1))
+        }
+    });
+}
+
 /// Cauldrons, composters, lightning rods, Galloper armour and dyed woolly armour.
 fn homecraft_tiles(a: &mut Atlas) {
     // A cauldron: dark iron with rivets, a rim on top, and a sooty inside.
@@ -4557,6 +4669,7 @@ fn homecraft_tiles(a: &mut Atlas) {
         if d < 5.5 { shade(rgb(240, 245, 250), r.range(0.88, 1.02) * if d > 4.5 { 0.85 } else { 1.0 }) } else { [0, 0, 0, 0] }
     });
     cooking_tiles(a);
+    zappart_tiles(a);
     // Dyed woolly armour: the worn knit and the icons, in each colour.
     for c in 0..8u16 {
         let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };

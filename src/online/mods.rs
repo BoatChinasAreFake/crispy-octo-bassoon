@@ -464,6 +464,44 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         info.added.1 += 1;
                     }
                 }
+                "dimension" if s.name.is_empty() || s.name.contains(':') => {
+                    errs.push(format!("line {}: [dimension ...] needs a simple name like [dimension moon]", s.line));
+                }
+                "dimension" => {
+                    if reg.dims.len() >= MAX_DIMS {
+                        errs.push(format!("line {}: too many dimensions across all mods ({MAX_DIMS} max)", s.line));
+                    } else if reg.dims.iter().any(|d| d.key == key) {
+                        errs.push(format!("line {}: {} is defined twice", s.line, s.name));
+                    } else if reg.blocks.len() + 2 > FIRST_ITEM as usize {
+                        errs.push(format!("line {}: too many blocks across all mods", s.line));
+                    } else {
+                        // Its portal's two sheets are blocks of its own (filled in in pass 2).
+                        let mut portal = [AIR; 2];
+                        for (k, x_axis) in [true, false].into_iter().enumerate() {
+                            let mut d = def(leak(&format!("{key}_portal{}", if x_axis { "" } else { "_z" })), leak(&format!("{} Portal", s.name)), Model::Shaped, false, false, [crate::texture::T_PORTAL; 3], -1.0, 0, false, AIR, 11.0, S_GLASS);
+                            d.shape = Shape::Portal { x_axis };
+                            d.creative = false;
+                            portal[k] = reg.blocks.len() as Id;
+                            reg.blocks.push(d);
+                        }
+                        reg.dims.push(crate::modgen::ModDim {
+                            key: key.clone(),
+                            name: leak(&s.name),
+                            stone: STONE,
+                            top: GRASS,
+                            under: DIRT,
+                            liquid: AIR,
+                            sea_level: 50,
+                            height: 64,
+                            hills: 8.0,
+                            scale: 80.0,
+                            sky: [0.4, 0.5, 0.7],
+                            light: 1.0,
+                            frame: OBSIDIAN,
+                            portal,
+                        });
+                    }
+                }
                 "mob" if s.name.is_empty() || s.name.contains(':') => {
                     errs.push(format!("line {}: [mob ...] needs a simple name like [mob mouse]", s.line));
                 }
@@ -491,6 +529,9 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
         parsed.push((mi, sections, Vec::new()));
     }
 
+    // Mods' dimensions are numbered in order of their names (see dims.rs).
+    reg.dims.sort_by(|a, b| a.key.cmp(&b.key));
+
     // Pass 2: textures first (blocks and items use them), then everything else.
     let mut ctx = Ctx { reg: &mut reg, textures: HashMap::new(), next_tile: FIRST_MOD_TILE };
     for (mi, sections, errs) in parsed.iter_mut() {
@@ -506,10 +547,24 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                 }
         }
     }
+    // Dimensions, then biomes (structures, ores and plants name them).
+    for (mi, sections, errs) in parsed.iter_mut() {
+        let m = &sources[*mi];
+        for s in sections.iter().filter(|s| s.kind == "dimension") {
+            fill_dimension(&mut ctx, m, s, errs);
+        }
+    }
+    for (mi, sections, errs) in parsed.iter_mut() {
+        let m = &sources[*mi];
+        for s in sections.iter().filter(|s| s.kind == "biome") {
+            fill_biome(&mut ctx, m, s, errs);
+        }
+    }
     for (mi, sections, errs) in parsed.iter_mut() {
         let m = &sources[*mi];
         for s in sections.iter() {
             match s.kind.as_str() {
+                "structure" => fill_structure(&mut ctx, m, s, errs),
                 "block" => fill_block(&mut ctx, m, s, errs),
                 "item" => fill_item(&mut ctx, m, s, errs),
                 "mob" => fill_mob(&mut ctx, m, s, errs),
@@ -522,6 +577,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                 "ore" => {
                     let b = s.str("block").and_then(|v| ctx.resolve(&m.id, v)).filter(|&b| b < FIRST_ITEM);
                     let replace = s.str("replace").map(|v| ctx.resolve(&m.id, v)).unwrap_or(Some(STONE)).filter(|&b| b < FIRST_ITEM);
+                    let dim = dim_of(&ctx, &m.id, s, errs);
                     match (b, replace) {
                         (Some(block), Some(replace)) => ctx.reg.ores.push(OreGen {
                             block,
@@ -529,6 +585,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                             min_y: num(s, "min_y", 1, errs),
                             max_y: num(s, "max_y", 60, errs),
                             chance: num(s, "chance", 0.004f32, errs).clamp(0.0, 0.05),
+                            dim,
                         }),
                         _ => errs.push(format!("line {}: [ore] needs block = <a block> (and an optional replace = <block>)", s.line)),
                     }
@@ -536,13 +593,14 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                 "plant" => {
                     let b = s.str("block").and_then(|v| ctx.resolve(&m.id, v)).filter(|&b| b < FIRST_ITEM);
                     let on = s.str("on").map(|v| ctx.resolve(&m.id, v)).unwrap_or(Some(GRASS)).filter(|&b| b < FIRST_ITEM);
+                    let dim = dim_of(&ctx, &m.id, s, errs);
                     match (b, on) {
-                        (Some(block), Some(on)) => ctx.reg.plants.push(PlantGen { block, on, chance: num(s, "chance", 0.01f32, errs).clamp(0.0, 0.2) }),
+                        (Some(block), Some(on)) => ctx.reg.plants.push(PlantGen { block, on, chance: num(s, "chance", 0.01f32, errs).clamp(0.0, 0.2), dim }),
                         _ => errs.push(format!("line {}: [plant] needs block = <a block> (and an optional on = <block>)", s.line)),
                     }
                 }
                 "splashes" => ctx.reg.splashes.extend(s.rows.iter().map(|(r, _)| r.chars().take(60).collect::<String>())),
-                "mod" | "texture" => {}
+                "mod" | "texture" | "dimension" | "biome" => {}
                 other => errs.push(format!("line {}: unknown section [{other}]", s.line)),
             }
         }
@@ -554,6 +612,255 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
         }
     }
     reg
+}
+
+/// Most dimensions, biomes and structures across all mods, and the biggest structure template.
+const MAX_DIMS: usize = 32;
+const MAX_BIOMES: usize = 64;
+const MAX_STRUCTURES: usize = 64;
+const MAX_TEMPLATE: i32 = 32;
+
+/// A mod dimension named in `dimension = <name>` (yours, or `mod:name`).
+fn find_dim(ctx: &Ctx, modid: &str, name: &str) -> Option<usize> {
+    let name = name.trim().to_ascii_lowercase();
+    let full = if name.contains(':') { name.clone() } else { format!("{modid}:{name}") };
+    ctx.reg.dims.iter().position(|d| d.key == full).or_else(|| ctx.reg.dims.iter().position(|d| d.key.ends_with(&format!(":{name}"))))
+}
+
+fn dim_of(ctx: &Ctx, modid: &str, s: &Section, errs: &mut Vec<String>) -> Option<usize> {
+    let (_, v, line) = s.get("dimension")?;
+    let d = find_dim(ctx, modid, v);
+    if d.is_none() {
+        errs.push(format!("line {line}: unknown dimension \"{v}\""));
+    }
+    d
+}
+
+/// A base-game biome by name ("plains", "birch_forest", "cherry grove").
+fn base_biome(name: &str) -> Option<crate::world::Biome> {
+    crate::world::Biome::from_name(&name.replace('_', " ")).or_else(|| crate::world::Biome::from_name(&name.replace('_', "")))
+}
+
+/// A block for a dimension or biome key, or an error.
+fn block_key(ctx: &Ctx, m: &ModSource, s: &Section, key: &str, errs: &mut Vec<String>) -> Option<Id> {
+    let (_, v, line) = s.get(key)?;
+    let b = ctx.resolve(&m.id, v).filter(|&b| b < FIRST_ITEM);
+    if b.is_none() {
+        errs.push(format!("line {line}: {key} = {v}: not a block"));
+    }
+    b
+}
+
+fn fill_dimension(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
+    let key = format!("{}:{}", m.id, s.name.to_ascii_lowercase());
+    let Some(k) = ctx.reg.dims.iter().position(|d| d.key == key) else { return };
+    let mut d = ctx.reg.dims[k].clone();
+    d.name = leak(s.str("name").unwrap_or(&s.name));
+    for (field, target) in [("stone", &mut d.stone), ("top", &mut d.top), ("under", &mut d.under), ("frame", &mut d.frame)] {
+        if let Some(b) = block_key(ctx, m, s, field, errs) {
+            *target = b;
+        }
+    }
+    if let Some(b) = block_key(ctx, m, s, "sea", errs) {
+        d.liquid = b;
+    }
+    if d.frame == OBSIDIAN || d.frame == AIR {
+        errs.push(format!("line {}: a dimension needs frame = <a block of your own> (not obsidian: that's the Scorchlands')", s.line));
+    }
+    d.sea_level = num(s, "sea_level", 50, errs).clamp(4, crate::world::CH - 10);
+    d.height = num(s, "height", 64, errs).clamp(8, crate::world::CH - 16);
+    d.hills = num(s, "hills", 8.0f32, errs).clamp(0.0, 60.0);
+    d.scale = num(s, "hill_size", 80.0f32, errs).clamp(8.0, 1000.0);
+    d.light = num(s, "light", 1.0f32, errs).clamp(0.0, 1.0);
+    if let Some((_, v, line)) = s.get("sky") {
+        match parse_color(v) {
+            Some(c) => d.sky = [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0],
+            None => errs.push(format!("line {line}: sky = {v}: not a colour")),
+        }
+    }
+    // Its portal's look.
+    let tile = match s.get("portal_texture") {
+        Some((_, v, line)) => ctx.texture(m, v, errs, *line),
+        None => crate::texture::T_PORTAL,
+    };
+    for p in d.portal {
+        if let Some(b) = ctx.reg.blocks.get_mut(p as usize) {
+            b.tex = [tile; 3];
+        }
+    }
+    ctx.reg.dims[k] = d;
+}
+
+fn fill_biome(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
+    if s.name.is_empty() || s.name.contains(':') {
+        errs.push(format!("line {}: [biome ...] needs a simple name like [biome cheese_fields]", s.line));
+        return;
+    }
+    let key = format!("{}:{}", m.id, s.name.to_ascii_lowercase());
+    if ctx.reg.biomes.len() >= MAX_BIOMES {
+        errs.push(format!("line {}: too many biomes across all mods ({MAX_BIOMES} max)", s.line));
+        return;
+    }
+    if ctx.reg.biomes.iter().any(|b| b.key == key) {
+        errs.push(format!("line {}: {} is defined twice", s.line, s.name));
+        return;
+    }
+    let (mut within, mut dim) = (Vec::new(), None);
+    let (inside, line) = s.get("in").map(|(_, v, l)| (v.clone(), *l)).unwrap_or(("plains".into(), s.line));
+    for name in inside.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        if let Some(b) = base_biome(name) {
+            within.push(b);
+        } else if let Some(d) = find_dim(ctx, &m.id, name) {
+            dim = Some(d);
+        } else {
+            errs.push(format!("line {line}: in = {name}: not a biome or dimension"));
+        }
+    }
+    if dim.is_some() && !within.is_empty() {
+        errs.push(format!("line {line}: a biome is either in base biomes or in a dimension, not both"));
+        within.clear();
+    }
+    let mut plants = Vec::new();
+    for (k, v, line) in s.kv.iter().filter(|(k, _, _)| k == "plant") {
+        let mut parts = v.split_whitespace();
+        let block = parts.next().and_then(|b| ctx.resolve(&m.id, b)).filter(|&b| b < FIRST_ITEM);
+        let chance = parts.next().and_then(|c| c.parse::<f32>().ok()).unwrap_or(0.02).clamp(0.0, 0.5);
+        match block {
+            Some(b) if plants.len() < 8 => plants.push((b, chance)),
+            Some(_) => errs.push(format!("line {line}: at most 8 plants a biome")),
+            None => errs.push(format!("line {line}: {k} = {v}: needs a block and a chance, like plant = rose 0.02")),
+        }
+    }
+    let tree = s.get("tree").and_then(|(_, v, line)| {
+        let parts: Vec<&str> = v.split_whitespace().collect();
+        let log = parts.first().and_then(|b| ctx.resolve(&m.id, b)).filter(|&b| b < FIRST_ITEM);
+        let leaves = parts.get(1).and_then(|b| ctx.resolve(&m.id, b)).filter(|&b| b < FIRST_ITEM);
+        let chance = parts.get(2).and_then(|c| c.parse::<f32>().ok()).unwrap_or(0.02).clamp(0.0, 0.2);
+        let height = parts.get(3).and_then(|c| c.parse::<i32>().ok()).unwrap_or(5).clamp(2, 16);
+        match (log, leaves) {
+            (Some(log), Some(leaves)) => Some(crate::modgen::ModTree { log, leaves, chance, height }),
+            _ => {
+                errs.push(format!("line {line}: tree = {v}: needs a log and a leaves block (and optionally a chance and height), like tree = oak_log oak_leaves 0.02 5"));
+                None
+            }
+        }
+    });
+    let biome = crate::modgen::ModBiome {
+        key,
+        name: leak(s.str("name").unwrap_or(&s.name)),
+        within,
+        dim,
+        share: num(s, "share", 0.25f32, errs).clamp(0.01, 1.0),
+        size: num(s, "size", 300.0f32, errs).clamp(32.0, 4000.0),
+        top: block_key(ctx, m, s, "top", errs),
+        under: block_key(ctx, m, s, "under", errs),
+        plants,
+        tree,
+    };
+    ctx.reg.biomes.push(biome);
+}
+
+fn fill_structure(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
+    if s.name.is_empty() || s.name.contains(':') {
+        errs.push(format!("line {}: [structure ...] needs a simple name like [structure hut]", s.line));
+        return;
+    }
+    if ctx.reg.structures.len() >= MAX_STRUCTURES {
+        errs.push(format!("line {}: too many structures across all mods ({MAX_STRUCTURES} max)", s.line));
+        return;
+    }
+    // The legend: `block # = cheese` (and '.' is air, '_' leaves what's there).
+    let mut legend: HashMap<char, Id> = HashMap::from([('.', AIR)]);
+    for (k, v, line) in s.kv.iter().filter(|(k, _, _)| k.starts_with("block ")) {
+        let ch: Vec<char> = k["block ".len()..].trim().chars().collect();
+        match (ch.as_slice(), ctx.resolve(&m.id, v).filter(|&b| b < FIRST_ITEM)) {
+            ([c], Some(b)) if *c != '_' => {
+                legend.insert(*c, b);
+            }
+            _ => errs.push(format!("line {line}: {k} = {v}: needs one letter and a block, like block # = cobblestone")),
+        }
+    }
+    // Layers from the bottom up, each a few rows (north to south) of letters (west to east).
+    let mut layers: Vec<Vec<(String, usize)>> = Vec::new();
+    for (row, line) in &s.rows {
+        if row.eq_ignore_ascii_case("layer") {
+            layers.push(Vec::new());
+        } else if let Some(l) = layers.last_mut() {
+            l.push((row.clone(), *line));
+        } else {
+            errs.push(format!("line {line}: a structure's rows go after a line saying layer"));
+        }
+    }
+    let h = layers.len() as i32;
+    let d = layers.iter().map(|l| l.len()).max().unwrap_or(0) as i32;
+    let w = layers.iter().flatten().map(|(r, _)| r.chars().count()).max().unwrap_or(0) as i32;
+    if h == 0 || d == 0 || w == 0 {
+        errs.push(format!("line {}: [structure] needs at least one layer of rows", s.line));
+        return;
+    }
+    if w > MAX_TEMPLATE || h > MAX_TEMPLATE || d > MAX_TEMPLATE {
+        errs.push(format!("line {}: structures are at most {MAX_TEMPLATE} blocks each way (this is {w}x{h}x{d})", s.line));
+        return;
+    }
+    let mut blocks = vec![None; (w * h * d) as usize];
+    for (y, layer) in layers.iter().enumerate() {
+        for (z, (row, line)) in layer.iter().enumerate() {
+            for (x, c) in row.chars().enumerate() {
+                if c == '_' {
+                    continue;
+                }
+                match legend.get(&c) {
+                    Some(&b) => blocks[((y as i32 * d + z as i32) * w + x as i32) as usize] = Some(b),
+                    None => errs.push(format!("line {line}: '{c}' isn't in the legend (add block {c} = <a block>)")),
+                }
+            }
+        }
+    }
+    let mut places = Vec::new();
+    let mut dim = dim_of(ctx, &m.id, s, errs);
+    if let Some((_, v, line)) = s.get("in") {
+        for name in v.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+            let lower = name.to_ascii_lowercase();
+            let full = if lower.contains(':') { lower.clone() } else { format!("{}:{lower}", m.id) };
+            if let Some(i) = ctx.reg.biomes.iter().position(|b| b.key == full || b.key.ends_with(&format!(":{lower}"))) {
+                places.push(crate::modgen::Place::Mod(i));
+                // A biome in a dimension puts the structure there too.
+                if dim.is_none() {
+                    dim = ctx.reg.biomes[i].dim;
+                }
+            } else if let Some(b) = base_biome(name) {
+                places.push(crate::modgen::Place::Base(b));
+            } else {
+                errs.push(format!("line {line}: in = {name}: not a biome"));
+            }
+        }
+    }
+    let mut loot = Vec::new();
+    if let Some((_, v, line)) = s.get("loot") {
+        for part in v.split(',') {
+            let bits: Vec<&str> = part.split_whitespace().collect();
+            let item = bits.first().and_then(|n| ctx.resolve(&m.id, n));
+            let most = bits.get(1).and_then(|n| n.parse::<u8>().ok()).unwrap_or(1).clamp(1, 64);
+            let chance = bits.get(2).and_then(|n| n.parse::<f32>().ok()).unwrap_or(0.5).clamp(0.0, 1.0);
+            match item {
+                Some(i) if loot.len() < 27 => loot.push((i, most, chance)),
+                Some(_) => {}
+                None => errs.push(format!("line {line}: loot: \"{}\" isn't an item (write item count chance, like diamond 2 0.3)", part.trim())),
+            }
+        }
+    }
+    ctx.reg.structures.push(crate::modgen::ModStructure {
+        key: format!("{}:{}", m.id, s.name.to_ascii_lowercase()),
+        name: leak(s.str("name").unwrap_or(&s.name)),
+        dim,
+        places,
+        spacing: num(s, "spacing", 16, errs).clamp(2, 128),
+        chance: num(s, "chance", 0.5f32, errs).clamp(0.0, 1.0),
+        sink: num(s, "sink", 0, errs).clamp(0, MAX_TEMPLATE),
+        size: [w, h, d],
+        blocks,
+        loot,
+    });
 }
 
 fn build_texture(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) -> Option<Vec<u8>> {
@@ -1912,8 +2219,14 @@ projectile_effect_duration = NaN
         let reg = build(&sources, &[]);
         let info = &reg.mods[0];
         assert!(info.errors.is_empty(), "example mod has errors: {:#?}", info.errors);
-        assert_eq!(info.added, (5, 4, 7));
-        assert_eq!(reg.ores.len(), 1);
+        assert_eq!(info.added, (8, 4, 8));
+        assert_eq!(reg.ores.len(), 2);
+        // A biome, a structure in it, and a dimension (with a biome and an ore of its own).
+        assert_eq!((reg.biomes.len(), reg.structures.len(), reg.dims.len()), (2, 1, 1));
+        assert_eq!(reg.structures[0].size, [5, 4, 5]);
+        assert_eq!(reg.biomes[1].dim, Some(0));
+        assert_eq!(reg.ores[1].dim, Some(0));
+        assert_eq!(reg.dims[0].frame, reg.lookup("cheese:moon_gate").unwrap());
         assert_eq!(reg.plants.len(), 1);
         assert_eq!(reg.splashes.len(), 3);
         // The PNG side texture decoded to real pixels.

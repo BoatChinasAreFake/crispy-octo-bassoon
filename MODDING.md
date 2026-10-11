@@ -190,7 +190,76 @@ on = grass          // what it grows on (default grass)
 chance = 0.01       // per surface column (max 0.2)
 ```
 
+Add `dimension = <name>` to either to put it in one of the mods' [dimensions](#dimension-name) instead of the Overworld.
+
 Terrain that was already generated doesn't change. Explore new areas, or start a new world.
+
+### `[biome <name>]`
+
+A biome takes over a share of one or more base-game biomes (or a share of a mod dimension), in big patches:
+
+```text
+[biome cheddar_plains]
+name = Cheddar Plains
+in = plains, meadow       // base-game biomes it appears in, or one mod dimension
+share = 0.3               // roughly this fraction of them (1 = all of it)
+size = 250                // how big its patches are, in blocks (32 to 4000)
+top = butter              // the ground's top block
+under = rind              // the few blocks under that
+plant = cheese_flower 0.06   // a block and a chance per column (up to 8 lines)
+tree = wheel butter 0.004 4  // log, leaves, chance per column, height
+```
+
+Base-game trees don't grow in a mod biome, so give it a `tree` if it should have any. The F3 screen shows which biome you're in, and `/locate <name>` finds the nearest patch.
+
+### `[structure <name>]`
+
+A structure is a block template, built in layers from the bottom up. Each layer is a few rows of letters, north to south, each row west to east. `.` is air, `_` leaves whatever's already there, and every other letter is in the legend:
+
+```text
+[structure cheese_hut]
+name = Cheese Hut
+in = cheddar_plains    // biomes it's built in (base-game or mod); leave out for anywhere
+spacing = 12           // about one per this many chunks each way (2 to 128)
+chance = 0.6           // how often a spot actually gets one
+sink = 0               // how many blocks it's sunk into the ground
+loot = slice 8 0.9, cheese_pickaxe 1 0.3   // its chests: item, up to how many, chance
+block # = wheel
+block c = chest
+layer
+###
+#c#
+###
+layer
+###
+#.#
+#.#
+```
+
+Structures are built only on dry land, and at most 32 blocks each way. Chests in a template are filled from `loot` when they're built. Add `dimension = <name>` to build it in a mod dimension (one built in a mod dimension's biome goes there by itself). `/locate <name>` finds the nearest one.
+
+### `[dimension <name>]`
+
+A whole new world, reached through a portal of its own. Build a frame of the `frame` block the same shape as a Scorchlands portal and light it with a Sparker:
+
+```text
+[dimension moon]
+name = The Cheese Moon
+frame = moon_gate          // the portal frame: one of your blocks (not obsidian)
+portal_texture = moon_portal
+stone = moon_rock          // what it's made of
+top = moon_rock            // its surface
+under = rind               // just under the surface
+sea = water                // its seas (leave out for none)
+sea_level = 50
+height = 50                // its average ground height
+hills = 14                 // how tall its hills are (0 for flat)
+hill_size = 60             // how wide they are
+sky = #10142a
+light = 0.55               // how bright it is (0 to 1); there's no sun or weather
+```
+
+Each dimension gets a portal block (`<name>_portal`) made for it. Ores, plants, biomes and structures can be put in it with `dimension = <name>` or `in = <name>`. Walking through the portal again brings you back to the Overworld. Its terrain is saved in its own folder, by name, so turning the mod off and on again keeps it.
 
 ### `[mob <name>]`
 
@@ -428,6 +497,7 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 ## Limits
 
 - Up to **32,000 mod blocks**, **32,000 mod items**, **187 mod mobs** and about **2,200 mod textures**, across all mods together.
+- Up to **32 dimensions**, **64 biomes** and **64 structures** across all mods together, and structures at most **32 blocks** each way.
 - 1 MB per file, and 4 MB for all of a server's mods together.
 
 ## Worlds and multiplayer
