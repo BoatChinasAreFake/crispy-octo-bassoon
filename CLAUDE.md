@@ -94,7 +94,7 @@ Originals:
 Parts:
 - Part 1: items 1 and 2. **(released)**
 - Part 2: items 3 and 4. **(released)**
-- Part 3: items 5 and 6.
+- Part 3: items 5 and 6. **(released)**
 - Part 4: the two originals (this is the last part).
 
 ## v0.6: The Hollow, filled in
