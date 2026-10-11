@@ -49,7 +49,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
-pub const PROTOCOL: u32 = 39;
+pub const PROTOCOL: u32 = 40;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -326,6 +326,16 @@ pub enum Msg {
     Letters { list: Vec<(String, String)>, arrived: bool },
     /// client -> host: throw my letters away.
     PostBin,
+    /// host -> client: you've earned this advancement (for things only the host sees).
+    Advance { key: String },
+    /// client -> host: what does this Notice Board say (see bounties.rs)?
+    BoardAsk { x: i32, y: i32, z: i32 },
+    /// host -> client: what it says, for you: (0 bring / 1 defeat, the item or
+    /// mob kind, how many, gold, experience, how many you've beaten, done),
+    /// and what its village thinks of you.
+    Board { x: i32, y: i32, z: i32, rep: i16, rows: Vec<(u8, Id, u8, u8, u16, u16, bool)> },
+    /// client -> host: I've done bounty `slot` on this board (and here's what it wanted).
+    Bounty { x: i32, y: i32, z: i32, slot: u8 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -1108,6 +1118,40 @@ impl Msg {
                 }
             }
             Msg::PostBin => w.u8(103),
+            Msg::Advance { key } => {
+                w.u8(104);
+                w.str(key);
+            }
+            Msg::BoardAsk { x, y, z } => {
+                w.u8(105);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::Board { x, y, z, rep, rows } => {
+                w.u8(106);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u16(*rep as u16);
+                w.u8(rows.len().min(crate::bounties::PER_BOARD) as u8);
+                for &(kind, what, n, gold, xp, have, done) in rows.iter().take(crate::bounties::PER_BOARD) {
+                    w.u8(kind);
+                    w.u16(what);
+                    w.u8(n);
+                    w.u8(gold);
+                    w.u16(xp);
+                    w.u16(have);
+                    w.u8(done as u8);
+                }
+            }
+            Msg::Bounty { x, y, z, slot } => {
+                w.u8(107);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*slot);
+            }
             Msg::TradeAccept { x, y, z, accept } => {
                 w.u8(97);
                 w.i32(*x);
@@ -1438,6 +1482,17 @@ impl Msg {
                 Msg::Letters { list, arrived }
             }
             103 => Msg::PostBin,
+            104 => Msg::Advance { key: r.str()? },
+            105 => Msg::BoardAsk { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            106 => {
+                let (x, y, z, rep) = (r.i32()?, r.i32()?, r.i32()?, r.u16()? as i16);
+                let mut rows = Vec::new();
+                for _ in 0..r.u8()?.min(crate::bounties::PER_BOARD as u8) {
+                    rows.push((r.u8()?, r.u16()?, r.u8()?, r.u8()?, r.u16()?, r.u16()?, r.u8()? != 0));
+                }
+                Msg::Board { x, y, z, rep, rows }
+            }
+            107 => Msg::Bounty { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()? },
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -2122,6 +2177,10 @@ mod tests {
             Msg::PostSend { to: "Bob".into(), letter: "Happy birthday!\nLove, Ann".into() },
             Msg::Letters { list: vec![("Ann".into(), "Hi".into())], arrived: true },
             Msg::PostBin,
+            Msg::Advance { key: "help_wanted".into() },
+            Msg::BoardAsk { x: 3, y: 64, z: -9 },
+            Msg::Board { x: 3, y: 64, z: -9, rep: -7, rows: vec![(0, 0x8005, 20, 3, 15, 0, false), (1, 7, 5, 4, 20, 2, true)] },
+            Msg::Bounty { x: 3, y: 64, z: -9, slot: 2 },
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },

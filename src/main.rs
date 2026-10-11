@@ -14,7 +14,7 @@ mod online;
 pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, mesher, meshpool, narrator, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, together, trading, trims, villageblocks, tripwire, wiring, woods, zapparts};
-pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, reputation, skins, sniffers, village_life, villagers, wildlife, wilter};
+pub(crate) use creatures::{animals, beasts, bees, bounties, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, reputation, skins, sniffers, village_growth, village_life, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, post, scripting, server, servers, teams};
 mod screens;
@@ -77,6 +77,8 @@ enum Screen {
     Enchant,
     /// Trading with a Hmmer (see villagers.rs).
     Trade,
+    /// Reading a village's Notice Board (see bounties.rs).
+    Board,
     /// A grindstone or smithing table is open (see smithing.rs).
     Bench,
     /// The Field Journal (see archaeology.rs) and the Beekeeping Log (bees.rs).
@@ -428,6 +430,9 @@ impl App {
         if self.screen == Screen::Trade && s != Screen::Trade {
             self.game.trading = None;
             self.game.inv.return_cursor();
+        }
+        if self.screen == Screen::Board && s != Screen::Board {
+            self.game.notice = None;
         }
         if self.screen == Screen::Sign && s != Screen::Sign {
             // Done writing: put it on the sign.
@@ -923,7 +928,7 @@ impl App {
                     type_into(&mut self.post_letter, post::LETTER_LEN);
                 }
             }
-            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench => {
+            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Board | Screen::Bench => {
                 let pad = self.pad_frame;
                 if is_key_pressed(KeyCode::Escape) || self.settings.binds.pressed(keybinds::Action::Inventory) || pad.inventory || pad.back {
                     self.set_screen(Screen::Playing);
@@ -1064,7 +1069,7 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench | Screen::Journal | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Board | Screen::Bench | Screen::Journal | Screen::Title | Screen::Dead) || self.game.net.is_some();
         let t_tick = std::time::Instant::now();
         if simulate {
             if self.game.map_colors.len() != self.map_colors.len() {
@@ -1117,6 +1122,11 @@ impl App {
         if self.game.trading.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Trade);
         } else if self.screen == Screen::Trade && self.game.trade_list().is_none() {
+            self.set_screen(Screen::Playing);
+        }
+        if self.game.notice.is_some() && self.screen == Screen::Playing {
+            self.set_screen(Screen::Board);
+        } else if self.screen == Screen::Board && self.game.board_rows().is_none() {
             self.set_screen(Screen::Playing);
         }
         if let Some(e) = self.game.net_error.take() {
@@ -1768,6 +1778,7 @@ impl App {
                     Screen::Anvil => self.anvil_screen(),
                     Screen::Enchant => self.enchant_screen(),
                     Screen::Trade => self.trade_screen(),
+                    Screen::Board => self.board_screen(),
                     Screen::Sign => self.sign_screen(),
                     Screen::Book => self.book_screen(),
                     Screen::Loom => self.loom_screen(),

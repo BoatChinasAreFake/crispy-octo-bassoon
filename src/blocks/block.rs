@@ -484,7 +484,9 @@ pub const CARTOGRAPHY_TABLE: Id = MYCELIUM + 103;
 pub const MUD_BRICKS: Id = MYCELIUM + 104;
 pub const THATCH: Id = MYCELIUM + 105;
 pub const FROST_SHINGLES: Id = MYCELIUM + 106;
-pub const NUM_BLOCKS: Id = MYCELIUM + 107;
+/// Each village's Notice Board, with its bounties (see bounties.rs).
+pub const NOTICE_BOARD: Id = MYCELIUM + 107;
+pub const NUM_BLOCKS: Id = MYCELIUM + 108;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.

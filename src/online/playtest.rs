@@ -192,6 +192,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     together(&mut host, &mut team, &mut report, &mut touched);
     village_life(&mut host, &mut team, &mut report, &mut touched);
     trade_levels(&mut host, &mut team, &mut report, &mut touched);
+    growing_villages(&mut host, &mut team, &mut report);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2193,6 +2194,153 @@ fn trade_levels(host: &mut Game, team: &mut [Bot], report: &mut Report, touched:
     pump(host, team, 0.5, |_| idle());
 }
 
+/// v0.5 part 3: a bot goes to a real village. Its Notice Board goes up; the
+/// bot hands in a Bring bounty and claims a Defeat one (the host checks and
+/// pays); then the village, full up, builds a house the bot sees go up.
+fn growing_villages(host: &mut Game, team: &mut [Bot], report: &mut Report) {
+    use crate::bounties::Task;
+    use crate::entity::MobKind;
+    revive(host, team);
+    let k = team.len() - 1;
+    let name = team[k].name.clone();
+    let id_k = team[k].game.my_id;
+    let Some(o) = host.world.nearest_site(crate::structures::Kind::Village, host.spawn, 60) else {
+        report.problems.push("no village anywhere near spawn to try growing villages in".into());
+        return;
+    };
+    let key = o + IVec3::Y;
+    let (cx, cz) = (o.x.div_euclid(crate::world::CW), o.z.div_euclid(crate::world::CW));
+    for dz in -2..=2 {
+        for dx in -2..=2 {
+            host.world.load_now(cx + dx, cz + dz);
+        }
+    }
+    // The bot walks (well, appears) onto the square, and waits for the land to arrive.
+    let spot = o.as_vec3() + Vec3::new(-1.5, 1.05, 0.5);
+    let home = team[k].game.player.body.pos;
+    // (The host moves them, as its own teleports do, so it doesn't think they're cheating.)
+    if let Some(p) = host.peers.get_mut(&id_k) {
+        p.target = spot;
+    }
+    let g = &mut team[k].game;
+    g.player.body.pos = spot;
+    g.player.body.vel = Vec3::ZERO;
+    g.player.fall_start = spot.y;
+    // (Bots have no renderer to load the land around them; the village spreads over a few chunks.)
+    let start = Instant::now();
+    let around = |g: &Game| (-1..=1).all(|dz| (-1..=1).all(|dx| g.world.is_loaded(o.x + dx * 24, o.z + dz * 24)));
+    while !around(g) && start.elapsed() < Duration::from_secs(30) {
+        g.world.stream(&[(spot, 3)]);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    pump(host, team, 1.0, |_| idle());
+    if !around(&team[k].game) {
+        report.problems.push(format!("{name} never had the village at {o} load around them"));
+    }
+    let (time, day) = (host.time, host.day);
+    host.time = 0.1;
+    host.grow_village(key);
+    pump(host, team, 1.0, |_| idle());
+    let Some(site) = host.village_site(key) else {
+        report.problems.push(format!("the village at {o} has no site"));
+        return;
+    };
+    let board = crate::structures::village_board(site.origin);
+    report.features.push("notice board");
+    if host.world.get_v(board) != NOTICE_BOARD || team[k].game.world.get_v(board) != NOTICE_BOARD {
+        report.problems.push(format!("the village's Notice Board: the host has {:?}, {name} sees {:?}", block(host.world.get_v(board)).key, block(team[k].game.world.get_v(board)).key));
+    }
+    host.world.set_v(board, NOTICE_BOARD);
+    pump(host, team, 0.5, |_| idle());
+    // A Bring bounty: the host hands over what it wants, the bot hands it in.
+    let rows = host.rows_for(board, &crate::players::record_key(&name));
+    let Task::Bring(item, n) = rows[0].bounty.task else { return };
+    host.give_peer(id_k, item, n);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.open_board(board);
+    pump(host, team, 1.0, |_| idle());
+    let seen = team[k].game.board_rows().map(|r| r.1).unwrap_or_default();
+    if seen.len() != crate::bounties::PER_BOARD || seen[0].bounty != rows[0].bounty {
+        report.problems.push(format!("{name} read the board and saw {} bounties (the host: {:?})", seen.len(), rows.iter().map(|r| r.bounty.text()).collect::<Vec<_>>()));
+    }
+    let gold = team[k].game.inv.count(GOLD_INGOT);
+    team[k].game.finish_bounty(0);
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("bounties");
+    let village = host.village_key(board.as_vec3());
+    let me = crate::players::record_key(&name);
+    if !host.bounties.done.contains(&(village, 0, me.clone())) || team[k].game.inv.count(GOLD_INGOT) != gold + rows[0].bounty.gold as u32 {
+        report.problems.push(format!("{name} handed in \"{}\": the host has it done: {}, and their gold went {gold} -> {}", rows[0].bounty.text(), host.bounties.done.contains(&(village, 0, me.clone())), team[k].game.inv.count(GOLD_INGOT)));
+    }
+    if !team[k].game.advancements.earned.iter().any(|a| a == "help_wanted") {
+        report.problems.push(format!("{name} finished a bounty but never heard about Help Wanted"));
+    }
+    // A Defeat bounty: the host counts what they beat.
+    if let Task::Defeat(kind, n) = rows[2].bounty.task {
+        for _ in 0..n {
+            host.bounty_kill(&name, kind);
+        }
+        team[k].game.open_board(board);
+        pump(host, team, 1.0, |_| idle());
+        let have = team[k].game.board_rows().map_or(0, |r| r.1[2].have);
+        team[k].game.finish_bounty(2);
+        pump(host, team, 1.0, |_| idle());
+        if have != n as u16 || !host.bounties.done.contains(&(village, 2, me.clone())) {
+            report.problems.push(format!("{name} beat {n} for \"{}\", saw {have} on the board, and the host has it done: {}", rows[2].bounty.text(), host.bounties.done.contains(&(village, 2, me))));
+        }
+    }
+    team[k].game.notice = None;
+    // Every bed taken and a couple of Hmmers about: a new house goes up.
+    let mut taken = HashSet::new();
+    while let Some(b) = crate::village_life::nearest(&host.world, key.as_vec3(), crate::beds::is_bed, &taken) {
+        taken.insert(b);
+    }
+    for (i, b) in taken.iter().enumerate() {
+        host.life.beds.insert(900_000 + i as u32, *b);
+    }
+    let mut helpers = Vec::new();
+    for i in 0..2 {
+        let id = host.alloc_mob(MobKind::Hmmer, key.as_vec3() + Vec3::new(i as f32 * 2.0 - 1.0, 0.0, 4.5));
+        if let Some(m) = host.mobs.iter_mut().find(|m| m.id == id) {
+            m.home = Some(m.body.pos);
+        }
+        helpers.push(id);
+    }
+    host.day += 1;
+    host.grow_village(key);
+    report.features.push("growing village");
+    let Some(build) = host.growth.villages.get(&key).and_then(|v| v.build) else {
+        report.problems.push(format!("the village at {o} was full up and didn't start a house"));
+        return;
+    };
+    for _ in 0..400 {
+        if host.growth.villages.get(&key).is_none_or(|v| v.build.is_none()) {
+            break;
+        }
+        host.grow_village(key);
+        pump(host, team, 0.05, |_| idle());
+    }
+    pump(host, team, 1.5, |_| idle());
+    let (at, facing, seed) = host.growth_spots(&site)[build.spot as usize];
+    let plan = crate::village_growth::house_plan(at, facing, seed, host.growth_style(&site));
+    let differ: Vec<String> = plan.iter().filter(|(p, id)| *id != AIR && team[k].game.world.get_v(*p) != host.world.get_v(*p)).map(|(p, _)| format!("{p}: {} not {}", block(team[k].game.world.get_v(*p)).key, block(host.world.get_v(*p)).key)).collect();
+    if host.growth.villages[&key].houses != 1 || !differ.is_empty() {
+        report.problems.push(format!("the new house: the host has built {} and {name} sees {} of its blocks differently ({:?})", host.growth.villages[&key].houses, differ.len(), &differ[..differ.len().min(4)]));
+    }
+    if !team[k].game.advancements.earned.iter().any(|a| a == "new_neighbours") {
+        report.problems.push(format!("{name} watched the house go up but never heard about New Neighbours"));
+    }
+    host.mobs.retain(|m| !helpers.contains(&m.id));
+    host.life.beds.retain(|id, _| *id < 900_000);
+    (host.time, host.day) = (time, day);
+    if let Some(p) = host.peers.get_mut(&id_k) {
+        p.target = home;
+    }
+    team[k].game.player.body.pos = home;
+    team[k].game.player.fall_start = home.y;
+    ground(host, team, k);
+}
+
 /// A small mod the `--playtest` command installs, so the bots can try a mod's
 /// dimension (see modgen.rs). (Not for the unit test: it would change the
 /// blocks under every other test running alongside.)
@@ -2239,7 +2387,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

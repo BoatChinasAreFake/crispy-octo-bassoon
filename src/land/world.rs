@@ -1906,8 +1906,11 @@ impl World {
     }
 
     pub fn set(&mut self, x: i32, y: i32, z: i32, id: Id) {
+        // (Logged ahead of anything it sets off, such as a pane joining up
+        // with it, so that everyone else applies them in the same order.)
+        let at = self.edit_log.len();
         if self.set_inner(x, y, z, id).is_some() && self.log_edits {
-            self.edit_log.push((x, y, z, id));
+            self.edit_log.insert(at, (x, y, z, id));
         }
     }
 

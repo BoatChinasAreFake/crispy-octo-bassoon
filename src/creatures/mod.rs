@@ -4,6 +4,7 @@
 pub(crate) mod animals;
 pub(crate) mod beasts;
 pub(crate) mod bees;
+pub(crate) mod bounties;
 pub(crate) mod creaking;
 pub(crate) mod critters;
 pub(crate) mod entity;
@@ -18,6 +19,7 @@ pub(crate) mod raids;
 pub(crate) mod reputation;
 pub(crate) mod skins;
 pub(crate) mod sniffers;
+pub(crate) mod village_growth;
 pub(crate) mod village_life;
 pub(crate) mod villagers;
 pub(crate) mod wilter;

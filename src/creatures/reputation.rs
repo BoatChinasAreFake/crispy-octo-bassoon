@@ -211,7 +211,7 @@ impl Game {
     }
 
     /// The name of player `id` (ours, or a joined player's).
-    fn player_name_of(&self, id: u32) -> Option<String> {
+    pub(crate) fn player_name_of(&self, id: u32) -> Option<String> {
         if id == self.my_id && !self.dedicated {
             Some(self.player_name.clone())
         } else {
@@ -251,6 +251,7 @@ impl Game {
     /// remembered; killing a monster that was bothering a village is too.
     pub fn rep_mob_died(&mut self, mob: u32, kind: MobKind, at: Vec3) {
         let Some((who, _)) = self.rep.hits.remove(&mob) else { return };
+        self.bounty_kill(&who, kind);
         if matches!(kind, MobKind::Hmmer | MobKind::Clanker) {
             if let Some(v) = self.mob_village(mob) {
                 self.change_rep(v, &who, KILL);
