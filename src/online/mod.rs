@@ -3,6 +3,7 @@
 
 pub(crate) mod admin;
 pub(crate) mod cheats;
+pub(crate) mod claims;
 pub(crate) mod crypto;
 pub(crate) mod ledger;
 pub(crate) mod mods;

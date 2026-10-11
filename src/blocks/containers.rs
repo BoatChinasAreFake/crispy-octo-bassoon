@@ -754,6 +754,11 @@ impl Game {
         if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST) {
             return;
         }
+        // Someone else's chests, on their land (see claims.rs; Personal Chests are everyone's own).
+        if kind != PERSONAL_CHEST && crate::vehicles::cart_of_key(p).is_none() && !self.may_build_at(&self.peer_name(from), p) {
+            self.system_message(Some(from), "That's on someone else's land.");
+            return;
+        }
         if kind == CHEST {
             self.snouts_see_chest_opened(p);
         }

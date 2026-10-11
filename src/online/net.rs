@@ -48,7 +48,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// status query (StatusAsk, Status), and players' own skins (SkinData).
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
-/// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn).
+/// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
 pub const PROTOCOL: u32 = 36;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
@@ -315,6 +315,8 @@ pub enum Msg {
     Sidebar { title: String, lines: Vec<(String, i32)>, countdown: String },
     /// host -> client: come back here when you die.
     SetSpawn { pos: Vec3 },
+    /// host -> client: the land claims (see claims.rs).
+    Claims { data: Vec<u8> },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -1075,6 +1077,11 @@ impl Msg {
                 w.u8(99);
                 w.v3(*pos);
             }
+            Msg::Claims { data } => {
+                w.u8(100);
+                w.u32(data.len() as u32);
+                w.bytes(data);
+            }
             Msg::TradeAccept { x, y, z, accept } => {
                 w.u8(97);
                 w.i32(*x);
@@ -1387,6 +1394,13 @@ impl Msg {
                 Msg::Sidebar { title, lines, countdown: r.str()? }
             }
             99 => Msg::SetSpawn { pos: r.v3()? },
+            100 => {
+                let n = r.u32()? as usize;
+                if n > 1 << 20 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "claims too big"));
+                }
+                Msg::Claims { data: r.take(n)?.to_vec() }
+            }
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -2067,6 +2081,7 @@ mod tests {
             Msg::TradeAccept { x: 1, y: -2, z: 3, accept: true },
             Msg::Sidebar { title: "Dig Race".into(), lines: vec![("Ann".into(), 7), ("Bob".into(), -2)], countdown: "Ends in 1:01".into() },
             Msg::SetSpawn { pos: Vec3::new(1.0, 64.0, -3.5) },
+            Msg::Claims { data: b"on\t1\n".to_vec() },
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },

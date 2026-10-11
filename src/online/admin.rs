@@ -123,7 +123,7 @@ fn describe_stack(id: Id, n: u8, wear: crate::inventory::Wear) -> String {
 }
 
 /// The admin commands (without the slash); the cheats are in `cheats::WORDS`.
-pub const WORDS: [&str; 20] = ["help", "list", "players", "info", "say", "kick", "ban", "unban", "bans", "time", "op", "deop", "ops", "allowlist", "whitelist", "forget", "password", "team", "tc", "pvp"];
+pub const WORDS: [&str; 22] = ["help", "list", "players", "info", "say", "kick", "ban", "unban", "bans", "time", "op", "deop", "ops", "allowlist", "whitelist", "forget", "password", "team", "tc", "pvp", "claim", "claims"];
 
 impl Game {
     fn caller_name(&self, who: Caller) -> String {
@@ -152,7 +152,7 @@ impl Game {
         if !known.contains(&word.as_str()) && !cheat {
             return None;
         }
-        let open = matches!(word.as_str(), "help" | "list" | "seed" | "team" | "tc");
+        let open = matches!(word.as_str(), "help" | "list" | "seed" | "team" | "tc" | "claim" | "claims");
         if !open && !self.caller_is_op(who) {
             return Some(vec![format!("Only operators can use /{word}.")]);
         }
@@ -190,6 +190,21 @@ impl Game {
                 }
             }
             ("pvp", arg) => out.extend(self.pvp_command(arg)),
+            // Land claims (see claims.rs): everyone has /claim; /claims on|off is for operators.
+            ("claim" | "claims", args) => {
+                let op = self.caller_is_op(who);
+                let here = match who {
+                    Caller::Player(id) => self.peer_ref(id).map(|p| p.target),
+                    _ => Some(self.player.body.pos),
+                }
+                .unwrap_or_default();
+                let at = (self.world.dim().index(), here.x.floor() as i32, here.z.floor() as i32);
+                let (lines, changed) = self.claims.command(&by, &word, args, op, at);
+                out.extend(lines);
+                if changed {
+                    self.share_claims();
+                }
+            }
             ("help", _) => {
                 if self.caller_is_op(who) {
                     out.push(HELP.into());

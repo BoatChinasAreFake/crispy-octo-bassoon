@@ -16,7 +16,7 @@ pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, di
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, together, trading, trims, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, skins, sniffers, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
-pub(crate) use online::{admin, cheats, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, scripting, server, servers, teams};
+pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, scripting, server, servers, teams};
 mod screens;
 mod shots;
 use shots::parse_args;

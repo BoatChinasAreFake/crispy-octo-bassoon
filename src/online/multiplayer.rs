@@ -484,6 +484,7 @@ impl Game {
             roster.extend(self.mob_names.iter().map(|(&mob, name)| Msg::MobName { mob, name: name.clone() }));
             roster.push(self.rules_msg());
             roster.push(self.teams_msg());
+            roster.push(self.claims_msg());
             if !self.board.shown.is_empty() {
                 roster.push(self.sidebar_msg());
             }
@@ -562,6 +563,11 @@ impl Game {
                     if old != id && !self.edit_allowed(x, y, z, old, id) {
                         corrections.push((x, y, z, old));
                         self.strike(from);
+                        continue;
+                    }
+                    // Someone else's land (see claims.rs).
+                    if old != id && !self.host_claim_ok(from, IVec3::new(x, y, z), old, id) {
+                        corrections.push((x, y, z, old));
                         continue;
                     }
                     // Scripts may veto what remote players do, just like the host's own actions.
@@ -1319,6 +1325,7 @@ impl Game {
             Msg::SkinData { id, pixels } => self.note_peer_skin(id, pixels),
             Msg::TradeState { x, y, z, seats, accepted, done, mine } => self.apply_deal(IVec3::new(x, y, z), seats, accepted, done, mine),
             Msg::Sidebar { title, lines, countdown } => self.board.shown = crate::minigames::Shown { title, lines, countdown },
+            Msg::Claims { data } => self.claims = crate::claims::Claims::decode(&data),
             Msg::SetSpawn { pos } => {
                 if pos.is_finite() {
                     self.personal_spawn = Some(pos);

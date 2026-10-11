@@ -325,6 +325,9 @@ pub struct Game {
     /// Teams (see teams.rs), and whether players can hurt each other (`/pvp`).
     pub teams: crate::teams::Teams,
     pub pvp: bool,
+    /// Land claimed with Survey Posts (see claims.rs), and whose land we're on.
+    pub claims: crate::claims::Claims,
+    pub on_land: Option<String>,
     /// Scores, timers and the sidebar for mods' minigames (see minigames.rs).
     pub board: crate::minigames::Board,
     /// Where we come back when we die, if a script said (otherwise the world's spawn).
@@ -631,6 +634,8 @@ impl Game {
             pvp: false,
             deals: HashMap::new(),
             board: Default::default(),
+            claims: Default::default(),
+            on_land: None,
             personal_spawn: None,
             smooth_far: false,
             lod: crate::lod::Lod::default(),
@@ -933,6 +938,9 @@ impl Game {
         if !self.waypoints.is_empty() {
             v.push(("waypoints2".into(), crate::qol::encode(&self.waypoints)));
         }
+        if self.claims != crate::claims::Claims::default() {
+            v.push(("claims".into(), self.claims.encode()));
+        }
         if self.board != crate::minigames::Board::default() {
             v.push(("minigame".into(), self.board.encode()));
         }
@@ -1009,6 +1017,9 @@ impl Game {
             self.waypoints = crate::qol::decode(b, false);
         } else if let Some(b) = extra("waypoints") {
             self.waypoints = crate::qol::decode(b, true);
+        }
+        if let Some(b) = extra("claims") {
+            self.claims = crate::claims::Claims::decode(b);
         }
         if let Some(b) = extra("minigame") {
             self.board = crate::minigames::Board::decode(b);
@@ -1591,6 +1602,9 @@ impl Game {
 
     fn script_tick(&mut self, dt: f32) {
         self.minigame_tick(dt);
+        if !self.dedicated {
+            self.note_land();
+        }
         let Some(host) = &mut self.scripts else { return };
         host.tick_acc += dt;
         if host.tick_acc < crate::scripting::TICK {
@@ -2952,6 +2966,14 @@ impl Game {
             if !self.fire("on_block_place", args) {
                 return;
             }
+            // A Survey Post claims land, if it can (see claims.rs).
+            if held == SURVEY_POST && self.claims.on {
+                let me = self.player_name.clone();
+                if let Err(e) = self.post_placed(&me, place) {
+                    self.msg(e);
+                    return;
+                }
+            }
         }
         let mut oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
         if held == TORCH
@@ -3009,6 +3031,9 @@ impl Game {
             let args = vec![self.player_name.clone().into(), (pos.x as INT).into(), (pos.y as INT).into(), (pos.z as INT).into(), reg().key_of(id).into()];
             if !self.fire("on_block_break", args) {
                 return;
+            }
+            if id == SURVEY_POST {
+                self.post_broken(pos);
             }
         }
         self.block_particles(pos, 14);

@@ -446,6 +446,28 @@ impl App {
                         draw_circle(bx, by, 2.5 * s, Color::from_rgba(170, 130, 80, 255));
                     }
                 }
+                // Claimed land (see claims.rs): ours in green, friends' in gold, others' in red.
+                if self.game.claims.on {
+                    let dim = self.game.world.dim().index();
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    let me_name = self.game.player_name.clone();
+                    for c in self.game.claims.list.iter().filter(|c| c.dim == dim) {
+                        let r = claims::RADIUS as f32;
+                        let (x0, z0) = (((c.post.x as f32 - r - me.x) / scale).max(-half), ((c.post.z as f32 - r - me.z) / scale).max(-half));
+                        let (x1, z1) = (((c.post.x as f32 + r + 1.0 - me.x) / scale).min(half), ((c.post.z as f32 + r + 1.0 - me.z) / scale).min(half));
+                        if x1 <= x0 || z1 <= z0 {
+                            continue;
+                        }
+                        let col = if c.owner.eq_ignore_ascii_case(&me_name) {
+                            Color::new(0.2, 0.8, 0.3, 0.9)
+                        } else if self.game.claims.is_friend(&c.owner, &me_name) {
+                            Color::new(0.95, 0.75, 0.2, 0.9)
+                        } else {
+                            Color::new(0.9, 0.2, 0.2, 0.9)
+                        };
+                        draw_rectangle_lines(cx + x0 * per_px, cy + z0 * per_px, (x1 - x0) * per_px, (z1 - z0) * per_px, 2.0 * s, col);
+                    }
+                }
                 // Teammates: dots in the team's colour.
                 let me_name = self.game.player_name.clone();
                 for p in self.game.peers.values().filter(|p| p.alive() && self.game.teams.same_team(&p.name, &me_name)) {
