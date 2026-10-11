@@ -171,7 +171,9 @@
 /gamemode survival {}
 /tc <message> talks to your team.
 /team create <name> [colour], join <name>, leave, list, colour <colour>, friendlyfire on|off, remove <name>.
+/team create Reds red
 /team friendlyfire on or off.
+/team join Reds
 1 player
 1-9 / wheel ... pick hotbar    {} ... pick block (creative)
 100% browser-free!
@@ -488,6 +490,7 @@ Cluckster clucks
 Clucksters flutter down ({})
 Coal
 Coal Ore
+Coal for the kitchen.
 Coast
 Coast Trim Template
 Cobbled Deepslate (Moody Rubble)
@@ -671,6 +674,7 @@ Detector Rail (Tattletale)
 Diamond Chest (Really Showing Off)
 Difficulty: Hard (hardcore)
 Difficulty: {}
+Dig Race
 Dig up buried treasure. The map wasn't lying.
 Dimond
 Dimond Boots (Sparkly Stomping)
@@ -972,6 +976,7 @@ Grumbler Tusk (Rude to Ask)
 Guardian
 HTTP {}
 Hackler
+Happy birthday! Don't eat it all at once.
 Hard (Aggressive Hissing)
 Hardcore: one life, hard mode. Good luck.
 Hardy
@@ -2404,6 +2409,7 @@ a socket
 a tamed monster is friendly
 a {} can't be saved
 acacia boat
+after the swap {} has {} gold and {} coal, {} {} gold and {} coal
 already as good as it gets
 already in love
 an alarming number of mites
@@ -2459,6 +2465,7 @@ controlURL
 cooking pot
 coordinate out of range
 copper golem
+couldn't claim land for {}: {}
 couldn't host: {}
 creatures dying
 cruises about 5 blocks up: {}
@@ -2819,6 +2826,7 @@ too many world changes in one event
 too soon
 too wide: prop it up
 tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|creative|spectator> [player], weather <clear|rain|thunder>, seed, summon <mob> [x y z] [count], locate <structure|biome>, setblock <x y z> <block>, kill [player | mobs | <mob>]
+trading table
 trapped chest
 tried to sleep in the Scorchlands
 tried to swim in lava. It's not that kind of pool
@@ -2965,10 +2973,12 @@ zombie hmmer
 {} Wart Block (Squishy)
 {} Wool
 {} and {} are both in the Scorchlands and can't see each other ({} {}; {} {} {})
+{} and {} both accepted at a Trading Table and the host made no swap
 {} armoured their Galloper and the host's isn't
 {} arrived in the Scorchlands without the gold block that's there
 {} banned address(es) loaded from {}
 {} broke kelp and the host's column didn't come away into water ({})
+{} built on {}'s land
 {} came home and the portal by spawn is gone (it has {})
 {} can build on your land now.
 {} can still see the spectator {}
@@ -2991,11 +3001,16 @@ zombie hmmer
 {} gave an Allay a diamond, and the host's Allay didn't take it
 {} gave their Donkey a chest and the host's has none
 {} got into someone else's Llama's pack
+{} got post and no advancement
 {} h {} min
+{} has different land claims from the host's
+{} has letters {}
 {} has {} where the host has {}
 {} heard {} of {}'s {} lines
 {} hit a Sporeling and wasn't slowed (id {})
+{} hit {} with /pvp on and nothing happened
 {} holds {} {} but the host's ledger says {}
+{} hurt teammate {} with friendly fire off
 {} is already your friend.
 {} is back where they left off.
 {} is no longer an operator.
@@ -3009,6 +3024,7 @@ zombie hmmer
 {} left the game ({})
 {} lit Soul Soil and the host has {} there
 {} made a stew and it's not in their Cookbook
+{} made a team and {} joined it, and the host doesn't have them together
 {} made you an operator. Try /help.
 {} mixed columns at {} borders
 {} never heard how {} died
@@ -3038,6 +3054,7 @@ zombie hmmer
 {} opened a chest by a Snout and it didn't mind
 {} opened a trapped chest and the host's isn't sprung
 {} picked up the spear but the host's ledger says {}
+{} posted something and the host has {} parcels on their way
 {} put Bone Dust on a fungus and the host's didn't grow
 {} put a lead on a Mooer and the host's isn't on one
 {} put down an acacia boat and the host didn't take it
@@ -3047,15 +3064,18 @@ zombie hmmer
 {} respawned and is still in {}
 {} respawned and isn't back in the Overworld
 {} says hi #{}
+{} sees different teams from the host's
 {} sees the composter still full ({})
 {} sees the pot as {}, not cooking
 {} sees the pot still full after serving
+{} sees the sidebar as {} (the host: {})
 {} served from a pot and got no stew
 {} set a Wilter Star in a beacon, and the host didn't star it
 {} sheared a Mushmooer and the host didn't see it (Mooer {}, mushrooms {})
 {} still sees the trapped chest's lamp lit after it was shut
 {} still sees {}'s old skin
 {} tied their Mooer to a fence and the host's isn't
+{} took the coal out of their inbox and has {} (had {})
 {} trim ({})
 {} walked into a mod's portal and is in {} (the host says {})
 {} walked into a portal and is in {} (the host says {})
@@ -3071,6 +3091,7 @@ zombie hmmer
 {} {} HTTP/1.1r\nHost: {}:{}r\nConnection: closer\nContent-Length: {}r\n
 {}% cooked
 {}'s claim is gone.
+{}'s inbox has {} coal after the post came
 {}'s members {} hurt each other now.
 {}'s world
 {}, and maybe more
