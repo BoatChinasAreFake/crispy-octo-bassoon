@@ -601,13 +601,25 @@ impl Generator {
     /// way its door faces (0 north .. 3 west), and its seed. Spaced so that
     /// their roofs (a block over a 7×7 footprint) never meet.
     pub fn village_houses(&self, site: &Site) -> Vec<(IVec3, u8, u32)> {
-        let (o, s) = (site.origin, site.seed);
-        [(9, -6, 2u8), (-9, -6, 2), (9, 6, 0), (6, 15, 3), (-6, -15, 1), (6, -15, 3)]
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| i < 3 || hash2(s ^ 0x4053, i as i32, 0) >= 0.35)
-            .map(|(i, &(x, z, facing))| (ivec3(o.x + x, self.column(o.x + x, o.z + z).0, o.z + z), facing, s.wrapping_add(i as u32 * 7919)))
-            .collect()
+        let s = site.seed;
+        let planned = HOUSE_SPOTS.iter().enumerate().filter(|&(i, _)| i < 3 || hash2(s ^ 0x4053, i as i32, 0) >= 0.35);
+        planned.map(|(i, &spot)| self.house_at(site, i, spot)).collect()
+    }
+
+    /// Where a village can build more houses as it grows (see
+    /// village_growth.rs): first the spots its plan left empty, then further
+    /// out along its paths. (Same layout as `village_houses`.)
+    pub fn village_growth_spots(&self, site: &Site) -> Vec<(IVec3, u8, u32)> {
+        let s = site.seed;
+        let skipped = HOUSE_SPOTS.iter().enumerate().filter(|&(i, _)| i >= 3 && hash2(s ^ 0x4053, i as i32, 0) < 0.35);
+        let further = GROWTH_SPOTS.iter().enumerate().map(|(k, spot)| (HOUSE_SPOTS.len() + k, spot));
+        skipped.chain(further).map(|(i, &spot)| self.house_at(site, i, spot)).collect()
+    }
+
+    /// A house spot's ground floor, facing and seed.
+    fn house_at(&self, site: &Site, i: usize, (x, z, facing): (i32, i32, u8)) -> (IVec3, u8, u32) {
+        let o = site.origin;
+        (ivec3(o.x + x, self.column(o.x + x, o.z + z).0, o.z + z), facing, site.seed.wrapping_add(i as u32 * 7919))
     }
 
     /// (The next few are in generator coordinates; `World` has versions in a
@@ -826,6 +838,18 @@ impl Generator {
         }
         v
     }
+}
+
+/// Where a newer village's houses stand, from its square: (x, z, facing).
+const HOUSE_SPOTS: [(i32, i32, u8); 6] = [(9, -6, 2), (-9, -6, 2), (9, 6, 0), (6, 15, 3), (-6, -15, 1), (6, -15, 3)];
+/// Where it builds more as it grows: at the far ends of its paths, clear of
+/// the farms and of each other's roofs.
+const GROWTH_SPOTS: [(i32, i32, u8); 4] = [(18, -6, 2), (18, 6, 0), (-18, -6, 2), (-19, 6, 0)];
+
+/// Where a village puts up its Notice Board (see bounties.rs): on the square,
+/// across the well from the chest.
+pub fn village_board(origin: IVec3) -> IVec3 {
+    origin + ivec3(2, 1, -2)
 }
 
 /// Where a village keeps its chest: on the square, by the well.

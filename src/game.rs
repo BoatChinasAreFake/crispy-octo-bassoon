@@ -165,7 +165,7 @@ pub struct Game {
     pub third_person: bool,
     pub ready: bool,
     pub held_name: f32,
-    spawn_timer: f32,
+    pub(crate) spawn_timer: f32,
     stars: Vec<Vec3>,
     clouds: Perlin,
     /// What the player has done here (see stats.rs).
@@ -353,6 +353,13 @@ pub struct Game {
     /// joined player's game, what the host last said a Hmmer's village thinks of us.
     pub rep: crate::reputation::Reputation,
     pub rep_seen: HashMap<u32, i16>,
+    /// The Notice Board we have open, who has done which bounties (see
+    /// bounties.rs), and (a joined player's game) what our board's village thinks of us.
+    pub notice: Option<IVec3>,
+    pub bounties: crate::bounties::Bounties,
+    pub board_rep: i32,
+    /// Villages' new houses and Clankers (see village_growth.rs).
+    pub growth: crate::village_growth::Growth,
     /// Days gone by (for the moon's phase; see skies.rs).
     pub day: u32,
     pub ride_sync: f32,
@@ -658,6 +665,10 @@ impl Game {
             hmmer_xp: HashMap::new(),
             rep: Default::default(),
             rep_seen: HashMap::new(),
+            notice: None,
+            bounties: Default::default(),
+            board_rep: 0,
+            growth: Default::default(),
             day: 0,
             ride_sync: 0.0,
             chat_log: Default::default(),
@@ -944,6 +955,8 @@ impl Game {
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
             ("hmmer_xp".to_string(), crate::villagers::encode_xp(&self.hmmer_xp)),
             ("reputation".to_string(), self.rep.encode()),
+            ("bounties".to_string(), self.bounties.encode()),
+            ("village_growth".to_string(), self.growth.encode()),
             ("day".to_string(), self.day.to_le_bytes().to_vec()),
             ("packs".to_string(), self.encode_packs()),
             ("sign_styles".to_string(), crate::qol::encode_styles(&self.world.sign_styles)),
@@ -1038,6 +1051,12 @@ impl Game {
         }
         if let Some(b) = extra("reputation") {
             self.rep = crate::reputation::Reputation::decode(b);
+        }
+        if let Some(b) = extra("bounties") {
+            self.bounties = crate::bounties::Bounties::decode(b);
+        }
+        if let Some(b) = extra("village_growth") {
+            self.growth = crate::village_growth::Growth::decode(b);
         }
         if let Some(b) = extra("regulars") {
             self.regulars = crate::villagers::decode_regulars(b);
@@ -2631,6 +2650,10 @@ impl Game {
                 self.open_post(false);
                 return;
             }
+            if id == NOTICE_BOARD {
+                self.open_board(pos);
+                return;
+            }
             if crate::books::is_lectern(id) {
                 self.use_lectern(pos, held);
                 return;
@@ -3616,6 +3639,7 @@ impl Game {
         self.hmmers_tick(dt);
         // (After hmmers_tick: the time of day decides where they go.)
         self.village_life_tick(dt);
+        self.village_growth_tick(dt);
         self.reputation_tick(dt);
         self.zombie_hmmers_tick(dt);
         self.free_riderless();

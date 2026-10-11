@@ -781,6 +781,16 @@ impl Game {
                 self.mail.letters.remove(&crate::post::inbox_key(&name).z);
                 self.send_letters(from, false);
             }
+            Msg::BoardAsk { x, y, z } => {
+                if self.peer_rate_ok(from, "board", 0.2) {
+                    self.host_board_ask(from, IVec3::new(x, y, z));
+                }
+            }
+            Msg::Bounty { x, y, z, slot } => {
+                if self.peer_rate_ok(from, "bounty", 0.2) {
+                    self.host_bounty(from, IVec3::new(x, y, z), slot);
+                }
+            }
             Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
             Msg::MobName { mob, name } => {
                 if self.peer_rate_ok(from, "name", 0.5) {
@@ -1390,6 +1400,13 @@ impl Game {
                     }
                 }
             }
+            Msg::Advance { key } => {
+                // (Only ones we know of.)
+                if crate::advancements::ALL.iter().any(|a| a.key == key) {
+                    self.advance(&key);
+                }
+            }
+            Msg::Board { x, y, z, rep, rows } => self.board_from_host(IVec3::new(x, y, z), rep, rows),
             Msg::Effect { heal, teleport, launch, take } => {
                 if heal > 0.0 && self.dead.is_none() {
                     self.player.health = (self.player.health + heal).min(crate::player::MAX_HEALTH);
@@ -1408,7 +1425,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } => {}
         }
     }
 

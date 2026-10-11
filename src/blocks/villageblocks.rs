@@ -1,6 +1,7 @@
 //! Village blocks (v0.5): the Cartography Table, the Cartographer's
 //! workstation (which block is whose workstation is in village_life.rs),
-//! and three blocks only villages have (see the styles in houses.rs): Mud
+//! the Notice Board (each village puts one up on its square: see
+//! bounties.rs), and three blocks only villages have (see the styles in houses.rs): Mud
 //! Bricks (desert walls), Thatch (savanna roofs) and Frost Shingles (snowy
 //! roofs). There's no recipe for those: take them from a village (politely).
 
@@ -12,12 +13,13 @@ pub fn defs() -> Vec<BlockDef> {
     let mud = def("mud_bricks", "Mud Bricks (Sun-Baked, Slightly Crumbly)", Model::Cube, true, true, [T_MUD_BRICKS; 3], 1.5, 1, false, MUD_BRICKS, 0.0, S_STONE);
     let thatch = def("thatch", "Thatch (Keeps the Rain Off, Mostly)", Model::Cube, true, true, [T_THATCH_TOP, T_THATCH, T_THATCH_TOP], 0.6, 0, false, THATCH, 0.0, S_GRASS);
     let frost = def("frost_shingles", "Frost Shingles (Cold to the Touch)", Model::Cube, true, true, [T_FROST_SHINGLES; 3], 1.5, 1, false, FROST_SHINGLES, 0.0, S_STONE);
-    vec![table, mud, thatch, frost]
+    let board = def("notice_board", "Notice Board (Help Wanted)", Model::Cube, true, true, [T_PLANKS, T_BOARD_FRONT, T_PLANKS], 2.5, 0, false, NOTICE_BOARD, 0.0, S_WOOD);
+    vec![table, mud, thatch, frost, board]
 }
 
 pub fn recipes() -> Vec<Recipe> {
     let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
-    vec![r(&[(PLANKS, 4), (WHEAT, 2)], (CARTOGRAPHY_TABLE, 1))]
+    vec![r(&[(PLANKS, 4), (WHEAT, 2)], (CARTOGRAPHY_TABLE, 1)), r(&[(PLANKS, 6), (STICK, 2), (BOOK, 1)], (NOTICE_BOARD, 1))]
 }
 
 #[cfg(test)]

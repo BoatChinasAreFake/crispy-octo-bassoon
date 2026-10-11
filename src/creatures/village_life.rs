@@ -151,7 +151,7 @@ impl Life {
 }
 
 /// The nearest block round `at` that `want` likes and isn't in `taken`.
-fn nearest(world: &crate::world::World, at: Vec3, want: impl Fn(Id) -> bool, taken: &HashSet<IVec3>) -> Option<IVec3> {
+pub(crate) fn nearest(world: &crate::world::World, at: Vec3, want: impl Fn(Id) -> bool, taken: &HashSet<IVec3>) -> Option<IVec3> {
     let c = at.floor().as_ivec3();
     let mut best: Option<(i32, IVec3)> = None;
     for dy in -LOOK_Y..=LOOK_Y {

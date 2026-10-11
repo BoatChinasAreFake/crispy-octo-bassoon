@@ -70,6 +70,7 @@
 #version 100
 #version 150
 #version 150\n#define HAS_DERIVATIVES 1\n#define HAS_TEXTURE_LOD 1\nout vec4 frag_color;\n{}
+(Reading the notes...)
 (and {} older)
 (it's you)
 (mouse wheel, Page Up or the scrollbar to read back)
@@ -304,6 +305,8 @@ Bat
 Bathe in a hot spring.
 Be near a Lightning Rod when it takes a strike.
 Be there when a baby Hmmer comes along.
+Be there when a village builds itself a Clanker.
+Be there when a village finishes a new house.
 Be under a ceiling when it comes down.
 Beacon (Wyrm-Powered Lighthouse)
 Beaconator
@@ -403,7 +406,9 @@ Brewing Stand (Chemistry, Loosely)
 Bricks
 Bright
 Brightness: {}
+Bring bounties are handed in all at once; Defeat bounties count since they went up.
 Bring down a column of kelp.
+Bring {} {}
 Bringing Home the Bacon
 Brooding
 Brown Mushroom Block (Flat Roof)
@@ -483,7 +488,9 @@ Chipped Anvil (Still Ominous)
 Chiseled Sandstone (Ancient Doodles)
 Chiseled Tuff (Fancy Grey)
 Chunks: {} meshed, {} loaded; {} regions of edits in memory
+Claim
 Claim some land with a Survey Post.
+Claimed
 Clank You Very Much
 Clanker
 Clay Tablet (Someone's Diary)
@@ -666,9 +673,11 @@ Defeat a Weeper. It's in a better place.
 Defeat a Witch. Mind the bottles.
 Defeat a desert Groaner or a snowy Rattler.
 Defeat a patrol captain. Villages are going to love you.
+Defeat a {}
 Defeat an Elder Guardian. Your arms will thank you.
 Defeat an Oinker. They trusted you.
 Defeat the Wilter.
+Defeat {} {}s
 Delete
 Delete "{}"?
 Delete Forever
@@ -827,6 +836,8 @@ Find the chest in a Woodland Mansion's secret room.
 Find the ice spikes.
 Find things
 Fine
+Finish a bounty from a village Notice Board.
+Finish ten bounties.
 Fire (Hot)
 Fire Coral Block (Not Actually Hot)
 Fire Resistance
@@ -993,6 +1004,8 @@ Grumbler Tusk (Rude to Ask)
 Guardian
 HTTP {}
 Hackler
+Hand in
+Handed in
 Happy birthday! Don't eat it all at once.
 Hard (Aggressive Hissing)
 Hardcore: one life, hard mode. Good luck.
@@ -1017,6 +1030,7 @@ Heavy Arms
 Heavy Core (Surprisingly Dense)
 Hello, My Name Is
 Helmet
+Help Wanted
 Herbs (Smell Nice)
 Hero of the Village
 High
@@ -1351,7 +1365,10 @@ Network: single player
 Neutral
 Never look a Starer in the eye. Beds skip the night. Bows need Pointy Sticks. Pokey Plants poke.
 New Hire
+New Neighbours
 New World
+New bounties in {} days
+New bounties tomorrow
 New in your Cookbook: {}.
 New in your Field Journal: {}.
 NewExternalIPAddress
@@ -1399,7 +1416,9 @@ Not a Scratch
 Not affiliated with any block-game company. Please don't sue.
 Not affiliated with anyone!
 Not bad.
+Not done yet. (They're still about.)
 Not enough honey yet. The bees are working on it (they say).
+Not enough yet. (They did say how many.)
 Not found yet
 Note Block (Plinky)
 Note Block (Plinky, Note {})
@@ -1409,6 +1428,8 @@ Note:
 Nothing matches.
 Nothing to load. A Crossbow takes Rockets or Pointy Sticks.
 Nothing yet. Craft a Fishing Stick (3 sticks, 2 string) and find some water.
+Notice Board
+Notice Board (Help Wanted)
 Novice
 Now 34% more parody!
 Now Playing
@@ -1428,6 +1449,7 @@ Ocean (Wet)
 Ocean Monument (Mind the Eyes)
 Ocean Ruins (Damp History)
 Ochre Froglight (Warm Glow)
+Odd Jobs
 Odds
 Off
 Off the Map
@@ -1497,6 +1519,7 @@ Password required to join
 Password set (applies to new logins).
 Pattern
 Pattern a banner at a Loom.
+Pays {} Gold Ingot{} and {} experience
 Peaceful (Nobody Hisses)
 Peak Performance
 Pearl Brooch (Fancy, Damp)
@@ -2017,6 +2040,7 @@ The beacon blazes: the Wilter Star is in.
 The beacon will give: {}.
 The bed exploded. Beds are not rated for the Scorchlands.
 The bed exploded. There's no night to skip out here.
+The board is blank. (Nobody out here needs a hand.)
 The cake is NOT a lie!
 The ceiling came down!
 The ceiling creaks... (prop it up with a pillar or a beam, or get out)
@@ -2060,7 +2084,10 @@ The stew was surprisingly fine. +{} health.
 The stew was... suspicious. Your stomach files a complaint.
 The table hums disapprovingly. {}.
 The tablet, from {}, reads: {}
+The village has built itself a new Clanker. (Some assembly was required.)
+The village has finished a new house. (Somebody's moving in.)
 The village has had enough of you. Its Hmmers won't trade with you.
+The village thanks you. (There's a note pinned up saying so.)
 The village thinks the world of you now. Its Hmmers give you their best prices.
 The village won't forget that. Its Clanker is watching you.
 The water boiled away. It's the Scorchlands, what did you expect?
@@ -2205,6 +2232,7 @@ Video Settings...
 View Bobbing
 Village (Actually a Village)
 Village People
+Village: {} ({})
 Visit a jungle. It's got fun and games (and melons).
 Visit a swamp. Mind the Bloops.
 Visit a taiga. Spruce yourself up.
@@ -2437,6 +2465,7 @@ a closure can't be saved (its captured state can't be reconstructed)
 a curried function pointer can't be saved (its captured arguments can't be reconstructed)
 a dedicated server
 a few mites
+a house is started
 a jobless Hmmer by a Lectern is still {} (and has claims {} / {})
 a letter
 a melee-only mob never fires an arrow
@@ -2451,6 +2480,7 @@ a skin must be 64x64
 a skin must be 64x64 pixels (this is {}x{})
 a socket
 a tamed monster is friendly
+a village
 a {} can't be saved
 acacia boat
 after a trade the village thinks {} of {}, who was told {}
@@ -2560,6 +2590,7 @@ glow berries
 glow squid
 got too close to a Polar Bear's cub
 grain, maybe sweetened
+growing village
 hardly any mites
 heads for its owner
 held again: waits first
@@ -2574,7 +2605,10 @@ hung on the east wall
 id is in the palette
 ids moved
 inventory too long
+it finishes
+it gave up on all of them
 it pours into the hole left behind
+it takes a while ({} looks)
 it turns toward the player
 join Blues
 join Reds
@@ -2697,10 +2731,12 @@ no address found
 no answer
 no flowers in reach (they need some within seven blocks)
 no free port
+no village anywhere near spawn to try growing villages in
 no welcome
 no {} found
 nobody got the bottle of honey from the hive
 nobody listed
+nobody to build it yet
 non-finite float
 north (-Z)
 not a Minceraft save
@@ -2714,9 +2750,11 @@ not very fresh
 nothing changed yet
 nothing fits
 nothing left to shear
+notice board
 on, stays on, off, stays off
 once on the press
 one book at a time
+one each is enough
 one event expands to at most five arrows
 one projectile always uses angle zero
 one twang per volley
@@ -2820,6 +2858,7 @@ the Woofer came back
 the anvil knows how to mend it
 the arrow hit the Mooer
 the arrow is used up
+the board goes up
 the book keeps its enchantments
 the broken Hollow Box was lost: nobody picked it up
 the chest holds {} diamonds for the host, but {} went in
@@ -2849,6 +2888,7 @@ the host refused {}'s chest at a crafting table
 the hush
 the mended tool is less worn
 the mod tool wore a use
+the new house: the host has built {} and {} sees {} of its blocks differently ({})
 the other side isn't speaking the same (encrypted) language: is one of you on an older version?
 the pair had a baby
 the sand and gravel didn't fall when the stone under them went
@@ -2862,6 +2902,10 @@ the suspicious sand {} brushed is still suspicious
 the swooper came down to bite
 the thrown spear was lost: nobody picked it up
 the totem didn't save {} (or the host still thinks they have it)
+the village at {} has no site
+the village at {} was full up and didn't start a house
+the village's Notice Board: the host has {}, {} sees {}
+the village's site
 the whole line lights up
 the wilter
 this computer's IP
@@ -3030,6 +3074,7 @@ zombie hmmer
 {} armoured their Galloper and the host's isn't
 {} arrived in the Scorchlands without the gold block that's there
 {} banned address(es) loaded from {}
+{} beat {} for "{}", saw {} on the board, and the host has it done: {}
 {} broke kelp and the host's column didn't come away into water ({})
 {} built on {}'s land
 {} came home and the portal by spawn is gone (it has {})
@@ -3051,12 +3096,14 @@ zombie hmmer
 {} fed two Tuskers and the host saw no baby
 {} filled and dyed a cauldron and the host has {}
 {} finished a Wilter's T and nothing woke
+{} finished a bounty but never heard about Help Wanted
 {} followed through the portal and is in {}
 {} gave an Allay a diamond, and the host's Allay didn't take it
 {} gave their Donkey a chest and the host's has none
 {} got into someone else's Llama's pack
 {} got post and no advancement
 {} h {} min
+{} handed in "{}": the host has it done: {}, and their gold went {} -> {}
 {} has different land claims from the host's
 {} has letters {}
 {} has {} where the host has {}
@@ -3068,6 +3115,8 @@ zombie hmmer
 {} hurt teammate {} with friendly fire off
 {} is already your friend.
 {} is back where they left off.
+{} is built: {} not {}
+{} is in the way
 {} is no longer an operator.
 {} is now an operator.
 {} is now in {} mode.
@@ -3082,6 +3131,7 @@ zombie hmmer
 {} made a team and {} joined it, and the host doesn't have them together
 {} made you an operator. Try /help.
 {} mixed columns at {} borders
+{} never had the village at {} load around them
 {} never heard how {} died
 {} never saw the Donkey's chest
 {} never saw the Galloper's gold armour
@@ -3115,6 +3165,7 @@ zombie hmmer
 {} put down an acacia boat and the host didn't take it
 {} put on a skin of its own and the host doesn't have it
 {} quads ({} cube) for {} faces
+{} read the board and saw {} bounties (the host: {})
 {} recipes still to discover
 {} respawned and is still in {}
 {} respawned and isn't back in the Overworld
@@ -3146,8 +3197,10 @@ zombie hmmer
 {} wasn't on the allow-list.
 {} wasn't on your list.
 {} watched a Hmmer take a job and got no advancement
+{} watched the house go up but never heard about New Neighbours
 {} won't cook. It's been asked.
 {} wore off.
+{} would be built over
 {} {} HTTP/1.1r\nHost: {}:{}r\nConnection: closer\nContent-Length: {}r\n
 {}% cooked
 {}'s claim is gone.
@@ -3166,6 +3219,7 @@ zombie hmmer
 {}: more than {} lines
 {}: too much data to save
 {}: {} blocks
+{}: {} not {}
 {}: {} of {} blocks differ from the host's, e.g. {}
 {}: {}, at {}, {}, {}{}
 {}: {}; kept as .bad

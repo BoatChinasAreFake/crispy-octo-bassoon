@@ -1,4 +1,4 @@
-//! Enchanting tables, anvils, trading, looms and books.
+//! Enchanting tables, anvils, trading, Notice Boards, looms and books.
 
 use crate::*;
 
@@ -265,6 +265,91 @@ impl App {
         if let Some(cur) = self.game.inv.cursor {
             self.ui.stack_worn(Some(cur), self.game.inv.cursor_wear, mx - slot / 2.0, my - slot / 2.0, slot, true);
         } else if let Some(t) = tooltip {
+            self.ui.tooltip(&t);
+        }
+    }
+
+    /// A village's Notice Board: its three bounties, how far along we are, and what they pay.
+    pub(crate) fn board_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+        let Some((rep, rows)) = self.game.board_rows() else { return };
+        let slot = 20.0 * s;
+        let row_h = slot * 1.7;
+        let panel_w = (slot * 13.0).min(w - 8.0 * s);
+        let head = 36.0 * s;
+        let panel_h = head + row_h * rows.len().max(1) as f32 + 22.0 * s;
+        let x0 = (w - panel_w) / 2.0;
+        let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::panel());
+        draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
+        let sx = x0 + 6.0 * s;
+        self.ui.text("Notice Board", sx, y0 + 12.0 * s, 10.0, WHITE);
+        // What the village thinks of us, shaded as on a Hmmer's trades.
+        let signed = if rep > 0 { format!("+{rep}") } else { rep.to_string() };
+        let [r, g, b] = reputation::standing_colour(rep);
+        self.ui.text(&format!("Village: {} ({signed})", reputation::standing(rep)), sx, y0 + 23.0 * s, 7.5, Color::new(r, g, b, 1.0));
+        let left = bounties::DAYS - self.game.day % bounties::DAYS;
+        let when = if left == 1 { "New bounties tomorrow".to_string() } else { format!("New bounties in {left} days") };
+        self.ui.text(&when, x0 + panel_w - 6.0 * s - self.ui.text_width(&when, 7.0), y0 + 23.0 * s, 7.0, GRAY);
+        if rows.is_empty() {
+            self.ui.text("(Reading the notes...)", sx, y0 + head + slot * 0.6, 8.0, GRAY);
+        }
+        let (mx, my) = mouse_position();
+        let mut tooltip: Option<String> = None;
+        for (i, row) in rows.iter().enumerate() {
+            let y = y0 + head + i as f32 * row_h;
+            let rect = Rect::new(sx, y, panel_w - 12.0 * s, row_h - 3.0 * s);
+            let ready = !row.done && row.have >= row.bounty.wants();
+            let hover = rect.contains(vec2(mx, my));
+            let bg = if row.done {
+                Color::new(0.14, 0.2, 0.14, 1.0)
+            } else if hover && ready {
+                Color::new(0.35, 0.3, 0.2, 1.0)
+            } else {
+                Color::new(0.18, 0.16, 0.14, 1.0)
+            };
+            draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
+            // What it wants: the thing itself, or a sword for a nuisance.
+            let icon = match row.bounty.task {
+                bounties::Task::Bring(id, n) => (id, n),
+                bounties::Task::Defeat(..) => (SWORD_IRON, 1),
+            };
+            let iy = y + (rect.h - slot) / 2.0;
+            self.ui.stack_worn(Some(icon), 0, sx + 2.0 * s, iy, slot, false);
+            if hover && mx < sx + 2.0 * s + slot {
+                tooltip = label(Some(icon), 0);
+            }
+            let tx = sx + slot + 8.0 * s;
+            let colour = if row.done { GRAY } else { WHITE };
+            self.ui.text(&self.ui.fit(&row.bounty.text(), 8.0, panel_w * 0.5), tx, y + 11.0 * s, 8.0, colour);
+            let bring = matches!(row.bounty.task, bounties::Task::Bring(..));
+            let progress = match (row.done, bring) {
+                (true, true) => "Handed in".to_string(),
+                (true, false) => "Claimed".to_string(),
+                _ => format!("{} / {}", row.have, row.bounty.wants()),
+            };
+            let pay = format!("Pays {} Gold Ingot{} and {} experience", row.bounty.gold, if row.bounty.gold == 1 { "" } else { "s" }, row.bounty.xp);
+            self.ui.text(&progress, tx, y + 22.0 * s, 7.0, if ready || row.done { Color::new(0.4, 0.95, 0.45, 1.0) } else { GRAY });
+            let px = tx + self.ui.text_width(&progress, 7.0) + 8.0 * s;
+            self.ui.text(&self.ui.fit(&pay, 7.0, rect.x + rect.w - px - 60.0 * s), px, y + 22.0 * s, 7.0, GOLD);
+            // The button: hand it in (or claim it), or done.
+            let (word, on) = if row.done {
+                ("Done", false)
+            } else {
+                (if bring { "Hand in" } else { "Claim" }, ready)
+            };
+            let bw = 52.0 * s;
+            let b = Rect::new(rect.x + rect.w - bw - 4.0 * s, y + (rect.h - 14.0 * s) / 2.0, bw, 14.0 * s);
+            draw_rectangle(b.x, b.y, b.w, b.h, if on { Color::new(0.25, 0.45, 0.25, 1.0) } else { Color::new(0.25, 0.25, 0.25, 1.0) });
+            self.ui.text_centered(word, b.x + b.w / 2.0, b.y + 10.0 * s, 7.5, if on { WHITE } else { GRAY });
+            if hover && is_mouse_button_pressed(MouseButton::Left) && !row.done {
+                self.game.finish_bounty(i);
+            }
+        }
+        self.ui.text("Bring bounties are handed in all at once; Defeat bounties count since they went up.", sx, y0 + panel_h - 7.0 * s, 6.0, GRAY);
+        if let Some(t) = tooltip {
             self.ui.tooltip(&t);
         }
     }

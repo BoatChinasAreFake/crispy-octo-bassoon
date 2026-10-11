@@ -893,6 +893,7 @@ pub const T_MUD_BRICKS: u16 = 1109;
 pub const T_THATCH: u16 = 1110;
 pub const T_THATCH_TOP: u16 = 1111;
 pub const T_FROST_SHINGLES: u16 = 1112;
+pub const T_BOARD_FRONT: u16 = 1113;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4659,6 +4660,27 @@ fn village_tiles(a: &mut Atlas) {
             shade(rgb(150, 190, 110), r.range(0.92, 1.05))
         } else {
             shade(rgb(225, 210, 170), r.range(0.94, 1.04))
+        }
+    });
+    // The Notice Board: a cork board in a plank frame, with notes pinned up.
+    a.each(T_BOARD_FRONT, |x, y, r, _| {
+        let frame = x == 0 || y == 0 || x == 15 || y == 15 || x == 1 || y == 1 || x == 14 || y == 14;
+        // Three notes, a little askew, and a pin in each.
+        let notes = [(3, 3, 5, 6), (9, 2, 5, 5), (5, 9, 6, 4)];
+        let note = notes.iter().position(|&(nx, ny, w, h)| (nx..nx + w).contains(&x) && (ny..ny + h).contains(&y));
+        if frame {
+            shade(rgb(125, 85, 50), r.range(0.85, 1.05) * if x == 1 || y == 1 || x == 14 || y == 14 { 0.8 } else { 1.0 })
+        } else if let Some(i) = note {
+            let (nx, ny, w, _) = notes[i];
+            if x == nx + w / 2 && y == ny {
+                [rgb(200, 40, 40), rgb(40, 90, 200), rgb(230, 190, 50)][i]
+            } else if (y - ny) % 2 == 1 && x > nx && x < nx + w - 1 {
+                rgb(90, 85, 80)
+            } else {
+                shade(rgb(235, 225, 195), r.range(0.95, 1.03))
+            }
+        } else {
+            shade(rgb(185, 140, 90), r.range(0.8, 1.08))
         }
     });
     // Planks, with a rolled map and a pair of dividers hung on the side.

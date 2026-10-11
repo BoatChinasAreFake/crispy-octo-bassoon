@@ -375,10 +375,12 @@ impl Game {
         }
     }
 
-    /// Advancements are only for the local player.
+    /// An advancement for one player (by record key): ours, or a joined player's (sent to them).
     pub fn advance_for(&mut self, who: &str, key: &str) {
         if record_key(&self.player_name) == who && !self.away() {
             self.advance(key);
+        } else if let Some(id) = self.peers.iter().find(|(_, p)| record_key(&p.name) == who).map(|(id, _)| *id) {
+            self.net_send_to(id, crate::net::Msg::Advance { key: key.to_string() });
         }
     }
 

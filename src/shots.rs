@@ -79,7 +79,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "tower" => Kind::Tower,
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
-        "village" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" => Kind::Village,
+        "village" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" => Kind::Village,
         "city" => Kind::HushedCity,
         "ruins" => Kind::DesertRuins,
         "trailruins" => Kind::TrailRuins,
@@ -386,7 +386,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -424,6 +424,20 @@ impl App {
                         g.move_local_player(crate::dims::Dim::Scorch, pos);
                     }
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
+                }
+                // In front of a village's Notice Board, or looking at where it will build next.
+                if let Some(o) = matches!(s.mode.as_str(), "noticeboard" | "growingvillage").then(|| g.world.nearest_site(structures::Kind::Village, g.spawn, 60)).flatten() {
+                    if s.mode == "noticeboard" {
+                        let board = structures::village_board(o);
+                        (s.pos, s.yaw, s.pitch) = (Some(board.as_vec3() + Vec3::new(0.5, 0.2, 3.5)), 0.0, -0.1);
+                    } else if let Some(at) = half_built_house(&mut g, o) {
+                        // From outside the village, a little above.
+                        let to = at.as_vec3() + Vec3::new(0.5, 2.0, 0.5);
+                        let out = Vec3::new(at.x as f32 - o.x as f32, 0.0, at.z as f32 - o.z as f32).normalize_or_zero();
+                        let from = to + out * 6.0 + Vec3::new(out.z * 3.0, 9.0, -out.x * 3.0);
+                        let d = to - from;
+                        (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                    }
                 }
                 // Look up at the sky: north for an aurora, away from the sun for a rainbow.
                 if s.mode == "aurora" {
@@ -1056,6 +1070,38 @@ impl App {
                 }
                 app.game.world.set_v(at(3.0, -3.5), block::LANTERN);
                 app.game.world.set_v(at(3.0, 3.5), block::LANTERN);
+                // And the village's Notice Board (see bounties.rs).
+                app.game.world.set_v(at(4.0, 5.5), block::NOTICE_BOARD);
+            }
+            if s.mode == "noticeboard" && frames == 125 {
+                let g = &mut app.game;
+                if let Some(o) = g.world.nearest_site(structures::Kind::Village, g.player.body.pos, 8) {
+                    let key = o + IVec3::Y;
+                    let (cx, cz) = (o.x.div_euclid(16), o.z.div_euclid(16));
+                    for dz in -2..=2 {
+                        for dx in -2..=2 {
+                            g.world.load_now(cx + dx, cz + dz);
+                        }
+                    }
+                    g.grow_village(key);
+                    let board = structures::village_board(o);
+                    let me = players::record_key(&g.player_name);
+                    if s.mode == "noticeboard" {
+                        // One to hand in, one done, one under way.
+                        let rows = g.rows_for(board, &me);
+                        if let bounties::Task::Bring(id, n) = rows[0].bounty.task {
+                            g.inv.add(id, n);
+                        }
+                        g.bounties.done.insert((key, 1, me.clone()));
+                        if let bounties::Task::Defeat(kind, n) = rows[2].bounty.task {
+                            for _ in 0..n.saturating_sub(1).max(1) {
+                                g.bounty_kill(&me, kind);
+                            }
+                        }
+                        g.rep.map.insert((key, me), 18);
+                        g.open_board(board);
+                    }
+                }
             }
             if s.mode == "together" && frames == 125 {
                 // Two teams with coloured names, a minigame's sidebar and a Survey Post.
@@ -2206,4 +2252,38 @@ fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
         _ => crate::world::GenOptions::LEGACY,
     };
     Game::new_with(seed, creative, menu, opts)
+}
+
+/// A village (its square at `o`) with every bed taken starts on a new house
+/// and gets halfway (see village_growth.rs). Where the house is going up.
+fn half_built_house(g: &mut Game, o: IVec3) -> Option<IVec3> {
+    let key = o + IVec3::Y;
+    let (cx, cz) = (o.x.div_euclid(16), o.z.div_euclid(16));
+    for dz in -2..=2 {
+        for dx in -2..=2 {
+            g.world.load_now(cx + dx, cz + dz);
+        }
+    }
+    let site = g.village_site(key)?;
+    let mut taken = std::collections::HashSet::new();
+    while let Some(b) = village_life::nearest(&g.world, key.as_vec3(), beds::is_bed, &taken) {
+        taken.insert(b);
+    }
+    for (i, b) in taken.into_iter().enumerate() {
+        g.life.beds.insert(800_000 + i as u32, b);
+    }
+    for i in 0..2 {
+        let id = g.alloc_mob(entity::MobKind::Hmmer, key.as_vec3() + Vec3::new(i as f32 * 2.0 - 1.0, 0.0, 4.5));
+        if let Some(m) = g.mobs.iter_mut().find(|m| m.id == id) {
+            m.home = Some(m.body.pos);
+            m.persistent = true;
+        }
+    }
+    g.day += 1;
+    g.grow_village(key);
+    let spot = g.growth.villages.get(&key)?.build?.spot as usize;
+    for _ in 0..30 {
+        g.grow_village(key);
+    }
+    Some(g.growth_spots(&site)[spot].0)
 }
