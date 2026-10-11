@@ -4611,7 +4611,7 @@ fn together_tiles(a: &mut Atlas) {
         }
     });
     a.each(T_TRADE_SIDE, |x, y, r, _| {
-        let leg = (x < 3 || x > 12) && y > 4;
+        let leg = !(3..=12).contains(&x) && y > 4;
         let top = y < 4;
         if top {
             shade(rgb(150, 105, 60), r.range(0.85, 1.05) * if y == 3 { 0.7 } else { 1.0 })
