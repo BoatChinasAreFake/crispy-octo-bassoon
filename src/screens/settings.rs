@@ -81,9 +81,9 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         let bw = (240.0 * s).min(w * 0.85);
-        let bh = (20.0 * s).min((h - 100.0 * s) / 12.0);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 13.0);
         let x = w / 2.0 - bw / 2.0;
-        let total = 10.0 * bh + 9.0 * 5.0 * s + 20.0 * s;
+        let total = 11.0 * bh + 10.0 * 5.0 * s + 20.0 * s;
         let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
         self.ui.text_centered("Video Settings", w / 2.0, y - 18.0 * s, 16.0, WHITE);
         let st = self.settings.clone();
@@ -174,12 +174,13 @@ impl App {
             self.settings.fancy_water = !st.fancy_water;
         }
         y += bh + 5.0 * s;
-        let far = match (st.distant_terrain, st.smooth_far) {
+        let far = match (st.distant_terrain && !st.low_memory, st.smooth_far) {
+            (false, _) if st.low_memory => "Distant Land: OFF (Low Memory)",
             (false, _) => "Distant Land: OFF",
             (true, false) => "Distant Land: Blocky",
             (true, true) => "Distant Land: Smooth",
         };
-        if self.ui.button(Rect::new(left, y, half, bh), far, true) {
+        if self.ui.button(Rect::new(left, y, half, bh), far, !st.low_memory) {
             // Off, blocky, smooth, off...
             (self.settings.distant_terrain, self.settings.smooth_far) = match (st.distant_terrain, st.smooth_far) {
                 (false, _) => (true, false),
@@ -192,10 +193,17 @@ impl App {
         if self.ui.button(Rect::new(right, y, half, bh), &format!("Shadow Map: {short} ({size})"), st.shadows) {
             self.settings.shadow_quality = (st.shadow_quality + 1) % crate::render::SHADOW_SIZES.len() as u8;
         }
+        y += bh + 5.0 * s;
+        // Fewer chunks kept, fewer mesh threads, no distant land, music kept smaller (see meshpool.rs).
+        if self.ui.button(Rect::new(x, y, bw, bh), &on_off("Low Memory", st.low_memory), true) {
+            self.settings.low_memory = !st.low_memory;
+        }
         y += bh + 4.0 * s;
         // VSync and anti-aliasing are set when the window opens.
         if (self.settings.vsync, self.settings.msaa) != self.video_at_start {
             self.ui.text_centered("VSync and anti-aliasing change next time the game starts.", w / 2.0, y + 9.0 * s, 8.0, GOLD);
+        } else if self.settings.low_memory != crate::sound::low_memory() {
+            self.ui.text_centered("The music is kept smaller (or larger) next time the game starts.", w / 2.0, y + 9.0 * s, 8.0, GOLD);
         } else if st.shadows && st.shadow_quality as usize == crate::render::SHADOW_SIZES.len() - 1 {
             self.ui.text_centered(&format!("{size} shadows? {name}"), w / 2.0, y + 9.0 * s, 8.0, GOLD);
         }

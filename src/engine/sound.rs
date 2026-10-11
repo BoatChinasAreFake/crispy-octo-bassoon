@@ -23,6 +23,19 @@ const NOTE_WIRE: u16 = 0x4000;
 /// Set when the platform audio thread dies (e.g. no sound device); we then stay silent.
 pub static AUDIO_DEAD: AtomicBool = AtomicBool::new(false);
 
+/// Low memory (Video Settings): long pieces (music, discs) are handed over as
+/// 16-bit samples, which the mixer keeps as they are (half the memory), and
+/// only the last music disc played is kept.
+static LOW_MEMORY: AtomicBool = AtomicBool::new(false);
+
+pub fn set_low_memory(on: bool) {
+    LOW_MEMORY.store(on, Ordering::Relaxed);
+}
+
+pub fn low_memory() -> bool {
+    LOW_MEMORY.load(Ordering::Relaxed)
+}
+
 /// Linux: quad-snd's ALSA thread panics (before `main` even runs) when there is no
 /// sound card, and every later sound call then prints an error. Ask ALSA up front instead.
 #[cfg(all(feature = "sound", target_os = "linux"))]
@@ -374,6 +387,37 @@ pub(crate) fn wav(samples: &[f32]) -> Vec<u8> {
 /// The same, for a sound that loops.
 fn wav_looped(samples: &[f32]) -> Vec<u8> {
     wav_at(&upsample(samples, true))
+}
+
+/// A long piece (music, a disc): 16-bit when memory is short.
+fn wav_long(samples: &[f32]) -> Vec<u8> {
+    if low_memory() {
+        wav16_at(&upsample(samples, false))
+    } else {
+        wav(samples)
+    }
+}
+
+/// 16-bit PCM, for `wav_long`.
+fn wav16_at(samples: &[f32]) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut b = Vec::with_capacity(44 + data_len as usize);
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + data_len).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    b.extend_from_slice(&1u16.to_le_bytes()); // mono
+    b.extend_from_slice(&OUT_SR.to_le_bytes());
+    b.extend_from_slice(&(OUT_SR * 2).to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data_len.to_le_bytes());
+    for s in samples {
+        b.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes());
+    }
+    b
 }
 
 fn wav_at(samples: &[f32]) -> Vec<u8> {
@@ -1234,7 +1278,7 @@ impl Audio {
             let (tx, rx) = std::sync::mpsc::channel();
             let _ = std::thread::Builder::new().name("music".into()).spawn(move || {
                 for (i, m) in MOODS.iter().enumerate() {
-                    if tx.send((*m, wav(&synth_music_mood(*m, 7 + i as u64)))).is_err() {
+                    if tx.send((*m, wav_long(&synth_music_mood(*m, 7 + i as u64)))).is_err() {
                         break;
                     }
                 }
@@ -1333,6 +1377,14 @@ impl Audio {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
         });
         for (i, bytes, secs) in discs {
+            if low_memory() {
+                // Only the newest disc is kept (the others are made again if wanted).
+                for (k, slot) in self.discs.iter_mut().enumerate() {
+                    if k != i && slot.take().is_some() {
+                        self.discs_asked[k] = false;
+                    }
+                }
+            }
             if let (Ok(snd), Some(slot)) = (load_sound_from_bytes(&bytes).await, self.discs.get_mut(i)) {
                 *slot = Some((snd, secs));
             }
@@ -1385,7 +1437,7 @@ impl Audio {
                 let _ = std::thread::Builder::new().name("disc".into()).spawn(move || {
                     let v = crate::music::synth_disc(n);
                     let secs = v.len() as f32 / SR as f32;
-                    let _ = tx.send((n, wav(&v), secs));
+                    let _ = tx.send((n, wav_long(&v), secs));
                 });
                 self.discs_pending.push(rx);
             }

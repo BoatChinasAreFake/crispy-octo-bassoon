@@ -68,6 +68,17 @@ pub struct Settings {
     pub shield_banner: u16,
     /// Creative hotbar presets: nine block/item names each, comma-separated ("" for an empty slot).
     pub hotbars: [String; 3],
+    /// Use less memory: fewer chunks kept, fewer mesh threads, music kept as 16-bit (see meshpool.rs, sound.rs).
+    pub low_memory: bool,
+    /// The language (a strings file's name, see lang.rs; empty: English).
+    pub language: String,
+    /// Read menus aloud (see narrator.rs).
+    pub narrator: bool,
+    /// Sneak and sprint keys switch on and off instead of being held.
+    pub toggle_sneak: bool,
+    pub toggle_sprint: bool,
+    /// Plain, strong colours behind and around the UI (see ui.rs).
+    pub high_contrast: bool,
 }
 
 /// Max FPS choices (0: unlimited).
@@ -115,6 +126,12 @@ impl Default for Settings {
             smooth_far: false,
             shield_banner: 0,
             hotbars: Default::default(),
+            low_memory: false,
+            language: String::new(),
+            narrator: false,
+            toggle_sneak: false,
+            toggle_sprint: false,
+            high_contrast: false,
         }
     }
 }
@@ -132,7 +149,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nskin_file={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nskin_file={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\nlow_memory={}\nlanguage={}\nnarrator={}\ntoggle_sneak={}\ntoggle_sprint={}\nhigh_contrast={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -165,6 +182,12 @@ impl Settings {
             self.distant_terrain,
             self.smooth_far,
             self.shield_banner,
+            self.low_memory,
+            clean(&self.language, 32),
+            self.narrator,
+            self.toggle_sneak,
+            self.toggle_sprint,
+            self.high_contrast,
         ) + self.hotbars.iter().enumerate().map(|(i, h)| format!("hotbar{}={}\n", i + 1, clean(h, 600))).collect::<String>().as_str()
             + self.binds.to_text().as_str()
     }
@@ -218,6 +241,12 @@ impl Settings {
                 "shield_banner" => s.shield_banner = v.parse().unwrap_or(0),
                 "hotbar1" | "hotbar2" | "hotbar3" => s.hotbars[(k.trim().as_bytes()[6] - b'1') as usize] = clean(v, 600),
                 "clouds" => s.clouds = flag(s.clouds),
+                "low_memory" => s.low_memory = flag(s.low_memory),
+                "language" => s.language = clean(v, 32),
+                "narrator" => s.narrator = flag(s.narrator),
+                "toggle_sneak" => s.toggle_sneak = flag(s.toggle_sneak),
+                "toggle_sprint" => s.toggle_sprint = flag(s.toggle_sprint),
+                "high_contrast" => s.high_contrast = flag(s.high_contrast),
                 k => {
                     s.binds.read(k, v);
                 }
@@ -311,6 +340,12 @@ mod tests {
             smooth_far: true,
             shield_banner: 0x0042,
             hotbars: Default::default(),
+            low_memory: true,
+            language: "pirate".into(),
+            narrator: true,
+            toggle_sneak: true,
+            toggle_sprint: true,
+            high_contrast: true,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

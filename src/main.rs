@@ -11,7 +11,7 @@ mod creatures;
 mod survival;
 mod online;
 
-pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
+pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, meshpool, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, skins, sniffers, villagers, wildlife, wilter};
@@ -135,6 +135,8 @@ struct App {
     video_at_start: (bool, u8),
     /// Screenshot runs neither read nor write settings.txt.
     no_settings_file: bool,
+    /// Screenshots mesh on the spot, unless asked not to (--mesh-threads, to check the threads).
+    shot_threads: bool,
     splash: &'static str,
     last_mouse: Option<Vec2>,
     show_debug: bool,
@@ -1607,7 +1609,15 @@ impl App {
         self.game.water_reflections = self.settings.water_reflections;
         self.game.shadows = self.settings.shadows;
         self.game.fancy_water = self.settings.fancy_water;
-        self.game.distant_terrain = self.settings.distant_terrain;
+        self.game.distant_terrain = self.settings.distant_terrain && !self.settings.low_memory;
+        self.game.world.keep_margin = if self.settings.low_memory { 1 } else { 3 };
+        // Chunks are meshed on worker threads (but on the spot for screenshots).
+        let threads = meshpool::MeshPool::workers_for(self.settings.low_memory);
+        if (!self.no_settings_file || self.shot_threads) && self.game.meshes.as_ref().is_none_or(|p| p.workers() != threads) {
+            self.game.meshes = Some(meshpool::MeshPool::new(threads));
+            let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
+            self.game.world.dirty.extend(all);
+        }
         self.game.smooth_far = self.settings.smooth_far;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
@@ -1954,6 +1964,8 @@ async fn game_main() {
     let tex = Texture2D::from_rgba8(texture::UI_ATLAS as u16, texture::UI_ATLAS as u16, &texture::ui_atlas(&atlas));
     tex.set_filter(FilterMode::Nearest);
 
+    // (How the music is kept depends on Low memory, so it's read this early; a change applies after a restart.)
+    sound::set_low_memory(settings::Settings::load(&settings::Settings::early_path()).low_memory);
     let audio = Audio::load().await;
 
     let mut shot = parse_args();
@@ -1964,6 +1976,7 @@ async fn game_main() {
         ui: Ui::new(tex),
         settings: Settings::default(),
         no_settings_file: shot.is_some(),
+        shot_threads: false,
         splash: pick_splash(),
         last_mouse: None,
         show_debug: false,
@@ -2096,6 +2109,8 @@ async fn game_main() {
             app.settings.brightness = b.clamp(0.0, 1.0);
         }
         app.settings.subtitles = flag("--subtitles");
+        app.shot_threads = flag("--mesh-threads");
+        app.settings.low_memory = flag("--low-memory");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {

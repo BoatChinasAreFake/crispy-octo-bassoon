@@ -33,6 +33,7 @@ pub fn idx(lx: i32, y: i32, lz: i32) -> usize {
     ((y * CW + lz) * CW + lx) as usize
 }
 
+#[derive(Clone)]
 pub struct Chunk {
     /// Block ids, packed per 16-block-tall section (see palette.rs). Index with `idx`.
     pub blocks: PalettedBlocks,
@@ -1539,6 +1540,8 @@ pub struct World {
     pub comparators: HashSet<IVec3>,
     /// Daylight sensors, trapped chests and calibrated sculk sensors (see zapparts.rs).
     pub zap_parts: HashSet<IVec3>,
+    /// Chunks are kept this far past the render distance before they go (1 with Low memory).
+    pub keep_margin: i32,
     /// Every beacon (see beacon.rs).
     pub beacons: HashSet<IVec3>,
     /// Conduits in loaded chunks (see monument.rs).
@@ -1618,6 +1621,7 @@ impl World {
             fires: HashSet::new(),
             comparators: HashSet::new(),
             zap_parts: HashSet::new(),
+            keep_margin: 3,
             beacons: HashSet::new(),
             conduits: HashSet::new(),
             ropes: HashSet::new(),
@@ -1830,7 +1834,7 @@ impl World {
             .filter(|&&(cx, cz)| {
                 centers.iter().all(|&(c, r)| {
                     let (pcx, pcz) = chunk_of(c);
-                    (cx - pcx).pow(2) + (cz - pcz).pow(2) > (r + 3) * (r + 3)
+                    (cx - pcx).pow(2) + (cz - pcz).pow(2) > (r + self.keep_margin) * (r + self.keep_margin)
                 })
             })
             .copied()

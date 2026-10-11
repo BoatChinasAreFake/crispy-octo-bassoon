@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 enum AudioMessage {
-    AddSound(u32, Vec<f32>),
+    AddSound(u32, Samples),
     Play(u32, u32, bool, f32),
     Stop(u32),
     StopAll(u32),
@@ -15,36 +15,71 @@ enum AudioMessage {
     Delete(u32),
 }
 
+/// (Minceraft patch.) A sound's samples, at 44.1 kHz. Every sound used to be
+/// kept as stereo floats, so a mono sound (all of Minceraft's) took twice the
+/// memory it needed; minutes of music came to hundreds of megabytes. Mono
+/// sounds stay mono now, and a 16-bit WAV stays 16-bit (half again).
+#[derive(Debug, Clone)]
+pub enum Samples {
+    /// Interleaved left and right.
+    Stereo(Arc<[f32]>),
+    Mono(Arc<[f32]>),
+    Mono16(Arc<[i16]>),
+}
+
+impl Samples {
+    /// How many frames (one sample per channel) it lasts.
+    pub fn frames(&self) -> usize {
+        match self {
+            Samples::Stereo(d) => d.len() / 2,
+            Samples::Mono(d) => d.len(),
+            Samples::Mono16(d) => d.len(),
+        }
+    }
+
+    /// Add frames from `from` into interleaved stereo `out`, as many as
+    /// fit or are left; returns how many.
+    fn mix_into(&self, from: usize, out: &mut [f32], volume: f32) -> usize {
+        let n = (out.len() / 2).min(self.frames().saturating_sub(from));
+        match self {
+            Samples::Stereo(d) => {
+                for (b, s) in out[..2 * n].iter_mut().zip(&d[2 * from..2 * (from + n)]) {
+                    *b += s * volume;
+                }
+            }
+            Samples::Mono(d) => {
+                for (f, s) in out.chunks_exact_mut(2).zip(&d[from..from + n]) {
+                    f[0] += s * volume;
+                    f[1] += s * volume;
+                }
+            }
+            Samples::Mono16(d) => {
+                let k = volume / 32767.0;
+                for (f, s) in out.chunks_exact_mut(2).zip(&d[from..from + n]) {
+                    let v = *s as f32 * k;
+                    f[0] += v;
+                    f[1] += v;
+                }
+            }
+        }
+        n
+    }
+}
+
 #[derive(Debug)]
 pub struct SoundState {
     sound_id: u32,
     play_id: u32,
-    sample: usize,
-    data: Arc<[f32]>,
+    /// The next frame to play.
+    frame: usize,
+    data: Samples,
     looped: bool,
     volume: f32,
 }
 
-impl SoundState {
-    fn get_samples(&mut self, n: usize) -> &[f32] {
-        let data = &self.data[self.sample..];
-
-        self.sample += n;
-
-        match data.get(..n) {
-            Some(data) => data,
-            None => data,
-        }
-    }
-
-    fn rewind(&mut self) {
-        self.sample = 0;
-    }
-}
-
 pub struct Mixer {
     rx: mpsc::Receiver<AudioMessage>,
-    sounds: HashMap<u32, Arc<[f32]>>,
+    sounds: HashMap<u32, Samples>,
     mixer_state: Vec<SoundState>,
     limiter: Limiter,
 }
@@ -225,14 +260,14 @@ impl Mixer {
         while let Ok(message) = self.rx.try_recv() {
             match message {
                 AudioMessage::AddSound(id, data) => {
-                    self.sounds.insert(id, data.into());
+                    self.sounds.insert(id, data);
                 }
                 AudioMessage::Play(sound_id, play_id, looped, volume) => {
                     if let Some(data) = self.sounds.get(&sound_id) {
                         self.mixer_state.push(SoundState {
                             sound_id,
                             play_id,
-                            sample: 0,
+                            frame: 0,
                             data: data.clone(),
                             looped,
                             volume,
@@ -283,28 +318,26 @@ impl Mixer {
         // Note: Doing manual iteration so we can remove sounds that finished playing
         let mut i = 0;
 
+        let wanted = buffer.len() / 2;
         while let Some(sound) = self.mixer_state.get_mut(i) {
             let volume = sound.volume;
-            let mut remainder = buffer.len();
+            let mut done = 0;
 
             loop {
-                let samples = sound.get_samples(remainder);
+                let n = sound.data.mix_into(sound.frame, &mut buffer[2 * done..], volume);
+                sound.frame += n;
+                done += n;
 
-                for (b, s) in buffer.iter_mut().zip(samples) {
-                    *b += s * volume;
-                }
-
-                remainder -= samples.len();
-
-                if remainder > 0 && sound.looped {
-                    sound.rewind();
+                // (An empty looped sound would spin forever: it just ends.)
+                if done < wanted && sound.looped && sound.data.frames() > 0 {
+                    sound.frame = 0;
                     continue;
                 }
 
                 break;
             }
 
-            if remainder > 0 {
+            if done < wanted {
                 self.mixer_state.swap_remove(i);
             } else {
                 i += 1;
@@ -315,8 +348,24 @@ impl Mixer {
     }
 }
 
-/// Parse ogg/wav/etc and get  resampled to 44100, 2 channel data
-pub fn load_samples_from_file(bytes: &[u8]) -> Result<Vec<f32>, ()> {
+/// (Minceraft patch.) Is this a 16-bit PCM WAV? Read straight from the header.
+fn is_wav16(bytes: &[u8]) -> bool {
+    bytes.len() >= 36 && &bytes[0..4] == b"RIFF" && &bytes[8..16] == b"WAVEfmt " && bytes[20..22] == [1, 0] && bytes[34..36] == [16, 0]
+}
+
+/// Parse ogg/wav/etc, resampled to 44100: mono stays mono (16-bit if it came as 16-bit WAV).
+pub fn load_samples_from_file(bytes: &[u8]) -> Result<Samples, ()> {
+    let wav16 = is_wav16(bytes);
+    let (frames, channels) = load_frames(bytes)?;
+    Ok(match channels {
+        1 if wav16 => Samples::Mono16(frames.iter().map(|s| (s.clamp(-1.0, 1.0) * 32767.0).round() as i16).collect()),
+        1 => Samples::Mono(frames.into()),
+        _ => Samples::Stereo(frames.into()),
+    })
+}
+
+/// The samples (interleaved if stereo) at 44.1 kHz, and how many channels.
+fn load_frames(bytes: &[u8]) -> Result<(Vec<f32>, usize), ()> {
     let mut audio_stream = {
         let file = std::io::Cursor::new(bytes);
         audrey::Reader::new(file).unwrap()
@@ -333,35 +382,33 @@ pub fn load_samples_from_file(bytes: &[u8]) -> Result<Vec<f32>, ()> {
 
     // audrey's frame docs: "TODO: Should consider changing this behaviour to check the audio file's actual number of channels and automatically convert to F's number of channels while reading".
     // lets fix this TODO here
-    if channels_count == 1 {
-        frames.extend(samples_iterator.flat_map(|sample| [sample, sample]));
-    } else if channels_count == 2 {
-        frames.extend(samples_iterator);
-    }
+    // (Minceraft patch: mono is kept as mono, see `Samples`.)
+    let ch = channels_count as usize;
+    frames.extend(samples_iterator);
 
     let sample_rate = description.sample_rate();
 
     // (Minceraft patch.) Linear interpolation rather than nearest-neighbour,
     // which repeated or dropped whole samples and left harsh mirror images.
     // Minceraft hands everything over at 44.1 kHz already, so this is a fallback.
-    if sample_rate != 44100 {
-        let in_frames = frames.len() / 2;
+    if sample_rate != 44100 && frames.len() >= ch {
+        let in_frames = frames.len() / ch;
         let out_frames = ((44100.0 / sample_rate as f64) * in_frames as f64) as usize;
         let step = sample_rate as f64 / 44100.0;
-        let mut resampled = vec![0.0; out_frames * 2];
-        for (n, sample) in resampled.chunks_exact_mut(2).enumerate() {
+        let mut resampled = vec![0.0; out_frames * ch];
+        for (n, sample) in resampled.chunks_exact_mut(ch).enumerate() {
             let pos = n as f64 * step;
-            let i = pos as usize;
+            let i = (pos as usize).min(in_frames - 1);
             let t = (pos - i as f64) as f32;
-            let j = (i + 1).min(in_frames.saturating_sub(1));
-            for c in 0..2 {
-                sample[c] = frames[2 * i + c] * (1.0 - t) + frames[2 * j + c] * t;
+            let j = (i + 1).min(in_frames - 1);
+            for c in 0..ch {
+                sample[c] = frames[ch * i + c] * (1.0 - t) + frames[ch * j + c] * t;
             }
         }
-        return Ok(resampled);
+        return Ok((resampled, ch));
     }
 
-    Ok(frames)
+    Ok((frames, ch))
 }
 
 #[cfg(test)]
@@ -419,13 +466,12 @@ mod tests {
     #[test]
     fn float_wavs_at_44k_load_untouched_and_others_resample_smoothly() {
         let tone: Vec<f32> = (0..1000).map(|i| (i as f32 * 0.07).sin() * 1e-3).collect();
-        let got = load_samples_from_file(&float_wav(44100, &tone)).unwrap();
-        assert_eq!(got.len(), 2000);
-        assert!(tone.iter().zip(got.chunks(2)).all(|(a, f)| f[0] == *a && f[1] == *a), "exact, both channels");
+        let Samples::Mono(got) = load_samples_from_file(&float_wav(44100, &tone)).unwrap() else { panic!("kept mono") };
+        assert_eq!(&got[..], &tone[..], "exact");
         // At 22.05 kHz: twice as long, and the in-between samples are in between.
-        let got = load_samples_from_file(&float_wav(22050, &tone)).unwrap();
-        assert_eq!(got.len(), 4000);
-        let mid = got[2 * 101];
+        let Samples::Mono(got) = load_samples_from_file(&float_wav(22050, &tone)).unwrap() else { panic!("kept mono") };
+        assert_eq!(got.len(), 2000);
+        let mid = got[101];
         assert!((mid - (tone[50] + tone[51]) / 2.0).abs() < 1e-9, "{} vs {} / {}", mid, tone[50], tone[51]);
     }
 }

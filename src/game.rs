@@ -320,6 +320,8 @@ pub struct Game {
     pub border_note: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
+    /// Worker threads that mesh chunks (none: meshed on the spot, as in screenshots and tests).
+    pub meshes: Option<crate::meshpool::MeshPool>,
     /// Distant terrain as smooth rolling land rather than blocky terraces.
     pub smooth_far: bool,
     pub lod: crate::lod::Lod,
@@ -613,6 +615,7 @@ impl Game {
             was_wet: false,
             border_note: 0.0,
             distant_terrain: true,
+            meshes: None,
             smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -1213,6 +1216,9 @@ impl Game {
             renderer.set_far(ctx, None);
             let all: Vec<(i32, i32)> = self.world.chunks.keys().copied().collect();
             self.world.dirty.extend(all);
+            if let Some(pool) = &mut self.meshes {
+                pool.cancel_all();
+            }
         }
         let center = self.player.body.pos;
         let mut centers = vec![(center, radius)];
@@ -1222,6 +1228,9 @@ impl Game {
         }
         for k in self.world.stream(&centers) {
             renderer.drop_chunk(ctx, k);
+            if let Some(pool) = &mut self.meshes {
+                pool.cancel(k);
+            }
         }
         // The far-off land, kept up with where we are.
         if self.distant_terrain && !self.elsewhere() {
@@ -1243,6 +1252,29 @@ impl Game {
             .map(|&(cx, cz)| ((cx - pcx).pow(2) + (cz - pcz).pow(2), (cx, cz)))
             .collect();
         dirty.sort_unstable();
+        if let Some(pool) = &mut self.meshes {
+            // Meshes made on the worker threads (see meshpool.rs).
+            for (k, mesh) in pool.finished() {
+                if self.world.chunks.contains_key(&k) {
+                    renderer.set_chunk(ctx, k, mesh);
+                }
+            }
+            let mut on_the_spot = 0;
+            for (d2, k) in dirty {
+                if d2 <= 2 && on_the_spot < 3 && renderer.chunks.contains_key(&k) {
+                    // An edit right by the player: shown this frame.
+                    on_the_spot += 1;
+                    pool.cancel(k);
+                    renderer.set_chunk(ctx, k, mesh_chunk(&self.world, k.0, k.1));
+                } else if pool.has_room() {
+                    pool.send(&self.world, k);
+                } else {
+                    continue;
+                }
+                self.world.dirty.remove(&k);
+            }
+            return self.check_ready(renderer);
+        }
         let start = macroquad::time::get_time();
         for (i, (_, k)) in dirty.into_iter().enumerate() {
             // Always finish a few (edits near the player), then stop at ~6 ms.
@@ -1253,6 +1285,11 @@ impl Game {
             renderer.set_chunk(ctx, k, mesh);
             self.world.dirty.remove(&k);
         }
+        self.check_ready(renderer);
+    }
+
+    /// Once the player's own chunk is drawn, the game can start.
+    fn check_ready(&mut self, renderer: &Renderer) {
         if !self.ready {
             let p = self.player.body.pos;
             let key = ((p.x / 16.0).floor() as i32, (p.z / 16.0).floor() as i32);
