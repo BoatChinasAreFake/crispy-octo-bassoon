@@ -108,7 +108,7 @@ impl Admin {
 }
 
 pub const HELP: &str = "Commands: list, players, info <name>, say <text>, kick <name>, ban <name|ip>, unban <ip>, bans, \
-time <day|noon|night|midnight|0-1>, op <name>, deop <name>, ops, allowlist <on|off|add|remove|list> [name], forget <name>, password <pw|off>";
+time <day|noon|night|midnight|0-1>, op <name>, deop <name>, ops, allowlist <on|off|add|remove|list> [name], forget <name>, password <pw|off>, pvp <on|off>, team <create|join|leave|list|colour|friendlyfire|remove>, tc <message>";
 
 /// A slot's contents as words: "Diamond Pickaxe (worn 12)", "Torch x16".
 fn describe_stack(id: Id, n: u8, wear: crate::inventory::Wear) -> String {
@@ -123,7 +123,7 @@ fn describe_stack(id: Id, n: u8, wear: crate::inventory::Wear) -> String {
 }
 
 /// The admin commands (without the slash); the cheats are in `cheats::WORDS`.
-pub const WORDS: [&str; 17] = ["help", "list", "players", "info", "say", "kick", "ban", "unban", "bans", "time", "op", "deop", "ops", "allowlist", "whitelist", "forget", "password"];
+pub const WORDS: [&str; 20] = ["help", "list", "players", "info", "say", "kick", "ban", "unban", "bans", "time", "op", "deop", "ops", "allowlist", "whitelist", "forget", "password", "team", "tc", "pvp"];
 
 impl Game {
     fn caller_name(&self, who: Caller) -> String {
@@ -152,7 +152,7 @@ impl Game {
         if !known.contains(&word.as_str()) && !cheat {
             return None;
         }
-        let open = matches!(word.as_str(), "help" | "list" | "seed");
+        let open = matches!(word.as_str(), "help" | "list" | "seed" | "team" | "tc");
         if !open && !self.caller_is_op(who) {
             return Some(vec![format!("Only operators can use /{word}.")]);
         }
@@ -168,12 +168,34 @@ impl Game {
         let mut save = false;
         let mut save_bans = false;
         match (word.as_str(), rest) {
+            // Teams (see teams.rs): anyone can make, join and leave them.
+            ("team", args) => {
+                let op = self.caller_is_op(who);
+                let (lines, changed) = self.teams.command(&by, args, op);
+                out.extend(lines);
+                if changed {
+                    self.share_teams();
+                }
+            }
+            ("tc", text) => {
+                let from = match who {
+                    Caller::Host => self.my_id,
+                    Caller::Player(id) => id,
+                    Caller::Console => crate::net::SYSTEM,
+                };
+                if from == crate::net::SYSTEM {
+                    out.push("The console isn't on a team.".into());
+                } else {
+                    out.extend(self.team_chat(from, text));
+                }
+            }
+            ("pvp", arg) => out.extend(self.pvp_command(arg)),
             ("help", _) => {
                 if self.caller_is_op(who) {
                     out.push(HELP.into());
                     out.push(format!("Cheats: {}", crate::cheats::HELP));
                 } else {
-                    out.push("Commands: list, seed, help. Operators can do more.".into());
+                    out.push("Commands: list, seed, help, team, tc. Operators can do more.".into());
                 }
                 if !matches!(who, Caller::Console) {
                     out.push("Waypoints: /wp add <name>, /wp remove <name>, /wp list.".into());

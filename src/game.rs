@@ -88,6 +88,8 @@ pub enum Target {
     Mob(usize),
     /// A boat or minecart (see vehicles.rs).
     Vehicle(usize),
+    /// Another player, when players can hurt each other (see teams.rs).
+    Player(u32),
 }
 
 pub struct Camera {
@@ -320,6 +322,9 @@ pub struct Game {
     pub border_note: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
+    /// Teams (see teams.rs), and whether players can hurt each other (`/pvp`).
+    pub teams: crate::teams::Teams,
+    pub pvp: bool,
     /// Worker threads that mesh chunks (none: meshed on the spot, as in screenshots and tests).
     pub meshes: Option<crate::meshpool::MeshPool>,
     /// Distant terrain as smooth rolling land rather than blocky terraces.
@@ -616,6 +621,8 @@ impl Game {
             border_note: 0.0,
             distant_terrain: true,
             meshes: None,
+            teams: Default::default(),
+            pvp: false,
             smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -917,6 +924,9 @@ impl Game {
         if !self.waypoints.is_empty() {
             v.push(("waypoints2".into(), crate::qol::encode(&self.waypoints)));
         }
+        if self.pvp || !self.teams.teams.is_empty() {
+            v.push(("teams".into(), [&[self.pvp as u8][..], &self.teams.encode()].concat()));
+        }
         if let Some((dim, d)) = self.last_death {
             v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).chain([dim.index()]).collect()));
         }
@@ -987,6 +997,10 @@ impl Game {
             self.waypoints = crate::qol::decode(b, false);
         } else if let Some(b) = extra("waypoints") {
             self.waypoints = crate::qol::decode(b, true);
+        }
+        if let Some(b) = extra("teams").filter(|b| !b.is_empty()) {
+            self.pvp = b[0] != 0;
+            self.teams = crate::teams::Teams::decode(&b[1..]).unwrap_or_default();
         }
         if let Some(b) = extra("last_death").filter(|b| b.len() >= 12) {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
@@ -2165,10 +2179,26 @@ impl Game {
                 ride = Some((i, t));
             }
         }
-        self.target = match (ride, best, hit) {
-            (Some((i, _)), _, _) => Some(Target::Vehicle(i)),
-            (None, Some((i, _)), _) => Some(Target::Mob(i)),
-            (None, None, Some(h)) => Some(Target::Block(h)),
+        // Other players, when they can be hurt (see teams.rs).
+        let mut someone: Option<(u32, f32)> = None;
+        if self.pvp {
+            let near = ride.map_or(f32::MAX, |r| r.1).min(best.map_or(f32::MAX, |b| b.1)).min(reach).min(block_dist);
+            for (&id, p) in &self.peers {
+                let half = Vec3::new(0.3, 0.0, 0.3);
+                if p.alive()
+                    && let Some(t) = ray_aabb(eye, dir, p.pos - half, p.pos + half + Vec3::Y * 1.8)
+                    && t < near
+                    && someone.is_none_or(|s| t < s.1)
+                {
+                    someone = Some((id, t));
+                }
+            }
+        }
+        self.target = match (someone, ride, best, hit) {
+            (Some((id, _)), ..) => Some(Target::Player(id)),
+            (None, Some((i, _)), _, _) => Some(Target::Vehicle(i)),
+            (None, None, Some((i, _)), _) => Some(Target::Mob(i)),
+            (None, None, None, Some(h)) => Some(Target::Block(h)),
             _ => None,
         };
         if self.spectator {
@@ -2282,6 +2312,29 @@ impl Game {
                             }
                         }
                     }
+                    self.attack_cd = 0.1;
+                }
+            }
+            Some(Target::Player(id)) => {
+                self.breaking = None;
+                if c.attack_pressed && self.attack_cd <= 0.0 {
+                    let id = *id;
+                    // As hard as hitting a mob (the host checks it, see teams.rs).
+                    let charge = self.attack_charge();
+                    let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
+                    let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
+                    let weakness = self.effect_level(crate::potions::Potion::Weakness) as f32 * crate::potions::WEAKNESS_PENALTY;
+                    let base = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength - weakness).max(0.5);
+                    let dmg = base * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    self.since_attack = 0.0;
+                    self.use_tool(hit_wear(held));
+                    if self.is_client() {
+                        self.net_send_msg(Msg::HitPlayer { target: id, dmg });
+                    } else {
+                        let me = self.my_id;
+                        self.host_hit_player(me, id, dmg);
+                    }
+                    self.sfx(Sfx::Hurt, self.peers.get(&id).map(|p| p.pos));
                     self.attack_cd = 0.1;
                 }
             }

@@ -47,7 +47,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v34: everything encrypted (see the top of this file), the server list's
 /// status query (StatusAsk, Status), and players' own skins (SkinData).
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
-pub const PROTOCOL: u32 = 35;
+/// v36: teams and players hitting players (Teams, HitPlayer).
+pub const PROTOCOL: u32 = 36;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -301,6 +302,10 @@ pub enum Msg {
     /// Both ways: a player's own skin, 64x64 RGBA (empty: back to a built-in
     /// one; client -> host: mine, `id` is ignored).
     SkinData { id: u32, pixels: Vec<u8> },
+    /// host -> client: the teams, and whether players can hurt each other (see teams.rs).
+    Teams { pvp: bool, data: Vec<u8> },
+    /// client -> host: I hit this player (the host checks it, see teams.rs).
+    HitPlayer { target: u32, dmg: f32 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -1025,6 +1030,17 @@ impl Msg {
                 w.u32(pixels.len() as u32);
                 w.bytes(pixels);
             }
+            Msg::Teams { pvp, data } => {
+                w.u8(94);
+                w.u8(*pvp as u8);
+                w.u32(data.len() as u32);
+                w.bytes(data);
+            }
+            Msg::HitPlayer { target, dmg } => {
+                w.u8(95);
+                w.u32(*target);
+                w.f32(*dmg);
+            }
             Msg::RideMob { mob, pos, yaw, off } => {
                 w.u8(59);
                 w.u32(*mob);
@@ -1304,6 +1320,15 @@ impl Msg {
                 }
                 Msg::SkinData { id, pixels: r.take(n)?.to_vec() }
             }
+            94 => {
+                let pvp = r.u8()? != 0;
+                let n = r.u32()? as usize;
+                if n > 1 << 18 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "teams too big"));
+                }
+                Msg::Teams { pvp, data: r.take(n)?.to_vec() }
+            }
+            95 => Msg::HitPlayer { target: r.u32()?, dmg: r.f32()? },
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -1978,6 +2003,8 @@ mod tests {
             Msg::Status { name: "Bob's world".into(), players: 2, max: 8, protocol: PROTOCOL, version: "v0.4".into(), password: true },
             Msg::SkinData { id: 5, pixels: vec![7; SKIN_BYTES] },
             Msg::SkinData { id: 5, pixels: Vec::new() },
+            Msg::Teams { pvp: true, data: vec![1, 2, 3] },
+            Msg::HitPlayer { target: 3, dmg: 4.5 },
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },

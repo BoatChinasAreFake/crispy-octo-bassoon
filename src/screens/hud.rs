@@ -446,6 +446,18 @@ impl App {
                         draw_circle(bx, by, 2.5 * s, Color::from_rgba(170, 130, 80, 255));
                     }
                 }
+                // Teammates: dots in the team's colour.
+                let me_name = self.game.player_name.clone();
+                for p in self.game.peers.values().filter(|p| p.alive() && self.game.teams.same_team(&p.name, &me_name)) {
+                    let (dx, dz) = ((p.pos.x - me.x) / scale, (p.pos.z - me.z) / scale);
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {
+                        let c = self.game.team_colour(&p.name).unwrap_or([255; 3]);
+                        let (bx, by) = (cx + dx * per_px, cy + dz * per_px);
+                        draw_circle(bx, by, 4.0 * s, Color::new(0.1, 0.08, 0.05, 1.0));
+                        draw_circle(bx, by, 3.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
+                    }
+                }
                 // Where you last died: a dark cross.
                 if let Some(d) = self.game.last_death.filter(|d| d.0 == self.game.dim).map(|d| d.1) {
                     let (dx, dz) = ((d.x - me.x) / scale, (d.z - me.z) / scale);
@@ -576,9 +588,11 @@ impl App {
                 continue;
             }
             let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
-            let tw = self.ui.text_width(&p.name, 9.0);
+            // (Names aren't translated; a team's colour, if they're on one.)
+            let tw = self.ui.raw_width(&p.name, 9.0);
             draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 10.0 * s, tw + 6.0 * s, 12.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
-            self.ui.text_centered(&p.name, sx, sy, 9.0, WHITE);
+            let col = self.game.team_colour(&p.name).map_or(WHITE, |c| Color::from_rgba(c[0], c[1], c[2], 255));
+            self.ui.raw_text(&p.name, sx - tw / 2.0, sy, 9.0, col);
         }
         // Waypoints: their names over the spot, and how far.
         for (wp, c) in self.game.waypoints_here() {
