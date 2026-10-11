@@ -197,6 +197,7 @@ A baked potato. The potato's redemption arc is complete.
 A blank map. Look in shipwrecks for a marked one.
 A blank map: no mansion anywhere near where it was drawn.
 A copy is made each time you open the world; the last {} are kept. Restoring makes a new world.
+A little Hmmer. It looks at you, says "hmm" very seriously, and wanders off.
 A mod is a folder with a mod.txt inside, placed in the folder above.
 A raid has begun! Defend the village.
 A raw potato. Nobody asked for this. Least of all you.
@@ -442,6 +443,7 @@ Carrot (Crunchy)
 Carrots
 Carry acacia, birch and dark oak logs at once.
 Cartographer (Knows Where Things Are)
+Cartography Table (Here Be Dragons)
 Castle Town
 Cat
 Catch a Fishy with your bare hands (well, hit one).
@@ -2041,6 +2043,7 @@ Things eaten
 Thinking...
 Third Person
 Thirsty
+This Hmmer hasn't found a job yet. A free workstation nearby would help.
 This Rollo has been brushed quite enough for now.
 This Vault wants an Ominous Trial Key.
 This hive is empty: put a Queen Bee in it, or leave it near a full colony and hope it swarms your way.

@@ -17,6 +17,7 @@ pub(crate) mod pathing;
 pub(crate) mod raids;
 pub(crate) mod skins;
 pub(crate) mod sniffers;
+pub(crate) mod village_life;
 pub(crate) mod villagers;
 pub(crate) mod wilter;
 pub(crate) mod wildlife;

@@ -189,6 +189,10 @@ pub fn trades_for(job: Job, seed: u32) -> Vec<Trade> {
 /// doesn't trade (or, being a monster on the loose, won't).
 pub fn trades_of(m: &Mob) -> Option<(String, Vec<Trade>)> {
     if m.kind == MobKind::Hmmer {
+        // No job, no trades (see village_life.rs).
+        if crate::village_life::jobless(m) {
+            return None;
+        }
         let job = Job::of_mob(m);
         return Some((format!("Hmmer: {}", job.name()), trades_for(job, m.seed)));
     }

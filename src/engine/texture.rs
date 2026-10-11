@@ -886,6 +886,9 @@ pub const T_SURVEY_TOP: u16 = 1103;
 pub const T_POSTBOX_FRONT: u16 = 1104;
 pub const T_POSTBOX_TOP: u16 = 1105;
 pub const T_LETTER: u16 = 1106;
+// Villages (see villageblocks.rs).
+pub const T_CARTO_TOP: u16 = 1107;
+pub const T_CARTO_SIDE: u16 = 1108;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4597,6 +4600,41 @@ fn zappart_tiles(a: &mut Atlas) {
     });
 }
 
+/// Village blocks: the Cartography Table.
+fn village_tiles(a: &mut Atlas) {
+    // A map pinned to the top, with a compass rose and a dotted route.
+    a.each(T_CARTO_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        let land = ((x as f32 * 0.7).sin() + (y as f32 * 0.5).cos()) > 0.4;
+        let route = (x + y) % 3 == 0 && (x as i32 - y as i32).abs() < 3;
+        let rose = (x == 11 && (9..14).contains(&y)) || (y == 11 && (9..14).contains(&x));
+        if edge {
+            shade(rgb(110, 75, 45), r.range(0.85, 1.05))
+        } else if rose {
+            rgb(150, 40, 35)
+        } else if route {
+            rgb(60, 45, 35)
+        } else if land {
+            shade(rgb(150, 190, 110), r.range(0.92, 1.05))
+        } else {
+            shade(rgb(225, 210, 170), r.range(0.94, 1.04))
+        }
+    });
+    // Planks, with a rolled map and a pair of dividers hung on the side.
+    a.each(T_CARTO_SIDE, |x, y, r, _| {
+        let roll = (3..6).contains(&y) && (3..13).contains(&x);
+        let dividers = (8..=13).contains(&y) && ((x as i32 - 8).abs() == (y as i32 - 8) / 2 + 1);
+        if roll {
+            shade(rgb(230, 215, 175), r.range(0.9, 1.05) * if y == 5 { 0.85 } else { 1.0 })
+        } else if dividers {
+            rgb(70, 70, 75)
+        } else {
+            let seam = y % 4 == 0;
+            shade(rgb(160, 120, 75), r.range(0.88, 1.05) * if seam { 0.8 } else { 1.0 })
+        }
+    });
+}
+
 /// The Trading Table, the Survey Post, the Post Box and letters.
 fn together_tiles(a: &mut Atlas) {
     // A trading table: planks with a green baize top, a gold line down the middle (yours, mine).
@@ -4768,6 +4806,7 @@ fn homecraft_tiles(a: &mut Atlas) {
     cooking_tiles(a);
     zappart_tiles(a);
     together_tiles(a);
+    village_tiles(a);
     // Dyed woolly armour: the worn knit and the icons, in each colour.
     for c in 0..8u16 {
         let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };
