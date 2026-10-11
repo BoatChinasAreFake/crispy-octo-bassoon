@@ -33,4 +33,5 @@ pub(crate) mod woods;
 pub(crate) mod wiring;
 pub(crate) mod together;
 pub(crate) mod trading;
+pub(crate) mod villageblocks;
 pub(crate) mod zapparts;

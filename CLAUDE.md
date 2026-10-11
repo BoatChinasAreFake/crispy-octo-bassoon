@@ -91,6 +91,12 @@ Originals:
 - Your own shop stall: set prices, and Hmmers come by and buy what you stock. Demand rises and falls with what the village needs.
 - The village paper: a daily newspaper reporting world events ("Local Woman Punches Tree", "Raid Repelled", "Hisser Seen Near Bakery").
 
+Parts:
+- Part 1: items 1 and 2. **(released)**
+- Part 2: items 3 and 4.
+- Part 3: items 5 and 6.
+- Part 4: the two originals (this is the last part).
+
 ## v0.6: The Hollow, filled in
 
 1. Hollow Cities: tall towers on the outer islands, with a flying ship carrying the Glider.

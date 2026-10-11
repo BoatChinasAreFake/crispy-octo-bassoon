@@ -190,6 +190,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     travelled(&mut host, &mut team, &mut report, &mut touched);
     homely(&mut host, &mut team, &mut report, &mut touched);
     together(&mut host, &mut team, &mut report, &mut touched);
+    village_life(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2056,6 +2057,79 @@ fn together(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mu
     let _ = id_b;
 }
 
+/// v0.5: a Hmmer with no job claims a bed and a Lectern near a bot and
+/// becomes a Librarian, then goes to bed at night; everyone sees it.
+fn village_life(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::entity::MobKind;
+    use crate::village_life::JOBLESS;
+    revive(host, team);
+    let k = 0;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 6);
+    let (bed, lectern) = (feet + IVec3::new(4, 0, 0), feet + IVec3::new(-4, 0, 0));
+    host.world.set_v(bed, crate::beds::bed(1));
+    for p in [bed, lectern] {
+        touched.insert(p);
+    }
+    let id = host.alloc_mob(MobKind::Hmmer, feet.as_vec3() + Vec3::new(0.5, 0.0, 2.5));
+    if let Some(m) = host.mobs.iter_mut().find(|m| m.id == id) {
+        m.variant = JOBLESS;
+        m.home = m.home.or(Some(m.body.pos));
+        m.persistent = true;
+    }
+    let before = host.time;
+    host.time = 0.1;
+    // Everyone sees it out of work first; then along comes a Lectern.
+    pump(host, team, 1.5, |_| idle());
+    host.world.set_v(lectern, LECTERN);
+    let librarian = 1 + crate::villagers::Job::Librarian.index();
+    // (Every Hmmer in the world takes its turn to look round, a few a second.)
+    for _ in 0..30 {
+        pump(host, team, 0.5, |_| idle());
+        if host.mobs.iter().any(|m| m.id == id && m.variant == librarian) {
+            break;
+        }
+    }
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("village life");
+    let variant = host.mobs.iter().find(|m| m.id == id).map(|m| m.variant);
+    if variant != Some(librarian) {
+        report.problems.push(format!("a jobless Hmmer by a Lectern is still {variant:?} (and has claims {:?} / {:?})", host.life.beds.get(&id), host.life.stations.get(&id)));
+    }
+    for b in team.iter() {
+        let theirs = b.game.mobs.iter().find(|m| m.id == id).map(|m| m.variant);
+        if theirs != variant {
+            report.problems.push(format!("{} sees the Hmmer as {theirs:?} (the host: {variant:?})", b.name));
+        }
+    }
+    if !team[k].game.advancements.has("new_hire") {
+        report.problems.push(format!("{} watched a Hmmer take a job and got no advancement", team[k].name));
+    }
+    // Night: off to bed.
+    host.time = 0.7;
+    for _ in 0..40 {
+        pump(host, team, 0.5, |_| idle());
+        if host.mobs.iter().any(|m| m.id == id && m.sitting) {
+            break;
+        }
+    }
+    pump(host, team, 1.0, |_| idle());
+    if !host.mobs.iter().any(|m| m.id == id && m.sitting) {
+        report.problems.push(format!("the Librarian never got into bed: {:?}", host.mobs.iter().find(|m| m.id == id).map(|m| m.body.pos)));
+    }
+    for b in team.iter() {
+        if !b.game.mobs.iter().any(|m| m.id == id && m.sitting) {
+            report.problems.push(format!("{} doesn't see the Librarian in bed", b.name));
+        }
+    }
+    host.time = before;
+    host.mobs.retain(|m| m.id != id);
+    host.world.set_v(bed, AIR);
+    host.world.set_v(lectern, AIR);
+    pump(host, team, 0.5, |_| idle());
+}
+
 /// A small mod the `--playtest` command installs, so the bots can try a mod's
 /// dimension (see modgen.rs). (Not for the unit test: it would change the
 /// blocks under every other test running alongside.)
@@ -2102,7 +2176,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

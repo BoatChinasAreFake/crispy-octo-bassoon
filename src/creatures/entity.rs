@@ -894,7 +894,8 @@ pub fn variants(kind: MobKind) -> u8 {
         MobKind::Mooer => 3,
         MobKind::Axolotl => 5,
         // (A Hmmer's "colouring" is its job: see villagers.rs.)
-        MobKind::Hmmer => 9,
+        // (9 is a Hmmer with no job yet: see village_life.rs.)
+        MobKind::Hmmer => 10,
         _ => 1,
     }
 }
@@ -2533,7 +2534,14 @@ impl Mob {
         if self.sitting {
             p.y -= 0.15 * scale.y;
         }
-        let root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
+        let mut root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
+        // A Hmmer asleep lies in its bed (see village_life.rs).
+        if self.kind == MobKind::Hmmer && self.sitting {
+            let at = self.body.pos.floor().as_ivec3();
+            if let Some(bed) = [at, at - macroquad::math::IVec3::Y].into_iter().find(|b| crate::beds::is_bed(world.get_v(*b))) {
+                root = crate::beds::pose(bed, crate::beds::facing(world.get_v(bed))) * Mat4::from_scale(scale);
+            }
+        }
         // Modded mobs carry their own texture, so their parts are built fresh.
         if let MobKind::Modded(_) = self.kind {
             if let Some(def) = self.kind.mod_def() {
@@ -2570,7 +2578,7 @@ impl Mob {
         let pose = if self.sitting { 0.0 } else { self.anim };
         if self.kind == MobKind::Hmmer {
             // The robe in the colours of its job; face and hands as they are.
-            let robe = job_robe(crate::villagers::Job::of_mob(self).index());
+            let robe = if crate::village_life::jobless(self) { [1.0, 0.95, 0.85] } else { job_robe(crate::villagers::Job::of_mob(self).index()) };
             geo.begin(Pass::Opaque, [tint[0] * robe[0], tint[1] * robe[1], tint[2] * robe[2], tint[3]], false);
             draw_posed(geo, &root, &parts[..5], pose, self.flap, sky);
             geo.begin(Pass::Opaque, tint, false);

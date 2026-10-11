@@ -300,6 +300,12 @@ impl Game {
             self.open_container(crate::wildlife::pack_key(id));
             return true;
         }
+        // A Hmmer between jobs.
+        if crate::village_life::jobless(mob) {
+            let line = if mob.baby > 0.0 { "A little Hmmer. It looks at you, says \"hmm\" very seriously, and wanders off." } else { "This Hmmer hasn't found a job yet. A free workstation nearby would help." };
+            self.msg(line);
+            return true;
+        }
         // A trader (unless you're offering it its taming or breeding food).
         let feeding = mob.kind.mod_def().is_some_and(|d| held != AIR && (d.tame_item == Some(held) || d.breed_item == Some(held)));
         if !feeding && crate::villagers::trades_of(mob).is_some() {

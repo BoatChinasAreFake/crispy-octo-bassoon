@@ -338,6 +338,8 @@ pub struct Game {
     /// get just their own letters), and couriers about (mob id, seconds left).
     pub mail: crate::post::Mail,
     pub couriers: Vec<(u32, f32)>,
+    /// Hmmers' beds and workstations (see village_life.rs).
+    pub life: crate::village_life::Life,
     /// Worker threads that mesh chunks (none: meshed on the spot, as in screenshots and tests).
     pub meshes: Option<crate::meshpool::MeshPool>,
     /// Distant terrain as smooth rolling land rather than blocky terraces.
@@ -639,6 +641,7 @@ impl Game {
             deals: HashMap::new(),
             mail: Default::default(),
             couriers: Vec::new(),
+            life: Default::default(),
             board: Default::default(),
             claims: Default::default(),
             on_land: None,
@@ -956,6 +959,9 @@ impl Game {
         if self.mail != crate::post::Mail::default() {
             v.push(("mail".into(), self.mail.encode()));
         }
+        if !self.life.beds.is_empty() || !self.life.stations.is_empty() {
+            v.push(("village_life".into(), self.life.encode()));
+        }
         if self.pvp || !self.teams.teams.is_empty() {
             v.push(("teams".into(), [&[self.pvp as u8][..], &self.teams.encode()].concat()));
         }
@@ -1041,6 +1047,9 @@ impl Game {
         }
         if let Some(b) = extra("mail") {
             self.mail = crate::post::Mail::decode(b);
+        }
+        if let Some(b) = extra("village_life") {
+            self.life = crate::village_life::Life::decode(b);
         }
         if let Some(b) = extra("teams").filter(|b| !b.is_empty()) {
             self.pvp = b[0] != 0;
@@ -1560,6 +1569,10 @@ impl Game {
         self.frost_walk(dt);
         self.update_entities(dt);
         self.script_tick(dt);
+        // (Where the world lives, village_life_tick does this along with the rest.)
+        if self.is_client() {
+            self.village_watch(dt);
+        }
     }
 
     // ------------------------------------------------------------ scripting
@@ -3581,6 +3594,8 @@ impl Game {
         self.mansions_tick(dt);
         self.raids_tick(dt);
         self.hmmers_tick(dt);
+        // (After hmmers_tick: the time of day decides where they go.)
+        self.village_life_tick(dt);
         self.zombie_hmmers_tick(dt);
         self.free_riderless();
         self.tidy_mob_names();

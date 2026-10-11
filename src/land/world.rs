@@ -560,7 +560,8 @@ pub struct GenOptions {
     /// Deep Dark, taller ice spikes, and structures that settle into the land.
     /// 3: the sea at 63 (and the land with it; see `sea`). 4: Woodland
     /// Mansions in the dark forests (see mansion.rs). 5: hot springs in
-    /// snowy mountains (see springs.rs).
+    /// snowy mountains (see springs.rs). 6: villages built in their biome's
+    /// style, in savannas too, with a workstation in every house (see houses.rs).
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -573,7 +574,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 5, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 6, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -584,7 +585,7 @@ impl GenOptions {
         if version == 0 {
             return GenOptions::LEGACY;
         }
-        GenOptions { version: version.min(5), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+        GenOptions { version: version.min(6), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
     }
 
     /// Sea level: version 3 (the world grew to 256 tall) lifts it to 63;

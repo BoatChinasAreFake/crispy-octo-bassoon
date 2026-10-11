@@ -886,6 +886,13 @@ pub const T_SURVEY_TOP: u16 = 1103;
 pub const T_POSTBOX_FRONT: u16 = 1104;
 pub const T_POSTBOX_TOP: u16 = 1105;
 pub const T_LETTER: u16 = 1106;
+// Villages (see villageblocks.rs).
+pub const T_CARTO_TOP: u16 = 1107;
+pub const T_CARTO_SIDE: u16 = 1108;
+pub const T_MUD_BRICKS: u16 = 1109;
+pub const T_THATCH: u16 = 1110;
+pub const T_THATCH_TOP: u16 = 1111;
+pub const T_FROST_SHINGLES: u16 = 1112;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4597,6 +4604,78 @@ fn zappart_tiles(a: &mut Atlas) {
     });
 }
 
+/// Village blocks: the Cartography Table, Mud Bricks, Thatch and Frost Shingles.
+fn village_tiles(a: &mut Atlas) {
+    // Mud Bricks: long sun-dried bricks, a pale mortar, straw flecks.
+    a.each(T_MUD_BRICKS, |x, y, r, _| {
+        let row = y / 4;
+        let off = if row % 2 == 0 { 0 } else { 4 };
+        let mortar = y % 4 == 3 || (x + off) % 8 == 7;
+        if mortar {
+            shade(rgb(205, 185, 150), r.range(0.92, 1.04))
+        } else if r.chance(0.06) {
+            rgb(215, 190, 110)
+        } else {
+            shade(rgb(165, 120, 80), r.range(0.86, 1.06))
+        }
+    });
+    // Thatch: bundles of straw hanging in rows.
+    a.each(T_THATCH, |x, y, r, _| {
+        let strand = (x * 7 + y / 3) % 5 == 0;
+        let row_edge = y % 5 == 4;
+        shade(rgb(200, 165, 85), r.range(0.85, 1.05) * if row_edge { 0.72 } else if strand { 0.86 } else { 1.0 })
+    });
+    a.each(T_THATCH_TOP, |x, y, r, _| {
+        let strand = (x + y * 3) % 4 == 0;
+        shade(rgb(195, 160, 80), r.range(0.85, 1.05) * if strand { 0.85 } else { 1.0 })
+    });
+    // Frost Shingles: slate-blue scales with frost on their lower edges.
+    a.each(T_FROST_SHINGLES, |x, y, r, _| {
+        let row = y / 4;
+        let off = if row % 2 == 0 { 0 } else { 2 };
+        let edge = y % 4 == 3;
+        let gap = (x + off) % 4 == 3;
+        if edge {
+            shade(rgb(225, 235, 245), r.range(0.92, 1.04))
+        } else if gap {
+            shade(rgb(55, 65, 85), r.range(0.9, 1.05))
+        } else {
+            shade(rgb(95, 115, 145), r.range(0.86, 1.06))
+        }
+    });
+    // A map pinned to the top, with a compass rose and a dotted route.
+    a.each(T_CARTO_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        let land = ((x as f32 * 0.7).sin() + (y as f32 * 0.5).cos()) > 0.4;
+        let route = (x + y) % 3 == 0 && (x as i32 - y as i32).abs() < 3;
+        let rose = (x == 11 && (9..14).contains(&y)) || (y == 11 && (9..14).contains(&x));
+        if edge {
+            shade(rgb(110, 75, 45), r.range(0.85, 1.05))
+        } else if rose {
+            rgb(150, 40, 35)
+        } else if route {
+            rgb(60, 45, 35)
+        } else if land {
+            shade(rgb(150, 190, 110), r.range(0.92, 1.05))
+        } else {
+            shade(rgb(225, 210, 170), r.range(0.94, 1.04))
+        }
+    });
+    // Planks, with a rolled map and a pair of dividers hung on the side.
+    a.each(T_CARTO_SIDE, |x, y, r, _| {
+        let roll = (3..6).contains(&y) && (3..13).contains(&x);
+        let dividers = (8..=13).contains(&y) && ((x as i32 - 8).abs() == (y as i32 - 8) / 2 + 1);
+        if roll {
+            shade(rgb(230, 215, 175), r.range(0.9, 1.05) * if y == 5 { 0.85 } else { 1.0 })
+        } else if dividers {
+            rgb(70, 70, 75)
+        } else {
+            let seam = y % 4 == 0;
+            shade(rgb(160, 120, 75), r.range(0.88, 1.05) * if seam { 0.8 } else { 1.0 })
+        }
+    });
+}
+
 /// The Trading Table, the Survey Post, the Post Box and letters.
 fn together_tiles(a: &mut Atlas) {
     // A trading table: planks with a green baize top, a gold line down the middle (yours, mine).
@@ -4624,19 +4703,32 @@ fn together_tiles(a: &mut Atlas) {
         }
     });
     // A survey post: a striped red-and-white marker, a brass plate on top.
+    // A surveyor's stake: grained wood, a band of lime flagging tape, and a
+    // brass plaque stamped with a compass cross.
     a.each(T_SURVEY_SIDE, |x, y, r, _| {
-        let stripe = (y / 4) % 2 == 0;
-        let base = if stripe { rgb(220, 50, 40) } else { rgb(235, 232, 225) };
-        shade(base, r.range(0.88, 1.05) * if x == 0 || x == 15 { 0.8 } else { 1.0 })
+        let tape = (2..5).contains(&y);
+        let plaque = (7..13).contains(&y) && (4..12).contains(&x);
+        let cross = plaque && (x == 7 || x == 8 || y == 9 || y == 10) && (5..11).contains(&x) && (8..12).contains(&y);
+        if tape {
+            shade(rgb(150, 230, 60), r.range(0.9, 1.05) * if y == 4 { 0.85 } else { 1.0 })
+        } else if cross {
+            shade(rgb(120, 80, 30), r.range(0.9, 1.05))
+        } else if plaque {
+            let edge = y == 7 || y == 12 || x == 4 || x == 11;
+            shade(rgb(205, 165, 75), r.range(0.92, 1.08) * if edge { 0.8 } else { 1.0 })
+        } else {
+            let grain = if (x * 3 + (y / 5)) % 7 == 0 { 0.82 } else { 1.0 };
+            shade(rgb(150, 105, 60), r.range(0.88, 1.05) * grain * if x == 0 || x == 15 { 0.8 } else { 1.0 })
+        }
     });
     a.each(T_SURVEY_TOP, |x, y, r, _| {
         let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
         if d < 3.0 {
-            shade(rgb(30, 30, 30), r.range(0.9, 1.1))
-        } else if d < 6.0 {
-            shade(rgb(205, 160, 60), r.range(0.9, 1.1))
+            shade(rgb(205, 165, 75), r.range(0.92, 1.08))
         } else {
-            shade(rgb(220, 50, 40), r.range(0.88, 1.05))
+            // End grain: rings.
+            let ring = (d as i32) % 2 == 0;
+            shade(rgb(170, 125, 75), r.range(0.9, 1.05) * if ring { 0.85 } else { 1.0 })
         }
     });
     // A post box: pillar-box red, a slot, and a little white sign.
@@ -4755,6 +4847,7 @@ fn homecraft_tiles(a: &mut Atlas) {
     cooking_tiles(a);
     zappart_tiles(a);
     together_tiles(a);
+    village_tiles(a);
     // Dyed woolly armour: the worn knit and the icons, in each colour.
     for c in 0..8u16 {
         let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };
