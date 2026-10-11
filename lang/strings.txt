@@ -249,6 +249,7 @@ Ancient Coin (Legal Tender, Once)
 Ancient honey: tastes of old stone and starlight. Your eyes tingle.
 Angler level {}  ({} xp)  -  lines snapped: {}  (they were THIS big)
 Angler level {}! The fish have started a group chat about you.
+Ann
 Another of the same (optional)
 Another shriek. Something is listening. Tiptoe.
 Anti-aliasing: OFF
@@ -353,6 +354,7 @@ Bloop
 Blow something up with TNT. Totally Not Trouble.
 Blue
 Blue honey: tastes like a cornflower looks. You feel zippy.
+Blues
 Boat (Mostly Waterproof)
 Bob
 Bob's Farm
@@ -441,6 +443,7 @@ Carrots
 Carry acacia, birch and dark oak logs at once.
 Cartographer (Knows Where Things Are)
 Castle Town
+Cat
 Catch a Fishy with your bare hands (well, hit one).
 Catch anything at all with a Fishing Stick.
 Catch the legendary Big Bob. Dawn or dusk, deep ocean. Good luck.
@@ -618,6 +621,7 @@ DIMONDS!
 Damage dealt
 Damage taken
 Damaged Anvil (Living on Borrowed Time)
+Dan
 Dandelion (Sunny Disposition)
 Danger
 Dark Forest (Bring a Torch)
@@ -1607,6 +1611,7 @@ Red
 Red Mushroom Block (Spotty Roof)
 Red Sand (Sunburnt)
 Red Terracotta
+Reds
 Reef Madness
 Reel it in (hold right-click)
 Reformed Lumberjack
@@ -1650,6 +1655,7 @@ Rollo Scute (Shed With Dignity)
 Rollo scuttles
 Rope-a-Dope
 Rotsteed
+Round ends in
 Router address didn't resolve
 Router description request failed (HTTP {}).
 Ruined Tower (Structurally Optimistic)
@@ -2467,6 +2473,8 @@ coordinate out of range
 copper golem
 couldn't claim land for {}: {}
 couldn't host: {}
+create Blues blue
+create Reds red
 creatures dying
 cruises about 5 blocks up: {}
 daylight sensor
@@ -2529,6 +2537,8 @@ ids moved
 inventory too long
 it pours into the hole left behind
 it turns toward the player
+join Blues
+join Reds
 just added
 just made
 just now
