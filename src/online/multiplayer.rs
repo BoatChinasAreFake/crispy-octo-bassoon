@@ -507,6 +507,7 @@ impl Game {
             }
             self.msg(format!("{name} joined the game"));
             self.welcome_back(from, &name);
+            self.post_on_join(from, &name);
             self.fire("on_player_join", vec![name.clone().into()]);
         }
     }
@@ -764,6 +765,20 @@ impl Game {
                     let name = self.peer_name(from);
                     self.accept_deal(p, &name, accept);
                 }
+            }
+            Msg::PostSend { to, letter } => {
+                let near = self.peers.get(&from).is_some_and(|q| crate::post::near_post_box(&self.world, q.target + Vec3::Y * 1.6));
+                if near && self.peer_rate_ok(from, "post", 1.0) {
+                    let name = self.peer_name(from);
+                    let r = self.send_post(&name, &to, &letter);
+                    let (Ok(s) | Err(s)) = r;
+                    self.system_message(Some(from), &s);
+                }
+            }
+            Msg::PostBin => {
+                let name = self.peer_name(from);
+                self.mail.letters.remove(&crate::post::inbox_key(&name).z);
+                self.send_letters(from, false);
             }
             Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
             Msg::MobName { mob, name } => {
@@ -1326,6 +1341,17 @@ impl Game {
             Msg::TradeState { x, y, z, seats, accepted, done, mine } => self.apply_deal(IVec3::new(x, y, z), seats, accepted, done, mine),
             Msg::Sidebar { title, lines, countdown } => self.board.shown = crate::minigames::Shown { title, lines, countdown },
             Msg::Claims { data } => self.claims = crate::claims::Claims::decode(&data),
+            Msg::Letters { list, arrived } => {
+                if arrived {
+                    self.advance("youve_got_post");
+                }
+                let key = crate::post::inbox_key(&self.player_name);
+                if list.is_empty() {
+                    self.mail.letters.remove(&key.z);
+                } else {
+                    self.mail.letters.insert(key.z, list);
+                }
+            }
             Msg::SetSpawn { pos } => {
                 if pos.is_finite() {
                     self.personal_spawn = Some(pos);
@@ -1381,7 +1407,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin => {}
         }
     }
 

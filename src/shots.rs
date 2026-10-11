@@ -369,7 +369,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -858,7 +858,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1227,6 +1227,27 @@ impl App {
                     c.slots[13] = Some((block::COAL, 32));
                 }
                 app.game.accept_deal(at, "Bob", true);
+                for (item, n) in [(block::DIAMOND, 5), (block::IRON, 9), (block::LOG, 16)] {
+                    app.game.give(item, n);
+                }
+            }
+            if s.mode == "postbox" && frames == 125 {
+                // A Post Box, and a birthday parcel for Bob half written.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let v = p + fwd * 2.5;
+                app.game.world.set_v(IVec3::new(v.x.floor() as i32, p.y.floor() as i32, v.z.floor() as i32), block::POST_BOX);
+                app.game.player_name = "Stove".into();
+                app.game.open_post(false);
+                let out = post::outbox_key("Stove");
+                if let Some(c) = app.game.world.mail_boxes.get_mut(&out) {
+                    c.slots[0] = Some((block::CAKE, 1));
+                    c.slots[1] = Some((block::DIAMOND, 3));
+                    c.slots[2] = Some((block::BREAD, 8));
+                }
+                app.post_to = "Bob".into();
+                app.post_letter = "Happy birthday! Don't eat it all at once.".into();
+                app.post_focus = 2;
                 for (item, n) in [(block::DIAMOND, 5), (block::IRON, 9), (block::LOG, 16)] {
                     app.game.give(item, n);
                 }

@@ -230,8 +230,10 @@ pub const ALL: &[Advancement] = &[
     adv("off_the_map", "Off the Map", "Step through a portal into a mod's dimension."),
     adv("homebrew", "Homebrew", "Wander into a biome a mod added."),
     adv("lost_in_translation", "Lost in Translation", "Play in a language a mod brought."),
-    adv("fair_trade", "Fair Trade", "Swap things with someone at a Trading Table."),
+    adv("square_deal", "A Square Deal", "Swap things with someone at a Trading Table."),
     adv("staked_claim", "Staked a Claim", "Claim some land with a Survey Post."),
+    adv("first_class", "First Class", "Post something to another player."),
+    adv("youve_got_post", "You've Got Post", "Have a Cluckster bring you something."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -255,6 +257,7 @@ const HOME: &[&str] = &[
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
     "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me", "fungal_growth",
     "dye_job", "compost_happens", "grounded", "first_course", "chefs_kiss", "cordon_bleu", "hot_tub", "thawed", "tuning_in", "its_a_trap",
+    "square_deal", "first_class",
 ];
 
 /// Which tab (1..) an advancement is on.

@@ -12,6 +12,7 @@ pub(crate) mod net;
 pub(crate) mod minigames;
 pub(crate) mod players;
 pub(crate) mod playtest;
+pub(crate) mod post;
 pub(crate) mod scripting;
 pub(crate) mod server;
 pub(crate) mod servers;

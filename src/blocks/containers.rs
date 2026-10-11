@@ -122,6 +122,10 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if kind == TRADING_TABLE {
         return slot < crate::trading::TRADE_SLOTS;
     }
+    // An outbox (inboxes are take-only: see `post::is_inbox`).
+    if kind == POST_BOX {
+        return slot < crate::post::OUTBOX_SLOTS;
+    }
     if !is_furnace(kind) {
         return slot < crate::chests::slots(kind);
     }
@@ -380,6 +384,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get_mut(&k);
     }
+    if crate::post::is_post_key(p) {
+        return world.mail_boxes.get_mut(&p);
+    }
     if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
         return world.backpacks.get_mut(&k);
     }
@@ -395,6 +402,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
 pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a Container> {
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get(&k);
+    }
+    if crate::post::is_post_key(p) {
+        return world.mail_boxes.get(&p);
     }
     if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
         return world.backpacks.get(&k);
@@ -412,6 +422,10 @@ pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle],
 pub fn store_kind(world: &World, vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Id {
     if crate::stash::stash_of_key(p).is_some() {
         return PERSONAL_CHEST;
+    }
+    // Someone's inbox or outbox (see post.rs).
+    if crate::post::is_post_key(p) {
+        return POST_BOX;
     }
     // A pack works like a chest as big as the backpack it's opened with.
     if let Some((_, t)) = crate::backpacks::pack_of_key(p) {
@@ -506,7 +520,7 @@ impl Game {
             }
         } else {
             // Only what the slot accepts may go in (the output is take-only).
-            let put_ok = cursor.map(|(id, _)| accepts(kind, slot, id)).unwrap_or(true);
+            let put_ok = cursor.map(|(id, _)| accepts(kind, slot, id) && !crate::post::is_inbox(pos)).unwrap_or(true);
             let same = matches!((cursor, s), (Some((a, _)), Some((b, _))) if a == b);
             if !(put_ok || cursor.is_none() || (slot == OUTPUT && is_three_slot(kind))) {
                 return;
@@ -564,6 +578,10 @@ impl Game {
         let Some(pos) = self.open else { return };
         let Some((id, n)) = self.inv.slots.get(inv_slot).copied().flatten() else { return };
         let kind = store_kind(&self.world, &self.vehicles, pos);
+        // An inbox: take-only (see post.rs).
+        if crate::post::is_inbox(pos) {
+            return;
+        }
         // A Trading Table: onto our own side only (see trading.rs).
         let side = if kind == TRADING_TABLE {
             match self.seat_at(pos, &self.player_name.clone()) {
@@ -656,6 +674,9 @@ impl Game {
                 if crate::stash::stash_of_key(p).is_some() {
                     return crate::stash::near_personal_chest(&self.world, self.player.eye());
                 }
+                if crate::post::is_post_key(p) {
+                    return crate::post::near_post_box(&self.world, self.player.eye());
+                }
                 if crate::backpacks::pack_of_key(p).is_some() {
                     return self.backpack_held(p);
                 }
@@ -738,6 +759,10 @@ impl Game {
         if crate::stash::stash_of_key(p).is_some() {
             return self.peers.get(&from).is_some_and(|q| crate::stash::stash_key(&q.name) == p && crate::stash::near_personal_chest(&self.world, q.target + Vec3::Y * 1.6));
         }
+        // Someone's own inbox or outbox: only theirs, and only by a Post Box.
+        if crate::post::is_post_key(p) {
+            return self.peers.get(&from).is_some_and(|q| (crate::post::inbox_key(&q.name) == p || crate::post::outbox_key(&q.name) == p) && crate::post::near_post_box(&self.world, q.target + Vec3::Y * 1.6));
+        }
         // Someone's backpack pack: only theirs, and only with a backpack in hand.
         if crate::backpacks::pack_of_key(p).is_some() {
             return self.peer_backpack(from, p);
@@ -751,11 +776,11 @@ impl Game {
 
     pub fn host_open(&mut self, from: u32, p: IVec3) {
         let kind = store_kind(&self.world, &self.vehicles, p);
-        if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST) {
+        if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST || kind == POST_BOX) {
             return;
         }
-        // Someone else's chests, on their land (see claims.rs; Personal Chests are everyone's own).
-        if kind != PERSONAL_CHEST && crate::vehicles::cart_of_key(p).is_none() && !self.may_build_at(&self.peer_name(from), p) {
+        // Someone else's chests, on their land (see claims.rs; Personal Chests and post are everyone's own).
+        if kind != PERSONAL_CHEST && kind != POST_BOX && crate::vehicles::cart_of_key(p).is_none() && !self.may_build_at(&self.peer_name(from), p) {
             self.system_message(Some(from), "That's on someone else's land.");
             return;
         }
@@ -767,6 +792,9 @@ impl Game {
         }
         if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
             self.world.backpacks.entry(k).or_insert_with(crate::backpacks::fresh);
+        }
+        if crate::post::is_post_key(p) {
+            self.world.mail_boxes.entry(p).or_insert_with(|| crate::post::fresh(p));
         }
         self.ensure_container(p);
         self.viewers.entry(p).or_default().insert(from);
@@ -823,7 +851,7 @@ impl Game {
 
     #[allow(clippy::too_many_arguments)]
     fn container_put(&mut self, from: u32, p: IVec3, kind: Id, slot: usize, item: Id, n: u8, wear: Wear) -> bool {
-        if !accepts(kind, slot, item) {
+        if !accepts(kind, slot, item) || crate::post::is_inbox(p) {
             return false;
         }
         let fits = match store_ref(&self.world, &self.vehicles, p).and_then(|c| c.slots[slot]) {
@@ -874,6 +902,8 @@ impl Game {
             self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST))
         } else if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
             self.world.backpacks.entry(k).or_insert_with(crate::backpacks::fresh)
+        } else if crate::post::is_post_key(p) {
+            self.world.mail_boxes.entry(p).or_insert_with(|| crate::post::fresh(p))
         } else if let Some(id) = crate::wildlife::pack_of_key(p) {
             self.world.packs.entry(id).or_insert_with(|| Container::for_block(CHEST))
         } else if crate::vehicles::cart_of_key(p).is_some() {

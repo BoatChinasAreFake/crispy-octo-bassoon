@@ -311,7 +311,7 @@ mod tests {
             assert_eq!(calibrated_state(calibrated(kind, true)), (kind, true));
         }
         assert!(source(TARGET_ON) && source(daylight(true, true)) && !source(daylight(false, false)) && !source(TARGET));
-        assert!(defs().len() as Id == NUM_BLOCKS - DAYLIGHT_SENSOR, "one def for every id");
+        assert!(defs().len() as Id == TRADING_TABLE - DAYLIGHT_SENSOR, "one def for every id (up to the v0.4 part 4 blocks, see together.rs)");
         assert!(crate::chests::is_chest(TRAPPED_CHEST) && crate::containers::is_container(DROPPER_FIRST + 2));
         assert!(crate::vehicles::is_rail(ACTIVATOR_RAIL + 3) && activator_on(ACTIVATOR_RAIL + 1));
     }

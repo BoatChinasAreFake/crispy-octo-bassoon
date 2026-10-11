@@ -120,7 +120,7 @@ impl Game {
             self.dirty_containers.insert(p);
             // (The host's own player gets the advancement here; joined players see `done` go up.)
             if self.viewing(p, &self.player_name.clone()) {
-                self.advance("fair_trade");
+                self.advance("square_deal");
             }
             self.sfx(crate::sound::Sfx::Chime, Some(p.as_vec3()));
         }
@@ -165,7 +165,7 @@ impl Game {
         let swapped = !fresh && done > d.done;
         *d = Deal { seats, accepted, done, mine: (mine < 2).then_some(mine as usize) };
         if swapped && self.open == Some(p) {
-            self.advance("fair_trade");
+            self.advance("square_deal");
         }
     }
 }

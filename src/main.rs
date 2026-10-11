@@ -16,7 +16,7 @@ pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, di
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, together, trading, trims, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, skins, sniffers, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
-pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, scripting, server, servers, teams};
+pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, post, scripting, server, servers, teams};
 mod screens;
 mod shots;
 use shots::parse_args;
@@ -159,6 +159,10 @@ struct App {
     /// The recipe book: search text (and whether it's being typed in), tab, "craftable only".
     book_search: String,
     book_focus: bool,
+    /// The Post Box: who it's for, the letter, and which is being typed in (0: neither).
+    post_to: String,
+    post_letter: String,
+    post_focus: u8,
     book_tab: crafting::Tab,
     book_craftable: bool,
     /// Where the Field Journal goes back to (the pause menu, or the game).
@@ -410,6 +414,7 @@ impl App {
         }
         if self.screen == Screen::Container && s != Screen::Container {
             self.game.close_container();
+            self.post_focus = 0;
         }
         if self.screen == Screen::Anvil && s != Screen::Anvil {
             self.game.close_anvil();
@@ -899,6 +904,23 @@ impl App {
                     if self.book_search != before {
                         self.recipe_scroll = 0.0;
                     }
+                }
+            }
+            Screen::Container if self.post_focus > 0 && self.game.open.is_some_and(post::is_post_key) => {
+                if is_key_pressed(KeyCode::Escape) {
+                    self.post_focus = 0;
+                } else if is_key_pressed(KeyCode::Tab) {
+                    self.post_focus = 3 - self.post_focus;
+                } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+                    if self.post_focus == 1 {
+                        self.post_focus = 2;
+                    } else {
+                        self.send_post_now();
+                    }
+                } else if self.post_focus == 1 {
+                    type_into(&mut self.post_to, 16);
+                } else {
+                    type_into(&mut self.post_letter, post::LETTER_LEN);
                 }
             }
             Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Bench => {
@@ -2028,6 +2050,9 @@ async fn game_main() {
         creative_backpack: false,
         book_search: String::new(),
         book_focus: false,
+        post_to: String::new(),
+        post_letter: String::new(),
+        post_focus: 0,
         book_tab: crafting::Tab::All,
         book_craftable: false,
         journal_back: Screen::Playing,

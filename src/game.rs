@@ -334,6 +334,10 @@ pub struct Game {
     pub personal_spawn: Option<Vec3>,
     /// Trading Tables' seats and Accepts (see trading.rs).
     pub deals: HashMap<IVec3, crate::trading::Deal>,
+    /// Post on its way and everyone's letters (see post.rs; joined players
+    /// get just their own letters), and couriers about (mob id, seconds left).
+    pub mail: crate::post::Mail,
+    pub couriers: Vec<(u32, f32)>,
     /// Worker threads that mesh chunks (none: meshed on the spot, as in screenshots and tests).
     pub meshes: Option<crate::meshpool::MeshPool>,
     /// Distant terrain as smooth rolling land rather than blocky terraces.
@@ -633,6 +637,8 @@ impl Game {
             teams: Default::default(),
             pvp: false,
             deals: HashMap::new(),
+            mail: Default::default(),
+            couriers: Vec::new(),
             board: Default::default(),
             claims: Default::default(),
             on_land: None,
@@ -944,6 +950,12 @@ impl Game {
         if self.board != crate::minigames::Board::default() {
             v.push(("minigame".into(), self.board.encode()));
         }
+        if !self.world.mail_boxes.is_empty() {
+            v.push(("mailboxes".into(), crate::containers::encode(&self.world.mail_boxes)));
+        }
+        if self.mail != crate::post::Mail::default() {
+            v.push(("mail".into(), self.mail.encode()));
+        }
         if self.pvp || !self.teams.teams.is_empty() {
             v.push(("teams".into(), [&[self.pvp as u8][..], &self.teams.encode()].concat()));
         }
@@ -1023,6 +1035,12 @@ impl Game {
         }
         if let Some(b) = extra("minigame") {
             self.board = crate::minigames::Board::decode(b);
+        }
+        if let Some(b) = extra("mailboxes") {
+            self.world.mail_boxes = crate::containers::decode(b, 4).into_iter().filter(|(p, _)| crate::post::is_post_key(*p)).collect();
+        }
+        if let Some(b) = extra("mail") {
+            self.mail = crate::post::Mail::decode(b);
         }
         if let Some(b) = extra("teams").filter(|b| !b.is_empty()) {
             self.pvp = b[0] != 0;
@@ -1602,6 +1620,7 @@ impl Game {
 
     fn script_tick(&mut self, dt: f32) {
         self.minigame_tick(dt);
+        self.post_tick(dt);
         if !self.dedicated {
             self.note_land();
         }
@@ -2573,6 +2592,10 @@ impl Game {
             }
             if id == PERSONAL_CHEST {
                 self.open_stash(pos);
+                return;
+            }
+            if id == POST_BOX {
+                self.open_post(false);
                 return;
             }
             if crate::books::is_lectern(id) {

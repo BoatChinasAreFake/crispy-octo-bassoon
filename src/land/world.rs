@@ -1499,6 +1499,8 @@ pub struct World {
     pub containers: HashMap<IVec3, Container>,
     /// Each player's Personal Chest storage, by `stash::stash_key` (see stash.rs).
     pub stashes: HashMap<i32, Container>,
+    /// Everyone's post inboxes and outboxes, by `post::inbox_key`/`outbox_key`.
+    pub mail_boxes: HashMap<IVec3, Container>,
     /// Everyone's backpack packs, by player (see backpacks.rs).
     pub backpacks: HashMap<i32, Container>,
     /// Llamas' packs, by mob id (see wildlife.rs).
@@ -1605,6 +1607,7 @@ impl World {
             farm: HashMap::new(),
             containers: HashMap::new(),
             stashes: HashMap::new(),
+            mail_boxes: HashMap::new(),
             backpacks: HashMap::new(),
             packs: HashMap::new(),
             structure_loot: true,
