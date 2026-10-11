@@ -237,6 +237,9 @@ pub const ALL: &[Advancement] = &[
     adv("new_hire", "New Hire", "Watch a Hmmer take a job at a workstation."),
     adv("baby_boom", "Baby Boom", "Be there when a baby Hmmer comes along."),
     adv("early_night", "Early Night", "Find a Hmmer tucked up in bed at night."),
+    adv("master_class", "Master Class", "Trade a Hmmer all the way up to Master."),
+    adv("pillar_of_the_community", "Pillar of the Community", "Get a village to love you."),
+    adv("persona_non_grata", "Persona Non Grata", "Get a village to hate you. (Well done?)"),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -252,7 +255,7 @@ const CREATURES: &[&str] = &[
     "armoured_pup", "too_hot", "guardian_down", "elder_statesman", "dry_your_eyes", "rampage_over", "breeze_through", "toot_toot", "heartbreak", "clank_you", "copper_golem", "sorted", "floaty_born", "harnessed",
     "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch", "char_broiled", "fungus_amongus",
     "pork_barrel", "raising_hell", "spore_loser", "magma_carta", "snuffed_out", "knight_errant",
-    "beast_of_burden", "hybrid_vigour", "snow_problem", "walkies", "new_hire", "baby_boom", "early_night",
+    "beast_of_burden", "hybrid_vigour", "snow_problem", "walkies", "new_hire", "baby_boom", "early_night", "master_class", "pillar_of_the_community", "persona_non_grata",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",

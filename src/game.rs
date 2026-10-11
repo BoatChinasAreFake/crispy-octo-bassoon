@@ -347,6 +347,12 @@ pub struct Game {
     pub lod: crate::lod::Lod,
     /// Trades made with each Hmmer, by each player (see villagers.rs).
     pub regulars: HashMap<(u32, String), u16>,
+    /// Each Hmmer's trading experience, by mob id: its level (see villagers.rs).
+    pub hmmer_xp: HashMap<u32, u16>,
+    /// What each village thinks of each player (see reputation.rs), and on a
+    /// joined player's game, what the host last said a Hmmer's village thinks of us.
+    pub rep: crate::reputation::Reputation,
+    pub rep_seen: HashMap<u32, i16>,
     /// Days gone by (for the moon's phase; see skies.rs).
     pub day: u32,
     pub ride_sync: f32,
@@ -649,6 +655,9 @@ impl Game {
             smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
+            hmmer_xp: HashMap::new(),
+            rep: Default::default(),
+            rep_seen: HashMap::new(),
             day: 0,
             ride_sync: 0.0,
             chat_log: Default::default(),
@@ -933,6 +942,8 @@ impl Game {
             ("bee_log".to_string(), self.bee_log.encode()),
             ("journal".to_string(), self.journal.encode()),
             ("regulars".to_string(), crate::villagers::encode_regulars(&self.regulars)),
+            ("hmmer_xp".to_string(), crate::villagers::encode_xp(&self.hmmer_xp)),
+            ("reputation".to_string(), self.rep.encode()),
             ("day".to_string(), self.day.to_le_bytes().to_vec()),
             ("packs".to_string(), self.encode_packs()),
             ("sign_styles".to_string(), crate::qol::encode_styles(&self.world.sign_styles)),
@@ -1021,6 +1032,12 @@ impl Game {
         }
         if let Some(b) = extra("day").and_then(|b| b.get(..4)) {
             self.day = u32::from_le_bytes(b.try_into().unwrap());
+        }
+        if let Some(b) = extra("hmmer_xp") {
+            self.hmmer_xp = crate::villagers::decode_xp(b);
+        }
+        if let Some(b) = extra("reputation") {
+            self.rep = crate::reputation::Reputation::decode(b);
         }
         if let Some(b) = extra("regulars") {
             self.regulars = crate::villagers::decode_regulars(b);
@@ -2150,7 +2167,8 @@ impl Game {
                     m.hurt = 0.0;
                     m.damage(a.damage, a.pos - a.vel);
                     m.last_attacker = pid;
-                    let (kind, at) = (m.kind, m.body.pos);
+                    let (kind, at, mob) = (m.kind, m.body.pos, m.id);
+                    self.note_player_hit(mob, pid);
                     self.sfx(Sfx::hurt_of(kind), Some(at));
                     if let Some(spear) = a.spear {
                         landed.push((a.pos - a.dir * 0.5, spear));
@@ -2394,6 +2412,8 @@ impl Game {
                         self.guardian_spikes(i);
                         self.mobs[i].damage(dmg, from);
                         self.mobs[i].last_attacker = 0;
+                        let (mob, me) = (self.mobs[i].id, self.my_id);
+                        self.note_player_hit(mob, me);
                         let (kind, at) = (self.mobs[i].kind, self.mobs[i].body.pos);
                         self.sfx(Sfx::hurt_of(kind), Some(at));
                         if lunge {
@@ -3596,6 +3616,7 @@ impl Game {
         self.hmmers_tick(dt);
         // (After hmmers_tick: the time of day decides where they go.)
         self.village_life_tick(dt);
+        self.reputation_tick(dt);
         self.zombie_hmmers_tick(dt);
         self.free_riderless();
         self.tidy_mob_names();
@@ -3788,6 +3809,9 @@ impl Game {
                 }
                 if m.health <= 0.0 && m.kind.raider() {
                     self.raider_died(&m);
+                }
+                if m.health <= 0.0 {
+                    self.rep_mob_died(m.id, m.kind, m.body.pos);
                 }
                 if m.health <= 0.0 && m.health > -50.0 {
                     let at = m.body.pos + Vec3::Y * 0.5;
@@ -6187,8 +6211,14 @@ looks_like = diamond
         g.target = Some(Target::Mob(0));
         g.use_item();
         assert_eq!(g.trading, Some(id));
+        // A new Hmmer is a Novice, with its first two trades.
         let (job, list) = g.trade_list().unwrap();
-        assert_eq!((job, list.clone()), (format!("Hmmer: {}", Job::Smith.name()), trades(seed)));
+        assert_eq!((job, list), (format!("Hmmer: {} - Novice (0/10) - Village: Neutral (+0)", Job::Smith.name()), trades(seed)[..2].to_vec()));
+        // (A Master has them all.)
+        g.hmmer_xp.insert(id, crate::villagers::LEVELS[crate::villagers::MASTER].1);
+        let (job, list) = g.trade_list().unwrap();
+        assert!(job.contains(" - Master - "), "{job}");
+        assert_eq!(list, trades(seed));
         // Coal for gold.
         let coal = list.iter().position(|t| t.give[0].0 == COAL).unwrap();
         g.inv.slots = [None; 36];

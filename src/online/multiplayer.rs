@@ -689,6 +689,7 @@ impl Game {
                     m.damage(dmg, eye);
                     m.last_attacker = from;
                     let (kind, pos) = (m.kind, m.body.pos);
+                    self.note_player_hit(mob, from);
                     self.sfx(Sfx::hurt_of(kind), Some(pos));
                     let held = self.verified_held(from);
                     self.host_wear(from, held, hit_wear(held));
@@ -1307,7 +1308,7 @@ impl Game {
             }
             Msg::BundleState { old, new, contents } => self.bundle_state(old, new, contents),
             Msg::BookState { old, new, signed, open, title, author, pages } => self.book_state(old, new, signed, open, title, author, pages),
-            Msg::Regular { mob, trades } => self.regular_state(mob, trades),
+            Msg::Regular { mob, trades, xp, rep } => self.regular_state(mob, trades, xp, rep),
             Msg::SignStyle { x, y, z, style, .. } => self.apply_sign_style(IVec3::new(x, y, z), style),
             Msg::Banner { x, y, z, design, facing, up } => self.banner_msg(IVec3::new(x, y, z), design, facing, up),
             Msg::Firework { at, colour } => {
@@ -2605,7 +2606,7 @@ mod tests {
         // The client sees the same trades, and makes one.
         client.open_trade(hmmer);
         let list = client.trade_list().expect("talking").1;
-        assert_eq!(list, trades(seed));
+        assert_eq!(list, trades(seed)[..2].to_vec(), "a Novice's two trades");
         let wheat = list.iter().position(|t| t.give[0].0 == WHEAT).unwrap();
         client.make_trade(wheat);
         assert!(pump(&mut host, &mut client, |_, c| c.inv.count(GOLD_INGOT) == 1 && c.inv.count(WHEAT) == 20));

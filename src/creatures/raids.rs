@@ -478,6 +478,7 @@ impl Game {
                     self.give_effect_to(id, Potion::Hero, HERO_SECS);
                     let name = if id == self.my_id { self.player_name.clone() } else { self.peer_name(id) };
                     self.advance_for(&name, "hero_village");
+                    self.rep_raid_won(r.centre, &name);
                 }
             }
         } else {

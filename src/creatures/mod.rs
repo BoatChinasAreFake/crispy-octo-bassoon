@@ -15,6 +15,7 @@ pub(crate) mod nametags;
 pub(crate) mod night;
 pub(crate) mod pathing;
 pub(crate) mod raids;
+pub(crate) mod reputation;
 pub(crate) mod skins;
 pub(crate) mod sniffers;
 pub(crate) mod village_life;

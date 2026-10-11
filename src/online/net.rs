@@ -49,7 +49,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
-pub const PROTOCOL: u32 = 38;
+pub const PROTOCOL: u32 = 39;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -157,8 +157,10 @@ pub enum Msg {
     SortContainer { x: i32, y: i32, z: i32 },
     /// client -> host: how many times have I traded with this Hmmer?
     RegularAsk { mob: u32 },
-    /// host -> client: you've traded with this Hmmer this many times (see villagers.rs).
-    Regular { mob: u32, trades: u16 },
+    /// host -> client: you've traded with this Hmmer this many times, it has
+    /// this much trading experience (its level), and its village thinks this
+    /// of you (see villagers.rs and reputation.rs).
+    Regular { mob: u32, trades: u16, xp: u16, rep: i16 },
     /// client -> host: I put one of these on the Campfire here to cook (see home.rs).
     CampfirePut { x: i32, y: i32, z: i32, item: Id },
     /// client -> host: Mending used this much of my experience (see enchant.rs).
@@ -888,10 +890,12 @@ impl Msg {
                 w.i32(*z);
                 w.u16(*item);
             }
-            Msg::Regular { mob, trades } => {
+            Msg::Regular { mob, trades, xp, rep } => {
                 w.u8(83);
                 w.u32(*mob);
                 w.u16(*trades);
+                w.u16(*xp);
+                w.u16(*rep as u16);
             }
             Msg::LecternTake { x, y, z } => {
                 w.u8(78);
@@ -1327,7 +1331,7 @@ impl Msg {
             80 => Msg::Loom { design: r.u16()?, dye: r.u16()? },
             81 => Msg::SortContainer { x: r.i32()?, y: r.i32()?, z: r.i32()? },
             82 => Msg::RegularAsk { mob: r.u32()? },
-            83 => Msg::Regular { mob: r.u32()?, trades: r.u16()? },
+            83 => Msg::Regular { mob: r.u32()?, trades: r.u16()?, xp: r.u16()?, rep: r.u16()? as i16 },
             84 => Msg::CampfirePut { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()? },
             85 => Msg::Mend { points: r.u32()? },
             86 => Msg::FrostWalk,
@@ -2093,7 +2097,7 @@ mod tests {
             Msg::Loom { design: 0x0042, dye: 0x805c },
             Msg::SortContainer { x: 1, y: -4097, z: -2 },
             Msg::RegularAsk { mob: 77 },
-            Msg::Regular { mob: 77, trades: 31 },
+            Msg::Regular { mob: 77, trades: 31, xp: 46, rep: -12 },
             Msg::CampfirePut { x: 1, y: 60, z: -2, item: 0x8028 },
             Msg::Mend { points: 9 },
             Msg::FrostWalk,
