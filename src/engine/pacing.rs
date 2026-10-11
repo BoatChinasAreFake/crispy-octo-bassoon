@@ -156,6 +156,9 @@ mod tests {
         let target = Instant::now() + Duration::from_millis(5);
         wait_until(target);
         let over = Instant::now() - target;
-        assert!(over < Duration::from_millis(3), "{over:?}");
+        // (Windows sleeps more coarsely, and a busy test machine can be a few
+        // milliseconds late waking us; well under a frame either way.)
+        let slack = if cfg!(windows) { Duration::from_millis(12) } else { Duration::from_millis(3) };
+        assert!(over < slack, "{over:?}");
     }
 }
