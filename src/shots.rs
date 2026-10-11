@@ -2243,10 +2243,20 @@ impl App {
     }
 }
 
-/// A game for a scene. `--gen 2` makes it a newer world (see `GenOptions`);
-/// scenes are older worlds otherwise, so they keep looking as they always have.
+/// Scenes added from v0.5 on: they show a world as it's made now (the
+/// newest generator) unless `--gen` says otherwise. New scenes go here.
+const LATEST_SCENES: &[&str] = &[
+    "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage",
+];
+
+/// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is
+/// the oldest). Older scenes are older worlds otherwise, so they keep looking
+/// as they always have; newer ones (`LATEST_SCENES`) use the newest.
 fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
-    let wanted = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--gen").and_then(|w| w[1].parse::<u8>().ok());
+    let args: Vec<String> = std::env::args().collect();
+    let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
+    let latest = arg("--mode").is_some_and(|m| LATEST_SCENES.contains(&m.as_str()));
+    let wanted = arg("--gen").and_then(|g| g.parse::<u8>().ok()).or(latest.then_some(crate::world::GenOptions::DEFAULT.version));
     let opts = match wanted {
         Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(crate::world::GenOptions::DEFAULT.version), ..crate::world::GenOptions::DEFAULT },
         _ => crate::world::GenOptions::LEGACY,

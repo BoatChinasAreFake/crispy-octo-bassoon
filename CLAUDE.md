@@ -4,6 +4,10 @@
 
 - **Never add Phantoms** (or any Phantom-like mob that harasses players for not sleeping), and never suggest them as an idea.
 
+## Working rules
+
+- **New additions use the latest generation by default.** Anything new that depends on how the world is generated (screenshot scenes, test worlds, playtests) uses the newest world generator unless it's specifically about older worlds. New screenshot scenes go in `LATEST_SCENES` in `src/shots.rs`.
+
 ## Roadmap rules
 
 The plan below runs from v0.2 to v1.0.0. Stick to it:
