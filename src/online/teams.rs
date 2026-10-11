@@ -288,6 +288,104 @@ impl Reader<'_> {
     }
 }
 
+// ------------------------------------------------------------------ in the game
+
+use crate::game::Game;
+use crate::net::{Msg, SYSTEM};
+
+/// The hardest one blow can land (a Mace from a great height is less; this only stops nonsense).
+const MAX_HIT: f32 = 40.0;
+/// How far a player can reach another (a little more than the reach, for lag).
+const HIT_RANGE: f32 = 6.5;
+
+impl Game {
+    pub fn teams_msg(&self) -> Msg {
+        Msg::Teams { pvp: self.pvp, data: self.teams.encode() }
+    }
+
+    /// The host tells everyone about the teams (after a change).
+    pub fn share_teams(&mut self) {
+        if self.is_host() {
+            let m = self.teams_msg();
+            self.net_broadcast_all(m);
+        }
+    }
+
+    /// A player's team colour, if they're on a team.
+    pub fn team_colour(&self, player: &str) -> Option<[u8; 3]> {
+        self.teams.team_of(player).map(Team::rgb)
+    }
+
+    /// `/tc`: say something to your team only (on the host).
+    pub fn team_chat(&mut self, from: u32, text: &str) -> Vec<String> {
+        let name = self.peer_name(from);
+        let Some(team) = self.teams.team_of(&name).map(|t| t.name.clone()) else {
+            return vec!["You're not on a team. /team join <name>, or /team create <name>.".into()];
+        };
+        let text: String = text.trim().chars().take(200).collect();
+        if text.is_empty() {
+            return vec!["/tc <message> talks to your team.".into()];
+        }
+        let line = format!("[{team}] {text}");
+        let mates: Vec<u32> = self.all_peers().filter(|(_, p)| self.teams.same_team(&p.name, &name)).map(|(&id, _)| id).collect();
+        for id in mates {
+            if id != from {
+                self.net_send_to(id, Msg::Chat { from, text: line.clone() });
+            }
+        }
+        let host_on_team = !self.dedicated && self.teams.same_team(&self.player_name, &name);
+        if from != self.my_id && from != SYSTEM {
+            // The sender sees it too (they don't echo commands).
+            self.net_send_to(from, Msg::Chat { from, text: line.clone() });
+        }
+        if host_on_team || from == self.my_id {
+            self.msg(format!("<{name}> {line}"));
+        }
+        Vec::new()
+    }
+
+    /// `/pvp on|off`: can players hurt each other?
+    pub fn pvp_command(&mut self, arg: &str) -> Vec<String> {
+        match arg.trim().to_ascii_lowercase().as_str() {
+            "on" | "true" => self.pvp = true,
+            "off" | "false" => self.pvp = false,
+            _ => return vec![format!("Players {} hurt each other. /pvp on or off.", if self.pvp { "can" } else { "can't" })],
+        }
+        self.share_teams();
+        vec![if self.pvp { "Players can hurt each other now (teams decide about their own, see /team friendlyfire).".into() } else { "Players can't hurt each other now.".into() }]
+    }
+
+    /// Can `attacker` hurt `victim` (both players) right now?
+    pub fn may_hit_player(&self, attacker: &str, victim: &str) -> bool {
+        self.pvp && attacker != victim && self.teams.may_hurt(attacker, victim)
+    }
+
+    /// The host: player `from` hit player `target` for `dmg` (checked here).
+    pub fn host_hit_player(&mut self, from: u32, target: u32, dmg: f32) {
+        if !dmg.is_finite() || dmg <= 0.0 || from == target {
+            return;
+        }
+        let (attacker, victim) = (self.peer_name(from), self.peer_name(target));
+        if !self.may_hit_player(&attacker, &victim) {
+            return;
+        }
+        let pos_of = |g: &Game, id: u32| if id == g.my_id && !g.dedicated { Some(g.player.body.pos) } else { g.peer_ref(id).filter(|p| p.alive()).map(|p| p.target) };
+        let (Some(a), Some(v)) = (pos_of(self, from), pos_of(self, target)) else { return };
+        if a.distance(v) > HIT_RANGE {
+            return;
+        }
+        let dmg = dmg.min(MAX_HIT);
+        let cause = format!("was struck down by {attacker}");
+        let knock = (v - a).normalize_or_zero() * 4.0 + macroquad::math::Vec3::Y * 2.0;
+        if target == self.my_id && !self.dedicated {
+            self.hurt_player_from(dmg, &cause, Some(a), false);
+            self.player.body.vel += knock;
+        } else {
+            self.hurt_peer(target, dmg, &cause, knock);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,103 +484,5 @@ mod tests {
         let b = t.encode();
         assert_eq!(Teams::decode(&b[..b.len() - 2]), None);
         assert_eq!(Teams::decode(&[]), None);
-    }
-}
-
-// ------------------------------------------------------------------ in the game
-
-use crate::game::Game;
-use crate::net::{Msg, SYSTEM};
-
-/// The hardest one blow can land (a Mace from a great height is less; this only stops nonsense).
-const MAX_HIT: f32 = 40.0;
-/// How far a player can reach another (a little more than the reach, for lag).
-const HIT_RANGE: f32 = 6.5;
-
-impl Game {
-    pub fn teams_msg(&self) -> Msg {
-        Msg::Teams { pvp: self.pvp, data: self.teams.encode() }
-    }
-
-    /// The host tells everyone about the teams (after a change).
-    pub fn share_teams(&mut self) {
-        if self.is_host() {
-            let m = self.teams_msg();
-            self.net_broadcast_all(m);
-        }
-    }
-
-    /// A player's team colour, if they're on a team.
-    pub fn team_colour(&self, player: &str) -> Option<[u8; 3]> {
-        self.teams.team_of(player).map(Team::rgb)
-    }
-
-    /// `/tc`: say something to your team only (on the host).
-    pub fn team_chat(&mut self, from: u32, text: &str) -> Vec<String> {
-        let name = self.peer_name(from);
-        let Some(team) = self.teams.team_of(&name).map(|t| t.name.clone()) else {
-            return vec!["You're not on a team. /team join <name>, or /team create <name>.".into()];
-        };
-        let text: String = text.trim().chars().take(200).collect();
-        if text.is_empty() {
-            return vec!["/tc <message> talks to your team.".into()];
-        }
-        let line = format!("[{team}] {text}");
-        let mates: Vec<u32> = self.all_peers().filter(|(_, p)| self.teams.same_team(&p.name, &name)).map(|(&id, _)| id).collect();
-        for id in mates {
-            if id != from {
-                self.net_send_to(id, Msg::Chat { from, text: line.clone() });
-            }
-        }
-        let host_on_team = !self.dedicated && self.teams.same_team(&self.player_name, &name);
-        if from != self.my_id && from != SYSTEM {
-            // The sender sees it too (they don't echo commands).
-            self.net_send_to(from, Msg::Chat { from, text: line.clone() });
-        }
-        if host_on_team || from == self.my_id {
-            self.msg(format!("<{name}> {line}"));
-        }
-        Vec::new()
-    }
-
-    /// `/pvp on|off`: can players hurt each other?
-    pub fn pvp_command(&mut self, arg: &str) -> Vec<String> {
-        match arg.trim().to_ascii_lowercase().as_str() {
-            "on" | "true" => self.pvp = true,
-            "off" | "false" => self.pvp = false,
-            _ => return vec![format!("Players {} hurt each other. /pvp on or off.", if self.pvp { "can" } else { "can't" })],
-        }
-        self.share_teams();
-        vec![if self.pvp { "Players can hurt each other now (teams decide about their own, see /team friendlyfire).".into() } else { "Players can't hurt each other now.".into() }]
-    }
-
-    /// Can `attacker` hurt `victim` (both players) right now?
-    pub fn may_hit_player(&self, attacker: &str, victim: &str) -> bool {
-        self.pvp && attacker != victim && self.teams.may_hurt(attacker, victim)
-    }
-
-    /// The host: player `from` hit player `target` for `dmg` (checked here).
-    pub fn host_hit_player(&mut self, from: u32, target: u32, dmg: f32) {
-        if !dmg.is_finite() || dmg <= 0.0 || from == target {
-            return;
-        }
-        let (attacker, victim) = (self.peer_name(from), self.peer_name(target));
-        if !self.may_hit_player(&attacker, &victim) {
-            return;
-        }
-        let pos_of = |g: &Game, id: u32| if id == g.my_id && !g.dedicated { Some(g.player.body.pos) } else { g.peer_ref(id).filter(|p| p.alive()).map(|p| p.target) };
-        let (Some(a), Some(v)) = (pos_of(self, from), pos_of(self, target)) else { return };
-        if a.distance(v) > HIT_RANGE {
-            return;
-        }
-        let dmg = dmg.min(MAX_HIT);
-        let cause = format!("was struck down by {attacker}");
-        let knock = (v - a).normalize_or_zero() * 4.0 + macroquad::math::Vec3::Y * 2.0;
-        if target == self.my_id && !self.dedicated {
-            self.hurt_player_from(dmg, &cause, Some(a), false);
-            self.player.body.vel += knock;
-        } else {
-            self.hurt_peer(target, dmg, &cause, knock);
-        }
     }
 }
