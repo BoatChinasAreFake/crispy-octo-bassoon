@@ -207,7 +207,8 @@ impl Generator {
         if spring_spot && let Some(m) = self.spring_site(ox, oz, h, biome, facing, seed) {
             return Some(m);
         }
-        if village_spot && matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) && h > self.sea() + 1 && h < self.sea() + 58 && wide_flat() {
+        let village_biome = matches!(biome, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy) || (self.opts.version >= 6 && biome == Biome::Savanna);
+        if village_spot && village_biome && h > self.sea() + 1 && h < self.sea() + 58 && wide_flat() {
             return Some(Site { kind: Kind::Village, origin: ivec3(ox, h, oz), facing, seed });
         }
         // Pilferers build lookouts on open, flat ground (and, in newer worlds, never within sight of a village).
@@ -479,6 +480,7 @@ impl Generator {
     fn village_blocks(&self, site: &Site) -> Vec<(IVec3, Id)> {
         let o = site.origin;
         let s = site.seed;
+        let pal = self.village_style(site).palette();
         let mut out = Vec::new();
         let ground = |x: i32, z: i32| self.column(o.x + x, o.z + z).0;
         // Clear a patch of sky (trees, grass) over somewhere built on.
@@ -495,7 +497,7 @@ impl Generator {
                         continue;
                     }
                     let g = ground(x, z);
-                    out.push((ivec3(o.x + x, g, o.z + z), GRAVEL));
+                    out.push((ivec3(o.x + x, g, o.z + z), pal.path));
                     out.push((ivec3(o.x + x, g - 1, o.z + z), DIRT));
                     clear(&mut out, x, z, g + 1);
                 }
@@ -507,7 +509,7 @@ impl Generator {
                 for y in -3..0 {
                     out.push((ivec3(o.x + x, o.y + y, o.z + z), if y == -3 { COBBLE } else { DIRT }));
                 }
-                out.push((ivec3(o.x + x, o.y, o.z + z), COBBLE));
+                out.push((ivec3(o.x + x, o.y, o.z + z), pal.square));
                 clear(&mut out, x, z, o.y + 1);
             }
         }
@@ -534,8 +536,9 @@ impl Generator {
         out.push((ivec3(o.x - 2, o.y + 2, o.z + 2), BELL));
         // Houses beside the paths, doors to the path. Newer worlds have proper houses (see houses.rs).
         if self.opts.version >= 2 {
+            let (style, stations) = (self.village_style(site), self.opts.version >= 6);
             for (at, facing, seed) in self.village_houses(site) {
-                out.extend(crate::houses::house_blocks(at, facing, seed));
+                out.extend(crate::houses::styled_house(at, facing, seed, style, stations));
             }
         }
         for (i, &(x, z, facing)) in [(9, -6, 2u8), (-9, -6, 2), (9, 6, 0), (6, 13, 3), (-6, -13, 1), (6, -14, 3)].iter().enumerate() {
@@ -585,6 +588,15 @@ impl Generator {
         out
     }
 
+    /// How a village builds: in its biome's style in new worlds (see houses.rs), else as plains villages always did.
+    pub fn village_style(&self, site: &Site) -> crate::houses::Style {
+        if self.opts.version >= 6 {
+            crate::houses::Style::of(self.column(site.origin.x, site.origin.z).1)
+        } else {
+            crate::houses::Style::Plains
+        }
+    }
+
     /// A newer village's houses: where each stands (its ground floor), which
     /// way its door faces (0 north .. 3 west), and its seed. Spaced so that
     /// their roofs (a block over a 7×7 footprint) never meet.
@@ -621,8 +633,9 @@ impl Generator {
                     self.settle(site.origin, &blocks, cx, cz, b);
                 }
                 if self.opts.version >= 2 && site.kind == Kind::Village {
+                    let (style, stations) = (self.village_style(&site), self.opts.version >= 6);
                     for (at, facing, seed) in self.village_houses(&site) {
-                        self.settle(at, &crate::houses::house_blocks(at, facing, seed), cx, cz, b);
+                        self.settle(at, &crate::houses::styled_house(at, facing, seed, style, stations), cx, cz, b);
                     }
                 }
                 for (p, id) in blocks {
@@ -1263,13 +1276,37 @@ mod tests {
         let v = village.expect("no village anywhere near");
         let blocks = g.site_blocks(&v);
         assert!(blocks.iter().filter(|b| b.1 == CHEST).count() >= 4, "a square chest and a few houses");
-        assert!(blocks.iter().any(|b| b.1 == GRAVEL) && blocks.iter().any(|b| b.1 == FARMLAND_WET) && blocks.iter().any(|b| b.1 == WATER));
+        let path = g.village_style(&v).palette().path;
+        assert!(blocks.iter().any(|b| b.1 == path) && blocks.iter().any(|b| b.1 == FARMLAND_WET) && blocks.iter().any(|b| b.1 == WATER));
         assert!(blocks.iter().any(|b| (b.0, b.1) == (village_chest(&v), CHEST)));
         // Its chests are the square's (a Clanker moves in) and huts' (each gets a Hmmer).
         let (cx, cz) = (v.origin.x.div_euclid(CW), v.origin.z.div_euclid(CW));
         let kinds: Vec<Kind> = (-2..=2).flat_map(|dz| (-2..=2).map(move |dx| (dx, dz))).flat_map(|(dx, dz)| g.structure_chests(cx + dx, cz + dz)).map(|c| c.1).collect();
         assert_eq!(kinds.iter().filter(|k| **k == Kind::Village).count(), 1);
         assert!(kinds.iter().filter(|k| **k == Kind::Hut).count() >= 3);
+    }
+
+    #[test]
+    fn villages_build_in_their_biomes_style_with_workstations_in_new_worlds_only() {
+        use crate::houses::Style;
+        let mut styles = std::collections::HashSet::new();
+        for seed in [11u32, 12, 13, 14] {
+            let g = Generator::with(seed, crate::world::GenOptions::DEFAULT);
+            for v in (-120..120).step_by(2).flat_map(|cz| (-120..120).step_by(2).map(move |cx| (cx, cz))).filter_map(|(cx, cz)| g.site(cx, cz).filter(|s| s.kind == Kind::Village)) {
+                let style = g.village_style(&v);
+                styles.insert(style);
+                let blocks = g.site_blocks(&v);
+                assert!(blocks.iter().any(|b| b.1 == style.palette().wall), "{style:?}");
+                let stations = blocks.iter().filter(|b| crate::village_life::station_job(b.1).is_some()).count();
+                assert!(stations >= g.village_houses(&v).len(), "a workstation in every house ({style:?})");
+            }
+        }
+        assert!(styles.len() >= 3, "a few styles turn up: {styles:?}");
+        // An older world's villages are just as they were.
+        let old = Generator::with(4242, crate::world::GenOptions { version: 5, ..crate::world::GenOptions::DEFAULT });
+        let v = (-150..150).flat_map(|cz| (-150..150).map(move |cx| (cx, cz))).find_map(|(cx, cz)| old.site(cx, cz).filter(|s| s.kind == Kind::Village)).expect("a village");
+        assert_eq!(old.village_style(&v), Style::Plains);
+        assert!(!old.site_blocks(&v).iter().any(|b| crate::village_life::station_job(b.1).is_some() && b.1 != BARREL));
     }
 
     #[test]

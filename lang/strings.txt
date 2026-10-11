@@ -867,6 +867,7 @@ Freight Train
 Fridge
 Friend
 From the {} layer: a {}{}.
+Frost Shingles (Cold to the Touch)
 Frost Walker
 Frost Walker (Walk on Water, Sort Of)
 Frozen Ocean (Brr)
@@ -1298,6 +1299,7 @@ MouseLeft
 MouseMiddle
 MouseRight
 Mud (Squelchy)
+Mud Bricks (Sun-Baked, Slightly Crumbly)
 Mule
 Multiplayer
 Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.
@@ -1956,6 +1958,7 @@ That's on someone else's land.
 That's outside the world.
 That's {} friends already.
 That's {} teams already. Remove one first.
+Thatch (Keeps the Rain Off, Mostly)
 Thawed
 The Bad Omen settles on the Trial Spawner. This one's going to be ominous.
 The Birds and the Bees

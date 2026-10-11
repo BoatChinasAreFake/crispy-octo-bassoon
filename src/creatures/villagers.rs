@@ -299,8 +299,11 @@ impl Game {
             m.id = self.next_mob_id;
             self.next_mob_id += 1;
             m.seed = seed & 0xFF_FFFF;
-            // Its job (out of all eight) goes in the colouring byte.
-            m.variant = 1 + (m.seed % 8) as u8;
+            // Its job (out of all eight) goes in the colouring byte: its
+            // house's workstation's, in newer villages (see village_life.rs).
+            let c = at.floor().as_ivec3();
+            let station = (-4..=4).flat_map(|dz| (-4..=4).flat_map(move |dx| (-1..=1).map(move |dy| c + macroquad::math::IVec3::new(dx, dy, dz)))).find_map(|p| crate::village_life::station_job(self.world.get_v(p)));
+            m.variant = 1 + station.map(|j| j.index()).unwrap_or((m.seed % 8) as u8);
             m.home = Some(at);
             m.persistent = true;
             self.mobs.push(m);

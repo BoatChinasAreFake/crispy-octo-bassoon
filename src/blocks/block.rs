@@ -480,7 +480,11 @@ pub const SURVEY_POST: Id = MYCELIUM + 101;
 pub const POST_BOX: Id = MYCELIUM + 102;
 /// Villages (see villageblocks.rs): the Cartographer's workstation.
 pub const CARTOGRAPHY_TABLE: Id = MYCELIUM + 103;
-pub const NUM_BLOCKS: Id = MYCELIUM + 104;
+/// Village-only blocks: desert walls, savanna roofs, snowy roofs.
+pub const MUD_BRICKS: Id = MYCELIUM + 104;
+pub const THATCH: Id = MYCELIUM + 105;
+pub const FROST_SHINGLES: Id = MYCELIUM + 106;
+pub const NUM_BLOCKS: Id = MYCELIUM + 107;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.

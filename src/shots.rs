@@ -79,7 +79,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "tower" => Kind::Tower,
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
-        "village" => Kind::Village,
+        "village" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" => Kind::Village,
         "city" => Kind::HushedCity,
         "ruins" => Kind::DesertRuins,
         "trailruins" => Kind::TrailRuins,
@@ -285,9 +285,17 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         }
         _ => return None,
     };
-    for r in 0..60 {
+    // A village in one style (see houses.rs) may be further off.
+    let style = match mode {
+        "desertvillage" => Some(crate::houses::Style::Desert),
+        "savannavillage" => Some(crate::houses::Style::Savanna),
+        "taigavillage" => Some(crate::houses::Style::Taiga),
+        "snowyvillage" => Some(crate::houses::Style::Snowy),
+        _ => None,
+    };
+    for r in 0..if style.is_some() { 250 } else { 60 } {
         for (dx, dz) in ring(r) {
-            let Some(site) = generator.site(cx0 + dx, cz0 + dz).filter(|s| s.kind == kind) else { continue };
+            let Some(site) = generator.site(cx0 + dx, cz0 + dz).filter(|s| s.kind == kind && style.is_none_or(|st| generator.village_style(s) == st)) else { continue };
             let o = site.origin.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
             return Some(match kind {
                 Kind::Dungeon => look(o + Vec3::new(2.6, 2.4, 2.6), o + Vec3::new(-3.0, 0.5, -1.0)),
@@ -378,7 +386,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -2153,7 +2161,7 @@ impl App {
 fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
     let wanted = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--gen").and_then(|w| w[1].parse::<u8>().ok());
     let opts = match wanted {
-        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(5), ..crate::world::GenOptions::DEFAULT },
+        Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(crate::world::GenOptions::DEFAULT.version), ..crate::world::GenOptions::DEFAULT },
         _ => crate::world::GenOptions::LEGACY,
     };
     Game::new_with(seed, creative, menu, opts)

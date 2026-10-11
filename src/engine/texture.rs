@@ -889,6 +889,10 @@ pub const T_LETTER: u16 = 1106;
 // Villages (see villageblocks.rs).
 pub const T_CARTO_TOP: u16 = 1107;
 pub const T_CARTO_SIDE: u16 = 1108;
+pub const T_MUD_BRICKS: u16 = 1109;
+pub const T_THATCH: u16 = 1110;
+pub const T_THATCH_TOP: u16 = 1111;
+pub const T_FROST_SHINGLES: u16 = 1112;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4600,8 +4604,45 @@ fn zappart_tiles(a: &mut Atlas) {
     });
 }
 
-/// Village blocks: the Cartography Table.
+/// Village blocks: the Cartography Table, Mud Bricks, Thatch and Frost Shingles.
 fn village_tiles(a: &mut Atlas) {
+    // Mud Bricks: long sun-dried bricks, a pale mortar, straw flecks.
+    a.each(T_MUD_BRICKS, |x, y, r, _| {
+        let row = y / 4;
+        let off = if row % 2 == 0 { 0 } else { 4 };
+        let mortar = y % 4 == 3 || (x + off) % 8 == 7;
+        if mortar {
+            shade(rgb(205, 185, 150), r.range(0.92, 1.04))
+        } else if r.chance(0.06) {
+            rgb(215, 190, 110)
+        } else {
+            shade(rgb(165, 120, 80), r.range(0.86, 1.06))
+        }
+    });
+    // Thatch: bundles of straw hanging in rows.
+    a.each(T_THATCH, |x, y, r, _| {
+        let strand = (x * 7 + y / 3) % 5 == 0;
+        let row_edge = y % 5 == 4;
+        shade(rgb(200, 165, 85), r.range(0.85, 1.05) * if row_edge { 0.72 } else if strand { 0.86 } else { 1.0 })
+    });
+    a.each(T_THATCH_TOP, |x, y, r, _| {
+        let strand = (x + y * 3) % 4 == 0;
+        shade(rgb(195, 160, 80), r.range(0.85, 1.05) * if strand { 0.85 } else { 1.0 })
+    });
+    // Frost Shingles: slate-blue scales with frost on their lower edges.
+    a.each(T_FROST_SHINGLES, |x, y, r, _| {
+        let row = y / 4;
+        let off = if row % 2 == 0 { 0 } else { 2 };
+        let edge = y % 4 == 3;
+        let gap = (x + off) % 4 == 3;
+        if edge {
+            shade(rgb(225, 235, 245), r.range(0.92, 1.04))
+        } else if gap {
+            shade(rgb(55, 65, 85), r.range(0.9, 1.05))
+        } else {
+            shade(rgb(95, 115, 145), r.range(0.86, 1.06))
+        }
+    });
     // A map pinned to the top, with a compass rose and a dotted route.
     a.each(T_CARTO_TOP, |x, y, r, _| {
         let edge = x == 0 || y == 0 || x == 15 || y == 15;
