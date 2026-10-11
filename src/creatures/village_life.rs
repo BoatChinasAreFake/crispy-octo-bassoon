@@ -78,6 +78,9 @@ pub fn jobless(m: &Mob) -> bool {
     m.kind == MobKind::Hmmer && m.variant == JOBLESS
 }
 
+/// How near (blocks) something in a village must be to count for an advancement.
+const WATCH: f32 = 16.0;
+
 /// What part of the day it is, for a Hmmer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Part {
@@ -108,6 +111,11 @@ pub struct Life {
     pub next: usize,
     /// Seconds until a baby may come along.
     pub baby_wait: f32,
+    /// (Not saved.) What our own player last saw of each Hmmer nearby
+    /// (colouring, and whether a baby), for the advancements, and when it
+    /// next looks.
+    pub seen: HashMap<u32, (u8, bool)>,
+    pub watch: f32,
 }
 
 impl Life {
@@ -178,6 +186,7 @@ impl Game {
     /// Where the world lives: Hmmers claim beds and workstations, keep their
     /// day, and now and then have babies.
     pub fn village_life_tick(&mut self, dt: f32) {
+        self.village_watch(dt);
         if self.is_client() {
             return;
         }
@@ -188,6 +197,39 @@ impl Game {
             self.village_look();
         }
         self.village_routine();
+    }
+
+    /// Our own player (host or joined) notices what goes on in a village
+    /// nearby: a Hmmer taking a job, a baby, Hmmers asleep in bed.
+    pub fn village_watch(&mut self, dt: f32) {
+        self.life.watch -= dt;
+        if self.life.watch > 0.0 || self.away() {
+            return;
+        }
+        self.life.watch = 0.5;
+        let me = self.player.body.pos;
+        let night = part_of_day(self.time) == Part::Bed;
+        let mut seen = HashMap::new();
+        let (mut hired, mut born, mut asleep) = (false, false, false);
+        for m in self.mobs.iter().filter(|m| m.kind == MobKind::Hmmer && m.health > 0.0 && m.body.pos.distance(me) < WATCH) {
+            let now = (m.variant, m.baby > 0.0);
+            match self.life.seen.get(&m.id) {
+                Some(&(was, _)) => hired |= was == JOBLESS && m.variant != JOBLESS,
+                // A baby we've never seen before, close by (not one we just walked up to).
+                None => born |= now.1 && !self.life.seen.is_empty() && m.body.pos.distance(me) < WATCH * 0.75,
+            }
+            asleep |= night && m.sitting && {
+                let at = m.body.pos.floor().as_ivec3();
+                crate::beds::is_bed(self.world.get_v(at)) || crate::beds::is_bed(self.world.get_v(at - IVec3::Y))
+            };
+            seen.insert(m.id, now);
+        }
+        self.life.seen = seen;
+        for (yes, key) in [(hired, "new_hire"), (born, "baby_boom"), (asleep, "early_night")] {
+            if yes {
+                self.advance(key);
+            }
+        }
     }
 
     /// The Hmmers who live here (grown-up, alive) and the babies.
@@ -433,6 +475,7 @@ mod tests {
         assert_eq!(butchers.len(), 1, "one of them takes the Smoker");
         let other = if butchers[0] == a { c } else { a };
         assert!(jobless(g.mobs.iter().find(|m| m.id == other).unwrap()), "no workstation left for the other");
+        assert!(g.advancements.has("new_hire"), "we watched it happen");
         // Break the Smoker: a Butcher nobody has traded with is out of a job.
         g.world.set_v(IVec3::new(2, 50, -4), AIR);
         g.village_life_tick(LOOK_EVERY);
@@ -464,6 +507,7 @@ mod tests {
             slept |= g.mobs.iter().any(|m| m.id == id && m.sitting);
         }
         assert!(slept, "it got into bed: {:?}", g.mobs.iter().find(|m| m.id == id).map(|m| m.body.pos));
+        assert!(g.advancements.has("early_night"));
         // Morning: up, and over to the barrel.
         g.time = 0.05;
         for _ in 0..1200 {
@@ -493,6 +537,8 @@ mod tests {
         assert_eq!(count(&g), 3, "a third bed: a baby");
         let baby = g.mobs.iter().find(|m| m.baby > 0.0).expect("a baby");
         assert!(jobless(baby) && g.life.beds.contains_key(&baby.id));
+        g.village_life_tick(LOOK_EVERY);
+        assert!(g.advancements.has("baby_boom"));
         // And not another straight away (or with no bed for it).
         g.world.set_v(IVec3::new(0, 50, -8), crate::beds::bed(0));
         g.village_life_tick(LOOK_EVERY);

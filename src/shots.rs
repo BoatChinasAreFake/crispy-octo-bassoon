@@ -377,7 +377,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -866,7 +866,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1028,6 +1028,34 @@ impl App {
                     peer.own_skin = Some(if i == 0 { template.clone() } else { card.clone() });
                     app.game.peers.insert(500 + i as u32, peer);
                 }
+            }
+            if s.mode == "bedtime" && frames == 125 {
+                // Night in a village: three Hmmers tucked up in bed, by lantern light, and their workstations.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                let y = p.y.floor() as i32;
+                let at = |f: f32, r: f32| {
+                    let v = p + fwd * f + right * r;
+                    IVec3::new(v.x.floor() as i32, y, v.z.floor() as i32)
+                };
+                let jobs = [villagers::Job::Librarian, villagers::Job::Farmer, villagers::Job::Cartographer];
+                for (i, job) in jobs.into_iter().enumerate() {
+                    let r = (i as f32 - 1.0) * 2.5;
+                    let bed = at(4.0, r);
+                    app.game.world.set_v(bed, beds::bed(2));
+                    app.game.world.set_v(at(6.0, r), village_life::station_of(job));
+                    let id = app.game.alloc_mob(entity::MobKind::Hmmer, bed.as_vec3() + Vec3::new(0.5, 0.6, 0.5));
+                    if let Some(m) = app.game.mobs.iter_mut().find(|m| m.id == id) {
+                        m.variant = 1 + job.index();
+                        m.persistent = true;
+                        m.sitting = true;
+                        m.home = Some(bed.as_vec3());
+                    }
+                    app.game.life.beds.insert(id, bed);
+                }
+                app.game.world.set_v(at(3.0, -3.5), block::LANTERN);
+                app.game.world.set_v(at(3.0, 3.5), block::LANTERN);
             }
             if s.mode == "together" && frames == 125 {
                 // Two teams with coloured names, a minigame's sidebar and a Survey Post.

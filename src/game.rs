@@ -1569,6 +1569,10 @@ impl Game {
         self.frost_walk(dt);
         self.update_entities(dt);
         self.script_tick(dt);
+        // (Where the world lives, village_life_tick does this along with the rest.)
+        if self.is_client() {
+            self.village_watch(dt);
+        }
     }
 
     // ------------------------------------------------------------ scripting

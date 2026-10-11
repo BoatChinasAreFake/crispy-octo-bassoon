@@ -273,6 +273,7 @@ Asking your router to open the port (UPnP)...
 Autumn
 Axolotl
 Azalea (Shrub With Ambitions)
+Baby Boom
 Back
 Back to Game
 Backpack (Right-Click: Your Pack, 27 Slots)
@@ -300,6 +301,7 @@ Bastion Treasure Room (Mind the Brute)
 Bat
 Bathe in a hot spring.
 Be near a Lightning Rod when it takes a strike.
+Be there when a baby Hmmer comes along.
 Be under a ceiling when it comes down.
 Beacon (Wyrm-Powered Lighthouse)
 Beaconator
@@ -726,6 +728,7 @@ Dungeon (Mossy, Moody)
 Dye
 Dye Job
 Dyed {}
+Early Night
 Earn Your Stripes
 Earn a Sneaker's trust with Cluckets.
 Easy (Gentle Hissing)
@@ -798,6 +801,7 @@ Fill a Crypt's ring of Eye Frames. Something opened.
 Fill all four seats on a Floaty.
 Find a Crimson Forest down in the Scorchlands.
 Find a Dimond. Spelled that way for legal reasons.
+Find a Hmmer tucked up in bed at night.
 Find a Soul Sand Valley.
 Find a Teal Forest. It's oddly calming.
 Find a birch forest.
@@ -1330,6 +1334,7 @@ Network: connected as {} ({} players)
 Network: hosting on port {} ({} players)
 Network: single player
 Never look a Starer in the eye. Beds skip the night. Bows need Pointy Sticks. Pokey Plants poke.
+New Hire
 New World
 New in your Cookbook: {}.
 New in your Field Journal: {}.
@@ -2196,6 +2201,7 @@ Warm Ocean (Tropical-ish)
 Warm Welcome
 Watch a Clanker flatten a monster. It's on your side. Probably.
 Watch a Copper Golem put something away. Neatly.
+Watch a Hmmer take a job at a workstation.
 Watch a Ribbit eat a Bloop.
 Watch a piston push something. Personal space is a myth.
 Watch copper turn fully green. Took its time.
@@ -2406,6 +2412,7 @@ a closure can't be saved (its captured state can't be reconstructed)
 a curried function pointer can't be saved (its captured arguments can't be reconstructed)
 a dedicated server
 a few mites
+a jobless Hmmer by a Lectern is still {} (and has claims {} / {})
 a letter
 a melee-only mob never fires an arrow
 a message was tampered with on the way
@@ -2773,6 +2780,7 @@ the Drowned Port
 the Hollow
 the Hollow Box put down again holds {} diamonds, not 7
 the Hushed Ones
+the Librarian never got into bed: {}
 the Overworld
 the Rattler hit the player ({} left)
 the Scarecrow kept watch
@@ -2865,6 +2873,7 @@ urn:schemas-upnp-org:device:InternetGatewayDevice:2
 urn:schemas-upnp-org:service:WANIPConnection:1
 urn:schemas-upnp-org:service:WANPPPConnection:1
 vegetables, and nothing that swims or moos
+village life
 wall impact cannot apply an effect
 wandering trader
 was bitten by a Woofer. Should have brought a bone
@@ -3009,6 +3018,7 @@ zombie hmmer
 {} covers too much
 {} covers {}% of the world
 {} does nothing to {}.
+{} doesn't see the Librarian in bed
 {} emptied a composter and got no Compost
 {} fed two Tuskers and the host saw no baby
 {} filled and dyed a cauldron and the host has {}
@@ -3081,6 +3091,7 @@ zombie hmmer
 {} respawned and isn't back in the Overworld
 {} says hi #{}
 {} sees different teams from the host's
+{} sees the Hmmer as {} (the host: {})
 {} sees the composter still full ({})
 {} sees the pot as {}, not cooking
 {} sees the pot still full after serving
@@ -3102,6 +3113,7 @@ zombie hmmer
 {} wasn't an operator.
 {} wasn't on the allow-list.
 {} wasn't on your list.
+{} watched a Hmmer take a job and got no advancement
 {} won't cook. It's been asked.
 {} wore off.
 {} {} HTTP/1.1r\nHost: {}:{}r\nConnection: closer\nContent-Length: {}r\n
