@@ -47,7 +47,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v34: everything encrypted (see the top of this file), the server list's
 /// status query (StatusAsk, Status), and players' own skins (SkinData).
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
-/// v36: teams and players hitting players (Teams, HitPlayer).
+/// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
+/// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn).
 pub const PROTOCOL: u32 = 36;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
@@ -310,6 +311,10 @@ pub enum Msg {
     TradeState { x: i32, y: i32, z: i32, seats: [String; 2], accepted: [bool; 2], done: u32, mine: u8 },
     /// client -> host: I accept the deal at this table (or take it back).
     TradeAccept { x: i32, y: i32, z: i32, accept: bool },
+    /// host -> client: a minigame's sidebar and countdown (empty: none; see minigames.rs).
+    Sidebar { title: String, lines: Vec<(String, i32)>, countdown: String },
+    /// host -> client: come back here when you die.
+    SetSpawn { pos: Vec3 },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -1056,6 +1061,20 @@ impl Msg {
                 w.u32(*done);
                 w.u8(*mine);
             }
+            Msg::Sidebar { title, lines, countdown } => {
+                w.u8(98);
+                w.str(title);
+                w.u8(lines.len().min(crate::minigames::SIDEBAR_LINES) as u8);
+                for (name, n) in lines.iter().take(crate::minigames::SIDEBAR_LINES) {
+                    w.str(name);
+                    w.i32(*n);
+                }
+                w.str(countdown);
+            }
+            Msg::SetSpawn { pos } => {
+                w.u8(99);
+                w.v3(*pos);
+            }
             Msg::TradeAccept { x, y, z, accept } => {
                 w.u8(97);
                 w.i32(*x);
@@ -1358,6 +1377,16 @@ impl Msg {
                 Msg::TradeState { x, y, z, seats, accepted: [a & 1 != 0, a & 2 != 0], done: r.u32()?, mine: r.u8()? }
             }
             97 => Msg::TradeAccept { x: r.i32()?, y: r.i32()?, z: r.i32()?, accept: r.u8()? != 0 },
+            98 => {
+                let title = r.str()?;
+                let n = (r.u8()? as usize).min(crate::minigames::SIDEBAR_LINES);
+                let mut lines = Vec::with_capacity(n);
+                for _ in 0..n {
+                    lines.push((r.str()?, r.i32()?));
+                }
+                Msg::Sidebar { title, lines, countdown: r.str()? }
+            }
+            99 => Msg::SetSpawn { pos: r.v3()? },
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -2036,6 +2065,8 @@ mod tests {
             Msg::HitPlayer { target: 3, dmg: 4.5 },
             Msg::TradeState { x: 1, y: -2, z: 3, seats: ["Ann".into(), String::new()], accepted: [true, false], done: 4, mine: 0 },
             Msg::TradeAccept { x: 1, y: -2, z: 3, accept: true },
+            Msg::Sidebar { title: "Dig Race".into(), lines: vec![("Ann".into(), 7), ("Bob".into(), -2)], countdown: "Ends in 1:01".into() },
+            Msg::SetSpawn { pos: Vec3::new(1.0, 64.0, -3.5) },
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },

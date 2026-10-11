@@ -8,6 +8,7 @@ pub(crate) mod ledger;
 pub(crate) mod mods;
 pub(crate) mod multiplayer;
 pub(crate) mod net;
+pub(crate) mod minigames;
 pub(crate) mod players;
 pub(crate) mod playtest;
 pub(crate) mod scripting;

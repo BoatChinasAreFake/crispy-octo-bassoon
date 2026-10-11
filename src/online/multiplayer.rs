@@ -484,6 +484,9 @@ impl Game {
             roster.extend(self.mob_names.iter().map(|(&mob, name)| Msg::MobName { mob, name: name.clone() }));
             roster.push(self.rules_msg());
             roster.push(self.teams_msg());
+            if !self.board.shown.is_empty() {
+                roster.push(self.sidebar_msg());
+            }
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
@@ -1315,6 +1318,12 @@ impl Game {
             }
             Msg::SkinData { id, pixels } => self.note_peer_skin(id, pixels),
             Msg::TradeState { x, y, z, seats, accepted, done, mine } => self.apply_deal(IVec3::new(x, y, z), seats, accepted, done, mine),
+            Msg::Sidebar { title, lines, countdown } => self.board.shown = crate::minigames::Shown { title, lines, countdown },
+            Msg::SetSpawn { pos } => {
+                if pos.is_finite() {
+                    self.personal_spawn = Some(pos);
+                }
+            }
             Msg::Teams { pvp, data } => {
                 self.pvp = pvp;
                 self.teams = crate::teams::Teams::decode(&data).unwrap_or_default();

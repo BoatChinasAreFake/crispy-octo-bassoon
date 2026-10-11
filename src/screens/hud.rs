@@ -574,6 +574,40 @@ impl App {
         draw_rectangle(x, y, bw * frac, 5.0 * s, fill);
     }
 
+    /// A mod's minigame: its scores down the right, its countdown at the top (see minigames.rs).
+    pub(crate) fn minigame_hud(&self) {
+        let shown = &self.game.board.shown;
+        let (w, s) = (screen_width(), self.ui.s);
+        if !shown.countdown.is_empty() {
+            let y = 34.0 * s;
+            let tw = self.ui.text_width(&shown.countdown, 10.0);
+            draw_rectangle(w / 2.0 - tw / 2.0 - 4.0 * s, y - 11.0 * s, tw + 8.0 * s, 14.0 * s, Color::new(0.0, 0.0, 0.0, 0.5));
+            self.ui.text_centered(&shown.countdown, w / 2.0, y, 10.0, GOLD);
+        }
+        if shown.title.is_empty() {
+            return;
+        }
+        let line_h = 10.0 * s;
+        // (Names aren't translated; the title is the mod's own.)
+        let width = shown.lines.iter().map(|(n, v)| self.ui.raw_width(n, 8.0) + self.ui.raw_width(&v.to_string(), 8.0) + 12.0 * s).fold(self.ui.text_width(&shown.title, 9.0), f32::max) + 8.0 * s;
+        let h = 14.0 * s + line_h * shown.lines.len() as f32 + 4.0 * s;
+        let (x, y) = (w - width - 6.0 * s, screen_height() * 0.3);
+        draw_rectangle(x, y, width, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        self.ui.text_centered(&shown.title, x + width / 2.0, y + 10.0 * s, 9.0, GOLD);
+        let me = self.game.player_name.clone();
+        for (i, (name, n)) in shown.lines.iter().enumerate() {
+            let ly = y + 14.0 * s + line_h * (i as f32 + 1.0) - 2.0 * s;
+            let col = match self.game.team_colour(name) {
+                Some(c) => Color::from_rgba(c[0], c[1], c[2], 255),
+                None if name.eq_ignore_ascii_case(&me) => Color::new(1.0, 1.0, 0.6, 1.0),
+                None => WHITE,
+            };
+            self.ui.raw_text(name, x + 4.0 * s, ly, 8.0, col);
+            let v = n.to_string();
+            self.ui.raw_text(&v, x + width - 4.0 * s - self.ui.raw_width(&v, 8.0), ly, 8.0, Color::new(1.0, 0.4, 0.4, 1.0));
+        }
+    }
+
     pub(crate) fn name_tags(&self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;

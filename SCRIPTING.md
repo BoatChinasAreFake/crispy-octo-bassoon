@@ -31,6 +31,7 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `on_use_item(player, item)` | Right-click with an item | yes, for the host's own player; for joined players the event still runs but their game has already done the normal thing |
 | `on_player_join(player)` / `on_player_leave(player)` | Multiplayer joins and leaves | |
 | `on_mob_death(kind, x, y, z, killer)` | A mob died (`kind` is `oinker`, `hisser`, `groaner`, `fluffer`, `starer`, `cluckster`, `mooer`, `rattler`, `webber`, `bloop`, `woofer`, `hmmer` or `grumbler`; `killer` is a player name or `""`) | |
+| `on_timer(name)` | A timer started with `timer_start` ran out (see Minigames) | |
 | `on_advancement(player, key)` | The world's player earned an advancement (`key` is like `"getting_wood"` or `"dimonds"`). Advancements belong to the world's own player, so this runs in single player and for the host | |
 
 - **Names:** blocks and items are passed as names: `"stone"`, `"glass"`, `"cheese:wheel"`.
@@ -73,6 +74,24 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `set_time(t)` | Set the time of day (0–1) for everyone |
 | `play_sound(name, x, y, z)` | `explode hiss oink groan pop click splash craft hurt eat break glass baa warp fanfare boing cluck moo rattle skitter bloop twang thunk woof snip hmm` |
 | `log(text)` / `print(text)` | Debug output: chat in single player, the console on a server |
+
+**Minigames** (changes applied right after your event function returns, like the rest): scores, a sidebar everyone sees, timers, teams and spawns. Everything here is saved with the world.
+
+| Function | Effect |
+| --- | --- |
+| `score_add(objective, player, n)`, `score_set(objective, player, n)` | Change a score. An objective is any name you like (`"dug"`, `"kills"`); a "player" can be any name too (a team, say) |
+| `score_get(objective, player)`, `scores(objective)` | A score now (0 if none), or every score of an objective as a map |
+| `score_reset(objective)` | Forget an objective's scores |
+| `sidebar_show(objective, title)`, `sidebar_hide()` | Show an objective down the right of everyone's screen, highest first (the top 10) |
+| `timer_start(name, seconds)`, `timer_stop(name)`, `timer_left(name)` | A timer: when it runs out, `on_timer(name)` runs. Starting it again restarts it |
+| `countdown_show(timer, label)`, `countdown_hide()` | Show a timer at the top of everyone's screen ("Round ends in 1:23") |
+| `team_create(team, colour)` | Make a team (`red`, `blue`, `green`, `yellow`, `purple`, `orange`, `aqua`, `pink`); its members' names show in its colour |
+| `team_join(player, team)`, `team_leave(player)` | Put a player on a team, or on none |
+| `team_of(player)`, `team_members(team)` | A player's team (`""` for none), or a team's players |
+| `team_friendly_fire(team, on)`, `set_pvp(on)` | Can players hurt each other at all, and can teammates? (Players can also use `/team` and operators `/pvp`) |
+| `set_spawn(player, x, y, z)`, `set_world_spawn(x, y, z)` | Where a player comes back when they die, or where everyone new starts |
+
+See `example-mods/digrace` for a whole minigame: two teams, two minutes, the most blocks dug wins.
 
 - **Timing:** changes are queued, so `get_block` right after `set_block` in the same event still sees the old block.
 - **Errors throw changes away:** if an event hits an error, none of its queued changes are applied, so a crash halfway through can't leave half a building behind.

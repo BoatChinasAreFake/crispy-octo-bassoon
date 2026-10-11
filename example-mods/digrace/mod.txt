@@ -1,0 +1,7 @@
+// Dig Race: an example minigame, written as a script (see game.rhai and
+// SCRIPTING.md, Minigames). Type /digrace in chat to start a round.
+[mod]
+name = Dig Race
+version = 1.0
+author = Minceraft Scripting Club
+description = /digrace: two teams, two minutes, most blocks dug wins.

@@ -325,6 +325,10 @@ pub struct Game {
     /// Teams (see teams.rs), and whether players can hurt each other (`/pvp`).
     pub teams: crate::teams::Teams,
     pub pvp: bool,
+    /// Scores, timers and the sidebar for mods' minigames (see minigames.rs).
+    pub board: crate::minigames::Board,
+    /// Where we come back when we die, if a script said (otherwise the world's spawn).
+    pub personal_spawn: Option<Vec3>,
     /// Trading Tables' seats and Accepts (see trading.rs).
     pub deals: HashMap<IVec3, crate::trading::Deal>,
     /// Worker threads that mesh chunks (none: meshed on the spot, as in screenshots and tests).
@@ -626,6 +630,8 @@ impl Game {
             teams: Default::default(),
             pvp: false,
             deals: HashMap::new(),
+            board: Default::default(),
+            personal_spawn: None,
             smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -927,6 +933,9 @@ impl Game {
         if !self.waypoints.is_empty() {
             v.push(("waypoints2".into(), crate::qol::encode(&self.waypoints)));
         }
+        if self.board != crate::minigames::Board::default() {
+            v.push(("minigame".into(), self.board.encode()));
+        }
         if self.pvp || !self.teams.teams.is_empty() {
             v.push(("teams".into(), [&[self.pvp as u8][..], &self.teams.encode()].concat()));
         }
@@ -1000,6 +1009,9 @@ impl Game {
             self.waypoints = crate::qol::decode(b, false);
         } else if let Some(b) = extra("waypoints") {
             self.waypoints = crate::qol::decode(b, true);
+        }
+        if let Some(b) = extra("minigame") {
+            self.board = crate::minigames::Board::decode(b);
         }
         if let Some(b) = extra("teams").filter(|b| !b.is_empty()) {
             self.pvp = b[0] != 0;
@@ -1578,6 +1590,7 @@ impl Game {
     }
 
     fn script_tick(&mut self, dt: f32) {
+        self.minigame_tick(dt);
         let Some(host) = &mut self.scripts else { return };
         host.tick_acc += dt;
         if host.tick_acc < crate::scripting::TICK {
@@ -1684,6 +1697,41 @@ impl Game {
                 Cmd::Sound(s, at) => {
                     self.sfx(s, Some(at));
                     self.net_broadcast(Msg::Sound { sfx: s.to_wire(), at });
+                }
+                // Minigames (see minigames.rs); what's on screen goes out on the next tick.
+                Cmd::ScoreSet(o, p, n) => self.board.set(&o, &p, n),
+                Cmd::ScoreAdd(o, p, n) => self.board.add(&o, &p, n),
+                Cmd::ScoreReset(o) => self.board.reset(&o),
+                Cmd::Sidebar(s) => self.board.sidebar = s,
+                Cmd::TimerStart(t, secs) => self.board.start_timer(&t, secs),
+                Cmd::TimerStop(t) => {
+                    self.board.timers.remove(&t);
+                }
+                Cmd::Countdown(c) => self.board.countdown = c,
+                Cmd::TeamCreate(t, colour) => {
+                    if self.teams.create(&t, colour).is_ok() {
+                        self.share_teams();
+                    }
+                }
+                Cmd::TeamJoin(p, t) => {
+                    self.teams.set_member(&p, t.as_deref());
+                    self.share_teams();
+                }
+                Cmd::TeamFriendlyFire(t, on) => {
+                    if let Some(i) = self.teams.find(&t) {
+                        self.teams.teams[i].friendly_fire = on;
+                        self.share_teams();
+                    }
+                }
+                Cmd::Pvp(on) => {
+                    self.pvp = on;
+                    self.share_teams();
+                }
+                Cmd::SetSpawn(p, at) => self.set_player_spawn(&p, at),
+                Cmd::WorldSpawn(at) => {
+                    if at.is_finite() {
+                        self.spawn = at;
+                    }
                 }
             }
         }
@@ -4137,14 +4185,15 @@ impl Game {
 
     pub fn respawn(&mut self) {
         self.dead = None;
-        self.player = Player::new(self.spawn);
+        let spawn = self.personal_spawn.unwrap_or(self.spawn);
+        self.player = Player::new(spawn);
         // Everyone comes back in the Overworld.
         if self.dim != crate::dims::Dim::Over {
             if self.is_client() {
                 // (The host moves us.)
                 self.net_send_msg(Msg::Respawn);
             } else {
-                self.move_local_player(crate::dims::Dim::Over, self.spawn);
+                self.move_local_player(crate::dims::Dim::Over, spawn);
             }
         }
         if self.net.is_none() {
