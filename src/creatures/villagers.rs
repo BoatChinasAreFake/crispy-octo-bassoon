@@ -23,6 +23,12 @@
 //! off, after 15 a fifth off, after 30 nearly a third (on top of a Hero of
 //! the Village's discount). Where the world lives keeps count for everyone
 //! and tells joined players theirs (`Msg::Regular`).
+//!
+//! **Levels** (v0.5): every trade with a Hmmer, by anyone, gives it a little
+//! experience, and it goes from Novice to Apprentice, Journeyman, Expert and
+//! Master. A Novice offers its first two trades; each level opens the next,
+//! and a Master adds one special trade of its job's. Going up a level
+//! restocks everything.
 
 use crate::block::*;
 use crate::enchant::roll;
@@ -32,6 +38,46 @@ use crate::inventory::Wear;
 use crate::net::Msg;
 use crate::noise::Rng;
 use crate::sound::Sfx;
+
+/// The levels, and the trading experience each starts at.
+pub const LEVELS: [(&str, u16); 5] = [("Novice", 0), ("Apprentice", 10), ("Journeyman", 25), ("Expert", 45), ("Master", 70)];
+pub const MASTER: usize = 4;
+
+/// Which level (0 Novice .. 4 Master) a Hmmer with this much experience is.
+pub fn level_of(xp: u16) -> usize {
+    LEVELS.iter().rposition(|l| xp >= l.1).unwrap_or(0)
+}
+
+/// How many of a Hmmer's trades (its first ones) are open at `level`.
+pub fn unlocked(level: usize) -> usize {
+    [2, 3, 4, 5, usize::MAX][level.min(MASTER)]
+}
+
+/// "Journeyman (31/45)", or just "Master".
+pub fn level_label(xp: u16) -> String {
+    let l = level_of(xp);
+    match LEVELS.get(l + 1) {
+        Some(next) => format!("{} ({xp}/{})", LEVELS[l].0, next.1),
+        None => LEVELS[l].0.to_string(),
+    }
+}
+
+/// Save format for Hmmers' experience: count, then (mob, xp).
+pub fn encode_xp(x: &std::collections::HashMap<u32, u16>) -> Vec<u8> {
+    let mut v: Vec<_> = x.iter().collect();
+    v.sort();
+    let mut out = (v.len() as u32).to_le_bytes().to_vec();
+    for (id, xp) in v {
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&xp.to_le_bytes());
+    }
+    out
+}
+
+pub fn decode_xp(b: &[u8]) -> std::collections::HashMap<u32, u16> {
+    let n = b.get(..4).map_or(0, |x| u32::from_le_bytes(x.try_into().unwrap()) as usize);
+    b[4.min(b.len())..].chunks_exact(6).take(n).map(|c| (u32::from_le_bytes(c[..4].try_into().unwrap()), u16::from_le_bytes(c[4..].try_into().unwrap()))).collect()
+}
 
 /// Times each trade can be made before a restock, and seconds between restocks (a day).
 pub const STOCK: u8 = 6;
@@ -181,6 +227,22 @@ pub fn trades_for(job: Job, seed: u32) -> Vec<Trade> {
             tr.wear = roll(item, rng.int(8, 20) as u8, &mut rng);
         }
     }
+    // And a Master's special (see `unlocked`): the best its job has, well enchanted where it can be.
+    let mut master = match job {
+        Job::Farmer => t((GOLD_INGOT, 4), none, (TORCHFLOWER_SEEDS, 3)),
+        Job::Librarian => t((GOLD_INGOT, 12), (BOOK, 1), (ENCHANTED_BOOK, 1)),
+        Job::Smith => t((GOLD_INGOT, 16), (DIAMOND, 1), (SWORD_DIAMOND, 1)),
+        Job::Fisher => t((GOLD_INGOT, 6), none, (ROD, 1)),
+        Job::Cleric => t((GOLD_INGOT, 20), (DIAMOND, 2), (TOTEM, 1)),
+        Job::Armourer => t((GOLD_INGOT, 12), (DIAMOND, 1), (ARMOR_FIRST + 12 + HELMET as Id, 1)),
+        Job::Cartographer => t((GOLD_INGOT, 4), none, (SPYGLASS, 1)),
+        Job::Butcher => t((GOLD_INGOT, 6), none, (SADDLE, 1)),
+    };
+    if matches!(master.get.0, ENCHANTED_BOOK | SWORD_DIAMOND | ROD) || armor_of(master.get.0).is_some() {
+        let item = if master.get.0 == ENCHANTED_BOOK { BOOK } else { master.get.0 };
+        master.wear = roll(item, rng.int(22, 30) as u8, &mut rng);
+    }
+    v.push(master);
     v
 }
 
@@ -424,6 +486,10 @@ impl Game {
             }
         }
         for (id, who, at) in cured {
+            // The whole village is grateful.
+            if let Some(v) = self.mob_village(id) {
+                self.change_rep(v, &who, crate::reputation::CURE);
+            }
             // Very grateful: the best prices, straight away.
             let n = self.regulars.entry((id, who.clone())).or_insert(0);
             *n = (*n).max(30);
@@ -497,6 +563,36 @@ impl Game {
         self.regulars.get(&(mob, crate::players::record_key(&self.player_name))).copied().unwrap_or(0)
     }
 
+    /// A Hmmer's trading experience (one from before levels: what it's traded so far).
+    pub fn hmmer_xp_of(&self, mob: u32) -> u16 {
+        self.hmmer_xp.get(&mob).copied().unwrap_or_else(|| self.regulars.iter().filter(|((id, _), _)| *id == mob).map(|(_, n)| *n).fold(0u16, |a, n| a.saturating_add(n)))
+    }
+
+    /// Where the world lives: a trade with `mob` went through, so it learns a
+    /// little. Going up a level restocks it; returns the new level if it went up.
+    fn hmmer_learns(&mut self, mob: u32) -> Option<usize> {
+        let before = self.hmmer_xp_of(mob);
+        let after = before.saturating_add(1);
+        self.hmmer_xp.insert(mob, after);
+        let (was, now) = (level_of(before), level_of(after));
+        if now == was {
+            return None;
+        }
+        let at = self.mobs.iter_mut().find(|m| m.id == mob).map(|m| {
+            m.trades_used = [0; 8];
+            m.body.pos
+        })?;
+        self.smoke(at + macroquad::math::Vec3::Y * 2.2, 10, 0.4);
+        self.sfx(Sfx::Chime, Some(at));
+        Some(now)
+    }
+
+    /// What we'd hear when a Hmmer goes up a level.
+    fn level_up_line(&self, mob: u32, level: usize) -> String {
+        let job = self.mobs.iter().find(|m| m.id == mob).map(|m| Job::of_mob(m).name().split(" (").next().unwrap_or("Hmmer").to_string()).unwrap_or_else(|| "Hmmer".into());
+        format!("Hmm! The {job} is now {} {}: new trades, and fresh stock.", if level == 1 { "an" } else { "a" }, LEVELS[level].0)
+    }
+
     /// A trade went through: count it (where the world lives, or our copy).
     fn note_regular(&mut self, mob: u32, who: String) -> u16 {
         let n = self.regulars.entry((mob, who)).or_insert(0);
@@ -523,10 +619,23 @@ impl Game {
         }
     }
 
-    /// A joined player is told how many times they've traded with `mob`.
-    pub fn regular_state(&mut self, mob: u32, trades: u16) {
+    /// A joined player is told how many times they've traded with `mob`, its
+    /// level, and what its village thinks of them.
+    pub fn regular_state(&mut self, mob: u32, trades: u16, xp: u16, rep: i16) {
         let me = crate::players::record_key(&self.player_name);
-        self.regulars.insert((mob, me), trades);
+        let before = self.regulars.insert((mob, me), trades);
+        let was = self.hmmer_xp.insert(mob, xp).map(level_of);
+        // We just traded it up to Master.
+        if level_of(xp) == MASTER && was.is_some_and(|l| l < MASTER) && before.is_some_and(|n| n < trades) {
+            self.advance("master_class");
+        }
+        self.rep_seen.insert(mob, rep);
+        if rep as i32 >= crate::reputation::LOVED {
+            self.advance("pillar_of_the_community");
+        }
+        if rep as i32 <= crate::reputation::HATED {
+            self.advance("persona_non_grata");
+        }
     }
 
     /// Right-click on a Hmmer: open its trades.
@@ -548,19 +657,38 @@ impl Game {
         if m.body.pos.distance(self.player.body.pos) > 8.0 {
             return None;
         }
-        let (title, list) = trades_of(m)?;
+        let (title, mut list) = trades_of(m)?;
+        // A Hmmer offers more as it goes up the levels, at prices that
+        // depend on what its village thinks of us (see reputation.rs).
+        let rep = if m.kind == MobKind::Hmmer { self.village_rep_of(id, &self.player_name) } else { 0 };
+        let title = if m.kind == MobKind::Hmmer {
+            let xp = self.hmmer_xp_of(id);
+            list.truncate(unlocked(level_of(xp)));
+            if rep <= crate::reputation::HATED {
+                list.clear();
+            }
+            let signed = if rep > 0 { format!("+{rep}") } else { rep.to_string() };
+            format!("{title} - {} - Village: {} ({signed})", level_label(xp), crate::reputation::standing(rep))
+        } else {
+            title
+        };
         let hero = self.has_effect(crate::potions::Potion::Hero);
         let regular = self.my_trades_with(id);
         let off = regular_discount(regular);
         let title = if off > 0.0 { format!("{title}  (a regular: {:.0}% off)", off * 100.0) } else { title };
-        Some((title, list.into_iter().map(|t| regular_price(if hero { crate::raids::hero_price(t) } else { t }, regular)).collect()))
+        Some((title, list.into_iter().map(|t| crate::reputation::rep_price(regular_price(if hero { crate::raids::hero_price(t) } else { t }, regular), rep)).collect()))
     }
 
     /// The local player makes trade `index` with the Hmmer they're talking to.
     pub fn make_trade(&mut self, index: usize) {
         let Some(id) = self.trading else { return };
         let Some((_, list)) = self.trade_list() else { return };
-        let Some(&t) = list.get(index) else { return };
+        let Some(&t) = list.get(index) else {
+            if self.mobs.iter().any(|m| m.id == id && m.kind == MobKind::Hmmer) && self.village_rep_of(id, &self.player_name) <= crate::reputation::HATED {
+                self.msg("Hmph. (This village won't trade with you.)");
+            }
+            return;
+        };
         if !self.creative && !can_afford(|i| self.inv.count(i), &t) {
             self.msg("Hmm. (You can't afford that.)");
             return;
@@ -600,9 +728,23 @@ impl Game {
         let points = self.rng.int(1, 3) as u32;
         self.add_xp(points);
         self.advance("what_a_deal");
+        // (It learns before the trade is counted: a Hmmer from before levels starts from its regulars' trades.)
+        let hmmer = self.mobs.iter().any(|m| m.id == id && m.kind == MobKind::Hmmer);
+        let level = if hmmer { self.hmmer_learns(id) } else { None };
         let me = crate::players::record_key(&self.player_name);
         self.note_regular(id, me);
         self.regular_advancements(id);
+        if hmmer && let Some(v) = self.mob_village(id) {
+            let name = self.player_name.clone();
+            self.change_rep(v, &name, crate::reputation::TRADE);
+        }
+        if let Some(level) = level {
+            let line = self.level_up_line(id, level);
+            self.msg(line);
+            if level == MASTER {
+                self.advance("master_class");
+            }
+        }
     }
 
     /// A joined player's trade: check the Hmmer's stock and their ledger.
@@ -610,9 +752,20 @@ impl Game {
         let Some(me) = self.peers.get(&from).map(|p| p.target) else { return };
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob && m.body.pos.distance(me) < 8.0) else { return };
         let Some(&t) = trades_of(m).and_then(|(_, list)| list.get(index as usize).copied()).as_ref() else { return };
+        // (Only what its level offers.)
+        let hmmer = m.kind == MobKind::Hmmer;
+        if hmmer && index as usize >= unlocked(level_of(self.hmmer_xp_of(mob))) {
+            return;
+        }
         let t = if self.heroes.contains_key(&from) { crate::raids::hero_price(t) } else { t };
         let who = self.peers.get(&from).map(|p| crate::players::record_key(&p.name)).unwrap_or_default();
         let t = regular_price(t, self.regulars.get(&(mob, who.clone())).copied().unwrap_or(0));
+        let rep = if hmmer { self.village_rep_with(mob, &who) } else { 0 };
+        if rep <= crate::reputation::HATED {
+            self.system_message(Some(from), "Hmph. (This village won't trade with you.)");
+            return;
+        }
+        let t = crate::reputation::rep_price(t, rep);
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) else { return };
         if m.trades_used[(index as usize).min(7)] >= STOCK {
             self.system_message(Some(from), "Hmm. (Out of stock until tomorrow.)");
@@ -635,8 +788,24 @@ impl Game {
         self.give_peer_worn(from, t.get.0, t.get.1, wear);
         let points = self.rng.int(1, 3) as u32;
         self.give_peer_xp(from, points);
-        let trades = self.note_regular(mob, who);
-        self.net_send_to(from, Msg::Regular { mob, trades });
+        let level = if hmmer { self.hmmer_learns(mob) } else { None };
+        let trades = self.note_regular(mob, who.clone());
+        if hmmer && let Some(v) = self.mob_village(mob) {
+            self.change_rep(v, &who, crate::reputation::TRADE);
+        }
+        if let Some(level) = level {
+            let line = self.level_up_line(mob, level);
+            self.system_message(Some(from), &line);
+        }
+        self.send_regular_to(from, mob, trades);
+    }
+
+    /// Tell a joined player how they stand with `mob` (see `Msg::Regular`).
+    pub fn send_regular_to(&mut self, to: u32, mob: u32, trades: u16) {
+        let xp = self.hmmer_xp_of(mob);
+        let name = self.peer_name(to);
+        let rep = self.village_rep_with(mob, &name).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        self.net_send_to(to, Msg::Regular { mob, trades, xp, rep });
     }
 
     /// What a bought item's wear is: a Treasure Map is marked from the trader's home.
@@ -654,13 +823,51 @@ impl Game {
     pub fn host_regular_ask(&mut self, from: u32, mob: u32) {
         let Some(who) = self.peers.get(&from).map(|p| crate::players::record_key(&p.name)) else { return };
         let trades = self.regulars.get(&(mob, who)).copied().unwrap_or(0);
-        self.net_send_to(from, Msg::Regular { mob, trades });
+        self.send_regular_to(from, mob, trades);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hmmers_go_up_the_levels_as_they_trade() {
+        assert_eq!((level_of(0), level_of(9), level_of(10), level_of(69), level_of(70), level_of(9999)), (0, 0, 1, 3, MASTER, MASTER));
+        assert_eq!(level_label(31), "Journeyman (31/45)");
+        assert_eq!(level_label(80), "Master");
+        for job in Job::ALL {
+            assert!(trades_for(job, 3).len() > unlocked(MASTER - 1), "{job:?} has a Master's special");
+        }
+        let mut g = crate::game::tests::arena(65);
+        let id = g.alloc_mob(MobKind::Hmmer, macroquad::math::Vec3::new(1.5, 50.0, 1.5));
+        let farmer = (0..64u32).find(|&s| Job::of(s) == Job::Farmer).unwrap();
+        g.mobs[0].seed = farmer;
+        g.open_trade(id);
+        assert_eq!(g.trade_list().unwrap().1.len(), 2);
+        for _ in 0..4 {
+            g.inv.add(WHEAT, 64);
+            g.inv.add(CARROT, 64);
+        }
+        // A locked trade can't be made.
+        g.make_trade(2);
+        assert_eq!(g.inv.count(GOLD_INGOT), 0);
+        // Ten trades: an Apprentice, with a third trade and its stock back.
+        for k in 0..10 {
+            g.make_trade(k / 6);
+        }
+        assert_eq!(level_of(g.hmmer_xp_of(id)), 1);
+        assert_eq!(g.trade_list().unwrap().1.len(), 3);
+        assert_eq!(g.mobs[0].trades_used, [0; 8], "restocked");
+        // And kept with the world.
+        let back = crate::game::Game::from_save(g.to_save());
+        assert_eq!(back.hmmer_xp_of(id), 10);
+        // One trade from Master.
+        g.hmmer_xp.insert(id, LEVELS[MASTER].1 - 1);
+        g.make_trade(0);
+        assert!(g.advancements.has("master_class"));
+        assert_eq!(g.trade_list().unwrap().1, trades(farmer).iter().map(|&t| crate::reputation::rep_price(regular_price(t, g.my_trades_with(id)), g.village_rep_of(id, &g.player_name))).collect::<Vec<_>>());
+    }
 
     #[test]
     fn regulars_get_a_discount_that_is_saved() {

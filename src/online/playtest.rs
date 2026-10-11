@@ -191,6 +191,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     homely(&mut host, &mut team, &mut report, &mut touched);
     together(&mut host, &mut team, &mut report, &mut touched);
     village_life(&mut host, &mut team, &mut report, &mut touched);
+    trade_levels(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2130,6 +2131,68 @@ fn village_life(host: &mut Game, team: &mut [Bot], report: &mut Report, touched:
     pump(host, team, 0.5, |_| idle());
 }
 
+/// v0.5 part 2: a bot trades a Hmmer up to Apprentice (and sees its third
+/// trade), the village warms to it, then it hits the Hmmer and the village
+/// cools; the bot hears all of it as the host has it.
+fn trade_levels(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::entity::MobKind;
+    use crate::villagers::{level_of, Job};
+    revive(host, team);
+    let k = 1 % team.len();
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    let id_k = team[k].game.my_id;
+    let name = team[k].name.clone();
+    let hmmer = host.alloc_mob(MobKind::Hmmer, feet.as_vec3() + Vec3::new(1.5, 0.0, 0.5));
+    let farmer = (0..64u32).find(|&s| Job::of(s) == Job::Farmer).unwrap_or(0);
+    if let Some(m) = host.mobs.iter_mut().find(|m| m.id == hmmer) {
+        m.seed = farmer;
+        m.variant = 1 + Job::Farmer.index();
+        m.persistent = true;
+    }
+    // One trade short of Apprentice.
+    host.hmmer_xp.insert(hmmer, crate::villagers::LEVELS[1].1 - 1);
+    host.give_peer(id_k, WHEAT, 40);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.open_trade(hmmer);
+    pump(host, team, 0.7, |_| idle());
+    let before = team[k].game.trade_list().map_or(0, |l| l.1.len());
+    team[k].game.make_trade(0);
+    pump(host, team, 1.0, |_| idle());
+    // (Ask again, as the trade screen does when it opens.)
+    team[k].game.open_trade(hmmer);
+    pump(host, team, 0.7, |_| idle());
+    report.features.push("trade levels");
+    let host_xp = host.hmmer_xp_of(hmmer);
+    if level_of(host_xp) != 1 {
+        report.problems.push(format!("{name} traded with a Hmmer one short of Apprentice and the host has it at {host_xp}"));
+    }
+    let after = team[k].game.trade_list().map_or(0, |l| l.1.len());
+    if (before, after) != (2, 3) || team[k].game.hmmer_xp_of(hmmer) != host_xp {
+        report.problems.push(format!("{name} saw {before} then {after} trades and experience {} (the host: {host_xp})", team[k].game.hmmer_xp_of(hmmer)));
+    }
+    let v = host.mob_village(hmmer);
+    let liked = v.map_or(0, |v| host.rep.get(v, &name));
+    if liked <= 0 || team[k].game.rep_seen.get(&hmmer).copied().unwrap_or(0) as i32 != liked {
+        report.problems.push(format!("after a trade the village thinks {liked} of {name}, who was told {:?}", team[k].game.rep_seen.get(&hmmer)));
+    }
+    // Now a hit: the village thinks less of them, and they're told.
+    team[k].game.net_send_msg(Msg::Attack { mob: hmmer, dmg: 1.0, from: team[k].game.player.eye() });
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("reputation");
+    let now = v.map_or(0, |v| host.rep.get(v, &name));
+    if now >= liked {
+        report.problems.push(format!("{name} hit a Hmmer and the village still thinks {now} of them (was {liked})"));
+    }
+    if team[k].game.rep_seen.get(&hmmer).copied().unwrap_or(0) as i32 != now {
+        report.problems.push(format!("{name} was told {:?} after the hit (the host: {now})", team[k].game.rep_seen.get(&hmmer)));
+    }
+    team[k].game.trading = None;
+    host.mobs.retain(|m| m.id != hmmer);
+    pump(host, team, 0.5, |_| idle());
+}
+
 /// A small mod the `--playtest` command installs, so the bots can try a mod's
 /// dimension (see modgen.rs). (Not for the unit test: it would change the
 /// blocks under every other test running alongside.)
@@ -2176,7 +2239,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

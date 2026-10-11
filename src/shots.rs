@@ -377,7 +377,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -866,7 +866,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1859,12 +1859,14 @@ impl App {
                 app.game.inv.add(block::BOAT, 1);
                 app.game.inv.add(block::RAIL_FIRST, 32);
             }
-            if s.mode == "trade" && frames == 125 {
+            if matches!(s.mode.as_str(), "trade" | "tradeliked" | "tradedisliked" | "tradehated") && frames == 125 {
                 // A Librarian and a purse of gold.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
                 let seed = (0..64u32).find(|&s| villagers::Job::of(s) == villagers::Job::Librarian).unwrap_or(1);
-                app.game.world.new_huts.push((p + fwd * 3.0, seed));
+                // (A village that dislikes us keeps its Hmmers a few steps off: see reputation.rs.)
+                let off = if matches!(s.mode.as_str(), "tradedisliked" | "tradehated") { 6.0 } else { 3.0 };
+                app.game.world.new_huts.push((p + fwd * off, seed));
                 app.game.house_hmmers();
                 let id = app.game.mobs.last().map(|m| m.id).unwrap_or(0);
                 if let Some(m) = app.game.mobs.last_mut() {
@@ -1873,6 +1875,17 @@ impl App {
                 app.game.inv.add(block::GOLD_INGOT, 23);
                 app.game.inv.add(block::FEATHER, 30);
                 app.game.inv.add(block::BOOK, 3);
+                // What the village thinks of us (see reputation.rs).
+                let rep = match s.mode.as_str() {
+                    "tradeliked" => 70,
+                    "tradedisliked" => -35,
+                    "tradehated" => -80,
+                    _ => 0,
+                };
+                if let Some(v) = app.game.mob_village(id) {
+                    let me = app.game.player_name.clone();
+                    app.game.rep.map.insert((v, players::record_key(&me)), rep);
+                }
                 app.game.open_trade(id);
             }
             if s.mode == "zappy" && frames == 125 {
