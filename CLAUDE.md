@@ -17,7 +17,7 @@ The plan below runs from v0.2 to v1.0.0. Stick to it:
 - **Between versions, only fixes.** Bug fixes and small requests from the user can go out as patch releases (v0.2.1, v0.2.2, ...), or ride along in the next part while a version is in progress. The user decides what counts as a small request.
 - **Changing the plan.** Only the user changes this plan. When they do, update this file in the same session.
 - **Every part ships with** (for what's in it): tests for the new rules, playtest-bot coverage of anything that syncs in multiplayer, advancements for the new content, screenshots checked, the README updated, 0 Clippy warnings, and a publish only when the user says "Yes".
-- **Originals.** Each version from v0.2 to v0.8 also has two additions that aren't in Minecraft, listed under it as "Originals". They're as much a part of the version as the rest of its list.
+- **Originals.** Each version from v0.2 to v0.9 also has two additions that aren't in Minecraft, listed under it as "Originals". They're as much a part of the version as the rest of its list.
 - **When a part or a version is released,** mark it **(released)** here and leave its list in place so it's clear what each one contained.
 
 ## v0.2: Underground and ruins (released)
@@ -101,7 +101,20 @@ Parts:
 - Part 3: items 5 and 6. **(released)**
 - Part 4: the two originals (this is the last part).
 
-## v0.6: The Hollow, filled in
+## v0.6: The land, reshaped (the user's request)
+
+A new world generator (version 7) that keeps what works in the current one (readable biome rules, temperature bands so neighbours make sense, warped borders) and takes from modern Minecraft's (the land's shape and its biomes coming from the same noises). Worlds made before it keep generating as they always have.
+
+1. Shape noises: continentalness (ocean, coast, inland), erosion (rugged to flat) and peaks-and-valleys set the height of the land through splines, in place of the hand-summed formula.
+2. Biomes from shape, then climate: a short, readable list of rules that looks at the land's shape first (coast, valley, peak, high plateau), then picks within the temperature bands by moisture, then uses a weirdness noise for the rarer variants (Cherry, Pale Garden and the like). Swamps and mangroves come from wet lowland rather than sinking the land afterwards.
+3. Rivers and beaches: two new biomes, following the valleys and the coasts.
+4. Cave biomes by depth: dripstone, lush caves and the Deep Dark chosen from the same climate plus depth.
+5. Mod biomes can give a target climate (hot, dry, inland, rugged...) and take the places nearest to it that the built-in rules leave free.
+6. Settling in: structures, villages, mansions and hot springs placed sensibly on the new land, and biome maps of many seeds checked for variety and sensible neighbours.
+
+Originals: not chosen yet.
+
+## v0.7: The Hollow, filled in
 
 1. Hollow Cities: tall towers on the outer islands, with a flying ship carrying the Glider.
 2. A Shulker-like mob that hides in a shell, shoots homing bullets that make you float, and drops shells that make Hollow Boxes (replacing the current way of getting them).
@@ -113,7 +126,7 @@ Originals:
 - Void fishing: cast off an island's edge into the void for strange catches (lost items, star fragments, the odd confused Fishie), tied into the fishing system and Angler levels.
 - Gravity islands: small islands where down is a different direction.
 
-## v0.7: Building and creative tools
+## v0.8: Building and creative tools
 
 1. Block sets: copper doors, trapdoors and grates; deepslate and tuff variants; walls for every stone; all slabs, stairs and walls for the v0.3 woods and stones.
 2. Creative tools: `/fill`, `/clone`, a selection wand, and a structure block that saves and pastes builds (and can export them for mods).
@@ -125,7 +138,7 @@ Originals:
 - Blueprints: copy a build at a Drafting Table, then Copper Golems build it from the materials in nearby chests, in survival.
 - Paint roller: recolour placed wool, concrete, glass and terracotta without breaking them.
 
-## v0.8: Atmosphere
+## v0.9: Atmosphere
 
 1. Ambient sound: each biome has its own background (wind on peaks, birds in forests, drips in caves, bubbles at sea).
 2. More music: biome and dimension pieces, a boss theme for each boss, and a title-screen theme.
@@ -137,7 +150,7 @@ Originals:
 - Camera: take an in-game photo that becomes an item you can hang as a painting or put in a frame.
 - Radio: a block that plays an endless procedurally composed station, with stations to tune between.
 
-## v0.9: Feature freeze and polish
+## v0.10: Feature freeze and polish
 
 No new features. Only:
 
