@@ -92,7 +92,7 @@ Originals:
 - The village paper: a daily newspaper reporting world events ("Local Woman Punches Tree", "Raid Repelled", "Hisser Seen Near Bakery").
 
 Parts:
-- Part 1: items 1 and 2.
+- Part 1: items 1 and 2. **(released)**
 - Part 2: items 3 and 4.
 - Part 3: items 5 and 6.
 - Part 4: the two originals (this is the last part).
