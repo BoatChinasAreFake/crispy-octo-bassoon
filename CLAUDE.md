@@ -76,7 +76,7 @@ Parts:
 - Part 1: items 1, 2 and 3. **(released)**
 - Part 2: items 4 and 5. **(released)**
 - Part 3: items 6, 7 and 8. **(released)**
-- Part 4: the two originals (this is the last part).
+- Part 4: items 9, 10 and 11, and the two originals (this is the last part).
 
 ## v0.5: Villages and people
 
