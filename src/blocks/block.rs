@@ -474,7 +474,11 @@ pub const ACTIVATOR_RAIL: Id = MYCELIUM + 86;
 pub const TRAPPED_CHEST: Id = MYCELIUM + 90;
 pub const TRAPPED_CHEST_ON: Id = MYCELIUM + 91;
 pub const CALIBRATED_SENSOR: Id = MYCELIUM + 92;
-pub const NUM_BLOCKS: Id = MYCELIUM + 100;
+/// Playing together (see together.rs).
+pub const TRADING_TABLE: Id = MYCELIUM + 100;
+pub const SURVEY_POST: Id = MYCELIUM + 101;
+pub const POST_BOX: Id = MYCELIUM + 102;
+pub const NUM_BLOCKS: Id = MYCELIUM + 103;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -2605,6 +2609,7 @@ impl Registry {
         blocks.extend(crate::cooking::defs());
         blocks.push(def("spring_rock", "Spring Rock (Warm to the Touch)", Cube, true, true, [T_SPRING_ROCK; 3], 1.5, 1, true, SPRING_ROCK, 0.0, S_STONE));
         blocks.extend(crate::zapparts::defs());
+        blocks.extend(crate::together::defs());
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -3139,6 +3144,7 @@ impl Registry {
         recipes.push(Recipe { inputs: vec![(STRING, 4), (GOO, 1)], output: (LEAD, 2) });
         recipes.extend(crate::cooking::recipes());
         recipes.extend(crate::zapparts::recipes());
+        recipes.extend(crate::together::recipes());
         recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {

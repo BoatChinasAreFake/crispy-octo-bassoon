@@ -47,7 +47,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v34: everything encrypted (see the top of this file), the server list's
 /// status query (StatusAsk, Status), and players' own skins (SkinData).
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
-pub const PROTOCOL: u32 = 35;
+/// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
+/// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
+pub const PROTOCOL: u32 = 37;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -301,6 +303,27 @@ pub enum Msg {
     /// Both ways: a player's own skin, 64x64 RGBA (empty: back to a built-in
     /// one; client -> host: mine, `id` is ignored).
     SkinData { id: u32, pixels: Vec<u8> },
+    /// host -> client: the teams, and whether players can hurt each other (see teams.rs).
+    Teams { pvp: bool, data: Vec<u8> },
+    /// client -> host: I hit this player (the host checks it, see teams.rs).
+    HitPlayer { target: u32, dmg: f32 },
+    /// host -> client: a Trading Table's seats and Accepts, and your seat (255: none; see trading.rs).
+    TradeState { x: i32, y: i32, z: i32, seats: [String; 2], accepted: [bool; 2], done: u32, mine: u8 },
+    /// client -> host: I accept the deal at this table (or take it back).
+    TradeAccept { x: i32, y: i32, z: i32, accept: bool },
+    /// host -> client: a minigame's sidebar and countdown (empty: none; see minigames.rs).
+    Sidebar { title: String, lines: Vec<(String, i32)>, countdown: String },
+    /// host -> client: come back here when you die.
+    SetSpawn { pos: Vec3 },
+    /// host -> client: the land claims (see claims.rs).
+    Claims { data: Vec<u8> },
+    /// client -> host: send my outbox (and this letter) to someone (see post.rs).
+    PostSend { to: String, letter: String },
+    /// host -> client: the letters in your inbox, oldest first (from, letter),
+    /// and whether that's because a Cluckster just brought you something.
+    Letters { list: Vec<(String, String)>, arrived: bool },
+    /// client -> host: throw my letters away.
+    PostBin,
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -1025,6 +1048,69 @@ impl Msg {
                 w.u32(pixels.len() as u32);
                 w.bytes(pixels);
             }
+            Msg::Teams { pvp, data } => {
+                w.u8(94);
+                w.u8(*pvp as u8);
+                w.u32(data.len() as u32);
+                w.bytes(data);
+            }
+            Msg::HitPlayer { target, dmg } => {
+                w.u8(95);
+                w.u32(*target);
+                w.f32(*dmg);
+            }
+            Msg::TradeState { x, y, z, seats, accepted, done, mine } => {
+                w.u8(96);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.str(&seats[0]);
+                w.str(&seats[1]);
+                w.u8(accepted[0] as u8 | (accepted[1] as u8) << 1);
+                w.u32(*done);
+                w.u8(*mine);
+            }
+            Msg::Sidebar { title, lines, countdown } => {
+                w.u8(98);
+                w.str(title);
+                w.u8(lines.len().min(crate::minigames::SIDEBAR_LINES) as u8);
+                for (name, n) in lines.iter().take(crate::minigames::SIDEBAR_LINES) {
+                    w.str(name);
+                    w.i32(*n);
+                }
+                w.str(countdown);
+            }
+            Msg::SetSpawn { pos } => {
+                w.u8(99);
+                w.v3(*pos);
+            }
+            Msg::Claims { data } => {
+                w.u8(100);
+                w.u32(data.len() as u32);
+                w.bytes(data);
+            }
+            Msg::PostSend { to, letter } => {
+                w.u8(101);
+                w.str(to);
+                w.str(letter);
+            }
+            Msg::Letters { list, arrived } => {
+                w.u8(102);
+                w.u8(*arrived as u8);
+                w.u8(list.len().min(crate::post::MAX_LETTERS) as u8);
+                for (from, text) in list.iter().take(crate::post::MAX_LETTERS) {
+                    w.str(from);
+                    w.str(text);
+                }
+            }
+            Msg::PostBin => w.u8(103),
+            Msg::TradeAccept { x, y, z, accept } => {
+                w.u8(97);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*accept as u8);
+            }
             Msg::RideMob { mob, pos, yaw, off } => {
                 w.u8(59);
                 w.u32(*mob);
@@ -1304,6 +1390,50 @@ impl Msg {
                 }
                 Msg::SkinData { id, pixels: r.take(n)?.to_vec() }
             }
+            94 => {
+                let pvp = r.u8()? != 0;
+                let n = r.u32()? as usize;
+                if n > 1 << 18 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "teams too big"));
+                }
+                Msg::Teams { pvp, data: r.take(n)?.to_vec() }
+            }
+            95 => Msg::HitPlayer { target: r.u32()?, dmg: r.f32()? },
+            96 => {
+                let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
+                let seats = [r.str()?, r.str()?];
+                let a = r.u8()?;
+                Msg::TradeState { x, y, z, seats, accepted: [a & 1 != 0, a & 2 != 0], done: r.u32()?, mine: r.u8()? }
+            }
+            97 => Msg::TradeAccept { x: r.i32()?, y: r.i32()?, z: r.i32()?, accept: r.u8()? != 0 },
+            98 => {
+                let title = r.str()?;
+                let n = (r.u8()? as usize).min(crate::minigames::SIDEBAR_LINES);
+                let mut lines = Vec::with_capacity(n);
+                for _ in 0..n {
+                    lines.push((r.str()?, r.i32()?));
+                }
+                Msg::Sidebar { title, lines, countdown: r.str()? }
+            }
+            99 => Msg::SetSpawn { pos: r.v3()? },
+            100 => {
+                let n = r.u32()? as usize;
+                if n > 1 << 20 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "claims too big"));
+                }
+                Msg::Claims { data: r.take(n)?.to_vec() }
+            }
+            101 => Msg::PostSend { to: r.str()?, letter: r.str()? },
+            102 => {
+                let arrived = r.u8()? != 0;
+                let n = (r.u8()? as usize).min(crate::post::MAX_LETTERS);
+                let mut list = Vec::with_capacity(n);
+                for _ in 0..n {
+                    list.push((r.str()?, r.str()?));
+                }
+                Msg::Letters { list, arrived }
+            }
+            103 => Msg::PostBin,
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -1978,6 +2108,16 @@ mod tests {
             Msg::Status { name: "Bob's world".into(), players: 2, max: 8, protocol: PROTOCOL, version: "v0.4".into(), password: true },
             Msg::SkinData { id: 5, pixels: vec![7; SKIN_BYTES] },
             Msg::SkinData { id: 5, pixels: Vec::new() },
+            Msg::Teams { pvp: true, data: vec![1, 2, 3] },
+            Msg::HitPlayer { target: 3, dmg: 4.5 },
+            Msg::TradeState { x: 1, y: -2, z: 3, seats: ["Ann".into(), String::new()], accepted: [true, false], done: 4, mine: 0 },
+            Msg::TradeAccept { x: 1, y: -2, z: 3, accept: true },
+            Msg::Sidebar { title: "Dig Race".into(), lines: vec![("Ann".into(), 7), ("Bob".into(), -2)], countdown: "Ends in 1:01".into() },
+            Msg::SetSpawn { pos: Vec3::new(1.0, 64.0, -3.5) },
+            Msg::Claims { data: b"on\t1\n".to_vec() },
+            Msg::PostSend { to: "Bob".into(), letter: "Happy birthday!\nLove, Ann".into() },
+            Msg::Letters { list: vec![("Ann".into(), "Hi".into())], arrived: true },
+            Msg::PostBin,
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },

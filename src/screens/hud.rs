@@ -446,6 +446,40 @@ impl App {
                         draw_circle(bx, by, 2.5 * s, Color::from_rgba(170, 130, 80, 255));
                     }
                 }
+                // Claimed land (see claims.rs): ours in green, friends' in gold, others' in red.
+                if self.game.claims.on {
+                    let dim = self.game.world.dim().index();
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    let me_name = self.game.player_name.clone();
+                    for c in self.game.claims.list.iter().filter(|c| c.dim == dim) {
+                        let r = claims::RADIUS as f32;
+                        let (x0, z0) = (((c.post.x as f32 - r - me.x) / scale).max(-half), ((c.post.z as f32 - r - me.z) / scale).max(-half));
+                        let (x1, z1) = (((c.post.x as f32 + r + 1.0 - me.x) / scale).min(half), ((c.post.z as f32 + r + 1.0 - me.z) / scale).min(half));
+                        if x1 <= x0 || z1 <= z0 {
+                            continue;
+                        }
+                        let col = if c.owner.eq_ignore_ascii_case(&me_name) {
+                            Color::new(0.2, 0.8, 0.3, 0.9)
+                        } else if self.game.claims.is_friend(&c.owner, &me_name) {
+                            Color::new(0.95, 0.75, 0.2, 0.9)
+                        } else {
+                            Color::new(0.9, 0.2, 0.2, 0.9)
+                        };
+                        draw_rectangle_lines(cx + x0 * per_px, cy + z0 * per_px, (x1 - x0) * per_px, (z1 - z0) * per_px, 2.0 * s, col);
+                    }
+                }
+                // Teammates: dots in the team's colour.
+                let me_name = self.game.player_name.clone();
+                for p in self.game.peers.values().filter(|p| p.alive() && self.game.teams.same_team(&p.name, &me_name)) {
+                    let (dx, dz) = ((p.pos.x - me.x) / scale, (p.pos.z - me.z) / scale);
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {
+                        let c = self.game.team_colour(&p.name).unwrap_or([255; 3]);
+                        let (bx, by) = (cx + dx * per_px, cy + dz * per_px);
+                        draw_circle(bx, by, 4.0 * s, Color::new(0.1, 0.08, 0.05, 1.0));
+                        draw_circle(bx, by, 3.0 * s, Color::from_rgba(c[0], c[1], c[2], 255));
+                    }
+                }
                 // Where you last died: a dark cross.
                 if let Some(d) = self.game.last_death.filter(|d| d.0 == self.game.dim).map(|d| d.1) {
                     let (dx, dz) = ((d.x - me.x) / scale, (d.z - me.z) / scale);
@@ -562,6 +596,40 @@ impl App {
         draw_rectangle(x, y, bw * frac, 5.0 * s, fill);
     }
 
+    /// A mod's minigame: its scores down the right, its countdown at the top (see minigames.rs).
+    pub(crate) fn minigame_hud(&self) {
+        let shown = &self.game.board.shown;
+        let (w, s) = (screen_width(), self.ui.s);
+        if !shown.countdown.is_empty() {
+            let y = 34.0 * s;
+            let tw = self.ui.text_width(&shown.countdown, 10.0);
+            draw_rectangle(w / 2.0 - tw / 2.0 - 4.0 * s, y - 11.0 * s, tw + 8.0 * s, 14.0 * s, Color::new(0.0, 0.0, 0.0, 0.5));
+            self.ui.text_centered(&shown.countdown, w / 2.0, y, 10.0, GOLD);
+        }
+        if shown.title.is_empty() {
+            return;
+        }
+        let line_h = 10.0 * s;
+        // (Names aren't translated; the title is the mod's own.)
+        let width = shown.lines.iter().map(|(n, v)| self.ui.raw_width(n, 8.0) + self.ui.raw_width(&v.to_string(), 8.0) + 12.0 * s).fold(self.ui.text_width(&shown.title, 9.0), f32::max) + 8.0 * s;
+        let h = 14.0 * s + line_h * shown.lines.len() as f32 + 4.0 * s;
+        let (x, y) = (w - width - 6.0 * s, screen_height() * 0.3);
+        draw_rectangle(x, y, width, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        self.ui.text_centered(&shown.title, x + width / 2.0, y + 10.0 * s, 9.0, GOLD);
+        let me = self.game.player_name.clone();
+        for (i, (name, n)) in shown.lines.iter().enumerate() {
+            let ly = y + 14.0 * s + line_h * (i as f32 + 1.0) - 2.0 * s;
+            let col = match self.game.team_colour(name) {
+                Some(c) => Color::from_rgba(c[0], c[1], c[2], 255),
+                None if name.eq_ignore_ascii_case(&me) => Color::new(1.0, 1.0, 0.6, 1.0),
+                None => WHITE,
+            };
+            self.ui.raw_text(name, x + 4.0 * s, ly, 8.0, col);
+            let v = n.to_string();
+            self.ui.raw_text(&v, x + width - 4.0 * s - self.ui.raw_width(&v, 8.0), ly, 8.0, Color::new(1.0, 0.4, 0.4, 1.0));
+        }
+    }
+
     pub(crate) fn name_tags(&self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
@@ -576,9 +644,11 @@ impl App {
                 continue;
             }
             let (sx, sy) = ((clip.x / clip.w * 0.5 + 0.5) * w, (0.5 - clip.y / clip.w * 0.5) * h);
-            let tw = self.ui.text_width(&p.name, 9.0);
+            // (Names aren't translated; a team's colour, if they're on one.)
+            let tw = self.ui.raw_width(&p.name, 9.0);
             draw_rectangle(sx - tw / 2.0 - 3.0 * s, sy - 10.0 * s, tw + 6.0 * s, 12.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
-            self.ui.text_centered(&p.name, sx, sy, 9.0, WHITE);
+            let col = self.game.team_colour(&p.name).map_or(WHITE, |c| Color::from_rgba(c[0], c[1], c[2], 255));
+            self.ui.raw_text(&p.name, sx - tw / 2.0, sy, 9.0, col);
         }
         // Waypoints: their names over the spot, and how far.
         for (wp, c) in self.game.waypoints_here() {

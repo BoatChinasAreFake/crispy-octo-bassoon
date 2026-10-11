@@ -45,6 +45,20 @@ pub enum Cmd {
     Spawn(u8, Vec3),
     SetTime(f32),
     Sound(crate::sound::Sfx, Vec3),
+    // Minigames (see minigames.rs).
+    ScoreSet(String, String, i64),
+    ScoreAdd(String, String, i64),
+    ScoreReset(String),
+    Sidebar(Option<(String, String)>),
+    TimerStart(String, f32),
+    TimerStop(String),
+    Countdown(Option<(String, String)>),
+    TeamCreate(String, Option<u8>),
+    TeamJoin(String, Option<String>),
+    TeamFriendlyFire(String, bool),
+    Pvp(bool),
+    SetSpawn(String, Vec3),
+    WorldSpawn(Vec3),
 }
 
 struct Ctx {
@@ -243,6 +257,42 @@ fn register_api(e: &mut Engine) {
         push(Cmd::Spawn(k.index(), Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))
     });
     e.register_fn("set_time", |t: Dynamic| -> Res<()> { push(Cmd::SetTime(num(&t)?.rem_euclid(1.0) as f32)) });
+
+    // ---- minigames (see minigames.rs): scores, the sidebar, timers, teams, spawns
+    use crate::minigames::{clean, NAME_LEN};
+    let name = |s: &str| clean(s, NAME_LEN);
+    e.register_fn("score_get", |objective: &str, player: &str| -> Res<INT> { with_game(|g| g.board.score(objective, player) as INT) });
+    e.register_fn("scores", |objective: &str| -> Res<rhai::Map> {
+        with_game(|g| g.board.scores.get(objective).map(|o| o.iter().map(|(p, &n)| (p.as_str().into(), Dynamic::from(n as INT))).collect()).unwrap_or_default())
+    });
+    e.register_fn("score_set", move |objective: &str, player: &str, n: INT| push(Cmd::ScoreSet(name(objective), name(player), n)));
+    e.register_fn("score_add", move |objective: &str, player: &str, n: INT| push(Cmd::ScoreAdd(name(objective), name(player), n)));
+    e.register_fn("score_reset", move |objective: &str| push(Cmd::ScoreReset(name(objective))));
+    e.register_fn("sidebar_show", move |objective: &str, title: &str| push(Cmd::Sidebar(Some((name(objective), name(title))))));
+    e.register_fn("sidebar_hide", || push(Cmd::Sidebar(None)));
+    e.register_fn("timer_start", move |timer: &str, secs: Dynamic| -> Res<()> { push(Cmd::TimerStart(name(timer), num(&secs)?.clamp(0.0, 86_400.0) as f32)) });
+    e.register_fn("timer_stop", move |timer: &str| push(Cmd::TimerStop(name(timer))));
+    e.register_fn("timer_left", |timer: &str| -> Res<FLOAT> { with_game(|g| g.board.timers.get(timer).copied().unwrap_or(0.0).max(0.0) as FLOAT) });
+    e.register_fn("countdown_show", move |timer: &str, label: &str| push(Cmd::Countdown(Some((name(timer), name(label))))));
+    e.register_fn("countdown_hide", || push(Cmd::Countdown(None)));
+    e.register_fn("team_create", |team: &str, colour: &str| -> Res<()> {
+        let Some(c) = crate::teams::colour_named(colour) else {
+            return err(format!("unknown colour \"{colour}\" (red, blue, green, yellow, purple, orange, aqua, pink)"));
+        };
+        push(Cmd::TeamCreate(team.into(), Some(c)))
+    });
+    e.register_fn("team_join", |player: &str, team: &str| push(Cmd::TeamJoin(player.into(), Some(team.into()))));
+    e.register_fn("team_leave", |player: &str| push(Cmd::TeamJoin(player.into(), None)));
+    e.register_fn("team_friendly_fire", |team: &str, on: bool| push(Cmd::TeamFriendlyFire(team.into(), on)));
+    e.register_fn("team_of", |player: &str| -> Res<ImmutableString> { with_game(|g| g.teams.team_of(player).map(|t| t.name.as_str().into()).unwrap_or_default()) });
+    e.register_fn("team_members", |team: &str| -> Res<Array> { with_game(|g| g.teams.members_of(team).into_iter().map(Dynamic::from).collect()) });
+    e.register_fn("set_pvp", |on: bool| push(Cmd::Pvp(on)));
+    e.register_fn("set_spawn", |player: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Res<()> {
+        push(Cmd::SetSpawn(player.into(), Vec3::new(num(&x)? as f32, (num(&y)? as f32).clamp(-10.0, 400.0), num(&z)? as f32)))
+    });
+    e.register_fn("set_world_spawn", |x: Dynamic, y: Dynamic, z: Dynamic| -> Res<()> {
+        push(Cmd::WorldSpawn(Vec3::new(num(&x)? as f32, (num(&y)? as f32).clamp(-10.0, 400.0), num(&z)? as f32)))
+    });
     e.register_fn("play_sound", |name: &str, x: Dynamic, y: Dynamic, z: Dynamic| -> Res<()> {
         use crate::sound::{Mat, Sfx};
         let s = match name {

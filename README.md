@@ -271,6 +271,15 @@ The game remembers the key each server showed the first time you reached it. If 
 
 If the router says no, the pause menu says so, and you can forward **TCP port 25565** by hand in the router's settings. If it says you're **behind a second NAT**, your internet provider shares one public address between many customers and nobody outside can reach you, however the port is set. If your connection has IPv6, the `[IPv6]:port` address the pause menu shows usually works directly (as long as your friends have IPv6 too). Otherwise, run a dedicated server somewhere with a public address.
 
+### Playing together
+
+- **Teams.** `/team create <name> [colour]` makes one (red, blue, green, yellow, purple, aqua, orange or pink), `/team join <name>` and `/team leave` move you, `/team colour <colour>` repaints yours and `/team list` shows them all; operators can `/team remove` one. Teammates' names float in their team's colour, they show as coloured dots on each other's maps, and `/tc <text>` talks to your team alone.
+- **PvP and friendly fire.** Players can't hurt each other until an operator says `/pvp on`. Then a team decides whether its own members can (`/team friendlyfire on|off`; off to begin with).
+- **The Trading Table** (4 planks, 2 gold, a chest). Two players open it and each puts their offer on their own side. When both press **Accept**, the host swaps the two sides in one go; changing anything takes both Accepts back, so nobody is caught out.
+- **Land claims** (opt-in: an operator turns them on with `/claims on`). A **Survey Post** (2 logs, a compass, 2 sticks) claims 16 blocks all round it, up to three per player. Nobody else can build there or open your chests unless you name them with `/claim friend add <name>`. `/claim` says whose land you're on, and claims show on maps.
+- **Post Boxes** (5 iron, a chest, a feather). Right-click one to open your outbox: put up to nine stacks in, write who it's for and a note, and press **Send**. About twenty seconds later a slightly put-upon Cluckster brings it to them, or, if they're not playing, it waits in their **inbox** (any Post Box, the **Inbox** button) and they're told there's post when they next join.
+- **Minigames.** Mods can keep scores, run timers and a countdown, put a sidebar on everyone's screen, and sort players into teams and spawn points (see SCRIPTING.md and `example-mods/digrace`).
+
 ### Dedicated server
 
 For a VPS, a Raspberry Pi or a spare PC. It has no window and needs no GPU or sound card.
@@ -298,6 +307,7 @@ Console commands:
 - `say <text>`, `kick <name>`, `time <day|noon|night|midnight|0.0-1.0>`, `password <pw|off>`.
 - `ban <name|ip>`, `unban <ip>`, `bans` (bans are by IP address).
 - `op <name>`, `deop <name>`, `ops`. Operators can use all of these in chat with a slash (`/kick Bob`); everyone else gets `/list` and `/help`.
+- `pvp on|off`, `claims on|off`, and `team` (as in chat).
 - `allowlist on|off|list|add <name>|remove <name>`. Turning it on adds whoever is online, so nobody is kicked out by surprise.
 - `save`, `stop`, `help`.
 
@@ -313,7 +323,8 @@ The world autosaves every 5 minutes and on `stop` (Ctrl+C loses anything since t
 - **The host doesn't take a player's word for anything.**
   - Block edits must be within reach, at a human rate, and follow the rules (no turning stone into Dimond ore, no breaking bedrock). Rejected edits are undone on the player's screen. Movement must make sense, and attacks, ignitions and fishing must be within reach and at a human pace. Chat is rate-limited, and nobody can call themselves "Server".
   - **The ledger.** Each player's inventory lives on their own machine, so it feels instant, but the host keeps a ledger of what every player really owns, built only from what it saw happen: drops it rolled, loot it sent, recipes it allowed, blocks placed, arrows shot, food eaten. Placing, crafting, shooting and the rest need the items in the ledger; every few seconds the counts are compared and the host's win. Tool wear, experience, enchantments, anvil repairs, dropped items and deaths all go through the host too.
-  - Chests, furnaces, backpacks and the other containers live on the host; players see a copy, and every move in or out is checked against the container and the ledger.
+  - Chests, furnaces, backpacks and the other containers live on the host; players see a copy, and every move in or out is checked against the container and the ledger. That goes for Trading Tables (each player can only touch their own side, and only the host swaps) and post (inboxes are take-only; parcels on their way are the host's, kept with the world).
+  - Hits on other players are checked for range, rate, `/pvp` and teams, and edits and chests on someone else's land are refused.
   - Creative worlds skip the ledger, since everything is free there anyway.
   - Players who keep sending things a real game wouldn't are kicked.
 - **Connection limits.** Messages are capped at 256 KB and read a bounded amount per frame; at most three connections per address; five wrong passwords lock an address out for ten minutes; silent connections are dropped after 30 seconds.
@@ -347,10 +358,10 @@ Each folder's `mod.rs` starts with a note on what's in it, and every file starts
 | `src/screens/` | Menus, settings, the inventory and creative tabs, crafting stations, logs and the HUD |
 | `src/engine/` | Rendering (`render`, `mesher`, `texture`, `light`, `tint`, `lod`), chunk storage (`palette`), noise, sound, UI widgets, controls (`keybinds`, `pad`), settings, saving (`save`, `regions`, `backups`, and the compressor, `squash`), meshing on worker threads (`meshpool`), languages (`lang`), the narrator, the data folder, updates, UPnP and accessibility |
 | `src/land/` | The world and its generator (`world`), the dimensions (`dims`), mods' biomes, structures and dimensions (`modgen`), and the realm each lives in (`realms`, saved by `realm_save`), structures, weather, seasons, skies, liquids, fire, falling blocks, trees and ground cover, random ticks (`copper`), the Scorchlands, their biomes (`wilds`), fortresses, bastions and Woodland Mansions, hot springs and the chill (`springs`), the Hollow, the Deep Dark, Trial Chambers, treasure and archaeology |
-| `src/blocks/` | The block and item registry (`block`), building blocks, doors, decor, containers, chests, beds, backpacks, Personal Chests, Hollow Boxes, Zappy wiring and contraptions, the newer Zappy parts (`zapparts`), hoppers, crafting, enchanting, anvils, smithing, trims, brewing, beacons, banners, books, fireworks, music, and cauldrons, composters, heads and lightning rods (`homecraft`) |
+| `src/blocks/` | The block and item registry (`block`), building blocks, doors, decor, containers, chests, beds, backpacks, Personal Chests, Hollow Boxes, Zappy wiring and contraptions, the newer Zappy parts (`zapparts`), hoppers, crafting, enchanting, anvils, smithing, trims, brewing, beacons, banners, books, fireworks, music, cauldrons, composters, heads and lightning rods (`homecraft`), and the blocks for playing together (`together`) and the Trading Table (`trading`) |
 | `src/creatures/` | Mob physics, models and AI (`entity`), pathfinding, animals, wildlife, critters, the Scorchlands' beasts, bees, horses (and Donkeys and Mules), leads, Floaties, golems (Snow Golems too), villagers, raids, Sniffers, the Creaking, name tags and players' own skins (`skins`) |
 | `src/survival/` | The player, inventory, items on the ground, hunger and breath, cooking, experience, combat, tools, gadgets, navigation, gliders, vehicles, farming, fishing, advancements, statistics, game modes, world rules, waypoints and other handy things (`qol`) |
-| `src/online/` | The network protocol and its encryption (`crypto.rs`), hosting and joining, the server list and LAN discovery (`servers.rs`), the dedicated server, admin, the host's ledger, remembered players, cheats, mods, scripting and the playtest bots |
+| `src/online/` | The network protocol and its encryption (`crypto.rs`), hosting and joining, the server list and LAN discovery (`servers.rs`), the dedicated server, admin, the host's ledger, remembered players, teams and PvP (`teams`), land claims (`claims`), the post (`post`), cheats, mods, scripting and mods' minigames (`minigames`), and the playtest bots |
 | `build.rs`, `assets/minceraft.ico` | The Windows exe's icon (drawn from the game's textures by `--export-icon`) |
 
 Not affiliated with any block-game company.

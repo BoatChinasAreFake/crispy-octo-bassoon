@@ -100,6 +100,10 @@ impl Game {
     pub(crate) fn move_one(&mut self, from: IVec3, slots: Option<Vec<usize>>, to: IVec3, from_above: bool) -> bool {
         use crate::containers::{store, store_kind, store_ref};
         let (src_kind, dst_kind) = (store_kind(&self.world, &self.vehicles, from), store_kind(&self.world, &self.vehicles, to));
+        // Nothing goes on or off a Trading Table by itself (see trading.rs).
+        if src_kind == TRADING_TABLE || dst_kind == TRADING_TABLE {
+            return false;
+        }
         let (Some(src), Some(dst)) = (store_ref(&self.world, &self.vehicles, from), store_ref(&self.world, &self.vehicles, to)) else { return false };
         let slots = slots.unwrap_or_else(|| takeable(src_kind, src));
         let pick = slots.into_iter().find(|&i| src.slots.get(i).copied().flatten().is_some_and(|(id, _)| landing_slot(dst_kind, dst, id, src.wear[i], from_above).is_some()));

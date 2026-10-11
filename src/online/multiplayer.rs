@@ -483,6 +483,11 @@ impl Game {
             roster.extend(self.all_peers().filter(|(_, p)| p.dim != Dim::Over).map(|(&id, p)| Msg::Dimension { id, dim: p.dim.index(), x: p.target.x, y: p.target.y, z: p.target.z }));
             roster.extend(self.mob_names.iter().map(|(&mob, name)| Msg::MobName { mob, name: name.clone() }));
             roster.push(self.rules_msg());
+            roster.push(self.teams_msg());
+            roster.push(self.claims_msg());
+            if !self.board.shown.is_empty() {
+                roster.push(self.sidebar_msg());
+            }
             roster.push(Msg::Weather { kind: self.weather.kind.index() });
             let Some(Net::Host(server)) = &mut self.net else { return };
             if let Some(c) = server.get(from) {
@@ -502,6 +507,7 @@ impl Game {
             }
             self.msg(format!("{name} joined the game"));
             self.welcome_back(from, &name);
+            self.post_on_join(from, &name);
             self.fire("on_player_join", vec![name.clone().into()]);
         }
     }
@@ -558,6 +564,11 @@ impl Game {
                     if old != id && !self.edit_allowed(x, y, z, old, id) {
                         corrections.push((x, y, z, old));
                         self.strike(from);
+                        continue;
+                    }
+                    // Someone else's land (see claims.rs).
+                    if old != id && !self.host_claim_ok(from, IVec3::new(x, y, z), old, id) {
+                        corrections.push((x, y, z, old));
                         continue;
                     }
                     // Scripts may veto what remote players do, just like the host's own actions.
@@ -742,6 +753,33 @@ impl Game {
                 self.relay_all(from, Msg::Chat { from, text });
             }
             Msg::Splash { item, at } => self.host_splash(from, item, at),
+            Msg::HitPlayer { target, dmg } => {
+                if self.peer_rate_ok(from, "hit_player", 0.2) {
+                    self.host_hit_player(from, target, dmg);
+                }
+            }
+            Msg::TradeAccept { x, y, z, accept } => {
+                let p = IVec3::new(x, y, z);
+                let open = self.viewers.get(&p).is_some_and(|v| v.contains(&from));
+                if open && self.world.get_v(p) == TRADING_TABLE && self.peer_rate_ok(from, "trade", 0.2) {
+                    let name = self.peer_name(from);
+                    self.accept_deal(p, &name, accept);
+                }
+            }
+            Msg::PostSend { to, letter } => {
+                let near = self.peers.get(&from).is_some_and(|q| crate::post::near_post_box(&self.world, q.target + Vec3::Y * 1.6));
+                if near && self.peer_rate_ok(from, "post", 1.0) {
+                    let name = self.peer_name(from);
+                    let r = self.send_post(&name, &to, &letter);
+                    let (Ok(s) | Err(s)) = r;
+                    self.system_message(Some(from), &s);
+                }
+            }
+            Msg::PostBin => {
+                let name = self.peer_name(from);
+                self.mail.letters.remove(&crate::post::inbox_key(&name).z);
+                self.send_letters(from, false);
+            }
             Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
             Msg::MobName { mob, name } => {
                 if self.peer_rate_ok(from, "name", 0.5) {
@@ -1300,6 +1338,29 @@ impl Game {
                 }
             }
             Msg::SkinData { id, pixels } => self.note_peer_skin(id, pixels),
+            Msg::TradeState { x, y, z, seats, accepted, done, mine } => self.apply_deal(IVec3::new(x, y, z), seats, accepted, done, mine),
+            Msg::Sidebar { title, lines, countdown } => self.board.shown = crate::minigames::Shown { title, lines, countdown },
+            Msg::Claims { data } => self.claims = crate::claims::Claims::decode(&data),
+            Msg::Letters { list, arrived } => {
+                if arrived {
+                    self.advance("youve_got_post");
+                }
+                let key = crate::post::inbox_key(&self.player_name);
+                if list.is_empty() {
+                    self.mail.letters.remove(&key.z);
+                } else {
+                    self.mail.letters.insert(key.z, list);
+                }
+            }
+            Msg::SetSpawn { pos } => {
+                if pos.is_finite() {
+                    self.personal_spawn = Some(pos);
+                }
+            }
+            Msg::Teams { pvp, data } => {
+                self.pvp = pvp;
+                self.teams = crate::teams::Teams::decode(&data).unwrap_or_default();
+            }
             Msg::PotionEffect { item } => {
                 if let Some((p, false)) = crate::potions::potion_of(item) {
                     self.apply_potion(p);
@@ -1346,7 +1407,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin => {}
         }
     }
 

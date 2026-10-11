@@ -14,6 +14,7 @@
  (Half the Commitment)
  (Upside Down)
  (and VSync)
+ (and you're a friend)
  (scripts in {} switched off after {} errors)
  (worn {})
  ({} crack{})
@@ -68,13 +69,16 @@
 #version 100
 #version 150
 #version 150\n#define HAS_DERIVATIVES 1\n#define HAS_TEXTURE_LOD 1\nout vec4 frag_color;\n{}
+(and {} older)
 (it's you)
 (mouse wheel, Page Up or the scrollbar to read back)
 (scroll for more)
 (scrolled back {} lines: Page Down or the wheel to return)
+(waiting for someone)
 *nom* Oinkchop acquired (internally).
 , and they look ready to swarm: have an empty hive nearby
 , foraging at x{} (variety x{}, climate x{})
+, friendly fire on
 , hardcore
 , no password
 , operator
@@ -162,8 +166,14 @@
 ..hHhhhh#oh.....
 ..hHhhhhhhHHh...
 ..hh.....#oHHh..
+/claim, /claim list, /claim friend add|remove <name>, /claim friends.
 /gamemode spectator {}
 /gamemode survival {}
+/tc <message> talks to your team.
+/team create <name> [colour], join <name>, leave, list, colour <colour>, friendlyfire on|off, remove <name>.
+/team create Reds red
+/team friendlyfire on or off.
+/team join Reds
 1 player
 1-9 / wheel ... pick hotbar    {} ... pick block (creative)
 100% browser-free!
@@ -172,12 +182,16 @@
 60 fps
 : perfect
 < Back
+<- swap ->
 <?xml version="1.0"?>r\n<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:{} xmlns:u="{}">{}</u:{}></s:Body></s:Envelope>
 <Player1> and here's a much longer message, the kind somebody types when they're explaining exactly where they left the diamonds, which wraps onto the next line instead of running off the edge of the screen
 <Player{}> chat line number {}
 > press <
+A Cluckster arrives with {} from {}, sighs, and waddles off. (It's in your inbox at any Post Box.)
 A Cluckster ate your seedlings. Consider a Scarecrow.
+A Cluckster takes it. They get it even if they're away.
 A Minceraft server
+A Square Deal
 A Water Bottle (or a potion) below
 A baked potato. The potato's redemption arc is complete.
 A blank map. Look in shipwrecks for a marked one.
@@ -189,12 +203,15 @@ A raw potato. Nobody asked for this. Least of all you.
 A roar echoes across the void.
 A shrieker shrieks. Something, far below, stirs.
 A swarm moved into your empty hive! Free bees. The best kind.
+A team needs a name (letters, numbers, - and _).
 A treasure map! It leads to... the spot where you're standing. Congratulations.
 A {} queen and {} bee{}, {}, with {}% honey and {}% comb, {}, health {}%, {}, {}
 APPDATA
 Abandoned Mineshaft (Mind the Webs)
 Acacia
+Accept
 Accept: application/vnd.github+json
+Accepted
 Accessibility
 Accessibility...
 Activator Rail (Everybody Out)
@@ -232,6 +249,7 @@ Ancient Coin (Legal Tender, Once)
 Ancient honey: tastes of old stone and starlight. Your eyes tingle.
 Angler level {}  ({} xp)  -  lines snapped: {}  (they were THIS big)
 Angler level {}! The fish have started a group chat about you.
+Ann
 Another of the same (optional)
 Another shriek. Something is listening. Tiptoe.
 Anti-aliasing: OFF
@@ -309,6 +327,7 @@ Big Backpack (45 Slots of Your Pack)
 Big Bob
 Big Bob (Legendary Carp)
 Bigger on the Inside
+Bin Them
 Biome: the Hollow
 Biome: {}
 Biome: {} (surface {})
@@ -335,7 +354,9 @@ Bloop
 Blow something up with TNT. Totally Not Trouble.
 Blue
 Blue honey: tastes like a cornflower looks. You feel zippy.
+Blues
 Boat (Mostly Waterproof)
+Bob
 Bob's Farm
 Boing
 Boing!
@@ -422,6 +443,7 @@ Carrots
 Carry acacia, birch and dark oak logs at once.
 Cartographer (Knows Where Things Are)
 Castle Town
+Cat
 Catch a Fishy with your bare hands (well, hit one).
 Catch anything at all with a Fishing Stick.
 Catch the legendary Big Bob. Dawn or dusk, deep ocean. Good luck.
@@ -455,6 +477,7 @@ Chipped Anvil (Still Ominous)
 Chiseled Sandstone (Ancient Doodles)
 Chiseled Tuff (Fancy Grey)
 Chunks: {} meshed, {} loaded; {} regions of edits in memory
+Claim some land with a Survey Post.
 Clank You Very Much
 Clanker
 Clay Tablet (Someone's Diary)
@@ -470,6 +493,7 @@ Cluckster clucks
 Clucksters flutter down ({})
 Coal
 Coal Ore
+Coal for the kitchen.
 Coast
 Coast Trim Template
 Cobbled Deepslate (Moody Rubble)
@@ -480,9 +504,10 @@ Collection complete: {}! Museums would fight over this.
 Colonies known nearby
 Colonies started
 Colour-blind
+Colours: {}.
 Command
-Commands: list, players, info <name>, say <text>, kick <name>, ban <name|ip>, unban <ip>, bans, time <day|noon|night|midnight|0-1>, op <name>, deop <name>, ops, allowlist <on|off|add|remove|list> [name], forget <name>, password <pw|off>
-Commands: list, seed, help. Operators can do more.
+Commands: list, players, info <name>, say <text>, kick <name>, ban <name|ip>, unban <ip>, bans, time <day|noon|night|midnight|0-1>, op <name>, deop <name>, ops, allowlist <on|off|add|remove|list> [name], forget <name>, password <pw|off>, pvp <on|off>, team <create|join|leave|list|colour|friendlyfire|remove>, tc <message>
+Commands: list, seed, help, team, tc. Operators can do more.
 Comparator (Counts Your Stuff)
 Compass (Points Home, Mostly)
 Compiled, not interpreted!
@@ -555,6 +580,7 @@ Couldn't use the skin {}: {}
 Couldn't use {}: {}; keeping files beside the game.
 Couldn't write {}: {}
 Country Lode, Take Me Home
+Courier
 Cover Me in Dimonds
 Crack! You pressed too hard. Gently does it.
 Cracked
@@ -595,6 +621,7 @@ DIMONDS!
 Damage dealt
 Damage taken
 Damaged Anvil (Living on Borrowed Time)
+Dan
 Dandelion (Sunny Disposition)
 Danger
 Dark Forest (Bring a Torch)
@@ -651,6 +678,7 @@ Detector Rail (Tattletale)
 Diamond Chest (Really Showing Off)
 Difficulty: Hard (hardcore)
 Difficulty: {}
+Dig Race
 Dig up buried treasure. The map wasn't lying.
 Dimond
 Dimond Boots (Sparkly Stomping)
@@ -795,6 +823,7 @@ Fire Resistance
 Fire Starter
 Firefly Bush (Twinkly After Dark)
 Firework bursts
+First Class
 First Course
 Fish
 Fish Chowder
@@ -951,6 +980,7 @@ Grumbler Tusk (Rude to Ask)
 Guardian
 HTTP {}
 Hackler
+Happy birthday! Don't eat it all at once.
 Hard (Aggressive Hissing)
 Hardcore: one life, hard mode. Good luck.
 Hardy
@@ -959,6 +989,7 @@ Harness Test World
 Harvest a crop grown where a different one grew before.
 Harvest a fully grown crop. Farming simulator unlocked.
 Harvest honey or honeycomb from a hive.
+Have a Cluckster bring you something.
 Have a swarm move into one of your empty hives.
 Hay Bale (Soft Landing)
 Hay Fever
@@ -1038,6 +1069,8 @@ IT'S HERE.
 Ice (Nature's Floor Wax)
 Ice Spikes (Pointy, Chilly)
 Igloo (Mind the Basement)
+Inbox
+Inbox ({})
 Ingredient on top: Glowshroom, Zappy Dust, Ember Shroom, Carrot, Feather (or Hisspowder)
 Internet address: {}:{}
 Inventory
@@ -1076,6 +1109,7 @@ Its material, or another one like it
 Jack o'Lantern (Faces Everywhere)
 Join
 Join a game that turned up on your network by itself.
+Join a team first.
 Joiny
 Jousting Champion
 Jukebox (Playing {})
@@ -1111,6 +1145,11 @@ LEGENDARY! You caught BIG BOB, all {}cm of him. He looks disappointed in you.
 LINE TENSION - EASE OFF!
 Ladder (Up, Mostly)
 Land a Mace blow on the way down. Gravity did most of the work.
+Land claims are off (posts stay put, and come back into force if they're turned on again).
+Land claims are off here (an operator can turn them on with /claims on).
+Land claims are off here.
+Land claims are on: a Survey Post claims the land around it.
+Land claims are {}.
 Land: {}
 Language
 Lantern (Fancy Torch)
@@ -1129,6 +1168,7 @@ Leaping
 Leaves
 Leaves: Still
 Leaves: Waving
+Leaving claimed land.
 Lectern (Reading Stand)
 Lectern (With a Book)
 Left by {}
@@ -1184,6 +1224,7 @@ MISMATCH: {}
 MODDING.md explains everything a mod can add.
 Mace (Gravity Assisted)
 Made of cubes!
+Made team {} ({}), and you're on it.
 Magma Block (Hot Feet Guaranteed)
 Magma Bloop
 Magma Carta
@@ -1300,6 +1341,8 @@ No backups yet. One is made the next time you play this world.
 No block called "{}".
 No block or item called "{}".
 No controller found. Plug one in any time.
+No friends named yet. /claim friend add <name>
+No letters. Things sent to you arrive in the slots above.
 No mods installed yet.
 No monsters, no hunger. Health comes back on its own.
 No password: anyone who can reach this port can join (use --password)
@@ -1310,6 +1353,9 @@ No players remembered yet.
 No script handled {}
 No servers yet. Games on your network show up here by themselves;
 No speech program found: the narrator can't speak (see the README).
+No team called {}.
+No team called {}. /team list shows them.
+No teams yet. /team create <name> [colour] makes one.
 No user data folder on this system; keeping files beside the game.
 No worlds yet. Create one below!
 No {} within 1,000 blocks (here).
@@ -1319,6 +1365,7 @@ No {} within 2,500 blocks.
 Nobody called {} has played here.
 Nobody called {} is remembered.
 Nobody can join this world, so there's nobody to ban.
+Nobody has claimed this land. A Survey Post would.
 None
 Normal
 Normal (Standard Hissing)
@@ -1333,6 +1380,7 @@ Note Block (Plinky)
 Note Block (Plinky, Note {})
 Note block plays
 Note {} of {} ({}).
+Note:
 Nothing matches.
 Nothing to load. A Crossbow takes Rockets or Pointy Sticks.
 Nothing yet. Craft a Fishing Stick (3 sticks, 2 string) and find some water.
@@ -1341,6 +1389,7 @@ Now Playing
 Now in 3D!
 Now it switches on at night.
 Now it switches on in the daytime.
+Now on {}'s land.
 Now playing: {}
 Now with 0 image files!
 OFF
@@ -1373,6 +1422,8 @@ On your network - {}
 Once signed, nobody can change it.
 One life on Hard. Die, and you can only watch.
 Online! Friends can join at {}:{}{}
+Only operators can remove teams.
+Only operators can turn land claims on or off.
 Only operators can use /{}.
 Only the host can change the time.
 Only the host can save this world.
@@ -1454,6 +1505,9 @@ Plants and Nature
 Play Selected World
 Play With Others
 Play in a language a mod brought.
+Players can hurt each other now (teams decide about their own, see /team friendlyfire).
+Players can't hurt each other now.
+Players {} hurt each other. /pvp on or off.
 Player{}
 Playing on {} ({})
 Playtest: a host and {} bots for {} seconds (seed {})...
@@ -1475,6 +1529,11 @@ Port opened, but your ISP puts you behind a second NAT ({}), so outsiders can't 
 Port {} opened. Share your public IP (search "what is my IP"){}
 Portal (Shimmery)
 Portal Opener
+Post Box (Cluckster Delivers)
+Post Box: Inbox
+Post Box: Send
+Post something to another player.
+Posting things to yourself? The Cluckster refuses.
 Postponed
 Potassium up. The soil is now slightly campfire-scented.
 Potato
@@ -1516,6 +1575,7 @@ Put armour on your Galloper.
 Put in a tool, weapon or armour, and some gold.
 Put on a piece of armour. Even the socks count.
 Put out a Wisp for good.
+Put something in, or write a letter.
 Pyramid Scheme
 Queen Bee (In a Jar, Unimpressed)
 Queens caught
@@ -1551,6 +1611,7 @@ Red
 Red Mushroom Block (Spotty Roof)
 Red Sand (Sunburnt)
 Red Terracotta
+Reds
 Reef Madness
 Reel it in (hold right-click)
 Reformed Lumberjack
@@ -1594,6 +1655,7 @@ Rollo Scute (Shed With Dignity)
 Rollo scuttles
 Rope-a-Dope
 Rotsteed
+Round ends in
 Router address didn't resolve
 Router description request failed (HTTP {}).
 Ruined Tower (Structurally Optimistic)
@@ -1663,6 +1725,8 @@ Seed: {}
 Seed: {}  Mode: {}{}
 Seeing Red
 Select World
+Send
+Send Post
 Server
 Server list name: {}. Encrypted; host key fingerprint {} (in {})
 Set a Wilter Star in a beacon.
@@ -1782,6 +1846,7 @@ Spruce Needles
 Spyglass (Pirate Approved)
 Squawker
 Squawker squawks
+Staked a Claim
 Stalac-tight
 Stand in a beacon's light. The Wyrm's egg, finally useful.
 Stand on a Magma Block without sneaking. Ow.
@@ -1838,6 +1903,7 @@ Support Gauge (Is It Going to Hold?)
 Support: open sky (nothing to hold up)
 Support: {}% ({})
 Surface {}
+Survey Post (This Is Mine Now)
 Survival
 Survival mode: punch a tree. Press E to craft. Avoid anything that hisses.
 Survival tips: punch a Tree Chunk, craft Planks, then Sticks, then a Wooden Pickaxe.
@@ -1849,6 +1915,7 @@ Suspiciously Golden Oinkchop
 Swamp (Squelchy)
 Swamp Thing
 Swap Hands
+Swap things with someone at a Trading Table.
 Swarm Catcher
 Swarms caught / lost
 Sweet Dreams
@@ -1857,8 +1924,10 @@ Swim in a warm ocean.
 SystemFunction036
 TNT (Totally Not Trouble)
 Tab: {}
+Table's Full
 Taiga (Pointy Trees)
 Take
+Take Back
 Take the potion out first.
 Tall Grass
 Tame a Galloper. It only took several hundred attempts.
@@ -1869,6 +1938,7 @@ Tattletale
 Teal
 Teal Appeal
 Teal Forest (Oddly Calming)
+Team {} is no more.
 Teleported {} to {} at {}, {}, {}.
 Teleported {} to {}, {}, {}.
 Tell a Calibrated Sculk Sensor what to listen for.
@@ -1879,13 +1949,18 @@ Tested on at least one computer!
 That Sinking Feeling
 That can't be enchanted (or already is).
 That one needs a Crafting Table. Four planks; you can make one in your pockets.
+That would overlap {}'s land.
+That's on someone else's land.
 That's outside the world.
+That's {} friends already.
+That's {} teams already. Remove one first.
 Thawed
 The Bad Omen settles on the Trial Spawner. This one's going to be ominous.
 The Birds and the Bees
 The Bundle is full.
 The Cake Is Not a Lie
 The Cheese King has been defeated!
+The Cluckster is snowed under. Try again later.
 The Curator
 The Dolphin enjoys the fish. It doesn't know any wrecks round here.
 The Dolphin swims off, looking back at you. Follow it!
@@ -1919,6 +1994,7 @@ The ceiling settles. That'll hold.
 The comb isn't ready to harvest yet.
 The compass needle swings round to the Lodestone.
 The console has no body; say who to move: tp <player> <x y z | player>
+The console isn't on a team.
 The eye drifts {} toward something about {} blocks away.
 The eye just... sits there. Nothing to find around here.
 The eye shattered. Rude.
@@ -1960,13 +2036,18 @@ The worn thing
 The {} has been defeated!
 The {} is yours now. It's sitting; right-click to call it along.
 The {} is yours. It could use a Saddle.
+There's already a team called {}.
 Things eaten
+Thinking...
 Third Person
 Thirsty
 This Rollo has been brushed quite enough for now.
 This Vault wants an Ominous Trial Key.
 This hive is empty: put a Queen Bee in it, or leave it near a full colony and hope it swarms your way.
 This is a hardcore world: no cheating.
+This is your land.
+This is {}'s land. Ask them to /claim friend add you.
+This is {}'s land{}.
 This server needs a password. Type it in the Password box.
 This world isn't open to anyone.
 Throw Item
@@ -1983,6 +2064,7 @@ Time: {}:00  Daylight: {}  Day {} ({}){}
 Tinted Glass (Sunglasses for Houses)
 Tips: dawn and dusk are best. Deep, wide water beats puddles. Worms help. Don't reel in on a nibble.
 Tips: mixed flowers make better honey. Smoke before you harvest. Wood Ash for mites. Keep a spare hive for swarms.
+To:
 Toaster
 Tongue Tied
 Too Hot to Handle
@@ -2007,6 +2089,7 @@ Trade fifteen times with the same Hmmer. They know your order now.
 Trade with a Farmer, a Librarian, a Smith and a Fisher.
 Trade with a Hmmer. Gold is finally good for something.
 Trading Hall
+Trading Table (No Takebacks)
 Trail Ruins (Muddy, Historic)
 Trailfolk
 Trapdoor (Floor Door)
@@ -2155,6 +2238,7 @@ Wheat Seeds (Tiny)
 Which Witch?
 White
 Who's a Good Boy?
+Who's it for? Write a name.
 Whoosh. A tree.
 Why
 Why Did the Cluckster Cross the Road?
@@ -2235,6 +2319,9 @@ You fished up a {}. Congratulations?
 You found a Wiggly Worm. The fish will love it.
 You got up. The night goes on without you.
 You have been banned from this server.
+You have {} Survey Posts already. Break one to move it.
+You haven't claimed any land. Place a Survey Post.
+You left {}.
 You lie down. It's a one-block bed, so this is going to be awkward. Zzz...
 You made eye contact with a Starer. Bold. Also a mistake.
 You may not rest now, there are monsters nearby. They're very loud sleepers.
@@ -2244,21 +2331,32 @@ You put on the {}. Dashing.
 You reel in... nothing. Very relaxing, though.
 You slept like a log (a Tree Chunk). Good morning! Spawn point set. Your back hurts.
 You trampled the farmland. The crops will remember this.
+You're already on {}.
 You're freezing. Find a fire, a roof, a hot meal or a hot spring.
 You're full. Even for cake. Impressive restraint.
 You're getting chilly. Your health won't come back by itself until you warm up.
 You're here. Mind the Pilferers.
 You're hurt
 You're in {}.
+You're not on a team.
+You're not on a team. /team join <name>, or /team create <name>.
 You're not on this server's allow-list.
+You're on team {} now.
 You're sending messages too fast. Take a breath.
+You've Got Post
+You've got post! ({} waiting at any Post Box.)
 Your Glider tore. Gravity says hello.
+Your Survey Posts: {}
 Your Woofer is armoured. Very good boy protection.
 Your bees swarmed and flew off. An empty hive nearby would have caught them.
+Your friends: {}
 Your game mode is now {}.
 Your inventory is safe. This world is kind.
+Your land.
+Your letter is on its way to {}.
 Your name
 Your old save is now the world "My World".
+Your parcel ({} stack{}) is on its way to {}.
 Your things are on the ground at {}, {}, {} for five minutes.
 Your {} broke. It had a good life.
 Your {} fell apart. It died doing what it loved.
@@ -2302,11 +2400,13 @@ a closure can't be saved (its captured state can't be reconstructed)
 a curried function pointer can't be saved (its captured arguments can't be reconstructed)
 a dedicated server
 a few mites
+a letter
 a melee-only mob never fires an arrow
 a message was tampered with on the way
 a miss cannot apply an effect
 a modded shot must not be blamed on a Rattler: {}
 a newer
+a parcel
 a quarter per ruby
 a sitting flier lands: y \= {}
 a skin must be 64x64
@@ -2315,6 +2415,7 @@ a socket
 a tamed monster is friendly
 a {} can't be saved
 acacia boat
+after the swap {} has {} gold and {} coal, {} {} gold and {} coal
 already as good as it gets
 already in love
 an alarming number of mites
@@ -2359,6 +2460,7 @@ centroid in
 centroid out 
 charred rattler
 chest recipe
+claims too big
 client snapshots cannot carry effects
 climbed to {}
 collection complete!
@@ -2369,7 +2471,10 @@ controlURL
 cooking pot
 coordinate out of range
 copper golem
+couldn't claim land for {}: {}
 couldn't host: {}
+create Blues blue
+create Reds red
 creatures dying
 cruises about 5 blocks up: {}
 daylight sensor
@@ -2432,6 +2537,8 @@ ids moved
 inventory too long
 it pours into the hole left behind
 it turns toward the player
+join Blues
+join Reds
 just added
 just made
 just now
@@ -2647,6 +2754,7 @@ stopped by the wall: {}
 string too long
 struck down
 swamps meet their neighbours gently (worst step {} over 2 blocks)
+teams too big
 teleported directly into a bad decision
 temper {}%
 tested armour
@@ -2728,6 +2836,7 @@ too many world changes in one event
 too soon
 too wide: prop it up
 tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|creative|spectator> [player], weather <clear|rain|thunder>, seed, summon <mob> [x y z] [count], locate <structure|biome>, setblock <x y z> <block>, kill [player | mobs | <mob>]
+trading table
 trapped chest
 tried to sleep in the Scorchlands
 tried to swim in lava. It's not that kind of pool
@@ -2737,6 +2846,7 @@ truncated mod pack
 turned {} degrees in 0.1 s at 90 degrees per second
 type an address below and press Add to List to keep one.
 unknown block or item "{}"
+unknown colour "{}" (red, blue, green, yellow, purple, orange, aqua, pink)
 unknown message type {}
 unknown mob "{}" (oinker, hisser, groaner, fluffer, starer)
 unknown mod ids become nothing
@@ -2795,6 +2905,7 @@ was smitten by a script
 was spat at by a Llama. Rude
 was struck by lightning. Statistically impressive
 was struck down by a command. Harsh.
+was struck down by {}
 was stung
 was stung by a Bee. The smoker was right there
 was tested
@@ -2872,13 +2983,17 @@ zombie hmmer
 {} Wart Block (Squishy)
 {} Wool
 {} and {} are both in the Scorchlands and can't see each other ({} {}; {} {} {})
+{} and {} both accepted at a Trading Table and the host made no swap
 {} armoured their Galloper and the host's isn't
 {} arrived in the Scorchlands without the gold block that's there
 {} banned address(es) loaded from {}
 {} broke kelp and the host's column didn't come away into water ({})
+{} built on {}'s land
 {} came home and the portal by spawn is gone (it has {})
+{} can build on your land now.
 {} can still see the spectator {}
 {} can still see {} (who's in the Scorchlands)
+{} can't build on your land any more.
 {} can't see {}
 {} chunks ready
 {} cost: {} level{}{}
@@ -2896,22 +3011,30 @@ zombie hmmer
 {} gave an Allay a diamond, and the host's Allay didn't take it
 {} gave their Donkey a chest and the host's has none
 {} got into someone else's Llama's pack
+{} got post and no advancement
 {} h {} min
+{} has different land claims from the host's
+{} has letters {}
 {} has {} where the host has {}
 {} heard {} of {}'s {} lines
 {} hit a Sporeling and wasn't slowed (id {})
+{} hit {} with /pvp on and nothing happened
 {} holds {} {} but the host's ledger says {}
+{} hurt teammate {} with friendly fire off
+{} is already your friend.
 {} is back where they left off.
 {} is no longer an operator.
 {} is now an operator.
 {} is now in {} mode.
 {} is online; kick them first.
+{} is {} now.
 {} isn't banned (unban takes an IP address; see bans).
 {} joined the game
 {} left the game
 {} left the game ({})
 {} lit Soul Soil and the host has {} there
 {} made a stew and it's not in their Cookbook
+{} made a team and {} joined it, and the host doesn't have them together
 {} made you an operator. Try /help.
 {} mixed columns at {} borders
 {} never heard how {} died
@@ -2941,6 +3064,7 @@ zombie hmmer
 {} opened a chest by a Snout and it didn't mind
 {} opened a trapped chest and the host's isn't sprung
 {} picked up the spear but the host's ledger says {}
+{} posted something and the host has {} parcels on their way
 {} put Bone Dust on a fungus and the host's didn't grow
 {} put a lead on a Mooer and the host's isn't on one
 {} put down an acacia boat and the host didn't take it
@@ -2950,15 +3074,18 @@ zombie hmmer
 {} respawned and is still in {}
 {} respawned and isn't back in the Overworld
 {} says hi #{}
+{} sees different teams from the host's
 {} sees the composter still full ({})
 {} sees the pot as {}, not cooking
 {} sees the pot still full after serving
+{} sees the sidebar as {} (the host: {})
 {} served from a pot and got no stew
 {} set a Wilter Star in a beacon, and the host didn't star it
 {} sheared a Mushmooer and the host didn't see it (Mooer {}, mushrooms {})
 {} still sees the trapped chest's lamp lit after it was shut
 {} still sees {}'s old skin
 {} tied their Mooer to a fence and the host's isn't
+{} took the coal out of their inbox and has {} (had {})
 {} trim ({})
 {} walked into a mod's portal and is in {} (the host says {})
 {} walked into a portal and is in {} (the host says {})
@@ -2968,10 +3095,14 @@ zombie hmmer
 {} was never told it's a spectator
 {} wasn't an operator.
 {} wasn't on the allow-list.
+{} wasn't on your list.
 {} won't cook. It's been asked.
 {} wore off.
 {} {} HTTP/1.1r\nHost: {}:{}r\nConnection: closer\nContent-Length: {}r\n
 {}% cooked
+{}'s claim is gone.
+{}'s inbox has {} coal after the post came
+{}'s members {} hurt each other now.
 {}'s world
 {}, and maybe more
 {}, button

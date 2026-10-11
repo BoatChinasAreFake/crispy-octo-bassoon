@@ -18,7 +18,8 @@
 //! back), breaks a full Hollow Box, picks it up and puts it down somewhere
 //! else (the contents come too), and is made a spectator (the host hides it
 //! from the others and refuses its block edits). Last, the host must have
-//! everyone's statistics.
+//! everyone's statistics. (Later batches add their own checks, through to
+//! teams, Trading Tables, sidebars, land claims and the post.)
 //!
 //! It prints what it did and what didn't match, and exits with 0 if all is
 //! well (1 otherwise), so it can run in CI or before a release.
@@ -188,6 +189,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     scorched(&mut host, &mut team, &mut report, &mut touched);
     travelled(&mut host, &mut team, &mut report, &mut touched);
     homely(&mut host, &mut team, &mut report, &mut touched);
+    together(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -1854,6 +1856,206 @@ fn homely(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut 
     }
 }
 
+/// Shift-click the first slot of the open container holding `item` (into the inventory).
+fn take_out(g: &mut Game, item: Id) {
+    let Some(p) = g.open else { return };
+    let slot = crate::containers::store_ref(&g.world, &g.vehicles, p).and_then(|c| c.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)));
+    if let Some(i) = slot {
+        g.container_click(i, false, true);
+    }
+}
+
+/// Shift-click `item` from the inventory into the open container.
+fn put_in(g: &mut Game, item: Id) {
+    if let Some(slot) = g.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == item)) {
+        g.container_quick_put(slot);
+    }
+}
+
+/// v0.4 part 4: teams and friendly fire, a Trading Table, a minigame's
+/// sidebar, land claims and the post.
+fn together(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    let n = team.len();
+    revive(host, team);
+    for k in 0..n.min(3) {
+        ground(host, team, k);
+    }
+    let (a, b) = (0, 1 % n);
+    let (name_a, name_b) = (team[a].name.clone(), team[b].name.clone());
+    let (id_a, id_b) = (team[a].game.my_id, team[b].game.my_id);
+
+    // 47. Two bots make and join a team by command: everyone agrees who's on it,
+    // and with /pvp on, teammates can't hurt each other but others can.
+    if n >= 2 {
+        team[a].game.send_chat("/team create Reds red");
+        pump(host, team, 0.7, |_| idle());
+        team[b].game.send_chat("/team join Reds");
+        pump(host, team, 1.0, |_| idle());
+        report.features.push("teams");
+        if !host.teams.same_team(&name_a, &name_b) {
+            report.problems.push(format!("{name_a} made a team and {name_b} joined it, and the host doesn't have them together"));
+        }
+        for bot in team.iter() {
+            if bot.game.teams != host.teams {
+                report.problems.push(format!("{} sees different teams from the host's", bot.name));
+            }
+        }
+        host.pvp = true;
+        host.share_teams();
+        pump(host, team, 0.5, |_| idle());
+        let before = team[a].game.player.health;
+        team[b].game.net_send_msg(Msg::HitPlayer { target: id_a, dmg: 3.0 });
+        pump(host, team, 0.7, |_| idle());
+        if team[a].game.player.health < before {
+            report.problems.push(format!("{name_b} hurt teammate {name_a} with friendly fire off"));
+        }
+        if n >= 3 {
+            team[2].game.net_send_msg(Msg::HitPlayer { target: id_a, dmg: 3.0 });
+            pump(host, team, 0.7, |_| idle());
+            if team[a].game.player.health >= before {
+                report.problems.push(format!("{} hit {name_a} with /pvp on and nothing happened", team[2].name));
+            }
+        }
+        host.pvp = false;
+        host.share_teams();
+        revive(host, team);
+    }
+
+    // 48. Two bots swap at a Trading Table: coal for gold, once both accept.
+    if n >= 2 {
+        let feet = team[a].game.player.body.pos.floor().as_ivec3();
+        let table = feet + IVec3::new(0, 0, 2);
+        host.world.set_v(table - IVec3::Y, STONE);
+        host.world.set_v(table, TRADING_TABLE);
+        touched.insert(table);
+        touched.insert(table - IVec3::Y);
+        host.give_peer(id_a, COAL, 7);
+        host.give_peer(id_b, GOLD_INGOT, 4);
+        pump(host, team, 1.0, |_| idle());
+        let (coal, gold) = (team[a].game.inv.count(COAL), team[b].game.inv.count(GOLD_INGOT));
+        team[a].game.open_container(table);
+        pump(host, team, 0.5, |_| idle());
+        team[b].game.open_container(table);
+        pump(host, team, 0.7, |_| idle());
+        put_in(&mut team[a].game, COAL);
+        put_in(&mut team[b].game, GOLD_INGOT);
+        pump(host, team, 0.7, |_| idle());
+        team[a].game.press_accept();
+        team[b].game.press_accept();
+        pump(host, team, 1.0, |_| idle());
+        take_out(&mut team[a].game, GOLD_INGOT);
+        take_out(&mut team[b].game, COAL);
+        pump(host, team, 1.0, |_| idle());
+        team[a].game.close_container();
+        team[b].game.close_container();
+        pump(host, team, 0.5, |_| idle());
+        report.features.push("trading table");
+        if host.deals.get(&table).map_or(0, |d| d.done) == 0 {
+            report.problems.push(format!("{name_a} and {name_b} both accepted at a Trading Table and the host made no swap"));
+        }
+        if team[a].game.inv.count(GOLD_INGOT) == 0 || team[b].game.inv.count(COAL) < coal || team[a].game.inv.count(COAL) >= coal || team[b].game.inv.count(GOLD_INGOT) >= gold {
+            report.problems.push(format!("after the swap {name_a} has {} gold and {} coal, {name_b} {} gold and {} coal", team[a].game.inv.count(GOLD_INGOT), team[a].game.inv.count(COAL), team[b].game.inv.count(GOLD_INGOT), team[b].game.inv.count(COAL)));
+        }
+        host.world.set_v(table, AIR);
+    }
+
+    // 49. A minigame's sidebar: everyone sees the host's scores.
+    host.board.set("dug", &name_a, 7);
+    host.board.set("dug", &name_b, 3);
+    host.board.sidebar = Some(("dug".into(), "Dig Race".into()));
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("sidebar");
+    for bot in team.iter() {
+        if bot.game.board.shown != host.board.shown || bot.game.board.shown.lines.is_empty() {
+            report.problems.push(format!("{} sees the sidebar as {:?} (the host: {:?})", bot.name, bot.game.board.shown, host.board.shown));
+        }
+    }
+    host.board = Default::default();
+    pump(host, team, 0.5, |_| idle());
+
+    // 50. Land claims: on the first bot's land, another can't build.
+    if n >= 2 {
+        let feet = team[a].game.player.body.pos.floor().as_ivec3();
+        host.claims.on = true;
+        let post = feet + IVec3::new(-2, 0, 0);
+        if let Err(e) = host.claims.add(&name_a, post, 0) {
+            report.problems.push(format!("couldn't claim land for {name_a}: {e}"));
+        }
+        host.share_claims();
+        pump(host, team, 0.7, |_| idle());
+        let spot = feet + IVec3::new(1, 0, -2);
+        host.world.set_v(spot - IVec3::Y, STONE);
+        host.world.set_v(spot, AIR);
+        touched.insert(spot);
+        touched.insert(spot - IVec3::Y);
+        pump(host, team, 0.5, |_| idle());
+        team[b].game.world.set_v(spot, COBBLE);
+        pump(host, team, 1.5, |_| idle());
+        report.features.push("claims");
+        for bot in team.iter() {
+            if bot.game.claims != host.claims {
+                report.problems.push(format!("{} has different land claims from the host's", bot.name));
+            }
+        }
+        if host.world.get_v(spot) != AIR {
+            report.problems.push(format!("{name_b} built on {name_a}'s land"));
+        }
+        host.claims = Default::default();
+        host.share_claims();
+        pump(host, team, 0.5, |_| idle());
+    }
+
+    // 51. Post: one bot sends coal and a letter to another, who takes it out of their inbox.
+    if n >= 2 {
+        let feet = team[a].game.player.body.pos.floor().as_ivec3();
+        let box_at = feet + IVec3::new(0, 0, -2);
+        host.world.set_v(box_at - IVec3::Y, STONE);
+        host.world.set_v(box_at, POST_BOX);
+        touched.insert(box_at);
+        touched.insert(box_at - IVec3::Y);
+        host.give_peer(id_a, COAL, 5);
+        pump(host, team, 1.0, |_| idle());
+        let had = team[b].game.inv.count(COAL);
+        team[a].game.open_post(false);
+        pump(host, team, 0.7, |_| idle());
+        put_in(&mut team[a].game, COAL);
+        pump(host, team, 0.7, |_| idle());
+        team[a].game.press_send(&name_b, "Coal for the kitchen.");
+        pump(host, team, 1.0, |_| idle());
+        team[a].game.close_container();
+        report.features.push("post");
+        if host.mail.parcels.len() != 1 {
+            report.problems.push(format!("{name_a} posted something and the host has {} parcels on their way", host.mail.parcels.len()));
+        }
+        for p in host.mail.parcels.iter_mut() {
+            p.due = 0.0;
+        }
+        pump(host, team, 1.5, |_| idle());
+        let inbox = crate::post::inbox_key(&name_b);
+        let waiting = host.world.mail_boxes.get(&inbox).map_or(0, |c| c.contents().iter().filter(|s| s.0 == COAL).map(|s| s.1 as u32).sum::<u32>());
+        if waiting < 5 {
+            report.problems.push(format!("{name_b}'s inbox has {waiting} coal after the post came"));
+        }
+        if team[b].game.letters_for(&name_b) != vec![(name_a.clone(), "Coal for the kitchen.".to_string())] {
+            report.problems.push(format!("{name_b} has letters {:?}", team[b].game.letters_for(&name_b)));
+        }
+        if !team[b].game.advancements.has("youve_got_post") {
+            report.problems.push(format!("{name_b} got post and no advancement"));
+        }
+        team[b].game.open_post(true);
+        pump(host, team, 0.7, |_| idle());
+        take_out(&mut team[b].game, COAL);
+        pump(host, team, 0.7, |_| idle());
+        team[b].game.close_container();
+        pump(host, team, 0.5, |_| idle());
+        if team[b].game.inv.count(COAL) < had + 5 {
+            report.problems.push(format!("{name_b} took the coal out of their inbox and has {} (had {had})", team[b].game.inv.count(COAL)));
+        }
+        host.world.set_v(box_at, AIR);
+    }
+    let _ = id_b;
+}
+
 /// A small mod the `--playtest` command installs, so the bots can try a mod's
 /// dimension (see modgen.rs). (Not for the unit test: it would change the
 /// blocks under every other test running alongside.)
@@ -1900,7 +2102,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

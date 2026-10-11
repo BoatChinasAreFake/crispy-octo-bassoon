@@ -114,6 +114,11 @@ impl W {
     pub(crate) fn f32(&mut self, v: f32) {
         self.0.extend_from_slice(&v.to_le_bytes())
     }
+    /// A u32 length, then the UTF-8.
+    pub(crate) fn str(&mut self, s: &str) {
+        self.u32(s.len() as u32);
+        self.0.extend_from_slice(s.as_bytes())
+    }
 }
 
 pub(crate) struct R<'a>(pub &'a [u8]);
@@ -150,6 +155,10 @@ impl R<'_> {
         let (a, b) = self.0.split_at(n);
         self.0 = b;
         Ok(a.to_vec())
+    }
+    /// A string written by `W::str` (at most 64 KiB).
+    pub(crate) fn str(&mut self) -> io::Result<String> {
+        Ok(String::from_utf8_lossy(&self.bytes(65536)?).into_owned())
     }
 }
 

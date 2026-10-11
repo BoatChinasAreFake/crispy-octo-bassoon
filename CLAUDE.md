@@ -54,7 +54,7 @@ Parts:
 - Part 3: items 5, 6 and 7. **(released)**
 - Part 4: the two originals (this is the last part). **(released)**
 
-## v0.4: Together and tinkering
+## v0.4: Together and tinkering (released)
 
 1. Encrypted multiplayer: a key exchange and an encrypted stream for all traffic, using only the standard library (as now).
 2. Finding servers: LAN games show up by themselves, and a saved server list with ping and player count.
@@ -64,6 +64,9 @@ Parts:
 6. Speed: chunk meshing on worker threads, compressed region files, a lower-memory option.
 7. Languages: all text in a strings file, so translations can come as mods.
 8. Accessibility: narrated menus, toggle (rather than hold) sneak and sprint, a high-contrast UI.
+9. Teams (the user's request): join a coloured team, with coloured name tags, team chat, teammates on the map, and an option to turn off friendly fire.
+10. A trading table (the user's request): two players put items on a shared table, and the swap only happens when both accept (host-checked).
+11. A mod minigame API (the user's request): scripts get scoreboards, timers, team and spawn controls, and a sidebar display, so mods can build minigames.
 
 Originals:
 - Land claims: a Survey Post marks out an area only you and the friends you name can build in (opt-in per server).
@@ -73,7 +76,7 @@ Parts:
 - Part 1: items 1, 2 and 3. **(released)**
 - Part 2: items 4 and 5. **(released)**
 - Part 3: items 6, 7 and 8. **(released)**
-- Part 4: the two originals (this is the last part).
+- Part 4: items 9, 10 and 11, and the two originals (this is the last part). **(released)**
 
 ## v0.5: Villages and people
 

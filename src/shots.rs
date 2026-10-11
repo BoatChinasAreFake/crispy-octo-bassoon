@@ -369,7 +369,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -858,7 +858,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1020,6 +1020,33 @@ impl App {
                     peer.own_skin = Some(if i == 0 { template.clone() } else { card.clone() });
                     app.game.peers.insert(500 + i as u32, peer);
                 }
+            }
+            if s.mode == "together" && frames == 125 {
+                // Two teams with coloured names, a minigame's sidebar and a Survey Post.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let right = Vec3::new(s.yaw.cos(), 0.0, s.yaw.sin());
+                app.game.player_name = "Stove".into();
+                app.game.teams.command("Ann", "create Reds red", false);
+                app.game.teams.command("Bob", "join Reds", false);
+                app.game.teams.command("Cat", "create Blues blue", false);
+                app.game.teams.command("Dan", "join Blues", false);
+                for (i, name) in ["Ann", "Bob", "Cat", "Dan"].into_iter().enumerate() {
+                    let mut peer = multiplayer::Peer::new(name.into(), p + fwd * (5.0 + (i % 2) as f32) + right * (i as f32 - 1.5) * 1.8);
+                    peer.yaw = s.yaw + std::f32::consts::PI;
+                    peer.skin = i as u8 + 1;
+                    app.game.peers.insert(600 + i as u32, peer);
+                }
+                for (name, n) in [("Reds", 12), ("Blues", 9)] {
+                    app.game.board.set("dug", name, n);
+                }
+                app.game.board.sidebar = Some(("dug".into(), "Dig Race".into()));
+                app.game.board.start_timer("round", 95.0);
+                app.game.board.countdown = Some(("round".into(), "Round ends in".into()));
+                let post = p + fwd * 3.0 - right * 2.5;
+                app.game.world.set_v(post.floor().as_ivec3(), block::SURVEY_POST);
+                app.game.claims.on = true;
+                let _ = app.game.claims.add("Stove", post.floor().as_ivec3(), 0);
             }
             if s.mode == "chat" && frames == 60 {
                 // A long chat, open and scrolled back a little.
@@ -1208,6 +1235,49 @@ impl App {
                     app.game.world.dirty.insert((big.x.div_euclid(16), big.z.div_euclid(16)));
                 }
                 app.game.lids.insert(big, chests::Lid { open: 1.0, yaw: s.yaw + std::f32::consts::PI });
+            }
+            if s.mode == "tradetable" && frames == 125 {
+                // A Trading Table between us and Bob: his emeralds-worth of gold for our diamonds.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let v = p + fwd * 2.5;
+                let at = IVec3::new(v.x.floor() as i32, p.y.floor() as i32, v.z.floor() as i32);
+                app.game.world.set_v(at, block::TRADING_TABLE);
+                app.game.player_name = "Stove".into();
+                app.game.open_container(at);
+                app.game.take_seat(at, "Bob");
+                if let Some(c) = app.game.world.containers.get_mut(&at) {
+                    c.slots[0] = Some((block::DIAMOND, 3));
+                    c.slots[1] = Some((block::BREAD, 4));
+                    c.slots[9] = Some((block::GOLD_INGOT, 12));
+                    c.slots[10] = Some((block::SADDLE, 1));
+                    c.slots[13] = Some((block::COAL, 32));
+                }
+                app.game.accept_deal(at, "Bob", true);
+                for (item, n) in [(block::DIAMOND, 5), (block::IRON, 9), (block::LOG, 16)] {
+                    app.game.give(item, n);
+                }
+            }
+            if s.mode == "postbox" && frames == 125 {
+                // A Post Box, and a birthday parcel for Bob half written.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let v = p + fwd * 2.5;
+                app.game.world.set_v(IVec3::new(v.x.floor() as i32, p.y.floor() as i32, v.z.floor() as i32), block::POST_BOX);
+                app.game.player_name = "Stove".into();
+                app.game.open_post(false);
+                let out = post::outbox_key("Stove");
+                if let Some(c) = app.game.world.mail_boxes.get_mut(&out) {
+                    c.slots[0] = Some((block::CAKE, 1));
+                    c.slots[1] = Some((block::DIAMOND, 3));
+                    c.slots[2] = Some((block::BREAD, 8));
+                }
+                app.post_to = "Bob".into();
+                app.post_letter = "Happy birthday! Don't eat it all at once.".into();
+                app.post_focus = 2;
+                for (item, n) in [(block::DIAMOND, 5), (block::IRON, 9), (block::LOG, 16)] {
+                    app.game.give(item, n);
+                }
             }
             if matches!(s.mode.as_str(), "kitchen" | "chest" | "furnace") && frames == 125 {
                 // A chest, a table and a row of furnaces (the middle one busy), a few blocks ahead.

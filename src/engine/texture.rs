@@ -878,6 +878,14 @@ pub const T_TRAPPED_CHEST_SIDE: u16 = 1091;
 /// Four: one for each kind of noise it listens for.
 pub const T_CALIBRATED_TOP: u16 = 1092;
 pub const T_CALIBRATED_SIDE: u16 = 1096;
+// Playing together (see together.rs).
+pub const T_TRADE_TOP: u16 = 1100;
+pub const T_TRADE_SIDE: u16 = 1101;
+pub const T_SURVEY_SIDE: u16 = 1102;
+pub const T_SURVEY_TOP: u16 = 1103;
+pub const T_POSTBOX_FRONT: u16 = 1104;
+pub const T_POSTBOX_TOP: u16 = 1105;
+pub const T_LETTER: u16 = 1106;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4589,6 +4597,82 @@ fn zappart_tiles(a: &mut Atlas) {
     });
 }
 
+/// The Trading Table, the Survey Post, the Post Box and letters.
+fn together_tiles(a: &mut Atlas) {
+    // A trading table: planks with a green baize top, a gold line down the middle (yours, mine).
+    a.each(T_TRADE_TOP, |x, y, r, _| {
+        let edge = x == 0 || y == 0 || x == 15 || y == 15;
+        if edge {
+            shade(rgb(150, 105, 60), r.range(0.85, 1.05))
+        } else if x == 7 || x == 8 {
+            shade(rgb(230, 190, 60), r.range(0.9, 1.1))
+        } else {
+            shade(rgb(40, 110, 60), r.range(0.85, 1.1))
+        }
+    });
+    a.each(T_TRADE_SIDE, |x, y, r, _| {
+        let leg = !(3..=12).contains(&x) && y > 4;
+        let top = y < 4;
+        if top {
+            shade(rgb(150, 105, 60), r.range(0.85, 1.05) * if y == 3 { 0.7 } else { 1.0 })
+        } else if leg {
+            shade(rgb(120, 80, 45), r.range(0.85, 1.05))
+        } else if y == 8 && (5..11).contains(&x) {
+            rgb(230, 190, 60)
+        } else {
+            shade(rgb(95, 65, 38), r.range(0.85, 1.05))
+        }
+    });
+    // A survey post: a striped red-and-white marker, a brass plate on top.
+    a.each(T_SURVEY_SIDE, |x, y, r, _| {
+        let stripe = (y / 4) % 2 == 0;
+        let base = if stripe { rgb(220, 50, 40) } else { rgb(235, 232, 225) };
+        shade(base, r.range(0.88, 1.05) * if x == 0 || x == 15 { 0.8 } else { 1.0 })
+    });
+    a.each(T_SURVEY_TOP, |x, y, r, _| {
+        let d = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if d < 3.0 {
+            shade(rgb(30, 30, 30), r.range(0.9, 1.1))
+        } else if d < 6.0 {
+            shade(rgb(205, 160, 60), r.range(0.9, 1.1))
+        } else {
+            shade(rgb(220, 50, 40), r.range(0.88, 1.05))
+        }
+    });
+    // A post box: pillar-box red, a slot, and a little white sign.
+    a.each(T_POSTBOX_FRONT, |x, y, r, _| {
+        let slot = y == 5 && (4..12).contains(&x);
+        let sign = (8..11).contains(&y) && (5..11).contains(&x);
+        if slot {
+            rgb(20, 10, 10)
+        } else if sign {
+            shade(rgb(240, 235, 220), r.range(0.95, 1.05))
+        } else {
+            shade(rgb(200, 30, 35), r.range(0.85, 1.05) * if y > 13 { 0.7 } else { 1.0 })
+        }
+    });
+    a.each(T_POSTBOX_TOP, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(rgb(170, 25, 30), r.range(0.85, 1.05) * if rim { 0.75 } else { 1.0 })
+    });
+    // A letter: an envelope with a red seal.
+    a.each(T_LETTER, |x, y, r, _| {
+        let inside = (2..14).contains(&x) && (4..12).contains(&y);
+        if !inside {
+            return [0, 0, 0, 0];
+        }
+        let flap = (y as i32 - 4) == (x as i32 - 2).min(13 - x as i32) / 2;
+        let seal = (7..9).contains(&x) && (7..9).contains(&y);
+        if seal {
+            rgb(200, 30, 35)
+        } else if flap || x == 2 || x == 13 || y == 4 || y == 11 {
+            shade(rgb(190, 175, 140), r.range(0.95, 1.05))
+        } else {
+            shade(rgb(245, 238, 220), r.range(0.95, 1.05))
+        }
+    });
+}
+
 /// Cauldrons, composters, lightning rods, Galloper armour and dyed woolly armour.
 fn homecraft_tiles(a: &mut Atlas) {
     // A cauldron: dark iron with rivets, a rim on top, and a sooty inside.
@@ -4670,6 +4754,7 @@ fn homecraft_tiles(a: &mut Atlas) {
     });
     cooking_tiles(a);
     zappart_tiles(a);
+    together_tiles(a);
     // Dyed woolly armour: the worn knit and the icons, in each colour.
     for c in 0..8u16 {
         let base = { let [r, g, b] = crate::carpentry::colour_rgb(c as usize); rgb(r, g, b) };

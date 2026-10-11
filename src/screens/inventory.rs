@@ -538,9 +538,21 @@ impl App {
         // Bigger chests have more rows (and the biggest is wider; see chests.rs).
         // (A backpack's pack shows only as much as the backpack reaches.)
         let shown = if chests::is_chest(kind) { c.slots.len().min(chests::slots(kind)) } else { c.slots.len() };
-        let cols = if containers::is_three_slot(kind) { 9 } else { chests::columns(shown) };
+        let table = kind == TRADING_TABLE;
+        // A Post Box: your outbox (with who it's for and a letter) or inbox (with your letters).
+        let post = post::is_post_key(pos);
+        let inbox = post::is_inbox(pos);
+        let cols = if containers::is_three_slot(kind) || table { 9 } else { chests::columns(shown) };
         let rows = if containers::is_three_slot(kind) { 3 } else { shown.div_ceil(cols).max(1) };
-        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * rows as f32 };
+        let top_h = if containers::is_three_slot(kind) {
+            slot * 3.2
+        } else if table {
+            slot * 3.0 + 32.0 * s
+        } else if post {
+            slot * rows as f32 + 58.0 * s
+        } else {
+            slot * rows as f32
+        };
         let panel_w = slot * cols as f32 + 12.0 * s;
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
@@ -552,10 +564,26 @@ impl App {
         let isx = x0 + (panel_w - slot * 9.0) / 2.0;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
         let mut tooltip: Option<String> = None;
-        let title = if backpacks::pack_of_key(pos).is_some() { item_name(self.game.inv.held()) } else { block(kind).name };
+        let title = if backpacks::pack_of_key(pos).is_some() {
+            item_name(self.game.inv.held())
+        } else if post {
+            if inbox { "Post Box: Inbox" } else { "Post Box: Send" }
+        } else {
+            block(kind).name
+        };
         self.ui.text(title, sx, y0 + 12.0 * s, 10.0, WHITE);
         let sort = Rect::new(x0 + panel_w - 42.0 * s, y0 + 3.0 * s, 36.0 * s, 13.0 * s);
-        if !containers::is_three_slot(kind) && self.ui.button(sort, "Sort", true) {
+        if post {
+            // Over to the other one.
+            let me = self.game.player_name.clone();
+            let waiting = self.game.post_waiting(&me);
+            let label = if inbox { "Send Post".to_string() } else if waiting > 0 { format!("Inbox ({waiting})") } else { "Inbox".to_string() };
+            if self.ui.button(Rect::new(x0 + panel_w - 66.0 * s, y0 + 3.0 * s, 60.0 * s, 13.0 * s), &label, true) {
+                self.post_focus = 0;
+                self.game.open_post(!inbox);
+                return;
+            }
+        } else if !containers::is_three_slot(kind) && !table && self.ui.button(sort, "Sort", true) {
             self.game.sort_container();
         }
         let top = y0 + 18.0 * s;
@@ -563,6 +591,9 @@ impl App {
         let spots: Vec<(usize, f32, f32)> = if containers::is_three_slot(kind) {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
+        } else if table {
+            // Two offers side by side, 3x3 each (see trading.rs).
+            (0..trading::TRADE_SLOTS).map(|i| (i, sx + (i % 3) as f32 * slot + if i >= trading::HALF { slot * 6.0 } else { 0.0 }, top + 10.0 * s + ((i % trading::HALF) / 3) as f32 * slot)).collect()
         } else {
             (0..shown).map(|i| (i, sx + (i % cols) as f32 * slot, top + (i / cols) as f32 * slot)).collect()
         };
@@ -574,6 +605,35 @@ impl App {
             if l || r {
                 self.game.container_click(i, r, shift && l);
             }
+        }
+        if table {
+            let deal = self.game.deals.get(&pos).cloned().unwrap_or_default();
+            let me = self.game.player_name.clone();
+            let mine = self.game.seat_at(pos, &me);
+            for side in 0..2 {
+                let x = sx + side as f32 * slot * 6.0;
+                let who = if deal.seats[side].is_empty() { "(waiting for someone)".to_string() } else { deal.seats[side].clone() };
+                let col = if mine == Some(side) { Color::new(1.0, 1.0, 0.6, 1.0) } else { WHITE };
+                // (A name isn't translated.)
+                self.ui.raw_text(&self.ui.fit(&who, 8.0, slot * 3.0), x, top + 7.0 * s, 8.0, col);
+                let (mark, mc) = if deal.accepted[side] { ("Accepted", Color::new(0.4, 1.0, 0.4, 1.0)) } else { ("Thinking...", GRAY) };
+                self.ui.text(mark, x, top + 10.0 * s + slot * 3.0 + 8.0 * s, 8.0, mc);
+            }
+            // Between them: what happens when both say yes.
+            let mid = sx + slot * 3.25;
+            self.ui.text_centered("<- swap ->", mid + slot * 1.25, top + 10.0 * s + slot * 1.4, 8.0, GOLD);
+            let label = match mine {
+                Some(s0) if deal.accepted[s0] => "Take Back",
+                Some(_) => "Accept",
+                None => "Table's Full",
+            };
+            let r = Rect::new(mid, top + 10.0 * s + slot * 2.0, slot * 2.5, 14.0 * s);
+            if self.ui.button(r, label, mine.is_some()) {
+                self.game.press_accept();
+            }
+        }
+        if post {
+            self.post_panel(inbox, sx, top + rows as f32 * slot + 4.0 * s, panel_w - 12.0 * s);
         }
         if kind == BREWING_STAND {
             let progress = (c.cook / potions::BREW_SECS).clamp(0.0, 1.0);
@@ -633,6 +693,65 @@ impl App {
         } else if let Some(t) = tooltip {
             self.ui.tooltip(&t);
         }
+    }
+
+    /// Under a Post Box's slots: who it's for and the letter (outbox), or your letters (inbox).
+    fn post_panel(&mut self, inbox: bool, x: f32, y: f32, w: f32) {
+        let s = self.ui.s;
+        let grey = Color::new(0.75, 0.75, 0.75, 1.0);
+        if inbox {
+            let me = self.game.player_name.clone();
+            let letters = self.game.letters_for(&me);
+            if letters.is_empty() {
+                self.ui.text("No letters. Things sent to you arrive in the slots above.", x, y + 9.0 * s, 7.0, grey);
+                return;
+            }
+            // The newest three (a name and a letter aren't translated).
+            for (i, (from, text)) in letters.iter().rev().take(3).enumerate() {
+                let line = format!("{from}: {}", text.replace('\n', " "));
+                self.ui.raw_text(&self.ui.fit(&line, 7.0, w - 44.0 * s), x, y + 9.0 * s + i as f32 * 11.0 * s, 7.0, WHITE);
+            }
+            if letters.len() > 3 {
+                self.ui.text(&format!("(and {} older)", letters.len() - 3), x, y + 9.0 * s + 33.0 * s, 6.5, grey);
+            }
+            if self.ui.button(Rect::new(x + w - 40.0 * s, y + 2.0 * s, 40.0 * s, 13.0 * s), "Bin Them", true) {
+                self.game.bin_letters();
+            }
+            return;
+        }
+        let field_h = 14.0 * s;
+        self.ui.text("To:", x, y + 10.0 * s, 8.0, grey);
+        let to_r = Rect::new(x + 20.0 * s, y, 90.0 * s, field_h);
+        let letter_r = Rect::new(x + 20.0 * s, y + field_h + 4.0 * s, w - 20.0 * s, field_h);
+        self.ui.text("Note:", x, y + field_h + 14.0 * s, 8.0, grey);
+        let clicked_to = self.ui.text_field(to_r, &self.post_to, self.post_focus == 1);
+        // A long letter shows its end, where you're typing.
+        let mut shown = self.post_letter.clone();
+        while !shown.is_empty() && self.ui.raw_width(&shown, 10.0) > letter_r.w - 14.0 * s {
+            shown.remove(0);
+        }
+        let clicked_letter = self.ui.text_field(letter_r, &shown, self.post_focus == 2);
+        if clicked_to {
+            self.post_focus = 1;
+        } else if clicked_letter {
+            self.post_focus = 2;
+        } else if self.ui.clicked {
+            self.post_focus = 0;
+        }
+        let send = Rect::new(x + w - 50.0 * s, y, 50.0 * s, field_h);
+        if self.ui.button(send, "Send", !self.post_to.trim().is_empty()) {
+            self.send_post_now();
+        }
+        self.ui.text("A Cluckster takes it. They get it even if they're away.", x, y + field_h * 2.0 + 16.0 * s, 6.5, grey);
+    }
+
+    /// The Post Box's Send button (or Enter in the letter).
+    pub(crate) fn send_post_now(&mut self) {
+        let (to, letter) = (self.post_to.clone(), self.post_letter.clone());
+        if self.game.press_send(&to, &letter) {
+            self.post_letter.clear();
+        }
+        self.post_focus = 0;
     }
 
     /// A grindstone or smithing table.

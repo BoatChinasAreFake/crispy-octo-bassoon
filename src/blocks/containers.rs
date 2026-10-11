@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    crate::chests::is_chest(id) || matches!(id, BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::zapparts::is_dropper(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id)
+    crate::chests::is_chest(id) || matches!(id, BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::zapparts::is_dropper(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id) || id == TRADING_TABLE
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -119,6 +119,13 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if crate::home::is_stand(kind) {
         return armor_of(item).is_some_and(|(s, _)| s == slot);
     }
+    if kind == TRADING_TABLE {
+        return slot < crate::trading::TRADE_SLOTS;
+    }
+    // An outbox (inboxes are take-only: see `post::is_inbox`).
+    if kind == POST_BOX {
+        return slot < crate::post::OUTBOX_SLOTS;
+    }
     if !is_furnace(kind) {
         return slot < crate::chests::slots(kind);
     }
@@ -139,6 +146,8 @@ impl Container {
             crate::hoppers::SLOTS
         } else if crate::home::is_stand(id) {
             crate::home::STAND_SLOTS
+        } else if id == TRADING_TABLE {
+            crate::trading::TRADE_SLOTS
         } else {
             crate::chests::slots(id)
         };
@@ -375,6 +384,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get_mut(&k);
     }
+    if crate::post::is_post_key(p) {
+        return world.mail_boxes.get_mut(&p);
+    }
     if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
         return world.backpacks.get_mut(&k);
     }
@@ -390,6 +402,9 @@ pub fn store<'a>(world: &'a mut World, vehicles: &'a mut [crate::vehicles::Vehic
 pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle], p: IVec3) -> Option<&'a Container> {
     if let Some(k) = crate::stash::stash_of_key(p) {
         return world.stashes.get(&k);
+    }
+    if crate::post::is_post_key(p) {
+        return world.mail_boxes.get(&p);
     }
     if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
         return world.backpacks.get(&k);
@@ -407,6 +422,10 @@ pub fn store_ref<'a>(world: &'a World, vehicles: &'a [crate::vehicles::Vehicle],
 pub fn store_kind(world: &World, vehicles: &[crate::vehicles::Vehicle], p: IVec3) -> Id {
     if crate::stash::stash_of_key(p).is_some() {
         return PERSONAL_CHEST;
+    }
+    // Someone's inbox or outbox (see post.rs).
+    if crate::post::is_post_key(p) {
+        return POST_BOX;
     }
     // A pack works like a chest as big as the backpack it's opened with.
     if let Some((_, t)) = crate::backpacks::pack_of_key(p) {
@@ -438,6 +457,10 @@ impl Game {
             self.snouts_see_chest_opened(pos);
         }
         self.treasure_advancements(pos);
+        if !self.is_client() && self.world.get_v(pos) == TRADING_TABLE {
+            let me = self.player_name.clone();
+            self.take_seat(pos, &me);
+        }
         self.open = Some(pos);
         self.sfx(Sfx::Place(Mat::Wood), Some(store_centre(&self.vehicles, pos)));
         if self.is_client() {
@@ -459,10 +482,20 @@ impl Game {
 
     pub fn close_container(&mut self) {
         self.inv.return_cursor();
+        let table = self.open.filter(|&p| self.world.get_v(p) == TRADING_TABLE);
         if let Some(p) = self.open.take()
             && self.is_client()
         {
             self.net_send_msg(Msg::CloseContainer { x: p.x, y: p.y, z: p.z });
+        }
+        // A Trading Table: our seat goes if our side is empty (see trading.rs).
+        if let Some(p) = table {
+            if self.is_client() {
+                self.deals.remove(&p);
+            } else {
+                let me = self.player_name.clone();
+                self.leave_seat(p, &me);
+            }
         }
     }
 
@@ -471,6 +504,10 @@ impl Game {
     pub fn container_click(&mut self, slot: usize, right: bool, shift: bool) {
         let Some(pos) = self.open else { return };
         let kind = store_kind(&self.world, &self.vehicles, pos);
+        // A Trading Table: only our own side (see trading.rs).
+        if kind == TRADING_TABLE && !self.may_touch(pos, &self.player_name.clone(), slot) {
+            return;
+        }
         let Some(c) = store(&mut self.world, &mut self.vehicles, pos) else { return };
         let Some(&before) = c.slots.get(slot) else { return };
         let mut s = before;
@@ -483,7 +520,7 @@ impl Game {
             }
         } else {
             // Only what the slot accepts may go in (the output is take-only).
-            let put_ok = cursor.map(|(id, _)| accepts(kind, slot, id)).unwrap_or(true);
+            let put_ok = cursor.map(|(id, _)| accepts(kind, slot, id) && !crate::post::is_inbox(pos)).unwrap_or(true);
             let same = matches!((cursor, s), (Some((a, _)), Some((b, _))) if a == b);
             if !(put_ok || cursor.is_none() || (slot == OUTPUT && is_three_slot(kind))) {
                 return;
@@ -515,6 +552,9 @@ impl Game {
         }
         let wear = c.wear[slot];
         self.dirty_containers.insert(pos);
+        if kind == TRADING_TABLE && s != before && !self.is_client() {
+            self.deal_changed(pos);
+        }
         // Loading a chest cart.
         if s.is_some() && s != before && crate::vehicles::cart_of_key(pos).is_some() && kind == CHEST {
             self.advance("freight");
@@ -538,6 +578,19 @@ impl Game {
         let Some(pos) = self.open else { return };
         let Some((id, n)) = self.inv.slots.get(inv_slot).copied().flatten() else { return };
         let kind = store_kind(&self.world, &self.vehicles, pos);
+        // An inbox: take-only (see post.rs).
+        if crate::post::is_inbox(pos) {
+            return;
+        }
+        // A Trading Table: onto our own side only (see trading.rs).
+        let side = if kind == TRADING_TABLE {
+            match self.seat_at(pos, &self.player_name.clone()) {
+                Some(s) => Some(s),
+                None => return,
+            }
+        } else {
+            None
+        };
         let Some(c) = store(&mut self.world, &mut self.vehicles, pos) else { return };
         let mut left = n;
         let mut changed: Vec<(usize, Stack)> = Vec::new();
@@ -549,7 +602,7 @@ impl Game {
         } else {
             // Chests: top up matching stacks first, then empty slots.
             let (same, empty): (Vec<usize>, Vec<usize>) = (0..c.slots.len()).filter(|&i| c.slots[i].map(|s| s.0 == id).unwrap_or(true)).partition(|&i| c.slots[i].is_some());
-            same.into_iter().chain(empty).collect()
+            same.into_iter().chain(empty).filter(|&i| side.is_none_or(|s| crate::trading::side_of(i) == s)).collect()
         };
         for i in order {
             if left == 0 || !accepts(kind, i, id) {
@@ -574,6 +627,9 @@ impl Game {
         let after: Vec<(usize, Stack, Stack, Wear)> = changed.iter().map(|&(i, b)| (i, b, c.slots[i], c.wear[i])).collect();
         self.inv.slots[inv_slot] = if left > 0 { Some((id, left)) } else { None };
         self.dirty_containers.insert(pos);
+        if kind == TRADING_TABLE && !self.is_client() && !after.is_empty() {
+            self.deal_changed(pos);
+        }
         if self.is_client() {
             for (i, b, a, wear) in after {
                 for (item, n, put) in moves(b, a) {
@@ -586,7 +642,8 @@ impl Game {
     /// The Sort button: tidy the open chest.
     pub fn sort_container(&mut self) {
         let Some(pos) = self.open else { return };
-        if is_three_slot(store_kind(&self.world, &self.vehicles, pos)) {
+        let kind = store_kind(&self.world, &self.vehicles, pos);
+        if is_three_slot(kind) || kind == TRADING_TABLE {
             return;
         }
         if let Some(c) = store(&mut self.world, &mut self.vehicles, pos) {
@@ -600,7 +657,8 @@ impl Game {
 
     pub fn host_sort(&mut self, from: u32, p: IVec3) {
         let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
-        if !open || !self.peer_near(from, p) || is_three_slot(store_kind(&self.world, &self.vehicles, p)) {
+        let kind = store_kind(&self.world, &self.vehicles, p);
+        if !open || !self.peer_near(from, p) || is_three_slot(kind) || kind == TRADING_TABLE {
             return;
         }
         if let Some(c) = store(&mut self.world, &mut self.vehicles, p) {
@@ -615,6 +673,9 @@ impl Game {
             .map(|p| {
                 if crate::stash::stash_of_key(p).is_some() {
                     return crate::stash::near_personal_chest(&self.world, self.player.eye());
+                }
+                if crate::post::is_post_key(p) {
+                    return crate::post::near_post_box(&self.world, self.player.eye());
                 }
                 if crate::backpacks::pack_of_key(p).is_some() {
                     return self.backpack_held(p);
@@ -698,6 +759,10 @@ impl Game {
         if crate::stash::stash_of_key(p).is_some() {
             return self.peers.get(&from).is_some_and(|q| crate::stash::stash_key(&q.name) == p && crate::stash::near_personal_chest(&self.world, q.target + Vec3::Y * 1.6));
         }
+        // Someone's own inbox or outbox: only theirs, and only by a Post Box.
+        if crate::post::is_post_key(p) {
+            return self.peers.get(&from).is_some_and(|q| (crate::post::inbox_key(&q.name) == p || crate::post::outbox_key(&q.name) == p) && crate::post::near_post_box(&self.world, q.target + Vec3::Y * 1.6));
+        }
         // Someone's backpack pack: only theirs, and only with a backpack in hand.
         if crate::backpacks::pack_of_key(p).is_some() {
             return self.peer_backpack(from, p);
@@ -711,7 +776,12 @@ impl Game {
 
     pub fn host_open(&mut self, from: u32, p: IVec3) {
         let kind = store_kind(&self.world, &self.vehicles, p);
-        if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST) {
+        if !self.peer_near(from, p) || !(is_container(kind) || kind == PERSONAL_CHEST || kind == POST_BOX) {
+            return;
+        }
+        // Someone else's chests, on their land (see claims.rs; Personal Chests and post are everyone's own).
+        if kind != PERSONAL_CHEST && kind != POST_BOX && crate::vehicles::cart_of_key(p).is_none() && !self.may_build_at(&self.peer_name(from), p) {
+            self.system_message(Some(from), "That's on someone else's land.");
             return;
         }
         if kind == CHEST {
@@ -723,9 +793,17 @@ impl Game {
         if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
             self.world.backpacks.entry(k).or_insert_with(crate::backpacks::fresh);
         }
+        if crate::post::is_post_key(p) {
+            self.world.mail_boxes.entry(p).or_insert_with(|| crate::post::fresh(p));
+        }
         self.ensure_container(p);
         self.viewers.entry(p).or_default().insert(from);
         self.send_container(p, Some(from));
+        if kind == TRADING_TABLE {
+            let name = self.peer_name(from);
+            self.take_seat(p, &name);
+            self.send_deal(p);
+        }
     }
 
     pub fn host_close(&mut self, from: u32, p: IVec3) {
@@ -734,6 +812,10 @@ impl Game {
             if v.is_empty() {
                 self.viewers.remove(&p);
             }
+        }
+        if self.world.get_v(p) == TRADING_TABLE {
+            let name = self.peer_name(from);
+            self.leave_seat(p, &name);
         }
     }
 
@@ -753,10 +835,15 @@ impl Game {
         let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
         let kind = store_kind(&self.world, &self.vehicles, p);
         let ok = open && self.peer_near(from, p) && n > 0 && valid_item(item) && store_ref(&self.world, &self.vehicles, p).map(|c| slot < c.slots.len()).unwrap_or(false);
+        // A Trading Table: only their own side (see trading.rs).
+        let ok = ok && (kind != TRADING_TABLE || self.may_touch(p, &self.peer_name(from), slot));
         let done = ok && if put { self.container_put(from, p, kind, slot, item, n, wear) } else { self.container_take(from, p, slot, item, n) };
         if done {
             // Everyone else looking sees it too.
             self.dirty_containers.insert(p);
+            if kind == TRADING_TABLE {
+                self.deal_changed(p);
+            }
         } else {
             self.send_container(p, Some(from));
         }
@@ -764,7 +851,7 @@ impl Game {
 
     #[allow(clippy::too_many_arguments)]
     fn container_put(&mut self, from: u32, p: IVec3, kind: Id, slot: usize, item: Id, n: u8, wear: Wear) -> bool {
-        if !accepts(kind, slot, item) {
+        if !accepts(kind, slot, item) || crate::post::is_inbox(p) {
             return false;
         }
         let fits = match store_ref(&self.world, &self.vehicles, p).and_then(|c| c.slots[slot]) {
@@ -815,6 +902,8 @@ impl Game {
             self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST))
         } else if let Some((k, _)) = crate::backpacks::pack_of_key(p) {
             self.world.backpacks.entry(k).or_insert_with(crate::backpacks::fresh)
+        } else if crate::post::is_post_key(p) {
+            self.world.mail_boxes.entry(p).or_insert_with(|| crate::post::fresh(p))
         } else if let Some(id) = crate::wildlife::pack_of_key(p) {
             self.world.packs.entry(id).or_insert_with(|| Container::for_block(CHEST))
         } else if crate::vehicles::cart_of_key(p).is_some() {

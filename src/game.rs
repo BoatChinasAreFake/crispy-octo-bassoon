@@ -88,6 +88,8 @@ pub enum Target {
     Mob(usize),
     /// A boat or minecart (see vehicles.rs).
     Vehicle(usize),
+    /// Another player, when players can hurt each other (see teams.rs).
+    Player(u32),
 }
 
 pub struct Camera {
@@ -320,6 +322,22 @@ pub struct Game {
     pub border_note: f32,
     /// Distant terrain past the render distance (Video Settings; see lod.rs).
     pub distant_terrain: bool,
+    /// Teams (see teams.rs), and whether players can hurt each other (`/pvp`).
+    pub teams: crate::teams::Teams,
+    pub pvp: bool,
+    /// Land claimed with Survey Posts (see claims.rs), and whose land we're on.
+    pub claims: crate::claims::Claims,
+    pub on_land: Option<String>,
+    /// Scores, timers and the sidebar for mods' minigames (see minigames.rs).
+    pub board: crate::minigames::Board,
+    /// Where we come back when we die, if a script said (otherwise the world's spawn).
+    pub personal_spawn: Option<Vec3>,
+    /// Trading Tables' seats and Accepts (see trading.rs).
+    pub deals: HashMap<IVec3, crate::trading::Deal>,
+    /// Post on its way and everyone's letters (see post.rs; joined players
+    /// get just their own letters), and couriers about (mob id, seconds left).
+    pub mail: crate::post::Mail,
+    pub couriers: Vec<(u32, f32)>,
     /// Worker threads that mesh chunks (none: meshed on the spot, as in screenshots and tests).
     pub meshes: Option<crate::meshpool::MeshPool>,
     /// Distant terrain as smooth rolling land rather than blocky terraces.
@@ -616,6 +634,15 @@ impl Game {
             border_note: 0.0,
             distant_terrain: true,
             meshes: None,
+            teams: Default::default(),
+            pvp: false,
+            deals: HashMap::new(),
+            mail: Default::default(),
+            couriers: Vec::new(),
+            board: Default::default(),
+            claims: Default::default(),
+            on_land: None,
+            personal_spawn: None,
             smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),
@@ -917,6 +944,21 @@ impl Game {
         if !self.waypoints.is_empty() {
             v.push(("waypoints2".into(), crate::qol::encode(&self.waypoints)));
         }
+        if self.claims != crate::claims::Claims::default() {
+            v.push(("claims".into(), self.claims.encode()));
+        }
+        if self.board != crate::minigames::Board::default() {
+            v.push(("minigame".into(), self.board.encode()));
+        }
+        if !self.world.mail_boxes.is_empty() {
+            v.push(("mailboxes".into(), crate::containers::encode(&self.world.mail_boxes)));
+        }
+        if self.mail != crate::post::Mail::default() {
+            v.push(("mail".into(), self.mail.encode()));
+        }
+        if self.pvp || !self.teams.teams.is_empty() {
+            v.push(("teams".into(), [&[self.pvp as u8][..], &self.teams.encode()].concat()));
+        }
         if let Some((dim, d)) = self.last_death {
             v.push(("last_death".into(), d.to_array().iter().flat_map(|f| f.to_le_bytes()).chain([dim.index()]).collect()));
         }
@@ -987,6 +1029,22 @@ impl Game {
             self.waypoints = crate::qol::decode(b, false);
         } else if let Some(b) = extra("waypoints") {
             self.waypoints = crate::qol::decode(b, true);
+        }
+        if let Some(b) = extra("claims") {
+            self.claims = crate::claims::Claims::decode(b);
+        }
+        if let Some(b) = extra("minigame") {
+            self.board = crate::minigames::Board::decode(b);
+        }
+        if let Some(b) = extra("mailboxes") {
+            self.world.mail_boxes = crate::containers::decode(b, 4).into_iter().filter(|(p, _)| crate::post::is_post_key(*p)).collect();
+        }
+        if let Some(b) = extra("mail") {
+            self.mail = crate::post::Mail::decode(b);
+        }
+        if let Some(b) = extra("teams").filter(|b| !b.is_empty()) {
+            self.pvp = b[0] != 0;
+            self.teams = crate::teams::Teams::decode(&b[1..]).unwrap_or_default();
         }
         if let Some(b) = extra("last_death").filter(|b| b.len() >= 12) {
             let f = |o: usize| f32::from_le_bytes(b[o..o + 4].try_into().unwrap());
@@ -1561,6 +1619,11 @@ impl Game {
     }
 
     fn script_tick(&mut self, dt: f32) {
+        self.minigame_tick(dt);
+        self.post_tick(dt);
+        if !self.dedicated {
+            self.note_land();
+        }
         let Some(host) = &mut self.scripts else { return };
         host.tick_acc += dt;
         if host.tick_acc < crate::scripting::TICK {
@@ -1667,6 +1730,41 @@ impl Game {
                 Cmd::Sound(s, at) => {
                     self.sfx(s, Some(at));
                     self.net_broadcast(Msg::Sound { sfx: s.to_wire(), at });
+                }
+                // Minigames (see minigames.rs); what's on screen goes out on the next tick.
+                Cmd::ScoreSet(o, p, n) => self.board.set(&o, &p, n),
+                Cmd::ScoreAdd(o, p, n) => self.board.add(&o, &p, n),
+                Cmd::ScoreReset(o) => self.board.reset(&o),
+                Cmd::Sidebar(s) => self.board.sidebar = s,
+                Cmd::TimerStart(t, secs) => self.board.start_timer(&t, secs),
+                Cmd::TimerStop(t) => {
+                    self.board.timers.remove(&t);
+                }
+                Cmd::Countdown(c) => self.board.countdown = c,
+                Cmd::TeamCreate(t, colour) => {
+                    if self.teams.create(&t, colour).is_ok() {
+                        self.share_teams();
+                    }
+                }
+                Cmd::TeamJoin(p, t) => {
+                    self.teams.set_member(&p, t.as_deref());
+                    self.share_teams();
+                }
+                Cmd::TeamFriendlyFire(t, on) => {
+                    if let Some(i) = self.teams.find(&t) {
+                        self.teams.teams[i].friendly_fire = on;
+                        self.share_teams();
+                    }
+                }
+                Cmd::Pvp(on) => {
+                    self.pvp = on;
+                    self.share_teams();
+                }
+                Cmd::SetSpawn(p, at) => self.set_player_spawn(&p, at),
+                Cmd::WorldSpawn(at) => {
+                    if at.is_finite() {
+                        self.spawn = at;
+                    }
                 }
             }
         }
@@ -2165,10 +2263,26 @@ impl Game {
                 ride = Some((i, t));
             }
         }
-        self.target = match (ride, best, hit) {
-            (Some((i, _)), _, _) => Some(Target::Vehicle(i)),
-            (None, Some((i, _)), _) => Some(Target::Mob(i)),
-            (None, None, Some(h)) => Some(Target::Block(h)),
+        // Other players, when they can be hurt (see teams.rs).
+        let mut someone: Option<(u32, f32)> = None;
+        if self.pvp {
+            let near = ride.map_or(f32::MAX, |r| r.1).min(best.map_or(f32::MAX, |b| b.1)).min(reach).min(block_dist);
+            for (&id, p) in &self.peers {
+                let half = Vec3::new(0.3, 0.0, 0.3);
+                if p.alive()
+                    && let Some(t) = ray_aabb(eye, dir, p.pos - half, p.pos + half + Vec3::Y * 1.8)
+                    && t < near
+                    && someone.is_none_or(|s| t < s.1)
+                {
+                    someone = Some((id, t));
+                }
+            }
+        }
+        self.target = match (someone, ride, best, hit) {
+            (Some((id, _)), ..) => Some(Target::Player(id)),
+            (None, Some((i, _)), _, _) => Some(Target::Vehicle(i)),
+            (None, None, Some((i, _)), _) => Some(Target::Mob(i)),
+            (None, None, None, Some(h)) => Some(Target::Block(h)),
             _ => None,
         };
         if self.spectator {
@@ -2282,6 +2396,29 @@ impl Game {
                             }
                         }
                     }
+                    self.attack_cd = 0.1;
+                }
+            }
+            Some(Target::Player(id)) => {
+                self.breaking = None;
+                if c.attack_pressed && self.attack_cd <= 0.0 {
+                    let id = *id;
+                    // As hard as hitting a mob (the host checks it, see teams.rs).
+                    let charge = self.attack_charge();
+                    let crit = self.player.body.vel.y < -1.0 && charge > 0.9;
+                    let strength = self.effect_amplifier(crate::potions::Potion::Strength).map_or(0.0, crate::potions::strength_bonus);
+                    let weakness = self.effect_level(crate::potions::Potion::Weakness) as f32 * crate::potions::WEAKNESS_PENALTY;
+                    let base = (attack_damage_with(held, self.held_level(Enchant::Sharpness)) + strength - weakness).max(0.5);
+                    let dmg = base * crate::combat::charge_scale(charge) * if crit { 1.5 } else { 1.0 };
+                    self.since_attack = 0.0;
+                    self.use_tool(hit_wear(held));
+                    if self.is_client() {
+                        self.net_send_msg(Msg::HitPlayer { target: id, dmg });
+                    } else {
+                        let me = self.my_id;
+                        self.host_hit_player(me, id, dmg);
+                    }
+                    self.sfx(Sfx::Hurt, self.peers.get(&id).map(|p| p.pos));
                     self.attack_cd = 0.1;
                 }
             }
@@ -2455,6 +2592,10 @@ impl Game {
             }
             if id == PERSONAL_CHEST {
                 self.open_stash(pos);
+                return;
+            }
+            if id == POST_BOX {
+                self.open_post(false);
                 return;
             }
             if crate::books::is_lectern(id) {
@@ -2848,6 +2989,14 @@ impl Game {
             if !self.fire("on_block_place", args) {
                 return;
             }
+            // A Survey Post claims land, if it can (see claims.rs).
+            if held == SURVEY_POST && self.claims.on {
+                let me = self.player_name.clone();
+                if let Err(e) = self.post_placed(&me, place) {
+                    self.msg(e);
+                    return;
+                }
+            }
         }
         let mut oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
         if held == TORCH
@@ -2905,6 +3054,9 @@ impl Game {
             let args = vec![self.player_name.clone().into(), (pos.x as INT).into(), (pos.y as INT).into(), (pos.z as INT).into(), reg().key_of(id).into()];
             if !self.fire("on_block_break", args) {
                 return;
+            }
+            if id == SURVEY_POST {
+                self.post_broken(pos);
             }
         }
         self.block_particles(pos, 14);
@@ -4081,14 +4233,15 @@ impl Game {
 
     pub fn respawn(&mut self) {
         self.dead = None;
-        self.player = Player::new(self.spawn);
+        let spawn = self.personal_spawn.unwrap_or(self.spawn);
+        self.player = Player::new(spawn);
         // Everyone comes back in the Overworld.
         if self.dim != crate::dims::Dim::Over {
             if self.is_client() {
                 // (The host moves us.)
                 self.net_send_msg(Msg::Respawn);
             } else {
-                self.move_local_player(crate::dims::Dim::Over, self.spawn);
+                self.move_local_player(crate::dims::Dim::Over, spawn);
             }
         }
         if self.net.is_none() {
