@@ -354,6 +354,8 @@ pub struct Game {
     /// Zappy Dust (see wiring.rs): time since the last update, pressed
     /// buttons and plates with their time left, doors held open by power.
     pub zap_timer: f32,
+    /// Until daylight sensors look at the sky again (see zapparts.rs).
+    pub sky_timer: f32,
     pub buttons: HashMap<IVec3, f32>,
     pub plates: HashMap<IVec3, f32>,
     pub powered_doors: HashSet<IVec3>,
@@ -630,6 +632,7 @@ impl Game {
             lava_waiting: HashSet::new(),
             on_fire: 0.0,
             zap_timer: 0.0,
+            sky_timer: 0.0,
             buttons: HashMap::new(),
             plates: HashMap::new(),
             powered_doors: HashSet::new(),
@@ -1314,6 +1317,7 @@ impl Game {
         self.weather_tick(dt);
         self.liquid_tick(dt);
         self.zap_tick(dt);
+        self.zapparts_tick(dt);
         self.deep_dark_tick(dt);
         self.buzz_tick(dt);
         self.shake = (self.shake - dt * 1.5).max(0.0);
@@ -1893,6 +1897,8 @@ impl Game {
         let mut winds: Vec<(Vec3, Option<u32>)> = Vec::new();
         let mut bursts: Vec<(Vec3, u8, f32, Option<u32>)> = Vec::new();
         let mut splashes: Vec<(Vec3, Option<crate::block::ProjectileEffect>)> = Vec::new();
+        // Blocks hit (a Target switches on; see zapparts.rs).
+        let mut struck: Vec<(IVec3, Option<u32>)> = Vec::new();
         let targets = if arrows.iter().any(|a| a.homing > 0.0) { self.homing_targets() } else { Vec::new() };
         arrows.retain_mut(|a| {
             if a.homing > 0.0 && !a.stuck {
@@ -1948,6 +1954,7 @@ impl Game {
             }
             if thunk {
                 self.sfx(Sfx::Thunk, Some(a.pos));
+                struck.push(((a.pos + a.dir * 0.3).floor().as_ivec3(), a.shooter));
             }
             // A spear that hits the ground drops, ready to be picked up.
             if let Some(spear) = a.spear
@@ -2041,6 +2048,9 @@ impl Game {
         }
         for (at, colour, damage, shooter) in bursts {
             self.firework_burst(at, colour, damage, shooter);
+        }
+        for (p, shooter) in struck {
+            self.projectile_hit_block(p, shooter);
         }
         for (at, (item, wear)) in landed {
             self.spawn_drop(at, item, 1, wear, Vec3::ZERO, 0.5);
@@ -2655,7 +2665,7 @@ impl Game {
         let hit_y = self.player.eye().y + self.player.look_dir().y * h.dist - hit_pos.y as f32;
         let hit_id = self.world.get_v(hit_pos);
         // Levers and buttons (sneak to place against one instead).
-        if !self.player.sneaking && self.use_switch(hit_pos, hit_id) {
+        if !self.player.sneaking && (self.use_switch(hit_pos, hit_id) || self.use_zappart(hit_pos, hit_id)) {
             return;
         }
         // Item frames take what you're holding.
@@ -2804,6 +2814,8 @@ impl Game {
             self.editing_sign = Some(place);
         }
         self.sfx(Sfx::Place(material(held)), Some(place.as_vec3() + Vec3::splat(0.5)));
+        // Heard (joined players' placing is heard by the host as it arrives).
+        self.vibrate_kind(place.as_vec3() + Vec3::splat(0.5), None, crate::zapparts::Vibe::Block);
         self.stats.placed += 1;
         self.player.swing = 1.0;
         if !self.creative {
@@ -2964,7 +2976,7 @@ impl Game {
         if crate::archaeology::is_pot(old) {
             self.pot_broken(pos, old);
         }
-        self.vibrate(pos.as_vec3() + Vec3::splat(0.5), None);
+        self.vibrate_kind(pos.as_vec3() + Vec3::splat(0.5), None, crate::zapparts::Vibe::Block);
     }
 
     /// Carry out mod-defined behaviour (see MODDING.md).
@@ -3616,7 +3628,7 @@ impl Game {
                     let points = m.kind.xp_value(m.size, &mut self.rng);
                     self.spawn_orbs(m.body.pos + Vec3::Y * 0.5, points);
                     self.sculk_spread(at, points);
-                    self.vibrate(at, None);
+                    self.vibrate_kind(at, None, crate::zapparts::Vibe::Mob);
                     if let Some(d) = m.kind.mod_def().filter(|d| d.boss) {
                         let t = format!("The {} has been defeated!", d.name);
                         self.msg(t.clone());

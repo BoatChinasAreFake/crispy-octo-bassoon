@@ -224,6 +224,9 @@ pub const ALL: &[Advancement] = &[
     adv("thawed", "Thawed", "Go from freezing to warm again in a hot spring."),
     adv("looking_sharp", "Looking Sharp", "Wear a skin of your own."),
     adv("lan_party", "LAN Party", "Join a game that turned up on your network by itself."),
+    adv("bullseye", "Bullseye", "Hit a Target with an arrow."),
+    adv("tuning_in", "Tuning In", "Tell a Calibrated Sculk Sensor what to listen for."),
+    adv("its_a_trap", "It's a Trap!", "Open a Trapped Chest wired up to something."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -246,7 +249,7 @@ const HOME: &[&str] = &[
     "what_a_deal", "brewmaster", "lumberjack_reforms", "melon_baller", "fire_starter", "pushy", "freight", "tattletale", "beaconator", "patina", "waxed", "bamboozled",
     "sweet_success", "ancient_honey", "new_colony", "swarm_catcher", "bee_careful", "plinky", "now_playing", "enchanter", "good_as_new", "published", "loomed", "homing_in",
     "boxed_in", "dressed_up", "the_usual", "trading_hall", "fair_trade", "ancient_seeds", "light_show", "bird_plane", "glow_up", "star_power", "kelp_me", "fungal_growth",
-    "dye_job", "compost_happens", "grounded", "first_course", "chefs_kiss", "cordon_bleu", "hot_tub", "thawed",
+    "dye_job", "compost_happens", "grounded", "first_course", "chefs_kiss", "cordon_bleu", "hot_tub", "thawed", "tuning_in", "its_a_trap",
 ];
 
 /// Which tab (1..) an advancement is on.

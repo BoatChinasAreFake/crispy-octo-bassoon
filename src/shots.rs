@@ -362,7 +362,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -829,7 +829,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1581,6 +1581,34 @@ impl App {
                 }
                 app.game.world.set_v(at(3, -2, 0), contraptions::comparator(contraptions::facing_of(r), false, false));
                 app.game.world.set_v(at(3, -1, 0), block::LAMP);
+            }
+            if s.mode == "zapparts" && frames == 125 {
+                // v0.4's Zappy parts in a row, each lighting a lamp: a daylight
+                // sensor, a Target, a trapped chest; a dropper, an activator
+                // rail with a cart, and the four calibrated sculk sensors.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * (ro - 5) + IVec3::Y * up;
+                let w = &mut app.game.world;
+                w.set_v(at(9, -6, 0), zapparts::daylight(false, true));
+                w.set_v(at(10, -6, 0), block::LAMP_ON);
+                w.set_v(at(9, -4, 0), block::TARGET);
+                w.set_v(at(9, -4, 1), block::TARGET_ON);
+                w.set_v(at(10, -4, 1), block::LAMP_ON);
+                w.set_v(at(9, -2, 0), block::TRAPPED_CHEST);
+                w.set_v(at(9, 0, 0), block::DROPPER_FIRST + contraptions::facing_of(-f) as block::Id);
+                for k in 1..=5 {
+                    w.set_v(at(8, k, 0), block::ACTIVATOR_RAIL + if f.x != 0 { 1 } else { 3 });
+                }
+                for (k, kind) in zapparts::Vibe::ALL.into_iter().enumerate() {
+                    w.set_v(at(12, k as i32 * 2 - 3, 0), zapparts::calibrated(kind, k == 1));
+                }
+                let spot = at(8, 3, 0).as_vec3() + Vec3::new(0.5, 0.06, 0.5);
+                let yaw = (r.x as f32).atan2(-(r.z as f32));
+                app.game.spawn_vehicle(vehicles::CART_KIND, spot, yaw);
             }
             if s.mode == "brewing" && frames == 125 {
                 // A brewing stand mid-brew, potions in hand, and a couple of effects on.

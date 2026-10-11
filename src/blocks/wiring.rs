@@ -35,7 +35,7 @@ pub fn is_wire(id: Id) -> bool {
 
 /// A switch that's on (or the block that always is).
 pub fn source_on(id: Id) -> bool {
-    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK | SCULK_SENSOR_ACTIVE | LIGHTNING_ROD_ON) || crate::vehicles::detector_on(id) || crate::tripwire::tripped(id)
+    matches!(id, LEVER_ON | BUTTON_ON | PLATE_ON | ZAP_BLOCK | SCULK_SENSOR_ACTIVE | LIGHTNING_ROD_ON) || crate::vehicles::detector_on(id) || crate::tripwire::tripped(id) || crate::zapparts::source(id)
 }
 
 /// Things that sit on the floor and fall off when it goes.
@@ -129,9 +129,12 @@ impl Game {
                 self.world.set_v(p, BUTTON);
                 self.sfx(Sfx::Click, Some(p.as_vec3() + Vec3::splat(0.5)));
             }
-            // (A struck lightning rod cools off the same way.)
+            // (A struck lightning rod cools off the same way, and a Target.)
             if self.world.get_v(p) == LIGHTNING_ROD_ON {
                 self.world.set_v(p, LIGHTNING_ROD);
+            }
+            if self.world.get_v(p) == TARGET_ON {
+                self.world.set_v(p, TARGET);
             }
         }
         self.pressure_plates(dt);
@@ -157,7 +160,9 @@ impl Game {
             check.insert(p);
             // Rails bend to join their neighbours; powered ones follow the power.
             if crate::vehicles::is_rail(id) {
-                let want = if crate::vehicles::is_detector(id) {
+                let want = if crate::zapparts::is_activator(id) {
+                    crate::zapparts::activator_shape(&self.world, p, powered(&self.world, p))
+                } else if crate::vehicles::is_detector(id) {
                     crate::vehicles::detector_shape(&self.world, p, crate::vehicles::detector_on(id))
                 } else if crate::vehicles::is_powered_rail(id) {
                     crate::vehicles::powered_shape(&self.world, p, powered(&self.world, p))

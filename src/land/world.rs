@@ -1517,6 +1517,8 @@ pub struct World {
     pub fires: HashSet<IVec3>,
     /// Every comparator (they watch containers; see contraptions.rs).
     pub comparators: HashSet<IVec3>,
+    /// Daylight sensors, trapped chests and calibrated sculk sensors (see zapparts.rs).
+    pub zap_parts: HashSet<IVec3>,
     /// Every beacon (see beacon.rs).
     pub beacons: HashSet<IVec3>,
     /// Conduits in loaded chunks (see monument.rs).
@@ -1595,6 +1597,7 @@ impl World {
             saplings: HashSet::new(),
             fires: HashSet::new(),
             comparators: HashSet::new(),
+            zap_parts: HashSet::new(),
             beacons: HashSet::new(),
             conduits: HashSet::new(),
             ropes: HashSet::new(),
@@ -1712,7 +1715,7 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
-                    if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::homecraft::is_rod(id) || crate::cooking::is_pot(id) || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) {
+                    if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::homecraft::is_rod(id) || crate::cooking::is_pot(id) || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) || crate::zapparts::watched(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
                         let p = ivec3(cx * CW + lx, y, cz * CW + lz);
@@ -1725,6 +1728,7 @@ impl World {
                             b if crate::cooking::is_pot(b) => self.cook_pots.insert(p),
                             b if crate::beacon::is_beacon(b) => self.beacons.insert(p),
                             b if crate::music::is_jukebox(b) => self.jukeboxes.insert(p),
+                            b if crate::zapparts::watched(b) => self.zap_parts.insert(p),
                             _ => self.comparators.insert(p),
                         };
                     }
@@ -1944,6 +1948,11 @@ impl World {
             self.comparators.insert(p);
         } else if crate::contraptions::is_comparator(old) {
             self.comparators.remove(&p);
+        }
+        if crate::zapparts::watched(id) {
+            self.zap_parts.insert(p);
+        } else if crate::zapparts::watched(old) {
+            self.zap_parts.remove(&p);
         }
         if crate::beacon::is_beacon(id) {
             self.beacons.insert(p);

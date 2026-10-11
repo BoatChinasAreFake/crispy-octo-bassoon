@@ -139,7 +139,7 @@ impl Vehicle {
 // ------------------------------------------------------------------ rails
 
 pub fn is_rail(id: Id) -> bool {
-    (RAIL_FIRST..RAIL_FIRST + 6).contains(&id) || (POWERED_RAIL..POWERED_RAIL + 4).contains(&id) || is_detector(id)
+    (RAIL_FIRST..RAIL_FIRST + 6).contains(&id) || (POWERED_RAIL..POWERED_RAIL + 4).contains(&id) || is_detector(id) || crate::zapparts::is_activator(id)
 }
 
 pub fn is_detector(id: Id) -> bool {
@@ -161,6 +161,8 @@ pub fn rail_dirs(id: Id) -> Option<[IVec3; 2]> {
         ((id - POWERED_RAIL) / 2) as u8
     } else if is_detector(id) {
         ((id - DETECTOR_RAIL) / 2) as u8
+    } else if crate::zapparts::is_activator(id) {
+        ((id - ACTIVATOR_RAIL) / 2) as u8
     } else if is_rail(id) {
         (id - RAIL_FIRST) as u8
     } else {
@@ -425,6 +427,12 @@ impl Game {
                     self.net_send_msg(Msg::Ride { id, pos, yaw });
                 }
             }
+        }
+        // A powered activator rail tips us out of our cart (see zapparts.rs).
+        if let Some(id) = self.riding
+            && self.vehicles.iter().any(|v| v.id == id && !is_boat(v.kind) && crate::zapparts::activator_on(self.world.get_v(v.cell())))
+        {
+            self.dismount();
         }
         if host {
             self.vehicle_sync -= dt;

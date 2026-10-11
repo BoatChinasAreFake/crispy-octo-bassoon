@@ -21,7 +21,7 @@ use std::sync::{LazyLock, RwLock};
 
 /// Any chest a lid swings on.
 pub fn is_chest(id: Id) -> bool {
-    matches!(id, CHEST | COPPER_CHEST | IRON_CHEST | GOLD_CHEST | DIAMOND_CHEST)
+    matches!(id, CHEST | COPPER_CHEST | IRON_CHEST | GOLD_CHEST | DIAMOND_CHEST | TRAPPED_CHEST | TRAPPED_CHEST_ON)
 }
 
 /// How many slots a chest of this kind has.

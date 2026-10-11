@@ -463,7 +463,18 @@ pub const COOKING_POT_FULL: Id = MYCELIUM + 71;
 pub const COOKING_POT_READY: Id = MYCELIUM + 72;
 /// The warm rock under a hot spring (see springs.rs).
 pub const SPRING_ROCK: Id = MYCELIUM + 73;
-pub const NUM_BLOCKS: Id = MYCELIUM + 74;
+/// More Zappy parts (see zapparts.rs): daylight sensors (`+ night * 2 + on`),
+/// the Target, droppers (`+ facing`), activator rails (`+ axis * 2 + on`),
+/// the Trapped Chest, and calibrated sculk sensors (`+ kind * 2 + on`).
+pub const DAYLIGHT_SENSOR: Id = MYCELIUM + 74;
+pub const TARGET: Id = MYCELIUM + 78;
+pub const TARGET_ON: Id = MYCELIUM + 79;
+pub const DROPPER_FIRST: Id = MYCELIUM + 80;
+pub const ACTIVATOR_RAIL: Id = MYCELIUM + 86;
+pub const TRAPPED_CHEST: Id = MYCELIUM + 90;
+pub const TRAPPED_CHEST_ON: Id = MYCELIUM + 91;
+pub const CALIBRATED_SENSOR: Id = MYCELIUM + 92;
+pub const NUM_BLOCKS: Id = MYCELIUM + 100;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -745,7 +756,7 @@ pub fn is_lava(id: Id) -> bool {
 }
 /// Part of a Zappy Dust contraption (wires, switches, lamps; see wiring.rs).
 pub fn is_zappy(id: Id) -> bool {
-    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON | LIGHTNING_ROD | LIGHTNING_ROD_ON) || crate::tripwire::is_tripwire(id) || crate::tripwire::is_hook(id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id)
+    (WIRE..=LAMP_ON).contains(&id) || matches!(id, COPPER_BULB | COPPER_BULB_ON | LIGHTNING_ROD | LIGHTNING_ROD_ON) || crate::tripwire::is_tripwire(id) || crate::tripwire::is_hook(id) || (RAIL_FIRST..POWERED_RAIL + 4).contains(&id) || (DETECTOR_RAIL..DETECTOR_RAIL + 4).contains(&id) || crate::contraptions::is_contraption(id) || crate::zapparts::is_part(id)
 }
 pub fn is_liquid(id: Id) -> bool {
     is_water(id) || is_lava(id)
@@ -1218,7 +1229,7 @@ pub fn placing_item(id: Id) -> Option<Id> {
         return Some(ZAP_DUST);
     }
     // Any rail is placed as a straight one, then bends to fit (see vehicles.rs).
-    if id == RAIL_FIRST || id == POWERED_RAIL || id == DETECTOR_RAIL {
+    if id == RAIL_FIRST || id == POWERED_RAIL || id == DETECTOR_RAIL || id == ACTIVATOR_RAIL {
         return Some(id);
     }
     // Signs and frames come in four facings; the item is the first.
@@ -2584,6 +2595,7 @@ impl Registry {
         blocks.extend(crate::homecraft::defs());
         blocks.extend(crate::cooking::defs());
         blocks.push(def("spring_rock", "Spring Rock (Warm to the Touch)", Cube, true, true, [T_SPRING_ROCK; 3], 1.5, 1, true, SPRING_ROCK, 0.0, S_STONE));
+        blocks.extend(crate::zapparts::defs());
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -3117,6 +3129,7 @@ impl Registry {
         recipes.extend(crate::homecraft::recipes());
         recipes.push(Recipe { inputs: vec![(STRING, 4), (GOO, 1)], output: (LEAD, 2) });
         recipes.extend(crate::cooking::recipes());
+        recipes.extend(crate::zapparts::recipes());
         recipes.push(r(&[(COPPER_INGOT, 3), (ZAP_DUST, 1), (STICK, 1)], (SUPPORT_GAUGE, 1)));
         recipes.push(r(&[(DIAMOND, 7), (UPGRADE_TEMPLATE, 1), (COBBLED_DEEPSLATE, 1)], (UPGRADE_TEMPLATE, 2)));
         for t in TRIM_FIRST..TRIM_FIRST + TRIMS as Id {

@@ -591,7 +591,7 @@ impl Game {
                     if old != id && crate::ledger::is_break(old, id) {
                         self.block_gone(IVec3::new(x, y, z), old);
                     } else if old != id {
-                        self.vibrate(center, Some(from));
+                        self.vibrate_kind(center, Some(from), crate::zapparts::Vibe::Block);
                     }
                     // Logged, so the host re-broadcasts it to everyone.
                     self.world.set(x, y, z, id);

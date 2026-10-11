@@ -340,6 +340,14 @@ impl Game {
         if crate::contraptions::is_comparator(old) && crate::contraptions::is_comparator(new) {
             return true;
         }
+        // Daylight sensors turn round, calibrated sensors change what they listen
+        // for (whether they're on is up to the host; see zapparts.rs).
+        if crate::zapparts::is_daylight(old) && crate::zapparts::is_daylight(new) {
+            return crate::zapparts::daylight_state(old).1 == crate::zapparts::daylight_state(new).1;
+        }
+        if crate::zapparts::is_calibrated(old) && crate::zapparts::is_calibrated(new) {
+            return !crate::zapparts::calibrated_state(new).1;
+        }
         if crate::beacon::is_beacon(old) && crate::beacon::is_beacon(new) {
             // A Wilter Star going in: theirs, and only on a full pyramid.
             if crate::beacon::starred(new) && !crate::beacon::starred(old) {
