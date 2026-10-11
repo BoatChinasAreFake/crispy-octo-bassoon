@@ -1173,6 +1173,7 @@ Loom (Pattern Machine)
 Looting
 Looting (Monsters Pay Better)
 Lost connection to the host ({}).
+Lost in Translation
 Lots
 Low Memory
 Lukewarm Ocean (Bathwater)
@@ -1452,6 +1453,7 @@ Planting the Past
 Plants and Nature
 Play Selected World
 Play With Others
+Play in a language a mod brought.
 Player{}
 Playing on {} ({})
 Playtest: a host and {} bots for {} seconds (seed {})...

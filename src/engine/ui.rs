@@ -20,8 +20,41 @@ pub struct Ui {
     pub face: Option<Font>,
 }
 
-pub const PANEL: Color = Color::new(0.08, 0.08, 0.1, 0.88);
-pub const SLOT_BG: Color = Color::new(0.25, 0.25, 0.28, 0.9);
+const PANEL_COLOUR: Color = Color::new(0.08, 0.08, 0.1, 0.88);
+const SLOT_COLOUR: Color = Color::new(0.25, 0.25, 0.28, 0.9);
+
+/// High contrast (Accessibility): solid black behind everything, thick
+/// white edges, yellow for what's under the pointer, and plain white text.
+static HIGH_CONTRAST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_high_contrast(on: bool) {
+    HIGH_CONTRAST.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn high_contrast() -> bool {
+    HIGH_CONTRAST.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Behind inventories and other windows.
+pub fn panel() -> Color {
+    if high_contrast() { BLACK } else { PANEL_COLOUR }
+}
+
+/// A slot's colour (in high contrast, an edge is drawn round it too).
+pub fn slot_bg() -> Color {
+    if high_contrast() { Color::new(0.12, 0.12, 0.12, 1.0) } else { SLOT_COLOUR }
+}
+
+/// Text colours in high contrast: anything greyish or faint is plain white
+/// (or a strong grey, for what can't be used); colours stay, at full strength.
+fn contrast(c: Color) -> Color {
+    let (hi, lo) = (c.r.max(c.g).max(c.b), c.r.min(c.g).min(c.b));
+    if hi - lo < 0.12 {
+        if hi < 0.55 && hi > 0.3 { Color::new(0.75, 0.75, 0.75, 1.0) } else { WHITE }
+    } else {
+        Color::new(c.r / hi, c.g / hi, c.b / hi, 1.0)
+    }
+}
 
 impl Ui {
     pub fn new(tex: Texture2D) -> Self {
@@ -54,6 +87,14 @@ impl Ui {
         let size = self.font(px);
         let off = (self.s * 0.6).max(1.0);
         let font = self.face.as_ref();
+        if high_contrast() && color.a > 0.05 {
+            // A solid black backing, whatever's behind.
+            let d = measure_text(t, font, size, 1.0);
+            let pad = self.s;
+            draw_rectangle(x - pad, y - d.offset_y - pad, d.width + 2.0 * pad, d.height + 2.0 * pad, BLACK);
+            draw_text_ex(t, x, y, TextParams { font, font_size: size, color: contrast(color), ..Default::default() });
+            return;
+        }
         draw_text_ex(t, x + off, y + off, TextParams { font, font_size: size, color: Color::new(0.0, 0.0, 0.0, color.a * 0.7), ..Default::default() });
         draw_text_ex(t, x, y, TextParams { font, font_size: size, color, ..Default::default() });
     }
@@ -143,18 +184,26 @@ impl Ui {
 
     pub fn button(&self, r: Rect, label: &str, enabled: bool) -> bool {
         let hov = enabled && self.hovered(r);
-        let bg = if !enabled {
-            Color::new(0.2, 0.2, 0.2, 0.8)
-        } else if hov {
-            Color::new(0.45, 0.5, 0.75, 0.95)
-        } else {
-            Color::new(0.35, 0.35, 0.38, 0.92)
-        };
-        draw_rectangle(r.x, r.y, r.w, r.h, bg);
         let b = self.s.max(1.0);
-        draw_rectangle_lines(r.x, r.y, r.w, r.h, b * 1.5, if hov { WHITE } else { Color::new(0.0, 0.0, 0.0, 0.8) });
-        draw_rectangle(r.x + b, r.y + b, r.w - 2.0 * b, b, Color::new(1.0, 1.0, 1.0, 0.15));
-        let col = if enabled { if hov { Color::new(1.0, 1.0, 0.6, 1.0) } else { WHITE } } else { GRAY };
+        let col = if high_contrast() {
+            // Black, with a thick edge: white, yellow under the pointer, grey when it can't be used.
+            let edge = if !enabled { Color::new(0.45, 0.45, 0.45, 1.0) } else if hov { YELLOW } else { WHITE };
+            draw_rectangle(r.x, r.y, r.w, r.h, BLACK);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, b * 3.0, edge);
+            if enabled { edge } else { Color::new(0.75, 0.75, 0.75, 1.0) }
+        } else {
+            let bg = if !enabled {
+                Color::new(0.2, 0.2, 0.2, 0.8)
+            } else if hov {
+                Color::new(0.45, 0.5, 0.75, 0.95)
+            } else {
+                Color::new(0.35, 0.35, 0.38, 0.92)
+            };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, b * 1.5, if hov { WHITE } else { Color::new(0.0, 0.0, 0.0, 0.8) });
+            draw_rectangle(r.x + b, r.y + b, r.w - 2.0 * b, b, Color::new(1.0, 1.0, 1.0, 0.15));
+            if enabled { if hov { Color::new(1.0, 1.0, 0.6, 1.0) } else { WHITE } } else { GRAY }
+        };
         let label = &*crate::lang::tr(label);
         if hov {
             *self.focus.borrow_mut() = label.to_string();
@@ -305,8 +354,12 @@ impl Ui {
     pub fn slot_worn(&self, stack: Option<(Id, u8)>, wear: crate::inventory::Wear, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
         let r = Rect::new(x, y, size, size);
         let hov = self.hovered(r);
-        draw_rectangle(x, y, size, size, if hov { Color::new(0.45, 0.45, 0.5, 0.95) } else { SLOT_BG });
-        draw_rectangle_lines(x, y, size, size, self.s, Color::new(0.0, 0.0, 0.0, 0.7));
+        draw_rectangle(x, y, size, size, if hov { Color::new(0.45, 0.45, 0.5, 0.95) } else { slot_bg() });
+        if high_contrast() {
+            draw_rectangle_lines(x, y, size, size, self.s * 1.5, if hov { YELLOW } else { Color::new(0.7, 0.7, 0.7, 1.0) });
+        } else {
+            draw_rectangle_lines(x, y, size, size, self.s, Color::new(0.0, 0.0, 0.0, 0.7));
+        }
         if selected {
             draw_rectangle_lines(x - self.s, y - self.s, size + 2.0 * self.s, size + 2.0 * self.s, self.s * 1.5, WHITE);
         }
@@ -334,8 +387,13 @@ impl Ui {
         let h = 3.0 * self.s + line_h * lines.len().max(1) as f32;
         let x = (mx + 10.0 * self.s).min(screen_width() - w);
         let y = (my - h).max(0.0);
-        draw_rectangle(x, y, w, h, Color::new(0.1, 0.0, 0.2, 0.95));
-        draw_rectangle_lines(x, y, w, h, self.s, Color::new(0.4, 0.1, 0.9, 1.0));
+        if high_contrast() {
+            draw_rectangle(x, y, w, h, BLACK);
+            draw_rectangle_lines(x, y, w, h, self.s * 2.0, WHITE);
+        } else {
+            draw_rectangle(x, y, w, h, Color::new(0.1, 0.0, 0.2, 0.95));
+            draw_rectangle_lines(x, y, w, h, self.s, Color::new(0.4, 0.1, 0.9, 1.0));
+        }
         for (i, l) in lines.iter().enumerate() {
             self.text(l, x + 4.0 * self.s, y + line_h * (i as f32 + 1.0) - 1.0 * self.s, 9.0, if i == 0 { WHITE } else { Color::new(0.8, 0.8, 0.85, 1.0) });
         }

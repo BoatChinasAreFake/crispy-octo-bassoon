@@ -141,6 +141,9 @@ struct App {
     shot_threads: bool,
     /// What the narrator has read out (see narrator.rs).
     narration: narrator::Narration,
+    /// Sneak and sprint, when they're switched on and off rather than held.
+    sneak_on: bool,
+    sprint_on: bool,
     splash: &'static str,
     last_mouse: Option<Vec2>,
     show_debug: bool,
@@ -640,6 +643,9 @@ impl App {
         let down = |a: A| playing && b.down(a);
         let hit = |a: A| playing && b.pressed(a);
         let pad = if playing { self.pad_frame } else { pad::PadFrame::default() };
+        // Sneak and sprint held, or switched on and off (Accessibility).
+        let sneak = keybinds::latch(&mut self.sneak_on, self.settings.toggle_sneak, hit(A::Sneak), down(A::Sneak)) && playing;
+        let sprint = keybinds::latch(&mut self.sprint_on, self.settings.toggle_sprint, hit(A::Sprint), down(A::Sprint)) && playing;
         let axis = |plus: A, minus: A, stick: f32| (down(plus) as i32 - down(minus) as i32) as f32 + stick;
         Controls {
             input: Input {
@@ -647,8 +653,8 @@ impl App {
                 strafe: axis(A::Right, A::Left, pad.walk[0]).clamp(-1.0, 1.0),
                 jump: down(A::Jump) || pad.jump,
                 jump_pressed: hit(A::Jump) || pad.jump_pressed,
-                sneak: down(A::Sneak) || pad.sneak,
-                sprint: down(A::Sprint) || pad.sprint,
+                sneak: sneak || pad.sneak,
+                sprint: sprint || pad.sprint,
             },
             attack_held: down(A::Attack) || pad.attack,
             attack_pressed: hit(A::Attack) || pad.attack_pressed,
@@ -1622,6 +1628,10 @@ impl App {
         self.game.fancy_water = self.settings.fancy_water;
         self.game.distant_terrain = self.settings.distant_terrain && !self.settings.low_memory;
         // The language (a mod's; see lang.rs), when it's changed or its mod has come or gone.
+        // (Playing in a mod's language earns its advancement.)
+        if self.screen == Screen::Playing && !lang::current().is_empty() && !self.game.advancements.has("lost_in_translation") {
+            self.game.advance("lost_in_translation");
+        }
         if lang::current() != self.settings.language {
             let l = block::reg().languages.iter().find(|l| l.key == self.settings.language);
             lang::set(l);
@@ -1666,6 +1676,11 @@ impl App {
     fn draw_ui(&mut self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
+        // High contrast: menus over a nearly black backdrop (see ui.rs).
+        ui::set_high_contrast(self.settings.high_contrast);
+        if ui::high_contrast() && !matches!(self.screen, Screen::Playing | Screen::Title) {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.85));
+        }
         match self.screen {
             Screen::Title => self.title_screen(),
             Screen::Options { from_title } => {
@@ -2000,6 +2015,8 @@ async fn game_main() {
         no_settings_file: shot.is_some(),
         shot_threads: false,
         narration: Default::default(),
+        sneak_on: false,
+        sprint_on: false,
         splash: pick_splash(),
         last_mouse: None,
         show_debug: false,

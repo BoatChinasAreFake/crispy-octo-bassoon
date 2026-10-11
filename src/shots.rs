@@ -767,6 +767,12 @@ impl App {
                 app.game = shot_game(424242, true, true);
                 app.set_screen(Screen::Options { from_title: true });
             }
+            "access" => {
+                app.game = shot_game(424242, true, true);
+                app.settings.toggle_sneak = true;
+                app.settings.subtitles = true;
+                app.set_screen(Screen::Access { from_title: true });
+            }
             "video" => {
                 app.game = shot_game(424242, true, true);
                 app.settings.max_fps = 144;

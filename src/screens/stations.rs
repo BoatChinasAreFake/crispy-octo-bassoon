@@ -13,7 +13,7 @@ impl App {
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
-        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::panel());
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
@@ -106,7 +106,7 @@ impl App {
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
-        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::panel());
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
@@ -184,7 +184,7 @@ impl App {
         let panel_h = 24.0 * s + row * list.len() as f32 + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
-        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::panel());
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
         let mut tooltip: Option<String> = None;
