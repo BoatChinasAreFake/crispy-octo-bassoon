@@ -53,6 +53,17 @@ pub fn standing(rep: i32) -> &'static str {
     }
 }
 
+/// The colour an opinion is shown in: grey when neutral, shading to green
+/// as the village likes you more and to red as it likes you less.
+pub fn standing_colour(rep: i32) -> [f32; 3] {
+    const GREY: [f32; 3] = [0.72, 0.72, 0.72];
+    const GREEN: [f32; 3] = [0.3, 0.95, 0.35];
+    const RED: [f32; 3] = [1.0, 0.3, 0.28];
+    let t = (rep.clamp(-100, 100) as f32 / 100.0).abs();
+    let to = if rep >= 0 { GREEN } else { RED };
+    [0, 1, 2].map(|i| GREY[i] + (to[i] - GREY[i]) * t)
+}
+
 /// A trade's price for someone the village thinks `rep` of.
 pub fn rep_price(mut t: Trade, rep: i32) -> Trade {
     let rep = rep.clamp(-100, 100) as f32;
@@ -328,6 +339,14 @@ mod tests {
         assert_eq!(standing(0), "Neutral");
         assert_eq!(standing(60), "Loved");
         assert_eq!(standing(-70), "Hated");
+        // Grey in the middle, all the way to green and red at the ends, and in between on the way.
+        assert_eq!(standing_colour(0), [0.72, 0.72, 0.72]);
+        assert_eq!(standing_colour(100), [0.3, 0.95, 0.35]);
+        assert_eq!(standing_colour(-150), [1.0, 0.3, 0.28]);
+        let half = standing_colour(50);
+        assert!(half[1] > 0.72 && half[1] < 0.95 && half[0] < 0.72);
+        let half = standing_colour(-50);
+        assert!(half[0] > 0.72 && half[0] < 1.0 && half[1] < 0.72);
     }
 
     #[test]

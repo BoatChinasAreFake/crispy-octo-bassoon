@@ -198,7 +198,17 @@ impl App {
         let mut tooltip: Option<String> = None;
         self.ui.text(&self.ui.fit(&title, 10.0, panel_w - 12.0 * s), sx, y0 + 12.0 * s, 10.0, WHITE);
         if let Some(st) = &standing {
-            self.ui.text(&self.ui.fit(st, 7.5, panel_w - 12.0 * s), sx, y0 + 23.0 * s, 7.5, GOLD);
+            // The level in gold; what the village thinks of us from grey to green or red.
+            let (level, village) = st.split_once("  |  ").unwrap_or((st.as_str(), ""));
+            self.ui.text(level, sx, y0 + 23.0 * s, 7.5, GOLD);
+            if !village.is_empty() {
+                let rep = self.game.trading.map_or(0, |id| self.game.village_rep_of(id, &self.game.player_name));
+                let [r, g, b] = reputation::standing_colour(rep);
+                let x = sx + self.ui.text_width(level, 7.5);
+                self.ui.text("  |  ", x, y0 + 23.0 * s, 7.5, GRAY);
+                let x = x + self.ui.text_width("  |  ", 7.5);
+                self.ui.text(&self.ui.fit(village, 7.5, x0 + panel_w - x - 6.0 * s), x, y0 + 23.0 * s, 7.5, Color::new(r, g, b, 1.0));
+            }
         }
         let top = y0 + head - 4.0 * s;
         if list.is_empty() {
