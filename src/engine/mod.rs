@@ -4,9 +4,11 @@
 pub(crate) mod access;
 pub(crate) mod backups;
 pub(crate) mod keybinds;
+pub(crate) mod lang;
 pub(crate) mod light;
 pub(crate) mod lod;
 pub(crate) mod mesher;
+pub(crate) mod narrator;
 pub(crate) mod meshpool;
 pub(crate) mod noise;
 pub(crate) mod pad;

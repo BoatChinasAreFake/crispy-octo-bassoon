@@ -11,7 +11,7 @@ mod creatures;
 mod survival;
 mod online;
 
-pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, meshpool, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
+pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, mesher, meshpool, narrator, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, skins, sniffers, villagers, wildlife, wilter};
@@ -94,6 +94,8 @@ enum Screen {
     Controls { from_title: bool },
     /// Graphics and frame rate (reached from Options).
     Video { from_title: bool },
+    /// Subtitles, colours, the narrator and how keys behave (reached from Options).
+    Access { from_title: bool },
     Help { from_title: bool },
     Advancements,
     /// What you've done in this world (see stats.rs).
@@ -137,6 +139,8 @@ struct App {
     no_settings_file: bool,
     /// Screenshots mesh on the spot, unless asked not to (--mesh-threads, to check the threads).
     shot_threads: bool,
+    /// What the narrator has read out (see narrator.rs).
+    narration: narrator::Narration,
     splash: &'static str,
     last_mouse: Option<Vec2>,
     show_debug: bool,
@@ -452,7 +456,7 @@ impl App {
             drain_chars();
         }
         // Leaving a screen where settings change: keep them for next time.
-        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Multiplayer) && self.screen != s {
+        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Access { .. } | Screen::Multiplayer) && self.screen != s {
             self.save_settings();
         }
         self.screen = s;
@@ -963,7 +967,7 @@ impl App {
                     self.set_screen(self.journal_back);
                 }
             }
-            Screen::Video { from_title } => {
+            Screen::Video { from_title } | Screen::Access { from_title } => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Options { from_title });
                 }
@@ -1585,8 +1589,15 @@ impl App {
         if self.ui.pressed.replace(false) {
             self.audio.play(Sfx::Click, None, listener);
         }
+        // The narrator reads out new screens and buttons (see narrator.rs).
+        if self.settings.narrator {
+            let (title, focus) = (self.ui.title.borrow().clone(), self.ui.focus.borrow().clone());
+            if let Some(words) = self.narration.update(&title, &focus) {
+                narrator::say(&words);
+            }
+        }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::BeeLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Access { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::BeeLog);
         let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
@@ -1610,6 +1621,13 @@ impl App {
         self.game.shadows = self.settings.shadows;
         self.game.fancy_water = self.settings.fancy_water;
         self.game.distant_terrain = self.settings.distant_terrain && !self.settings.low_memory;
+        // The language (a mod's; see lang.rs), when it's changed or its mod has come or gone.
+        if lang::current() != self.settings.language {
+            let l = block::reg().languages.iter().find(|l| l.key == self.settings.language);
+            lang::set(l);
+            // Its font, if it brings one (and it's a font macroquad can read).
+            self.ui.face = l.and_then(|l| l.font.as_ref()).and_then(|f| load_ttf_font_from_bytes(f).ok());
+        }
         self.game.world.keep_margin = if self.settings.low_memory { 1 } else { 3 };
         // Chunks are meshed on worker threads (but on the spot for screenshots).
         let threads = meshpool::MeshPool::workers_for(self.settings.low_memory);
@@ -1661,6 +1679,10 @@ impl App {
             Screen::Video { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
                 self.video_screen(from_title);
+            }
+            Screen::Access { from_title } => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
+                self.access_screen(from_title);
             }
             Screen::Controls { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
@@ -1977,6 +1999,7 @@ async fn game_main() {
         settings: Settings::default(),
         no_settings_file: shot.is_some(),
         shot_threads: false,
+        narration: Default::default(),
         splash: pick_splash(),
         last_mouse: None,
         show_debug: false,
@@ -2111,6 +2134,8 @@ async fn game_main() {
         app.settings.subtitles = flag("--subtitles");
         app.shot_threads = flag("--mesh-threads");
         app.settings.low_memory = flag("--low-memory");
+        app.settings.language = arg("--language").unwrap_or_default();
+        app.settings.high_contrast = flag("--high-contrast");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {

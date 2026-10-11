@@ -1,0 +1,64 @@
+# Pirate. Lines are `English = translation`; {} is a part the game fills in
+# (a number, a name), and {1}, {2} put the parts in another order.
+
+# The title screen
+Singleplayer = Sail Alone
+Multiplayer = Sail With a Crew
+Mods = Contraband
+Options = Ship's Rules
+How to Play = The Pirate Code
+Quit to Desktop = Abandon Ship
+Punch trees! (Legally distinct) = Punch trees, ye scallywag!
+
+# Worlds
+Select World = Pick Yer Island
+Create New World = Chart a New Island
+Play Selected World = Set Sail
+Delete = Scuttle
+Cancel = Belay That
+Back = Back to Port
+Done = Aye
+
+# Options
+FOV: {} = Spyglass Width: {}
+Mouse Sensitivity: {}% = Twitchy Hands: {}%
+Sound Volume: {}% = Shanty Loudness: {}%
+Music: ON = Shanties: Aye
+Music: OFF = Shanties: Nay
+Language = Lingo
+Skin: {} = Yer Face: {}
+Video Settings... = Lookin' Glass...
+Controls... = The Helm...
+Accessibility... = Help for Old Sea Dogs...
+Accessibility = Help for Old Sea Dogs
+Video Settings = Lookin' Glass
+{}: ON = {}: Aye
+{}: OFF = {}: Nay
+Render Distance: {} chunks = How Far Ye Can See: {} chunks
+Subtitles = Words on Screen
+Narrator = Parrot Reads Aloud
+Fullscreen = Whole Sail
+
+# In the game
+Back to Game = Back to the Plunderin'
+Save and Quit to Title = Drop Anchor and Go Ashore
+Open to LAN = Open the Port to Mates
+Advancements ({}/{}) = Bounties ({}/{})
+Statistics = Ship's Log
+Inventory = Treasure Hold
+Respawn = Rise from Davy Jones' Locker
+{} joined the game = {} came aboard
+{} left the game = {} walked the plank
+
+# A few things
+Stone = Rock
+Sand = Beach
+Water = Briny Deep
+Torch = Lantern o' Fire
+Coal = Black Gold
+Gold = Doubloons
+Iron = Cannon Metal
+Crafting Table = Carpenter's Bench
+Chestplate = Breastplate
+Planks = Deck Boards
+{} Pickaxe = {} Pick

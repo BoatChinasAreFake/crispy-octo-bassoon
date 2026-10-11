@@ -11,9 +11,10 @@ impl App {
         self.ui.logo(w / 2.0, h * 0.12, px);
         let pulse = 1.0 + (get_time() * 6.0).sin().abs() as f32 * 0.08;
         let size = self.ui.font(11.0 * pulse);
-        let tw = measure_text(self.splash, None, size, 1.0).width;
+        let splash = crate::lang::tr(self.splash);
+        let tw = measure_text(&splash, None, size, 1.0).width;
         let (sx, sy) = (w / 2.0 + px * 16.0, h * 0.12 + px * 6.2);
-        draw_text_ex(self.splash, sx - tw / 2.0, sy, TextParams { font_size: size, color: GOLD, rotation: -0.35, ..Default::default() });
+        draw_text_ex(&splash, sx - tw / 2.0, sy, TextParams { font_size: size, color: GOLD, rotation: -0.35, ..Default::default() });
 
         let bw = (200.0 * s).min(w * 0.8);
         let bh = 20.0 * s;

@@ -53,13 +53,20 @@ impl App {
             self.set_screen(Screen::Controls { from_title });
         }
         y += bh + 5.0 * s;
-        let subs = if self.settings.subtitles { "Subtitles: ON" } else { "Subtitles: OFF" };
-        if self.ui.button(Rect::new(left, y, half, bh), subs, true) {
-            self.settings.subtitles = !self.settings.subtitles;
+        // English, then each language the mods bring (see lang.rs).
+        let langs = &block::reg().languages;
+        let at = langs.iter().position(|l| l.key == self.settings.language);
+        let name = at.map_or("English", |i| langs[i].name);
+        // (Raw: a language's name is in that language already.)
+        if self.ui.button(Rect::new(left, y, half, bh), "", true) {
+            let next = at.map_or(0, |i| i + 1);
+            self.settings.language = langs.get(next).map(|l| l.key.clone()).unwrap_or_default();
         }
-        let cb = if self.settings.colour_blind { "Colour-blind: ON" } else { "Colour-blind: OFF" };
-        if self.ui.button(Rect::new(right, y, half, bh), cb, true) {
-            self.settings.colour_blind = !self.settings.colour_blind;
+        let label = format!("{}: {name}", crate::lang::tr("Language"));
+        let tw = self.ui.raw_width(&label, 10.0);
+        self.ui.raw_text(&label, left + (half - tw) / 2.0, y + bh / 2.0 + 3.0 * s, 10.0, WHITE);
+        if self.ui.button(Rect::new(right, y, half, bh), "Accessibility...", true) {
+            self.set_screen(Screen::Access { from_title });
         }
         y += bh + 5.0 * s;
         let size_i = settings::UI_SCALES.iter().position(|(m, _)| (*m - self.settings.ui_scale).abs() < 0.01).unwrap_or(1);
@@ -73,6 +80,52 @@ impl App {
         y += bh + 12.0 * s;
         if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
             self.set_screen(if from_title { Screen::Title } else { Screen::Paused });
+        }
+    }
+
+    /// Subtitles and colours, the narrator, and keys that switch on and off.
+    pub(crate) fn access_screen(&mut self, from_title: bool) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        let bw = (220.0 * s).min(w * 0.8);
+        let bh = (20.0 * s).min((h - 100.0 * s) / 8.0);
+        let x = w / 2.0 - bw / 2.0;
+        let total = 5.0 * bh + 4.0 * 5.0 * s + 7.0 * s;
+        let mut y = ((h - total) / 2.0 + 10.0 * s).max(30.0 * s);
+        self.ui.text_centered("Accessibility", w / 2.0, y - 18.0 * s, 16.0, WHITE);
+        let half = (bw - 4.0 * s) / 2.0;
+        let (left, right) = (x, x + half + 4.0 * s);
+        let on_off = |name: &str, on: bool| if on { format!("{name}: ON") } else { format!("{name}: OFF") };
+        let st = self.settings.clone();
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Subtitles", st.subtitles), true) {
+            self.settings.subtitles = !st.subtitles;
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), &on_off("Colour-blind", st.colour_blind), true) {
+            self.settings.colour_blind = !st.colour_blind;
+        }
+        y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Narrator", st.narrator), true) {
+            self.settings.narrator = !st.narrator;
+        }
+        if self.ui.button(Rect::new(right, y, half, bh), &on_off("High Contrast", st.high_contrast), true) {
+            self.settings.high_contrast = !st.high_contrast;
+        }
+        y += bh + 5.0 * s;
+        let sneak = if st.toggle_sneak { "Sneak: Toggle" } else { "Sneak: Hold" };
+        if self.ui.button(Rect::new(left, y, half, bh), sneak, true) {
+            self.settings.toggle_sneak = !st.toggle_sneak;
+        }
+        let sprint = if st.toggle_sprint { "Sprint: Toggle" } else { "Sprint: Hold" };
+        if self.ui.button(Rect::new(right, y, half, bh), sprint, true) {
+            self.settings.toggle_sprint = !st.toggle_sprint;
+        }
+        y += bh + 5.0 * s;
+        if self.settings.narrator && !crate::narrator::available() {
+            self.ui.text_centered("No speech program found: the narrator can't speak (see the README).", w / 2.0, y + 9.0 * s, 8.0, GOLD);
+        }
+        y += 16.0 * s;
+        if self.ui.button(Rect::new(x, y, bw, bh), "Done", true) {
+            self.set_screen(Screen::Options { from_title });
         }
     }
 
@@ -108,7 +161,7 @@ impl App {
         y += bh + 5.0 * s;
         let half = (bw - 4.0 * s) / 2.0;
         let (left, right) = (x, x + half + 4.0 * s);
-        let on_off = |name: &str, on: bool| format!("{name}: {}", if on { "ON" } else { "OFF" });
+        let on_off = |name: &str, on: bool| if on { format!("{name}: ON") } else { format!("{name}: OFF") };
         if self.ui.button(Rect::new(left, y, half, bh), &on_off("Fullscreen", st.fullscreen), true) {
             self.settings.fullscreen = !st.fullscreen;
             set_fullscreen(self.settings.fullscreen);

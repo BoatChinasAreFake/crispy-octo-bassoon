@@ -481,6 +481,33 @@ If two mods both define a `[mob]` with the same section name, a bare name resolv
 
 Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, hostile ranged combat with bounded appearance, timed effects, deterministic multishot, homing and blast projectiles, flying, taming and breeding, custom box-built bodies with simple animations, trading, and bosses. Arbitrary projectile geometry/rendering and custom UI screens still require a Rust change.
 
+### `[language <code>]`
+
+A translation of the game. Every line of text Minceraft shows is listed, in English, in [`lang/strings.txt`](lang/strings.txt). A translation is a file in your mod that pairs English lines with yours:
+
+```text
+[language pirate]
+name = Pirate          // what the Language button shows
+file = pirate.txt      // the translations
+font = myfont.ttf      // optional: a font with the letters your language needs
+```
+
+```text
+# pirate.txt: `English = translation`, one to a line (# starts a note)
+Singleplayer = Sail Alone
+Render Distance: {} chunks = How Far Ye Can See: {} chunks
+{} joined the game = {} came aboard
+{} gave {} to {} = {3} got {2} from {1}
+{} Pickaxe = {} Pick
+```
+
+- `{}` is a part the game fills in as it runs (a number, a name). Your line needs the same number of them; `{1}`, `{2}` and so on put them in another order.
+- The parts are translated too where they can be, so `Iron = Cannon Metal` and `{} Pickaxe = {} Pick` make "Iron Pickaxe" read "Cannon Metal Pick".
+- Write `\n` for a new line, and `\=` for an equals sign with spaces round it in the English.
+- Lines you leave out stay English, so a translation can start small. Text that players write (chat, signs, books, names) is never translated.
+- The built-in font has the Latin alphabet with its accents. For other alphabets (Cyrillic, Greek, Chinese, ...), add a `.ttf` or `.otf` font to the mod and name it with `font =` (up to 24 MB). Fonts stay on the computer they're on: servers don't send them to joining players.
+- Pick the language in Options. See `example-mods/pirate` for a whole (small) example.
+
 ### `[splashes]`
 
 Each line is an extra title-screen splash text.
@@ -498,7 +525,8 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 
 - Up to **32,000 mod blocks**, **32,000 mod items**, **187 mod mobs** and about **2,200 mod textures**, across all mods together.
 - Up to **32 dimensions**, **64 biomes** and **64 structures** across all mods together, and structures at most **32 blocks** each way.
-- 1 MB per file, and 4 MB for all of a server's mods together.
+- Up to **64 languages**, each up to 20,000 lines.
+- 1 MB per file (24 MB for a font), and 4 MB for all of a server's mods together.
 
 ## Worlds and multiplayer
 

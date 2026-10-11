@@ -1,0 +1,16 @@
+// An example translation: the game in Pirate. Copy this folder into mods/,
+// then pick "Language: Pirate" in Options.
+//
+// A translation is a file of `English = translation` lines (see pirate.txt).
+// Every English line the game shows is listed in lang/strings.txt in the
+// game's source; translate as many as you like, and the rest stay English.
+
+[mod]
+name = Pirate Speak
+version = 1.0
+author = Minceraft
+description = Arr. The menus and more, in Pirate.
+
+[language pirate]
+name = Pirate
+file = pirate.txt
