@@ -230,6 +230,7 @@ pub const ALL: &[Advancement] = &[
     adv("off_the_map", "Off the Map", "Step through a portal into a mod's dimension."),
     adv("homebrew", "Homebrew", "Wander into a biome a mod added."),
     adv("lost_in_translation", "Lost in Translation", "Play in a language a mod brought."),
+    adv("fair_trade", "Fair Trade", "Swap things with someone at a Trading Table."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).

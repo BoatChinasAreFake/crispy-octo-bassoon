@@ -748,6 +748,14 @@ impl Game {
                     self.host_hit_player(from, target, dmg);
                 }
             }
+            Msg::TradeAccept { x, y, z, accept } => {
+                let p = IVec3::new(x, y, z);
+                let open = self.viewers.get(&p).is_some_and(|v| v.contains(&from));
+                if open && self.world.get_v(p) == TRADING_TABLE && self.peer_rate_ok(from, "trade", 0.2) {
+                    let name = self.peer_name(from);
+                    self.accept_deal(p, &name, accept);
+                }
+            }
             Msg::RideMob { mob, pos, yaw, off } => self.host_ride_mob(from, mob, pos, yaw, off),
             Msg::MobName { mob, name } => {
                 if self.peer_rate_ok(from, "name", 0.5) {
@@ -1306,6 +1314,7 @@ impl Game {
                 }
             }
             Msg::SkinData { id, pixels } => self.note_peer_skin(id, pixels),
+            Msg::TradeState { x, y, z, seats, accepted, done, mine } => self.apply_deal(IVec3::new(x, y, z), seats, accepted, done, mine),
             Msg::Teams { pvp, data } => {
                 self.pvp = pvp;
                 self.teams = crate::teams::Teams::decode(&data).unwrap_or_default();
@@ -1356,7 +1365,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } => {}
         }
     }
 

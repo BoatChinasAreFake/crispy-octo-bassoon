@@ -369,7 +369,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -858,7 +858,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -1208,6 +1208,28 @@ impl App {
                     app.game.world.dirty.insert((big.x.div_euclid(16), big.z.div_euclid(16)));
                 }
                 app.game.lids.insert(big, chests::Lid { open: 1.0, yaw: s.yaw + std::f32::consts::PI });
+            }
+            if s.mode == "tradetable" && frames == 125 {
+                // A Trading Table between us and Bob: his emeralds-worth of gold for our diamonds.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let v = p + fwd * 2.5;
+                let at = IVec3::new(v.x.floor() as i32, p.y.floor() as i32, v.z.floor() as i32);
+                app.game.world.set_v(at, block::TRADING_TABLE);
+                app.game.player_name = "Stove".into();
+                app.game.open_container(at);
+                app.game.take_seat(at, "Bob");
+                if let Some(c) = app.game.world.containers.get_mut(&at) {
+                    c.slots[0] = Some((block::DIAMOND, 3));
+                    c.slots[1] = Some((block::BREAD, 4));
+                    c.slots[9] = Some((block::GOLD_INGOT, 12));
+                    c.slots[10] = Some((block::SADDLE, 1));
+                    c.slots[13] = Some((block::COAL, 32));
+                }
+                app.game.accept_deal(at, "Bob", true);
+                for (item, n) in [(block::DIAMOND, 5), (block::IRON, 9), (block::LOG, 16)] {
+                    app.game.give(item, n);
+                }
             }
             if matches!(s.mode.as_str(), "kitchen" | "chest" | "furnace") && frames == 125 {
                 // A chest, a table and a row of furnaces (the middle one busy), a few blocks ahead.

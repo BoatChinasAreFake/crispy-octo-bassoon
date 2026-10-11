@@ -325,6 +325,8 @@ pub struct Game {
     /// Teams (see teams.rs), and whether players can hurt each other (`/pvp`).
     pub teams: crate::teams::Teams,
     pub pvp: bool,
+    /// Trading Tables' seats and Accepts (see trading.rs).
+    pub deals: HashMap<IVec3, crate::trading::Deal>,
     /// Worker threads that mesh chunks (none: meshed on the spot, as in screenshots and tests).
     pub meshes: Option<crate::meshpool::MeshPool>,
     /// Distant terrain as smooth rolling land rather than blocky terraces.
@@ -623,6 +625,7 @@ impl Game {
             meshes: None,
             teams: Default::default(),
             pvp: false,
+            deals: HashMap::new(),
             smooth_far: false,
             lod: crate::lod::Lod::default(),
             regulars: HashMap::new(),

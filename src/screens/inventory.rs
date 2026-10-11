@@ -538,9 +538,16 @@ impl App {
         // Bigger chests have more rows (and the biggest is wider; see chests.rs).
         // (A backpack's pack shows only as much as the backpack reaches.)
         let shown = if chests::is_chest(kind) { c.slots.len().min(chests::slots(kind)) } else { c.slots.len() };
-        let cols = if containers::is_three_slot(kind) { 9 } else { chests::columns(shown) };
+        let table = kind == TRADING_TABLE;
+        let cols = if containers::is_three_slot(kind) || table { 9 } else { chests::columns(shown) };
         let rows = if containers::is_three_slot(kind) { 3 } else { shown.div_ceil(cols).max(1) };
-        let top_h = if containers::is_three_slot(kind) { slot * 3.2 } else { slot * rows as f32 };
+        let top_h = if containers::is_three_slot(kind) {
+            slot * 3.2
+        } else if table {
+            slot * 3.0 + 32.0 * s
+        } else {
+            slot * rows as f32
+        };
         let panel_w = slot * cols as f32 + 12.0 * s;
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
@@ -555,7 +562,7 @@ impl App {
         let title = if backpacks::pack_of_key(pos).is_some() { item_name(self.game.inv.held()) } else { block(kind).name };
         self.ui.text(title, sx, y0 + 12.0 * s, 10.0, WHITE);
         let sort = Rect::new(x0 + panel_w - 42.0 * s, y0 + 3.0 * s, 36.0 * s, 13.0 * s);
-        if !containers::is_three_slot(kind) && self.ui.button(sort, "Sort", true) {
+        if !containers::is_three_slot(kind) && !table && self.ui.button(sort, "Sort", true) {
             self.game.sort_container();
         }
         let top = y0 + 18.0 * s;
@@ -563,6 +570,9 @@ impl App {
         let spots: Vec<(usize, f32, f32)> = if containers::is_three_slot(kind) {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
+        } else if table {
+            // Two offers side by side, 3x3 each (see trading.rs).
+            (0..trading::TRADE_SLOTS).map(|i| (i, sx + (i % 3) as f32 * slot + if i >= trading::HALF { slot * 6.0 } else { 0.0 }, top + 10.0 * s + ((i % trading::HALF) / 3) as f32 * slot)).collect()
         } else {
             (0..shown).map(|i| (i, sx + (i % cols) as f32 * slot, top + (i / cols) as f32 * slot)).collect()
         };
@@ -573,6 +583,32 @@ impl App {
             }
             if l || r {
                 self.game.container_click(i, r, shift && l);
+            }
+        }
+        if table {
+            let deal = self.game.deals.get(&pos).cloned().unwrap_or_default();
+            let me = self.game.player_name.clone();
+            let mine = self.game.seat_at(pos, &me);
+            for side in 0..2 {
+                let x = sx + side as f32 * slot * 6.0;
+                let who = if deal.seats[side].is_empty() { "(waiting for someone)".to_string() } else { deal.seats[side].clone() };
+                let col = if mine == Some(side) { Color::new(1.0, 1.0, 0.6, 1.0) } else { WHITE };
+                // (A name isn't translated.)
+                self.ui.raw_text(&self.ui.fit(&who, 8.0, slot * 3.0), x, top + 7.0 * s, 8.0, col);
+                let (mark, mc) = if deal.accepted[side] { ("Accepted", Color::new(0.4, 1.0, 0.4, 1.0)) } else { ("Thinking...", GRAY) };
+                self.ui.text(mark, x, top + 10.0 * s + slot * 3.0 + 8.0 * s, 8.0, mc);
+            }
+            // Between them: what happens when both say yes.
+            let mid = sx + slot * 3.25;
+            self.ui.text_centered("<- swap ->", mid + slot * 1.25, top + 10.0 * s + slot * 1.4, 8.0, GOLD);
+            let label = match mine {
+                Some(s0) if deal.accepted[s0] => "Take Back",
+                Some(_) => "Accept",
+                None => "Table's Full",
+            };
+            let r = Rect::new(mid, top + 10.0 * s + slot * 2.0, slot * 2.5, 14.0 * s);
+            if self.ui.button(r, label, mine.is_some()) {
+                self.game.press_accept();
             }
         }
         if kind == BREWING_STAND {

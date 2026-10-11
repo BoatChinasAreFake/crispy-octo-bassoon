@@ -306,6 +306,10 @@ pub enum Msg {
     Teams { pvp: bool, data: Vec<u8> },
     /// client -> host: I hit this player (the host checks it, see teams.rs).
     HitPlayer { target: u32, dmg: f32 },
+    /// host -> client: a Trading Table's seats and Accepts, and your seat (255: none; see trading.rs).
+    TradeState { x: i32, y: i32, z: i32, seats: [String; 2], accepted: [bool; 2], done: u32, mine: u8 },
+    /// client -> host: I accept the deal at this table (or take it back).
+    TradeAccept { x: i32, y: i32, z: i32, accept: bool },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -1041,6 +1045,24 @@ impl Msg {
                 w.u32(*target);
                 w.f32(*dmg);
             }
+            Msg::TradeState { x, y, z, seats, accepted, done, mine } => {
+                w.u8(96);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.str(&seats[0]);
+                w.str(&seats[1]);
+                w.u8(accepted[0] as u8 | (accepted[1] as u8) << 1);
+                w.u32(*done);
+                w.u8(*mine);
+            }
+            Msg::TradeAccept { x, y, z, accept } => {
+                w.u8(97);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*accept as u8);
+            }
             Msg::RideMob { mob, pos, yaw, off } => {
                 w.u8(59);
                 w.u32(*mob);
@@ -1329,6 +1351,13 @@ impl Msg {
                 Msg::Teams { pvp, data: r.take(n)?.to_vec() }
             }
             95 => Msg::HitPlayer { target: r.u32()?, dmg: r.f32()? },
+            96 => {
+                let (x, y, z) = (r.i32()?, r.i32()?, r.i32()?);
+                let seats = [r.str()?, r.str()?];
+                let a = r.u8()?;
+                Msg::TradeState { x, y, z, seats, accepted: [a & 1 != 0, a & 2 != 0], done: r.u32()?, mine: r.u8()? }
+            }
+            97 => Msg::TradeAccept { x: r.i32()?, y: r.i32()?, z: r.i32()?, accept: r.u8()? != 0 },
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -2005,6 +2034,8 @@ mod tests {
             Msg::SkinData { id: 5, pixels: Vec::new() },
             Msg::Teams { pvp: true, data: vec![1, 2, 3] },
             Msg::HitPlayer { target: 3, dmg: 4.5 },
+            Msg::TradeState { x: 1, y: -2, z: 3, seats: ["Ann".into(), String::new()], accepted: [true, false], done: 4, mine: 0 },
+            Msg::TradeAccept { x: 1, y: -2, z: 3, accept: true },
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },
