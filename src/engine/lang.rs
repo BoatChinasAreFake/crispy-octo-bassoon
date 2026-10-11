@@ -282,7 +282,8 @@ pub(crate) fn extract_strings(src: &std::path::Path) -> Vec<String> {
     }
     files.sort();
     for f in files {
-        let code = std::fs::read_to_string(&f).unwrap_or_default();
+        // (Windows checkouts end lines with \r\n.)
+        let code = std::fs::read_to_string(&f).unwrap_or_default().replace("\r\n", "\n");
         // Tests' text isn't shown to anyone.
         let code = code.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
         for lit in literals(code) {
