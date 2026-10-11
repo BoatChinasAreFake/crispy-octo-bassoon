@@ -227,6 +227,8 @@ pub const ALL: &[Advancement] = &[
     adv("bullseye", "Bullseye", "Hit a Target with an arrow."),
     adv("tuning_in", "Tuning In", "Tell a Calibrated Sculk Sensor what to listen for."),
     adv("its_a_trap", "It's a Trap!", "Open a Trapped Chest wired up to something."),
+    adv("off_the_map", "Off the Map", "Step through a portal into a mod's dimension."),
+    adv("homebrew", "Homebrew", "Wander into a biome a mod added."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).

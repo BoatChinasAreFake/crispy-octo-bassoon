@@ -1024,6 +1024,15 @@ impl Game {
             return;
         }
         self.explore_timer = 0.0;
+        // Mods' biomes, anywhere (see modgen.rs).
+        {
+            let p = self.player.body.pos;
+            let (x, z) = (p.x.floor() as i32, p.z.floor() as i32);
+            let g = &self.world.generator;
+            if !g.biomes.is_empty() && g.mod_biome_at(x, z, g.column(x, z).1).is_some() {
+                self.advance("homebrew");
+            }
+        }
         // Down below, it's the Scorchlands' own biomes (see wilds.rs).
         if self.in_scorch() {
             self.scorch_explore();
@@ -1133,6 +1142,10 @@ impl Game {
     }
 
     pub fn daylight(&self) -> f32 {
+        // A mod dimension's light is its own, with no sun to change it.
+        if let Some(d) = self.mod_dim_here() {
+            return d.light.max(0.18);
+        }
         let s = self.sun_angle().sin();
         let t = ((s + 0.15) / 0.4).clamp(0.0, 1.0);
         let clear = 0.18 + 0.82 * t * t * (3.0 - 2.0 * t);
@@ -1145,7 +1158,12 @@ impl Game {
 
     /// Somewhere other than the ordinary world (no weather, its own sky)?
     pub fn elsewhere(&self) -> bool {
-        self.in_scorch() || self.in_hollow()
+        self.in_scorch() || self.in_hollow() || self.mod_dim_here().is_some()
+    }
+
+    /// The mod dimension the active realm is, if it's one (see modgen.rs).
+    pub fn mod_dim_here(&self) -> Option<&crate::modgen::ModDim> {
+        if self.menu { None } else { self.world.generator.mod_dim() }
     }
 
     /// Is the active realm (where the local player is, unless the host is
@@ -1155,6 +1173,9 @@ impl Game {
     }
 
     pub fn sky_color(&self) -> [f32; 3] {
+        if let Some(d) = self.mod_dim_here() {
+            return d.sky;
+        }
         if self.in_scorch() {
             return self.world.scorch_haze(self.player.body.pos).0;
         }
@@ -1203,7 +1224,7 @@ impl Game {
             renderer.drop_chunk(ctx, k);
         }
         // The far-off land, kept up with where we are.
-        if self.distant_terrain && !self.in_scorch() && !self.in_hollow() {
+        if self.distant_terrain && !self.elsewhere() {
             let generator = self.world.generator.clone();
             if let Some(land) = self.lod.tick(&generator, &self.map_colors, center, radius, self.smooth_far) {
                 renderer.set_far(ctx, Some(&land));
@@ -4087,7 +4108,7 @@ impl Game {
         let (ox, oz) = ((eye.x + scroll) / cell, eye.z / cell);
         let reach = if scorch || !self.clouds_on { -1 } else { ((render_distance * 16) as f32 / cell) as i32 + 4 };
         // With the distant land showing, clouds go on out over it (as flat ones past the near boxes).
-        let far_land = self.distant_terrain && !self.in_scorch() && !self.in_hollow();
+        let far_land = self.distant_terrain && !self.elsewhere();
         let far_reach = if reach < 0 || !far_land { reach } else { reach.max((crate::lod::far_for(render_distance) as f32 / cell) as i32 + 2) };
         // Each row's runs of cloudy cells become one strip (Fast) or one box
         // (Fancy). Edges come from whole cells plus one shared fraction, so
@@ -4413,7 +4434,7 @@ impl Game {
         let underwater = !self.menu && self.player.head_in_water(&self.world);
         let sky = self.sky_color();
         let far = (render_distance * 16) as f32;
-        let far_land = self.distant_terrain && renderer.has_far() && !self.in_scorch() && !self.in_hollow();
+        let far_land = self.distant_terrain && renderer.has_far() && !self.elsewhere();
         let (fog_color, fog_start, fog_end) = if underwater {
             // A Turtle Shell lets you see a good way further.
             let shell = self.inv.armor[0].is_some_and(|(id, _)| id == TURTLE_SHELL);
@@ -4424,6 +4445,8 @@ impl Game {
             (sky, far * 0.2 * thick, far * 0.8 * thick)
         } else if self.in_hollow() {
             ([0.1, 0.05, 0.14], far * 0.4, far)
+        } else if self.mod_dim_here().is_some() {
+            (sky, far * 0.5, far - 4.0)
         } else if !self.fog_on {
             (sky, 0.0, 0.0)
         } else if far_land {
@@ -4441,7 +4464,7 @@ impl Game {
             extra.push([e.x, e.y, e.z, -block(held).light * 0.8]);
         }
         let lights: [Vec4; 16] = renderer.nearby_lights(cam.pos, &extra);
-        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.in_scorch() && !self.in_hollow(), sun_dir: { let a = sun_step(self.sun_angle()); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
+        FrameParams { view_proj: cam.view_proj, cam_pos: cam.pos, fog_color, fog_start, fog_end, far_land: far_land && !underwater, daylight: self.daylight(), ambient: if self.has_effect(crate::potions::Potion::NightVision) { 0.7 } else if self.in_scorch() { 0.32 } else if self.in_hollow() { 0.45 } else { 0.0 }, lights, colour_blind: self.colour_blind, waving_leaves: self.waving_leaves, water_reflections: self.water_reflections, time: self.clock, shadows: self.shadows && !self.elsewhere(), sun_dir: { let a = sun_step(self.sun_angle()); Vec3::new(a.cos(), a.sin(), 0.25).normalize() }, fancy_water: self.fancy_water }
     }
 }
 

@@ -1670,6 +1670,8 @@ pub struct OreGen {
     pub min_y: i32,
     pub max_y: i32,
     pub chance: f32,
+    /// In a mod dimension (an index into `Registry::dims`) instead of the Overworld.
+    pub dim: Option<usize>,
 }
 
 /// Mod world generation: plants on the surface.
@@ -1678,6 +1680,7 @@ pub struct PlantGen {
     pub block: Id,
     pub on: Id,
     pub chance: f32,
+    pub dim: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1711,6 +1714,10 @@ pub struct Registry {
     pub fuels: Vec<(Id, f32)>,
     /// Mod-defined mob types, in deterministic id order (see entity.rs).
     pub mobs: Vec<ModMob>,
+    /// Mod biomes, structures and dimensions (see modgen.rs); dimensions in key order.
+    pub biomes: Vec<crate::modgen::ModBiome>,
+    pub structures: Vec<crate::modgen::ModStructure>,
+    pub dims: Vec<crate::modgen::ModDim>,
 }
 
 static REGISTRY: AtomicPtr<Registry> = AtomicPtr::new(std::ptr::null_mut());
@@ -3142,7 +3149,7 @@ impl Registry {
                 recipes.push(r(&[(material, n)], (ARMOR_FIRST + (t * 4 + slot) as Id, 1)));
             }
         }
-        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new() }
+        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new(), biomes: Vec::new(), structures: Vec::new(), dims: Vec::new() }
     }
 
     /// Look up a block or item id by key ("stone", "cheese:wheel", ...).

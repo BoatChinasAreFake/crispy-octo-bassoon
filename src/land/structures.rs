@@ -153,7 +153,7 @@ impl Generator {
     pub fn site(&self, cx: i32, cz: i32) -> Option<Site> {
         match self.dim {
             Dim::Scorch => return self.scorch_site(cx, cz),
-            Dim::Hollow => return None,
+            Dim::Hollow | Dim::Mod(_) => return None,
             Dim::Over => {}
         }
         let s = self.seed ^ 0x57_C0DE;
@@ -1129,6 +1129,13 @@ impl World {
             if crate::contraptions::is_dispenser(self.get_v(p)) && !self.containers.contains_key(&p) {
                 let mut c = crate::containers::Container::for_block(DISPENSER_FIRST);
                 c.slots[0] = Some((ARROW, 9));
+                self.containers.insert(p, c);
+            }
+        }
+        // Mods' structures' chests (see modgen.rs).
+        for (p, si, seed) in self.generator.mod_structure_chests(cx, cz) {
+            if crate::chests::is_chest(self.get_v(p)) && !self.containers.contains_key(&p) {
+                let c = crate::modgen::mod_loot(si, seed);
                 self.containers.insert(p, c);
             }
         }

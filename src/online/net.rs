@@ -46,7 +46,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v29: new woods (doors, boats), the Mushmooer, kelp and sea plants.
 /// v34: everything encrypted (see the top of this file), the server list's
 /// status query (StatusAsk, Status), and players' own skins (SkinData).
-pub const PROTOCOL: u32 = 34;
+/// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
+pub const PROTOCOL: u32 = 35;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

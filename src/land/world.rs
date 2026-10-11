@@ -20,7 +20,7 @@ pub const OLD_SEA: i32 = 40;
 pub const NEW_SEA: i32 = 63;
 /// How deep (below the sea) the shallow coastal shelf goes before the sea floor drops away.
 const SEA_SHELF: f32 = 2.0;
-const CHUNK_VOL: usize = (CW * CW * CH) as usize;
+pub(crate) const CHUNK_VOL: usize = (CW * CW * CH) as usize;
 
 #[inline]
 /// 0 below `a`, 1 above `b`, and a smooth S between.
@@ -626,8 +626,8 @@ pub struct Generator {
     /// Which dimension this generates (see dims.rs): it works in that
     /// dimension's generator coordinates, its own plus `dim.gen_x()`.
     pub dim: Dim,
-    continent: Perlin,
-    hills: Perlin,
+    pub(crate) continent: Perlin,
+    pub(crate) hills: Perlin,
     ridges: Perlin,
     pub(crate) temp: Perlin,
     pub(crate) moist: Perlin,
@@ -637,8 +637,11 @@ pub struct Generator {
     /// The Scorchlands' caverns (see scorch.rs).
     pub(crate) scorch: Perlin,
     /// Mod world generation, copied from the registry when the world is created.
-    ores: Vec<OreGen>,
-    plants: Vec<PlantGen>,
+    pub(crate) ores: Vec<OreGen>,
+    pub(crate) plants: Vec<PlantGen>,
+    pub(crate) biomes: Vec<crate::modgen::ModBiome>,
+    pub(crate) structures: Vec<crate::modgen::ModStructure>,
+    pub(crate) dims: Vec<crate::modgen::ModDim>,
 }
 
 impl Generator {
@@ -671,6 +674,9 @@ impl Generator {
             scorch: Perlin::new(s + 8),
             ores: reg().ores.clone(),
             plants: reg().plants.clone(),
+            biomes: reg().biomes.clone(),
+            structures: reg().structures.clone(),
+            dims: reg().dims.clone(),
         }
     }
 
@@ -681,6 +687,9 @@ impl Generator {
 
     /// Surface height and biome for a column.
     pub fn column(&self, x: i32, z: i32) -> (i32, Biome) {
+        if let Some(d) = self.mod_dim() {
+            return (self.mod_height(d, x, z), Biome::Plains);
+        }
         if self.opts.version >= 3 {
             return self.column_v3(x, z);
         }
@@ -1053,6 +1062,7 @@ impl Generator {
             // (The other dimensions are generated in generator coordinates; see dims.rs.)
             Dim::Scorch => self.generate_scorch(cx + self.dim.gen_cx(), cz),
             Dim::Hollow => self.generate_hollow(cx + self.dim.gen_cx(), cz),
+            Dim::Mod(_) => self.generate_mod(cx, cz),
         }
     }
 
@@ -1148,7 +1158,7 @@ impl Generator {
                             b[i] = COPPER_ORE;
                         }
                     }
-                    for (oi, ore) in self.ores.iter().enumerate() {
+                    for (oi, ore) in self.ores.iter().enumerate().filter(|(_, o)| o.dim.is_none()) {
                         if b[i] == ore.replace && (ore.min_y..=ore.max_y).contains(&y) {
                             let salt = 0x5100 + oi as u32 * 7;
                             // Small 2x2x2-ish veins; roughly `chance` of the eligible blocks.
@@ -1321,12 +1331,16 @@ impl Generator {
                 }
                 if top < CH && b[idx(lx, top, lz)] == AIR {
                     let below = b[idx(lx, h, lz)];
-                    for (pi, p) in self.plants.iter().enumerate() {
+                    for (pi, p) in self.plants.iter().enumerate().filter(|(_, p)| p.dim.is_none()) {
                         if below == p.on && hash2(s ^ (0x9100 + pi as u32 * 13), x, z) < p.chance {
                             b[idx(lx, top, lz)] = p.block;
                             break;
                         }
                     }
+                }
+                // Mods' biomes take over their share of the land (see modgen.rs).
+                if h >= self.sea() {
+                    self.mod_biome_column(&mut b, lx, lz, x, z, biome);
                 }
             }
         }
@@ -1334,6 +1348,10 @@ impl Generator {
         for tz in cz * CW - 4..cz * CW + CW + 4 {
             for tx in cx * CW - 4..cx * CW + CW + 4 {
                 let Some((h, trunk, kind)) = self.tree_at(tx, tz) else { continue };
+                // (A mod biome grows its own trees instead.)
+                if self.mod_biome_at(tx, tz, self.column(tx, tz).1).is_some() {
+                    continue;
+                }
                 let base = ivec3(tx, h, tz);
                 for (o, id, force) in kind.shape(trunk, |o| hash3(s ^ 0x1EA, base.x + o.x, base.y + o.y, base.z + o.z)) {
                     let p = base + o;
@@ -1369,8 +1387,10 @@ impl Generator {
                 }
             }
         }
+        self.mod_trees(cx, cz, &mut b, |x, z| self.column(x, z));
         self.place_structures(cx, cz, &mut b);
         self.place_crypts(cx, cz, &mut b);
+        self.place_mod_structures(cx, cz, &mut b);
         b
     }
 }

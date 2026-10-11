@@ -161,7 +161,7 @@ The generator builds things, the same in every copy of a world. `/locate` finds 
 - **Beds and sleep.** A bed faces away from whoever put it down. Right-click it at night to lie down; the screen fades, and if nobody gets you up the night is skipped and you step out beside the bed. Jumping, sneaking or getting hurt gets you up early. It refuses if monsters are nearby, sets where you come back after dying, and clears a storm. (Don't try it in the Scorchlands or the Hollow.)
 - **Death.** Dying drops your things where you fell (they wait five minutes), and everyone is told how you died ("Bot5 was struck down by a command. Harsh."). Held maps and the **Recovery Compass** show where.
 - **Game modes.** Survival, Creative (flight, instant breaking, infinite blocks) and **Spectator** (fly through everything, touch nothing). **Hardcore** is one life on Hard; die and you can only spectate.
-- **Advancements** (211 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
+- **Advancements** (216 of them, in four tabs, each with a toast and a fanfare) and **Statistics** (blocks, crafts, kills, distances, fish, food and more) are kept per world.
 
 ### Building
 
@@ -215,6 +215,8 @@ These are deliberately over-engineered.
 ### Zappy Dust and machines
 
 Legally distinct redstone, simplified. Power comes from levers, buttons, pressure plates, Zappy blocks, **Observers** and **Detector Rails**, and travels up to 15 blocks of dust. It lights **Zappy Lamps** and **Copper Bulbs**, opens doors and sets off TNT. **Zappy Torches** invert, **Repeaters** delay, **Comparators** read containers, **Pistons** push and pull, **Dispensers** fire whatever's in them, **Hoppers** move items between containers, a **Crafter** crafts when powered, and **Note Blocks** play.
+
+More parts: a **Daylight Sensor** gives power by day (use it to turn it round, and it gives power by night instead), a **Target** lights up for a second when an arrow hits it, a **Dropper** drops one item when powered (or passes it into a container in front), an **Activator Rail** throws riders out of carts and stops hopper carts from collecting, a **Trapped Chest** gives power while someone has it open, and a **Calibrated Sculk Sensor** hears only one kind of thing (footsteps, blocks, music or mobs; use it to change which).
 
 ### Getting around
 
@@ -318,7 +320,7 @@ The world autosaves every 5 minutes and on `stop` (Ctrl+C loses anything since t
 
 ## Modding
 
-- **Data mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants, mobs and simple effects. Servers send their mods to players automatically. See **[MODDING.md](MODDING.md)** and `example-mods/cheese`.
+- **Data mods.** Drop a folder with a `mod.txt` into `mods/` to add blocks, items, tools, food, recipes, textures (pixel art, noise or PNG), ores, plants, mobs and simple effects, and whole new biomes, structures (built from a block template) and dimensions with portals of their own. Servers send their mods to players automatically. See **[MODDING.md](MODDING.md)** and `example-mods/cheese`.
 - **Code mods.** Mods can also include sandboxed [Rhai](https://rhai.rs) scripts that react to events (chat commands, blocks broken and placed, item use, joins, mob deaths, ticks) and call a game API. Scripts run on the machine that owns the world, dedicated servers included. See **[SCRIPTING.md](SCRIPTING.md)** and `example-mods/commands`.
 
 ## For developers
@@ -341,8 +343,8 @@ Each folder's `mod.rs` starts with a note on what's in it, and every file starts
 | `src/shots.rs` | The `--screenshot` harness and its scenes |
 | `src/screens/` | Menus, settings, the inventory and creative tabs, crafting stations, logs and the HUD |
 | `src/engine/` | Rendering (`render`, `mesher`, `texture`, `light`, `tint`, `lod`), chunk storage (`palette`), noise, sound, UI widgets, controls (`keybinds`, `pad`), settings, saving (`save`, `regions`, `backups`), the data folder, updates, UPnP and accessibility |
-| `src/land/` | The world and its generator (`world`), the dimensions (`dims`) and the realm each lives in (`realms`, saved by `realm_save`), structures, weather, seasons, skies, liquids, fire, falling blocks, trees and ground cover, random ticks (`copper`), the Scorchlands, their biomes (`wilds`), fortresses, bastions and Woodland Mansions, hot springs and the chill (`springs`), the Hollow, the Deep Dark, Trial Chambers, treasure and archaeology |
-| `src/blocks/` | The block and item registry (`block`), building blocks, doors, decor, containers, chests, beds, backpacks, Personal Chests, Hollow Boxes, Zappy wiring and contraptions, hoppers, crafting, enchanting, anvils, smithing, trims, brewing, beacons, banners, books, fireworks, music, and cauldrons, composters, heads and lightning rods (`homecraft`) |
+| `src/land/` | The world and its generator (`world`), the dimensions (`dims`), mods' biomes, structures and dimensions (`modgen`), and the realm each lives in (`realms`, saved by `realm_save`), structures, weather, seasons, skies, liquids, fire, falling blocks, trees and ground cover, random ticks (`copper`), the Scorchlands, their biomes (`wilds`), fortresses, bastions and Woodland Mansions, hot springs and the chill (`springs`), the Hollow, the Deep Dark, Trial Chambers, treasure and archaeology |
+| `src/blocks/` | The block and item registry (`block`), building blocks, doors, decor, containers, chests, beds, backpacks, Personal Chests, Hollow Boxes, Zappy wiring and contraptions, the newer Zappy parts (`zapparts`), hoppers, crafting, enchanting, anvils, smithing, trims, brewing, beacons, banners, books, fireworks, music, and cauldrons, composters, heads and lightning rods (`homecraft`) |
 | `src/creatures/` | Mob physics, models and AI (`entity`), pathfinding, animals, wildlife, critters, the Scorchlands' beasts, bees, horses (and Donkeys and Mules), leads, Floaties, golems (Snow Golems too), villagers, raids, Sniffers, the Creaking, name tags and players' own skins (`skins`) |
 | `src/survival/` | The player, inventory, items on the ground, hunger and breath, cooking, experience, combat, tools, gadgets, navigation, gliders, vehicles, farming, fishing, advancements, statistics, game modes, world rules, waypoints and other handy things (`qol`) |
 | `src/online/` | The network protocol and its encryption (`crypto.rs`), hosting and joining, the server list and LAN discovery (`servers.rs`), the dedicated server, admin, the host's ledger, remembered players, cheats, mods, scripting and the playtest bots |

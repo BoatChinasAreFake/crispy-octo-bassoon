@@ -250,6 +250,31 @@ impl Game {
             }
             return vec![format!("No {} within 2,500 blocks.", biome.name())];
         }
+        // Mods' structures and biomes, by name (see modgen.rs).
+        let lower = what.to_ascii_lowercase().replace(' ', "_");
+        let named = |key: &str, name: &str| key.rsplit(':').next() == Some(lower.as_str()) || key == lower || name.eq_ignore_ascii_case(&what);
+        if let Some(si) = crate::block::reg().structures.iter().position(|s| named(&s.key, s.name)) {
+            let name = crate::block::reg().structures[si].name;
+            return match g.nearest_mod_structure(si, here.as_ivec3(), 64) {
+                Some(p) => vec![format!("The nearest {name} is at {}, {}, {} ({} blocks away).", p.x, p.y, p.z, (p.as_vec3() - here).length() as i32)],
+                None => vec![format!("No {name} within 1,000 blocks (here).")],
+            };
+        }
+        if let Some(bi) = crate::block::reg().biomes.iter().position(|b| named(&b.key, b.name)) {
+            let name = crate::block::reg().biomes[bi].name;
+            let (cx, cz) = (here.x as i32, here.z as i32);
+            for r in 0..160 {
+                let step = 16;
+                for k in 0..(r * 8).max(1) {
+                    let a = k as f32 / (r * 8).max(1) as f32 * std::f32::consts::TAU;
+                    let (x, z) = (cx + (a.cos() * (r * step) as f32) as i32, cz + (a.sin() * (r * step) as f32) as i32);
+                    if g.mod_biome_at(x, z, g.column(x, z).1) == Some(bi) {
+                        return vec![format!("The nearest {name} is around {x}, {z} ({} blocks away).", r * step)];
+                    }
+                }
+            }
+            return vec![format!("No {name} within 2,500 blocks (here).")];
+        }
         vec![format!("Don't know \"{what}\". Try a structure (village, hushed city, desert ruins...) or a biome.")]
     }
 

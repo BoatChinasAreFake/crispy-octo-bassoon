@@ -175,11 +175,12 @@ impl Game {
                 continue;
             }
             // A portal whose frame is broken falls apart.
-            if crate::scorch::is_portal(id) {
-                let side = if id == PORTAL_X { IVec3::X } else { IVec3::Z };
+            if let Some(kind) = crate::scorch::portal_kind(id) {
+                let side = if id == crate::scorch::sheets(kind)[0] { IVec3::X } else { IVec3::Z };
+                let frame = crate::scorch::frame_block(kind);
                 let intact = [side, -side, IVec3::Y, IVec3::NEG_Y].iter().all(|d| {
                     let n = self.world.get_v(p + *d);
-                    n == id || n == OBSIDIAN
+                    n == id || n == frame
                 });
                 if !intact {
                     self.world.set_v(p, AIR);

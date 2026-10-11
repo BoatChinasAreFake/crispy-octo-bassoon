@@ -1098,9 +1098,9 @@ impl Game {
             return crate::fire::can_burn_at(&self.world, p) && (new == FIRE) != crate::wilds::is_soul_ground(self.world.get_v(p - IVec3::Y));
         }
         // Portals light only inside a real obsidian frame.
-        if matches!(new, PORTAL_X | PORTAL_Z) {
+        if let Some(kind) = crate::scorch::portal_kind(new) {
             let p = IVec3::new(x, y, z);
-            return old == AIR && crate::scorch::portal_frame(&self.world, p, new == PORTAL_X).is_some();
+            return old == AIR && crate::scorch::portal_frame_of(&self.world, p, new == crate::scorch::sheets(kind)[0], kind).is_some();
         }
         // Gates and trapdoors swing; fences and panes may be placed at any join (the host reshapes them).
         if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new)) {

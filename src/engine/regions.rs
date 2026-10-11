@@ -51,6 +51,8 @@ pub fn region_dir(world_file: &Path) -> PathBuf {
 pub fn dim_dir(base: &Path, dim: crate::dims::Dim) -> PathBuf {
     match dim {
         crate::dims::Dim::Over => base.to_path_buf(),
+        // (Mods' dimensions by name: see dims.rs.)
+        d @ crate::dims::Dim::Mod(_) => base.join(format!("dim_{}", d.save_name())),
         d => base.join(format!("dim{}", d.index())),
     }
 }

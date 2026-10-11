@@ -59,6 +59,13 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         let d = to - from;
         (from, d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()))
     };
+    // A mod's structure (the first one the loaded mods define), from a little way off.
+    if mode == "modhut" {
+        let o = generator.nearest_mod_structure(0, g.spawn.as_ivec3(), 120)?;
+        let to = o.as_vec3() + Vec3::new(0.5, 2.0, 0.5);
+        let from = to + Vec3::new(6.0, 7.0, 9.0);
+        return Some(look(from, to));
+    }
     // The Scorchlands' structures are a long way east.
     let (cx0, cz0) = if matches!(mode, "fortress" | "camp" | "bastion") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
     let kind = match mode {
@@ -371,7 +378,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -418,6 +425,22 @@ impl App {
                     let anti = -Vec3::new(a.cos(), a.sin(), 0.25);
                     (s.yaw, s.pitch) = (anti.x.atan2(-anti.z), 0.2);
                 }
+                app.start_game(g);
+                app.show_debug = false;
+            }
+            "moddim" => {
+                // Standing in the first mod dimension the loaded mods define.
+                let mut g = shot_game(424242, true, false);
+                let dim = crate::dims::Dim::Mod(0);
+                let probe = world::Generator::with_dim(g.world.seed(), g.world.generator.opts, dim);
+                let h = probe.column(8, 8).0;
+                g.move_local_player(dim, Vec3::new(8.5, h as f32 + 1.2, 8.5));
+                for cz in -4..=4 {
+                    for cx in -4..=4 {
+                        g.world.load_now(cx, cz);
+                    }
+                }
+                (s.pos, s.yaw, s.pitch) = (Some(Vec3::new(8.5, h as f32 + 3.0, 8.5)), 0.6, -0.15);
                 app.start_game(g);
                 app.show_debug = false;
             }
