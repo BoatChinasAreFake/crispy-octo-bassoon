@@ -1041,7 +1041,7 @@ Hmm. (You can't afford that.)
 Hmmer
 Hmmer hmms
 Hmmer: {}
-Hmmer: {} - Novice (0/10) - Village: Neutral (+0)
+Hmmer: {} - Novice (0/10) - Village: Neutral (0)
 Hmph. (This village won't trade with you.)
 Hodgepodge
 Hoe (Dirt Scratcher)
