@@ -180,16 +180,30 @@ impl App {
         let slot = 20.0 * s;
         let Some((title, list)) = self.game.trade_list() else { return };
         let row = slot * 1.1;
+        // A Hmmer's title carries its level and its village's opinion of us, on a line of their own.
+        let (title, standing) = match title.split_once(" - ") {
+            Some((a, b)) => (a.to_string(), Some(b.replace(" - ", "  |  "))),
+            None => (title, None),
+        };
+        let head = if standing.is_some() { 34.0 * s } else { 24.0 * s };
+        // (An empty list: the village won't trade with us.)
+        let rows = list.len().max(1) as f32;
         let panel_w = slot * 9.0 + 12.0 * s;
-        let panel_h = 24.0 * s + row * list.len() as f32 + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
+        let panel_h = head + row * rows + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
         draw_rectangle(x0, y0, panel_w, panel_h, ui::panel());
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
         let mut tooltip: Option<String> = None;
-        self.ui.text(&title, sx, y0 + 12.0 * s, 10.0, WHITE);
-        let top = y0 + 20.0 * s;
+        self.ui.text(&self.ui.fit(&title, 10.0, panel_w - 12.0 * s), sx, y0 + 12.0 * s, 10.0, WHITE);
+        if let Some(st) = &standing {
+            self.ui.text(&self.ui.fit(st, 7.5, panel_w - 12.0 * s), sx, y0 + 23.0 * s, 7.5, GOLD);
+        }
+        let top = y0 + head - 4.0 * s;
+        if list.is_empty() {
+            self.ui.text("Hmph. (This village won't trade with you.)", sx, top + slot * 0.6, 8.0, Color::new(1.0, 0.5, 0.45, 1.0));
+        }
         let (mx, my) = mouse_position();
         for (i, t) in list.iter().enumerate() {
             let y = top + i as f32 * row;
@@ -210,7 +224,8 @@ impl App {
             self.ui.tile(texture::T_ARROW_UI, sx + slot * 2.3, y, slot, if afford { WHITE } else { Color::new(0.4, 0.4, 0.4, 1.0) });
             let gx = sx + slot * 3.6;
             self.ui.stack_worn(Some(t.get), t.wear, gx, y, slot, false);
-            self.ui.text(&label(Some(t.get), t.wear).unwrap_or_default(), gx + slot * 1.2, y + slot * 0.62, 7.0, if afford { WHITE } else { GRAY });
+            let room = x0 + panel_w - (gx + slot * 1.2) - 6.0 * s;
+            self.ui.text(&self.ui.fit(&label(Some(t.get), t.wear).unwrap_or_default(), 7.0, room), gx + slot * 1.2, y + slot * 0.62, 7.0, if afford { WHITE } else { GRAY });
             if hover && mx >= gx {
                 tooltip = label(Some(t.get), t.wear);
             }
@@ -218,7 +233,7 @@ impl App {
                 self.game.make_trade(i);
             }
         }
-        let inv_y = top + row * list.len() as f32 + 12.0 * s;
+        let inv_y = top + row * rows + 12.0 * s;
         self.ui.text("Inventory", sx, inv_y - 4.0 * s, 8.0, GRAY);
         for i in 9..36 {
             let j = i - 9;

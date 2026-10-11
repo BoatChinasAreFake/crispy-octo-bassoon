@@ -2453,6 +2453,7 @@ a socket
 a tamed monster is friendly
 a {} can't be saved
 acacia boat
+after a trade the village thinks {} of {}, who was told {}
 after the swap {} has {} gold and {} coal, {} {} gold and {} coal
 already as good as it gets
 already in love
@@ -2875,6 +2876,7 @@ too many world changes in one event
 too soon
 too wide: prop it up
 tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|creative|spectator> [player], weather <clear|rain|thunder>, seed, summon <mob> [x y z] [count], locate <structure|biome>, setblock <x y z> <block>, kill [player | mobs | <mob>]
+trade levels
 trading table
 trapped chest
 tried to sleep in the Scorchlands
@@ -3059,6 +3061,7 @@ zombie hmmer
 {} has letters {}
 {} has {} where the host has {}
 {} heard {} of {}'s {} lines
+{} hit a Hmmer and the village still thinks {} of them (was {})
 {} hit a Sporeling and wasn't slowed (id {})
 {} hit {} with /pvp on and nothing happened
 {} holds {} {} but the host's ledger says {}
@@ -3115,6 +3118,7 @@ zombie hmmer
 {} recipes still to discover
 {} respawned and is still in {}
 {} respawned and isn't back in the Overworld
+{} saw {} then {} trades and experience {} (the host: {})
 {} says hi #{}
 {} sees different teams from the host's
 {} sees the Hmmer as {} (the host: {})
@@ -3129,6 +3133,7 @@ zombie hmmer
 {} still sees {}'s old skin
 {} tied their Mooer to a fence and the host's isn't
 {} took the coal out of their inbox and has {} (had {})
+{} traded with a Hmmer one short of Apprentice and the host has it at {}
 {} trim ({})
 {} walked into a mod's portal and is in {} (the host says {})
 {} walked into a portal and is in {} (the host says {})
@@ -3136,6 +3141,7 @@ zombie hmmer
 {} was disconnected: {}
 {} was never told about its Bad Omen
 {} was never told it's a spectator
+{} was told {} after the hit (the host: {})
 {} wasn't an operator.
 {} wasn't on the allow-list.
 {} wasn't on your list.
