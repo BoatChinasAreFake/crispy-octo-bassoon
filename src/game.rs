@@ -6213,7 +6213,7 @@ looks_like = diamond
         assert_eq!(g.trading, Some(id));
         // A new Hmmer is a Novice, with its first two trades.
         let (job, list) = g.trade_list().unwrap();
-        assert_eq!((job, list), (format!("Hmmer: {} - Novice (0/10) - Village: Neutral (+0)", Job::Smith.name()), trades(seed)[..2].to_vec()));
+        assert_eq!((job, list), (format!("Hmmer: {} - Novice (0/10) - Village: Neutral (0)", Job::Smith.name()), trades(seed)[..2].to_vec()));
         // (A Master has them all.)
         g.hmmer_xp.insert(id, crate::villagers::LEVELS[crate::villagers::MASTER].1);
         let (job, list) = g.trade_list().unwrap();

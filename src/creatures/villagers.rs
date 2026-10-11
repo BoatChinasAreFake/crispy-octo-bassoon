@@ -667,7 +667,8 @@ impl Game {
             if rep <= crate::reputation::HATED {
                 list.clear();
             }
-            format!("{title} - {} - Village: {} ({rep:+})", level_label(xp), crate::reputation::standing(rep))
+            let signed = if rep > 0 { format!("+{rep}") } else { rep.to_string() };
+            format!("{title} - {} - Village: {} ({signed})", level_label(xp), crate::reputation::standing(rep))
         } else {
             title
         };
