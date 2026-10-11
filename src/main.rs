@@ -11,7 +11,7 @@ mod creatures;
 mod survival;
 mod online;
 
-pub(crate) use engine::{access, backups, compose, keybinds, light, lod, mesher, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, texture, tint, ui, updates, upnp};
+pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, mesher, meshpool, narrator, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stash, trims, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{animals, beasts, bees, creaking, critters, entity, floaty, horses, leads, nametags, night, pathing, raids, skins, sniffers, villagers, wildlife, wilter};
@@ -94,6 +94,8 @@ enum Screen {
     Controls { from_title: bool },
     /// Graphics and frame rate (reached from Options).
     Video { from_title: bool },
+    /// Subtitles, colours, the narrator and how keys behave (reached from Options).
+    Access { from_title: bool },
     Help { from_title: bool },
     Advancements,
     /// What you've done in this world (see stats.rs).
@@ -135,6 +137,13 @@ struct App {
     video_at_start: (bool, u8),
     /// Screenshot runs neither read nor write settings.txt.
     no_settings_file: bool,
+    /// Screenshots mesh on the spot, unless asked not to (--mesh-threads, to check the threads).
+    shot_threads: bool,
+    /// What the narrator has read out (see narrator.rs).
+    narration: narrator::Narration,
+    /// Sneak and sprint, when they're switched on and off rather than held.
+    sneak_on: bool,
+    sprint_on: bool,
     splash: &'static str,
     last_mouse: Option<Vec2>,
     show_debug: bool,
@@ -450,7 +459,7 @@ impl App {
             drain_chars();
         }
         // Leaving a screen where settings change: keep them for next time.
-        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Multiplayer) && self.screen != s {
+        if matches!(self.screen, Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Access { .. } | Screen::Multiplayer) && self.screen != s {
             self.save_settings();
         }
         self.screen = s;
@@ -634,6 +643,9 @@ impl App {
         let down = |a: A| playing && b.down(a);
         let hit = |a: A| playing && b.pressed(a);
         let pad = if playing { self.pad_frame } else { pad::PadFrame::default() };
+        // Sneak and sprint held, or switched on and off (Accessibility).
+        let sneak = keybinds::latch(&mut self.sneak_on, self.settings.toggle_sneak, hit(A::Sneak), down(A::Sneak)) && playing;
+        let sprint = keybinds::latch(&mut self.sprint_on, self.settings.toggle_sprint, hit(A::Sprint), down(A::Sprint)) && playing;
         let axis = |plus: A, minus: A, stick: f32| (down(plus) as i32 - down(minus) as i32) as f32 + stick;
         Controls {
             input: Input {
@@ -641,8 +653,8 @@ impl App {
                 strafe: axis(A::Right, A::Left, pad.walk[0]).clamp(-1.0, 1.0),
                 jump: down(A::Jump) || pad.jump,
                 jump_pressed: hit(A::Jump) || pad.jump_pressed,
-                sneak: down(A::Sneak) || pad.sneak,
-                sprint: down(A::Sprint) || pad.sprint,
+                sneak: sneak || pad.sneak,
+                sprint: sprint || pad.sprint,
             },
             attack_held: down(A::Attack) || pad.attack,
             attack_pressed: hit(A::Attack) || pad.attack_pressed,
@@ -961,7 +973,7 @@ impl App {
                     self.set_screen(self.journal_back);
                 }
             }
-            Screen::Video { from_title } => {
+            Screen::Video { from_title } | Screen::Access { from_title } => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Options { from_title });
                 }
@@ -1583,8 +1595,15 @@ impl App {
         if self.ui.pressed.replace(false) {
             self.audio.play(Sfx::Click, None, listener);
         }
+        // The narrator reads out new screens and buttons (see narrator.rs).
+        if self.settings.narrator {
+            let (title, focus) = (self.ui.title.borrow().clone(), self.ui.focus.borrow().clone());
+            if let Some(words) = self.narration.update(&title, &focus) {
+                narrator::say(&words);
+            }
+        }
         // Keep the game world quiet while paused or in menus layered over it.
-        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::BeeLog);
+        let world_audible = !matches!(self.screen, Screen::Paused | Screen::Options { .. } | Screen::Controls { .. } | Screen::Video { .. } | Screen::Access { .. } | Screen::Help { .. } | Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::BeeLog);
         let yaw = self.game.player.yaw;
         for (s, at) in std::mem::take(&mut self.game.sounds) {
             if world_audible || s == Sfx::Craft || s == Sfx::Fanfare {
@@ -1607,7 +1626,26 @@ impl App {
         self.game.water_reflections = self.settings.water_reflections;
         self.game.shadows = self.settings.shadows;
         self.game.fancy_water = self.settings.fancy_water;
-        self.game.distant_terrain = self.settings.distant_terrain;
+        self.game.distant_terrain = self.settings.distant_terrain && !self.settings.low_memory;
+        // The language (a mod's; see lang.rs), when it's changed or its mod has come or gone.
+        // (Playing in a mod's language earns its advancement.)
+        if self.screen == Screen::Playing && !lang::current().is_empty() && !self.game.advancements.has("lost_in_translation") {
+            self.game.advance("lost_in_translation");
+        }
+        if lang::current() != self.settings.language {
+            let l = block::reg().languages.iter().find(|l| l.key == self.settings.language);
+            lang::set(l);
+            // Its font, if it brings one (and it's a font macroquad can read).
+            self.ui.face = l.and_then(|l| l.font.as_ref()).and_then(|f| load_ttf_font_from_bytes(f).ok());
+        }
+        self.game.world.keep_margin = if self.settings.low_memory { 1 } else { 3 };
+        // Chunks are meshed on worker threads (but on the spot for screenshots).
+        let threads = meshpool::MeshPool::workers_for(self.settings.low_memory);
+        if (!self.no_settings_file || self.shot_threads) && self.game.meshes.as_ref().is_none_or(|p| p.workers() != threads) {
+            self.game.meshes = Some(meshpool::MeshPool::new(threads));
+            let all: Vec<(i32, i32)> = self.game.world.chunks.keys().copied().collect();
+            self.game.world.dirty.extend(all);
+        }
         self.game.smooth_far = self.settings.smooth_far;
         if mesher::smooth() != self.settings.smooth_lighting {
             // Every chunk has to be meshed again with the other kind of lighting.
@@ -1638,6 +1676,11 @@ impl App {
     fn draw_ui(&mut self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
+        // High contrast: menus over a nearly black backdrop (see ui.rs).
+        ui::set_high_contrast(self.settings.high_contrast);
+        if ui::high_contrast() && !matches!(self.screen, Screen::Playing | Screen::Title) {
+            draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.85));
+        }
         match self.screen {
             Screen::Title => self.title_screen(),
             Screen::Options { from_title } => {
@@ -1651,6 +1694,10 @@ impl App {
             Screen::Video { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
                 self.video_screen(from_title);
+            }
+            Screen::Access { from_title } => {
+                draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
+                self.access_screen(from_title);
             }
             Screen::Controls { from_title } => {
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.7));
@@ -1954,6 +2001,8 @@ async fn game_main() {
     let tex = Texture2D::from_rgba8(texture::UI_ATLAS as u16, texture::UI_ATLAS as u16, &texture::ui_atlas(&atlas));
     tex.set_filter(FilterMode::Nearest);
 
+    // (How the music is kept depends on Low memory, so it's read this early; a change applies after a restart.)
+    sound::set_low_memory(settings::Settings::load(&settings::Settings::early_path()).low_memory);
     let audio = Audio::load().await;
 
     let mut shot = parse_args();
@@ -1964,6 +2013,10 @@ async fn game_main() {
         ui: Ui::new(tex),
         settings: Settings::default(),
         no_settings_file: shot.is_some(),
+        shot_threads: false,
+        narration: Default::default(),
+        sneak_on: false,
+        sprint_on: false,
         splash: pick_splash(),
         last_mouse: None,
         show_debug: false,
@@ -2096,6 +2149,10 @@ async fn game_main() {
             app.settings.brightness = b.clamp(0.0, 1.0);
         }
         app.settings.subtitles = flag("--subtitles");
+        app.shot_threads = flag("--mesh-threads");
+        app.settings.low_memory = flag("--low-memory");
+        app.settings.language = arg("--language").unwrap_or_default();
+        app.settings.high_contrast = flag("--high-contrast");
     }
     let broken: Vec<&block::ModInfo> = mod_infos.iter().filter(|m| m.enabled && !m.errors.is_empty()).collect();
     if let Some(m) = broken.first() {

@@ -39,8 +39,10 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 /// Chunks along each side of a region.
 pub const REGION: i32 = 32;
 const MAGIC: &[u8; 4] = b"MNRG";
-/// v2 adds soil, containers, signs and frames.
-const VERSION: u32 = 2;
+/// v2 adds soil, containers, signs and frames; v3 squashes it all (see squash.rs).
+const VERSION: u32 = 3;
+/// The most a region can unsquash to.
+const MAX_RAW: usize = 256 << 20;
 
 /// Where a world file's regions go.
 pub fn region_dir(world_file: &Path) -> PathBuf {
@@ -231,8 +233,6 @@ pub struct RegionData {
 /// Pack one region.
 pub fn encode(chunks: &[ChunkEdits], palette: &[(Id, String)], farm: &[u8], containers: &[u8], decor: &[u8]) -> Vec<u8> {
     let mut w = W(Vec::new());
-    w.0.extend_from_slice(MAGIC);
-    w.u32(VERSION);
     w.u32(palette.len() as u32);
     for (id, key) in palette {
         w.u16(*id);
@@ -246,8 +246,12 @@ pub fn encode(chunks: &[ChunkEdits], palette: &[(Id, String)], farm: &[u8], cont
         w.u32(m.len() as u32);
         let mut entries: Vec<(u32, Id)> = m.iter().map(|(&i, &id)| (i, id)).collect();
         entries.sort_unstable();
+        // Each one as the gap since the last (small, and much the same from
+        // one to the next, so they squash well).
+        let mut last = 0;
         for (i, id) in entries {
-            w.u32(i);
+            varint(&mut w.0, i - last);
+            last = i;
             w.u16(id);
         }
     }
@@ -255,7 +259,34 @@ pub fn encode(chunks: &[ChunkEdits], palette: &[(Id, String)], farm: &[u8], cont
         w.u32(blob.len() as u32);
         w.0.extend_from_slice(blob);
     }
-    w.0
+    // The header, then the rest squashed.
+    let mut out = W(Vec::new());
+    out.0.extend_from_slice(MAGIC);
+    out.u32(VERSION);
+    out.u32(w.0.len() as u32);
+    out.0.extend_from_slice(&crate::squash::compress(&w.0));
+    out.0
+}
+
+/// A number in as few bytes as it needs: seven bits each, low first, the top bit saying more follow.
+fn varint(out: &mut Vec<u8>, mut v: u32) {
+    while v >= 0x80 {
+        out.push(v as u8 | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+fn read_varint(r: &mut R) -> io::Result<u32> {
+    let mut v = 0u32;
+    for shift in (0..35).step_by(7) {
+        let b = r.take::<1>()?[0];
+        v |= ((b & 0x7f) as u32).checked_shl(shift).unwrap_or(0);
+        if b < 0x80 {
+            return Ok(v);
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::InvalidData, "region file damaged (number too long)"))
 }
 
 /// Unpack a region file.
@@ -268,6 +299,12 @@ pub fn decode(bytes: &[u8]) -> io::Result<RegionData> {
     let version = r.u32()?;
     if !(1..=VERSION).contains(&version) {
         return Err(bad("unknown version"));
+    }
+    let raw;
+    if version >= 3 {
+        let len = r.u32()? as usize;
+        raw = crate::squash::decompress(r.0, MAX_RAW).filter(|b| b.len() == len).ok_or_else(|| bad("squashed data"))?;
+        r = R(&raw);
     }
     let mut d = RegionData::default();
     for _ in 0..r.u32()? {
@@ -286,8 +323,15 @@ pub fn decode(bytes: &[u8]) -> io::Result<RegionData> {
             return Err(bad("too many edits"));
         }
         let mut entries = Vec::with_capacity(count);
+        let mut last = 0u32;
         for _ in 0..count {
-            entries.push((r.u32()?, r.u16()?));
+            let i = if version >= 3 {
+                last = last.checked_add(read_varint(&mut r)?).ok_or_else(|| bad("edit out of range"))?;
+                last
+            } else {
+                r.u32()?
+            };
+            entries.push((i, r.u16()?));
         }
         d.chunks.push((key, entries));
     }
@@ -582,6 +626,24 @@ mod tests {
         v1.extend_from_slice(&9u32.to_le_bytes());
         v1.extend_from_slice(&TORCH.to_le_bytes());
         assert_eq!(decode(&v1).unwrap().chunks, vec![((0, 0), vec![(9, TORCH)])]);
+        // So does a version 2 file (not squashed, whole indices).
+        let mut v2 = b"MNRG\x02\0\0\0\0\0\0\0\x01\0\0\0".to_vec();
+        v2.extend_from_slice(&[0; 8]);
+        v2.extend_from_slice(&2u32.to_le_bytes());
+        for (i, id) in [(3u32, STONE), (70000, TORCH)] {
+            v2.extend_from_slice(&i.to_le_bytes());
+            v2.extend_from_slice(&id.to_le_bytes());
+        }
+        v2.extend_from_slice(&[0; 12]);
+        assert_eq!(decode(&v2).unwrap().chunks, vec![((0, 0), vec![(3, STONE), (70000, TORCH)])]);
+        // A busy region squashes well.
+        let big: HashMap<u32, Id> = (0..20000u32).map(|i| (i * 5 + i / 256 * 900, if i / 300 % 3 == 0 { TORCH } else { STONE })).collect();
+        let bytes = encode(&[((0, 0), &big)], &[], &[], &[], &[]);
+        assert!(bytes.len() * 10 < 20000 * 6, "{} bytes", bytes.len());
+        let back = decode(&bytes).unwrap();
+        let mut want: Vec<(u32, Id)> = big.into_iter().collect();
+        want.sort_unstable();
+        assert_eq!(back.chunks[0].1, want);
         assert_eq!(region_of(-1, 31), (-1, 0));
         assert_eq!(region_of(32, -33), (1, -2));
     }

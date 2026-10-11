@@ -261,19 +261,24 @@ fn merge_flats(flats: &[Flat], dims: [i32; 3], origin: [f32; 3], out: &mut MeshD
 }
 
 pub fn mesh_chunk(world: &World, cx: i32, cz: i32) -> ChunkMesh {
-    let mut hood = Hood { c: [None; 9], own: Vec::new() };
-    for dz in -1..=1 {
-        for dx in -1..=1 {
-            hood.c[((dz + 1) * 3 + dx + 1) as usize] = world.chunks.get(&(cx + dx, cz + dz));
-        }
-    }
+    mesh_parts(hood_of(world, cx, cz), crate::tint::Field::of(world, cx, cz), cx, cz)
+}
+
+/// A chunk and its eight neighbours (west to east, then north to south).
+pub fn hood_of(world: &World, cx: i32, cz: i32) -> [Option<&Chunk>; 9] {
+    std::array::from_fn(|i| world.chunks.get(&(cx + i as i32 % 3 - 1, cz + i as i32 / 3 - 1)))
+}
+
+/// Mesh a chunk from just what it needs: itself, its neighbours and its
+/// biome colours (so it can be done away from the world, see meshpool.rs).
+pub fn mesh_parts(c: [Option<&Chunk>; 9], field: Option<crate::tint::Field>, cx: i32, cz: i32) -> ChunkMesh {
+    let mut hood = Hood { c, own: Vec::new() };
     let mut out = ChunkMesh { opaque: MeshData::default(), water: MeshData::default(), lights: Vec::new() };
     let Some(me) = hood.c[4] else { return out };
     hood.own = vec![AIR; (CW * CW * CH) as usize];
     me.blocks.decode_into(&mut hood.own);
     let (bx, bz) = ((cx * CW) as f32, (cz * CW) as f32);
     // Biome colours for grass, leaves and water (see tint.rs).
-    let field = crate::tint::Field::of(world, cx, cz);
     let tint_at = |id: Id, f: usize, x: f32, z: f32| match (&field, crate::tint::kind_of(id, f)) {
         (Some(field), Some(kind)) => field.at(kind, (x - bx).round() as i32, (z - bz).round() as i32),
         _ => crate::tint::NEUTRAL,

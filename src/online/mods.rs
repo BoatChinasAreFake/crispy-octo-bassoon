@@ -14,6 +14,9 @@ use std::sync::Mutex;
 
 pub const MAX_FILE: usize = 1 << 20;
 pub const MAX_PACK: usize = 4 << 20;
+/// A language's font can be bigger (fonts for Chinese or Japanese are); fonts stay
+/// on the computer they're on, and aren't sent to joining players.
+pub const MAX_FONT: usize = 24 << 20;
 
 /// One mod's files, from disk or from a server.
 #[derive(Clone, Debug, PartialEq)]
@@ -47,9 +50,10 @@ pub fn read_disk(dir: &Path) -> Vec<ModSource> {
                 for f in inner.flatten() {
                     let fname = f.file_name().to_string_lossy().to_string();
                     let lower = fname.to_ascii_lowercase();
-                    if (lower.ends_with(".txt") || lower.ends_with(".png") || lower.ends_with(".rhai")) && f.path().is_file()
+                    let font = lower.ends_with(".ttf") || lower.ends_with(".otf");
+                    if (lower.ends_with(".txt") || lower.ends_with(".png") || lower.ends_with(".rhai") || font) && f.path().is_file()
                         && let Ok(bytes) = std::fs::read(f.path())
-                            && bytes.len() <= MAX_FILE {
+                            && bytes.len() <= if font { MAX_FONT } else { MAX_FILE } {
                                 files.insert(fname, bytes);
                             }
                 }
@@ -111,7 +115,7 @@ pub fn active_pack() -> Vec<u8> {
         .lock()
         .unwrap()
         .iter()
-        .map(|m| ModSource { id: m.id.clone(), files: m.files.iter().filter(|(n, _)| !n.to_ascii_lowercase().ends_with(".rhai")).map(|(k, v)| (k.clone(), v.clone())).collect() })
+        .map(|m| ModSource { id: m.id.clone(), files: m.files.iter().filter(|(n, _)| ![".rhai", ".ttf", ".otf"].iter().any(|x| n.to_ascii_lowercase().ends_with(x))).map(|(k, v)| (k.clone(), v.clone())).collect() })
         .collect();
     encode_pack(&without_scripts)
 }
@@ -599,6 +603,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         _ => errs.push(format!("line {}: [plant] needs block = <a block> (and an optional on = <block>)", s.line)),
                     }
                 }
+                "language" => fill_language(&mut ctx, m, s, errs),
                 "splashes" => ctx.reg.splashes.extend(s.rows.iter().map(|(r, _)| r.chars().take(60).collect::<String>())),
                 "mod" | "texture" | "dimension" | "biome" => {}
                 other => errs.push(format!("line {}: unknown section [{other}]", s.line)),
@@ -861,6 +866,51 @@ fn fill_structure(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<Stri
         blocks,
         loot,
     });
+}
+
+/// Most languages across all mods, and the most lines one can have.
+const MAX_LANGUAGES: usize = 64;
+const MAX_LANGUAGE_LINES: usize = 20000;
+
+/// `[language de]`: a translation, from `file = <a .txt in the mod>` (see lang.rs).
+fn fill_language(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
+    let code = s.name.trim().to_ascii_lowercase();
+    if code.is_empty() || !code.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        errs.push(format!("line {}: [language ...] needs a short code like [language de]", s.line));
+        return;
+    }
+    let key = format!("{}:{code}", m.id);
+    if ctx.reg.languages.len() >= MAX_LANGUAGES || ctx.reg.languages.iter().any(|l| l.key == key) {
+        errs.push(format!("line {}: too many languages, or {code} twice", s.line));
+        return;
+    }
+    let Some((_, file, line)) = s.get("file") else {
+        errs.push(format!("line {}: [language] needs file = <the translations, a .txt in the mod>", s.line));
+        return;
+    };
+    let Some(bytes) = m.files.get(file.as_str()) else {
+        errs.push(format!("line {line}: file {file} not found in the mod folder"));
+        return;
+    };
+    let text = String::from_utf8_lossy(bytes);
+    let (table, bad) = crate::lang::Table::parse(&text);
+    errs.extend(bad.into_iter().take(10).map(|e| format!("{file}: {e}")));
+    if table.len() > MAX_LANGUAGE_LINES {
+        errs.push(format!("{file}: more than {MAX_LANGUAGE_LINES} lines"));
+        return;
+    }
+    let name = leak(s.str("name").unwrap_or(&code));
+    let font = match s.get("font") {
+        Some((_, f, line)) => match m.files.get(f.as_str()) {
+            Some(bytes) => Some(std::sync::Arc::new(bytes.clone())),
+            None => {
+                errs.push(format!("line {line}: font {f} not found in the mod folder (a .ttf or .otf)"));
+                None
+            }
+        },
+        None => None,
+    };
+    ctx.reg.languages.push(crate::lang::Language { key, name, table: std::sync::Arc::new(table), font });
 }
 
 fn build_texture(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) -> Option<Vec<u8>> {
@@ -2209,6 +2259,31 @@ projectile_effect_duration = NaN
         assert!(errs.iter().any(|e| e.contains("line 5") && e.contains("unobtainium")), "{errs:?}");
         // The block itself still exists with defaults.
         assert!(reg.lookup("bad:rock").is_some());
+    }
+
+    #[test]
+    fn the_example_translation_loads_and_translates() {
+        let sources: Vec<ModSource> = read_disk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("example-mods")).into_iter().filter(|m| m.id == "pirate").collect();
+        let reg = build(&sources, &[]);
+        assert!(reg.mods[0].errors.is_empty(), "{:#?}", reg.mods[0].errors);
+        let lang = &reg.languages[0];
+        assert_eq!((lang.key.as_str(), lang.name), ("pirate:pirate", "Pirate"));
+        assert_eq!(&*lang.table.translate("Quit to Desktop"), "Abandon Ship");
+        assert_eq!(&*lang.table.translate("Render Distance: 12 chunks"), "How Far Ye Can See: 12 chunks");
+        assert_eq!(&*lang.table.translate("Fullscreen: ON"), "Whole Sail: Aye");
+        // A name made of parts is translated part by part; what it hasn't got stays English.
+        assert_eq!(&*lang.table.translate("Iron Pickaxe"), "Cannon Metal Pick");
+        assert_eq!(&*lang.table.translate("Diamond Sword"), "Diamond Sword");
+        // Every English line it translates is one the game shows (none misspelt).
+        let shown: std::collections::HashSet<String> = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("lang/strings.txt")).unwrap().lines().map(str::to_string).collect();
+        let text = String::from_utf8_lossy(&sources[0].files["pirate.txt"]).to_string();
+        for line in text.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let english = line.split(" = ").next().unwrap();
+            assert!(shown.contains(english), "pirate.txt translates \"{english}\", which the game never shows");
+        }
+        // A missing file or a bad code is reported.
+        let bad = ModSource { id: "x".into(), files: BTreeMap::from([("mod.txt".to_string(), b"[mod]\nname = x\n[language de]\nfile = nope.txt\n[language d e]\nfile = nope.txt\n".to_vec())]) };
+        assert_eq!(build(&[bad], &[]).mods[0].errors.len(), 2);
     }
 
     #[test]

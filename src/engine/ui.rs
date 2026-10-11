@@ -13,14 +13,52 @@ pub struct Ui {
     pub rclicked: bool,
     /// Set whenever a button fires this frame, so the app can play a click.
     pub pressed: std::cell::Cell<bool>,
+    /// This frame's screen title and the button under the pointer, for the narrator (see narrator.rs).
+    pub title: std::cell::RefCell<String>,
+    pub focus: std::cell::RefCell<String>,
+    /// A language's own font (see lang.rs); None: the built-in one.
+    pub face: Option<Font>,
 }
 
-pub const PANEL: Color = Color::new(0.08, 0.08, 0.1, 0.88);
-pub const SLOT_BG: Color = Color::new(0.25, 0.25, 0.28, 0.9);
+const PANEL_COLOUR: Color = Color::new(0.08, 0.08, 0.1, 0.88);
+const SLOT_COLOUR: Color = Color::new(0.25, 0.25, 0.28, 0.9);
+
+/// High contrast (Accessibility): solid black behind everything, thick
+/// white edges, yellow for what's under the pointer, and plain white text.
+static HIGH_CONTRAST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_high_contrast(on: bool) {
+    HIGH_CONTRAST.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn high_contrast() -> bool {
+    HIGH_CONTRAST.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Behind inventories and other windows.
+pub fn panel() -> Color {
+    if high_contrast() { BLACK } else { PANEL_COLOUR }
+}
+
+/// A slot's colour (in high contrast, an edge is drawn round it too).
+pub fn slot_bg() -> Color {
+    if high_contrast() { Color::new(0.12, 0.12, 0.12, 1.0) } else { SLOT_COLOUR }
+}
+
+/// Text colours in high contrast: anything greyish or faint is plain white
+/// (or a strong grey, for what can't be used); colours stay, at full strength.
+fn contrast(c: Color) -> Color {
+    let (hi, lo) = (c.r.max(c.g).max(c.b), c.r.min(c.g).min(c.b));
+    if hi - lo < 0.12 {
+        if hi < 0.55 && hi > 0.3 { Color::new(0.75, 0.75, 0.75, 1.0) } else { WHITE }
+    } else {
+        Color::new(c.r / hi, c.g / hi, c.b / hi, 1.0)
+    }
+}
 
 impl Ui {
     pub fn new(tex: Texture2D) -> Self {
-        Ui { tex, s: 2.0, clicked: false, rclicked: false, pressed: std::cell::Cell::new(false) }
+        Ui { tex, s: 2.0, clicked: false, rclicked: false, pressed: std::cell::Cell::new(false), title: Default::default(), focus: Default::default(), face: None }
     }
 
     /// `scale` is the UI Size option: a multiplier on the size that suits the window.
@@ -30,26 +68,69 @@ impl Ui {
         self.s = ((h / 300.0).clamp(1.5, 4.0) * scale).min(h / 230.0).max(1.0);
         self.clicked = is_mouse_button_pressed(MouseButton::Left);
         self.rclicked = is_mouse_button_pressed(MouseButton::Right);
+        self.title.borrow_mut().clear();
+        self.focus.borrow_mut().clear();
     }
 
     pub fn font(&self, px: f32) -> u16 {
         (px * self.s).round() as u16
     }
 
+    /// Text, in the language being shown (see lang.rs).
     pub fn text(&self, t: &str, x: f32, y: f32, px: f32, color: Color) {
+        self.raw_text(&crate::lang::tr(t), x, y, px, color);
+    }
+
+    /// Text exactly as given: what players write (chat, signs, names) isn't translated.
+    pub fn raw_text(&self, t: &str, x: f32, y: f32, px: f32, color: Color) {
+        let t = &*self.drawable(t);
         let size = self.font(px);
         let off = (self.s * 0.6).max(1.0);
-        draw_text_ex(t, x + off, y + off, TextParams { font_size: size, color: Color::new(0.0, 0.0, 0.0, color.a * 0.7), ..Default::default() });
-        draw_text_ex(t, x, y, TextParams { font_size: size, color, ..Default::default() });
+        let font = self.face.as_ref();
+        if high_contrast() && color.a > 0.05 {
+            // A solid black backing, whatever's behind.
+            let d = measure_text(t, font, size, 1.0);
+            let pad = self.s;
+            draw_rectangle(x - pad, y - d.offset_y - pad, d.width + 2.0 * pad, d.height + 2.0 * pad, BLACK);
+            draw_text_ex(t, x, y, TextParams { font, font_size: size, color: contrast(color), ..Default::default() });
+            return;
+        }
+        draw_text_ex(t, x + off, y + off, TextParams { font, font_size: size, color: Color::new(0.0, 0.0, 0.0, color.a * 0.7), ..Default::default() });
+        draw_text_ex(t, x, y, TextParams { font, font_size: size, color, ..Default::default() });
+    }
+
+    /// The built-in font has the Latin letters (accents too) but not curly
+    /// quotes and long dashes: those become plain ones (a language with a
+    /// font of its own keeps them).
+    fn drawable<'a>(&self, t: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.face.is_some() || t.is_ascii() || t.chars().all(|c| (c as u32) < 0x100) {
+            return std::borrow::Cow::Borrowed(t);
+        }
+        std::borrow::Cow::Owned(
+            t.chars()
+                .map(|c| match c {
+                    '\u{2018}' | '\u{2019}' | '\u{201A}' => "'".to_string(),
+                    '\u{201C}' | '\u{201D}' | '\u{201E}' => "\"".to_string(),
+                    '\u{2013}' | '\u{2014}' => "-".to_string(),
+                    '\u{2026}' => "...".to_string(),
+                    c => c.to_string(),
+                })
+                .collect(),
+        )
     }
 
     pub fn text_width(&self, t: &str, px: f32) -> f32 {
-        measure_text(t, None, self.font(px), 1.0).width
+        self.raw_width(&crate::lang::tr(t), px)
+    }
+
+    pub fn raw_width(&self, t: &str, px: f32) -> f32 {
+        measure_text(self.drawable(t).as_ref(), self.face.as_ref(), self.font(px), 1.0).width
     }
 
     /// Break text into lines that fit in `max` pixels, at spaces where it can
     /// (a word too long for a line on its own is split wherever it has to be).
     pub fn wrap(&self, t: &str, px: f32, max: f32) -> Vec<String> {
+        let t = crate::lang::tr(t);
         let mut lines = Vec::new();
         let mut line = String::new();
         for word in t.split(' ') {
@@ -76,6 +157,7 @@ impl Ui {
 
     /// Shorten text with "..." so it fits in `max` pixels.
     pub fn fit(&self, t: &str, px: f32, max: f32) -> String {
+        let t = &*crate::lang::tr(t);
         if self.text_width(t, px) <= max {
             return t.to_string();
         }
@@ -87,6 +169,10 @@ impl Ui {
     }
 
     pub fn text_centered(&self, t: &str, cx: f32, y: f32, px: f32, color: Color) {
+        // The big centred line is the screen's title (the first one drawn).
+        if px >= 16.0 && self.title.borrow().is_empty() {
+            *self.title.borrow_mut() = crate::lang::tr(t).into_owned();
+        }
         let w = self.text_width(t, px);
         self.text(t, cx - w / 2.0, y, px, color);
     }
@@ -98,21 +184,38 @@ impl Ui {
 
     pub fn button(&self, r: Rect, label: &str, enabled: bool) -> bool {
         let hov = enabled && self.hovered(r);
-        let bg = if !enabled {
-            Color::new(0.2, 0.2, 0.2, 0.8)
-        } else if hov {
-            Color::new(0.45, 0.5, 0.75, 0.95)
-        } else {
-            Color::new(0.35, 0.35, 0.38, 0.92)
-        };
-        draw_rectangle(r.x, r.y, r.w, r.h, bg);
         let b = self.s.max(1.0);
-        draw_rectangle_lines(r.x, r.y, r.w, r.h, b * 1.5, if hov { WHITE } else { Color::new(0.0, 0.0, 0.0, 0.8) });
-        draw_rectangle(r.x + b, r.y + b, r.w - 2.0 * b, b, Color::new(1.0, 1.0, 1.0, 0.15));
-        let col = if enabled { if hov { Color::new(1.0, 1.0, 0.6, 1.0) } else { WHITE } } else { GRAY };
-        let size = 10.0;
-        let dims = measure_text(label, None, self.font(size), 1.0);
-        self.text(label, r.x + (r.w - dims.width) / 2.0, r.y + r.h / 2.0 + dims.offset_y / 2.0 - b, size, col);
+        let col = if high_contrast() {
+            // Black, with a thick edge: white, yellow under the pointer, grey when it can't be used.
+            let edge = if !enabled { Color::new(0.45, 0.45, 0.45, 1.0) } else if hov { YELLOW } else { WHITE };
+            draw_rectangle(r.x, r.y, r.w, r.h, BLACK);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, b * 3.0, edge);
+            if enabled { edge } else { Color::new(0.75, 0.75, 0.75, 1.0) }
+        } else {
+            let bg = if !enabled {
+                Color::new(0.2, 0.2, 0.2, 0.8)
+            } else if hov {
+                Color::new(0.45, 0.5, 0.75, 0.95)
+            } else {
+                Color::new(0.35, 0.35, 0.38, 0.92)
+            };
+            draw_rectangle(r.x, r.y, r.w, r.h, bg);
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, b * 1.5, if hov { WHITE } else { Color::new(0.0, 0.0, 0.0, 0.8) });
+            draw_rectangle(r.x + b, r.y + b, r.w - 2.0 * b, b, Color::new(1.0, 1.0, 1.0, 0.15));
+            if enabled { if hov { Color::new(1.0, 1.0, 0.6, 1.0) } else { WHITE } } else { GRAY }
+        };
+        let label = &*crate::lang::tr(label);
+        if hov {
+            *self.focus.borrow_mut() = label.to_string();
+        }
+        // Smaller, if that's what it takes to fit (a long translation).
+        let mut size = 10.0;
+        let mut dims = measure_text(self.drawable(label).as_ref(), self.face.as_ref(), self.font(size), 1.0);
+        while dims.width > r.w - 6.0 * b && size > 6.0 {
+            size -= 0.5;
+            dims = measure_text(self.drawable(label).as_ref(), self.face.as_ref(), self.font(size), 1.0);
+        }
+        self.raw_text(label, r.x + (r.w - dims.width) / 2.0, r.y + r.h / 2.0 + dims.offset_y / 2.0 - b, size, col);
         let fired = hov && self.clicked;
         if fired {
             self.pressed.set(true);
@@ -251,8 +354,12 @@ impl Ui {
     pub fn slot_worn(&self, stack: Option<(Id, u8)>, wear: crate::inventory::Wear, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
         let r = Rect::new(x, y, size, size);
         let hov = self.hovered(r);
-        draw_rectangle(x, y, size, size, if hov { Color::new(0.45, 0.45, 0.5, 0.95) } else { SLOT_BG });
-        draw_rectangle_lines(x, y, size, size, self.s, Color::new(0.0, 0.0, 0.0, 0.7));
+        draw_rectangle(x, y, size, size, if hov { Color::new(0.45, 0.45, 0.5, 0.95) } else { slot_bg() });
+        if high_contrast() {
+            draw_rectangle_lines(x, y, size, size, self.s * 1.5, if hov { YELLOW } else { Color::new(0.7, 0.7, 0.7, 1.0) });
+        } else {
+            draw_rectangle_lines(x, y, size, size, self.s, Color::new(0.0, 0.0, 0.0, 0.7));
+        }
         if selected {
             draw_rectangle_lines(x - self.s, y - self.s, size + 2.0 * self.s, size + 2.0 * self.s, self.s * 1.5, WHITE);
         }
@@ -267,11 +374,12 @@ impl Ui {
         let border = if focused { WHITE } else if hov { LIGHTGRAY } else { GRAY };
         draw_rectangle_lines(r.x, r.y, r.w, r.h, self.s * 1.5, border);
         let caret = if focused && (get_time() * 2.0) as i64 % 2 == 0 { "_" } else { "" };
-        self.text(&format!("{text}{caret}"), r.x + 5.0 * self.s, r.y + r.h * 0.68, 10.0, WHITE);
+        self.raw_text(&format!("{text}{caret}"), r.x + 5.0 * self.s, r.y + r.h * 0.68, 10.0, WHITE);
         hov && self.clicked
     }
 
     pub fn tooltip(&self, text: &str) {
+        let text = &*crate::lang::tr(text);
         let (mx, my) = mouse_position();
         let lines: Vec<&str> = text.lines().collect();
         let w = lines.iter().map(|l| self.text_width(l, 9.0)).fold(0.0, f32::max) + 8.0 * self.s;
@@ -279,8 +387,13 @@ impl Ui {
         let h = 3.0 * self.s + line_h * lines.len().max(1) as f32;
         let x = (mx + 10.0 * self.s).min(screen_width() - w);
         let y = (my - h).max(0.0);
-        draw_rectangle(x, y, w, h, Color::new(0.1, 0.0, 0.2, 0.95));
-        draw_rectangle_lines(x, y, w, h, self.s, Color::new(0.4, 0.1, 0.9, 1.0));
+        if high_contrast() {
+            draw_rectangle(x, y, w, h, BLACK);
+            draw_rectangle_lines(x, y, w, h, self.s * 2.0, WHITE);
+        } else {
+            draw_rectangle(x, y, w, h, Color::new(0.1, 0.0, 0.2, 0.95));
+            draw_rectangle_lines(x, y, w, h, self.s, Color::new(0.4, 0.1, 0.9, 1.0));
+        }
         for (i, l) in lines.iter().enumerate() {
             self.text(l, x + 4.0 * self.s, y + line_h * (i as f32 + 1.0) - 1.0 * self.s, 9.0, if i == 0 { WHITE } else { Color::new(0.8, 0.8, 0.85, 1.0) });
         }

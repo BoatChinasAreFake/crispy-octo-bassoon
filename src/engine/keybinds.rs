@@ -263,9 +263,41 @@ impl Bindings {
     }
 }
 
+/// A key that's either held (`toggle` off) or, for those who'd rather not
+/// hold it (Accessibility), switched on by one press and off by the next.
+/// `on` remembers where a toggled key is.
+pub fn latch(on: &mut bool, toggle: bool, pressed: bool, held: bool) -> bool {
+    if !toggle {
+        *on = false;
+        return held;
+    }
+    if pressed {
+        *on = !*on;
+    }
+    *on
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toggled_keys_switch_on_and_off_and_held_ones_dont_stick() {
+        let mut on = false;
+        // Held: down while held, and nothing remembered.
+        assert!(latch(&mut on, false, true, true));
+        assert!(!latch(&mut on, false, false, false));
+        // Toggled: one press on, holding changes nothing, the next press off.
+        assert!(latch(&mut on, true, true, true));
+        assert!(latch(&mut on, true, false, true));
+        assert!(latch(&mut on, true, false, false));
+        assert!(!latch(&mut on, true, true, true));
+        assert!(!latch(&mut on, true, false, false));
+        // Switching Toggle off lets go.
+        latch(&mut on, true, true, true);
+        assert!(!latch(&mut on, false, false, false));
+        assert!(!on);
+    }
 
     #[test]
     fn every_default_has_a_name() {

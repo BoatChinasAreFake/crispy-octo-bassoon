@@ -1718,6 +1718,8 @@ pub struct Registry {
     pub biomes: Vec<crate::modgen::ModBiome>,
     pub structures: Vec<crate::modgen::ModStructure>,
     pub dims: Vec<crate::modgen::ModDim>,
+    /// Translations mods bring (see lang.rs).
+    pub languages: Vec<crate::lang::Language>,
 }
 
 static REGISTRY: AtomicPtr<Registry> = AtomicPtr::new(std::ptr::null_mut());
@@ -3149,7 +3151,7 @@ impl Registry {
                 recipes.push(r(&[(material, n)], (ARMOR_FIRST + (t * 4 + slot) as Id, 1)));
             }
         }
-        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new(), biomes: Vec::new(), structures: Vec::new(), dims: Vec::new() }
+        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new(), biomes: Vec::new(), structures: Vec::new(), dims: Vec::new(), languages: Vec::new() }
     }
 
     /// Look up a block or item id by key ("stone", "cheese:wheel", ...).

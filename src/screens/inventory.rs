@@ -60,7 +60,7 @@ impl App {
         let panel_h = (slot * 9.5).min(h - 20.0 * s).max(slot * 7.0);
         let x0 = (w - total_w) / 2.0 + armor_w + 6.0 * s;
         let y0 = (h - panel_h) / 2.0;
-        draw_rectangle(x0, y0, left_w, panel_h, ui::PANEL);
+        draw_rectangle(x0, y0, left_w, panel_h, ui::panel());
         draw_rectangle_lines(x0, y0, left_w, panel_h, s, WHITE);
         let mut tooltip: Option<String> = None;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
@@ -68,7 +68,7 @@ impl App {
         // Armour: four slots, each taking only its own kind.
         let ax = x0 - armor_w - 6.0 * s;
         let armor_h = 18.0 * s + slot * 4.0 + 24.0 * s + 12.0 * s + slot + 4.0 * s;
-        draw_rectangle(ax, y0, armor_w, armor_h, ui::PANEL);
+        draw_rectangle(ax, y0, armor_w, armor_h, ui::panel());
         draw_rectangle_lines(ax, y0, armor_w, armor_h, s, WHITE);
         self.ui.text("Armour", ax + 4.0 * s, y0 + 12.0 * s, 8.0, WHITE);
         for i in 0..4 {
@@ -275,7 +275,7 @@ impl App {
     /// Creative's side panel: a search box and the palette's kinds of things.
     fn creative_side(&mut self, rx: f32, y0: f32, right_w: f32, panel_h: f32) {
         let s = self.ui.s;
-        draw_rectangle(rx, y0, right_w, panel_h, ui::PANEL);
+        draw_rectangle(rx, y0, right_w, panel_h, ui::panel());
         draw_rectangle_lines(rx, y0, right_w, panel_h, s, WHITE);
         self.ui.text("Find things", rx + 5.0 * s, y0 + 11.0 * s, 8.0, WHITE);
         let sb = Rect::new(rx + 4.0 * s, y0 + 15.0 * s, right_w - 8.0 * s, 12.0 * s);
@@ -313,7 +313,7 @@ impl App {
     pub(crate) fn recipe_book(&mut self, rx: f32, y0: f32, right_w: f32, panel_h: f32) -> Option<String> {
         let s = self.ui.s;
         let mut tooltip = None;
-        draw_rectangle(rx, y0, right_w, panel_h, ui::PANEL);
+        draw_rectangle(rx, y0, right_w, panel_h, ui::panel());
         draw_rectangle_lines(rx, y0, right_w, panel_h, s, WHITE);
         let table = self.game.table_nearby();
         let title = if table { "Crafting Table" } else { "Pocket Crafting (small things)" };
@@ -545,7 +545,7 @@ impl App {
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
-        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::panel());
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
         // Your own slots, centred under a wide chest.
@@ -646,7 +646,7 @@ impl App {
         let panel_h = 18.0 * s + top_h + 18.0 * s + slot * 3.0 + 6.0 * s + slot + 8.0 * s;
         let x0 = (w - panel_w) / 2.0;
         let y0 = ((h - panel_h) / 2.0).max(4.0 * s);
-        draw_rectangle(x0, y0, panel_w, panel_h, ui::PANEL);
+        draw_rectangle(x0, y0, panel_w, panel_h, ui::panel());
         draw_rectangle_lines(x0, y0, panel_w, panel_h, s, WHITE);
         let sx = x0 + 6.0 * s;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
