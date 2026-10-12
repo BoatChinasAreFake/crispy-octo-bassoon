@@ -244,6 +244,10 @@ pub const ALL: &[Advancement] = &[
     adv("some_assembly_required", "Some Assembly Required", "Be there when a village builds itself a Clanker."),
     adv("help_wanted", "Help Wanted", "Finish a bounty from a village Notice Board."),
     adv("odd_jobs", "Odd Jobs", "Finish ten bounties."),
+    adv("open_for_business", "Open for Business", "Sell something to a Hmmer from your own Shop Stall."),
+    adv("nest_egg", "Nest Egg", "Take 64 gold at your Shop Stall."),
+    adv("extra_extra", "Extra! Extra!", "Read the village paper."),
+    adv("front_page", "Front Page News", "Read a paper whose lead story is about you."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
@@ -260,7 +264,7 @@ const CREATURES: &[&str] = &[
     "full_flight", "jousting", "resin_up", "which_witch", "local_flavour", "fetch", "char_broiled", "fungus_amongus",
     "pork_barrel", "raising_hell", "spore_loser", "magma_carta", "snuffed_out", "knight_errant",
     "beast_of_burden", "hybrid_vigour", "snow_problem", "walkies", "new_hire", "baby_boom", "early_night", "master_class", "pillar_of_the_community", "persona_non_grata",
-    "new_neighbours", "some_assembly_required", "help_wanted", "odd_jobs",
+    "new_neighbours", "some_assembly_required", "help_wanted", "odd_jobs", "open_for_business", "nest_egg", "extra_extra", "front_page",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",

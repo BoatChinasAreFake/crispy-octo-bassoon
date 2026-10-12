@@ -49,7 +49,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
-pub const PROTOCOL: u32 = 40;
+pub const PROTOCOL: u32 = 41;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -336,6 +336,17 @@ pub enum Msg {
     Board { x: i32, y: i32, z: i32, rep: i16, rows: Vec<(u8, Id, u8, u8, u16, u16, bool)> },
     /// client -> host: I've done bounty `slot` on this board (and here's what it wanted).
     Bounty { x: i32, y: i32, z: i32, slot: u8 },
+    /// client -> host: the price of lot `slot` at my Shop Stall (see stalls.rs).
+    StallPrice { x: i32, y: i32, z: i32, slot: u8, price: u8 },
+    /// host -> client: a Shop Stall's owner and prices, and how each lot would
+    /// do (demand in hundredths, a fair price in tenths of a gold ingot).
+    Stall { x: i32, y: i32, z: i32, owner: String, prices: Vec<u8>, lots: Vec<(u16, u16)> },
+    /// client -> host: today's paper from this Notice Board, please (see paper.rs).
+    TakePaper { x: i32, y: i32, z: i32 },
+    /// client -> host: what's in day `day`'s paper?
+    PaperAsk { day: u32 },
+    /// host -> client: day `day`'s paper (headline, story).
+    Paper { day: u32, stories: Vec<(String, String)> },
     /// host -> client: a script did something to you.
     Effect { heal: f32, teleport: Option<Vec3>, launch: Option<f32>, take: Option<(Id, u8)> },
 }
@@ -1145,6 +1156,48 @@ impl Msg {
                     w.u8(done as u8);
                 }
             }
+            Msg::StallPrice { x, y, z, slot, price } => {
+                w.u8(108);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.u8(*slot);
+                w.u8(*price);
+            }
+            Msg::Stall { x, y, z, owner, prices, lots } => {
+                w.u8(109);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+                w.str(owner);
+                let n = prices.len().min(crate::stalls::LOTS);
+                w.u8(n as u8);
+                for (i, price) in prices.iter().take(n).enumerate() {
+                    w.u8(*price);
+                    let (d, f) = lots.get(i).copied().unwrap_or((100, 0));
+                    w.u16(d);
+                    w.u16(f);
+                }
+            }
+            Msg::TakePaper { x, y, z } => {
+                w.u8(110);
+                w.i32(*x);
+                w.i32(*y);
+                w.i32(*z);
+            }
+            Msg::PaperAsk { day } => {
+                w.u8(111);
+                w.u32(*day);
+            }
+            Msg::Paper { day, stories } => {
+                w.u8(112);
+                w.u32(*day);
+                w.u8(stories.len().min(crate::paper::STORIES + 2) as u8);
+                for (h, b) in stories.iter().take(crate::paper::STORIES + 2) {
+                    w.str(h);
+                    w.str(b);
+                }
+            }
             Msg::Bounty { x, y, z, slot } => {
                 w.u8(107);
                 w.i32(*x);
@@ -1493,6 +1546,26 @@ impl Msg {
                 Msg::Board { x, y, z, rep, rows }
             }
             107 => Msg::Bounty { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()? },
+            110 => Msg::TakePaper { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            111 => Msg::PaperAsk { day: r.u32()? },
+            112 => {
+                let day = r.u32()?;
+                let mut stories = Vec::new();
+                for _ in 0..r.u8()?.min(crate::paper::STORIES as u8 + 2) {
+                    stories.push((r.str()?, r.str()?));
+                }
+                Msg::Paper { day, stories }
+            }
+            108 => Msg::StallPrice { x: r.i32()?, y: r.i32()?, z: r.i32()?, slot: r.u8()?, price: r.u8()? },
+            109 => {
+                let (x, y, z, owner) = (r.i32()?, r.i32()?, r.i32()?, r.str()?);
+                let (mut prices, mut lots) = (Vec::new(), Vec::new());
+                for _ in 0..r.u8()?.min(crate::stalls::LOTS as u8) {
+                    prices.push(r.u8()?);
+                    lots.push((r.u16()?, r.u16()?));
+                }
+                Msg::Stall { x, y, z, owner, prices, lots }
+            }
             59 => Msg::RideMob { mob: r.u32()?, pos: r.v3()?, yaw: r.f32()?, off: r.u8()? != 0 },
             55 => Msg::FrameUse { x: r.i32()?, y: r.i32()?, z: r.i32()?, item: r.u16()?, wear: r.u32()?, put: r.u8()? != 0 },
             45 => Msg::Enchanted { item: r.u16()?, ench: r.u16()?, count: r.u32()? },
@@ -2181,6 +2254,11 @@ mod tests {
             Msg::BoardAsk { x: 3, y: 64, z: -9 },
             Msg::Board { x: 3, y: 64, z: -9, rep: -7, rows: vec![(0, 0x8005, 20, 3, 15, 0, false), (1, 7, 5, 4, 20, 2, true)] },
             Msg::Bounty { x: 3, y: 64, z: -9, slot: 2 },
+            Msg::StallPrice { x: 3, y: 64, z: -9, slot: 4, price: 12 },
+            Msg::TakePaper { x: 3, y: 64, z: -9 },
+            Msg::PaperAsk { day: 12 },
+            Msg::Paper { day: 12, stories: vec![("Raid Repelled!".into(), "Hmmers feel brave.".into()), ("Small Ads".into(), "Mud.".into())] },
+            Msg::Stall { x: 3, y: 64, z: -9, owner: "ann".into(), prices: vec![3, 0, 64], lots: vec![(160, 25), (100, 0), (25, 640)] },
             Msg::BeaconEffect { item: 0x8066 },
             Msg::RideMob { mob: 42, pos: Vec3::new(1.0, 2.0, 3.0), yaw: 0.5, off: true },
             Msg::Repair { x: 1, y: -2, z: 3, item: 0x800c, material: 0x8002, used: 2, combine: false, ench: 0x48, other_ench: 3 },

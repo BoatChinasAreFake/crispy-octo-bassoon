@@ -401,6 +401,8 @@ impl Game {
             }
             self.life.beds.insert(id, free);
             self.hearts(at + Vec3::Y * 2.0, 4);
+            let place = self.place_of(at);
+            self.report(crate::paper::Event::Baby, &place, "", 1);
             self.life.baby_wait = BABY_EVERY;
             return;
         }

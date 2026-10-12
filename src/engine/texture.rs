@@ -894,6 +894,9 @@ pub const T_THATCH: u16 = 1110;
 pub const T_THATCH_TOP: u16 = 1111;
 pub const T_FROST_SHINGLES: u16 = 1112;
 pub const T_BOARD_FRONT: u16 = 1113;
+pub const T_STALL_SIDE: u16 = 1114;
+pub const T_STALL_TOP: u16 = 1115;
+pub const T_NEWSPAPER: u16 = 1116;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4681,6 +4684,50 @@ fn village_tiles(a: &mut Atlas) {
             }
         } else {
             shade(rgb(185, 140, 90), r.range(0.8, 1.08))
+        }
+    });
+    // The Shop Stall: a striped awning over a plank counter with wares on show.
+    a.each(T_STALL_SIDE, |x, y, r, _| {
+        if y < 5 {
+            // The awning, scalloped along its edge.
+            let stripe = (x / 3) % 2 == 0;
+            // (Scallops: the edge dips between them, into the shade below.)
+            if y == 4 && x % 3 == 1 {
+                shade(rgb(60, 45, 30), r.range(0.9, 1.05))
+            } else {
+                shade(if stripe { rgb(200, 45, 40) } else { rgb(240, 235, 220) }, r.range(0.9, 1.05) * if y == 4 { 0.85 } else { 1.0 })
+            }
+        } else if y < 8 {
+            // Shade under it, with a few things for sale.
+            let ware = matches!((x, y), (3, 6) | (4, 6) | (9, 7) | (12, 6) | (13, 6));
+            if ware { [rgb(220, 160, 40), rgb(200, 60, 50), rgb(90, 160, 60)][x % 3] } else { shade(rgb(60, 45, 30), r.range(0.9, 1.05)) }
+        } else {
+            let seam = y % 4 == 0;
+            shade(rgb(165, 120, 75), r.range(0.86, 1.05) * if seam { 0.8 } else { 1.0 })
+        }
+    });
+    a.each(T_STALL_TOP, |x, _y, r, _| {
+        let stripe = (x / 3) % 2 == 0;
+        shade(if stripe { rgb(200, 45, 40) } else { rgb(240, 235, 220) }, r.range(0.9, 1.05))
+    });
+    // A folded newspaper: a masthead, a picture, and columns of print.
+    a.each(T_NEWSPAPER, |x, y, r, _| {
+        let paper = (2..14).contains(&x) && (2..15).contains(&y);
+        if !paper {
+            return [0, 0, 0, 0];
+        }
+        let edge = x == 2 || x == 13 || y == 2 || y == 14;
+        let masthead = (4..12).contains(&x) && y == 4;
+        let picture = (4..8).contains(&x) && (6..10).contains(&y);
+        let print = y >= 6 && y % 2 == 0 && (x >= 9 || y >= 11) && (4..12).contains(&x);
+        if masthead {
+            rgb(30, 30, 35)
+        } else if picture {
+            shade(rgb(110, 110, 115), r.range(0.8, 1.1))
+        } else if print {
+            rgb(90, 90, 95)
+        } else {
+            shade(rgb(235, 228, 205), r.range(0.95, 1.03) * if edge { 0.85 } else { 1.0 })
         }
     });
     // Planks, with a rolled map and a pair of dividers hung on the side.

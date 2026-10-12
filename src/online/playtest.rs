@@ -2237,8 +2237,10 @@ fn growing_villages(host: &mut Game, team: &mut [Bot], report: &mut Report) {
     if !around(&team[k].game) {
         report.problems.push(format!("{name} never had the village at {o} load around them"));
     }
-    let (time, day) = (host.time, host.day);
+    let (time, day, difficulty) = (host.time, host.day, host.rules.difficulty);
     host.time = 0.1;
+    // (Nothing to bother the bot while it's busy: a dead player isn't "there" to see things.)
+    host.rules.difficulty = crate::rules::Difficulty::Peaceful;
     host.grow_village(key);
     pump(host, team, 1.0, |_| idle());
     let Some(site) = host.village_site(key) else {
@@ -2290,6 +2292,16 @@ fn growing_villages(host: &mut Game, team: &mut [Bot], report: &mut Report) {
         }
     }
     team[k].game.notice = None;
+    // (Back on its feet, and back on the square, if anything happened to it.)
+    if team[k].game.dead.is_some() {
+        revive(host, team);
+        if let Some(p) = host.peers.get_mut(&id_k) {
+            p.target = spot;
+        }
+        team[k].game.player.body.pos = spot;
+        team[k].game.player.fall_start = spot.y;
+        pump(host, team, 1.0, |_| idle());
+    }
     // Every bed taken and a couple of Hmmers about: a new house goes up.
     let mut taken = HashSet::new();
     while let Some(b) = crate::village_life::nearest(&host.world, key.as_vec3(), crate::beds::is_bed, &taken) {
@@ -2330,9 +2342,70 @@ fn growing_villages(host: &mut Game, team: &mut [Bot], report: &mut Report) {
     if !team[k].game.advancements.earned.iter().any(|a| a == "new_neighbours") {
         report.problems.push(format!("{name} watched the house go up but never heard about New Neighbours"));
     }
+    // v0.5 part 4: the bot opens a Shop Stall (it's theirs now), puts out a
+    // lot of bread at a bargain, and a Hmmer buys it; the gold is in their till.
+    let stall = key + IVec3::new(4, 0, 4);
+    host.world.set_v(stall, SHOP_STALL);
+    host.give_peer(id_k, BREAD, 10);
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.open_stall(stall);
+    pump(host, team, 1.0, |_| idle());
+    put_in(&mut team[k].game, BREAD);
+    team[k].game.set_stall_price(0, 1);
+    pump(host, team, 1.0, |_| idle());
+    report.features.push("shop stall");
+    let owner = host.shops.stalls.get(&stall).map(|s| s.owner.clone()).unwrap_or_default();
+    let lot = host.world.containers.get(&stall).and_then(|c| c.slots[0]);
+    let price = host.shops.stalls.get(&stall).map_or(0, |s| s.prices[0]);
+    if owner != crate::players::record_key(&name) || lot != Some((BREAD, 10)) || price != 1 {
+        report.problems.push(format!("{name}'s stall: owner {owner:?}, lot {lot:?}, price {price}"));
+    }
+    let shopper = host.alloc_mob(MobKind::Hmmer, stall.as_vec3() + Vec3::new(0.5, 0.0, 1.5));
+    let sold = (0..20).any(|_| host.customer_buys(stall, shopper));
+    pump(host, team, 1.0, |_| idle());
+    let till = team[k].game.world.containers.get(&stall).and_then(|c| c.slots[crate::stalls::TILL]);
+    if !sold || till != Some((GOLD_INGOT, 1)) {
+        report.problems.push(format!("a Hmmer at {name}'s stall bought: {sold}, and {name} sees {till:?} in the till"));
+    }
+    if !team[k].game.advancements.earned.iter().any(|a| a == "open_for_business") {
+        report.problems.push(format!("{name} sold something but never heard about Open for Business"));
+    }
+    team[k].game.close_container();
+    host.mobs.retain(|m| m.id != shopper);
+    // The village paper: yesterday the bot punched a tree, so it's on the front page.
+    host.news.note(host.day.saturating_sub(1), crate::paper::Event::TreePunched, &name, "", 1);
+    team[k].game.open_board(board);
+    pump(host, team, 0.5, |_| idle());
+    team[k].game.take_paper();
+    pump(host, team, 1.0, |_| idle());
+    team[k].game.notice = None;
+    report.features.push("village paper");
+    let paper = team[k].game.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == NEWSPAPER));
+    match paper {
+        Some(i) => {
+            let wear = team[k].game.inv.wear[i];
+            let mut read = None;
+            for _ in 0..10 {
+                read = team[k].game.read_paper(wear, 0.5);
+                if read.is_some() {
+                    break;
+                }
+                pump(host, team, 0.5, |_| idle());
+            }
+            match read {
+                // (It may not lead: the bots get up to all sorts.)
+                Some((_, _, stories)) if stories.iter().any(|s| s.0.contains(&name) || s.1.contains(&name)) => {}
+                other => report.problems.push(format!("{name}'s paper doesn't mention them: {:?}", other.map(|o| o.2))),
+            }
+            if !team[k].game.advancements.earned.iter().any(|a| a == "extra_extra") {
+                report.problems.push(format!("{name} read the paper but never heard about Extra! Extra!"));
+            }
+        }
+        None => report.problems.push(format!("{name} asked the Notice Board for today's paper and got none")),
+    }
     host.mobs.retain(|m| !helpers.contains(&m.id));
     host.life.beds.retain(|id, _| *id < 900_000);
-    (host.time, host.day) = (time, day);
+    (host.time, host.day, host.rules.difficulty) = (time, day, difficulty);
     if let Some(p) = host.peers.get_mut(&id_k) {
         p.target = home;
     }
@@ -2387,7 +2460,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

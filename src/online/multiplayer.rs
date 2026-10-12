@@ -601,6 +601,11 @@ impl Game {
                     // Hives, pots and sculk notice (and the Deep Dark hears it).
                     if old != id && crate::ledger::is_break(old, id) {
                         self.block_gone(IVec3::new(x, y, z), old);
+                        // A log off a tree with bare hands: that's news.
+                        if is_log(old) && self.ledger(from).is_some_and(|l| l.held == AIR) && !self.peer_free(from) {
+                            let name = self.peer_name(from);
+                            self.report(crate::paper::Event::TreePunched, &name, "", 1);
+                        }
                     } else if old != id {
                         self.vibrate_kind(center, Some(from), crate::zapparts::Vibe::Block);
                     }
@@ -784,6 +789,21 @@ impl Game {
             Msg::BoardAsk { x, y, z } => {
                 if self.peer_rate_ok(from, "board", 0.2) {
                     self.host_board_ask(from, IVec3::new(x, y, z));
+                }
+            }
+            Msg::TakePaper { x, y, z } => {
+                if self.peer_rate_ok(from, "paper", 0.5) {
+                    self.host_take_paper(from, IVec3::new(x, y, z));
+                }
+            }
+            Msg::PaperAsk { day } => {
+                if self.peer_rate_ok(from, "paper_ask", 0.5) {
+                    self.host_paper_ask(from, day);
+                }
+            }
+            Msg::StallPrice { x, y, z, slot, price } => {
+                if self.peer_rate_ok(from, "stall", 0.05) {
+                    self.host_stall_price(from, IVec3::new(x, y, z), slot, price);
                 }
             }
             Msg::Bounty { x, y, z, slot } => {
@@ -972,6 +992,8 @@ impl Game {
                 if self.peer_rate_ok(from, "died", 1.0) {
                     let cause: String = cause.chars().filter(|c| !c.is_control()).take(120).collect();
                     let line = format!("{} {cause}", self.peer_name(from));
+                    let name = self.peer_name(from);
+                    self.report(crate::paper::Event::Died, &name, &cause, 1);
                     self.msg(line.clone());
                     self.system_message(None, &line);
                 }
@@ -1407,6 +1429,10 @@ impl Game {
                 }
             }
             Msg::Board { x, y, z, rep, rows } => self.board_from_host(IVec3::new(x, y, z), rep, rows),
+            Msg::Stall { x, y, z, owner, prices, lots } => self.stall_from_host(IVec3::new(x, y, z), owner, prices, lots),
+            Msg::Paper { day, stories } => {
+                self.news.issues.insert(day, stories);
+            }
             Msg::Effect { heal, teleport, launch, take } => {
                 if heal > 0.0 && self.dead.is_none() {
                     self.player.health = (self.player.health + heal).min(crate::player::MAX_HEALTH);
@@ -1425,7 +1451,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } => {}
+            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } => {}
         }
     }
 

@@ -289,6 +289,8 @@ impl Game {
 
     /// A house is finished: everyone about hears of it.
     fn house_done(&mut self, key: IVec3) {
+        let place = self.place_of(key.as_vec3());
+        self.report(crate::paper::Event::House, &place, "", 1);
         for who in self.players_near(key.as_vec3()) {
             self.tell(&who, "The village has finished a new house. (Somebody's moving in.)");
             self.advance_for(&who, "new_neighbours");
@@ -298,6 +300,8 @@ impl Game {
     /// The village builds itself a Clanker on the square.
     pub fn build_clanker(&mut self, key: IVec3) {
         let at = key.as_vec3() + Vec3::new(-1.5, 0.0, -1.5);
+        let place = self.place_of(key.as_vec3());
+        self.report(crate::paper::Event::Clanker, &place, "", 1);
         self.world.new_clankers.push(at);
         self.house_clankers();
         self.smoke(at + Vec3::Y, 12, 0.6);

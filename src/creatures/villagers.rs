@@ -743,6 +743,8 @@ impl Game {
             self.msg(line);
             if level == MASTER {
                 self.advance("master_class");
+                let me = self.player_name.clone();
+                self.report(crate::paper::Event::Master, &me, "", 1);
             }
         }
     }
@@ -796,6 +798,10 @@ impl Game {
         if let Some(level) = level {
             let line = self.level_up_line(mob, level);
             self.system_message(Some(from), &line);
+            if level == MASTER {
+                let name = self.peer_name(from);
+                self.report(crate::paper::Event::Master, &name, "", 1);
+            }
         }
         self.send_regular_to(from, mob, trades);
     }

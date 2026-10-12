@@ -26,6 +26,7 @@ pub(crate) mod models;
 pub(crate) mod music;
 pub(crate) mod potions;
 pub(crate) mod smithing;
+pub(crate) mod stalls;
 pub(crate) mod stash;
 pub(crate) mod trims;
 pub(crate) mod tripwire;
