@@ -116,10 +116,14 @@ pub enum Biome {
     WarmOcean,
     LukewarmOcean,
     FrozenOcean,
+    /// Rivers wind along the valleys inland, down to the sea (worlds from version 7).
+    River,
+    /// Sandy shores where the land meets the sea (worlds from version 7).
+    Beach,
 }
 
 impl Biome {
-    pub const ALL: [Biome; 22] = [
+    pub const ALL: [Biome; 24] = [
         Biome::Plains,
         Biome::Forest,
         Biome::Desert,
@@ -142,6 +146,8 @@ impl Biome {
         Biome::WarmOcean,
         Biome::LukewarmOcean,
         Biome::FrozenOcean,
+        Biome::River,
+        Biome::Beach,
     ];
 
     /// Any of the seas.
@@ -179,6 +185,8 @@ impl Biome {
             Biome::WarmOcean => "Warm Ocean (Tropical-ish)",
             Biome::LukewarmOcean => "Lukewarm Ocean (Bathwater)",
             Biome::FrozenOcean => "Frozen Ocean (Brr)",
+            Biome::River => "River (Going With the Flow)",
+            Biome::Beach => "Beach (Sandy Everywhere)",
         }
     }
 
@@ -562,6 +570,9 @@ pub struct GenOptions {
     /// Mansions in the dark forests (see mansion.rs). 5: hot springs in
     /// snowy mountains (see springs.rs). 6: villages built in their biome's
     /// style, in savannas too, with a workstation in every house (see houses.rs).
+    /// 7: the land shaped by continentalness, erosion and peaks and valleys,
+    /// biomes picked from the shape and then the climate, rivers and beaches
+    /// (see shape.rs).
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -574,7 +585,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 6, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 7, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -585,7 +596,7 @@ impl GenOptions {
         if version == 0 {
             return GenOptions::LEGACY;
         }
-        GenOptions { version: version.min(6), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
+        GenOptions { version: version.min(GenOptions::DEFAULT.version), structures: structures.min(3), biome_size: biome_size.min(3), terrain: terrain.min(3) }
     }
 
     /// Sea level: version 3 (the world grew to 256 tall) lifts it to 63;
@@ -638,6 +649,9 @@ pub struct Generator {
     pub(crate) cavern: Perlin,
     /// The Scorchlands' caverns (see scorch.rs).
     pub(crate) scorch: Perlin,
+    /// Erosion and weirdness, for the land's shape from version 7 (see shape.rs).
+    pub(crate) erosion: Perlin,
+    pub(crate) weird: Perlin,
     /// Mod world generation, copied from the registry when the world is created.
     pub(crate) ores: Vec<OreGen>,
     pub(crate) plants: Vec<PlantGen>,
@@ -674,6 +688,8 @@ impl Generator {
             cave_b: Perlin::new(s + 6),
             cavern: Perlin::new(s + 7),
             scorch: Perlin::new(s + 8),
+            erosion: Perlin::new(s + 9),
+            weird: Perlin::new(s + 10),
             ores: reg().ores.clone(),
             plants: reg().plants.clone(),
             biomes: reg().biomes.clone(),
@@ -691,6 +707,9 @@ impl Generator {
     pub fn column(&self, x: i32, z: i32) -> (i32, Biome) {
         if let Some(d) = self.mod_dim() {
             return (self.mod_height(d, x, z), Biome::Plains);
+        }
+        if self.opts.version >= 7 {
+            return self.column_v7(x, z);
         }
         if self.opts.version >= 3 {
             return self.column_v3(x, z);
@@ -941,7 +960,8 @@ impl Generator {
         let jz = ((hash2(self.seed ^ 0xB1F, x, z) - 0.5) * 9.0) as i32;
         let other = self.column(x + jx, z + jz).1;
         // (Only between land biomes: the shore stays where the water is.)
-        if other.is_ocean() || own.is_ocean() || matches!(other, Biome::StonyPeaks | Biome::MushroomIslands) || matches!(own, Biome::StonyPeaks | Biome::MushroomIslands) { own } else { other }
+        let keeps = |b: Biome| b.is_ocean() || matches!(b, Biome::StonyPeaks | Biome::MushroomIslands | Biome::River | Biome::Beach);
+        if keeps(other) || keeps(own) { own } else { other }
     }
 
     /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
@@ -1100,7 +1120,7 @@ impl Generator {
                         // Deserts sit on a few layers of sandstone.
                         if biome == Biome::Desert && y >= h - 8 { SANDSTONE } else { STONE }
                     } else if y < h {
-                        if biome == Biome::Desert || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else if peaks { STONE } else { DIRT }
+                        if matches!(biome, Biome::Desert | Biome::Beach) || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else if peaks { STONE } else { DIRT }
                     } else if y == h && h >= self.sea() - 1 && matches!(biome, Biome::StonyPeaks | Biome::MushroomIslands | Biome::IceSpikes) {
                         match biome {
                             // Bare rock, with patches of gravel and calcite.
@@ -1119,7 +1139,7 @@ impl Generator {
                             if hash2(s ^ 0x6A, x, z) < 0.3 { GRAVEL } else if h > self.sea() - 6 { SAND } else { DIRT }
                         } else if badlands && !steep {
                             RED_SAND
-                        } else if biome == Biome::Desert || beach {
+                        } else if matches!(biome, Biome::Desert | Biome::Beach) || beach {
                             SAND
                         } else if biome == Biome::Snowy {
                             SNOW_GRASS
@@ -2170,7 +2190,13 @@ impl World {
                 let (h, biome) = self.generator.column(x, z);
                 // Solid ground: no cave mouth or ravine to drop straight into.
                 let solid = (h - 4..=h).all(|y| !self.generator.is_cave(x, y, z, h)) && self.generator.ravine_floor(x, z).is_none();
-                if h > self.sea() + 1 && !biome.is_ocean() && solid && self.generator.tree_at(x, z).is_none() {
+                // (New worlds: somewhere to stand round about too, out of the water and off any ravine's edge.)
+                let roomy = self.generator.opts.version < 7
+                    || [(8, 0), (-8, 0), (0, 8), (0, -8), (6, 6), (-6, -6), (6, -6), (-6, 6)].iter().all(|&(dx, dz)| {
+                        let (hh, b) = self.generator.column(x + dx, z + dz);
+                        (hh - h).abs() <= 4 && hh > self.sea() && !b.is_ocean() && b != Biome::River && self.generator.ravine_floor(x + dx, z + dz).is_none()
+                    });
+                if h > self.sea() + 1 && !biome.is_ocean() && solid && roomy && self.generator.tree_at(x, z).is_none() {
                     return Vec3::new(x as f32 + 0.5, h as f32 + 1.0, z as f32 + 0.5);
                 }
             }
@@ -2257,7 +2283,8 @@ mod biome_tests {
                 }
             }
         }
-        for b in Biome::ALL {
+        // (Rivers and beaches are only in worlds from version 7; see shape.rs.)
+        for b in Biome::ALL.into_iter().filter(|b| !matches!(b, Biome::River | Biome::Beach)) {
             assert!(seen.contains_key(b.name()), "no {} found", b.name());
         }
         // Look at a chunk in the middle of each new biome.
@@ -2386,7 +2413,8 @@ mod v3_tests {
                 assert!(high || !(frozen(a) && (mild(b) || hot(b) || warm(b))) && !(frozen(b) && (mild(a) || hot(a) || warm(a))), "{a:?} next to {b:?} at {x},{z}");
                 // Desert and badlands meet savanna or jungle, not the temperate lands.
                 assert!(!(hot(a) && (mild(b) || b == Taiga)) && !(hot(b) && (mild(a) || a == Taiga)), "{a:?} next to {b:?} at {x},{z}");
-                if [a, b].iter().any(|b| matches!(b, Swamp | Mangrove)) {
+                // (A river's channel drops away at its edge, whatever's beside it.)
+                if [a, b].iter().any(|b| matches!(b, Swamp | Mangrove)) && a != River && b != River {
                     worst_swamp_step = worst_swamp_step.max((h1 - h2).abs());
                 }
             }

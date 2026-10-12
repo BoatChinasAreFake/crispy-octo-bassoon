@@ -177,7 +177,7 @@ impl Generator {
         // Mineshafts: deep, on a grid of their own (and never where Trial Chambers are).
         let shaft_spot = self.opts.structures > 0 && !trial_spot && (cx.rem_euclid(6), cz.rem_euclid(6)) == (3, 3) && hash2(s ^ 0x5AF7, cx.div_euclid(6), cz.div_euclid(6)) < 0.45;
         // Ocean Monuments: rare, on a grid of their own, on the deep sea floor.
-        let monument_spot = self.opts.structures > 0 && (cx.rem_euclid(8), cz.rem_euclid(8)) == (4, 4) && hash2(s ^ 0x30A, cx.div_euclid(8), cz.div_euclid(8)) < 0.6;
+        let monument_spot = self.monument_spot(cx, cz);
         // Woodland Mansions: rarer still, on their own grid, in dark forests (see mansion.rs).
         let mansion_spot = self.mansion_spot(cx, cz);
         // Hot springs: in snowy mountains (see springs.rs).
@@ -305,11 +305,22 @@ impl Generator {
     /// region may hold a site (so any two are at least two chunks apart), if
     /// the region rolls one and no village is within two chunks.
     pub fn structure_slot(&self, cx: i32, cz: i32) -> bool {
+        // (From version 7, nothing right beside where a monument may go, either.)
+        if self.opts.version >= 7 && (-1..=1).any(|dz| (-1..=1).any(|dx| self.monument_spot(cx + dx, cz + dz))) {
+            return false;
+        }
         let s = self.seed ^ 0x5107;
         let (gx, gz) = (cx.div_euclid(4), cz.div_euclid(4));
         let (sx, sz) = (gx * 4 + 1 + (hash2(s, gx, gz) * 2.0) as i32 % 2, gz * 4 + 1 + (hash2(s ^ 1, gx, gz) * 2.0) as i32 % 2);
         let chance = [0.0, 0.35, 0.7, 1.0][self.opts.structures as usize % 4];
         (cx, cz) == (sx, sz) && hash2(s ^ 2, gx, gz) < chance && !(-2..=2).any(|dz| (-2..=2).any(|dx| self.village_spot(cx + dx, cz + dz)))
+    }
+
+    /// Where an Ocean Monument may go: rare, on a grid of its own (it only
+    /// does where the sea is deep enough; see `site`).
+    pub fn monument_spot(&self, cx: i32, cz: i32) -> bool {
+        let s = self.seed ^ 0x57_C0DE;
+        self.opts.structures > 0 && (cx.rem_euclid(8), cz.rem_euclid(8)) == (4, 4) && hash2(s ^ 0x30A, cx.div_euclid(8), cz.div_euclid(8)) < 0.6
     }
 
     /// Every block a site places, in world coordinates (AIR clears space).

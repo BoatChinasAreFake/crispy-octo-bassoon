@@ -70,6 +70,8 @@ pub fn grass(b: Biome) -> [f32; 3] {
         Biome::MushroomIslands => [85.0, 201.0, 63.0],
         Biome::Meadow => [131.0, 187.0, 109.0],
         Biome::StonyPeaks => [154.0, 190.0, 75.0],
+        // (A river or beach is the plains' colour; its banks blend with whatever's beside it.)
+        Biome::River | Biome::Beach => PLAINS_GRASS,
     };
     [c[0] / PLAINS_GRASS[0], c[1] / PLAINS_GRASS[1], c[2] / PLAINS_GRASS[2]]
 }
@@ -95,6 +97,7 @@ pub fn leaves(b: Biome) -> [f32; 3] {
         Biome::MushroomIslands => [70.0, 175.0, 32.0],
         Biome::Meadow => [99.0, 165.0, 83.0],
         Biome::StonyPeaks => [130.0, 172.0, 30.0],
+        Biome::River | Biome::Beach => PLAINS_LEAVES,
     };
     // (The painted leaves have little blue in them, and a tint can at most double it.)
     [c[0] / PLAINS_LEAVES[0], c[1] / PLAINS_LEAVES[1], (c[2] / PLAINS_LEAVES[2]).min(1.95)]
@@ -122,6 +125,9 @@ pub fn water(b: Biome) -> [f32; 3] {
         Biome::WarmOcean => [0.55, 1.25, 1.15],
         Biome::LukewarmOcean => [0.75, 1.12, 1.08],
         Biome::FrozenOcean => [0.7, 0.8, 1.15],
+        // Rivers run a little clearer and greener than the sea; the beach's shallows are clear.
+        Biome::River => [0.9, 1.05, 1.0],
+        Biome::Beach => [0.85, 1.08, 1.08],
     }
 }
 

@@ -390,6 +390,8 @@ impl Game {
 pub fn spawn_kind(biome: crate::world::Biome, top: Id, rng: &mut Rng) -> Option<MobKind> {
     use crate::world::Biome;
     match (biome, top) {
+        // Turtles like a proper beach best.
+        (Biome::Beach, SAND) if rng.chance(0.6) => Some(MobKind::Turtle),
         (_, SAND) if biome != Biome::Desert && rng.chance(0.3) => Some(MobKind::Turtle),
         (Biome::Jungle, _) if rng.chance(0.25) => Some(MobKind::Panda),
         (Biome::Snowy | Biome::IceSpikes, _) if rng.chance(0.2) => Some(MobKind::PolarBear),

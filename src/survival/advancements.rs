@@ -248,6 +248,8 @@ pub const ALL: &[Advancement] = &[
     adv("nest_egg", "Nest Egg", "Take 64 gold at your Shop Stall."),
     adv("extra_extra", "Extra! Extra!", "Read the village paper."),
     adv("front_page", "Front Page News", "Read a paper whose lead story is about you."),
+    adv("down_by_the_river", "Down by the River", "Find a river winding through the valleys to the sea."),
+    adv("lifes_a_beach", "Life's a Beach", "Stand on a sandy beach. Mind the sand in your boots."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).

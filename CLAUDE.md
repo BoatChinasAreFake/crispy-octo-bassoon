@@ -115,7 +115,7 @@ A new world generator (version 7) that keeps what works in the current one (read
 Originals: not chosen yet.
 
 Parts:
-- Part 1: items 1, 2 and 3.
+- Part 1: items 1, 2 and 3. **(released)**
 - Part 2: items 4, 5 and 6, and the two originals (this is the last part).
 
 ## v0.7: The Hollow, filled in

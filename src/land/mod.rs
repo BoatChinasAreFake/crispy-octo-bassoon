@@ -25,6 +25,7 @@ pub(crate) mod scorch;
 pub(crate) mod seas;
 pub(crate) mod springs;
 pub(crate) mod seasons;
+pub(crate) mod shape;
 pub(crate) mod skies;
 pub(crate) mod structures;
 pub(crate) mod temples;

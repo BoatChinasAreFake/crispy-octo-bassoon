@@ -293,6 +293,9 @@ pub fn climate(b: Biome) -> f32 {
         Biome::DarkForest => 0.6,
         Biome::MushroomIslands => 0.5,
         Biome::IceSpikes | Biome::StonyPeaks => 0.4,
+        // Riverbanks are green and flowery; beaches less so.
+        Biome::River => 0.95,
+        Biome::Beach => 0.7,
     }
 }
 

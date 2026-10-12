@@ -1,0 +1,378 @@
+//! The land's shape, and the biomes on it, in worlds from version 7.
+//!
+//! Three slow noises shape the land, as in modern Minecraft:
+//!
+//! - **Continentalness**: deep ocean, ocean, the coast, inland and far inland.
+//!   It sets how high the land sits (a spline: the sea floor, rising to the
+//!   coast, then gently higher the further inland).
+//! - **Erosion**: from rugged (low) to worn flat (high). It sets how much the
+//!   peaks and valleys count.
+//! - **Peaks and valleys**, folded from a "weirdness" noise: valley floors
+//!   where weirdness is near nought, ridges where it's large either way.
+//!   Rivers run along the valley floors, down to the sea.
+//!
+//! The biome then comes from the shape first (the sea, a river, the beach, a
+//! peak, wet lowland), then from the temperature bands of the older
+//! generator (so neighbours still make sense: snow gives way to taiga before
+//! anything milder), moisture within a band, and weirdness for the rarer
+//! variants (Cherry Groves, the Pale Garden, Ice Spikes). Swamps and
+//! mangroves are wet lowland that was low already; nothing sinks the land
+//! afterwards.
+
+use crate::world::smoothstep;
+use crate::world::{Biome, Generator};
+
+/// A curve through some points (x rising), straight between them and flat
+/// beyond the ends.
+pub struct Spline(pub &'static [(f32, f32)]);
+
+impl Spline {
+    pub fn at(&self, x: f32) -> f32 {
+        let p = self.0;
+        if x <= p[0].0 {
+            return p[0].1;
+        }
+        for w in p.windows(2) {
+            let ((x0, y0), (x1, y1)) = (w[0], w[1]);
+            if x <= x1 {
+                return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+            }
+        }
+        p[p.len() - 1].1
+    }
+}
+
+/// Continentalness to height above (or below) the sea: the deep sea floor,
+/// the shelf, the coast at about nought, then gently up inland.
+pub const CONTINENT: Spline = Spline(&[(-1.0, -46.0), (-0.5, -40.0), (-0.32, -24.0), (-0.22, -10.0), (-0.15, -3.0), (-0.11, 0.0), (-0.05, 2.0), (0.1, 5.0), (0.3, 11.0), (0.6, 20.0), (1.0, 26.0)]);
+/// Erosion to ruggedness: how much the peaks and valleys count.
+pub const RUGGED: Spline = Spline(&[(-1.0, 1.0), (-0.5, 0.95), (-0.25, 0.6), (0.0, 0.32), (0.25, 0.14), (0.5, 0.06), (1.0, 0.04)]);
+/// Peaks and valleys to height: valley floors, gentle middles, steep peaks.
+pub const PEAKS: Spline = Spline(&[(-1.0, -12.0), (-0.6, -5.0), (-0.2, 0.0), (0.2, 7.0), (0.5, 20.0), (0.8, 40.0), (1.0, 54.0)]);
+
+/// Where the coast is, in continentalness: beaches between these.
+pub const COAST: (f32, f32) = (-0.2, -0.06);
+/// How close to nought weirdness is along a river's channel, and its valley.
+pub const RIVER: f32 = 0.045;
+pub const RIVER_VALLEY: f32 = 0.32;
+
+/// Everything the biome rules look at for a column.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Place {
+    pub h: i32,
+    pub sea: i32,
+    /// Continentalness, erosion, weirdness and peaks-and-valleys (each about -1 to 1).
+    pub c: f32,
+    pub e: f32,
+    pub w: f32,
+    pub pv: f32,
+    /// Temperature and moisture (see `Generator::climate`).
+    pub t: f32,
+    pub m: f32,
+    /// In a river's channel.
+    pub river: bool,
+    /// How much this is wet lowland (0 to 1): low, flat-ish and damp.
+    pub wet_low: f32,
+}
+
+/// Fold weirdness into peaks and valleys: -1 on the valley floors (weirdness
+/// near nought), 1 on the ridges.
+pub fn peaks_and_valleys(w: f32) -> f32 {
+    1.0 - (3.0 * w.abs() - 2.0).abs()
+}
+
+/// The seas, by temperature.
+fn sea_by_temperature(t: f32) -> Biome {
+    if t > 0.3 {
+        Biome::WarmOcean
+    } else if t > 0.12 {
+        Biome::LukewarmOcean
+    } else if t < -0.32 {
+        Biome::FrozenOcean
+    } else {
+        Biome::Ocean
+    }
+}
+
+/// The biome rules, in order: the shape of the land first, then the
+/// temperature band, moisture within it, and weirdness for the rare ones.
+pub fn pick(p: &Place) -> Biome {
+    let (h, sea, t, m, w) = (p.h, p.sea, p.t, p.m, p.w);
+    // The shape: water, the shore, the heights, wet lowland.
+    if p.river {
+        return Biome::River;
+    }
+    if h < sea - 1 {
+        return sea_by_temperature(t);
+    }
+    if h > sea + 52 || (p.pv > 0.8 && p.e < -0.35 && h > sea + 44) {
+        return if t > -0.05 { Biome::StonyPeaks } else { Biome::Snowy };
+    }
+    let coast = (COAST.0..COAST.1).contains(&p.c);
+    if coast && h <= sea + 2 && p.e > -0.45 && p.wet_low < 0.5 {
+        return if t < -0.32 { Biome::Snowy } else { Biome::Beach };
+    }
+    // Then the temperature bands.
+    if t < -0.32 {
+        // Frozen: here and there, where it's weird, fields of ice spikes.
+        return if w > 0.42 && h < sea + 30 { Biome::IceSpikes } else { Biome::Snowy };
+    }
+    if t < -0.17 {
+        // Cold: always taiga, between the snow and everything milder.
+        return Biome::Taiga;
+    }
+    if t < 0.22 {
+        // Temperate.
+        return if p.wet_low > 0.5 && t > -0.12 {
+            Biome::Swamp
+        } else if m > 0.24 && t > -0.02 {
+            Biome::DarkForest
+        } else if m > 0.12 && t < -0.04 && w < -0.42 {
+            Biome::PaleGarden
+        } else if m > 0.06 && (0.04..0.16).contains(&t) {
+            Biome::BirchForest
+        } else if m > 0.06 {
+            Biome::Forest
+        } else if w > 0.42 && m > -0.08 && h > sea + 5 {
+            Biome::Cherry
+        } else if h > sea + 16 && p.e > 0.05 && m > -0.1 {
+            // High, worn-flat grassland.
+            Biome::Meadow
+        } else {
+            Biome::Plains
+        };
+    }
+    if t < 0.36 {
+        // Warm: jungle where it's wet (mangroves on its wet lowland), savanna where it isn't.
+        return if m > 0.16 {
+            if p.wet_low > 0.4 { Biome::Mangrove } else { Biome::Jungle }
+        } else {
+            Biome::Savanna
+        };
+    }
+    // Hot.
+    if m > 0.12 {
+        if p.wet_low > 0.4 { Biome::Mangrove } else { Biome::Jungle }
+    } else if p.e < -0.12 {
+        // Hot, dry and rugged: the stripy hills.
+        Biome::Badlands
+    } else {
+        Biome::Desert
+    }
+}
+
+impl Generator {
+    /// The three shape noises at a column: continentalness, erosion and weirdness.
+    pub fn shape_noise(&self, x: i32, z: i32) -> (f32, f32, f32) {
+        let (fx, fz) = (x as f32, z as f32);
+        let bs = self.opts.biome_scale().sqrt();
+        // (A little warp, so no ridge or coast runs straight.)
+        let (wx, wz) = (self.hills.noise2(fx / 97.0 - 210.0, fz / 97.0) * 30.0, self.hills.noise2(fx / 97.0, fz / 97.0 + 330.0) * 30.0);
+        let norm = |v: f32| (v * 2.6).clamp(-1.0, 1.0);
+        let c = norm(self.continent.fbm2((fx + wx) / (900.0 * bs), (fz + wz) / (900.0 * bs), 4) + 0.11);
+        let e = norm(self.erosion.fbm2((fx - wz) / (520.0 * bs), (fz + wx) / (520.0 * bs), 3));
+        let w = norm(self.weird.fbm2((fx + wz * 0.5) / (440.0 * bs), (fz - wx * 0.5) / (440.0 * bs), 3));
+        (c, e, w)
+    }
+
+    /// Surface height and biome for a column, in worlds from version 7.
+    pub(crate) fn column_v7(&self, x: i32, z: i32) -> (i32, Biome) {
+        let place = self.place_v7(x, z);
+        let biome = pick(&place);
+        let (h, biome) = (place.h, biome);
+        // Far out in deep water, now and then, the sea floor rises into a mushroom island.
+        if biome.is_ocean() && h < place.sea - 4 {
+            let k = self.mushroom_isle(x, z);
+            if k > 0.0 {
+                let seaf = place.sea as f32;
+                let top = seaf + 1.0 + (k - 0.5).max(0.0) * 10.0;
+                let hh = (h as f32 + (top - h as f32) * (k * 2.0).min(1.0)).round() as i32;
+                return (hh, if hh >= place.sea - 1 { Biome::MushroomIslands } else { biome });
+            }
+        }
+        (h, biome)
+    }
+
+    /// The land's height and what the biome rules need, in worlds from version 7.
+    pub fn place_v7(&self, x: i32, z: i32) -> Place {
+        let (fx, fz) = (x as f32, z as f32);
+        let sea = self.sea();
+        let seaf = sea as f32;
+        let (c, e, w) = self.shape_noise(x, z);
+        let pv = peaks_and_valleys(w);
+        let relief = self.opts.relief();
+        // Inland the peaks and valleys count; at sea, hardly.
+        let inland = smoothstep(-0.16, 0.08, c);
+        let rugged = RUGGED.at(e);
+        let mut h = seaf + CONTINENT.at(c);
+        h += inland * PEAKS.at(pv) * rugged * relief;
+        // A little detail on top: more where it's rugged.
+        h += self.hills.fbm2(fx / 70.0, fz / 70.0, 3) * (1.5 + 6.0 * rugged) * (0.3 + 0.7 * inland) * relief.sqrt();
+        // Tall peaks ease off toward the top of the world instead of being cut flat.
+        let knee = seaf + 44.0;
+        if h > knee {
+            h = knee + (h - knee) / (1.0 + (h - knee) / 24.0);
+        }
+        // Rivers: along the valley floors (weirdness near nought), inland, and
+        // not up in the mountains. The valley's sides come down to a bank a
+        // little over the sea, then the channel drops below it.
+        let reach = smoothstep(-0.26, -0.12, c) * (1.0 - smoothstep(seaf + 34.0, seaf + 60.0, h));
+        let aw = w.abs();
+        let valley = (1.0 - smoothstep(RIVER, RIVER_VALLEY, aw)) * reach;
+        let bank = seaf + 1.5;
+        h -= (h - bank).max(0.0) * valley;
+        let channel = RIVER * reach;
+        let river = aw < channel && h < seaf + 3.0;
+        if river {
+            // Deepest in the middle.
+            let bed = seaf - 1.5 - 3.5 * (1.0 - aw / channel.max(1e-4));
+            h = h.min(bed);
+        }
+        let (t, m) = self.climate(x, z);
+        // Wet lowland: low, damp, not rugged. It gets a bumpy floor just
+        // around the sea, pools and islands of mud and grass (low already,
+        // so this moves it only a block or two).
+        let wet_low = smoothstep(0.1, 0.26, m) * (1.0 - smoothstep(seaf + 1.0, seaf + 5.0, h)) * smoothstep(seaf - 4.0, seaf - 1.0, h) * smoothstep(-0.3, 0.0, e) * smoothstep(-0.14, -0.04, c);
+        if !river {
+            let bumps = seaf - 0.6 + self.hills.noise2(fx / 9.0, fz / 9.0) * 2.2;
+            h += (bumps - h) * wet_low * 0.7;
+        }
+        let h = (h.round() as i32).clamp(4, sea + 68);
+        Place { h, sea, c, e, w, pv, t, m, river, wet_low }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::GenOptions;
+
+    fn place(h: i32, t: f32, m: f32) -> Place {
+        Place { h, sea: 63, c: 0.3, e: 0.0, w: 0.2, pv: peaks_and_valleys(0.2), t, m, river: false, wet_low: 0.0 }
+    }
+
+    #[test]
+    fn splines_pass_through_their_points_and_level_off() {
+        assert_eq!(CONTINENT.at(-0.11), 0.0, "the coast is at the sea");
+        assert_eq!(CONTINENT.at(-5.0), -46.0);
+        assert_eq!(CONTINENT.at(5.0), 26.0);
+        assert!((PEAKS.at(0.0) - 3.5).abs() < 1e-4, "halfway between its neighbours");
+        for s in [&CONTINENT, &RUGGED, &PEAKS] {
+            for w in s.0.windows(2) {
+                assert!(w[0].0 < w[1].0);
+            }
+        }
+        assert_eq!(peaks_and_valleys(0.0), -1.0, "valley floors where weirdness is nought");
+        assert!((peaks_and_valleys(2.0 / 3.0) - 1.0).abs() < 1e-5, "ridges");
+    }
+
+    #[test]
+    fn the_rules_read_the_shape_first() {
+        let base = place(70, 0.0, 0.0);
+        assert_eq!(pick(&base), Biome::Plains);
+        assert_eq!(pick(&Place { river: true, ..base }), Biome::River);
+        assert_eq!(pick(&Place { h: 50, ..base }), Biome::Ocean);
+        assert_eq!(pick(&Place { h: 50, t: 0.4, ..base }), Biome::WarmOcean);
+        assert_eq!(pick(&Place { h: 64, c: -0.12, ..base }), Biome::Beach);
+        assert_eq!(pick(&Place { h: 64, c: -0.12, t: -0.5, ..base }), Biome::Snowy, "a snowy shore");
+        assert_eq!(pick(&Place { h: 120, ..base }), Biome::StonyPeaks);
+        assert_eq!(pick(&Place { h: 120, t: -0.2, ..base }), Biome::Snowy);
+        // Then the bands, moisture, and weirdness for the rare ones.
+        assert_eq!(pick(&Place { t: -0.4, ..base }), Biome::Snowy);
+        assert_eq!(pick(&Place { t: -0.4, w: 0.6, ..base }), Biome::IceSpikes);
+        assert_eq!(pick(&Place { t: -0.2, ..base }), Biome::Taiga);
+        assert_eq!(pick(&Place { m: 0.1, t: 0.1, ..base }), Biome::BirchForest);
+        assert_eq!(pick(&Place { m: 0.1, t: -0.1, ..base }), Biome::Forest);
+        assert_eq!(pick(&Place { m: 0.3, ..base }), Biome::DarkForest);
+        assert_eq!(pick(&Place { m: 0.2, t: -0.1, w: -0.6, ..base }), Biome::PaleGarden);
+        assert_eq!(pick(&Place { w: 0.6, ..base }), Biome::Cherry);
+        assert_eq!(pick(&Place { h: 85, e: 0.3, ..base }), Biome::Meadow);
+        assert_eq!(pick(&Place { wet_low: 0.8, h: 64, ..base }), Biome::Swamp);
+        assert_eq!(pick(&Place { t: 0.3, ..base }), Biome::Savanna);
+        assert_eq!(pick(&Place { t: 0.3, m: 0.2, ..base }), Biome::Jungle);
+        assert_eq!(pick(&Place { t: 0.3, m: 0.2, wet_low: 0.8, ..base }), Biome::Mangrove);
+        assert_eq!(pick(&Place { t: 0.5, ..base }), Biome::Desert);
+        assert_eq!(pick(&Place { t: 0.5, e: -0.4, ..base }), Biome::Badlands);
+    }
+
+    /// A wide look at a seed: biomes (and heights) every few blocks.
+    fn survey(seed: u32, step: i32, n: i32) -> Vec<(i32, Biome)> {
+        let g = Generator::with(seed, GenOptions { version: 7, ..GenOptions::DEFAULT });
+        let mut out = Vec::new();
+        for j in -n / 2..n / 2 {
+            for i in -n / 2..n / 2 {
+                out.push(g.column(i * step, j * step));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn new_worlds_have_rivers_beaches_and_plenty_of_land() {
+        for seed in [424242, 1234, 77] {
+            let cols = survey(seed, 16, 128);
+            let share = |b: Biome| cols.iter().filter(|c| c.1 == b).count() as f32 / cols.len() as f32;
+            let sea: f32 = Biome::ALL.iter().filter(|b| b.is_ocean()).map(|&b| share(b)).sum();
+            assert!((0.2..0.7).contains(&sea), "seed {seed}: sea {sea}");
+            assert!(share(Biome::River) > 0.004, "seed {seed}: rivers {}", share(Biome::River));
+            assert!(share(Biome::Beach) > 0.004, "seed {seed}: beaches {}", share(Biome::Beach));
+            let kinds = Biome::ALL.iter().filter(|&&b| share(b) > 0.0).count();
+            assert!(kinds >= 16, "seed {seed}: only {kinds} kinds of biome");
+            // The heights make sense for their biome.
+            for &(h, b) in &cols {
+                match b {
+                    Biome::River => assert!(h < 63, "a river below the sea"),
+                    Biome::Beach => assert!((62..=65).contains(&h)),
+                    b if b.is_ocean() => assert!(h < 62),
+                    _ => assert!(h >= 62),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rivers_reach_the_sea() {
+        // Follow river columns from the sea: some river touches an ocean.
+        let g = Generator::with(424242, GenOptions { version: 7, ..GenOptions::DEFAULT });
+        let mut meets = 0;
+        for z in (-1500..1500).step_by(6) {
+            for x in (-1500..1500).step_by(6) {
+                if g.column(x, z).1 == Biome::River && [(6, 0), (-6, 0), (0, 6), (0, -6)].iter().any(|&(dx, dz)| g.column(x + dx, z + dz).1.is_ocean()) {
+                    meets += 1;
+                }
+            }
+        }
+        assert!(meets > 0, "no river meets the sea");
+    }
+
+    #[test]
+    fn new_worlds_start_on_dry_level_ground() {
+        for seed in [1234u32, 3, 6, 77] {
+            let w = crate::world::World::with_options(seed, GenOptions::DEFAULT);
+            let s = w.find_spawn();
+            let (x, z) = (s.x as i32, s.z as i32);
+            let h = w.generator.column(x, z).0;
+            for (dx, dz) in [(8, 0), (-8, 0), (0, 8), (0, -8)] {
+                let (hh, b) = w.generator.column(x + dx, z + dz);
+                assert!((hh - h).abs() <= 4 && !b.is_ocean() && b != Biome::River, "seed {seed}: {b:?} at {hh} beside a spawn at {h}");
+            }
+        }
+    }
+
+    /// Writes biome maps (raw bytes, one per column) for a look at them:
+    /// `MINCERAFT_BIOME_MAPS=dir cargo test --release biome_maps -- --ignored`.
+    #[test]
+    #[ignore]
+    fn biome_maps() {
+        let Ok(dir) = std::env::var("MINCERAFT_BIOME_MAPS") else { return };
+        let names: Vec<String> = Biome::ALL.iter().map(|b| format!("{b:?}")).collect();
+        std::fs::write(format!("{dir}/biome_names.txt"), names.join("\n")).unwrap();
+        for seed in [424242u32, 1234, 77] {
+            let cols = survey(seed, 4, 512);
+            let raw: Vec<u8> = cols.iter().map(|c| Biome::ALL.iter().position(|&b| b == c.1).unwrap() as u8).collect();
+            std::fs::write(format!("{dir}/biomes_{seed}.raw"), raw).unwrap();
+            let hs: Vec<u8> = cols.iter().map(|c| c.0.clamp(0, 255) as u8).collect();
+            std::fs::write(format!("{dir}/heights_{seed}.raw"), hs).unwrap();
+        }
+    }
+}
