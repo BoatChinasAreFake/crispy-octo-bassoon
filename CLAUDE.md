@@ -82,7 +82,7 @@ Parts:
 - Part 3: items 6, 7 and 8. **(released)**
 - Part 4: items 9, 10 and 11, and the two originals (this is the last part). **(released)**
 
-## v0.5: Villages and people
+## v0.5: Villages and people (released)
 
 1. Villages that live: Hmmers claim beds and workstations, take their job from the station, have babies when there are free beds, and go indoors at night.
 2. Village styles by biome: desert, savanna, taiga, snowy and plains villages each built differently, plus village-only blocks.
@@ -99,7 +99,7 @@ Parts:
 - Part 1: items 1 and 2. **(released)**
 - Part 2: items 3 and 4. **(released)**
 - Part 3: items 5 and 6. **(released)**
-- Part 4: the two originals (this is the last part).
+- Part 4: the two originals (this is the last part). **(released)**
 
 ## v0.6: The land, reshaped (the user's request)
 
