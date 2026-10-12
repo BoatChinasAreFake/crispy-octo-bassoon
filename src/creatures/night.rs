@@ -305,6 +305,18 @@ impl Game {
     }
 }
 
+/// Which monster turns up on a cave floor, for a roll in 0..1.
+pub fn cave_monster(roll: f32) -> MobKind {
+    match roll {
+        r if r < 0.27 => MobKind::Groaner,
+        r if r < 0.52 => MobKind::Rattler,
+        r if r < 0.74 => MobKind::Hisser,
+        r if r < 0.88 => MobKind::Webber,
+        r if r < 0.95 => MobKind::Bloop,
+        _ => MobKind::Starer,
+    }
+}
+
 /// Which night monster turns up in a biome, swapping in the local kinds:
 /// desert Groaners, snowy Rattlers, swamp Witches.
 pub fn local_kind(kind: MobKind, biome: crate::world::Biome, rng: &mut Rng) -> MobKind {

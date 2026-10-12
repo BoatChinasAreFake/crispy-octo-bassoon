@@ -100,7 +100,12 @@ fn joins(pane: bool, other: Id) -> bool {
 
 /// Which sides a fence or pane at `p` should join.
 pub fn join_mask(world: &World, p: IVec3, pane: bool) -> u8 {
-    SIDES.iter().filter(|(d, _)| joins(pane, world.get_v(p + *d))).fold(0, |m, (_, b)| m | b)
+    join_mask_by(|q| world.get_v(q), p, pane)
+}
+
+/// The same, asking `get` what's where (a structure that isn't built yet, say).
+pub fn join_mask_by(get: impl Fn(IVec3) -> Id, p: IVec3, pane: bool) -> u8 {
+    SIDES.iter().filter(|(d, _)| joins(pane, get(p + *d))).fold(0, |m, (_, b)| m | b)
 }
 
 /// How high fences stand for collisions: a little over a jump.

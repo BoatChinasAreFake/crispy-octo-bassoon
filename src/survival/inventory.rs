@@ -191,6 +191,16 @@ impl Inventory {
         crate::containers::sort_slots(&mut self.slots[9..36], &mut self.wear[9..36]);
     }
 
+    /// A number key over slot `i`: swap it with hotbar slot `k` (backpack to
+    /// hotbar and back, or two hotbar slots). Not while carrying something.
+    pub fn swap_with_hotbar(&mut self, i: usize, k: usize) {
+        if self.cursor.is_some() || i == k || i >= self.slots.len() || k >= 9 {
+            return;
+        }
+        self.slots.swap(i, k);
+        self.wear.swap(i, k);
+    }
+
     /// Swap what's in the hand for what's in the other hand.
     pub fn swap_hands(&mut self) {
         let i = self.selected;
@@ -393,5 +403,31 @@ pub fn right_click_stack(slot: &mut Stack, cursor: &mut Stack) {
             *cursor = if n > 1 { Some((id, n - 1)) } else { None };
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::block::{DIRT, SAND, STONE};
+
+    #[test]
+    fn number_keys_swap_with_the_hotbar() {
+        let mut inv = Inventory::new();
+        inv.slots[20] = Some((STONE, 10));
+        inv.slots[3] = Some((DIRT, 5));
+        inv.wear[3] = 7;
+        inv.swap_with_hotbar(20, 3);
+        assert_eq!((inv.slots[3], inv.slots[20]), (Some((STONE, 10)), Some((DIRT, 5))));
+        assert_eq!(inv.wear[20], 7, "the wear goes with it");
+        // Into an empty hotbar slot, and between two hotbar slots.
+        inv.swap_with_hotbar(20, 8);
+        assert_eq!((inv.slots[8], inv.slots[20]), (Some((DIRT, 5)), None));
+        inv.swap_with_hotbar(8, 0);
+        assert_eq!(inv.slots[0], Some((DIRT, 5)));
+        // Not while carrying something.
+        inv.cursor = Some((SAND, 1));
+        inv.swap_with_hotbar(3, 0);
+        assert_eq!(inv.slots[0], Some((DIRT, 5)));
     }
 }

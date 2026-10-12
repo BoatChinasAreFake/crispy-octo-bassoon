@@ -368,7 +368,8 @@ pub fn igloo_blocks(site: &Site) -> Vec<(IVec3, Id)> {
         for y in -9..=-8 {
             // Panes across the front of both cells, a wall between them.
             if x.abs() >= 2 {
-                put(x, y, -5, PANE_FIRST);
+                // (Joined along the row, east and west, like the bars of a cell.)
+                put(x, y, -5, PANE_FIRST + 3);
             } else {
                 put(x, y, -5, STONE_BRICKS);
                 put(x, y, -6, STONE_BRICKS);

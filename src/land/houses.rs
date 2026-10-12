@@ -165,7 +165,8 @@ pub fn styled_house(origin: IVec3, facing: u8, seed: u32, style: Style, station:
                     pal.corner
                 } else {
                     let along = if ex { z } else { x };
-                    let window = (y == 2 || (two_storey && y == 5)) && along.abs() == 1 && !(z == 3 && y == 2);
+                    // At eye level on each floor (the upper floor is at 4).
+                    let window = (y == 2 || (two_storey && y == 6)) && along.abs() == 1 && !(z == 3 && y == 2);
                     if window { PANE_FIRST } else { pal.wall }
                 };
                 put(x, y, z, id);
@@ -271,12 +272,56 @@ pub fn styled_house(origin: IVec3, facing: u8, seed: u32, style: Style, station:
         let (x, y, z) = STATION;
         put(x, y, z, crate::village_life::station_of(house_job(seed)));
     }
+    join_panes(&mut out);
     out
+}
+
+/// Glass panes join up with the walls beside them (as they would if placed by
+/// hand): each pane's last word is the version joined to what the house has round it.
+fn join_panes(out: &mut Vec<(IVec3, Id)>) {
+    let at: std::collections::HashMap<IVec3, Id> = out.iter().copied().collect();
+    let joined: Vec<(IVec3, Id)> = at
+        .iter()
+        .filter(|(_, id)| crate::carpentry::is_pane(**id))
+        .map(|(&p, _)| (p, PANE_FIRST + crate::carpentry::join_mask_by(|q| at.get(&q).copied().unwrap_or(AIR), p, true) as Id))
+        .collect();
+    let mut joined = joined;
+    joined.sort_by_key(|(p, _)| p.to_array());
+    out.extend(joined);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_join_their_walls_and_sit_at_eye_level() {
+        let o = ivec3(0, 70, 0);
+        let mut upper = false;
+        for style in Style::ALL {
+            for seed in 0..40u32 {
+                let mut at = std::collections::HashMap::new();
+                for (p, id) in styled_house(o, (seed % 4) as u8, seed, style, true) {
+                    at.insert(p, id);
+                }
+                // (Two storeys: the upper floor is at 4.)
+                let two = at.get(&(o + ivec3(0, 4, 0))) == Some(&style.palette().floor);
+                for (p, id) in &at {
+                    if !crate::carpentry::is_pane(*id) {
+                        continue;
+                    }
+                    // Joined to the wall on either side (a pane alone in the air draws as a post).
+                    let mask = id - PANE_FIRST;
+                    assert!(mask == 3 || mask == 12, "{style:?} seed {seed}: pane at {p} joins {mask:04b}");
+                    // On the ground floor at y 2; upstairs at y 6, not 5 (at the upstairs' legs).
+                    let y = p.y - o.y;
+                    assert!(y == 2 || y > 4 && !(two && y == 5), "{style:?} seed {seed}: a window at leg height ({y})");
+                    upper |= two && y == 6;
+                }
+            }
+        }
+        assert!(upper, "some two-storey houses have upstairs windows");
+    }
 
     #[test]
     fn every_style_builds_its_own_way_with_a_workstation() {

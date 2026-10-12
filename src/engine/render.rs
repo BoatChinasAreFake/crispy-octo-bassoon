@@ -28,7 +28,7 @@ varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 varying vec4 v_spos;
-varying vec3 v_tint;
+varying vec4 v_tint;
 
 bool starts_at(vec2 t, vec2 o) {
     return abs(t.x - o.x) < 0.0001 && abs(t.y - o.y) < 0.0001;
@@ -57,8 +57,9 @@ void main() {
     v_wpos = p;
     v_tile = in_tile;
     v_spos = light_mvp * vec4(p, 1.0);
-    // Biome colour: 128 is "as painted" (see tint.rs).
-    v_tint = in_tint.rgb / 128.0;
+    // Biome colour: 128 is "as painted" (see tint.rs). Alpha 0 marks a grass
+    // block's side, which only takes it on its green fringe.
+    v_tint = vec4(in_tint.rgb / 128.0, in_tint.a / 255.0);
 }
 "#;
 
@@ -76,7 +77,7 @@ varying vec3 v_light;
 varying vec3 v_wpos;
 varying vec2 v_tile;
 varying vec4 v_spos;
-varying vec3 v_tint;
+varying vec4 v_tint;
 
 uniform sampler2D tex;
 uniform sampler2D shadow_map;
@@ -176,8 +177,18 @@ void main() {
     // Which way the surface faces, worked out before any pixel is discarded.
     vec3 surface = cross(dFdx(v_wpos), dFdy(v_wpos));
 #endif
-    vec4 c = sample_tile() * tint;
-    c.rgb *= v_tint;
+    vec4 s = sample_tile();
+    vec3 biome = v_tint.rgb;
+    // (Nearly opaque is opaque: the grass side's fringe marker, wherever it's drawn.)
+    if (s.a > 0.97) s.a = 1.0;
+    if (v_tint.a < 0.5) {
+        // The fringe is marked in the texture by an alpha just under one
+        // (250; mipmaps blend it, so a distant side is tinted as much as it's fringe).
+        biome = mix(vec3(1.0), biome, clamp((1.0 - s.a) * 51.0, 0.0, 1.0));
+        s.a = 1.0;
+    }
+    vec4 c = s * tint;
+    c.rgb *= biome;
     if (c.a < 0.08) discard;
     // The mesher marks faces under water (x + 4) and water surfaces with their depth (8 + depth).
     float lx = v_light.x;
@@ -230,7 +241,7 @@ void main() {
     if (depth >= 0.0 && params3.w > 0.5 && params2.x < 0.5) {
         // Deep water is darker, bluer and harder to see through.
         float k = clamp(depth / 10.0, 0.0, 1.0);
-        col *= mix(vec3(1.0), vec3(0.42, 0.58, 0.78) * v_tint, k);
+        col *= mix(vec3(1.0), vec3(0.42, 0.58, 0.78) * v_tint.rgb, k);
         c.a = c.a + (1.0 - c.a) * k * 0.8;
     }
 #ifdef GL_OES_standard_derivatives
@@ -252,7 +263,7 @@ void main() {
             // The sky it reflects: the horizon's colour, bluer overhead.
             // (A murky swamp reflects murkily: the biome's water colour tints it too.)
             vec3 skyc = mix(fog_color.rgb, fog_color.rgb * vec3(0.55, 0.72, 1.05), clamp(r.y * 1.6, 0.0, 1.0));
-            skyc *= (0.5 + 0.5 * params.x) * mix(vec3(1.0), v_tint, 0.5);
+            skyc *= (0.5 + 0.5 * params.x) * mix(vec3(1.0), v_tint.rgb, 0.5);
             col = mix(col, skyc, clamp(0.1 + fres * 0.85, 0.0, 0.88));
             c.a = mix(c.a, 1.0, clamp(fres * 0.7, 0.0, 0.7));
             // The sun's glint: a hot pinpoint and a softer glow round it.

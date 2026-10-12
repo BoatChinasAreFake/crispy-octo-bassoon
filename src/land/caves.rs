@@ -256,6 +256,23 @@ pub fn can_hang(id: Id) -> bool {
     id == POINTY_ROCK || is_amethyst_bud(id)
 }
 
+/// Which piece of its spike a Pointy Rock at height `y` is (the tile it's
+/// drawn with): alone, a stack's tip, its base (against what holds it up) or
+/// a middle. `hanging` says which way the spike points.
+pub fn rock_piece(get: impl Fn(i32) -> Id, y: i32, hanging: bool) -> u16 {
+    use crate::texture::*;
+    let run = |step: i32| (1..6).take_while(|k| get(y + k * step) == POINTY_ROCK).count();
+    let (below, above) = (run(-1), run(1));
+    // Towards the point, and towards what it grows from.
+    let (to_tip, to_base) = if hanging { (below, above) } else { (above, below) };
+    match (to_tip, to_base) {
+        (0, 0) => T_POINTY_ROCK,
+        (0, _) => T_POINTY_TIP,
+        (_, 0) => T_POINTY_BASE,
+        _ => T_POINTY_MIDDLE,
+    }
+}
+
 /// Does the Pointy Rock (or bud) at height `y` hang? `get` reads the column.
 /// Follow a stack of them down: if it ends on something solid they stand,
 /// otherwise they hang.
@@ -498,6 +515,24 @@ impl Game {
 mod tests {
     use super::*;
     use crate::world::GenOptions;
+
+    #[test]
+    fn long_spikes_are_drawn_as_one() {
+        use crate::texture::*;
+        // A stalagmite three long on the floor (y 1..=3), and a stalactite two long from the ceiling (y 8..=9).
+        let col = |y: i32| match y {
+            0 | 10 => STONE,
+            1..=3 | 8 | 9 => POINTY_ROCK,
+            _ => AIR,
+        };
+        let piece = |y: i32| rock_piece(col, y, hangs(col, y));
+        assert_eq!([piece(1), piece(2), piece(3)], [T_POINTY_BASE, T_POINTY_MIDDLE, T_POINTY_TIP], "a stalagmite grows up to its point");
+        assert_eq!([piece(9), piece(8)], [T_POINTY_BASE, T_POINTY_TIP], "a stalactite hangs down to its point");
+        assert!(hangs(col, 8) && !hangs(col, 3));
+        // On its own it's a whole little cone.
+        let lone = |y: i32| if y == 0 { STONE } else if y == 1 { POINTY_ROCK } else { AIR };
+        assert_eq!(rock_piece(lone, 1, false), T_POINTY_ROCK);
+    }
 
     #[test]
     fn cave_biomes_and_geodes_turn_up() {

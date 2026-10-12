@@ -3998,7 +3998,9 @@ impl Game {
         self.spawn_timer -= dt;
         if self.spawn_timer <= 0.0 {
             self.spawn_timer = 1.0;
+            self.thin_monsters();
             self.try_spawn();
+            self.try_cave_spawn();
         }
         self.farm_tick(dt);
         self.hive_tick(dt);
@@ -4073,7 +4075,8 @@ impl Game {
         }
         // Kept animals (bred, tamed) don't count against new ones turning up.
         let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent && m.kind != MobKind::Fishy).count();
-        let hostile = self.mobs.len() - passive;
+        // Only wild monsters count towards the monster cap (not fish, Hmmers, pets or bats).
+        let hostile = self.wild_monsters();
         let a = self.rng.range(0.0, TAU);
         let d = self.rng.range(24.0, 56.0);
         let (x, z) = ((p.x + a.cos() * d).floor() as i32, (p.z + a.sin() * d).floor() as i32);
@@ -4182,8 +4185,7 @@ impl Game {
             }
             return;
         }
-        let cap = ((12 + 4 * self.peers.len()) as f32 * crate::skies::monster_scale(self.moon_phase())) as usize;
-        if hostile >= cap || !self.rules.difficulty.monsters() {
+        if hostile >= self.monster_cap() || !self.rules.difficulty.monsters() {
             return;
         }
         let roll = self.rng.f32();
@@ -4211,20 +4213,80 @@ impl Game {
         let dark = self.is_night() || self.weather.kind == crate::weather::Weather::Thunder;
         // Torchlight keeps monsters away (block light 8 or more).
         let torchlit = |w: &World, y: i32| w.block_level(x, y, z) >= 8;
-        if dark && is_solid(top) && clear(&self.world, y + 1) && !torchlit(&self.world, y + 1) {
+        // (Not up in the treetops.)
+        if dark && is_solid(top) && !is_leaves(top) && clear(&self.world, y + 1) && !torchlit(&self.world, y + 1) {
             let pos = Vec3::new(x as f32 + 0.5, y as f32 + 1.0, z as f32 + 0.5);
             self.alloc_mob_sized(kind, pos, size);
+        }
+    }
+
+    /// Wild monsters about (the ones the monster cap counts).
+    fn wild_monsters(&self) -> usize {
+        self.mobs.iter().filter(|m| m.menacing() && !m.persistent).count()
+    }
+
+    /// How many wild monsters there can be at once (more on a full moon, more with company).
+    fn monster_cap(&self) -> usize {
+        ((12 + 4 * self.peers.len()) as f32 * crate::skies::monster_scale(self.moon_phase())) as usize
+    }
+
+    /// Monsters nobody is near wander off now and then, making room for new
+    /// ones where people are (a cave's worth left behind doesn't use up the night).
+    fn thin_monsters(&mut self) {
+        let mut near: Vec<Vec3> = self.peers.values().map(|p| p.target).collect();
+        if !self.away() {
+            near.push(self.player.body.pos);
+        }
+        let lonely: Vec<u32> = self.mobs.iter().filter(|m| m.menacing() && !m.persistent && near.iter().all(|p| m.body.pos.distance(*p) > 48.0)).map(|m| m.id).collect();
+        for id in lonely {
+            if self.rng.chance(1.0 / 30.0) {
+                self.mobs.retain(|m| m.id != id);
+            }
+        }
+    }
+
+    /// Caves are dark day and night: monsters turn up on cave floors around
+    /// someone's height, out of the sky light and torchlight (but not in the
+    /// Deep Dark, which has its own listener).
+    fn try_cave_spawn(&mut self) {
+        if self.world.is_scorch() || self.world.is_hollow() || self.mod_dim_here().is_some() || !self.rules.difficulty.monsters() {
             return;
         }
-        // Caves are always spooky (but no horses down there).
-        if kind == MobKind::Rotsteed {
+        let mut centers = if self.away() { vec![] } else { vec![self.player.body.pos] };
+        centers.extend(self.peers.values().map(|p| p.target));
+        if centers.is_empty() || self.wild_monsters() >= self.monster_cap() {
             return;
         }
-        let cy = self.rng.int(4, y.max(5));
-        if cy + 1 < y && is_solid(self.world.get(x, cy - 1, z)) && clear(&self.world, cy) && self.world.sky_light(x, cy, z) < 0.15 && !torchlit(&self.world, cy) {
-            let pos = Vec3::new(x as f32 + 0.5, cy as f32, z as f32 + 0.5);
-            self.alloc_mob_sized(kind, pos, size);
+        let p = centers[self.rng.int(0, centers.len() as i32 - 1) as usize];
+        let (a, d) = (self.rng.range(0.0, TAU), self.rng.range(16.0, 44.0));
+        let (x, z) = ((p.x + a.cos() * d).floor() as i32, (p.z + a.sin() * d).floor() as i32);
+        if !self.world.is_loaded(x, z) {
+            return;
         }
+        let surface = self.world.surface_y(x, z);
+        let deep_dark = self.world.generator.deep_dark(x, z);
+        let py = p.y as i32;
+        let floors: Vec<i32> = ((py - 20).max(2)..(py + 20).min(surface - 1))
+            .filter(|&y| {
+                let w = &self.world;
+                is_solid(w.get(x, y - 1, z))
+                    && (0..2).all(|h| !is_solid(w.get(x, y + h, z)) && !is_liquid(w.get(x, y + h, z)))
+                    && w.sky_light(x, y, z) < 0.15
+                    && w.block_level(x, y, z) < 8
+                    && !(deep_dark && y < crate::deepdark::DEEP_TOP + 2)
+            })
+            .collect();
+        if floors.is_empty() {
+            return;
+        }
+        let y = floors[self.rng.int(0, floors.len() as i32 - 1) as usize];
+        let kind = crate::night::cave_monster(self.rng.f32());
+        // Starers need a third block of headroom.
+        if kind == MobKind::Starer && is_solid(self.world.get(x, y + 2, z)) {
+            return;
+        }
+        let size = if kind == MobKind::Bloop { [1, 1, 2][self.rng.int(0, 2) as usize] } else { 1 };
+        self.alloc_mob_sized(kind, Vec3::new(x as f32 + 0.5, y as f32, z as f32 + 0.5), size);
     }
 
     /// The Scorchlands have their own residents, light or dark.
@@ -7528,5 +7590,94 @@ looks_like = diamond
         // Old worlds (no options saved) keep the old rules.
         let mut old = Game::new(237, false, false);
         assert_eq!(Game::from_save(old.to_save()).world.generator.opts, GenOptions::LEGACY);
+    }
+
+    /// A game in the middle of a wider patch of world (81 chunks), with
+    /// monsters turned on and nothing spawned yet.
+    fn wide_game(seed: u32) -> Game {
+        let mut g = Game::new(seed, false, false);
+        let mut w = World::new(seed);
+        for cz in -4..=4 {
+            for cx in -4..=4 {
+                w.load_now(cx, cz);
+            }
+        }
+        g.world = w;
+        g.ready = true;
+        g.rules.difficulty = crate::rules::Difficulty::Normal;
+        g.mobs.clear();
+        g
+    }
+
+    #[test]
+    fn monsters_turn_up_at_night_even_beside_a_crowd() {
+        let mut g = wide_game(611);
+        g.time = 0.75;
+        assert!(g.is_night());
+        let y = g.world.surface_y(0, 0) + 1;
+        g.player.body.pos = Vec3::new(0.5, y as f32, 0.5);
+        // A village's worth of Hmmers and a sea's worth of Fishies don't use up the monster cap.
+        for i in 0..14 {
+            let id = g.alloc_mob(MobKind::Hmmer, Vec3::new(i as f32, y as f32, 2.0));
+            g.mobs.iter_mut().find(|m| m.id == id).unwrap().persistent = true;
+            g.alloc_mob(MobKind::Fishy, Vec3::new(i as f32, y as f32, -2.0));
+        }
+        for _ in 0..300 {
+            g.try_spawn();
+        }
+        assert!(g.wild_monsters() >= 4, "monsters spawned at night: {}", g.wild_monsters());
+        assert!(g.wild_monsters() <= g.monster_cap());
+    }
+
+    #[test]
+    fn caves_have_monsters_by_day() {
+        let mut g = wide_game(612);
+        g.time = 0.25;
+        assert!(!g.is_night());
+        // A big dark hall well under the ground, and someone standing in it.
+        let floor = 20;
+        for x in -48..48 {
+            for z in -48..48 {
+                g.world.set(x, floor - 1, z, STONE);
+                for y in floor..floor + 4 {
+                    g.world.set(x, y, z, AIR);
+                }
+                g.world.set(x, floor + 4, z, STONE);
+            }
+        }
+        g.player.body.pos = Vec3::new(0.5, floor as f32, 0.5);
+        for _ in 0..200 {
+            g.try_cave_spawn();
+        }
+        let down_here = g.mobs.iter().filter(|m| m.menacing() && (m.body.pos.y - floor as f32).abs() < 0.5).count();
+        assert!(down_here >= 6, "monsters on the cave floor: {down_here}");
+        // Torchlight keeps them away.
+        g.mobs.clear();
+        for x in (-48..48).step_by(5) {
+            for z in (-48..48).step_by(5) {
+                g.world.set(x, floor, z, TORCH);
+            }
+        }
+        for _ in 0..200 {
+            g.try_cave_spawn();
+        }
+        // (The world's own caves above and below can still have some.)
+        let in_hall = g.mobs.iter().filter(|m| (m.body.pos.y - floor as f32).abs() < 0.5).count();
+        assert_eq!(in_hall, 0, "a well-lit cave stays empty");
+    }
+
+    #[test]
+    fn far_off_monsters_wander_off() {
+        let mut g = wide_game(613);
+        g.player.body.pos = Vec3::new(0.5, 80.0, 0.5);
+        let near = g.alloc_mob(MobKind::Groaner, Vec3::new(5.0, 80.0, 0.0));
+        let far = g.alloc_mob(MobKind::Groaner, Vec3::new(60.0, 80.0, 0.0));
+        let kept = g.alloc_mob(MobKind::Groaner, Vec3::new(60.0, 80.0, 5.0));
+        g.mobs.iter_mut().find(|m| m.id == kept).unwrap().persistent = true;
+        for _ in 0..400 {
+            g.thin_monsters();
+        }
+        let here = |id: u32| g.mobs.iter().any(|m| m.id == id);
+        assert!(here(near) && here(kept) && !here(far));
     }
 }

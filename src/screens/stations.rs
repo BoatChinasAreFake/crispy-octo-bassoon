@@ -74,7 +74,7 @@ impl App {
         for i in 9..36 {
             let j = i - 9;
             let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            let (l, r, hov) = self.inv_slot(i, cx, cy, slot, false);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -82,7 +82,7 @@ impl App {
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.inv_slot(i, sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -151,7 +151,7 @@ impl App {
         for i in 9..36 {
             let j = i - 9;
             let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            let (l, r, hov) = self.inv_slot(i, cx, cy, slot, false);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -159,7 +159,7 @@ impl App {
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.inv_slot(i, sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -248,7 +248,7 @@ impl App {
         for i in 9..36 {
             let j = i - 9;
             let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            let (l, r, hov) = self.inv_slot(i, cx, cy, slot, false);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -256,7 +256,7 @@ impl App {
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.inv_slot(i, sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }

@@ -113,7 +113,7 @@ fn colour(h: i32, biome: Biome, colours: &[[u8; 3]], sea: i32) -> [u8; 3] {
         c = c.map(|v| v * deep);
     } else if let Some((leaves, amount)) = canopy(biome) {
         let l = of(leaves).unwrap_or([60, 110, 50]);
-        let lt = if leaves == CHERRY_LEAVES || leaves == PALE_OAK_LEAVES { [1.0; 3] } else { crate::tint::grass(biome) };
+        let lt = if leaves == CHERRY_LEAVES || leaves == PALE_OAK_LEAVES { [1.0; 3] } else { crate::tint::leaves(biome) };
         for k in 0..3 {
             c[k] = c[k] * (1.0 - amount) + l[k] as f32 * lt[k] * amount;
         }

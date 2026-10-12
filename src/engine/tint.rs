@@ -26,9 +26,10 @@ pub enum Kind {
 }
 
 /// Does this face of this block take its biome's colour?
-pub fn kind_of(id: Id, face: usize) -> Option<Kind> {
+pub fn kind_of(id: Id, _face: usize) -> Option<Kind> {
     match id {
-        GRASS if face == 2 => Some(Kind::Grass),
+        // (Its sides only on their green fringe; see `side_mark`.)
+        GRASS => Some(Kind::Grass),
         TALL_GRASS => Some(Kind::Grass),
         LEAVES | JUNGLE_LEAVES | MANGROVE_LEAVES | ACACIA_LEAVES | DARK_OAK_LEAVES => Some(Kind::Leaves),
         _ if is_water(id) => Some(Kind::Water),
@@ -36,34 +37,67 @@ pub fn kind_of(id: Id, face: usize) -> Option<Kind> {
     }
 }
 
-/// A biome's grass and leaf colour, as a multiplier on the plains-green textures.
+/// Plains grass and leaves, the colours the textures are painted in.
+const PLAINS_GRASS: [f32; 3] = [145.0, 189.0, 89.0];
+const PLAINS_LEAVES: [f32; 3] = [119.0, 171.0, 47.0];
+
+/// A grass block's side takes the biome colour only on its green fringe:
+/// its tint is marked (alpha 0) so the shader tints just the fringe's pixels.
+pub fn side_mark(id: Id, face: usize, tint: [u8; 4]) -> [u8; 4] {
+    if id == GRASS && face != 2 { [tint[0], tint[1], tint[2], 0] } else { tint }
+}
+
+/// A biome's grass colour, as a multiplier on the plains-green textures:
+/// from lush jungle green through the cool blue-greens of the north to the
+/// dry olive of the savanna and the swamp's murk.
 pub fn grass(b: Biome) -> [f32; 3] {
-    match b {
-        Biome::Plains => [1.0, 1.0, 1.0],
-        Biome::Forest => [0.88, 0.98, 0.85],
-        Biome::Desert => [1.3, 1.08, 0.6],
-        Biome::Badlands => [1.35, 1.0, 0.55],
-        Biome::Snowy => [0.85, 0.97, 1.05],
-        Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean => [0.95, 1.0, 0.95],
-        Biome::FrozenOcean => [0.85, 0.97, 1.05],
-        Biome::Swamp => [0.72, 0.78, 0.5],
-        Biome::Jungle => [0.78, 1.18, 0.62],
-        Biome::Taiga => [0.8, 0.95, 0.92],
-        Biome::Cherry => [1.05, 1.08, 0.85],
-        Biome::Mangrove => [0.78, 0.9, 0.55],
+    let c = match b {
+        Biome::Plains => PLAINS_GRASS,
+        Biome::Forest => [121.0, 192.0, 90.0],
+        Biome::Desert | Biome::Savanna => [191.0, 183.0, 85.0],
+        Biome::Badlands => [144.0, 129.0, 77.0],
+        Biome::Snowy | Biome::IceSpikes | Biome::FrozenOcean => [128.0, 180.0, 151.0],
+        Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean => [142.0, 185.0, 113.0],
+        Biome::Swamp | Biome::Mangrove => [106.0, 112.0, 57.0],
+        Biome::Jungle => [89.0, 201.0, 60.0],
+        Biome::Taiga => [134.0, 183.0, 131.0],
+        Biome::Cherry => [182.0, 219.0, 97.0],
         // Grey-green at most (any grass at its edges fades to grey).
-        Biome::PaleGarden => [1.3, 0.88, 1.7],
-        // Dry and yellow.
-        Biome::Savanna => [1.3, 1.05, 0.55],
-        Biome::BirchForest => [0.95, 1.05, 0.85],
+        Biome::PaleGarden => [119.0, 130.0, 114.0],
+        Biome::BirchForest => [136.0, 187.0, 103.0],
         // Deep and dark.
-        Biome::DarkForest => [0.62, 0.82, 0.55],
-        Biome::MushroomIslands => [0.85, 1.05, 0.7],
-        Biome::IceSpikes => [0.85, 0.97, 1.05],
-        // Lush.
-        Biome::Meadow => [0.82, 1.1, 0.85],
-        Biome::StonyPeaks => [0.9, 0.95, 0.85],
-    }
+        Biome::DarkForest => [80.0, 122.0, 50.0],
+        Biome::MushroomIslands => [85.0, 201.0, 63.0],
+        Biome::Meadow => [131.0, 187.0, 109.0],
+        Biome::StonyPeaks => [154.0, 190.0, 75.0],
+    };
+    [c[0] / PLAINS_GRASS[0], c[1] / PLAINS_GRASS[1], c[2] / PLAINS_GRASS[2]]
+}
+
+/// A biome's leaf colour, as a multiplier (leaves have their own palette,
+/// a little deeper than the grass beneath them).
+pub fn leaves(b: Biome) -> [f32; 3] {
+    let c = match b {
+        Biome::Plains => PLAINS_LEAVES,
+        Biome::Forest | Biome::BirchForest => [89.0, 174.0, 48.0],
+        Biome::Desert | Biome::Savanna => [174.0, 164.0, 42.0],
+        Biome::Badlands => [158.0, 129.0, 77.0],
+        Biome::Snowy | Biome::IceSpikes | Biome::FrozenOcean => [96.0, 161.0, 123.0],
+        Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean => [113.0, 167.0, 77.0],
+        Biome::Swamp => [106.0, 112.0, 57.0],
+        Biome::Mangrove => [141.0, 177.0, 39.0],
+        // (Jungle leaves are painted lush already.)
+        Biome::Jungle => [78.0, 165.0, 30.0],
+        Biome::Taiga => [104.0, 164.0, 100.0],
+        Biome::Cherry => [150.0, 196.0, 80.0],
+        Biome::PaleGarden => [135.0, 141.0, 118.0],
+        Biome::DarkForest => [64.0, 128.0, 36.0],
+        Biome::MushroomIslands => [70.0, 175.0, 32.0],
+        Biome::Meadow => [99.0, 165.0, 83.0],
+        Biome::StonyPeaks => [130.0, 172.0, 30.0],
+    };
+    // (The painted leaves have little blue in them, and a tint can at most double it.)
+    [c[0] / PLAINS_LEAVES[0], c[1] / PLAINS_LEAVES[1], (c[2] / PLAINS_LEAVES[2]).min(1.95)]
 }
 
 /// A biome's water colour, as a multiplier.
@@ -125,11 +159,13 @@ impl Field {
         let (g0x, g0z) = (cx * CW / STEP - WIDE, cz * CW / STEP - WIDE);
         let n = (CW / STEP + 1 + 2 * WIDE) as usize;
         let mut g = vec![[0.0f32; 3]; n * n];
+        let mut l = vec![[0.0f32; 3]; n * n];
         let mut w = vec![[0.0f32; 3]; n * n];
         for j in 0..n {
             for i in 0..n {
                 let b = biome_at((g0x + i as i32) * STEP, (g0z + j as i32) * STEP);
                 g[j * n + i] = grass(b);
+                l[j * n + i] = leaves(b);
                 w[j * n + i] = water(b);
             }
         }
@@ -172,8 +208,7 @@ impl Field {
             out
         };
         let season = crate::seasons::shown();
-        let g = blur(&g);
-        Field { grass: corners(&g, crate::seasons::grass_tint(season)), leaves: corners(&g, crate::seasons::leaf_tint(season)), water: corners(&blur(&w), [1.0; 3]) }
+        Field { grass: corners(&blur(&g), crate::seasons::grass_tint(season)), leaves: corners(&blur(&l), crate::seasons::leaf_tint(season)), water: corners(&blur(&w), [1.0; 3]) }
     }
 
     /// The colours, given each column's biome.
@@ -182,11 +217,13 @@ impl Field {
         let span = (CW + 2 * r) as usize;
         let (x0, z0) = (cx * CW - r, cz * CW - r);
         let mut g = vec![[0.0f32; 3]; span * span];
+        let mut l = vec![[0.0f32; 3]; span * span];
         let mut w = vec![[0.0f32; 3]; span * span];
         for j in 0..span {
             for i in 0..span {
                 let b = biome_at(x0 + i as i32, z0 + j as i32);
                 g[j * span + i] = grass(b);
+                l[j * span + i] = leaves(b);
                 w[j * span + i] = water(b);
             }
         }
@@ -236,8 +273,7 @@ impl Field {
         };
         // The season turns grass, and leaves further (see seasons.rs).
         let season = crate::seasons::shown();
-        let g = blur(&g);
-        Field { grass: corners(&g, crate::seasons::grass_tint(season)), leaves: corners(&g, crate::seasons::leaf_tint(season)), water: corners(&blur(&w), [1.0; 3]) }
+        Field { grass: corners(&blur(&g), crate::seasons::grass_tint(season)), leaves: corners(&blur(&l), crate::seasons::leaf_tint(season)), water: corners(&blur(&w), [1.0; 3]) }
     }
 
     /// The colour at a column corner (local 0..=CW each way).
@@ -262,11 +298,11 @@ mod tests {
         assert!((0..=CW).all(|i| plains.at(Kind::Grass, i, i) == NEUTRAL));
         // Desert from x = 8: a smooth ramp across the border, no jumps.
         let split = Field::from_biomes(|x, _| if x < 8 { Biome::Plains } else { Biome::Desert }, 0, 0);
-        let row: Vec<u8> = (0..=CW).map(|x| split.at(Kind::Grass, x, 5)[2]).collect();
+        let row: Vec<u8> = (0..=CW).map(|x| split.at(Kind::Grass, x, 5)[0]).collect();
         assert_eq!(row[0], 128, "far from the border, plains as painted");
-        assert_eq!(row[CW as usize], pack(grass(Biome::Desert))[2], "and desert on the far side");
+        assert_eq!(row[CW as usize], pack(grass(Biome::Desert))[0], "and desert on the far side");
         for w in row.windows(2) {
-            assert!(w[1] <= w[0] && w[0] - w[1] <= 10, "blends gently: {row:?}");
+            assert!(w[1] >= w[0] && w[1] - w[0] <= 10, "blends gently: {row:?}");
         }
         assert!(row.iter().filter(|&&b| b != 128 && b != row[CW as usize]).count() >= 5, "over several blocks: {row:?}");
         // Neighbouring chunks agree along their shared edge.
@@ -281,11 +317,11 @@ mod tests {
     #[test]
     fn wide_blending_is_gentle_and_seamless() {
         let split = |x: i32, _| if x < 8 { Biome::Plains } else { Biome::Desert };
-        let row: Vec<u8> = (-2..=2).flat_map(|cx| (0..CW).map(move |x| (cx, x))).map(|(cx, x)| Field::wide(split, cx, 0).at(Kind::Grass, x, 5)[2]).collect();
+        let row: Vec<u8> = (-2..=2).flat_map(|cx| (0..CW).map(move |x| (cx, x))).map(|(cx, x)| Field::wide(split, cx, 0).at(Kind::Grass, x, 5)[0]).collect();
         for w in row.windows(2) {
             assert!(w[0].abs_diff(w[1]) <= 4, "blends gently: {row:?}");
         }
-        assert!(row.iter().filter(|&&b| b != 128 && b != pack(grass(Biome::Desert))[2]).count() >= 14, "over many blocks: {row:?}");
+        assert!(row.iter().filter(|&&b| b != 128 && b != pack(grass(Biome::Desert))[0]).count() >= 14, "over many blocks: {row:?}");
         let biome = |x: i32, z: i32| if (x / 9 + z / 5).rem_euclid(3) == 0 { Biome::Swamp } else { Biome::Jungle };
         let (a, b) = (Field::wide(biome, 0, 0), Field::wide(biome, 1, 0));
         let (c, d) = (Field::wide(biome, 0, -1), Field::wide(biome, 0, 0));
@@ -298,10 +334,27 @@ mod tests {
     #[test]
     fn what_gets_tinted() {
         assert_eq!(kind_of(GRASS, 2), Some(Kind::Grass));
-        assert_eq!(kind_of(GRASS, 0), None, "grass sides keep their dirt");
+        assert_eq!(kind_of(GRASS, 0), Some(Kind::Grass), "grass sides take it on their fringe");
+        assert_eq!(side_mark(GRASS, 0, NEUTRAL)[3], 0, "(marked as a side)");
+        assert_eq!(side_mark(GRASS, 2, NEUTRAL), NEUTRAL, "the top is tinted all over");
         assert_eq!(kind_of(LEAVES, 4), Some(Kind::Leaves), "leaves follow the grass, and turn further with the seasons");
         assert_eq!(kind_of(WATER, 2), Some(Kind::Water));
         assert_eq!(kind_of(STONE, 2), None);
         assert_eq!(kind_of(SPRUCE_LEAVES, 2), None, "spruce keeps its own colour");
+    }
+
+    #[test]
+    fn biomes_look_different() {
+        use Biome::*;
+        // Every pair of these grassy biomes differs clearly in grass or leaf colour.
+        let grassy = [Plains, Forest, Savanna, Badlands, Snowy, Swamp, Jungle, Taiga, DarkForest, BirchForest, Meadow, Cherry, MushroomIslands, PaleGarden];
+        let apart = |a: [f32; 3], b: [f32; 3]| (0..3).map(|i| (a[i] - b[i]).abs()).sum::<f32>();
+        for (i, &a) in grassy.iter().enumerate() {
+            for &b in &grassy[i + 1..] {
+                assert!(apart(grass(a), grass(b)) + apart(leaves(a), leaves(b)) > 0.12, "{a:?} and {b:?} look alike");
+            }
+        }
+        // And a tint never more than doubles a colour (what it can store).
+        assert!(grassy.iter().all(|&b| grass(b).iter().chain(leaves(b).iter()).all(|&v| v < 2.0)));
     }
 }

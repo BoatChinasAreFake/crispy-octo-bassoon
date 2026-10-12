@@ -46,7 +46,26 @@ impl CreativeTab {
     }
 }
 
+/// The hotbar number key (1 to 9) pressed this frame, if any.
+pub fn hotbar_key() -> Option<usize> {
+    let keys = [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4, KeyCode::Key5, KeyCode::Key6, KeyCode::Key7, KeyCode::Key8, KeyCode::Key9];
+    keys.iter().position(|&k| is_key_pressed(k))
+}
+
 impl App {
+    /// One of your own inventory slots (0 to 8 the hotbar), on any screen:
+    /// drawn, and with the mouse over it, a number key swaps it with that
+    /// hotbar slot. Returns (left click, right click, hovered).
+    pub(crate) fn inv_slot(&mut self, i: usize, x: f32, y: f32, size: f32, selected: bool) -> (bool, bool, bool) {
+        let got = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], x, y, size, selected);
+        if got.2
+            && let Some(k) = hotbar_key()
+        {
+            self.game.inv.swap_with_hotbar(i, k);
+        }
+        got
+    }
+
     pub(crate) fn inventory_screen(&mut self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
@@ -60,8 +79,12 @@ impl App {
         let panel_h = (slot * 9.5).min(h - 20.0 * s).max(slot * 7.0);
         let x0 = (w - total_w) / 2.0 + armor_w + 6.0 * s;
         let y0 = (h - panel_h) / 2.0;
-        draw_rectangle(x0, y0, left_w, panel_h, ui::panel());
-        draw_rectangle_lines(x0, y0, left_w, panel_h, s, WHITE);
+        // The backpack's three rows sit right over the hotbar; only the
+        // creative palette wants the panel's full height (for more rows).
+        let palette = creative && !self.creative_backpack;
+        let left_h = if palette { panel_h } else { 18.0 * s + slot * 3.0 + 14.0 * s + slot + 6.0 * s };
+        draw_rectangle(x0, y0, left_w, left_h, ui::panel());
+        draw_rectangle_lines(x0, y0, left_w, left_h, s, WHITE);
         let mut tooltip: Option<String> = None;
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
 
@@ -178,7 +201,7 @@ impl App {
             for i in 9..36 {
                 let j = i - 9;
                 let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_top + (j / 9) as f32 * slot);
-                let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+                let (l, r, hov) = self.inv_slot(i, cx, cy, slot, false);
                 if hov {
                     tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
                 }
@@ -193,7 +216,7 @@ impl App {
                 }
             }
         }
-        let hot_y = y0 + panel_h - slot - 6.0 * s;
+        let hot_y = y0 + left_h - slot - 6.0 * s;
         self.ui.text("Hotbar", sx, hot_y - 3.0 * s, 9.0, GRAY);
         if creative {
             // Three saved hotbars (kept in settings.txt): save this one, or swap one in.
@@ -218,7 +241,7 @@ impl App {
         }
         for i in 0..9 {
             let cx = sx + i as f32 * slot;
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.inv_slot(i, cx, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -242,7 +265,7 @@ impl App {
             }
         }
         if self.game.inv.cursor.is_some() && self.ui.clicked {
-            let panels = [Rect::new(x0, y0, left_w, panel_h), Rect::new(ax, y0, armor_w, armor_h), Rect::new(x0 + left_w + 8.0 * s, y0, right_w, panel_h)];
+            let panels = [Rect::new(x0, y0, left_w, left_h), Rect::new(ax, y0, armor_w, armor_h), Rect::new(x0 + left_w + 8.0 * s, y0, right_w, panel_h)];
             if !panels.iter().any(|r| self.ui.hovered(*r)) {
                 // Clicked outside: creative forgets it, survival throws it on the floor.
                 if creative {
@@ -684,7 +707,7 @@ impl App {
         for i in 9..36 {
             let j = i - 9;
             let (cx, cy) = (isx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            let (l, r, hov) = self.inv_slot(i, cx, cy, slot, false);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -692,7 +715,7 @@ impl App {
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], isx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.inv_slot(i, isx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -869,7 +892,7 @@ impl App {
         for i in 9..36 {
             let j = i - 9;
             let (cx, cy) = (sx + (j % 9) as f32 * slot, inv_y + (j / 9) as f32 * slot);
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], cx, cy, slot, false);
+            let (l, r, hov) = self.inv_slot(i, cx, cy, slot, false);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
@@ -877,7 +900,7 @@ impl App {
         }
         let hot_y = inv_y + slot * 3.0 + 6.0 * s;
         for i in 0..9 {
-            let (l, r, hov) = self.ui.slot_worn(self.game.inv.slots[i], self.game.inv.wear[i], sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
+            let (l, r, hov) = self.inv_slot(i, sx + i as f32 * slot, hot_y, slot, i == self.game.inv.selected);
             if hov {
                 tooltip = label(self.game.inv.slots[i], self.game.inv.wear[i]);
             }
