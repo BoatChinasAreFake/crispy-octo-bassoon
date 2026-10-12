@@ -2461,6 +2461,12 @@ Wyrm Egg (Trophy, Allegedly)
 Wyrm Slayer
 X Marks the Spot
 X marks the spot: dig here!
+XCloseDisplay
+XDefaultRootWindow
+XOpenDisplay
+XRRConfigCurrentRate
+XRRFreeScreenConfigInfo
+XRRGetScreenInfo
 XYZ: {} / {} / {} in {}
 Yellow
 Yellow Terracotta
@@ -2587,6 +2593,7 @@ a skin must be 64x64 pixels (this is {}x{})
 a socket
 a tamed monster is friendly
 a village
+a well-lit cave stays empty
 a {} can't be saved
 acacia boat
 after a trade the village thinks {} of {}, who was told {}
@@ -2830,6 +2837,8 @@ mites at {}%
 mod dimension
 mod pack too large
 modded shot uses the generic cause: {}
+monsters on the cave floor: {}
+monsters spawned at night: {}
 ms: game {} mesh {} scene {} draw {} UI {} | GPU {}
 mushrooms and grain
 near the Scorchlands' own middle: {}

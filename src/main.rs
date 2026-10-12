@@ -2208,6 +2208,8 @@ async fn game_main() {
     }
     let mut frames = 0u32;
     let mut last_frame = std::time::Instant::now();
+    // (Asked once: VSync holds frames to it if the driver won't; see pacing.rs.)
+    let refresh = pacing::refresh_rate();
     loop {
         if let Some(s) = &shot {
             app.shot_frame(s, frames);
@@ -2231,15 +2233,13 @@ async fn game_main() {
             app.game.disconnect();
             break;
         }
-        // Max FPS: wait out the rest of this frame's share of a second.
-        let now = std::time::Instant::now();
-        match pacing::next_due(last_frame, if shot.is_none() { app.settings.max_fps } else { 0 }, now) {
-            Some(due) => {
-                pacing::wait_until(due);
-                last_frame = due;
-            }
-            None => last_frame = now,
+        // Max FPS (and VSync, in case the driver ignores it): wait out the rest
+        // of this frame's share of a second, counted from when it started.
+        let cap = if shot.is_some() { 0.0 } else { pacing::cap(app.settings.max_fps, app.settings.vsync, refresh) };
+        if let Some(due) = pacing::next_due(last_frame, cap) {
+            pacing::wait_until(due);
         }
+        last_frame = std::time::Instant::now();
         next_frame().await;
     }
 }

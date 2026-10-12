@@ -10,6 +10,8 @@ pub const TILES_PER_ROW: u16 = (ATLAS / TILE) as u16;
 
 pub const T_GRASS_TOP: u16 = 0;
 pub const T_GRASS_SIDE: u16 = 1;
+/// The alpha that marks a grass side's green fringe (tinted by biome; see render.rs).
+pub const GRASS_FRINGE: u8 = 250;
 pub const T_DIRT: u16 = 2;
 pub const T_STONE: u16 = 3;
 pub const T_COBBLE: u16 = 4;
@@ -897,6 +899,10 @@ pub const T_BOARD_FRONT: u16 = 1113;
 pub const T_STALL_SIDE: u16 = 1114;
 pub const T_STALL_TOP: u16 = 1115;
 pub const T_NEWSPAPER: u16 = 1116;
+/// Pieces of a stack of Pointy Rocks: its tip, middle and base (see the mesher).
+pub const T_POINTY_TIP: u16 = 1117;
+pub const T_POINTY_MIDDLE: u16 = 1118;
+pub const T_POINTY_BASE: u16 = 1119;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -986,6 +992,9 @@ pub const BASE_TEXTURES: &[(&str, u16)] = &[
     ("anvil_top", T_ANVIL_TOP),
     ("glowshroom", T_GLOWSHROOM),
     ("pointy_rock", T_POINTY_ROCK),
+    ("pointy_rock_tip", T_POINTY_TIP),
+    ("pointy_rock_middle", T_POINTY_MIDDLE),
+    ("pointy_rock_base", T_POINTY_BASE),
     ("lava", T_LAVA),
     ("obsidian", T_OBSIDIAN),
 ];
@@ -2037,7 +2046,9 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     for x in 0..TILE {
         let depth = 3 + a.rng.int(0, 2) as usize;
         for y in 0..depth {
-            let g = shade(rgb(94, 160, 58), 1.0 + a.rng.range(-0.12, 0.12));
+            let mut g = shade(rgb(94, 160, 58), 1.0 + a.rng.range(-0.12, 0.12));
+            // Marked (alpha just under 255) as the part that takes the biome's colour.
+            g[3] = GRASS_FRINGE;
             a.set(T_GRASS_SIDE, x, y, g);
             let s = shade(rgb(240, 248, 255), 1.0 + a.rng.range(-0.05, 0.03));
             a.set(T_SNOW_SIDE, x, y, s);
@@ -2833,6 +2844,22 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
             [0, 0, 0, 0]
         }
     });
+    // A long spike is a tip, middles and a base, narrowing to its point: each
+    // piece is a slice of one tapering column (half-widths at its top and bottom).
+    for (tile, top, bottom) in [(T_POINTY_TIP, 0.0, 4.6), (T_POINTY_MIDDLE, 4.6, 5.6), (T_POINTY_BASE, 5.6, 7.4)] {
+        a.each(tile, |x, y, r, _| {
+            let t = (y as f32 + 0.5) / 16.0;
+            let half: f32 = top + (bottom - top) * t;
+            let dx = x as f32 - 7.5;
+            if dx.abs() > half.max(0.5) {
+                return [0, 0, 0, 0];
+            }
+            let round = 1.1 - 0.35 * (dx / half.max(1.0) + 1.0) / 2.0;
+            let ridge = if (y + tile as usize).is_multiple_of(5) { 0.85 } else { 1.0 };
+            let tip = if tile == T_POINTY_TIP && y < 5 { 1.12 } else { 1.0 };
+            shade(rgb(118, 116, 112), round * ridge * tip * r.range(0.9, 1.06))
+        });
+    }
     a.each(T_POINTY_ROCK, |x, y, r, _| {
         // A stone cone, point at the top (the mesher flips it for ones hanging
         // from ceilings). Lit from the left, with ridges and a paler, worn tip.
@@ -7207,7 +7234,8 @@ mod tests {
             }
             for &t in &b.tex {
                 let (tx, ty) = ((t % TILES_PER_ROW) as usize, (t / TILES_PER_ROW) as usize);
-                let clear = (0..16).any(|y| (0..16).any(|x| atlas[((ty * 16 + y) * size + tx * 16 + x) * 4 + 3] < 255));
+                // (A grass side's fringe is marked just under opaque; it's drawn solid.)
+                let clear = (0..16).any(|y| (0..16).any(|x| atlas[((ty * 16 + y) * size + tx * 16 + x) * 4 + 3] < GRASS_FRINGE));
                 if clear {
                     bad.push(b.key);
                 }

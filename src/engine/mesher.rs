@@ -280,7 +280,7 @@ pub fn mesh_parts(c: [Option<&Chunk>; 9], field: Option<crate::tint::Field>, cx:
     let (bx, bz) = ((cx * CW) as f32, (cz * CW) as f32);
     // Biome colours for grass, leaves and water (see tint.rs).
     let tint_at = |id: Id, f: usize, x: f32, z: f32| match (&field, crate::tint::kind_of(id, f)) {
-        (Some(field), Some(kind)) => field.at(kind, (x - bx).round() as i32, (z - bz).round() as i32),
+        (Some(field), Some(kind)) => crate::tint::side_mark(id, f, field.at(kind, (x - bx).round() as i32, (z - bz).round() as i32)),
         _ => crate::tint::NEUTRAL,
     };
 
@@ -318,7 +318,7 @@ pub fn mesh_parts(c: [Option<&Chunk>; 9], field: Option<crate::tint::Field>, cx:
                         Model::Empty => {}
                         Model::Cross => {
                             let (sky, blk) = hood.lit(lx, y, lz);
-                            let tile = def.tex[1];
+                            let mut tile = def.tex[1];
                             let (a, b) = if id == TORCH || is_wall_torch(id) || crate::contraptions::is_ztorch(id) { (0.3, 0.7) } else { (0.15, 0.85) };
                             let diag = [
                                 [[a, 0., a], [b, 0., b], [b, 1., b], [a, 1., a]],
@@ -327,6 +327,10 @@ pub fn mesh_parts(c: [Option<&Chunk>; 9], field: Option<crate::tint::Field>, cx:
                             // A pointy rock (or amethyst bud) hanging from a ceiling points down (a stalactite).
                             let hanging = crate::caves::can_hang(id) && crate::caves::hangs(|k| hood.get(lx, k, lz), y);
                             let uv = if hanging { [[0., 0.], [1., 0.], [1., 1.], [0., 1.]] } else { CORNER_UV };
+                            // A stack of them is one long spike: a base, middles and a tip.
+                            if id == POINTY_ROCK {
+                                tile = crate::caves::rock_piece(|k| hood.get(lx, k, lz), y, hanging);
+                            }
                             // A torch on a wall leans out from it.
                             let lean = is_wall_torch(id).then(|| crate::decor::outward((id - WALL_TORCH_FIRST) as u8));
                             let diag = diag.map(|q| {
