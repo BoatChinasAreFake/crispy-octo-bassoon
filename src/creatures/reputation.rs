@@ -210,6 +210,14 @@ impl Game {
         }
     }
 
+    /// A player's name as they write it, from their record key (else the key itself).
+    pub fn display_name(&self, key: &str) -> String {
+        if crate::players::record_key(&self.player_name) == key {
+            return self.player_name.clone();
+        }
+        self.peers.values().find(|p| crate::players::record_key(&p.name) == key).map(|p| p.name.clone()).unwrap_or_else(|| key.to_string())
+    }
+
     /// The name of player `id` (ours, or a joined player's).
     pub(crate) fn player_name_of(&self, id: u32) -> Option<String> {
         if id == self.my_id && !self.dedicated {
@@ -252,6 +260,9 @@ impl Game {
     pub fn rep_mob_died(&mut self, mob: u32, kind: MobKind, at: Vec3) {
         let Some((who, _)) = self.rep.hits.remove(&mob) else { return };
         self.bounty_kill(&who, kind);
+        if matches!(kind, MobKind::Wyrm | MobKind::Wilter | MobKind::ElderGuardian) {
+            self.report(crate::paper::Event::Boss, &who, kind.name(), 1);
+        }
         if matches!(kind, MobKind::Hmmer | MobKind::Clanker) {
             if let Some(v) = self.mob_village(mob) {
                 self.change_rep(v, &who, KILL);

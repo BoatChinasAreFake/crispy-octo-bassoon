@@ -466,6 +466,8 @@ impl Game {
         let state = Msg::Raid { state: if won { 2 } else { 3 }, wave: r.wave, waves: r.waves, left: 0 };
         self.send_raid_bar(&r, state);
         self.raid_hud = Some((if won { 2 } else { 3 }, r.wave, r.waves, 0, 6.0));
+        let place = self.place_of(r.centre);
+        self.report(if won { crate::paper::Event::RaidWon } else { crate::paper::Event::RaidLost }, &place, "", 1);
         if won {
             self.system_message(None, "Victory! The village is saved.");
             self.sfx(Sfx::Fanfare, Some(r.centre));

@@ -318,6 +318,8 @@ impl Game {
             *t
         };
         self.change_rep(village, who, REP);
+        let name = self.display_name(who);
+        self.report(crate::paper::Event::Bounty, &name, "", 1);
         self.tell(who, "The village thanks you. (There's a note pinned up saying so.)");
         self.sfx(crate::sound::Sfx::Hmm, Some(pos.as_vec3()));
         self.advance_for(who, "help_wanted");

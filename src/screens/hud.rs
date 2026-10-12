@@ -503,6 +503,51 @@ impl App {
         if held == block::COOKBOOK {
             self.cookbook_hud();
         }
+        if held == block::NEWSPAPER {
+            self.paper_hud(dt);
+        }
+    }
+
+    /// The village paper, held: the masthead, the day, and the stories (see paper.rs).
+    fn paper_hud(&mut self, dt: f32) {
+        let s = self.ui.s;
+        let wear = self.game.inv.wear[self.game.inv.selected];
+        let (w, x, y) = (250.0 * s, screen_width() - 260.0 * s, 10.0 * s);
+        let ink = Color::new(0.12, 0.12, 0.14, 1.0);
+        let grey = Color::new(0.35, 0.35, 0.38, 1.0);
+        let Some((title, day, stories)) = self.game.read_paper(wear, dt) else {
+            draw_rectangle(x, y, w, 30.0 * s, Color::new(0.94, 0.92, 0.85, 0.96));
+            self.ui.text("(Hot off the press...)", x + 8.0 * s, y + 18.0 * s, 8.0, grey);
+            return;
+        };
+        // Lay it out first, to know how tall it is: each story's headline and its words, wrapped.
+        let body_w = w - 16.0 * s;
+        let mut lines: Vec<(String, f32, Color)> = Vec::new();
+        for (k, (head, body)) in stories.iter().enumerate() {
+            let size = if k == 0 { 10.0 } else { 8.0 };
+            for l in self.ui.wrap(head, size, body_w) {
+                lines.push((l, size, ink));
+            }
+            for l in self.ui.wrap(body, 6.5, body_w) {
+                lines.push((l, 6.5, grey));
+            }
+            lines.push((String::new(), 3.0, grey));
+        }
+        let height: f32 = 38.0 * s + lines.iter().map(|l| (l.1 + 3.0) * s).sum::<f32>();
+        draw_rectangle(x, y, w, height, Color::new(0.94, 0.92, 0.85, 0.96));
+        draw_rectangle_lines(x, y, w, height, 1.5 * s, ink);
+        // (A paper's name isn't translated.)
+        self.ui.raw_text(&self.ui.fit(&title, 11.0, body_w), x + 8.0 * s, y + 14.0 * s, 11.0, ink);
+        draw_line(x + 6.0 * s, y + 20.0 * s, x + w - 6.0 * s, y + 20.0 * s, 1.0 * s, ink);
+        self.ui.text(&format!("Day {day}. Free from the Notice Board."), x + 8.0 * s, y + 29.0 * s, 6.5, grey);
+        draw_line(x + 6.0 * s, y + 33.0 * s, x + w - 6.0 * s, y + 33.0 * s, 1.0 * s, ink);
+        let mut ly = y + 38.0 * s;
+        for (l, size, c) in lines {
+            ly += (size + 3.0) * s;
+            if !l.is_empty() {
+                self.ui.raw_text(&l, x + 8.0 * s, ly - 3.0 * s, size, c);
+            }
+        }
     }
 
     /// The Cookbook, held: each dish, with the best grade made (or a hint).

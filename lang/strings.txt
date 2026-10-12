@@ -70,6 +70,7 @@
 #version 100
 #version 150
 #version 150\n#define HAS_DERIVATIVES 1\n#define HAS_TEXTURE_LOD 1\nout vec4 frag_color;\n{}
+(Hot off the press...)
 (Reading the notes...)
 (and {} older)
 (it's you)
@@ -85,6 +86,7 @@
 , no password
 , operator
 , password protected
+, thanks to {}
 , {} problem(s)
 , {} script(s)
 -Command
@@ -192,13 +194,19 @@
 A Cluckster arrives with {} from {}, sighs, and waddles off. (It's in your inbox at any Post Box.)
 A Cluckster ate your seedlings. Consider a Scarecrow.
 A Cluckster takes it. They get it even if they're away.
+A Hisser was seen
+A Hmmer bought {} {} from your stall for {} gold.
+A Hmmer is now a Master of its trade{}. Prices are said to reflect this.
 A Minceraft server
 A Square Deal
 A Water Bottle (or a potion) below
+A baby Hmmer was
 A baked potato. The potato's redemption arc is complete.
 A blank map. Look in shipwrecks for a marked one.
 A blank map: no mansion anywhere near where it was drawn.
+A bounty was done
 A copy is made each time you open the world; the last {} are kept. Restoring makes a new world.
+A day of almost complete calm. Our reporters remain on alert.
 A little Hmmer. It looks at you, says "hmm" very seriously, and wanders off.
 A mod is a folder with a mod.txt inside, placed in the folder above.
 A raid has begun! Defend the village.
@@ -271,12 +279,14 @@ Armourer (Clanks When Walking)
 Arms Up
 Arrow hits
 As intended. Starving stops at half a heart.
+Asked to elaborate, the Hmmer hmmed again. We will keep readers informed.
 Asking the router to forward the port (UPnP)...
 Asking your router to open the port (UPnP)...
 Autumn
 Axolotl
 Azalea (Shrub With Ambitions)
 Baby Boom
+Baby Boom Continues
 Back
 Back to Game
 Backpack (Right-Click: Your Pack, 27 Slots)
@@ -285,6 +295,7 @@ Backups of "{}"
 Bad Omen
 Badlands (Stripy)
 Baked Spud (Redeemed)
+Bakery
 Bamboo (Grows While You Watch)
 Bamboo Mosaic (Fancy Stripes)
 Bamboo Planks (Stripey)
@@ -329,7 +340,9 @@ Beekeeper level {}  ({} xp)  -  stung {} time{}
 Beekeeper level {}! The bees have started calling you 'the big one'.
 Beekeeping Log
 Bees buzz
+Bell
 Bell (Ding Dong)
+Bellford
 Benchmarking
 Big Backpack (45 Slots of Your Pack)
 Big Bob
@@ -392,6 +405,7 @@ Bowl (Empty, Hopeful)
 Brain Coral Block (Thinks Pink)
 Branching Out
 Bread (Finally)
+Bread is bread, and gold is gold. Analysts expect this to continue.
 Bread! Civilisation has arrived.
 Break 100 blocks. Your hands must be so tired.
 Break a Creaking Heart and see its Creaking crumble.
@@ -426,6 +440,7 @@ Bucket (Empty, Optimistic)
 Bucket of Lava (Hold Level)
 Bucket of Water (Sloshy)
 Budding Amethyst (Grows Gems, Won't Move)
+Bugle
 Build a Copper Golem: a pumpkin on a block of copper.
 Build a Snow Golem.
 Build the Wilter. Why would you do that?
@@ -492,7 +507,9 @@ Claim
 Claim some land with a Survey Post.
 Claimed
 Clank You Very Much
+Clankbury
 Clanker
+Clarion
 Clay Tablet (Someone's Diary)
 Clean Slate
 Clean an Encrusted Relic at a Restoration Bench.
@@ -509,6 +526,7 @@ Coal Ore
 Coal for the kitchen.
 Coast
 Coast Trim Template
+Cobble Green
 Cobbled Deepslate (Moody Rubble)
 Cobblestun
 Cobweb (Sticky Situation)
@@ -640,6 +658,7 @@ Danger
 Dark Forest (Bring a Torch)
 Dark Oak
 Dark Prismarine (Moody Sea-Stone)
+Day {}. Free from the Notice Board.
 Daylight Cycle: OFF (the sun is taking a break)
 Daylight Cycle: ON
 Daylight Sensor (Night Owl)
@@ -783,6 +802,7 @@ Expert
 Explorer
 Explosion
 Exposed Copper (Ageing Gracefully)
+Extra! Extra!
 Eye Contact
 Eye Frame (Empty)
 Eye Frame (Staring Back)
@@ -790,10 +810,13 @@ Eye Spy
 Eyeblossom (Pretending to Sleep)
 Eyeblossom (Wide Awake)
 FAILED to start: {}
+FOR SALE: one bucket, slightly holey. Will trade for a better bucket.
 FOV: {}
+FREE TO A GOOD HOME: mud. Lots of it. Collect from the swamp.
 Facing: {}
 Fair Trade
 Fancy
+Farm
 Farmer (Knows a Lot About Wheat)
 Farming: hoe the dirt, plant, keep it watered and lit, feed the soil, rotate crops. A Soil Probe explains.
 Farmland (Hydrated)
@@ -846,6 +869,7 @@ Firefly Bush (Twinkly After Dark)
 Firework bursts
 First Class
 First Course
+First Issue!
 Fish
 Fish Chowder
 Fish caught
@@ -863,6 +887,7 @@ Flat Tops
 Flat-ish
 Floaty
 Fluffer
+Fluffer Escapes, Is Found, Was Never Lost
 Fluffer baas
 Fluffers: ethically sheared!
 Fly, infinite blocks, no damage.
@@ -872,6 +897,7 @@ Folder: {}
 Follow the Fin
 Food
 Fool's Gold
+For sale (a Hmmer buys a whole lot):
 Forest (Trees Included)
 Forget Key
 Forgot {}'s key: the next one it shows will be trusted.
@@ -886,6 +912,7 @@ Freight Train
 Fridge
 Friend
 From the {} layer: a {}{}.
+Front Page News
 Frost Shingles (Cold to the Touch)
 Frost Walker
 Frost Walker (Walk on Water, Sort Of)
@@ -910,6 +937,7 @@ Garbled reply from the router
 Garden Soup
 Gather, craft, and try not to get hissed at.
 Gave {} {} to {}.
+Gazette
 Gear
 Generating terrain (artisanally)...
 Gentle
@@ -954,6 +982,7 @@ Glow Up
 Glowrock
 Glowshroom (Cave Nightlight)
 Glug. The sponge drank {} blocks of water. It's still thirsty.
+Glutted
 Go from freezing to warm again in a hot spring.
 Goat
 Goat Horn (Very Loud)
@@ -981,6 +1010,8 @@ Got it
 Grade {}
 Grass Block
 Gravel
+Gravelton
+Great 
 Green
 Green Thumb
 Grilled fish. The Fish Log would be proud.
@@ -1006,6 +1037,7 @@ HTTP {}
 Hackler
 Hand in
 Handed in
+Happy News
 Happy birthday! Don't eat it all at once.
 Hard (Aggressive Hissing)
 Hardcore: one life, hard mode. Good luck.
@@ -1031,6 +1063,7 @@ Heavy Core (Surprisingly Dense)
 Hello, My Name Is
 Helmet
 Help Wanted
+Herald
 Herbs (Smell Nice)
 Hero of the Village
 High
@@ -1039,7 +1072,9 @@ Hilly
 Hiss-tory
 Hisser
 Hisser Head (Defused)
+Hisser Seen Near {}
 Hissers explode. Groaners and Rattlers burn in daylight. Bloops split. Webbers climb. Farm animals are friends (and food).
+Hissers were seen
 Hissing!
 Hisspowder
 Hisss... boom.
@@ -1053,9 +1088,12 @@ Hmm! The {} is now {} {}: new trades, and fresh stock.
 Hmm. (Out of stock until tomorrow.)
 Hmm. (You can't afford that.)
 Hmmer
+Hmmer Reaches Master
 Hmmer hmms
 Hmmer: {}
 Hmmer: {} - Novice (0/10) - Village: Neutral (0)
+Hmmers come by in the daytime.
+Hmmington
 Hmph. (This village won't trade with you.)
 Hodgepodge
 Hoe (Dirt Scratcher)
@@ -1083,6 +1121,8 @@ Hot Stuff
 Hot Tub
 Hot Upgrade
 Hotbar
+House
+Houses
 How to Play
 How to Play Minceraft
 Hug Life
@@ -1175,6 +1215,7 @@ LAN Party
 LAN address: {}:{}
 LEGENDARY! You caught BIG BOB, all {}cm of him. He looks disappointed in you.
 LINE TENSION - EASE OFF!
+LOST: one Clanker's patience. If found, please do not return it.
 Ladder (Up, Mostly)
 Land a Mace blow on the way down. Gravity did most of the work.
 Land claims are off (posts stay put, and come back into force if they're turned on again).
@@ -1206,10 +1247,12 @@ Lectern (With a Book)
 Left by {}
 Legally distinct from everything!
 Leggings
+Letters to the editor: who keeps taking it? Answers on a postcard.
 Level {}! Your anvil is impressed. Mildly.
 Level {}+   costs {} level{} and {} gold
 Lever (Pull It)
 Librarian (Shh)
+Library
 Library/Application Support/Minceraft
 Light Show
 Light a Zappy Lamp with a switch. Electricity: now legally distinct.
@@ -1224,6 +1267,7 @@ Liked
 Lily Pad (Frog Not Included)
 Line tension
 Listening on TCP port {} (IPv4{}), max {} players
+Little 
 Llama
 Llama Drama
 Load a Minecart with Chest. Choo choo, cargo.
@@ -1232,6 +1276,8 @@ Loaded world {} (seed {})
 Loaded {} mod(s) from the server.
 Local Brewery
 Local Flavour
+Local Hmmer Hmms
+Local Player {} Punches Tree
 Locked out {} for 10 minutes after repeated wrong passwords
 Lodestone
 Lodestone (Magnetic Personality)
@@ -1250,6 +1296,7 @@ Lost in Translation
 Lots
 Loved
 Low Memory
+Lower 
 Lukewarm Ocean (Bathwater)
 Lush Life
 M-SEARCH * HTTP/1.1r\nHOST: 239.255.255.250:1900r\nMAN: "ssdp:discover"r\nMX: 2r\nST: {}r\nr\n
@@ -1275,6 +1322,7 @@ Mansion: {} blocks {}
 Map (You Are Here)
 Map Fragment (Torn, Promising)
 Map: one pixel for every {} block(s).
+Market Report
 Master
 Master Class
 Max FPS: Unlimited{}
@@ -1333,6 +1381,7 @@ MouseMiddle
 MouseRight
 Mud (Squelchy)
 Mud Bricks (Sun-Baked, Slightly Crumbly)
+Muddlecombe
 Mule
 Multiplayer
 Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.
@@ -1347,6 +1396,7 @@ Music: OFF
 Music: ON
 My World
 Mycelium (Grass, but Fungal)
+NOTICE: the Bell is for raids, not for fun. You know who you are.
 Name Tag (Hello, My Name Is)
 Name a mob with a Name Tag. It won't answer to it.
 Name it (Enter: done, Esc: never mind)
@@ -1359,11 +1409,14 @@ Needle in a Haystack
 Needs fuel: coal, wood, sticks...
 Needs level {}
 Needs {} gold
+Neighbours say they are "fine with it". Somebody has already moved in.
+Nest Egg
 Network: connected as {} ({} players)
 Network: hosting on port {} ({} players)
 Network: single player
 Neutral
 Never look a Starer in the eye. Beds skip the night. Bows need Pointy Sticks. Pokey Plants poke.
+New Arrival
 New Hire
 New Neighbours
 New World
@@ -1371,7 +1424,9 @@ New bounties in {} days
 New bounties tomorrow
 New in your Cookbook: {}.
 New in your Field Journal: {}.
+New {} for {}
 NewExternalIPAddress
+Newspaper (Hold to Read)
 Next >
 Night Vision
 Nightly
@@ -1408,9 +1463,11 @@ Nobody called {} has played here.
 Nobody called {} is remembered.
 Nobody can join this world, so there's nobody to ban.
 Nobody has claimed this land. A Survey Post would.
+Nobody here wants this.
 None
 Normal
 Normal (Standard Hissing)
+North 
 Not Today
 Not a Scratch
 Not affiliated with any block-game company. Please don't sue.
@@ -1425,6 +1482,7 @@ Note Block (Plinky, Note {})
 Note block plays
 Note {} of {} ({}).
 Note:
+Nothing Happens; Experts Baffled
 Nothing matches.
 Nothing to load. A Crossbow takes Rockets or Pointy Sticks.
 Nothing yet. Craft a Fishing Stick (3 sticks, 2 string) and find some water.
@@ -1458,6 +1516,7 @@ Offline
 Oinker
 Oinker oinks
 Oinkstep
+Old 
 Old Debris (Ancient, Stubborn)
 Old Faithful
 Older Than Sweet
@@ -1469,6 +1528,7 @@ On
 On your network - {}
 Once signed, nobody can change it.
 One life on Hard. Die, and you can only watch.
+One log was taken, by hand.
 Online! Friends can join at {}:{}{}
 Only operators can remove teams.
 Only operators can turn land claims on or off.
@@ -1482,6 +1542,7 @@ Open a Vault with a Trial Key.
 Open a chest in a shipwreck. Finders keepers.
 Open a door. Then close it. Then open it again.
 Open an Ominous Vault with an Ominous Trial Key.
+Open for Business
 Open the treasure chest in a Snout Bastion.
 Open to Internet
 Open to LAN
@@ -1535,6 +1596,7 @@ Pick something up to discover recipes.
 Pick up a Hollow Box with things still in it.
 Pilferer
 Pilferer Outpost (Keep Out)
+Pilferers Sent Packing
 Pillar of the Community
 Pink Petals (Ground Confetti)
 Piston (Pushy)
@@ -1597,6 +1659,7 @@ Press a key or mouse button (Esc: leave it empty).
 Pressure (let go to ease off)
 Pressure Plate (Step On It)
 Pretty Polly
+Prices Steady at the Stalls
 Prismarine (Sea-Stone, Shifty Colours)
 Prismarine Bricks (Tidy Sea-Stone)
 Prismarine Crystals (Wet Sparkles)
@@ -1626,6 +1689,7 @@ Put armour on your Galloper.
 Put in a tool, weapon or armour, and some gold.
 Put on a piece of armour. Even the socks count.
 Put out a Wisp for good.
+Put something in the slot above to sell it.
 Put something in, or write a letter.
 Pyramid Scheme
 Queen Bee (In a Jar, Unimpressed)
@@ -1636,6 +1700,9 @@ Rage Quit to Title
 Raid - Defeat
 Raid - Victory!
 Raid - wave {} of {} - {} raider{} left
+Raid Repelled!
+Raid Ruins Market Day
+Raiders got the better of {}. The village says it will remember this.
 Rail (Choo Choo)
 Raising Hell
 Rampage Over
@@ -1656,6 +1723,8 @@ Raw food goes on top (twice as fast)
 Raw food, sand or cobble goes on top
 Raw meat. There's a furnace for that now, you know.
 Reach level 30. Nothing to spend it on but anvils. For now.
+Read a paper whose lead story is about you.
+Read the village paper.
 Ready
 Recovery Compass (Points to Your Last Mistake)
 Red
@@ -1711,6 +1780,7 @@ Router address didn't resolve
 Router description request failed (HTTP {}).
 Ruined Tower (Structurally Optimistic)
 SAVE FAILED: {}
+SERVICES: walls built, roofs mended. No Hissers, please.
 SNAP! The line broke. The fish is telling all its friends about you.
 SOAPAction
 STOVEVILLE
@@ -1776,6 +1846,7 @@ Seed: {}
 Seed: {}  Mode: {}{}
 Seeing Red
 Select World
+Sell something to a Hmmer from your own Shop Stall.
 Send
 Send Post
 Server
@@ -1783,6 +1854,7 @@ Server list name: {}. Encrypted; host key fingerprint {} (in {})
 Set a Wilter Star in a beacon.
 Set off a firework from the ground.
 Set {}, {}, {} to {}.
+Setback for Local Adventurer
 Shadow Map: {} ({})
 Shadows
 Sharpness
@@ -1794,6 +1866,7 @@ Shears snip
 Shield (Door You Can Carry)
 Ship's Bell (Still Rings)
 Shipwreck (Abandoned, Soggy)
+Shop Stall (Everything Must Go)
 Shrieker shrieks
 Shroomlight (Glows, Squishily)
 Sign
@@ -1811,10 +1884,13 @@ Sizzler Cage (Spawns Trouble)
 Skin: {}
 Skin{}
 Skull
+Sky no longer falling, say experts. Celebrations are expected to be loud.
 Sleep in a bed and skip the night. Time is a construct.
+Slow
 Slowness
 Sly Friend
 Small
+Small Ads
 Small Amethyst Bud (Patience)
 Smash Hit
 Smith (Hits Things Professionally)
@@ -1850,6 +1926,7 @@ Soil Probe (Science!)
 Soil Scientist
 Soil: {} | N {} P {} K {}
 Some Assembly Required
+Some sun, some cloud, and the sky in its usual place. More of the same is forecast.
 Something
 Something enchanted (or worn)
 Something teleports
@@ -1865,6 +1942,7 @@ Soul Sand Valley (Sighs a Lot)
 Soul Searching
 Soul Soil (Still Sighing)
 Sound Volume: {}%
+South 
 Sparker (Hot Hands in a Can)
 Spear Express
 Spear It Out
@@ -1910,6 +1988,7 @@ Staring Eye (It Knows)
 Starred Beacon (Twice the Lighthouse)
 Statistics
 Statue Chic
+Steady
 Step into the Hollow. It's very quiet. Too quiet.
 Step into the Scorchlands. Bring a snack. And a bucket of regret.
 Step through a portal into a mod's dimension.
@@ -1926,6 +2005,7 @@ Stony Peaks (Rock Bottom, but Up)
 Stop a creaking ceiling from coming down.
 Stopped: {} shows a different key than last time ({} before, {} now). Someone may be pretending to be it. If its owner reset it, choose it and press Forget Key.
 Stopping server...
+Storm Rattles Rooftops
 Stove
 Stove approves!
 Stove's world
@@ -1978,6 +2058,7 @@ Tab: {}
 Table's Full
 Taiga (Pointy Trees)
 Take
+Take 64 gold at your Shop Stall.
 Take Back
 Take the potion out first.
 Tall Grass
@@ -2006,6 +2087,7 @@ That's outside the world.
 That's {} friends already.
 That's {} teams already. Remove one first.
 Thatch (Keeps the Rain Off, Mostly)
+Thatchby
 Thawed
 The Bad Omen settles on the Trial Spawner. This one's going to be ominous.
 The Birds and the Bees
@@ -2017,6 +2099,7 @@ The Cluckster is snowed under. Try again later.
 The Curator
 The Dolphin enjoys the fish. It doesn't know any wrecks round here.
 The Dolphin swims off, looking back at you. Follow it!
+The Fluffer was in the field the whole time. An inquiry is planned.
 The Hmmer is itself again, and very grateful. Its prices are yours.
 The Hollow
 The Hollow Wyrm is beaten! A portal home opens in the middle of the island.
@@ -2096,6 +2179,7 @@ The worn thing
 The {} has been defeated!
 The {} is yours now. It's sitting; right-click to call it along.
 The {} is yours. It could use a Saddle.
+The {} {}
 There's already a team called {}.
 Things eaten
 Thinking...
@@ -2109,6 +2193,7 @@ This is a hardcore world: no cheating.
 This is your land.
 This is {}'s land. Ask them to /claim friend add you.
 This is {}'s land{}.
+This is {}'s stall. (Look, don't touch.)
 This server needs a password. Type it in the Password box.
 This world isn't open to anyone.
 Throw Item
@@ -2119,6 +2204,8 @@ Throw a Stare Pearl. Arrive rudely.
 Throw something on the floor with Q. On purpose, surely.
 Thud
 Thunder
+Thunder and lightning overnight. Anyone holding a sword aloft is asked to stop.
+Till:
 Time played
 Time set to {}.
 Time: {}:00  Daylight: {}  Day {} ({}){}
@@ -2127,6 +2214,7 @@ Tips: dawn and dusk are best. Deep, wide water beats puddles. Worms help. Don't 
 Tips: mixed flowers make better honey. Smoke before you harvest. Wood Ash for mites. Keep a spare hive for swarms.
 To:
 Toaster
+Today's Paper
 Tongue Tied
 Too Hot to Handle
 Too dark. Saplings need light (sun or torches).
@@ -2152,6 +2240,7 @@ Trade with a Farmer, a Librarian, a Smith and a Fisher.
 Trade with a Hmmer. Gold is finally good for something.
 Trading Hall
 Trading Table (No Takebacks)
+Tragedy Strikes
 Trail Ruins (Muddy, Historic)
 Trailfolk
 Trapdoor (Floor Door)
@@ -2191,17 +2280,20 @@ Unbreaking (Mostly)
 Uncover a Pristine relic.
 Uncovered{}
 Under Lock and Key
+Unfortunate Incident
 Unknown command "{}". Type help, or /command for script mods.
 Unknown command /nope
 Unknown command {}. Try /help, or commands from script mods.
 Unknown difficulty '{}' (try peaceful, easy, normal or hard); keeping {}
 Unsupported router URL: {}
+Unwanted
 Up, Up and Away
 Update Check: OFF
 Update Check: ON
 Upgrade Dimond gear to Scorchite.
 Upgrade to Scorchite (enchantments and wear are kept).
 Upgrading this takes {} {}.
+Upper 
 Usage: allowlist <on|off|list|add <name>|remove <name>>
 Usage: gamemode <survival|creative|spectator> [player]
 Usage: kill [player | mobs | monsters | <mob>]
@@ -2231,7 +2323,9 @@ Video Settings
 Video Settings...
 View Bobbing
 Village (Actually a Village)
+Village Builds Clanker
 Village People
+Village Stands Firm
 Village: {} ({})
 Visit a jungle. It's got fun and games (and melons).
 Visit a swamp. Mind the Bloops.
@@ -2239,6 +2333,7 @@ Visit a taiga. Spruce yourself up.
 Visit the badlands. Admire the terracotta. Don't lick it.
 WANIPConnection
 WANPPPConnection
+WANTED: anyone who has seen a diamond. Just to talk.
 Wake The Hush. Bold choice.
 Wake a Dried Floaty by putting it next to water.
 Walk Backward
@@ -2247,6 +2342,7 @@ Walkies
 Wander into a biome a mod added.
 Wanderer
 Wanderer (Just Passing Through)
+Wanted!
 Ward
 Ward Trim Template
 Warm Ocean (Tropical-ish)
@@ -2274,6 +2370,7 @@ We Need to Go Hotter
 Weakness
 Wear a full set of Dimond armour. Subtle.
 Wear a skin of your own.
+Weather Continues
 Weather Cycle: OFF
 Weather Cycle: ON
 Weather set to {}.
@@ -2294,12 +2391,16 @@ Welcome back. The world missed you (it's a HashMap, it can't feel).
 Welcome to
 Welcome to the Jungle
 Welcome to the Scorchlands. Mind the lava. Also everything else.
+Welcome to your village paper. Yesterday's news, every morning, from the Notice Board.
 Welcome to {}. Somebody made this.
+Well
+Well Bucket Missing Again
 What a Deal
 What the hell is wrong with you?
 Wheat
 Wheat (Bread Pending)
 Wheat Seeds (Tiny)
+Wheatley
 Which Witch?
 White
 Who's a Good Boy?
@@ -2325,6 +2426,7 @@ Winter
 Wishing Well (Doesn't Grant)
 Wisp
 Witch
+Witnesses describe it as "sudden". More tomorrow.
 Wonderful.
 Wood Ash (Potassium!)
 Wooden
@@ -2339,6 +2441,7 @@ Woolly Hat (Hand-Knitted)
 Woolly Jumper (Itchy)
 Woolly Socks (For Sandals)
 Woolly Trousers (Very Itchy)
+World Begins
 World Border: None
 World Border: {} blocks
 World Settings
@@ -2346,6 +2449,7 @@ World name
 World saved.
 Worn
 Worn tool on the left, what it's made of (a twin, or an enchanted book) on the right.
+Worth about {} gold here ({}). Left-click: dearer, right-click: cheaper (shift: by 5).
 Woven Charm (Smells of Pine)
 Write on the sign (Enter: next line, Esc: done)
 Written Book (Signed and Everything)
@@ -2410,6 +2514,7 @@ You're on team {} now.
 You're sending messages too fast. Take a breath.
 You've Got Post
 You've got post! ({} waiting at any Post Box.)
+You've had today's paper. (There's only one a day.)
 Your Glider tore. Gravity says hello.
 Your Survey Posts: {}
 Your Woofer is armoured. Very good boy protection.
@@ -2450,6 +2555,7 @@ Zoomies
 [mod]\nname \= Playtest Moon\n[block moon_rock]\ntexture \= stone\n[block moon_frame]\ntexture \= white\n[dimension moon]\nname \= The Playtest Moon\nstone \= moon_rock\ntop \= moon_rock\nunder \= moon_rock\nframe \= moon_frame\nheight \= 40\nhills \= 4\n
 [{}] saved variables are damaged ({}); starting fresh
 [{}] {} ran /{}
+a Hmmer at {}'s stall bought: {}, and {} sees {} in the till
 a Witch's potion burst on {} and it wasn't slowed
 a baby
 a bad key in the handshake
@@ -2503,6 +2609,7 @@ at the end of the line: {}
 ate a Cooked Pufferfish. Cooking it did not help
 ate a Pufferfish. It said 'Do Not Eat' right on it
 ate a Suspicious Stew. It was, in fact, suspicious
+baby Hmmers were
 back at the first portal: {}
 bad char
 bad data: {}
@@ -2521,6 +2628,7 @@ blasts never break blocks
 blocks placed and broken
 books are enchantable
 bosses shrug off knockback by default
+bounties were done
 burned to a crisp. Extra crispy
 buzzing with bees
 calm under the smoke
@@ -2802,6 +2910,7 @@ serviceType
 shader failed to compile: {}
 shadow shader failed to compile: {}
 sheltering from the rain
+shop stall
 should hit terrain
 snout brute
 snout chest
@@ -2902,6 +3011,7 @@ the suspicious sand {} brushed is still suspicious
 the swooper came down to bite
 the thrown spear was lost: nobody picked it up
 the totem didn't save {} (or the host still thinks they have it)
+the village
 the village at {} has no site
 the village at {} was full up and didn't start a house
 the village's Notice Board: the host has {}, {} sees {}
@@ -2945,6 +3055,7 @@ urn:schemas-upnp-org:service:WANIPConnection:1
 urn:schemas-upnp-org:service:WANPPPConnection:1
 vegetables, and nothing that swims or moos
 village life
+village paper
 wall impact cannot apply an effect
 wandering trader
 was bitten by a Woofer. Should have brought a bone
@@ -3043,6 +3154,7 @@ zombie hmmer
 {} Boat
 {} Concrete
 {} Concrete Powder (Just Add Water)
+{} Defeats {}
 {} Door
 {} Dye
 {} Fence
@@ -3053,6 +3165,7 @@ zombie hmmer
 {} Honey
 {} Honey (Bottled)
 {} Leaves
+{} Lends a Hand
 {} Log
 {} Nylium (Fuzzy Rock)
 {} Pickaxe
@@ -3068,13 +3181,16 @@ zombie hmmer
 {} Stem (A Mushroom's Idea of a Tree)
 {} Sword
 {} Wart Block (Squishy)
+{} Witnesses describe the tree as "fine, considering".
 {} Wool
 {} and {} are both in the Scorchlands and can't see each other ({} {}; {} {} {})
 {} and {} both accepted at a Trading Table and the host made no swap
 {} armoured their Galloper and the host's isn't
 {} arrived in the Scorchlands without the gold block that's there
+{} asked the Notice Board for today's paper and got none
 {} banned address(es) loaded from {}
 {} beat {} for "{}", saw {} on the board, and the host has it done: {}
+{} born yesterday. Beds are reported to be in short supply.
 {} broke kelp and the host's column didn't come away into water ({})
 {} built on {}'s land
 {} came home and the portal by spawn is gone (it has {})
@@ -3100,10 +3216,12 @@ zombie hmmer
 {} followed through the portal and is in {}
 {} gave an Allay a diamond, and the host's Allay didn't take it
 {} gave their Donkey a chest and the host's has none
+{} gold changed hands at {}'s stall. Economists call it "a start".
 {} got into someone else's Llama's pack
 {} got post and no advancement
 {} h {} min
 {} handed in "{}": the host has it done: {}, and their gold went {} -> {}
+{} has a new Clanker. The Clanker had no comment.
 {} has different land claims from the host's
 {} has letters {}
 {} has {} where the host has {}
@@ -3127,10 +3245,12 @@ zombie hmmer
 {} left the game
 {} left the game ({})
 {} lit Soul Soil and the host has {} there
+{} logs were taken, by hand.
 {} made a stew and it's not in their Cookbook
 {} made a team and {} joined it, and the host doesn't have them together
 {} made you an operator. Try /help.
 {} mixed columns at {} borders
+{} near {}, and then, briefly, not seen at all. Repairs are under way.
 {} never had the village at {} load around them
 {} never heard how {} died
 {} never saw the Donkey's chest
@@ -3155,6 +3275,7 @@ zombie hmmer
 {} never saw the whole rope
 {} never saw {}'s own skin
 {} next to {} at {},{}
+{} on the Notice Board. The village is grateful, and slightly less short of things.
 {} opened a birch door and the host's stayed shut
 {} opened a chest by a Snout and it didn't mind
 {} opened a trapped chest and the host's isn't sprung
@@ -3166,9 +3287,11 @@ zombie hmmer
 {} put on a skin of its own and the host doesn't have it
 {} quads ({} cube) for {} faces
 {} read the board and saw {} bounties (the host: {})
+{} read the paper but never heard about Extra! Extra!
 {} recipes still to discover
 {} respawned and is still in {}
 {} respawned and isn't back in the Overworld
+{} saw off the raiders. Hmmers report feeling "quite brave, actually".
 {} saw {} then {} trades and experience {} (the host: {})
 {} says hi #{}
 {} sees different teams from the host's
@@ -3180,6 +3303,7 @@ zombie hmmer
 {} served from a pot and got no stew
 {} set a Wilter Star in a beacon, and the host didn't star it
 {} sheared a Mushmooer and the host didn't see it (Mooer {}, mushrooms {})
+{} sold something but never heard about Open for Business
 {} still sees the trapped chest's lamp lit after it was shut
 {} still sees {}'s old skin
 {} tied their Mooer to a fence and the host's isn't
@@ -3202,10 +3326,13 @@ zombie hmmer
 {} wore off.
 {} would be built over
 {} {} HTTP/1.1r\nHost: {}:{}r\nConnection: closer\nContent-Length: {}r\n
+{} {}. They are expected back shortly. Their belongings are said to be "somewhere around there".
 {}% cooked
 {}'s claim is gone.
 {}'s inbox has {} coal after the post came
 {}'s members {} hurt each other now.
+{}'s paper doesn't mention them: {}
+{}'s stall: owner {}, lot {}, price {}
 {}'s world
 {}, and maybe more
 {}, button

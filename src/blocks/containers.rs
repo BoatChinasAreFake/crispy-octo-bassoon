@@ -39,7 +39,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    crate::chests::is_chest(id) || matches!(id, BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::zapparts::is_dropper(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id) || id == TRADING_TABLE
+    crate::chests::is_chest(id) || matches!(id, BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::zapparts::is_dropper(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id) || id == TRADING_TABLE || id == SHOP_STALL
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -122,6 +122,10 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
     if kind == TRADING_TABLE {
         return slot < crate::trading::TRADE_SLOTS;
     }
+    // A Shop Stall: wares in the lots; the till only pays out (see stalls.rs).
+    if kind == SHOP_STALL {
+        return slot < crate::stalls::LOTS;
+    }
     // An outbox (inboxes are take-only: see `post::is_inbox`).
     if kind == POST_BOX {
         return slot < crate::post::OUTBOX_SLOTS;
@@ -148,6 +152,8 @@ impl Container {
             crate::home::STAND_SLOTS
         } else if id == TRADING_TABLE {
             crate::trading::TRADE_SLOTS
+        } else if id == SHOP_STALL {
+            crate::stalls::SLOTS
         } else {
             crate::chests::slots(id)
         };
@@ -643,7 +649,7 @@ impl Game {
     pub fn sort_container(&mut self) {
         let Some(pos) = self.open else { return };
         let kind = store_kind(&self.world, &self.vehicles, pos);
-        if is_three_slot(kind) || kind == TRADING_TABLE {
+        if is_three_slot(kind) || kind == TRADING_TABLE || kind == SHOP_STALL {
             return;
         }
         if let Some(c) = store(&mut self.world, &mut self.vehicles, pos) {
@@ -658,7 +664,7 @@ impl Game {
     pub fn host_sort(&mut self, from: u32, p: IVec3) {
         let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
         let kind = store_kind(&self.world, &self.vehicles, p);
-        if !open || !self.peer_near(from, p) || is_three_slot(kind) || kind == TRADING_TABLE {
+        if !open || !self.peer_near(from, p) || is_three_slot(kind) || kind == TRADING_TABLE || kind == SHOP_STALL {
             return;
         }
         if let Some(c) = store(&mut self.world, &mut self.vehicles, p) {
@@ -787,6 +793,15 @@ impl Game {
         if kind == CHEST {
             self.snouts_see_chest_opened(p);
         }
+        // A Shop Stall: only its owner's (the first to open it; see stalls.rs).
+        if kind == SHOP_STALL {
+            let who = crate::players::record_key(&self.peer_name(from));
+            if !self.claim_stall(p, &who) {
+                let owner = self.shops.stalls.get(&p).map(|s| s.owner.clone()).unwrap_or_default();
+                self.system_message(Some(from), &format!("This is {owner}'s stall. (Look, don't touch.)"));
+                return;
+            }
+        }
         if let Some(k) = crate::stash::stash_of_key(p) {
             self.world.stashes.entry(k).or_insert_with(|| Container::for_block(CHEST));
         }
@@ -803,6 +818,9 @@ impl Game {
             let name = self.peer_name(from);
             self.take_seat(p, &name);
             self.send_deal(p);
+        }
+        if kind == SHOP_STALL {
+            self.send_stall(p);
         }
     }
 
@@ -843,6 +861,10 @@ impl Game {
             self.dirty_containers.insert(p);
             if kind == TRADING_TABLE {
                 self.deal_changed(p);
+            }
+            // (What each lot would fetch changes with what's in it.)
+            if kind == SHOP_STALL {
+                self.send_stall(p);
             }
         } else {
             self.send_container(p, Some(from));

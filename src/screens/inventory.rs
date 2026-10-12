@@ -539,15 +539,18 @@ impl App {
         // (A backpack's pack shows only as much as the backpack reaches.)
         let shown = if chests::is_chest(kind) { c.slots.len().min(chests::slots(kind)) } else { c.slots.len() };
         let table = kind == TRADING_TABLE;
+        let stall = kind == SHOP_STALL;
         // A Post Box: your outbox (with who it's for and a letter) or inbox (with your letters).
         let post = post::is_post_key(pos);
         let inbox = post::is_inbox(pos);
-        let cols = if containers::is_three_slot(kind) || table { 9 } else { chests::columns(shown) };
+        let cols = if containers::is_three_slot(kind) || table || stall { 9 } else { chests::columns(shown) };
         let rows = if containers::is_three_slot(kind) { 3 } else { shown.div_ceil(cols).max(1) };
         let top_h = if containers::is_three_slot(kind) {
             slot * 3.2
         } else if table {
             slot * 3.0 + 32.0 * s
+        } else if stall {
+            slot * 3.2 + 26.0 * s
         } else if post {
             slot * rows as f32 + 58.0 * s
         } else {
@@ -583,7 +586,7 @@ impl App {
                 self.game.open_post(!inbox);
                 return;
             }
-        } else if !containers::is_three_slot(kind) && !table && self.ui.button(sort, "Sort", true) {
+        } else if !containers::is_three_slot(kind) && !table && !stall && self.ui.button(sort, "Sort", true) {
             self.game.sort_container();
         }
         let top = y0 + 18.0 * s;
@@ -591,6 +594,11 @@ impl App {
         let spots: Vec<(usize, f32, f32)> = if containers::is_three_slot(kind) {
             let cx = sx + slot * 2.5;
             vec![(INPUT, cx, top), (FUEL, cx, top + slot * 2.2), (OUTPUT, sx + slot * 5.5, top + slot * 1.1)]
+        } else if stall {
+            // The lots in a row, the till below on the right (see stalls.rs).
+            let mut v: Vec<(usize, f32, f32)> = (0..stalls::LOTS).map(|i| (i, sx + i as f32 * slot, top + 10.0 * s)).collect();
+            v.push((stalls::TILL, sx + slot * 8.0, top + 10.0 * s + slot * 2.2));
+            v
         } else if table {
             // Two offers side by side, 3x3 each (see trading.rs).
             (0..trading::TRADE_SLOTS).map(|i| (i, sx + (i % 3) as f32 * slot + if i >= trading::HALF { slot * 6.0 } else { 0.0 }, top + 10.0 * s + ((i % trading::HALF) / 3) as f32 * slot)).collect()
@@ -634,6 +642,9 @@ impl App {
         }
         if post {
             self.post_panel(inbox, sx, top + rows as f32 * slot + 4.0 * s, panel_w - 12.0 * s);
+        }
+        if stall && let Some(t) = self.stall_panel(&c, sx, top, slot, shift) {
+            tooltip = Some(t);
         }
         if kind == BREWING_STAND {
             let progress = (c.cook / potions::BREW_SECS).clamp(0.0, 1.0);
@@ -693,6 +704,53 @@ impl App {
         } else if let Some(t) = tooltip {
             self.ui.tooltip(&t);
         }
+    }
+
+    /// A Shop Stall's prices and how each lot is doing, under the lots; the till.
+    /// Returns a tooltip if the mouse is on a price.
+    fn stall_panel(&mut self, c: &containers::Container, sx: f32, top: f32, slot: f32, shift: bool) -> Option<String> {
+        let s = self.ui.s;
+        let (_, prices, lots) = self.game.stall_view()?;
+        self.ui.text("For sale (a Hmmer buys a whole lot):", sx, top + 7.0 * s, 7.0, GRAY);
+        let (mx, my) = mouse_position();
+        let mut tip = None;
+        for i in 0..stalls::LOTS {
+            let x = sx + i as f32 * slot;
+            let y = top + 10.0 * s + slot + 2.0 * s;
+            let r = Rect::new(x + 1.0 * s, y, slot - 2.0 * s, 11.0 * s);
+            let hover = r.contains(vec2(mx, my));
+            draw_rectangle(r.x, r.y, r.w, r.h, if hover { Color::new(0.35, 0.3, 0.2, 1.0) } else { Color::new(0.18, 0.16, 0.14, 1.0) });
+            let label = if prices[i] == 0 { "-".to_string() } else { format!("{}g", prices[i]) };
+            self.ui.text_centered(&label, x + slot / 2.0, y + 8.5 * s, 7.0, GOLD);
+            // How it's selling (only for a lot with something in it).
+            if c.slots[i].is_some() {
+                let (d, fair) = lots[i];
+                let word = if fair <= 0.05 { "Unwanted" } else { stalls::demand_word(d) };
+                let col = match word {
+                    "Wanted!" => Color::new(0.4, 0.95, 0.45, 1.0),
+                    "Steady" => WHITE,
+                    "Slow" => Color::new(1.0, 0.8, 0.4, 1.0),
+                    "Unwanted" => GRAY,
+                    _ => Color::new(1.0, 0.45, 0.4, 1.0),
+                };
+                self.ui.text_centered(word, x + slot / 2.0, y + 20.0 * s, 5.5, col);
+                if hover {
+                    tip = Some(if fair <= 0.05 { "Nobody here wants this.".to_string() } else { format!("Worth about {fair:.1} gold here ({word}). Left-click: dearer, right-click: cheaper (shift: by 5).") });
+                }
+            } else if hover {
+                tip = Some("Put something in the slot above to sell it.".to_string());
+            }
+            let step = if shift { 5 } else { 1 };
+            if hover && is_mouse_button_pressed(MouseButton::Left) {
+                self.game.set_stall_price(i, prices[i].saturating_add(step).min(stalls::MAX_PRICE));
+            } else if hover && is_mouse_button_pressed(MouseButton::Right) {
+                self.game.set_stall_price(i, prices[i].saturating_sub(step));
+            }
+        }
+        let ty = top + 10.0 * s + slot * 2.2;
+        self.ui.text("Till:", sx + slot * 7.0 - 2.0 * s, ty + slot * 0.62, 8.0, GOLD);
+        self.ui.text("Hmmers come by in the daytime.", sx, ty + slot * 0.62, 7.0, GRAY);
+        tip
     }
 
     /// Under a Post Box's slots: who it's for and the letter (outbox), or your letters (inbox).

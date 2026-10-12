@@ -360,6 +360,10 @@ pub struct Game {
     pub board_rep: i32,
     /// Villages' new houses and Clankers (see village_growth.rs).
     pub growth: crate::village_growth::Growth,
+    /// Players' Shop Stalls, and what villages have had their fill of (see stalls.rs).
+    pub shops: crate::stalls::Shops,
+    /// What's been in the news, and who's had today's paper (see paper.rs).
+    pub news: crate::paper::News,
     /// Days gone by (for the moon's phase; see skies.rs).
     pub day: u32,
     pub ride_sync: f32,
@@ -669,6 +673,8 @@ impl Game {
             bounties: Default::default(),
             board_rep: 0,
             growth: Default::default(),
+            shops: Default::default(),
+            news: Default::default(),
             day: 0,
             ride_sync: 0.0,
             chat_log: Default::default(),
@@ -957,6 +963,8 @@ impl Game {
             ("reputation".to_string(), self.rep.encode()),
             ("bounties".to_string(), self.bounties.encode()),
             ("village_growth".to_string(), self.growth.encode()),
+            ("shops".to_string(), self.shops.encode()),
+            ("news".to_string(), self.news.encode()),
             ("day".to_string(), self.day.to_le_bytes().to_vec()),
             ("packs".to_string(), self.encode_packs()),
             ("sign_styles".to_string(), crate::qol::encode_styles(&self.world.sign_styles)),
@@ -1057,6 +1065,12 @@ impl Game {
         }
         if let Some(b) = extra("village_growth") {
             self.growth = crate::village_growth::Growth::decode(b);
+        }
+        if let Some(b) = extra("shops") {
+            self.shops = crate::stalls::Shops::decode(b);
+        }
+        if let Some(b) = extra("news") {
+            self.news = crate::paper::News::decode(b);
         }
         if let Some(b) = extra("regulars") {
             self.regulars = crate::villagers::decode_regulars(b);
@@ -2598,6 +2612,10 @@ impl Game {
             && !self.player.sneaking
         {
             let (pos, id) = (h.pos, self.world.get_v(h.pos));
+            if id == SHOP_STALL {
+                self.open_stall(pos);
+                return;
+            }
             if crate::containers::is_container(id) {
                 self.open_container(pos);
                 return;
@@ -3114,6 +3132,11 @@ impl Game {
             if id == SURVEY_POST {
                 self.post_broken(pos);
             }
+            // A log off a tree with bare hands: that's news.
+            if is_log(id) && self.inv.held() == AIR && !self.creative {
+                let me = self.player_name.clone();
+                self.report(crate::paper::Event::TreePunched, &me, "", 1);
+            }
         }
         self.block_particles(pos, 14);
         if !self.creative && drops {
@@ -3219,6 +3242,8 @@ impl Game {
         if self.is_client() {
             self.net_send_msg(Msg::Died { cause: cause.to_string() });
         } else {
+            let me = self.player_name.clone();
+            self.report(crate::paper::Event::Died, &me, cause, 1);
             self.system_message(None, &line);
             self.chat_log.push_back(line);
             while self.chat_log.len() > CHAT_KEEP {
@@ -3640,6 +3665,7 @@ impl Game {
         // (After hmmers_tick: the time of day decides where they go.)
         self.village_life_tick(dt);
         self.village_growth_tick(dt);
+        self.shops_tick(dt);
         self.reputation_tick(dt);
         self.zombie_hmmers_tick(dt);
         self.free_riderless();
@@ -3758,7 +3784,13 @@ impl Game {
                     let knock = (self.player.body.pos - ppos).normalize_or_zero();
                     self.player.body.vel += self.steadied(knock * 3.0 + Vec3::Y * 3.0);
                 }
-                MobEvent::Explode(at, r, cause) => self.explode(at, r, cause),
+                MobEvent::Explode(at, r, cause) => {
+                    if cause.contains("Hisser") && self.village_at(at).is_some() {
+                        let place = self.place_of(at);
+                        self.report(crate::paper::Event::Hisser, &place, "", 1);
+                    }
+                    self.explode(at, r, cause)
+                }
                 MobEvent::Smoke(at) => self.smoke(at, 1, 0.2),
                 MobEvent::Warp(from, to) => {
                     self.smoke(from + Vec3::Y * 1.4, 10, 0.4);

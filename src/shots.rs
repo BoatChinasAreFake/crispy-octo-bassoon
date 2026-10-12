@@ -79,7 +79,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
         "tower" => Kind::Tower,
         "well" => Kind::Well,
         "dungeon" => Kind::Dungeon,
-        "village" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" => Kind::Village,
+        "village" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" => Kind::Village,
         "city" => Kind::HushedCity,
         "ruins" => Kind::DesertRuins,
         "trailruins" => Kind::TrailRuins,
@@ -386,7 +386,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -426,8 +426,8 @@ impl App {
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
                 }
                 // In front of a village's Notice Board, or looking at where it will build next.
-                if let Some(o) = matches!(s.mode.as_str(), "noticeboard" | "growingvillage").then(|| g.world.nearest_site(structures::Kind::Village, g.spawn, 60)).flatten() {
-                    if s.mode == "noticeboard" {
+                if let Some(o) = matches!(s.mode.as_str(), "noticeboard" | "growingvillage" | "shopstall" | "newspaper").then(|| g.world.nearest_site(structures::Kind::Village, g.spawn, 60)).flatten() {
+                    if matches!(s.mode.as_str(), "noticeboard" | "shopstall" | "newspaper") {
                         let board = structures::village_board(o);
                         (s.pos, s.yaw, s.pitch) = (Some(board.as_vec3() + Vec3::new(0.5, 0.2, 3.5)), 0.0, -0.1);
                     } else if let Some(at) = half_built_house(&mut g, o) {
@@ -1072,6 +1072,47 @@ impl App {
                 app.game.world.set_v(at(3.0, 3.5), block::LANTERN);
                 // And the village's Notice Board (see bounties.rs).
                 app.game.world.set_v(at(4.0, 5.5), block::NOTICE_BOARD);
+            }
+            if matches!(s.mode.as_str(), "shopstall" | "newspaper") && frames == 125 {
+                let g = &mut app.game;
+                if let Some(o) = g.world.nearest_site(structures::Kind::Village, g.player.body.pos, 8) {
+                    let key = o + IVec3::Y;
+                    g.grow_village(key);
+                    if s.mode == "shopstall" {
+                        // A stall by the board, stocked, priced, and a sale in the till already.
+                        let stall = structures::village_board(o) + IVec3::new(-1, 0, 0);
+                        g.world.set_v(stall, block::SHOP_STALL);
+                        g.open_stall(stall);
+                        if let Some(c) = g.world.containers.get_mut(&stall) {
+                            for (i, lot) in [(block::BREAD, 12), (block::WHEAT, 32), (block::IRON, 3), (block::CAKE, 1), (block::WOOL, 8), (block::DIRT, 64)].into_iter().enumerate() {
+                                c.slots[i] = Some(lot);
+                            }
+                            c.slots[stalls::TILL] = Some((block::GOLD_INGOT, 7));
+                        }
+                        // (A village that's just bought plenty of wheat.)
+                        g.shops.glut.insert((key, block::WHEAT), 0.4);
+                        for (i, p) in [5u8, 3, 5, 2, 4, 1].into_iter().enumerate() {
+                            g.set_stall_price(i, p);
+                        }
+                    } else {
+                        // Yesterday was eventful.
+                        let me = g.player_name.clone();
+                        let place = g.place_of(key.as_vec3());
+                        let day = g.day.max(4);
+                        g.day = day;
+                        for (e, who, detail, n) in [
+                            (paper::Event::RaidWon, place.as_str(), "", 1),
+                            (paper::Event::TreePunched, me.as_str(), "", 3),
+                            (paper::Event::Hisser, place.as_str(), "", 1),
+                            (paper::Event::Baby, place.as_str(), "", 2),
+                        ] {
+                            g.news.note(day - 1, e, who, detail, n);
+                        }
+                        g.inv.slots[0] = Some((block::NEWSPAPER, 1));
+                        g.inv.wear[0] = paper::paper_wear(day, paper::masthead_of(key));
+                        g.inv.selected = 0;
+                    }
+                }
             }
             if s.mode == "noticeboard" && frames == 125 {
                 let g = &mut app.game;
@@ -2243,10 +2284,20 @@ impl App {
     }
 }
 
-/// A game for a scene. `--gen 2` makes it a newer world (see `GenOptions`);
-/// scenes are older worlds otherwise, so they keep looking as they always have.
+/// Scenes added from v0.5 on: they show a world as it's made now (the
+/// newest generator) unless `--gen` says otherwise. New scenes go here.
+const LATEST_SCENES: &[&str] = &[
+    "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper",
+];
+
+/// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is
+/// the oldest). Older scenes are older worlds otherwise, so they keep looking
+/// as they always have; newer ones (`LATEST_SCENES`) use the newest.
 fn shot_game(seed: u32, creative: bool, menu: bool) -> Game {
-    let wanted = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--gen").and_then(|w| w[1].parse::<u8>().ok());
+    let args: Vec<String> = std::env::args().collect();
+    let arg = |name: &str| args.windows(2).find(|w| w[0] == name).map(|w| w[1].clone());
+    let latest = arg("--mode").is_some_and(|m| LATEST_SCENES.contains(&m.as_str()));
+    let wanted = arg("--gen").and_then(|g| g.parse::<u8>().ok()).or(latest.then_some(crate::world::GenOptions::DEFAULT.version));
     let opts = match wanted {
         Some(v) if v >= 1 => crate::world::GenOptions { version: v.min(crate::world::GenOptions::DEFAULT.version), ..crate::world::GenOptions::DEFAULT },
         _ => crate::world::GenOptions::LEGACY,

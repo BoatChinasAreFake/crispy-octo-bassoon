@@ -349,6 +349,10 @@ impl App {
             }
         }
         self.ui.text("Bring bounties are handed in all at once; Defeat bounties count since they went up.", sx, y0 + panel_h - 7.0 * s, 6.0, GRAY);
+        // Today's paper, free (see paper.rs).
+        if self.ui.button(Rect::new(x0 + panel_w - 80.0 * s, y0 + 3.0 * s, 74.0 * s, 12.0 * s), "Today's Paper", true) {
+            self.game.take_paper();
+        }
         if let Some(t) = tooltip {
             self.ui.tooltip(&t);
         }

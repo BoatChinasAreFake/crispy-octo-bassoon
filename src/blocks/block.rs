@@ -486,7 +486,9 @@ pub const THATCH: Id = MYCELIUM + 105;
 pub const FROST_SHINGLES: Id = MYCELIUM + 106;
 /// Each village's Notice Board, with its bounties (see bounties.rs).
 pub const NOTICE_BOARD: Id = MYCELIUM + 107;
-pub const NUM_BLOCKS: Id = MYCELIUM + 108;
+/// A player's own shop (see stalls.rs).
+pub const SHOP_STALL: Id = MYCELIUM + 108;
+pub const NUM_BLOCKS: Id = MYCELIUM + 109;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -754,7 +756,9 @@ pub const SALT: Id = FIRST_ITEM + 265;
 pub const HERBS: Id = FIRST_ITEM + 266;
 pub const COOKBOOK: Id = FIRST_ITEM + 267;
 pub const DISH_FIRST: Id = FIRST_ITEM + 268;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 277;
+/// The village paper (see paper.rs): its wear says which issue.
+pub const NEWSPAPER: Id = FIRST_ITEM + 277;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 278;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2890,6 +2894,7 @@ impl Registry {
         items.push(item("lead", "Lead (Walkies)", T_LEAD));
         items.push(ItemDef { stack: 1, consume: false, ..item("woodland_map", "Woodland Explorer Map (Here Be Pilferers)", T_WOODLAND_MAP) });
         items.extend(crate::cooking::items());
+        items.push(ItemDef { stack: 1, consume: false, ..item("newspaper", "Newspaper (Hold to Read)", T_NEWSPAPER) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };

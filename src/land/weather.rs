@@ -130,6 +130,9 @@ impl Game {
                     Weather::Clear => Weather::Rain,
                     _ => Weather::Clear,
                 };
+                if next == Weather::Thunder {
+                    self.report(crate::paper::Event::Storm, "", "", 1);
+                }
                 self.set_weather(next);
             }
         }
