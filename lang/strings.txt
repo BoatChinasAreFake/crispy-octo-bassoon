@@ -319,6 +319,7 @@ Be there when a baby Hmmer comes along.
 Be there when a village builds itself a Clanker.
 Be there when a village finishes a new house.
 Be under a ceiling when it comes down.
+Beach (Sandy Everywhere)
 Beacon (Wyrm-Powered Lighthouse)
 Beaconator
 Bead Necklace (Hand-Strung)
@@ -747,6 +748,7 @@ Don't look at the Starers!
 Done
 Donkey
 Door (Opens Both Ways, Emotionally)
+Down by the River
 Dried Floaty (Just Add Water)
 Dried Kelp (Crunchy Ocean)
 Drink a potion you brewed. Or found. We don't judge.
@@ -849,6 +851,7 @@ Find a jungle temple. Watch your feet.
 Find a lush cave, where the moss is greener.
 Find a meadow.
 Find a mushroom island.
+Find a river winding through the valleys to the sea.
 Find a savanna, where the trees had a haircut.
 Find a village. An actual one, this time.
 Find an Ocean Monument. Hold your breath.
@@ -1254,6 +1257,7 @@ Lever (Pull It)
 Librarian (Shh)
 Library
 Library/Application Support/Minceraft
+Life's a Beach
 Light Show
 Light a Zappy Lamp with a switch. Electricity: now legally distinct.
 Light a fire with a Sparker. Twisted, apparently.
@@ -1768,6 +1772,7 @@ Ride over a Detector Rail. It told everyone.
 Right-click to read
 Riptide
 Riptide (Spear Express)
+River (Going With the Flow)
 Robin Hood (Legally Distinct)
 Rocket Man
 Rollo
@@ -1979,6 +1984,7 @@ Staked a Claim
 Stalac-tight
 Stand in a beacon's light. The Wyrm's egg, finally useful.
 Stand on a Magma Block without sneaking. Ow.
+Stand on a sandy beach. Mind the sand in your boots.
 Stand on a stony peak.
 Star Power
 Stare Pearl (Throw to Teleport)
@@ -2613,6 +2619,7 @@ arrived in a portal
 asking the host's status crashed
 asleep for the night
 at the end of the line: {}
+at the {} by {},{}, the host has {} at {} and {} sees {}
 ate a Cooked Pufferfish. Cooking it did not help
 ate a Pufferfish. It said 'Do Not Eat' right on it
 ate a Suspicious Stew. It was, in fact, suspicious
@@ -2850,6 +2857,7 @@ no flowers in reach (they need some within seven blocks)
 no free port
 no village anywhere near spawn to try growing villages in
 no welcome
+no {} anywhere near spawn
 no {} found
 nobody got the bottle of honey from the hive
 nobody listed
@@ -2902,6 +2910,7 @@ region file damaged ({})
 repacked id is known
 respawn with a full stomach
 right-click opens it
+rivers and beaches
 rotation bonus
 rotation bonus!
 rotation preserves the vertical lob
@@ -3009,6 +3018,7 @@ the mod tool wore a use
 the new house: the host has built {} and {} sees {} of its blocks differently ({})
 the other side isn't speaking the same (encrypted) language: is one of you on an older version?
 the pair had a baby
+the playtest world isn't on the newest generator
 the sand and gravel didn't fall when the stone under them went
 the save file is damaged or incomplete
 the seeker found its mark
@@ -3315,6 +3325,7 @@ zombie hmmer
 {} sold something but never heard about Open for Business
 {} still sees the trapped chest's lamp lit after it was shut
 {} still sees {}'s old skin
+{} stood in the {} at {},{} but never heard about {}
 {} tied their Mooer to a fence and the host's isn't
 {} took the coal out of their inbox and has {} (had {})
 {} traded with a Hmmer one short of Apprentice and the host has it at {}

@@ -129,7 +129,8 @@ impl Report {
 /// Run a playtest: `bots` players for `seconds` of game time on a world from `seed`.
 pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Report, String> {
     let mut report = Report::default();
-    let mut host = Game::new(seed, false, false);
+    // (The newest generator, as a new world gets.)
+    let mut host = Game::new_with(seed, false, false, crate::world::GenOptions::DEFAULT);
     let spawn = host.spawn;
     load_around(&mut host, spawn);
     let port = host.open_server(port, None, bots + 4).map_err(|e| format!("couldn't host: {e}"))?;
@@ -179,6 +180,11 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
         }
         std::thread::sleep(Duration::from_micros(300));
     }
+    // The checks below set up what they need themselves: no more monsters
+    // wandering in (they'd kill a bot halfway through one), and the ones
+    // the free play brought sent away.
+    host.spawn_timer = f32::MAX;
+    host.mobs.retain(|m| !m.menacing() || m.persistent);
     new_features(&mut host, &mut team, &mut report, &mut touched);
     latest_features(&mut host, &mut team, &mut report, &mut touched);
     batch_two(&mut host, &mut team, &mut report, &mut touched);
@@ -193,6 +199,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     village_life(&mut host, &mut team, &mut report, &mut touched);
     trade_levels(&mut host, &mut team, &mut report, &mut touched);
     growing_villages(&mut host, &mut team, &mut report);
+    new_land(&mut host, &mut team, &mut report);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -256,6 +263,10 @@ fn ground(host: &mut Game, team: &mut [Bot], k: usize) {
 /// Walk bot `k` onto whatever `item` lies on the host's ground, trying spots
 /// around it in case a wall or a tower is in the way. True once it has one.
 fn fetch(host: &mut Game, team: &mut [Bot], k: usize, item: Id) -> bool {
+    // (Nobody picks anything up while dead.)
+    if team[k].game.dead.is_some() {
+        revive(host, team);
+    }
     let offsets = [(0.0, 0.0), (0.6, 0.0), (-0.6, 0.0), (0.0, 0.6), (0.0, -0.6), (0.6, 0.6), (-0.6, -0.6), (0.6, -0.6), (-0.6, 0.6)];
     for round in 0..3 {
         for (dx, dz) in offsets {
@@ -351,6 +362,8 @@ fn new_features(host: &mut Game, team: &mut [Bot], report: &mut Report, touched:
     }
 
     // 3. A Hollow Box full of diamonds: broken, picked up, put down elsewhere.
+    // (Everyone up again first: the night may have had its way with someone.)
+    revive(host, team);
     let box_bot = 2 % n;
     ground(host, team, box_bot);
     let feet = team[box_bot].game.player.body.pos.floor().as_ivec3();
@@ -2414,6 +2427,73 @@ fn growing_villages(host: &mut Game, team: &mut [Bot], report: &mut Report) {
     ground(host, team, k);
 }
 
+/// The new land (generator 7): a bot goes to a beach and then a river near
+/// spawn, the host and the bot build the same land there, and the bot hears
+/// about both advancements.
+fn new_land(host: &mut Game, team: &mut [Bot], report: &mut Report) {
+    use crate::world::Biome;
+    revive(host, team);
+    let k = team.len() - 1;
+    let name = team[k].name.clone();
+    let id_k = team[k].game.my_id;
+    if host.world.generator.opts.version < 7 {
+        report.problems.push("the playtest world isn't on the newest generator".into());
+        return;
+    }
+    let home = team[k].game.player.body.pos;
+    let (sx, sz) = (host.spawn.x as i32, host.spawn.z as i32);
+    let find = |g: &crate::world::Generator, want: Biome| {
+        (0..240).find_map(|r: i32| {
+            (-r..=r).flat_map(move |dz| (-r..=r).map(move |dx| (dx, dz))).filter(|(dx, dz)| dx.abs().max(dz.abs()) == r).map(|(dx, dz)| (sx + dx * 8, sz + dz * 8)).find(|&(x, z)| g.column(x, z).1 == want)
+        })
+    };
+    report.features.push("rivers and beaches");
+    for (want, adv) in [(Biome::Beach, "lifes_a_beach"), (Biome::River, "down_by_the_river")] {
+        let Some((x, z)) = find(&host.world.generator, want) else {
+            report.problems.push(format!("no {want:?} anywhere near spawn"));
+            continue;
+        };
+        let (cx, cz) = (x.div_euclid(crate::world::CW), z.div_euclid(crate::world::CW));
+        for dz in -1..=1 {
+            for dx in -1..=1 {
+                host.world.load_now(cx + dx, cz + dz);
+            }
+        }
+        let sea = host.world.sea();
+        let h = host.world.generator.column(x, z).0.max(sea);
+        let spot = Vec3::new(x as f32 + 0.5, h as f32 + 1.05, z as f32 + 0.5);
+        if let Some(p) = host.peers.get_mut(&id_k) {
+            p.target = spot;
+        }
+        let g = &mut team[k].game;
+        g.player.body.pos = spot;
+        g.player.body.vel = Vec3::ZERO;
+        g.player.fall_start = spot.y;
+        let start = Instant::now();
+        // (All of the patch compared below.)
+        let around = |g: &Game| [(-3, -3), (3, -3), (-3, 3), (3, 3)].iter().all(|&(dx, dz)| g.world.is_loaded(x + dx, z + dz));
+        while !around(g) && start.elapsed() < Duration::from_secs(30) {
+            g.world.stream(&[(spot, 2)]);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        pump(host, team, 1.5, |_| idle());
+        // The same land on both sides: the column and its neighbours, from the bed up.
+        let differ = (-3..=3).flat_map(|dz| (-3..=3).map(move |dx| (dx, dz))).flat_map(|(dx, dz)| (sea - 10..sea + 10).map(move |y| IVec3::new(x + dx, y, z + dz))).find(|&p| host.world.get_v(p) != team[k].game.world.get_v(p));
+        if let Some(p) = differ {
+            report.problems.push(format!("at the {want:?} by {x},{z}, the host has {} at {p} and {name} sees {}", block(host.world.get_v(p)).key, block(team[k].game.world.get_v(p)).key));
+        }
+        if !team[k].game.advancements.earned.iter().any(|a| a == adv) {
+            report.problems.push(format!("{name} stood in the {want:?} at {x},{z} but never heard about {adv}"));
+        }
+    }
+    if let Some(p) = host.peers.get_mut(&id_k) {
+        p.target = home;
+    }
+    team[k].game.player.body.pos = home;
+    team[k].game.player.fall_start = home.y;
+    ground(host, team, k);
+}
+
 /// A small mod the `--playtest` command installs, so the bots can try a mod's
 /// dimension (see modgen.rs). (Not for the unit test: it would change the
 /// blocks under every other test running alongside.)
@@ -2460,7 +2540,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

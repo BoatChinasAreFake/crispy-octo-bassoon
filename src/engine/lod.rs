@@ -63,7 +63,7 @@ fn surface(h: i32, biome: Biome, sea: i32) -> (Id, [f32; 3]) {
     }
     match biome {
         Biome::Badlands => (RED_SAND, [1.0; 3]),
-        Biome::Desert => (SAND, [1.0; 3]),
+        Biome::Desert | Biome::Beach => (SAND, [1.0; 3]),
         _ if beach => (SAND, [1.0; 3]),
         Biome::Snowy => (SNOW_GRASS, [1.0; 3]),
         Biome::Mangrove => (MUD, [1.0; 3]),

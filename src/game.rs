@@ -1179,6 +1179,8 @@ impl Game {
             Biome::StonyPeaks => Some("peak_performance"),
             Biome::WarmOcean => Some("warm_welcome"),
             Biome::FrozenOcean => Some("brr"),
+            Biome::River => Some("down_by_the_river"),
+            Biome::Beach => Some("lifes_a_beach"),
             _ => None,
         };
         if let Some(k) = key {
