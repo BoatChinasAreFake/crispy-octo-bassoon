@@ -111,14 +111,15 @@ A new world generator (version 7) that keeps what works in the current one (read
 4. Cave biomes by depth: dripstone, lush caves and the Deep Dark chosen from the same climate plus depth.
 5. Mod biomes can give a target climate (hot, dry, inland, rugged...) and take the places nearest to it that the built-in rules leave free.
 6. Settling in: structures, villages, mansions and hot springs placed sensibly on the new land, and biome maps of many seeds checked for variety and sensible neighbours.
+7. Terrain refinements (the user's request): broader continents and climate regions, river widths independent of valley scale, bays and rocky shores with slope-aware beaches, mountain foothills/passes/plateaus, elevation-aware alpine snow, and blended ground cover/tree density at ordinary biome borders. Recheck caves and structures against the larger terrain.
 
-Originals: not chosen yet. The Part 2 core implements items 4, 5 and 6 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
+Originals: not chosen yet. The Part 2 core implements items 4 to 7 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
 
-Implementation compatibility: Part 1 worlds retain generator revision 7. Part 2 core uses revision 8 for new worlds, reusing revision 7's surface shape and climate; revisions 0–7 retain their generation rules.
+Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 9 for the requested terrain refinements; revisions 0–8 retain their generation rules. Protocol 44 prevents older clients from clamping revision 9 to their newest supported generator.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**
-- Part 2: items 4, 5 and 6, and the two originals (this is the last part).
+- Part 2: items 4 to 7, and the two originals (this is the last part).
 
 ## v0.7: The Hollow, filled in
 

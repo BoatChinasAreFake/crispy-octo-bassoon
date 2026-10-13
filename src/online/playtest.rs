@@ -2567,6 +2567,22 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
     if let Some(at)=host.world.generator.nearest_site(crate::structures::Kind::Village,home,160) {
         compare_generated_patch(host,team,report,touched,at.as_vec3()+Vec3::new(5.5,2.05,0.5),"village foundation");
     } else { report.problems.push("no village in the placement playtest".into()); }
+    if host.world.generator.opts.version >= 9 {
+        report.features.push("broader terrain and rocky coasts");
+        for rocky in [false,true] {
+            let g=&host.world.generator;
+            let found=(-4096..4096).step_by(32).flat_map(|z|(-4096..4096).step_by(32).map(move|x|(x,z)))
+                .find(|&(x,z)| {
+                    let (h,b)=g.column(x,z);
+                    if rocky { h>=g.sea() && !matches!(b,crate::world::Biome::Snowy | crate::world::Biome::IceSpikes) && g.shore_shape(x,z,&g.place_v7(x,z)).1 }
+                    else { b==crate::world::Biome::River }
+                });
+            if let Some((x,z))=found {
+                let h=g.column(x,z).0.max(g.sea());
+                compare_generated_patch(host,team,report,touched,Vec3::new(x as f32+0.5,h as f32+1.05,z as f32+0.5),if rocky { "rocky coast" } else { "bounded river" });
+            } else { report.problems.push(if rocky { "no rocky coast in the placement playtest" } else { "no river in the placement playtest" }.into()); }
+        }
+    }
     // The CLI installs this mod before both host and clients build generators.
     if host.world.generator.biomes.iter().any(|b|b.climate.is_some()) {
         report.features.push("mod climate targets");
@@ -2631,7 +2647,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

@@ -34,6 +34,10 @@ pub(crate) fn parse_args() -> Option<ShotArgs> {
             Some("settled_mansion") => "mansion".into(),
             Some("settled_spring") => "hotspring".into(),
             Some("climate_mod") => "modhut".into(),
+            Some("terrain_mountains") => "stonypeaks".into(),
+            Some("terrain_meadow") => "meadow".into(),
+            Some("terrain_river") => "river".into(),
+            Some("terrain_beach") => "beach".into(),
             Some(mode) => mode.into(),
             None => "title".into(),
         },
@@ -259,6 +263,30 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
+        "rockyshore" | "biomeborder" => {
+            for r in 0..400 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let (h, b) = generator.column(x, z);
+                    let fits = if mode == "rockyshore" {
+                        h >= generator.sea() - 1 && h <= generator.sea() + 5
+                            && generator.shore_shape(x, z, &generator.place_v7(x, z)).1
+                            && !matches!(b, world::Biome::Snowy | world::Biome::IceSpikes)
+                    } else {
+                        h > generator.sea() + 3 && b == world::Biome::Plains
+                            && [(20, 0), (-20, 0), (0, 20), (0, -20)].iter()
+                                .any(|&(i,j)| generator.column(x+i,z+j).1 == world::Biome::Forest)
+                    };
+                    if fits {
+                        let to = Vec3::new(x as f32, h as f32 + 1.0, z as f32);
+                        let (fx, fz) = (x + 24, z + 24);
+                        let from = Vec3::new(fx as f32, generator.column(fx,fz).0.max(h) as f32 + 12.0, fz as f32);
+                        return Some(look(from, to));
+                    }
+                }
+            }
+            return None;
+        }
         "river" | "beach" => {
             // From the land beside a river, looking along its valley; or from
             // above a beach, looking out to sea.
@@ -434,7 +462,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" | "rockyshore" | "biomeborder" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -2337,6 +2365,7 @@ impl App {
 const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
+    "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is

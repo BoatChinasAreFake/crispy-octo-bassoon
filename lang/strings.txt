@@ -2643,7 +2643,9 @@ blasts never break blocks
 blocks placed and broken
 books are enchantable
 bosses shrug off knockback by default
+bounded river
 bounties were done
+broader terrain and rocky coasts
 burned to a crisp. Extra crispy
 buzzing with bees
 calm under the smoke
@@ -2865,6 +2867,8 @@ no climate-target mod patch
 no flowers in reach (they need some within seven blocks)
 no free port
 no naturally open {} cave
+no river in the placement playtest
+no rocky coast in the placement playtest
 no village anywhere near spawn to try growing villages in
 no village in the placement playtest
 no welcome
@@ -2924,6 +2928,7 @@ respawn with a full stomach
 revision 7 keeps its released advancement rule
 right-click opens it
 rivers and beaches
+rocky coast
 rotation bonus
 rotation bonus!
 rotation preserves the vertical lob
@@ -3284,6 +3289,7 @@ zombie hmmer
 {} made a team and {} joined it, and the host doesn't have them together
 {} made you an operator. Try /help.
 {} mixed columns at {} borders
+{} mixed, {} protected
 {} near {}, and then, briefly, not seen at all. Repairs are under way.
 {} never had the village at {} load around them
 {} never heard how {} died

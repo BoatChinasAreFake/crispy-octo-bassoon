@@ -574,6 +574,8 @@ pub struct GenOptions {
     /// biomes picked from the shape and then the climate, rivers and beaches
     /// (see shape.rs).
     /// 8: climate-and-depth caves, mod climate targets and footprint placement.
+    /// 9: broader land/climate, bounded rivers, varied shores and mountains,
+    /// elevation-aware snow and blended vegetation at ordinary biome borders.
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -586,7 +588,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 8, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 9, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -831,8 +833,9 @@ impl Generator {
         let bs = self.opts.biome_scale();
         let warp = 26.0 * bs.sqrt();
         let (wx, wz) = (self.hills.noise2(fx / 61.0 + 410.0, fz / 61.0) * warp, self.hills.noise2(fx / 61.0, fz / 61.0 - 520.0) * warp);
-        let t = self.temp.fbm2((fx + wx) / (400.0 * bs) + 300.0, (fz + wz) / (400.0 * bs), 3);
-        let m = self.moist.fbm2((fx - wz) / (300.0 * bs), (fz + wx) / (300.0 * bs) - 200.0, 3);
+        let scale = if self.opts.version >= 9 { 2.0 } else { 1.0 };
+        let t = self.temp.fbm2((fx + wx) / (400.0 * bs * scale) + 300.0, (fz + wz) / (400.0 * bs * scale), 3);
+        let m = self.moist.fbm2((fx - wz) / (300.0 * bs * scale), (fz + wx) / (300.0 * bs * scale) - 200.0, 3);
         (t, m)
     }
 
@@ -957,18 +960,20 @@ impl Generator {
         if self.opts.version < 3 {
             return own;
         }
-        let jx = ((hash2(self.seed ^ 0xB1E, x, z) - 0.5) * 9.0) as i32;
-        let jz = ((hash2(self.seed ^ 0xB1F, x, z) - 0.5) * 9.0) as i32;
+        let width = if self.opts.version >= 9 { 48.0 } else { 9.0 };
+        let jx = ((hash2(self.seed ^ 0xB1E, x, z) - 0.5) * width) as i32;
+        let jz = ((hash2(self.seed ^ 0xB1F, x, z) - 0.5) * width) as i32;
         let other = self.column(x + jx, z + jz).1;
         // (Only between land biomes: the shore stays where the water is.)
         let keeps = |b: Biome| b.is_ocean() || matches!(b, Biome::StonyPeaks | Biome::MushroomIslands | Biome::River | Biome::Beach);
-        if keeps(other) || keeps(own) { own } else { other }
+        let special = |b| matches!(b, Biome::IceSpikes | Biome::Cherry | Biome::PaleGarden | Biome::Swamp | Biome::Mangrove);
+        if keeps(other) || keeps(own) || (self.opts.version >= 9 && (special(other) || special(own))) { own } else { other }
     }
 
     /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
     pub fn cold(&self, x: i32, z: i32) -> bool {
         if self.opts.version >= 3 {
-            return self.climate(x, z).0 < -0.32;
+            return self.climate(x, z).0 < if self.opts.version >= 9 { -0.38 } else { -0.32 };
         }
         let bs = self.opts.biome_scale();
         self.temp.fbm2(x as f32 / (520.0 * bs) + 300.0, z as f32 / (520.0 * bs), 3) < -0.3
@@ -993,6 +998,14 @@ impl Generator {
     /// A tree rooted at this column: ground height, trunk height and kind.
     pub fn tree_at(&self, x: i32, z: i32) -> Option<(i32, i32, TreeKind)> {
         let (h, biome) = self.column(x, z);
+        let biome = if self.opts.version >= 9 {
+            if (self.sea() - 1..=self.sea() + 5).contains(&h) && self.shore_shape(x, z, &self.place_v7(x, z)).1 {
+                return None;
+            }
+            // The same stochastic border blend controls tree density/species,
+            // surface material and ground cover, not just the ground texture.
+            self.ground_biome(x, z, biome)
+        } else { biome };
         let density = match biome {
             Biome::Forest => 0.035,
             Biome::Plains => 0.004,
@@ -1101,7 +1114,12 @@ impl Generator {
                 cols[(lz * CW + lx) as usize] = (h, biome);
                 // (What the ground is made of: ragged at the borders; see `ground_biome`.)
                 let biome = self.ground_biome(x, z, biome);
-                let beach = (self.sea() - 1..=self.sea() + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::MushroomIslands | Biome::IceSpikes | Biome::StonyPeaks);
+                let rocky_shore = self.opts.version >= 9 && (self.sea() - 1..=self.sea() + 5).contains(&h)
+                    && !matches!(biome, Biome::Snowy | Biome::IceSpikes | Biome::MushroomIslands)
+                    && self.shore_shape(x, z, &self.place_v7(x, z)).1;
+                let beach = if self.opts.version >= 9 { biome == Biome::Beach } else {
+                    (self.sea() - 1..=self.sea() + 1).contains(&h) && !matches!(biome, Biome::Snowy | Biome::Swamp | Biome::Badlands | Biome::MushroomIslands | Biome::IceSpikes | Biome::StonyPeaks)
+                };
                 let peaks = biome == Biome::StonyPeaks;
                 // (Mangrove mudflats are muddier swamps.)
                 let swamp = matches!(biome, Biome::Swamp | Biome::Mangrove);
@@ -1114,6 +1132,8 @@ impl Generator {
                 for y in 0..CH.min(h.max(self.sea()) + 1) {
                     let id = if y == 0 || (y <= 2 && hash3(s, x, y, z) < 0.5) {
                         BEDROCK
+                    } else if rocky_shore && y >= h - 3 && y <= h {
+                        if y == h && hash2(s ^ 0xC0A57, x >> 2, z >> 2) < 0.3 { GRAVEL } else { STONE }
                     } else if badlands && y >= h - 14 && (y < h || (y == h && steep)) {
                         // Bands of terracotta.
                         TERRACOTTA + [0, 1, 0, 2, 3, 0, 1, 2][((y + wobble).rem_euclid(24) / 3) as usize] as Id
@@ -2270,10 +2290,50 @@ mod biome_tests {
     use super::*;
 
     #[test]
+    fn latest_ecotones_blend_ground_and_keep_shape_landmarks() {
+        let g = Generator::with(2024, GenOptions { structures: 0, ..GenOptions::DEFAULT });
+        let mut mixed = 0;
+        let mut protected = 0;
+        for z in (-4096..4096).step_by(64) {
+            for x in (-4096..4096).step_by(16) {
+                let own = g.column(x,z).1;
+                let cover = g.ground_biome(x,z,own);
+                if own.is_ocean() || matches!(own, Biome::River | Biome::Beach | Biome::StonyPeaks | Biome::MushroomIslands | Biome::IceSpikes | Biome::Cherry | Biome::PaleGarden | Biome::Swamp | Biome::Mangrove) {
+                    assert_eq!(cover,own);
+                    protected += 1;
+                } else if cover != own {
+                    assert!(!cover.is_ocean() && !matches!(cover,Biome::River | Biome::Beach | Biome::StonyPeaks));
+                    mixed += 1;
+                }
+            }
+        }
+        assert!(mixed > 50 && protected > 500, "{mixed} mixed, {protected} protected");
+    }
+
+    #[test]
+    fn rocky_coasts_generate_stone_and_gravel_without_tree_roots() {
+        let _lock = crate::mods::registry_test_lock();
+        let g = Generator::with(77, GenOptions { structures: 0, ..GenOptions::DEFAULT });
+        let mut checked = 0;
+        'search: for z in (-4096..4096).step_by(16) {
+            for x in (-4096..4096).step_by(16) {
+                let (h,biome)=g.column(x,z);
+                if !(g.sea()+1..=g.sea()+5).contains(&h) || matches!(biome,Biome::Snowy | Biome::IceSpikes) || !g.shore_shape(x,z,&g.place_v7(x,z)).1 { continue; }
+                let b=g.generate(x.div_euclid(CW),z.div_euclid(CW));
+                assert!(matches!(b[idx(x.rem_euclid(CW),h,z.rem_euclid(CW))],STONE | GRAVEL));
+                assert!(g.tree_at(x,z).is_none());
+                checked += 1;
+                if checked == 8 { break 'search; }
+            }
+        }
+        assert_eq!(checked,8);
+    }
+
+    #[test]
     fn generation_compatibility_fixtures() {
         let _lock = crate::mods::registry_test_lock();
-        let expected = [0xe47b0d9ff29082d0, 0xe47b0d9ff29082d0, 0x3afd8bc9b13b404a, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x8b9d73f9458eb1fa];
-        for version in 0..=7 {
+        let expected = [0xe47b0d9ff29082d0, 0xe47b0d9ff29082d0, 0x3afd8bc9b13b404a, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x8b9d73f9458eb1fa, 0xc84556a2d6219704];
+        for version in 0..=8 {
             let g = Generator::with(424242, GenOptions { version, ..GenOptions::DEFAULT });
             let mut hash = 0xcbf29ce484222325u64;
             for (cx, cz) in [(0, 0), (-7, 11), (31, -29)] {
@@ -2463,7 +2523,8 @@ mod v3_tests {
         }
         // Smaller than "normal" was before version 3.
         let before = Generator::with(2024, GenOptions { version: 2, ..GenOptions::DEFAULT });
-        let (now, then) = (median_run(&g), median_run(&before));
+        let v3 = Generator::with(2024, GenOptions { version: 3, ..GenOptions::DEFAULT });
+        let (now, then) = (median_run(&v3), median_run(&before));
         assert!(now * 3 < then * 2 && now >= 16, "median stretch {now} blocks (it was {then})");
     }
 

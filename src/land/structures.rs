@@ -359,6 +359,11 @@ impl Generator {
     /// region may hold a site (so any two are at least two chunks apart), if
     /// the region rolls one and no village is within two chunks.
     pub fn structure_slot(&self, cx: i32, cz: i32) -> bool {
+        // Mansions use their own grid and have basements plus settling
+        // aprons. Reserve their neighbourhood before common sites roll.
+        if self.opts.version >= 9 && (-2..=2).any(|dz| (-2..=2).any(|dx| self.mansion_spot(cx + dx, cz + dz))) {
+            return false;
+        }
         // (From version 7, nothing right beside where a monument may go, either.)
         if self.opts.version >= 7 && (-1..=1).any(|dz| (-1..=1).any(|dx| self.monument_spot(cx + dx, cz + dz))) {
             return false;
@@ -1385,6 +1390,22 @@ mod tests {
             }
         }
         assert!(exercised, "a footprint enclosing a river");
+    }
+
+    #[test]
+    fn revision_nine_reserves_mansion_neighbourhoods() {
+        let g = Generator::with(31337, crate::world::GenOptions::DEFAULT);
+        let mut found = 0;
+        for cz in -40..40 {
+            for cx in -40..40 {
+                if !g.mansion_spot(cx,cz) { continue; }
+                found += 1;
+                for dz in -2..=2 { for dx in -2..=2 {
+                    assert!(!g.structure_slot(cx+dx,cz+dz));
+                } }
+            }
+        }
+        assert!(found > 0);
     }
 
     #[test]
