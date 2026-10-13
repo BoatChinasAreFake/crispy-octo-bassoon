@@ -49,6 +49,25 @@ pub fn floor_plant(g: &Generator, biome: Biome, x: i32, z: i32, depth: i32) -> O
 }
 
 impl Generator {
+    /// Beach scrub, occasional weathered log clusters and sparse turtle nests.
+    /// The shared cell anchor makes logs continuous across chunk boundaries.
+    pub fn beach_feature(&self,x:i32,z:i32,h:i32)->Option<Id> {
+        if self.opts.version<10 || h<self.sea()+1 { return None; }
+        let s=self.seed^0xB3AC0;
+        let (cx,cz)=(x.div_euclid(32),z.div_euclid(32));
+        if hash2(s,cx,cz)<0.12 {
+            let (rx,rz)=(cx*32+8+(hash2(s^1,cx,cz)*16.0) as i32,cz*32+8+(hash2(s^2,cx,cz)*16.0) as i32);
+            let len=2+(hash2(s^3,cx,cz)*3.0) as i32;
+            let along=if hash2(s^4,cx,cz)<0.5 { z==rz && (rx..rx+len).contains(&x) } else { x==rx && (rz..rz+len).contains(&z) };
+            if along && self.column(rx,rz)==(h,Biome::Beach) { return Some(LOG); }
+        }
+        let r=hash2(s^5,x,z);
+        if r<0.0003 && self.climate(x,z).0>0.1 { Some(TURTLE_EGG) }
+        else if r<0.006 { Some(DEAD_BUSH) }
+        else if r<0.045 && hash2(s^6,x>>3,z>>3)<0.35 { Some(TALL_GRASS) }
+        else { None }
+    }
+
     /// How far an iceberg rises above a frozen sea here (0: none). Bergs sit
     /// on a grid, one per 24 blocks or so, each a lumpy mound of packed ice.
     pub fn iceberg(&self, x: i32, z: i32) -> i32 {
@@ -77,6 +96,56 @@ impl Generator {
 }
 
 impl Game {
+    pub(crate) fn sea_spawn_room(&self,at:Vec3)->bool {
+        let wet=|id|is_water(id)||waterlogged(id);
+        [Vec3::ZERO,Vec3::new(0.5,0.0,0.0),Vec3::new(-0.5,0.0,0.0),Vec3::new(0.0,0.6,0.0),Vec3::new(0.0,0.0,0.5),Vec3::new(0.0,0.0,-0.5)]
+            .iter().all(|&off|wet(self.world.get_v((at+off).floor().as_ivec3())))
+    }
+
+    /// A dedicated marine pass: local schools/pods don't share land-animal
+    /// caps, while hard world caps bound memory and host simulation work.
+    pub(crate) fn try_sea_wildlife(&mut self,center:Vec3)->bool {
+        use crate::entity::MobKind;
+        let mut centers=vec![center];
+        if !self.away() { centers.push(self.player.body.pos); }
+        centers.extend(self.peers.values().map(|p|p.target));
+        // Recycle wild schools outside every player's loaded surroundings;
+        // kept animals remain, and still count against the hard limit.
+        self.mobs.retain(|m|m.persistent || !matches!(m.kind,MobKind::Fishy|MobKind::Dolphin)
+            || centers.iter().any(|p|m.body.pos.distance_squared(*p)<=192.0*192.0));
+        let fish_cap=(64+8*self.peers.len()).min(128);
+        let dolphin_cap=(12+2*self.peers.len()).min(24);
+        for _ in 0..4 {
+            let angle=self.rng.range(0.0,std::f32::consts::TAU);
+            let radius=self.rng.range(20.0,52.0);
+            let (x,z)=((center.x+angle.cos()*radius).floor() as i32,(center.z+angle.sin()*radius).floor() as i32);
+            if !self.world.is_loaded(x,z) { continue; }
+            let biome=self.world.generator.column(x,z).1;
+            if !biome.is_ocean() { continue; }
+            let sea=self.world.sea();
+            let wet=|id| is_water(id)||waterlogged(id);
+            let top=if biome==Biome::FrozenOcean { sea-1 } else { sea };
+            let depth=(0..top).take_while(|d| wet(self.world.get(x,top-d,z))).count() as i32;
+            if depth<3 { continue; }
+            let fish=self.mobs.iter().filter(|m|m.kind==MobKind::Fishy).count();
+            let dolphins=self.mobs.iter().filter(|m|m.kind==MobKind::Dolphin).count();
+            let local_fish=self.mobs.iter().filter(|m|m.kind==MobKind::Fishy && m.body.pos.distance_squared(center)<96.0*96.0).count();
+            let local_dolphins=self.mobs.iter().filter(|m|m.kind==MobKind::Dolphin && m.body.pos.distance_squared(center)<96.0*96.0).count();
+            let (kind,n,y)=if biome!=Biome::FrozenOcean && depth>=5 && dolphins<dolphin_cap && local_dolphins<6 && self.rng.chance(0.22) {
+                (MobKind::Dolphin,(self.rng.int(1,2) as usize).min(dolphin_cap-dolphins).min(6-local_dolphins),sea-2)
+            } else if fish<fish_cap && local_fish<24 && self.rng.chance(0.8) {
+                (MobKind::Fishy,(self.rng.int(4,7) as usize).min(fish_cap-fish).min(24-local_fish),top-1-self.rng.int(0,(depth-3).min(10)))
+            } else { continue; };
+            let mut spawned=false;
+            for i in 0..n {
+                let at=Vec3::new(x as f32+0.5+i as f32*0.8,y as f32+0.5,z as f32+0.5-i as f32*0.6);
+                if self.sea_spawn_room(at) { self.alloc_mob(kind,at);spawned=true; }
+            }
+            if spawned { return true; }
+        }
+        false
+    }
+
     /// A waterlogged block was broken (where the world lives): the water
     /// stays, and broken kelp takes the kelp above it with it.
     pub fn sea_block_gone(&mut self, p: IVec3, old: Id) {
@@ -130,6 +199,64 @@ mod tests {
     use super::*;
 
     use macroquad::math::ivec3;
+
+    #[test]
+    fn ocean_wildlife_forms_schools_without_land_caps_or_dry_spawns() {
+        use crate::entity::MobKind;
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=Game::new_with(77,true,false,crate::world::GenOptions::DEFAULT);
+        let (x,z)=(-4096..4096).step_by(64).flat_map(|z|(-4096..4096).step_by(64).map(move|x|(x,z)))
+            .find(|&(x,z)|[-64,0,64].iter().all(|&dx|[-64,0,64].iter().all(|&dz| {
+                let (h,b)=g.world.generator.column(x+dx,z+dz);b==Biome::Ocean && h<g.world.sea()-12
+            }))).expect("open ocean habitat");
+        let center=Vec3::new(x as f32+0.5,g.world.sea() as f32+2.0,z as f32+0.5);
+        for dz in -4..=4 { for dx in -4..=4 { g.world.load_now(x.div_euclid(16)+dx,z.div_euclid(16)+dz); } }
+        for _ in 0..16 { g.alloc_mob(MobKind::Mooer,center+Vec3::Y*4.0); }
+        for _ in 0..160 { g.try_sea_wildlife(center); }
+        let fish=g.mobs.iter().filter(|m|m.kind==MobKind::Fishy).count();
+        let dolphins=g.mobs.iter().filter(|m|m.kind==MobKind::Dolphin).count();
+        assert!((18..=24).contains(&fish) && (2..=6).contains(&dolphins),"{fish} fish, {dolphins} dolphins");
+        assert!(g.mobs.iter().filter(|m|matches!(m.kind,MobKind::Fishy|MobKind::Dolphin)).all(|m|g.sea_spawn_room(m.body.pos)));
+        assert!(!g.sea_spawn_room(center+Vec3::Y*10.0));
+        for m in &mut g.mobs { if matches!(m.kind,MobKind::Fishy|MobKind::Dolphin) { m.body.pos.x+=10000.0; } }
+        for _ in fish..64 { g.alloc_mob(MobKind::Fishy,center+Vec3::X*10000.0); }
+        for _ in dolphins..12 { g.alloc_mob(MobKind::Dolphin,center+Vec3::X*10000.0); }
+        for m in &mut g.mobs { if matches!(m.kind,MobKind::Fishy|MobKind::Dolphin) { m.persistent=true; } }
+        let count=g.mobs.len();
+        for _ in 0..40 { assert!(!g.try_sea_wildlife(center)); }
+        assert_eq!(g.mobs.len(),count,"distant schools still respect world caps");
+        for m in &mut g.mobs { if matches!(m.kind,MobKind::Fishy|MobKind::Dolphin) { m.persistent=false; } }
+        for _ in 0..100 { g.try_sea_wildlife(center); }
+        assert!(g.mobs.iter().filter(|m|matches!(m.kind,MobKind::Fishy|MobKind::Dolphin)).all(|m|m.body.pos.distance_squared(center)<96.0*96.0));
+        assert!(g.mobs.iter().filter(|m|m.kind==MobKind::Fishy).count()>=18,"wild slots are recycled at a new coast");
+    }
+
+    #[test]
+    fn beach_details_use_supported_existing_blocks() {
+        let _lock=crate::mods::registry_test_lock();
+        let g=Generator::with(1234,crate::world::GenOptions{structures:0,..crate::world::GenOptions::DEFAULT});
+        let mut found=std::collections::HashSet::new();
+        let mut checked=0;
+        'search: for z in (-4096..4096).step_by(8) { for x in (-4096..4096).step_by(8) {
+            let (h,b)=g.column(x,z);
+            if b!=Biome::Beach || h<g.sea()+1 { continue; }
+            for dz in 0..8 { for dx in 0..8 {
+                let (xx,zz)=(x+dx,z+dz);let (hh,bb)=g.column(xx,zz);
+                if bb!=Biome::Beach { continue; }
+                if let Some(id)=g.beach_feature(xx,zz,hh) {
+                    if id==TURTLE_EGG { assert!(g.climate(xx,zz).0>0.1); }
+                    assert!(hh>g.sea());found.insert(id);
+                    if checked<12 {
+                        let blocks=g.generate(xx.div_euclid(16),zz.div_euclid(16));
+                        let ground=blocks[crate::world::idx(xx.rem_euclid(16),hh,zz.rem_euclid(16))];
+                        assert!(matches!(ground,SAND|GRAVEL));checked+=1;
+                    }
+                }
+            } }
+            if found.len()==4 && checked>=12 { break 'search; }
+        } }
+        assert!(found.contains(&LOG) && found.contains(&TALL_GRASS) && found.contains(&DEAD_BUSH) && found.contains(&TURTLE_EGG),"{found:?}");
+    }
 
     /// A pool, 8 deep, over the arena's floor.
     fn pool(g: &mut Game) {

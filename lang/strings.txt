@@ -2638,6 +2638,7 @@ bad world id
 barely bothering
 barely knocked up
 base items the palette doesn't mention stay put
+beach ecology
 birch door
 blasts never break blocks
 blocks placed and broken
@@ -2732,6 +2733,7 @@ hung on the east wall
 id is in the palette
 ids moved
 inventory too long
+islands and beach ecology
 it finishes
 it gave up on all of them
 it pours into the hole left behind
@@ -2739,6 +2741,7 @@ it takes a while ({} looks)
 it turns toward the player
 join Blues
 join Reds
+joined player never saw the marine school
 just added
 just made
 just now
@@ -2843,6 +2846,7 @@ looking straight at its face
 lost a staring contest with a Starer
 magma bloop
 magma cube
+marine spawning produced no school
 meat and vegetables
 meat, vegetables and grain
 median stretch {} blocks (it was {})
@@ -2864,9 +2868,12 @@ no Pointy Sticks, no shot
 no address found
 no answer
 no climate-target mod patch
+no decorated beach in the placement playtest
 no flowers in reach (they need some within seven blocks)
 no free port
 no naturally open {} cave
+no offshore island in the placement playtest
+no open ocean in the wildlife playtest
 no river in the placement playtest
 no rocky coast in the placement playtest
 no village anywhere near spawn to try growing villages in
@@ -2891,6 +2898,7 @@ nothing changed yet
 nothing fits
 nothing left to shear
 notice board
+offshore island
 on, stays on, off, stays off
 once on the press
 one book at a time
@@ -2900,6 +2908,7 @@ one projectile always uses angle zero
 one twang per volley
 only once
 only ores
+open ocean
 open to LAN
 ordinary arrows carry no effect
 overlapping projectiles pass through spectators without being consumed
@@ -2940,6 +2949,7 @@ save is from a newer version ({})
 scooped up
 script context vanished
 script error: {}
+sea wildlife
 seed {}: spawn at {} stands on {}
 server status
 serviceType

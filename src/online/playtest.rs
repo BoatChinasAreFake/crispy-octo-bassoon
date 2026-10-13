@@ -2586,6 +2586,42 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
         }
     }
     // The CLI installs this mod before both host and clients build generators.
+    if host.world.generator.opts.version>=10 {
+        report.features.push("islands and beach ecology");
+        for beach in [false,true] {
+            let g=&host.world.generator;
+            let found=(-4096..4096).step_by(8).flat_map(|z|(-4096..4096).step_by(8).map(move|x|(x,z)))
+                .find(|&(x,z)| {
+                    let (h,b)=g.column(x,z);
+                    if beach {
+                        b==crate::world::Biome::Beach && h>g.sea() && g.beach_feature(x,z,h).is_some_and(|id|
+                            g.generate(x.div_euclid(16),z.div_euclid(16))[crate::world::idx(x.rem_euclid(16),h+1,z.rem_euclid(16))]==id)
+                    } else { h>g.sea()+3 && b!=crate::world::Biome::MushroomIslands && g.ocean_island(x,z)>0.7 && g.shape_noise(x,z).0< -0.28 }
+                });
+            if let Some((x,z))=found {
+                let h=g.column(x,z).0;
+                compare_generated_patch(host,team,report,touched,Vec3::new(x as f32+0.5,h as f32+2.05,z as f32+0.5),if beach { "beach ecology" } else { "offshore island" });
+            } else { report.problems.push(if beach { "no decorated beach in the placement playtest" } else { "no offshore island in the placement playtest" }.into()); }
+        }
+        report.features.push("sea wildlife");
+        let g=&host.world.generator;
+        let found=(-4096..4096).step_by(64).flat_map(|z|(-4096..4096).step_by(64).map(move|x|(x,z)))
+            .find(|&(x,z)|[-64,0,64].iter().all(|&dx|[-64,0,64].iter().all(|&dz|{
+                let (h,b)=g.column(x+dx,z+dz);b==crate::world::Biome::Ocean && h<g.sea()-12
+            })));
+        if let Some((x,z))=found {
+            let spot=Vec3::new(x as f32+0.5,g.sea() as f32+2.05,z as f32+0.5);
+            compare_generated_patch(host,team,report,touched,spot,"open ocean");
+            for dz in -4..=4 { for dx in -4..=4 { host.world.load_now(x.div_euclid(16)+dx,z.div_euclid(16)+dz); } }
+            let first=host.mobs.iter().map(|m|m.id).max().unwrap_or(0);
+            for _ in 0..80 { host.try_sea_wildlife(spot); }
+            let spawned:Vec<u32>=host.mobs.iter().filter(|m|m.id>first && matches!(m.kind,crate::entity::MobKind::Fishy | crate::entity::MobKind::Dolphin)).map(|m|m.id).collect();
+            pump(host,team,2.0,|_|idle());
+            if spawned.len()<4 { report.problems.push("marine spawning produced no school".into()); }
+            if !spawned.iter().any(|&id|team[k].game.mobs.iter().any(|m|m.id==id)) { report.problems.push("joined player never saw the marine school".into()); }
+        } else { report.problems.push("no open ocean in the wildlife playtest".into()); }
+    }
+
     if host.world.generator.biomes.iter().any(|b|b.climate.is_some()) {
         report.features.push("mod climate targets");
         let g=&host.world.generator;
@@ -2661,7 +2697,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "sea wildlife"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

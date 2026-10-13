@@ -576,6 +576,8 @@ pub struct GenOptions {
     /// 8: climate-and-depth caves, mod climate targets and footprint placement.
     /// 9: broader land/climate, bounded rivers, varied shores and mountains,
     /// elevation-aware snow and blended vegetation at ordinary biome borders.
+    /// 10: rolling inland relief, offshore islands, rare larger mushroom
+    /// islands and beach ecology, preserving revisions 0–9.
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -588,7 +590,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 9, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 10, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -1358,6 +1360,11 @@ impl Generator {
                 if top < CH && badlands && b[idx(lx, h, lz)] == RED_SAND && b[idx(lx, top, lz)] == AIR && hash2(s ^ 0xDB, x, z) < 0.02 {
                     b[idx(lx, top, lz)] = DEAD_BUSH;
                 }
+                if self.opts.version>=10 && biome==Biome::Beach && h>self.sea() && b[idx(lx,h,lz)]==SAND {
+                    let gravel=self.hills.noise2(x as f32/18.0+51.0,z as f32/18.0)>0.35 && hash2(s^0xB3AC1,x,z)<0.35;
+                    if gravel { b[idx(lx,h,lz)]=GRAVEL; }
+                    else if top<CH && b[idx(lx,top,lz)]==AIR && let Some(id)=self.beach_feature(x,z,h) { b[idx(lx,top,lz)]=id; }
+                }
                 if swamp && h < self.sea() && b[idx(lx, self.sea(), lz)] == WATER && hash2(s ^ 0x111, x, z) < 0.08 {
                     b[idx(lx, self.sea() + 1, lz)] = LILY_PAD;
                 }
@@ -1443,21 +1450,26 @@ impl Generator {
     /// middle). They're rare: a few in every thousand blocks of sea, each one
     /// a lumpy round island 50 to 100 blocks across.
     pub fn mushroom_isle(&self, x: i32, z: i32) -> f32 {
-        const GRID: i32 = 640;
+        let grid = if self.opts.version >= 10 { 4096 } else { 640 };
         let s = self.seed ^ 0x15E;
-        let (gx, gz) = (x.div_euclid(GRID), z.div_euclid(GRID));
+        let (gx, gz) = (x.div_euclid(grid), z.div_euclid(grid));
         let mut best: f32 = 0.0;
         for dz in -1..=1 {
             for dx in -1..=1 {
                 let (cx, cz) = (gx + dx, gz + dz);
-                if hash2(s, cx, cz) > 0.4 {
+                let chance = if self.opts.version >= 10 { 0.18 } else { 0.4 };
+                if hash2(s, cx, cz) > chance {
                     continue;
                 }
-                let mid = (cx * GRID + 100 + (hash2(s ^ 1, cx, cz) * 440.0) as i32, cz * GRID + 100 + (hash2(s ^ 2, cx, cz) * 440.0) as i32);
-                let radius = 25.0 + hash2(s ^ 3, cx, cz) * 25.0;
+                let (margin, spread, min_radius, radius_range, detail_scale, detail_height) = if self.opts.version >= 10 {
+                    (1024, 2048.0, 360.0, 160.0, 90.0, 48.0)
+                } else { (100, 440.0, 25.0, 25.0, 14.0, 8.0) };
+                let mid = (cx * grid + margin + (hash2(s ^ 1, cx, cz) * spread) as i32, cz * grid + margin + (hash2(s ^ 2, cx, cz) * spread) as i32);
+                let radius = min_radius + hash2(s ^ 3, cx, cz) * radius_range;
                 let d = (((x - mid.0).pow(2) + (z - mid.1).pow(2)) as f32).sqrt();
+                if self.opts.version>=10 && (d>radius+detail_height || !self.offshore_room(mid.0,mid.1,radius as i32)) { continue; }
                 // (Lumpy edges.)
-                let lumps = self.hills.noise2(x as f32 / 14.0 + 77.0, z as f32 / 14.0) * 8.0;
+                let lumps = self.hills.noise2(x as f32 / detail_scale + 77.0, z as f32 / detail_scale) * detail_height;
                 best = best.max(1.0 - (d + lumps) / radius);
             }
         }
@@ -2332,8 +2344,8 @@ mod biome_tests {
     #[test]
     fn generation_compatibility_fixtures() {
         let _lock = crate::mods::registry_test_lock();
-        let expected = [0xe47b0d9ff29082d0, 0xe47b0d9ff29082d0, 0x3afd8bc9b13b404a, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x8b9d73f9458eb1fa, 0xc84556a2d6219704];
-        for version in 0..=8 {
+        let expected = [0xe47b0d9ff29082d0, 0xe47b0d9ff29082d0, 0x3afd8bc9b13b404a, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x8b9d73f9458eb1fa, 0xc84556a2d6219704, 0xf4f1b498d92c27c8];
+        for version in 0..=9 {
             let g = Generator::with(424242, GenOptions { version, ..GenOptions::DEFAULT });
             let mut hash = 0xcbf29ce484222325u64;
             for (cx, cz) in [(0, 0), (-7, 11), (31, -29)] {

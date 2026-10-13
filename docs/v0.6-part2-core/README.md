@@ -1,10 +1,10 @@
 # v0.6 Part 2 core — development branch
 
-Implements roadmap items 4 to 7. The two originals remain undecided, and Part 2 is not marked released. No changes are merged into main and no release is published.
+Implements roadmap items 4 to 8. The two originals remain undecided, and Part 2 is not marked released. No changes are merged into main and no release is published.
 
 ## Behavior and compatibility
 
-- New worlds use generation revision **9** for the requested terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–8** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **45** also rejects clients using the earlier revision 9 bank profile, preventing host/client terrain disagreement.
+- New worlds use generation revision **10** for relief, islands and beach ecology. Revision 9 retains the previous terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–9** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **46** prevents older clients from clamping revision 10 to revision 9.
 - The depth-aware cave selector reuses surface temperature, moisture, continentalness and erosion. Deep Dark takes precedence below height 24 under inland rugged land. Damp, mild land has lush caves from height 24; drier, non-frozen inland land has dripstone at heights 10–48. Bedrock and the top eight blocks below the surface are excluded. Existing carving, blocks, geodes and survival mechanics remain.
 - Climate-target mods use optional bounded axes, a 0.35 per-axis eligibility radius, normalized mean squared distance and stable-key tie-breaking. Targetless patches retain first-match priority. Built-in shape landmarks and rare variants are protected. Targets are ignored in older worlds and rejected for mod dimensions.
 - Surface structures validate their complete bounded footprints, including interiors. Villages check squares, paths, farms and houses; growth sites are filtered too. Mansions remain inside dark forest, and springs require cold, level ground. Overworld mod templates receive supporting foundations, and settling aprons preserve adjacent waterways.
@@ -14,13 +14,13 @@ Implements roadmap items 4 to 7. The two originals remain undecided, and Part 2 
 
 Validated on Linux x86-64 with **Rust 1.90.0**, locked dependencies and the normal release profile (thin LTO):
 
-- `cargo test --release --locked`: **559 passed, 0 failed, 1 ignored** (the manual map export).
+- `cargo test --release --locked`: **563 passed, 0 failed, 1 ignored** (the manual map export).
 - `cargo clippy --release --all-targets --locked -- -D warnings`: clean.
 - `cargo check --release --locked --no-default-features`: passes.
 - Audio mixer tests: **2 passed**. This container required the GNU bfd linker for the standalone vendor test binary.
-- Six-bot, 60-second CLI socket playtest, seed 1234: everyone agrees (103 blocks placed, 87 broken, 130 chat lines). Includes natural cave generation, village foundations, climate-target mod surfaces, bounded rivers, rocky coasts, host edit/restore propagation and advancement delivery.
+- Six-bot, 60-second CLI socket playtest, seed 1234: everyone agrees (122 blocks placed, 106 broken, 129 chat lines). Includes natural cave generation, village foundations, climate-target mod surfaces, bounded rivers, rocky coasts, islands, beach ecology, marine mob snapshots, host edit/restore propagation and advancement delivery.
 - The test suite also runs a two-bot/seed-77 scenario and a six-bot/seed-1234 scenario with base content, without installing a mod registry concurrently.
-- Released-generation regression fixtures were captured from merge commit `3ef73d102c6119e4092c2e59b69e47c8c1d4c556` before implementation: seed 424242, chunks (0,0), (-7,11), (31,-29), for every revision 0–7. Revision 8 was captured from commit `59c38343a05c72044b06a08e49f309bafe8feae2` before the revision 9 edits; all nine fixtures pass.
+- Released-generation regression fixtures were captured from merge commit `3ef73d102c6119e4092c2e59b69e47c8c1d4c556` before implementation: seed 424242, chunks (0,0), (-7,11), (31,-29), for every revision 0–7. Revision 8 was captured from commit `59c38343a05c72044b06a08e49f309bafe8feae2` before the revision 9 edits; all ten fixtures pass.
 - Climate parser tests cover finite bounds, omitted axes, old defaults and unsupported dimensions. Integration tests check generated mod-template blocks, foundations, chest locators and a template spanning a chunk boundary.
 - Twelve-seed automated surveys check variety, sea/land balance, river/beach height constraints and absence of directly adjacent hot/frozen biomes. Revision 8 surface maps, structure overlays and cave slices were visually reviewed; revision 9 surface exports passed for all twelve seeds at 512×512 chunks, with the same ten comparison seeds rendered and inspected.
 - The original seven natural scenes were inspected for revision 8. Six new scenes were rendered and inspected for revision 9: river, rocky coast, beach, mountains, meadow and forest/plains border, using software OpenGL. Audio output was unavailable in this container; audio playback was not auditioned. Windows and macOS builds were not run locally.
@@ -72,3 +72,19 @@ Other scenes: `depth_dripstone`, `depth_lush`, `depth_dark`, `settled_village`, 
 The initial revision 9 river cut stopped at the water biome and left a ledge up to the valley floor. Its replacement blends from four blocks below sea level through an underwater shelf to the dry valley floor over twice the channel half-width, with matching slopes at the shelf and bank joins. Revisions 0–8 keep their original river profiles. Profile tests limit adjacent one-block samples to at most one block of rise at normal channel widths; generated-bank tests inspect edge jumps across three seeds. The natural river screenshot is rechecked for this correction. This refines the unreleased revision 9; protocol 45 rejects clients running the previous bank profile.
 
 While rechecking multiplayer, the playtest loading helper was corrected to wait for the 5×5 neighbourhood around the bot, rather than counting distant cached chunks. A regression test preloads a distant area and verifies that the requested local area is still loaded. This fixes premature reads after moves between cached regions.
+
+## Relief, islands and beach ecology (revision 10)
+
+Medium-scale inland hills add relief without shrinking continents or climate regions. Valley flattening ends at weirdness 0.19 instead of 0.32; the smooth river shelf/bank profile remains. Wetland detail blending is softer to keep swamp/jungle boundaries gentle.
+
+Ordinary islands use a separate 1,024-block grid with a 24% candidate roll and 120–250-block shaping radii. Mushroom candidates move from a 640-block/40% grid to 4,096 blocks/18%, roughly 91 times fewer candidates per unit area before offshore filtering; shaping radii grow from 25–50 to 360–520 blocks. These are shaping radii, not exposed land diameters. Candidate centres and cardinal shores must lie in deep ocean. A regression checks hundreds of blocks of exposed mycelium and separating water.
+
+Gentle beaches extend up to sea level +4 and gain gravel patches, sparse scrub, shared-anchor fallen log clusters and rare warm-shore turtle nests, using existing blocks and mechanics. No new originals are chosen.
+
+A dedicated marine spawning pass tries four water habitats near a player per attempt. Local caps are 24 fish and 6 dolphins within 96 blocks; world limits range from 64 to 128 fish and 12 to 24 dolphins by player count. Each spawn checks water clearance. Marine populations no longer consume land-animal caps, and river fish use local limits. Existing hostile sea life and dark-water Glow Squid remain.
+
+The socket playtest now checks island and decorated-beach regeneration, edit restoration, and delivery of newly spawned marine mobs to the joined player. Revision 9 chunk fixtures were captured from commit `abee1142af7856fb050548c39acec79e4b50f3ca` before this slice.
+
+Current checks: 563 release tests pass, including local marine density, water clearance, hard caps, recycling of distant wild schools, beach support, island isolation/size, increased normalized inland relief, compatibility through revision 9 and socket delivery of marine mobs. Kept marine animals are not recycled. Wild fish and dolphins farther than 192 blocks from every player are removed to free cap space at newly explored coasts.
+
+Ten matched 512×512-chunk surface maps, sampled every eight blocks, contained 203 dry mushroom-biome components in revision 9 and two in revision 10. The largest sampled dry mushroom component grew from 56 to 496 blocks wide. Across 4,016,492 matched dry inland samples, mean height change over 32 blocks increased from 3.07 to 3.61 blocks (about 18%). These are bounded survey statistics, not exact worldwide rates.

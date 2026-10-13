@@ -4077,8 +4077,9 @@ impl Game {
             }
             return;
         }
+        if self.try_sea_wildlife(p) { return; }
         // Kept animals (bred, tamed) don't count against new ones turning up.
-        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent && m.kind != MobKind::Fishy).count();
+        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent && !matches!(m.kind,MobKind::Fishy | MobKind::Dolphin | MobKind::GlowSquid | MobKind::Axolotl)).count();
         // Only wild monsters count towards the monster cap (not fish, Hmmers, pets or bats).
         let hostile = self.wild_monsters();
         let a = self.rng.range(0.0, TAU);
@@ -4109,19 +4110,14 @@ impl Game {
                 }
                 return;
             }
-            // Dolphins in the open sea, in little pods.
-            let dolphins = self.mobs.iter().filter(|m| m.kind == MobKind::Dolphin).count();
-            if dolphins < 6 && depth >= 5 && matches!(biome, Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean) && !self.is_night() && self.rng.chance(0.15) {
-                for i in 0..self.rng.int(1, 3) {
-                    self.alloc_mob(MobKind::Dolphin, Vec3::new(x as f32 + 0.5 + i as f32 * 1.2, (y - 2) as f32, z as f32 + 0.5));
-                }
-                return;
-            }
-            if fish < 12 && depth >= 2 && self.rng.chance(0.6) {
+            // Ocean schools/pods use the dedicated marine pass above.
+            // Rivers retain fish even when another coast already has schools.
+            let local_fish=self.mobs.iter().filter(|m|m.kind==MobKind::Fishy && m.body.pos.distance_squared(p)<96.0*96.0).count();
+            if !biome.is_ocean() && fish<128 && local_fish<12 && depth >= 2 && self.rng.chance(0.6) {
                 let n = self.rng.int(2, 4);
                 for i in 0..n {
                     let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.6, (y - depth / 2) as f32, z as f32 + 0.5 - i as f32 * 0.4);
-                    self.alloc_mob(MobKind::Fishy, pos);
+                    if self.sea_spawn_room(pos) && self.mobs.iter().filter(|m|m.kind==MobKind::Fishy).count()<128 && i < (12-local_fish) as i32 { self.alloc_mob(MobKind::Fishy, pos); }
                 }
                 return;
             }

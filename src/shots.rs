@@ -263,6 +263,46 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
+        "rolling_hills" | "offshore_island" | "large_mushroom" | "beach_ecology" | "sea_wildlife" => {
+            if matches!(mode,"offshore_island"|"large_mushroom") {
+                let mushroom=mode=="large_mushroom";
+                let grid=if mushroom {4096}else{1024};
+                let salt=generator.seed^if mushroom {0x15E}else{0x15_1A4D};
+                let (gx,gz)=((cx0*16).div_euclid(grid),(cz0*16).div_euclid(grid));
+                for r in 0..16 { for (dx,dz) in ring(r) {
+                    let (cx,cz)=(gx+dx,gz+dz);
+                    let (margin,spread)=if mushroom {(1024,2048.0)}else{(280,464.0)};
+                    let (x,z)=(cx*grid+margin+(crate::noise::hash2(salt^1,cx,cz)*spread) as i32,cz*grid+margin+(crate::noise::hash2(salt^2,cx,cz)*spread) as i32);
+                    let (h,b)=generator.column(x,z);
+                    let fits=if mushroom {b==world::Biome::MushroomIslands}else{h>generator.sea()+6 && generator.ocean_island(x,z)>0.7 && generator.shape_noise(x,z).0< -0.28};
+                    if fits {
+                        let (fx,fz)=(x+70,z+70);
+                        let from=Vec3::new(fx as f32,generator.column(fx,fz).0.max(h) as f32+18.0,fz as f32);
+                        return Some(look(from,Vec3::new(x as f32,h as f32+2.0,z as f32)));
+                    }
+                } }
+                return None;
+            }
+            for r in 0..400 { for (dx,dz) in ring(r) {
+                let (x,z)=((cx0+dx)*16+8,(cz0+dz)*16+8);
+                let (h,b)=generator.column(x,z);
+                let fits=match mode {
+                    "rolling_hills"=>matches!(b,world::Biome::Plains|world::Biome::Meadow|world::Biome::Savanna) && h>generator.sea()+10 && generator.shape_noise(x,z).0>0.25
+                        && [(64,0),(-64,0),(0,64),(0,-64)].iter().all(|&(i,j)|{let (_,bb)=generator.column(x+i,z+j);!bb.is_ocean() && bb!=world::Biome::River})
+                        && [(64,0),(-64,0),(0,64),(0,-64)].iter().any(|&(i,j)|(generator.column(x+i,z+j).0-h).abs()>=10),
+                    "beach_ecology"=>b==world::Biome::Beach && h>generator.sea() && generator.beach_feature(x,z,h).is_some_and(|id|
+                        generator.generate(x.div_euclid(16),z.div_euclid(16))[world::idx(x.rem_euclid(16),h+1,z.rem_euclid(16))]==id),
+                    _=>b==world::Biome::Ocean && h<generator.sea()-12 && [-48,0,48].iter().all(|&i|[-48,0,48].iter().all(|&j|generator.column(x+i,z+j).1==world::Biome::Ocean)),
+                };
+                if fits {
+                    let to=Vec3::new(x as f32,h as f32+1.0,z as f32);
+                    if mode=="sea_wildlife" { return Some((Vec3::new(x as f32,generator.sea() as f32-4.0,z as f32),0.8,-0.1)); }
+                    let lift=if mode=="beach_ecology" {6.0}else{16.0};
+                    return Some(look(to+Vec3::new(10.0,lift,14.0),to));
+                }
+            } }
+            return None;
+        }
         "rockyshore" | "biomeborder" => {
             for r in 0..400 {
                 for (dx, dz) in ring(r) {
@@ -462,7 +502,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" | "rockyshore" | "biomeborder" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" | "rockyshore" | "biomeborder" | "rolling_hills" | "offshore_island" | "large_mushroom" | "beach_ecology" | "sea_wildlife" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -500,6 +540,16 @@ impl App {
                         g.move_local_player(crate::dims::Dim::Scorch, pos);
                     }
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
+                }
+                if s.mode=="sea_wildlife" && let Some(pos)=s.pos {
+                    let (cx,cz)=((pos.x.floor() as i32).div_euclid(16),(pos.z.floor() as i32).div_euclid(16));
+                    for dz in -4..=4 { for dx in -4..=4 { g.world.load_now(cx+dx,cz+dz); } }
+                    for _ in 0..60 { g.try_sea_wildlife(pos); }
+                    if let Some(m)=g.mobs.iter().find(|m|m.kind==entity::MobKind::Dolphin) {
+                        let to=m.body.pos;let from=to+Vec3::new(6.0,-1.5,6.0);let d=to-from;
+                        (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                    }
+                    g.inv.armor[0]=Some((block::TURTLE_SHELL,1));
                 }
                 // In front of a village's Notice Board, or looking at where it will build next.
                 if let Some(o) = matches!(s.mode.as_str(), "noticeboard" | "growingvillage" | "shopstall" | "newspaper").then(|| g.world.nearest_site(structures::Kind::Village, g.spawn, 60)).flatten() {
@@ -931,6 +981,14 @@ impl App {
                     app.game.player.body.pos = p;
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
+                }
+                if s.mode=="sea_wildlife" && let Some(to)=app.game.mobs.iter().find(|m|m.kind==entity::MobKind::Dolphin).map(|m|m.body.pos+Vec3::Y*0.3) {
+                    let mut from=to+Vec3::new(4.0,-0.9,5.0);
+                    from.y=from.y.min(app.game.world.sea() as f32-2.0);
+                    let d=to-(from+Vec3::Y*player::EYE);
+                    app.game.player.body.pos=from;
+                    app.game.player.yaw=d.x.atan2(-d.z);
+                    app.game.player.pitch=d.y.atan2(Vec2::new(d.x,d.z).length());
                 }
             }
             if frames >= 150 && frames < 150 + s.chat.len() as u32 {
@@ -2366,6 +2424,7 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
+    "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is
