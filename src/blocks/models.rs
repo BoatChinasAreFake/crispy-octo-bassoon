@@ -73,6 +73,16 @@ fn lantern(body: u16, y: f32) -> Vec<Piece> {
 pub fn pieces(id: Id) -> Option<Vec<Piece>> {
     let t = block(id).tex;
     Some(match id {
+        DRIFTWOOD | DRIFTWOOD_Z => {
+            let mut parts=vec![bx([0.0,0.0,4.0],[16.0,4.0,12.0],T_DRIFTWOOD_SIDE).face(0,T_DRIFTWOOD_END).face(1,T_DRIFTWOOD_END),bx([7.0,2.0,10.0],[10.0,5.0,15.0],T_DRIFTWOOD_SIDE)];
+            if id==DRIFTWOOD_Z {for p in &mut parts {p.lo.swap(0,2);p.hi.swap(0,2);p.tiles.swap(0,4);p.tiles.swap(1,5);}}
+            parts
+        }
+        SHELL_PATCH | SHELL_PATCH_WET => vec![
+            bx([2.0,0.0,2.0],[7.0,2.0,7.0],T_SHELL_PATCH).stretched(ALL),
+            bx([8.0,0.0,7.0],[14.0,3.0,12.0],T_SHELL_PATCH).stretched(ALL),
+            bx([3.0,0.0,11.0],[6.0,1.0,14.0],T_SHELL_PATCH).stretched(ALL),
+        ],
         LANTERN => lantern(T_LANTERN_BODY, 0.0),
         SOUL_LANTERN => lantern(T_SOUL_LANTERN_BODY, 0.0),
         LANTERN_HANGING => {
@@ -280,7 +290,7 @@ mod tests {
 
     #[test]
     fn models_stay_inside_their_cell_and_have_something_to_show() {
-        for id in [LANTERN, SOUL_LANTERN, LANTERN_HANGING, BELL, ENCHANTING_TABLE, GRINDSTONE, POT_FIRST, POT_FIRST + 12, SCAFFOLDING, CHAIN, CHARRED_SKULL, EYE_FRAME, EYE_FRAME_FULL, BREWING_STAND] {
+        for id in [DRIFTWOOD, DRIFTWOOD_Z, SHELL_PATCH, SHELL_PATCH_WET, LANTERN, SOUL_LANTERN, LANTERN_HANGING, BELL, ENCHANTING_TABLE, GRINDSTONE, POT_FIRST, POT_FIRST + 12, SCAFFOLDING, CHAIN, CHARRED_SKULL, EYE_FRAME, EYE_FRAME_FULL, BREWING_STAND] {
             let v = pieces(id).unwrap_or_else(|| panic!("{id} has a model"));
             assert!(!v.is_empty());
             for p in &v {

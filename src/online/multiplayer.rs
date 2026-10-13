@@ -1151,6 +1151,12 @@ impl Game {
         if block(old).hardness < 0.0 && !replaceable(old) {
             return false;
         }
+        // Beach decorations keep their placement support and wet/dry state.
+        let below=self.world.get(x,y-1,z);
+        if new==DUNE_GRASS {return replaceable(old) && !is_wet(old) && matches!(below,SAND|RED_SAND|GRAVEL|DIRT|GRASS);}
+        if matches!(new,SHELL_PATCH|SHELL_PATCH_WET) {
+            return replaceable(old) && is_solid(below) && (new==SHELL_PATCH_WET)==is_wet(old);
+        }
         // Crops only appear on farmland, and only as seedlings: the host grows them.
         if let Some((_, stage)) = Crop::of_block(new) {
             let on_farmland = is_farmland(self.world.get(x, y - 1, z));

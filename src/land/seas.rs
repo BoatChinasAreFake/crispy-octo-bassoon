@@ -26,6 +26,7 @@ pub const KELP_CHANCE: f32 = 0.08;
 /// What grows on this patch of sea floor, if anything: the plant, and (for
 /// kelp) how tall. `depth` is how much water there is above the floor.
 pub fn floor_plant(g: &Generator, biome: Biome, x: i32, z: i32, depth: i32) -> Option<(Id, i32)> {
+    if g.opts.version>=11 && biome.is_ocean() && biome!=Biome::FrozenOcean && (1..=6).contains(&depth) && hash2(g.seed^0xB3AC7,x,z)<0.012 {return Some((SHELL_PATCH_WET,1));}
     if depth < 2 || biome == Biome::FrozenOcean {
         return None;
     }
@@ -49,6 +50,34 @@ pub fn floor_plant(g: &Generator, biome: Biome, x: i32, z: i32, depth: i32) -> O
 }
 
 impl Generator {
+    /// Small, sheltered basins in level beach sand. The complete rim is
+    /// checked from world coordinates, so neighbouring chunks agree.
+    pub(crate) fn beach_pool_cell(&self,cx:i32,cz:i32)->Option<(i32,i32,i32,i32)> {
+        if self.opts.version<11 {return None;}
+        let s=self.seed^0x71DE;
+        if hash2(s,cx,cz)>0.28 {return None;}
+        let (x,z)=(cx*64+8+(hash2(s^1,cx,cz)*48.0) as i32,cz*64+8+(hash2(s^2,cx,cz)*48.0) as i32);
+        let (h,b)=self.column(x,z);
+        if b!=Biome::Beach || !(self.sea()+1..=self.sea()+3).contains(&h) || self.climate(x,z).0< -0.1 {return None;}
+        let radius=2+(hash2(s^3,cx,cz)*2.0) as i32;
+        for dz in -radius-1..=radius+1 {for dx in -radius-1..=radius+1 {
+            let (hh,bb)=self.column(x+dx,z+dz);
+            if bb!=Biome::Beach || hh<h || hh>h+1 || self.mod_biome_at(x+dx,z+dz,bb).is_some() {return None;}
+        }}
+        Some((x,z,h-1,radius))
+    }
+
+    pub(crate) fn beach_pool_at(&self,x:i32,z:i32)->Option<i32> {
+        if self.opts.version<11 {return None;}
+        let (cx,cz)=(x.div_euclid(64),z.div_euclid(64));
+        let s=self.seed^0x71DE;
+        let (mx,mz)=(cx*64+8+(hash2(s^1,cx,cz)*48.0) as i32,cz*64+8+(hash2(s^2,cx,cz)*48.0) as i32);
+        if (x-mx).pow(2)+(z-mz).pow(2)>9 {return None;}
+        let (_,_,level,radius)=self.beach_pool_cell(cx,cz)?;
+        ((x-mx).pow(2)+(z-mz).pow(2)<=radius*radius).then_some(level)
+    }
+
+
     /// Beach scrub, occasional weathered log clusters and sparse turtle nests.
     /// The shared cell anchor makes logs continuous across chunk boundaries.
     pub fn beach_feature(&self,x:i32,z:i32,h:i32)->Option<Id> {
@@ -59,9 +88,13 @@ impl Generator {
             let (rx,rz)=(cx*32+8+(hash2(s^1,cx,cz)*16.0) as i32,cz*32+8+(hash2(s^2,cx,cz)*16.0) as i32);
             let len=2+(hash2(s^3,cx,cz)*3.0) as i32;
             let along=if hash2(s^4,cx,cz)<0.5 { z==rz && (rx..rx+len).contains(&x) } else { x==rx && (rz..rz+len).contains(&z) };
-            if along && self.column(rx,rz)==(h,Biome::Beach) { return Some(LOG); }
+            if along && self.column(rx,rz)==(h,Biome::Beach) {return Some(if self.opts.version<11 {LOG}else if hash2(s^4,cx,cz)<0.5 {DRIFTWOOD_Z}else{DRIFTWOOD});}
         }
         let r=hash2(s^5,x,z);
+        if self.opts.version>=11 {
+            if r>0.006 && r<0.065 && h<=self.sea()+2 {return Some(SHELL_PATCH);}
+            if (0.006..0.12).contains(&r) && h>=self.sea()+2 && hash2(s^6,x>>3,z>>3)<0.6 {return Some(DUNE_GRASS);}
+        }
         if r<0.0003 && self.climate(x,z).0>0.1 { Some(TURTLE_EGG) }
         else if r<0.006 { Some(DEAD_BUSH) }
         else if r<0.045 && hash2(s^6,x>>3,z>>3)<0.35 { Some(TALL_GRASS) }
@@ -127,7 +160,8 @@ impl Game {
         let sea=self.world.sea();
         let floor=(4..=sea+4).rev().find(|&y|is_solid(self.world.get(x,y,z)))?;
         let ground=self.world.get(x,floor,z);
-        let depth=sea-floor;
+        let water_top=(floor+1..=sea+4).filter(|&y|is_wet(self.world.get(x,y,z))).max().unwrap_or(sea);
+        let depth=water_top-floor;
         let sandy=matches!(ground,SAND|GRAVEL|RED_SAND);
         let rocky=matches!(ground,STONE|GRAVEL|DEEPSLATE);
         let fits=match kind {
@@ -142,7 +176,7 @@ impl Game {
             _=>false,
         };
         if !fits { return None; }
-        let y=if kind.benthic() {floor+1} else {match kind { Sardine=>sea-3, Tuna=>sea-6, _=>floor+2 }};
+        let y=if kind.benthic() {floor+1} else {match kind { Sardine=>water_top-3, Tuna=>water_top-6, _=>floor+2 }};
         let at=Vec3::new(x as f32+0.5,y as f32,z as f32+0.5);
         self.coastal_room(kind,at).then_some(at)
     }
@@ -289,6 +323,59 @@ mod tests {
     use macroquad::math::ivec3;
 
     #[test]
+    fn tide_pools_are_supported_contained_and_cross_chunk_safe() {
+        let _lock=crate::mods::registry_test_lock();
+        for seed in [77,1234] {
+            let opts=crate::world::GenOptions{structures:0,..crate::world::GenOptions::DEFAULT};
+            let mut g=Game::new_with(seed,true,false,opts);
+            let beach_generator=&g.world.generator;
+            let found=(-128..128).flat_map(|z|(-128..128).map(move|x|(x,z))).filter_map(|(x,z)|beach_generator.beach_pool_cell(x,z))
+                .find(|&(x,z,_,r)|x.rem_euclid(16)<r || x.rem_euclid(16)>=16-r || z.rem_euclid(16)<r || z.rem_euclid(16)>=16-r).expect("pool across a chunk edge");
+            let (x,z,level,radius)=found;
+            for dz in -1..=1 {for dx in -1..=1 {g.world.load_now(x.div_euclid(16)+dx,z.div_euclid(16)+dz);}}
+            assert_eq!(g.world.get(x,level-2,z),SAND);
+            assert_eq!(g.world.get(x,level-3,z),SANDSTONE);
+            assert!(is_wet(g.world.get(x,level,z)));
+            assert!(g.coastal_habitat(crate::entity::MobKind::Clam,x,z).is_some());
+            assert!(g.coastal_habitat(crate::entity::MobKind::Tuna,x,z).is_none());
+            for dz in -radius..=radius {for dx in -radius..=radius {
+                if dx*dx+dz*dz<=radius*radius {assert!(is_wet(g.world.get(x+dx,level,z+dz)));}
+            }}
+            for (dx,dz) in [(radius+1,0),(-radius-1,0),(0,radius+1),(0,-radius-1)] {assert!(is_solid(g.world.get(x+dx,level,z+dz)),"closed pool rim");}
+            for _ in 0..100 {g.liquid_tick(0.05);g.falling_tick(0.05);}
+            assert!(is_wet(g.world.get(x,level,z)),"pool retained its water");
+            assert_eq!(g.world.get(x,level-2,z),SAND,"sand did not fall into caves");
+            g.ready=true;g.player.body.pos=Vec3::new(x as f32+0.5,level as f32,z as f32+0.5);
+            g.update(0.6,&crate::game::Controls::default());
+            assert!(g.advancements.earned.iter().any(|a|a=="tide_time"));
+        }
+    }
+
+    #[test]
+    fn revision_eleven_beaches_have_collectible_finds_and_grass() {
+        let _lock=crate::mods::registry_test_lock();
+        let g=Generator::with(1234,crate::world::GenOptions{structures:0,..crate::world::GenOptions::DEFAULT});
+        let mut found=std::collections::HashSet::new();
+        'search: for z in (-4096..4096).step_by(8) {for x in (-4096..4096).step_by(8) {
+            if g.column(x,z).1!=Biome::Beach {continue;}
+            for dz in 0..8 {for dx in 0..8 {
+                let (xx,zz)=(x+dx,z+dz);let (h,b)=g.column(xx,zz);
+                if b!=Biome::Beach || g.beach_pool_at(xx,zz).is_some() {continue;}
+                if let Some(id)=g.beach_feature(xx,zz,h) {
+                    if !matches!(id,DRIFTWOOD|DRIFTWOOD_Z|SHELL_PATCH|DUNE_GRASS) || found.contains(&id) {continue;}
+                    let blocks=g.generate(xx.div_euclid(16),zz.div_euclid(16));
+                    if blocks[crate::world::idx(xx.rem_euclid(16),h+1,zz.rem_euclid(16))]==id {found.insert(id);}
+                }
+            }}
+            if found.len()==4 {break 'search;}
+        }}
+        assert_eq!(found.len(),4,"{found:?}");
+        assert!(crate::block::reg().recipes.iter().any(|r|r.inputs==[(DRIFTWOOD,1)] && r.output==(PLANKS,2)));
+        assert_eq!(crate::containers::fuel_secs(DRIFTWOOD),Some(10.0));
+        assert_eq!(block(SHELL_PATCH).drop,SEASHELL);
+    }
+
+    #[test]
     fn coastal_habitats_respect_depth_support_and_body_clearance() {
         use crate::entity::MobKind::*;
         let _lock=crate::mods::registry_test_lock();
@@ -422,7 +509,7 @@ mod tests {
     #[test]
     fn beach_details_use_supported_existing_blocks() {
         let _lock=crate::mods::registry_test_lock();
-        let g=Generator::with(1234,crate::world::GenOptions{structures:0,..crate::world::GenOptions::DEFAULT});
+        let g=Generator::with(1234,crate::world::GenOptions{version:10,structures:0,..crate::world::GenOptions::DEFAULT});
         let mut found=std::collections::HashSet::new();
         let mut checked=0;
         'search: for z in (-4096..4096).step_by(8) { for x in (-4096..4096).step_by(8) {

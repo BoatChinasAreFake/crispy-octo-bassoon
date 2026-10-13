@@ -942,6 +942,10 @@ pub const T_TUNA_HEAD: u16 = 1155;
 pub const T_EEL_BACK: u16 = 1156;
 pub const T_EEL_BELLY: u16 = 1157;
 pub const T_EEL_HEAD: u16 = 1158;
+pub const T_DRIFTWOOD_SIDE: u16 = 1159;
+pub const T_DRIFTWOOD_END: u16 = 1160;
+pub const T_SHELL_PATCH: u16 = 1161;
+pub const T_DUNE_GRASS: u16 = 1162;
 
 // Crop tiles are four in a row: T_CROP_* + stage.
 
@@ -7238,6 +7242,13 @@ const BUNDLE_SPRITE: [&str; 16] = [
 
 
 fn paint_coastal(a: &mut Atlas) {
+    a.each(T_DRIFTWOOD_SIDE,|x,y,r,_|shade(if (y+(x/4)%3)%5==0 {rgb(110,100,81)}else{rgb(178,163,132)},r.range(0.92,1.08)));
+    a.each(T_DRIFTWOOD_END,|x,y,r,_| {let dx=x as f32-7.5;let dy=y as f32-7.5;shade(rgb(198,181,143),if (dx*dx+dy*dy).sqrt().rem_euclid(3.0)<0.6 {0.68}else{r.range(0.94,1.06)})});
+    a.each(T_SHELL_PATCH,|x,y,_,_| {let dx=x as f32-7.5;let dy=17.0-y as f32;shade(rgb(231,217,186),0.88+(dx.atan2(dy)*28.0).cos()*0.1)});
+    a.each(T_DUNE_GRASS,|x,y,_,_| {
+        let stem=[(3i32,3i32),(7,1),(11,4),(14,6)].iter().any(|&(base,top)|y as i32>=top && (x as i32-base-(15-y as i32)/5).abs()<=if y>10 {1}else{0});
+        if !stem {[0,0,0,0]}else if y<7 {rgb(188,169,96)}else{rgb(126,151,73)}
+    });
     for (tile,body) in [(T_SARDINE_ITEM,rgb(146,182,198)),(T_TUNA_ITEM,rgb(48,89,132)),(T_EEL_ITEM,rgb(79,100,61))] {
         a.sprite(tile,&FISH,&[('#',shade(body,0.45)),('f',body),('F',shade(body,0.75)),('b',rgb(219,223,198)),('w',rgb(255,255,255)),('k',rgb(10,10,10))]);
     }

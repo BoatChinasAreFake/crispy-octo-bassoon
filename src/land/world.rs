@@ -590,7 +590,8 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 10, structures: 2, biome_size: 1, terrain: 1 };
+    // Revision 11 adds beach finds and closed tide pools; old worlds keep their revision.
+    pub const DEFAULT: GenOptions = GenOptions { version: 11, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -1392,6 +1393,14 @@ impl Generator {
                 if h >= self.sea() {
                     self.mod_biome_column(&mut b, lx, lz, x, z, biome);
                 }
+                if biome==Biome::Beach && let Some(level)=self.beach_pool_at(x,z) {
+                    let floor=level-2;
+                    b[idx(lx,floor-1,lz)]=SANDSTONE;
+                    b[idx(lx,floor,lz)]=SAND;
+                    for y in floor+1..=h+1 {b[idx(lx,y,lz)]=if y<=level {WATER}else{AIR};}
+                    if hash2(s^0x71D5,x,z)<0.16 {b[idx(lx,floor+1,lz)]=SHELL_PATCH_WET;}
+                }
+
             }
         }
         // Trees may overhang from neighbouring chunks, so scan a margin around this one.
@@ -2344,8 +2353,8 @@ mod biome_tests {
     #[test]
     fn generation_compatibility_fixtures() {
         let _lock = crate::mods::registry_test_lock();
-        let expected = [0xe47b0d9ff29082d0, 0xe47b0d9ff29082d0, 0x3afd8bc9b13b404a, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x8b9d73f9458eb1fa, 0xc84556a2d6219704, 0xf4f1b498d92c27c8];
-        for version in 0..=9 {
+        let expected = [0xe47b0d9ff29082d0, 0xe47b0d9ff29082d0, 0x3afd8bc9b13b404a, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x8b9d73f9458eb1fa, 0xc84556a2d6219704, 0xf4f1b498d92c27c8, 0xf4f1b498d92c27c8];
+        for version in 0..=10 {
             let g = Generator::with(424242, GenOptions { version, ..GenOptions::DEFAULT });
             let mut hash = 0xcbf29ce484222325u64;
             for (cx, cz) in [(0, 0), (-7, 11), (31, -29)] {

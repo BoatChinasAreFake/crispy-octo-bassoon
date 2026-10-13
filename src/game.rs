@@ -1144,6 +1144,8 @@ impl Game {
             return;
         }
         self.explore_timer = 0.0;
+        let p=self.player.body.pos;
+        if self.world.generator.beach_pool_at(p.x.floor() as i32,p.z.floor() as i32).is_some() && is_wet(self.world.get_v((p+Vec3::Y*0.3).floor().as_ivec3())) {self.advance("tide_time");}
         if !self.away() && self.mobs.iter().any(|m|m.kind.coastal() && m.body.pos.distance_squared(self.player.body.pos)<8.0*8.0) { self.advance("shore_life"); }
         // Mods' biomes, anywhere (see modgen.rs).
         {
@@ -1218,6 +1220,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
+            SEASHELL | DRIFTWOOD | DRIFTWOOD_Z => "beachcomber",
             RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH => "shore_supper",
             LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG => "getting_wood",
             COBBLE => "stone_age",
@@ -3048,6 +3051,8 @@ impl Game {
         }
         let below = self.world.get_v(place - IVec3::Y);
         match held {
+            DUNE_GRASS if is_wet(self.world.get_v(place)) || !matches!(below,SAND|RED_SAND|GRAVEL|DIRT|GRASS) => return,
+            SHELL_PATCH | SHELL_PATCH_WET if !is_solid(below) => return,
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
             // Torches go on walls too.
             TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
@@ -3079,6 +3084,8 @@ impl Game {
             }
         }
         let mut oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
+        if matches!(held,DRIFTWOOD|DRIFTWOOD_Z) {oriented=if matches!(self.facing(),0|2) {DRIFTWOOD_Z}else{DRIFTWOOD};}
+        if matches!(held,SHELL_PATCH|SHELL_PATCH_WET) {oriented=if is_wet(self.world.get_v(place)) {SHELL_PATCH_WET}else{SHELL_PATCH};}
         if held == TORCH
             && is_solid(hit_id)
             && !replaceable(hit_id)
@@ -3212,8 +3219,8 @@ impl Game {
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
-        if (block(a).model == Model::Cross && !is_wall_torch(a)) || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
-            self.world.set_v(above, AIR);
+        if matches!(a,SHELL_PATCH|SHELL_PATCH_WET) || (block(a).model == Model::Cross && !is_wall_torch(a)) || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
+            self.world.set_v(above, if waterlogged(a) {WATER}else{AIR});
             if is_door(a) {
                 self.world.set_v(above + IVec3::Y, AIR);
             }
@@ -5136,6 +5143,32 @@ pub(crate) mod tests {
         assert_eq!(map[PEARL as usize], PEARL, "base items the palette doesn't mention stay put");
         assert_eq!(map[FIRST_MOD_ITEM as usize + 5], AIR, "unknown mod ids become nothing");
         assert_eq!(map[DIAMOND_ORE as usize], DIAMOND_ORE);
+    }
+
+    #[test]
+    fn beach_blocks_place_harvest_and_preserve_water() {
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=Game::new_with(7,true,false,crate::world::GenOptions::DEFAULT);
+        g.world.load_now(0,0);g.player.body.pos=Vec3::new(10.0,82.0,10.0);
+        let base=IVec3::new(3,80,3);let at=base+IVec3::Y;
+        g.world.set_v(base,SAND);g.world.set_v(at,AIR);
+        g.target=Some(Target::Block(crate::world::Hit{pos:base,normal:IVec3::Y,dist:1.0}));
+        g.inv.slots[0]=Some((DRIFTWOOD,1));g.inv.selected=0;g.player.yaw=0.0;g.use_item();
+        assert_eq!(g.world.get_v(at),DRIFTWOOD_Z);
+        g.world.set_v(at,WATER);g.inv.slots[0]=Some((SHELL_PATCH,1));g.use_item();
+        assert_eq!(g.world.get_v(at),SHELL_PATCH_WET);
+        assert_eq!(placing_item(DRIFTWOOD_Z),Some(DRIFTWOOD));assert_eq!(placing_item(SHELL_PATCH_WET),Some(SHELL_PATCH));
+        assert!(!g.edit_allowed(at.x,at.y,at.z,AIR,SHELL_PATCH_WET),"wet patch cannot manufacture water");
+        g.creative=false;g.break_block(at,true);g.refill_tick();
+        assert_eq!(g.world.get_v(at),WATER);
+        assert!(g.drops.iter().any(|d|d.item==SEASHELL));
+        g.world.set_v(at,SHELL_PATCH_WET);g.break_block(base,true);
+        assert_eq!(g.world.get_v(at),WATER,"support loss keeps the patch's water");
+        g.creative=true;g.world.set_v(base,SAND);g.world.set_v(at,AIR);
+        g.inv.slots[0]=Some((DUNE_GRASS,1));g.use_item();assert_eq!(g.world.get_v(at),DUNE_GRASS);
+        g.world.set_v(at,WATER);g.use_item();assert_eq!(g.world.get_v(at),WATER,"dune grass stays above water");
+        g.world.set_v(base,AIR);g.world.set_v(base-IVec3::Y,AIR);g.world.set_v(at,AIR);g.use_item();assert_eq!(g.world.get_v(at),AIR,"grass needs supported soil");
+        g.item_advancements(SEASHELL);assert!(g.advancements.earned.iter().any(|a|a=="beachcomber"));
     }
 
     #[test]

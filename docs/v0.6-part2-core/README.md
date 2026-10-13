@@ -1,10 +1,10 @@
 # v0.6 Part 2 core — development branch
 
-Implements roadmap items 4 to 9. The two originals remain undecided, and Part 2 is not marked released. No changes are merged into main and no release is published.
+Implements roadmap items 4 to 10. The two originals remain undecided, and Part 2 is not marked released. No changes are merged into main and no release is published.
 
 ## Behavior and compatibility
 
-- New worlds use generation revision **10** for relief, islands and beach ecology. Revision 9 retains the previous terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–9** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **47** protects revision 10, the appended coastal mob IDs and the new item IDs.
+- New worlds use generation revision **11** for beach finds and sheltered tide pools, on revision 10 terrain. Revision 9 retains the previous terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–10** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **48** protects revision 11 and the appended beach block IDs.
 - The depth-aware cave selector reuses surface temperature, moisture, continentalness and erosion. Deep Dark takes precedence below height 24 under inland rugged land. Damp, mild land has lush caves from height 24; drier, non-frozen inland land has dripstone at heights 10–48. Bedrock and the top eight blocks below the surface are excluded. Existing carving, blocks, geodes and survival mechanics remain.
 - Climate-target mods use optional bounded axes, a 0.35 per-axis eligibility radius, normalized mean squared distance and stable-key tie-breaking. Targetless patches retain first-match priority. Built-in shape landmarks and rare variants are protected. Targets are ignored in older worlds and rejected for mod dimensions.
 - Surface structures validate their complete bounded footprints, including interiors. Villages check squares, paths, farms and houses; growth sites are filtered too. Mansions remain inside dark forest, and springs require cold, level ground. Overworld mod templates receive supporting foundations, and settling aprons preserve adjacent waterways.
@@ -14,11 +14,11 @@ Implements roadmap items 4 to 9. The two originals remain undecided, and Part 2 
 
 Validated on Linux x86-64 with **Rust 1.90.0**, locked dependencies and the normal release profile (thin LTO):
 
-- `cargo test --release --locked`: **567 passed, 0 failed, 1 ignored** (the manual map export).
+- `cargo test --release --locked`: **570 passed, 0 failed, 1 ignored** (the manual map export).
 - `cargo clippy --release --all-targets --locked -- -D warnings`: clean.
 - `cargo check --release --locked --no-default-features`: passes.
 - Audio mixer tests: **2 passed**. This container required the GNU bfd linker for the standalone vendor test binary.
-- Six-bot, 60-second CLI socket playtest, seed 1234: everyone agrees (122 blocks placed, 106 broken, 129 chat lines). Includes natural cave generation, village foundations, climate-target mod surfaces, bounded rivers, rocky coasts, islands, beach ecology, all nine coastal species, marine mob snapshots, host edit/restore propagation and advancement delivery.
+- Six-bot, 60-second CLI socket playtest, seed 1234: everyone agrees (121 blocks placed, 106 broken, 129 chat lines). Includes natural cave generation, village foundations, climate-target mod surfaces, bounded rivers, rocky coasts, islands, beach ecology, tide pools/finds, all nine coastal species, marine mob snapshots, host edit/restore propagation and advancement delivery.
 - The test suite also runs a two-bot/seed-77 scenario and a six-bot/seed-1234 scenario with base content, without installing a mod registry concurrently.
 - Released-generation regression fixtures were captured from merge commit `3ef73d102c6119e4092c2e59b69e47c8c1d4c556` before implementation: seed 424242, chunks (0,0), (-7,11), (31,-29), for every revision 0–7. Revision 8 was captured from commit `59c38343a05c72044b06a08e49f309bafe8feae2` before the revision 9 edits; all ten fixtures pass.
 - Climate parser tests cover finite bounds, omitted axes, old defaults and unsupported dimensions. Integration tests check generated mod-template blocks, foundations, chest locators and a template spanning a chunk boundary.
@@ -102,3 +102,15 @@ Four new tests cover actual depth/support, Tuna body clearance and dry-cell reje
 The coastal art refinement replaces the shared diagonal-striping pattern with separate species/material textures and explicit top, underside and side faces. Starfish arms are fivefold symmetric, tapered and connected to a low raised centre; their existing collision box is unchanged. Shellfish show growth bands, the snail has a spiral shell and soft foot, crabs have mottled plates and segmented legs, and swimmers have scale rows, countershading, heads and fin rays. The Tuna's head remains fixed with its eyes while its tail/fins animate. `coastal_starfish` provides a close, elevated view for checking the silhouette. These changes affect presentation only; protocol, saves, spawning and terrain rules stay unchanged.
 
 Art validation: three existing atlas tests and the coastal species/save/food round-trip test pass; release build and Clippy with warnings denied pass. The starfish close-up, coastal floor group and swimmer side views were rendered and inspected using software OpenGL and Night Vision.
+
+## Beach finds and sheltered tide pools (revision 11)
+
+New generation replaces dry log clusters with low, oriented Driftwood models and adds low decorative shell patches, waterlogged shallow shell beds and Dune Grass clumps. Driftwood crafts into two Planks or burns for ten seconds. Two seashells craft a placeable patch, which returns a seashell when harvested; the earlier three-shell/two-Bone-Dust recipe remains. Wet patches retain water after harvest/support loss. Dune Grass can be replanted above water on supported sand, red sand, gravel, dirt or grass.
+
+Tide pools use 64-block candidate cells, a 28% candidate roll and two- or three-block radii, then require a complete level, mild-climate Beach footprint and rim with no mod-biome override. A sandstone support layer stops their sand floors falling into caves. Each pool is two water blocks deep and may contain shell beds. All placement decisions use global coordinates across chunk boundaries. Coastal habitats now measure actual local water height, letting existing shallow-water creatures inhabit the basins.
+
+The save format remains 16, generation compatibility is checked through revision 10, and protocol 48 rejects older block/gen layouts. The new base blocks append after the village blocks; mod block palettes remap their shifted runtime IDs. The revision 10 fixture was captured from unmodified commit `d915575cf3fa27cc60d960958cce500414cb2064` before the beach changes.
+
+Tests cover natural beach finds, closed and supported cross-chunk pools, water retention through simulation, shellfish habitat, placement/support, waterlogged harvest, resources, recipes and advancements. Socket playtests compare generated pool chunks, exercise every new block ID and restoration, and check joined-player placement/payment and both new advancements. `tide_pool` is a natural scene; `beach_showcase` explicitly stages Driftwood, Shell Patch and Dune Grass beside a generated basin.
+
+Beach validation: 570 release tests pass, Clippy is clean, the reduced-feature build passes, and the six-bot/mod-enabled CLI playtest agrees (121 placed, 106 broken, 129 chat lines). The natural pool and staged decoration scenes were rendered and inspected with software OpenGL.

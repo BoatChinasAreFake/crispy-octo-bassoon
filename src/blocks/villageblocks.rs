@@ -32,7 +32,7 @@ mod tests {
         assert_eq!(block(CARTOGRAPHY_TABLE).key, "cartography_table");
         assert_eq!(block(MUD_BRICKS).key, "mud_bricks");
         assert_eq!(block(FROST_SHINGLES).drop, FROST_SHINGLES);
-        assert_eq!(defs().len() as Id, NUM_BLOCKS - CARTOGRAPHY_TABLE);
+        assert_eq!(defs().len() as Id, SHOP_STALL + 1 - CARTOGRAPHY_TABLE);
         for (id, _) in recipes().iter().map(|r| r.output) {
             assert!(reg().recipes.iter().any(|r| r.output.0 == id), "{id} can be made");
         }

@@ -88,6 +88,7 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
         COAL => 80.0,
         LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | PLANKS | CHERRY_PLANKS | MANGROVE_PLANKS | PALE_OAK_PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
         HAY => 45.0,
+        DRIFTWOOD | DRIFTWOOD_Z => 10.0,
         STICK | WHEAT => 5.0,
         DOOR | ACACIA_DOOR | BIRCH_DOOR | DARK_OAK_DOOR => 10.0,
         id if is_log(id) || crate::woods::is_planks(id) => 15.0,

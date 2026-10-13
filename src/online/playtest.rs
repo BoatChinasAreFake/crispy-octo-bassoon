@@ -2634,6 +2634,46 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
         } else { report.problems.push("no open ocean in the wildlife playtest".into()); }
     }
 
+    if host.world.generator.opts.version>=11 {
+        report.features.push("beach finds and tide pools");
+        let ledger=|host:&Game,id:u32,item:Id|host.peers.get(&id).map(|p|p.ledger.bag.count(item)).unwrap_or(0);
+        let g=&host.world.generator;
+        let found=(-128..128).flat_map(|z|(-128..128).map(move|x|(x,z))).find_map(|(x,z)|g.beach_pool_cell(x,z));
+        if let Some((x,z,level,radius))=found {
+            let spot=Vec3::new(x as f32+0.5,level as f32+1.05,z as f32+0.5);
+            compare_generated_patch(host,team,report,touched,spot,"tide pool");
+            {
+                let g=&mut team[k].game;
+                g.player.body.pos=Vec3::new(x as f32+0.5,level as f32-0.2,z as f32+0.5);
+                g.player.body.vel=Vec3::ZERO;g.player.flying=false;g.player.gliding=false;
+                g.player.fall_start=g.player.body.pos.y;
+            }
+            pump(host,team,0.6,|_|idle());
+            if !team[k].game.advancements.earned.iter().any(|a|a=="tide_time") {report.problems.push("tide pool advancement never arrived".into());}
+            let who=team[k].game.my_id;
+            for (item,new,wet) in [(DRIFTWOOD,DRIFTWOOD_Z,false),(SHELL_PATCH,SHELL_PATCH_WET,true),(DUNE_GRASS,DUNE_GRASS,false)] {
+                let at=if wet {IVec3::new(x,level-1,z)}else{IVec3::new(x+radius+1,host.world.generator.column(x+radius+1,z).0+1,z)};
+                let old=host.world.get_v(at);
+                host.world.set_v(at,if wet {WATER}else{AIR});touched.insert(at);
+                let before=ledger(host,who,item);host.give_peer(who,item,1);pump(host,team,0.6,|_|idle());
+                team[k].game.world.set_v(at,new);team[k].game.inv.remove(item,1);
+                pump(host,team,0.6,|_|idle());
+                if host.world.get_v(at)!=new || ledger(host,who,item)!=before {report.problems.push(format!("joined player couldn't place/pay for beach block {new}"));}
+                host.world.set_v(at,old);pump(host,team,0.3,|_|idle());
+            }
+            host.give_peer(who,SEASHELL,1);pump(host,team,0.5,|_|idle());
+            if !team[k].game.advancements.earned.iter().any(|a|a=="beachcomber") {report.problems.push("beachcomber advancement never arrived".into());}
+
+            for (i,id) in [DRIFTWOOD,DRIFTWOOD_Z,SHELL_PATCH,SHELL_PATCH_WET,DUNE_GRASS].into_iter().enumerate() {
+                let at=spot.floor().as_ivec3()+IVec3::new(i as i32-2,4,0);let old=host.world.get_v(at);
+                host.world.set_v(at,id);touched.insert(at);pump(host,team,0.3,|_|idle());
+                if team[k].game.world.get_v(at)!=id {report.problems.push(format!("beach block {id} never arrived"));}
+                host.world.set_v(at,old);pump(host,team,0.2,|_|idle());
+                if team[k].game.world.get_v(at)!=old {report.problems.push("beach edit restoration failed".into());}
+            }
+        } else {report.problems.push("no tide pool in the beach playtest".into());}
+    }
+
     if host.world.generator.biomes.iter().any(|b|b.climate.is_some()) {
         report.features.push("mod climate targets");
         let g=&host.world.generator;
@@ -2709,7 +2749,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "sea wildlife", "coastal species"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "sea wildlife", "coastal species", "beach finds and tide pools"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

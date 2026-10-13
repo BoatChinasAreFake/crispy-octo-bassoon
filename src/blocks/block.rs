@@ -488,12 +488,17 @@ pub const FROST_SHINGLES: Id = MYCELIUM + 106;
 pub const NOTICE_BOARD: Id = MYCELIUM + 107;
 /// A player's own shop (see stalls.rs).
 pub const SHOP_STALL: Id = MYCELIUM + 108;
-pub const NUM_BLOCKS: Id = MYCELIUM + 109;
+pub const DRIFTWOOD: Id = MYCELIUM + 109;
+pub const DRIFTWOOD_Z: Id = MYCELIUM + 110;
+pub const SHELL_PATCH: Id = MYCELIUM + 111;
+pub const SHELL_PATCH_WET: Id = MYCELIUM + 112;
+pub const DUNE_GRASS: Id = MYCELIUM + 113;
+pub const NUM_BLOCKS: Id = MYCELIUM + 114;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
 pub fn waterlogged(id: Id) -> bool {
-    matches!(id, MANGROVE_ROOTS_WET | KELP | SEAGRASS | SEA_PICKLE)
+    matches!(id, MANGROVE_ROOTS_WET | KELP | SEAGRASS | SEA_PICKLE | SHELL_PATCH_WET)
 }
 
 /// Water, or something sitting in it.
@@ -923,6 +928,7 @@ pub fn armor_points(id: Id) -> u8 {
 /// Facings: 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Shape {
+    Driftwood { x_axis: bool },
     Full,
     Slab { top: bool },
     /// `facing` is the side the high step is on.
@@ -1060,6 +1066,11 @@ impl Shape {
     pub fn boxes(self) -> ([Aabb; 3], usize) {
         let full = ([0.0; 3], [1.0; 3]);
         match self {
+            Shape::Driftwood { x_axis } => {
+                let mut boxes=[([0.0,0.0,0.25],[1.0,0.25,0.75]),([0.4375,0.125,0.625],[0.625,0.3125,0.9375]),full];
+                if !x_axis {for (lo,hi) in &mut boxes[..2] {lo.swap(0,2);hi.swap(0,2);}}
+                (boxes,2)
+            }
             Shape::Full => ([full; 3], 1),
             Shape::Slab { top: false } => ([([0.0; 3], [1.0, 0.5, 1.0]), full, full], 1),
             Shape::Slab { top: true } => ([([0.0, 0.5, 0.0], [1.0; 3]), full, full], 1),
@@ -1248,6 +1259,8 @@ pub fn made_of(id: Id) -> Id {
 /// The item a player spends to place block `id` (None: not something players
 /// place directly; door tops come free with their bottom half).
 pub fn placing_item(id: Id) -> Option<Id> {
+    if matches!(id,DRIFTWOOD|DRIFTWOOD_Z) {return Some(DRIFTWOOD);}
+    if matches!(id,SHELL_PATCH|SHELL_PATCH_WET) {return Some(SHELL_PATCH);}
     if id == WIRE {
         return Some(ZAP_DUST);
     }
@@ -2630,6 +2643,15 @@ impl Registry {
         blocks.extend(crate::zapparts::defs());
         blocks.extend(crate::together::defs());
         blocks.extend(crate::villageblocks::defs());
+        for (id,key,name,x_axis) in [(DRIFTWOOD,"driftwood","Driftwood (Weathered Shore Wood)",true),(DRIFTWOOD_Z,"driftwood_z","Driftwood (Weathered Shore Wood)",false)] {
+            let mut b=def(key,name,Shaped,true,false,[T_DRIFTWOOD_SIDE;3],0.8,0,false,DRIFTWOOD,0.0,S_WOOD);
+            b.shape=Shape::Driftwood{x_axis};b.family=DRIFTWOOD;b.creative=id==DRIFTWOOD;blocks.push(b);
+        }
+        for (id,key) in [(SHELL_PATCH,"shell_patch"),(SHELL_PATCH_WET,"shell_patch_wet")] {
+            let mut b=def(key,"Shell Patch (Beach Treasure)",Shaped,false,false,[T_SHELL_PATCH;3],0.1,0,false,SEASHELL,0.0,S_STONE);
+            b.shape=Shape::Layer{eighths:2};b.family=SHELL_PATCH;b.creative=id==SHELL_PATCH;blocks.push(b);
+        }
+        blocks.push(def("dune_grass","Dune Grass (Windblown Tufts)",Cross,false,false,[T_DUNE_GRASS;3],0.0,0,false,DUNE_GRASS,0.0,S_GRASS));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2972,6 +2994,8 @@ impl Registry {
             r(&[(IRON, 1), (STICK, 1), (GLASS, 1)], (SOIL_PROBE, 1)),
             r(&[(WHEAT, 3)], (BREAD, 1)),
             r(&[(STICK, 3), (STRING, 2)], (ROD, 1)),
+            r(&[(DRIFTWOOD, 1)], (PLANKS, 2)),
+            r(&[(SEASHELL, 2)], (SHELL_PATCH, 1)),
             r(&[(SEASHELL, 3)], (BONE_DUST, 2)),
             r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),

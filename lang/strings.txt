@@ -197,6 +197,7 @@ A Cluckster takes it. They get it even if they're away.
 A Hisser was seen
 A Hmmer bought {} {} from your stall for {} gold.
 A Hmmer is now a Master of its trade{}. Prices are said to reflect this.
+A Little Tide Time
 A Minceraft server
 A Square Deal
 A Water Bottle (or a potion) below
@@ -320,6 +321,7 @@ Be there when a village builds itself a Clanker.
 Be there when a village finishes a new house.
 Be under a ceiling when it comes down.
 Beach (Sandy Everywhere)
+Beachcomber
 Beacon (Wyrm-Powered Lighthouse)
 Beaconator
 Bead Necklace (Hand-Strung)
@@ -533,6 +535,7 @@ Cobbled Deepslate (Moody Rubble)
 Cobblestun
 Cobweb (Sticky Situation)
 Cold Feet
+Collect driftwood or seashells from the coast.
 Collection complete: {}! Museums would fight over this.
 Colonies known nearby
 Colonies started
@@ -754,12 +757,14 @@ Door (Opens Both Ways, Emotionally)
 Down by the River
 Dried Floaty (Just Add Water)
 Dried Kelp (Crunchy Ocean)
+Driftwood (Weathered Shore Wood)
 Drink a potion you brewed. Or found. We don't judge.
 Dripstone Block (Drippy Stone)
 Dropper (Just Drops Things)
 Drops Ominously
 Drowned Port
 Dry Your Eyes
+Dune Grass (Windblown Tufts)
 Dungeon (Mossy, Moody)
 Dye
 Dye Job
@@ -1886,6 +1891,7 @@ Sheaf
 Shear the mushrooms off a Mushmooer.
 Shears (For Fluffers, Not Haircuts)
 Shears snip
+Shell Patch (Beach Treasure)
 Shield (Door You Can Carry)
 Ship's Bell (Still Rings)
 Shipwreck (Abandoned, Soggy)
@@ -2015,6 +2021,7 @@ Starred Beacon (Twice the Lighthouse)
 Statistics
 Statue Chic
 Steady
+Step into a sheltered beach tide pool.
 Step into the Hollow. It's very quiet. Too quiet.
 Step into the Scorchlands. Bring a snack. And a bucket of regret.
 Step through a portal into a mod's dimension.
@@ -2658,7 +2665,11 @@ bad world id
 barely bothering
 barely knocked up
 base items the palette doesn't mention stay put
+beach block {} never arrived
 beach ecology
+beach edit restoration failed
+beach finds and tide pools
+beachcomber advancement never arrived
 birch door
 blasts never break blocks
 blocks placed and broken
@@ -2740,6 +2751,7 @@ glow berries
 glow squid
 got too close to a Polar Bear's cub
 grain, maybe sweetened
+grass needs supported soil
 growing village
 hardly any mites
 heads for its owner
@@ -2763,6 +2775,7 @@ it takes a while ({} looks)
 it turns toward the player
 join Blues
 join Reds
+joined player couldn't place/pay for beach block {}
 joined player never saw the marine school
 joined player never saw {}
 just added
@@ -2899,6 +2912,7 @@ no offshore island in the placement playtest
 no open ocean in the wildlife playtest
 no river in the placement playtest
 no rocky coast in the placement playtest
+no tide pool in the beach playtest
 no village anywhere near spawn to try growing villages in
 no village in the placement playtest
 no welcome
@@ -3010,6 +3024,7 @@ still there
 stopped by the wall: {}
 string too long
 struck down
+support loss keeps the patch's water
 swamps meet their neighbours gently (worst step {} over 2 blocks)
 teams too big
 teleported directly into a bad decision
@@ -3091,6 +3106,8 @@ the village's site
 the whole line lights up
 the wilter
 this computer's IP
+tide pool
+tide pool advancement never arrived
 tilling makes a soil record
 timed out
 too dark
@@ -3191,6 +3208,7 @@ wear kept
 went out with a bang
 went out with a bang (TNT)
 west (-X)
+wet patch cannot manufacture water
 wglSwapIntervalEXT
 what didn't fit is on the floor
 whatever's left
