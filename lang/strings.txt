@@ -507,6 +507,7 @@ Chunks: {} meshed, {} loaded; {} regions of edits in memory
 Claim
 Claim some land with a Survey Post.
 Claimed
+Clam
 Clank You Very Much
 Clankbury
 Clanker
@@ -569,6 +570,7 @@ Cooked Cod-ish
 Cooked Oinkchop
 Cooked Pufferfish (Still Do Not Eat)
 Cooked Salmon-ish
+Cooked Seafood
 Cooked to perfection. By a cube. Of cobblestone.
 Cooking Pot (Over-Engineered)
 Cooking it only halved the problem. Still ow.
@@ -614,6 +616,7 @@ Couldn't write {}: {}
 Country Lode, Take Me Home
 Courier
 Cover Me in Dimonds
+Crab
 Crack! You pressed too hard. Gently does it.
 Cracked
 Cracked Blackstone Bricks (Lived In)
@@ -773,6 +776,7 @@ Echo
 Echo Idol (Whispers Back)
 Echo Shard (Hums Faintly)
 Edible. Technically.
+Eel
 Efficiency
 Efficiency (Faster Hitting of Rocks)
 Efficiency doesn't fit a sword
@@ -938,6 +942,7 @@ Game over!
 Game over. You can still look around.
 Garbled reply from the router
 Garden Soup
+Gather seafood from a coastal creature.
 Gather, craft, and try not to get hissed at.
 Gave {} {} to {}.
 Gazette
@@ -1257,6 +1262,7 @@ Lever (Pull It)
 Librarian (Shh)
 Library
 Library/Application Support/Minceraft
+Life at the Shore
 Life's a Beach
 Light Show
 Light a Zappy Lamp with a switch. Electricity: now legally distinct.
@@ -1333,6 +1339,7 @@ Max FPS: Unlimited{}
 Max FPS: {}{}
 Meadow (Hay Fever)
 Medium
+Meet a beach or coastal sea creature up close.
 Melon (Heavy Snack)
 Melon Baller
 Melon Slice (Mostly Water)
@@ -1398,6 +1405,7 @@ Mushroom Stem (A Very Tall Stalk)
 Music Disc ({})
 Music: OFF
 Music: ON
+Mussel
 My World
 Mycelium (Grass, but Fungal)
 NOTICE: the Bell is for raids, not for fun. You know who you are.
@@ -1559,6 +1567,7 @@ Orange Terracotta
 Other hand
 Other hand (a shield, torches...)
 Oxidized Copper (Statue Chic)
+Oyster
 PRESSURE - EASE OFF!
 Packed Ice (Never Melts)
 Page {} of {}
@@ -1719,10 +1728,15 @@ Raw Baa-con
 Raw Baa-con. Crunchy? No. Wool-adjacent? Yes.
 Raw Cluckets
 Raw Cod-ish
+Raw Crab Meat
+Raw Eel
 Raw Moo-steak
 Raw Oinkchop
 Raw Salmon-ish
+Raw Sardine
+Raw Shellfish
 Raw Spud (Regrettable)
+Raw Tuna
 Raw fish. Sushi, technically.
 Raw food goes on top (twice as fast)
 Raw food, sand or cobble goes on top
@@ -1796,6 +1810,7 @@ Sand
 Sand, cobble and the like on top (twice as fast; no food)
 Sandstone (Sand, But Committed)
 Sapling (Tree, Eventually)
+Sardine
 Savanna (Flat Tops)
 Save Name
 Save World Now
@@ -1840,9 +1855,11 @@ Sculk clicks
 Scute Cute
 Sea Lantern (Glows Under Pressure)
 Sea Pickle (Not for Eating)
+Sea Snail
 Seagrass (Wet Lawn)
 Search recipes...
 Search...
+Seashell
 Seasons: OFF
 Seasons: ON (eight days each)
 Secret Passage
@@ -1873,6 +1890,7 @@ Shield (Door You Can Carry)
 Ship's Bell (Still Rings)
 Shipwreck (Abandoned, Soggy)
 Shop Stall (Everything Must Go)
+Shore Supper
 Shrieker shrieks
 Shroomlight (Glows, Squishily)
 Sign
@@ -1990,6 +2008,7 @@ Stand on a stony peak.
 Star Power
 Stare Pearl (Throw to Teleport)
 Starer
+Starfish
 Staring Champion
 Staring Eye (It Knows)
 Starred Beacon (Twice the Lighthouse)
@@ -2266,6 +2285,7 @@ Tropical Fish (Suspiciously Colorful)
 Try the example: copy example-mods/cheese into mods/, then press Reload.
 Tube Coral Block (Blue, Busy)
 Tuff Bricks (Grey, Proud)
+Tuna
 Tune a Note Block. Perfect pitch not required.
 Tuning In
 Turned away {} from {} (not on the allow-list)
@@ -2660,6 +2680,8 @@ claims too big
 client snapshots cannot carry effects
 climate and depth caves
 climbed to {}
+coastal encounter advancement never arrived
+coastal species
 collection complete!
 connection closed
 connection closed during the handshake (is the other side on an older version?)
@@ -2742,6 +2764,7 @@ it turns toward the player
 join Blues
 join Reds
 joined player never saw the marine school
+joined player never saw {}
 just added
 just made
 just now
@@ -2949,6 +2972,7 @@ save is from a newer version ({})
 scooped up
 script context vanished
 script error: {}
+sea snail
 sea wildlife
 seed {}: spawn at {} stands on {}
 server status

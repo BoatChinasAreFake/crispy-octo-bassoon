@@ -303,6 +303,16 @@ pub enum MobKind {
     SnowGolem,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
+    // Coastal wildlife: append to ALL to preserve every existing base index.
+    Starfish,
+    Clam,
+    Crab,
+    Sardine,
+    Tuna,
+    Mussel,
+    Oyster,
+    SeaSnail,
+    Eel,
     Modded(u16),
 }
 
@@ -316,7 +326,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 68] = [
+    pub const ALL: [MobKind; 77] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -386,6 +396,15 @@ impl MobKind {
         MobKind::Donkey,
         MobKind::Mule,
         MobKind::SnowGolem,
+        MobKind::Starfish,
+        MobKind::Clam,
+        MobKind::Crab,
+        MobKind::Sardine,
+        MobKind::Tuna,
+        MobKind::Mussel,
+        MobKind::Oyster,
+        MobKind::SeaSnail,
+        MobKind::Eel,
     ];
 
     pub fn index(self) -> u8 {
@@ -474,6 +493,15 @@ impl MobKind {
             "floaty" | "happy_ghast" => Some(MobKind::Floaty),
             "rotsteed" | "zombie_horse" => Some(MobKind::Rotsteed),
             "turtle" => Some(MobKind::Turtle),
+            "starfish" => Some(MobKind::Starfish),
+            "clam" => Some(MobKind::Clam),
+            "crab" => Some(MobKind::Crab),
+            "sardine" => Some(MobKind::Sardine),
+            "tuna" => Some(MobKind::Tuna),
+            "mussel" => Some(MobKind::Mussel),
+            "oyster" => Some(MobKind::Oyster),
+            "sea_snail" | "sea snail" | "seasnail" => Some(MobKind::SeaSnail),
+            "eel" => Some(MobKind::Eel),
             "dolphin" => Some(MobKind::Dolphin),
             "panda" => Some(MobKind::Panda),
             "polar bear" | "polar_bear" | "polarbear" => Some(MobKind::PolarBear),
@@ -551,6 +579,16 @@ impl MobKind {
             MobKind::Rotsteed => "Rotsteed",
             MobKind::Turtle => "Turtle",
             MobKind::Dolphin => "Dolphin",
+            MobKind::Starfish => "Starfish",
+            MobKind::Clam => "Clam",
+            MobKind::Crab => "Crab",
+            MobKind::Sardine => "Sardine",
+            MobKind::Tuna => "Tuna",
+            MobKind::Mussel => "Mussel",
+            MobKind::Oyster => "Oyster",
+            MobKind::SeaSnail => "Sea Snail",
+            MobKind::Eel => "Eel",
+
             MobKind::Panda => "Panda",
             MobKind::PolarBear => "Polar Bear",
             MobKind::Llama => "Llama",
@@ -578,7 +616,7 @@ impl MobKind {
         }
     }
     /// Half-width and height at size 1.
-    fn dims(self) -> (f32, f32) {
+    pub(crate) fn dims(self) -> (f32, f32) {
         if let MobKind::Modded(_) = self {
             return self.mod_def().map(|d| (d.half_width, d.height)).unwrap_or((0.4, 0.9));
         }
@@ -633,6 +671,14 @@ impl MobKind {
             MobKind::Rotsteed => (0.6, 1.6),
             MobKind::Turtle => (0.55, 0.45),
             MobKind::Dolphin => (0.45, 0.6),
+            MobKind::Starfish => (0.3, 0.12),
+            MobKind::Clam | MobKind::Oyster => (0.22, 0.18),
+            MobKind::Mussel => (0.16, 0.18),
+            MobKind::SeaSnail => (0.2, 0.3),
+            MobKind::Crab => (0.43, 0.34),
+            MobKind::Sardine => (0.3, 0.25),
+            MobKind::Tuna => (0.8, 0.75),
+            MobKind::Eel => (0.7, 0.25),
             MobKind::Panda => (0.6, 1.25),
             MobKind::PolarBear => (0.6, 1.4),
             MobKind::Llama => (0.45, 1.85),
@@ -697,6 +743,10 @@ impl MobKind {
             MobKind::Rotsteed => 18.0,
             MobKind::Turtle => 30.0,
             MobKind::Dolphin => 10.0,
+            MobKind::Starfish | MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => 4.0,
+            MobKind::Crab | MobKind::Eel => 6.0,
+            MobKind::Sardine => 3.0,
+            MobKind::Tuna => 12.0,
             MobKind::Panda => 20.0,
             MobKind::PolarBear => 30.0,
             MobKind::Llama => 22.0,
@@ -745,8 +795,11 @@ impl MobKind {
             // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Sporeling | MobKind::SnowGolem)
+        !self.coastal() && !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Sporeling | MobKind::SnowGolem)
     }
+    /// Beach and ocean species have their own habitat and population rules.
+    pub fn coastal(self) -> bool { matches!(self, MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel) }
+    pub fn benthic(self) -> bool { matches!(self, MobKind::Starfish | MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Crab) }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
         matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::Turtle | MobKind::Panda | MobKind::Llama | MobKind::Donkey | MobKind::Mule)
@@ -1405,7 +1458,24 @@ impl Mob {
                     }
                 }
             }
-            MobKind::Fishy => {
+            MobKind::Starfish | MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Crab => {
+                may_wander = false;
+                if self.body.in_water { swim_vy = Some(-0.6); }
+                let mobile = matches!(self.kind, MobKind::Crab | MobKind::SeaSnail | MobKind::Starfish);
+                if mobile {
+                    self.wander_t -= dt;
+                    if self.wander_t <= 0.0 { self.wander_t=rng.range(3.0,8.0);self.wander_dir=Some(rng.range(0.0,std::f32::consts::TAU)); }
+                    if let Some(yaw)=self.wander_dir {
+                        let ahead=self.body.pos+Vec3::new(yaw.sin(),0.0,-yaw.cos())*0.8;
+                        let floor=ground_below(world,ahead,3);
+                        if (floor-self.body.pos.y).abs()<0.6 && (self.kind==MobKind::Crab || is_wet(world.get_v(ahead.floor().as_ivec3()))) {
+                            want=Some((yaw,if self.kind==MobKind::Crab {0.65}else{0.08}));
+                        } else { self.wander_t=0.0; }
+                    }
+                }
+                if !self.body.in_water && self.kind!=MobKind::Crab { self.health-=dt*0.25; }
+            }
+            MobKind::Fishy | MobKind::Sardine | MobKind::Tuna | MobKind::Eel => {
                 if self.body.in_water {
                     // Drift about, never out of the water.
                     let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
@@ -1416,8 +1486,15 @@ impl Mob {
                     if self.flee > 0.0 {
                         want = Some(((-flat.x).atan2(flat.z), 4.5));
                     }
-                    let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + 0.8).floor() as i32, self.body.pos.z.floor() as i32);
-                    let drift = (self.wander_t * 1.7 + self.id as f32).sin() * 0.8;
+                    if self.kind==MobKind::Sardine {
+                        let school=(self.seed as f32*0.001+self.anim*0.03).sin()*0.5;
+                        want=Some((self.wander_dir.unwrap_or(school),1.6));
+                    } else if self.kind==MobKind::Tuna { want=Some((self.wander_dir.unwrap_or(self.yaw),2.2)); }
+                    let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + self.body.height + 0.4).floor() as i32, self.body.pos.z.floor() as i32);
+                    let drift = if self.kind==MobKind::Eel {
+                        let floor=ground_below(world,self.body.pos,8);
+                        ((floor+0.5-self.body.pos.y)*1.5).clamp(-1.0,1.0)
+                    } else { (self.wander_t * 1.7 + self.id as f32).sin() * 0.8 };
                     swim_vy = Some(if is_water(above) { drift } else { drift.min(0.0) - 0.3 });
                 } else {
                     // Out of the water: flop, and slowly dry out.
@@ -2403,6 +2480,11 @@ impl Mob {
             MobKind::SnowGolem => Some((SNOW_BLOCK, 1)),
             MobKind::Grumbler if n > 0 => Some((GOO, n)),
             MobKind::Clanker => Some((IRON, 3 + n)),
+            MobKind::Sardine => Some((RAW_SARDINE,1)),
+            MobKind::Tuna => Some((RAW_TUNA,2+n)),
+            MobKind::Eel => Some((RAW_EEL,1)),
+            MobKind::Crab => Some((CRAB_MEAT,1)),
+            MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => Some((SHELLFISH,1)),
             MobKind::Fishy => Some(([COD, COD, SALMON, TROPICAL][rng.int(0, 3) as usize], 1)),
             // An armed one drops its spear now and then; otherwise it's soggy goo.
             MobKind::Soggy if self.seed == 1 && rng.chance(0.25) => Some((SPEAR, 1)),
@@ -2451,6 +2533,7 @@ impl Mob {
     /// Anything dropped besides `loot` (Baa-con, Cluckets, spare Pointy Sticks).
     pub fn extra_loot(&self, rng: &mut Rng) -> Option<(Id, u8)> {
         match self.kind {
+            MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => Some((SEASHELL,1)),
             MobKind::Fluffer if rng.chance(0.7) => Some((MUTTON, 1)),
             MobKind::Cluckster => Some((CLUCKETS, 1)),
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
@@ -2861,6 +2944,74 @@ static SNOUT_BRUTE: [Part; 7] = {
 };
 
 // A fish: a long body, a tail that waggles, a fin on top.
+static STARFISH: [Part; 6] = [
+    part([-0.1, 0.0, -0.1], [0.2, 0.1, 0.2], [0.0;3], Limb::Fixed, [T_STARFISH;6]),
+    part([-0.06, 0.0, -0.3], [0.12, 0.08, 0.25], [0.0;3], Limb::Fixed, [T_STARFISH;6]),
+    part([-0.28, 0.0, -0.12], [0.24, 0.08, 0.12], [0.0;3], Limb::Yaw(-0.7), [T_STARFISH;6]),
+    part([0.04, 0.0, -0.12], [0.24, 0.08, 0.12], [0.0;3], Limb::Yaw(0.7), [T_STARFISH;6]),
+    part([-0.2, 0.0, 0.02], [0.13, 0.08, 0.25], [0.0;3], Limb::Yaw(-0.5), [T_STARFISH;6]),
+    part([0.07, 0.0, 0.02], [0.13, 0.08, 0.25], [0.0;3], Limb::Yaw(0.5), [T_STARFISH;6]),
+];
+static CLAM: [Part; 2] = [
+    part([-0.2, 0.0, -0.2], [0.4, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_CLAM;6]),
+    part([-0.18, 0.08, -0.18], [0.36, 0.1, 0.36], [0.0;3], Limb::Fixed, [T_CLAM;6]),
+];
+static MUSSEL: [Part; 2] = [
+    part([-0.12, 0.0, -0.2], [0.24, 0.08, 0.4], [0.0;3], Limb::Fixed, [T_MUSSEL;6]),
+    part([-0.09, 0.08, -0.16], [0.18, 0.1, 0.32], [0.0;3], Limb::Fixed, [T_MUSSEL;6]),
+];
+static OYSTER: [Part; 3] = [
+    part([-0.22, 0.0, -0.18], [0.44, 0.06, 0.36], [0.0;3], Limb::Fixed, [T_OYSTER;6]),
+    part([-0.17, 0.06, -0.2], [0.34, 0.11, 0.4], [0.0;3], Limb::Fixed, [T_OYSTER;6]),
+    part([-0.13, 0.17, -0.1], [0.26, 0.04, 0.2], [0.0;3], Limb::Fixed, [T_OYSTER;6]),
+];
+static SEASNAIL: [Part; 4] = [
+    part([-0.14, 0.0, -0.2], [0.28, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
+    part([-0.13, 0.07, -0.08], [0.26, 0.22, 0.24], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
+    part([-0.07, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
+    part([0.04, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
+];
+static CRAB: [Part; 13] = [
+    part([-0.22, 0.1, -0.2], [0.44, 0.17, 0.4], [0.0;3], Limb::Fixed, [T_CRAB;6]),
+    part([-0.37, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB;6]),
+    part([0.25, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB;6]),
+    part([-0.16, 0.27, -0.18], [0.05, 0.06, 0.05], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([0.11, 0.27, -0.18], [0.05, 0.06, 0.05], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.37, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
+    part([0.19, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
+    part([-0.37, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
+    part([0.19, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
+    part([-0.37, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
+    part([0.19, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
+    part([-0.37, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
+    part([0.19, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
+];
+static SARDINE: [Part; 5] = [
+    part([-0.07, 0.03, -0.22], [0.14, 0.16, 0.36], [0.0;3], Limb::Fixed, [T_SARDINE;6]),
+    part([-0.02, 0.04, 0.14], [0.04, 0.15, 0.14], [0.0;3], Limb::SwingY(0.5), [T_SARDINE;6]),
+    part([-0.02, 0.19, -0.07], [0.04, 0.06, 0.12], [0.0;3], Limb::SwingY(0.5), [T_SARDINE;6]),
+    part([0.073, 0.13, -0.19], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.088, 0.13, -0.19], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+];
+static TUNA: [Part; 8] = [
+    part([-0.23, 0.12, -0.55], [0.46, 0.42, 0.96], [0.0;3], Limb::Fixed, [T_TUNA;6]),
+    part([-0.16, 0.2, -0.75], [0.32, 0.28, 0.22], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
+    part([-0.025, 0.15, 0.4], [0.05, 0.38, 0.28], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
+    part([-0.025, 0.54, -0.15], [0.05, 0.2, 0.3], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
+    part([-0.4, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
+    part([0.18, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
+    part([0.162, 0.38, -0.65], [0.015, 0.065, 0.065], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.177, 0.38, -0.65], [0.015, 0.065, 0.065], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+];
+static EEL: [Part; 6] = [
+    part([-0.09, 0.04, -0.5], [0.18, 0.16, 0.32], [0.0;3], Limb::Fixed, [T_EEL;6]),
+    part([-0.08, 0.04, -0.18], [0.16, 0.14, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL;6]),
+    part([-0.065, 0.04, 0.14], [0.13, 0.12, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL;6]),
+    part([-0.04, 0.04, 0.46], [0.08, 0.08, 0.22], [0.0;3], Limb::SwingY(0.5), [T_EEL;6]),
+    part([0.091, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.106, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+];
+
 static FISHY: [Part; 3] = [
     part([-0.12, 0.05, -0.3], [0.24, 0.3, 0.55], [0.0; 3], Limb::Fixed, [T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY_FACE]),
     part([-0.02, 0.06, 0.25], [0.04, 0.28, 0.22], [0.0, 0.2, 0.25], Limb::SwingY(2.0), [T_FISHY_FIN; 6]),
@@ -3556,7 +3707,7 @@ pub static CAMEL_SADDLE: [Part; 2] = [
     part([-0.44, 1.84, 0.3], [0.88, 0.1, 0.45], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6]),
 ];
 
-fn model(kind: MobKind) -> &'static [Part] {
+pub(crate) fn model(kind: MobKind) -> &'static [Part] {
     match kind {
         MobKind::Oinker => &OINKER,
         MobKind::Hisser => &HISSER,
@@ -3585,6 +3736,16 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Squawker => &SQUAWKER,
         MobKind::Clanker => &CLANKER,
         MobKind::Fishy => &FISHY,
+        MobKind::Starfish => &STARFISH,
+        MobKind::Clam => &CLAM,
+        MobKind::Crab => &CRAB,
+        MobKind::Sardine => &SARDINE,
+        MobKind::Tuna => &TUNA,
+        MobKind::Mussel => &MUSSEL,
+        MobKind::Oyster => &OYSTER,
+        MobKind::SeaSnail => &SEASNAIL,
+        MobKind::Eel => &EEL,
+
         MobKind::Soggy => &SOGGY,
         MobKind::Bee => &BEE,
         MobKind::Sneaker => &SNEAKER,

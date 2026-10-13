@@ -60,6 +60,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         MUTTON => COOKED_MUTTON,
         CLUCKETS => COOKED_CLUCKETS,
         MOO_STEAK => STEAK,
+        RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH => COOKED_SEAFOOD,
         COD => COOKED_COD,
         SALMON => COOKED_SALMON,
         POTATO => BAKED_POTATO,

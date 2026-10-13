@@ -758,7 +758,14 @@ pub const COOKBOOK: Id = FIRST_ITEM + 267;
 pub const DISH_FIRST: Id = FIRST_ITEM + 268;
 /// The village paper (see paper.rs): its wear says which issue.
 pub const NEWSPAPER: Id = FIRST_ITEM + 277;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 278;
+pub const RAW_SARDINE: Id = FIRST_ITEM + 278;
+pub const RAW_TUNA: Id = FIRST_ITEM + 279;
+pub const RAW_EEL: Id = FIRST_ITEM + 280;
+pub const CRAB_MEAT: Id = FIRST_ITEM + 281;
+pub const SHELLFISH: Id = FIRST_ITEM + 282;
+pub const COOKED_SEAFOOD: Id = FIRST_ITEM + 283;
+pub const SEASHELL: Id = FIRST_ITEM + 284;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 285;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2895,6 +2902,11 @@ impl Registry {
         items.push(ItemDef { stack: 1, consume: false, ..item("woodland_map", "Woodland Explorer Map (Here Be Pilferers)", T_WOODLAND_MAP) });
         items.extend(crate::cooking::items());
         items.push(ItemDef { stack: 1, consume: false, ..item("newspaper", "Newspaper (Hold to Read)", T_NEWSPAPER) });
+        for (key,name,tile) in [("raw_sardine","Raw Sardine",T_SARDINE_ITEM),("raw_tuna","Raw Tuna",T_TUNA_ITEM),("raw_eel","Raw Eel",T_EEL_ITEM),("crab_meat","Raw Crab Meat",T_SEAFOOD),("shellfish","Raw Shellfish",T_SEASHELL)] {
+            items.push(ItemDef { food:Some(1.0),..item(key,name,tile) });
+        }
+        items.push(ItemDef { food:Some(6.0),..item("cooked_seafood","Cooked Seafood",T_SEAFOOD) });
+        items.push(item("seashell","Seashell",T_SEASHELL));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2960,6 +2972,7 @@ impl Registry {
             r(&[(IRON, 1), (STICK, 1), (GLASS, 1)], (SOIL_PROBE, 1)),
             r(&[(WHEAT, 3)], (BREAD, 1)),
             r(&[(STICK, 3), (STRING, 2)], (ROD, 1)),
+            r(&[(SEASHELL, 3)], (BONE_DUST, 2)),
             r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),
@@ -3310,7 +3323,7 @@ pub fn food_value(id: Id) -> Option<f32> {
 /// How long a food keeps you full (its saturation per point, Minecraft style).
 pub fn food_quality(id: Id) -> f32 {
     match id {
-        PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COD | SALMON | TROPICAL | POTATO => 0.3,
+        RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH | PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COD | SALMON | TROPICAL | POTATO => 0.3,
         GOO | COOKED_BOOT => 0.1,
         CARROT | BREAD | APPLE => 0.6,
         GOLDEN_CHOP | BIG_BOB => 1.2,

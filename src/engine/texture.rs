@@ -903,6 +903,21 @@ pub const T_NEWSPAPER: u16 = 1116;
 pub const T_POINTY_TIP: u16 = 1117;
 pub const T_POINTY_MIDDLE: u16 = 1118;
 pub const T_POINTY_BASE: u16 = 1119;
+pub const T_STARFISH: u16 = 1120;
+pub const T_CLAM: u16 = 1121;
+pub const T_CRAB: u16 = 1122;
+pub const T_SARDINE: u16 = 1123;
+pub const T_TUNA: u16 = 1124;
+pub const T_MUSSEL: u16 = 1125;
+pub const T_OYSTER: u16 = 1126;
+pub const T_SEASNAIL: u16 = 1127;
+pub const T_EEL: u16 = 1128;
+pub const T_SEAFOOD: u16 = 1129;
+pub const T_SEASHELL: u16 = 1130;
+pub const T_COAST_EYE: u16 = 1131;
+pub const T_SARDINE_ITEM: u16 = 1132;
+pub const T_TUNA_ITEM: u16 = 1133;
+pub const T_EEL_ITEM: u16 = 1134;
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -4004,6 +4019,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
         if shaft || head { rgb(255, 255, 255) } else { [0, 0, 0, 0] }
     });
 
+    paint_coastal(&mut a);
     paint_new_things(&mut a);
     paint_bees(&mut a);
     paint_critters(&mut a);
@@ -7194,6 +7210,19 @@ const BUNDLE_SPRITE: [&str; 16] = [
     "......####......",
     "................",
 ];
+
+
+fn paint_coastal(a: &mut Atlas) {
+    for (tile,body) in [(T_SARDINE_ITEM,rgb(146,182,198)),(T_TUNA_ITEM,rgb(48,89,132)),(T_EEL_ITEM,rgb(79,100,61))] {
+        a.sprite(tile,&FISH,&[('#',shade(body,0.45)),('f',body),('F',shade(body,0.75)),('b',rgb(219,223,198)),('w',rgb(255,255,255)),('k',rgb(10,10,10))]);
+    }
+    a.each(T_COAST_EYE,|x,y,_,_|if (3..6).contains(&x) && (3..6).contains(&y) {rgb(220,225,210)}else{rgb(16,20,23)});
+    for (tile,base) in [(T_STARFISH,rgb(232,133,64)),(T_CLAM,rgb(211,187,153)),(T_CRAB,rgb(185,65,43)),(T_SARDINE,rgb(146,182,198)),(T_TUNA,rgb(48,89,132)),(T_MUSSEL,rgb(43,49,79)),(T_OYSTER,rgb(156,156,130)),(T_SEASNAIL,rgb(191,153,97)),(T_EEL,rgb(79,100,61))] {
+        a.each(tile,|x,y,r,_|shade(base,if (x+y/2)%4==0 {0.72}else{r.range(0.9,1.1)}));
+    }
+    a.each(T_SEAFOOD,|x,y,r,_|if (x as i32-8).pow(2)+(y as i32-8).pow(2)>38 {[0,0,0,0]}else{shade(rgb(224,160,119),r.range(0.85,1.1))});
+    a.each(T_SEASHELL,|x,y,r,_|if (x as i32-8).pow(2)+(y as i32-9).pow(2)>43 {[0,0,0,0]}else{shade(rgb(227,203,165),if (x+y)%3==0 {0.75}else{r.range(0.95,1.05)})});
+}
 
 #[cfg(test)]
 mod tests {

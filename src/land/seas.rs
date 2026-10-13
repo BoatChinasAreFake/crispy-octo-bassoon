@@ -96,6 +96,94 @@ impl Generator {
 }
 
 impl Game {
+    /// Check the entire collision box, including Tuna's wider body.
+    pub(crate) fn coastal_room(&self,kind:crate::entity::MobKind,at:Vec3)->bool {
+        let (half,height)=kind.dims();
+        let lo=at-Vec3::new(half,0.0,half);
+        let hi=at+Vec3::new(half,height,half);
+        for z in lo.z.floor() as i32..=(hi.z-0.001).floor() as i32 {
+            for x in lo.x.floor() as i32..=(hi.x-0.001).floor() as i32 {
+                if !self.world.is_loaded(x,z) { return false; }
+                for y in lo.y.floor() as i32..=(hi.y-0.001).floor() as i32 {
+                    let id=self.world.get(x,y,z);
+                    if kind==crate::entity::MobKind::Crab {
+                        if is_solid(id) || is_lava(id) { return false; }
+                    } else if !is_water(id) && !waterlogged(id) { return false; }
+                }
+            }
+        }
+        true
+    }
+
+    /// Species-specific habitat using actual loaded blocks, rather than just
+    /// generated height (so player-built dry/filled pools cannot spawn fish).
+    pub(crate) fn coastal_habitat(&self,kind:crate::entity::MobKind,x:i32,z:i32)->Option<Vec3> {
+        use crate::entity::MobKind::*;
+        let g=&self.world.generator;
+        if !self.world.is_loaded(x,z) { return None; }
+        let (_,biome)=g.column(x,z);
+        if !biome.is_ocean() && biome!=Biome::Beach { return None; }
+        if biome==Biome::FrozenOcean { return None; }
+        let sea=self.world.sea();
+        let floor=(4..=sea+4).rev().find(|&y|is_solid(self.world.get(x,y,z)))?;
+        let ground=self.world.get(x,floor,z);
+        let depth=sea-floor;
+        let sandy=matches!(ground,SAND|GRAVEL|RED_SAND);
+        let rocky=matches!(ground,STONE|GRAVEL|DEEPSLATE);
+        let fits=match kind {
+            Crab => (biome==Biome::Beach || biome.is_ocean()) && sandy && (-4..=4).contains(&depth),
+            Starfish => (1..=8).contains(&depth) && sandy,
+            Clam => (2..=10).contains(&depth) && sandy,
+            Mussel | Oyster => (1..=8).contains(&depth) && (sandy||rocky),
+            SeaSnail => (1..=8).contains(&depth) && (sandy||rocky),
+            Sardine => biome.is_ocean() && depth>=5,
+            Tuna => biome.is_ocean() && depth>=12,
+            Eel => biome.is_ocean() && (4..=24).contains(&depth),
+            _=>false,
+        };
+        if !fits { return None; }
+        let y=if kind.benthic() {floor+1} else {match kind { Sardine=>sea-3, Tuna=>sea-6, _=>floor+2 }};
+        let at=Vec3::new(x as f32+0.5,y as f32,z as f32+0.5);
+        self.coastal_room(kind,at).then_some(at)
+    }
+
+    pub(crate) fn try_coastal_wildlife(&mut self,center:Vec3)->bool {
+        use crate::entity::MobKind::*;
+        let mut centers=vec![center];
+        if !self.away() { centers.push(self.player.body.pos); }
+        centers.extend(self.peers.values().map(|p|p.target));
+        self.mobs.retain(|m|m.persistent || !m.kind.coastal() || centers.iter().any(|p|m.body.pos.distance_squared(*p)<=192.0*192.0));
+        let cap=(80+12*self.peers.len()).min(160);
+        let count=self.mobs.iter().filter(|m|m.kind.coastal()).count();
+        if count>=cap { return false; }
+        for _ in 0..4 {
+            let angle=self.rng.range(0.0,std::f32::consts::TAU);
+            let radius=self.rng.range(18.0,50.0);
+            let (x,z)=((center.x+angle.cos()*radius).floor() as i32,(center.z+angle.sin()*radius).floor() as i32);
+            let kinds=[Starfish,Clam,Crab,Sardine,Tuna,Mussel,Oyster,SeaSnail,Eel];
+            let kind=kinds[self.rng.int(0,8) as usize];
+            let limit=match kind { Sardine=>20, Tuna=>4, Eel=>6, Crab=>8, _=>6 };
+            let nearby=self.mobs.iter().filter(|m|m.kind==kind && m.body.pos.distance_squared(center)<96.0*96.0).count();
+            if nearby>=limit { continue; }
+            if self.coastal_habitat(kind,x,z).is_none() { continue; }
+            let n=if kind==Sardine {self.rng.int(5,8) as usize}else if matches!(kind,Mussel|Oyster|Clam) {self.rng.int(2,3) as usize}else{1};
+            let school=self.rng.int(0,1_000_000) as u32;
+            let mut spawned=false;
+            for i in 0..n.min(limit-nearby).min(cap-count) {
+                let (xx,zz)=(x+i as i32,z);
+                // Recheck each member's own floor/habitat: no hovering colonies.
+                let Some(pos)=self.coastal_habitat(kind,xx,zz) else { continue; };
+                if self.mobs.iter().any(|m|m.kind.coastal() && m.body.pos.distance_squared(pos)<0.7*0.7) { continue; }
+                let id=self.alloc_mob(kind,pos);
+                if let Some(m)=self.mobs.iter_mut().find(|m|m.id==id) {m.seed=school;m.yaw=angle;m.wander_dir=Some(angle);m.body.in_water=is_water(self.world.get_v(pos.floor().as_ivec3())) || waterlogged(self.world.get_v(pos.floor().as_ivec3()));}
+                spawned=true;
+            }
+            if spawned { return true; }
+        }
+        false
+    }
+
+
     pub(crate) fn sea_spawn_room(&self,at:Vec3)->bool {
         let wet=|id|is_water(id)||waterlogged(id);
         [Vec3::ZERO,Vec3::new(0.5,0.0,0.0),Vec3::new(-0.5,0.0,0.0),Vec3::new(0.0,0.6,0.0),Vec3::new(0.0,0.0,0.5),Vec3::new(0.0,0.0,-0.5)]
@@ -199,6 +287,106 @@ mod tests {
     use super::*;
 
     use macroquad::math::ivec3;
+
+    #[test]
+    fn coastal_habitats_respect_depth_support_and_body_clearance() {
+        use crate::entity::MobKind::*;
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=Game::new_with(77,true,false,crate::world::GenOptions::DEFAULT);
+        let (x,z)=(-4096..4096).step_by(64).flat_map(|z|(-4096..4096).step_by(64).map(move|x|(x,z)))
+            .find(|&(x,z)|g.world.generator.column(x,z).1==Biome::Ocean).unwrap();
+        for dz in -1..=1 { for dx in -1..=1 {g.world.load_now(x.div_euclid(16)+dx,z.div_euclid(16)+dz);} }
+        let sea=g.world.sea();
+        for depth in [2,6,16] {
+            for zz in z-3..=z+3 {for xx in x-3..=x+3 {for y in 4..=sea+4 {
+                g.world.set(xx,y,zz,if y<=sea-depth {SAND}else if y<=sea {WATER}else{AIR});
+            } } }
+            for kind in [Starfish,Clam,Crab,Sardine,Tuna,Mussel,Oyster,SeaSnail,Eel] {
+                let expected=match kind {Crab=>depth<=4,Starfish|Clam|Mussel|Oyster|SeaSnail=>depth<=8,Sardine=>depth>=5,Tuna=>depth>=12,Eel=>depth>=4,_=>false};
+                let at=g.coastal_habitat(kind,x,z);
+                assert_eq!(at.is_some(),expected,"{kind:?} at depth {depth}");
+                if let Some(at)=at {assert!(g.coastal_room(kind,at));}
+            }
+        }
+        let at=g.coastal_habitat(Tuna,x,z).unwrap();
+        g.world.set(x+1,at.y as i32,z,STONE);
+        assert!(!g.coastal_room(Tuna,at),"a Tuna needs more than a point of water");
+        g.world.set(x+1,at.y as i32,z,WATER);
+        g.world.set(x,at.y as i32,z,AIR);
+        assert!(!g.coastal_room(Tuna,at),"dry cells reject fish");
+    }
+
+    #[test]
+    fn coastal_spawning_has_local_and_global_limits_and_recycles_wildlife() {
+        use crate::entity::MobKind::*;
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=Game::new_with(77,true,false,crate::world::GenOptions::DEFAULT);
+        let (x,z)=(-4096..4096).step_by(64).flat_map(|z|(-4096..4096).step_by(64).map(move|x|(x,z)))
+            .find(|&(x,z)|[-64,0,64].iter().all(|&dx|[-64,0,64].iter().all(|&dz|{
+                let (h,b)=g.world.generator.column(x+dx,z+dz);b==Biome::Ocean && h<g.world.sea()-12
+            }))).unwrap();
+        for dz in -4..=4 {for dx in -4..=4 {g.world.load_now(x.div_euclid(16)+dx,z.div_euclid(16)+dz);} }
+        let center=Vec3::new(x as f32+0.5,g.world.sea() as f32,z as f32+0.5);
+        for _ in 0..200 {g.try_coastal_wildlife(center);}
+        for kind in [Sardine,Tuna] {
+            let n=g.mobs.iter().filter(|m|m.kind==kind).count();
+            assert!(n>0 && n<=if kind==Sardine {20}else{4},"{kind:?}: {n}");
+        }
+        assert!(g.mobs.iter().filter(|m|m.kind.coastal()).all(|m|g.coastal_room(m.kind,m.body.pos)));
+        g.mobs.clear();
+        for _ in 0..80 {let id=g.alloc_mob(Sardine,center+Vec3::X*10000.0);g.mobs.iter_mut().find(|m|m.id==id).unwrap().persistent=true;}
+        assert!(!g.try_coastal_wildlife(center));
+        assert_eq!(g.mobs.len(),80,"kept animals respect hard limits");
+        for m in &mut g.mobs {m.persistent=false;}
+        for _ in 0..100 {g.try_coastal_wildlife(center);}
+        assert!(g.mobs.iter().all(|m|m.body.pos.distance_squared(center)<96.0*96.0));
+        assert!(g.mobs.iter().any(|m|m.kind==Sardine));
+    }
+
+    #[test]
+    fn bottom_creatures_stay_on_the_floor_and_shellfish_do_not_wander() {
+        use crate::entity::{Mob,MobKind};
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=Game::new_with(9,true,true,crate::world::GenOptions::DEFAULT);
+        g.world.load_now(0,0);
+        for z in 0..16 {for x in 0..16 {for y in 45..60 {g.world.set(x,y,z,if y<=49 {SAND}else{WATER});}}}
+        let mut rng=crate::noise::Rng::new(8);
+        for kind in [MobKind::Clam,MobKind::Mussel,MobKind::Oyster,MobKind::Starfish,MobKind::SeaSnail,MobKind::Crab,MobKind::Eel] {
+            let mut m=Mob::new(kind,Vec3::new(8.5,50.0,8.5),&mut rng);m.body.in_water=true;
+            for _ in 0..300 {m.update(1.0/30.0,&g.world,Vec3::splat(100.0),false,1.0,&mut rng);}
+            assert!(m.body.pos.y<51.2 && m.body.pos.y>=49.9,"{kind:?} floated or sank: {}",m.body.pos.y);
+            assert_eq!(m.health,kind.max_health());
+            if matches!(kind,MobKind::Clam|MobKind::Mussel|MobKind::Oyster) {assert!((m.body.pos-Vec3::new(8.5,50.0,8.5)).length()<0.02);}
+        }
+        g.menu=false;
+        g.item_advancements(RAW_SARDINE);
+        assert!(g.advancements.earned.iter().any(|a|a=="shore_supper"));
+    }
+
+    #[test]
+    fn new_species_save_and_food_paths_round_trip() {
+        use crate::entity::{Mob,MobKind};
+        let _lock=crate::mods::registry_test_lock();
+        let mut rng=crate::noise::Rng::new(4);
+        let mut mobs=Vec::new();
+        for kind in MobKind::ALL.into_iter().filter(|k|k.coastal()) {
+            assert!(!kind.hostile() && !kind.passive());
+            assert_eq!(MobKind::from_name(kind.name()),Some(kind));
+            let mut m=Mob::new(kind,Vec3::new(1.5,50.0,1.5),&mut rng);m.persistent=true;
+            assert!(!crate::entity::model(kind).is_empty());
+            if kind!=MobKind::Starfish {
+                let (food,_)=m.loot(&mut rng).expect("harvestable seafood");
+                assert_eq!(crate::containers::smelt(food),Some(COOKED_SEAFOOD));
+                assert!(food_value(food).is_some());
+            }
+            mobs.push(m);
+        }
+        let bytes=crate::animals::encode_mobs(&mobs,&std::collections::HashMap::new());
+        let back=crate::animals::decode_mobs(&bytes,&mut rng);
+        assert_eq!(back.iter().map(|m|m.kind).collect::<Vec<_>>(),mobs.iter().map(|m|m.kind).collect::<Vec<_>>());
+        assert_eq!(MobKind::SnowGolem.index(),67,"old base mob indices stay fixed");
+        assert_eq!(reg().items[(SEASHELL-FIRST_ITEM) as usize].key,"seashell");
+    }
 
     #[test]
     fn ocean_wildlife_forms_schools_without_land_caps_or_dry_spawns() {

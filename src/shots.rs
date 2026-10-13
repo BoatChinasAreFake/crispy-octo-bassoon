@@ -448,6 +448,33 @@ impl App {
     pub(crate) fn shot_setup(&mut self, s: &mut ShotArgs) {
         let app = self;
         match s.mode.as_str() {
+            "coastal_floor" | "coastal_fish" => {
+                // Controlled aquarium for model QA; natural habitat rules are
+                // exercised separately by spawning tests and playtests.
+                let mut g=shot_game(424242,true,false);
+                let (ox,oz)=(-4096..4096).step_by(128).flat_map(|z|(-4096..4096).step_by(128).map(move|x|(x,z))).find(|&(x,z)|g.world.generator.climate(x,z).0>0.35).unwrap_or((0,0));
+                let origin=Vec3::new(ox as f32,0.0,oz as f32);
+                for dz in -1..=1 {for dx in -1..=1 {g.world.load_now(ox.div_euclid(16)+dx,oz.div_euclid(16)+dz);} }
+                for z in -12..=8 {for x in -12..=12 {for y in 74..crate::world::CH {
+                    g.world.set(ox+x,y,oz+z,if y<76 {STONE}else if y==76 {SAND}else if y<=81 {WATER}else{AIR});
+                } } }
+                g.mobs.clear();
+                use entity::MobKind as K;
+                let kinds=if s.mode=="coastal_floor" {vec![K::Starfish,K::Clam,K::Crab,K::Mussel,K::Oyster,K::SeaSnail]} else {vec![K::Sardine,K::Tuna,K::Eel]};
+                for (i,kind) in kinds.into_iter().enumerate() {
+                    let pos=origin+Vec3::new(-1.5+(i%3) as f32*1.5,if kind.benthic(){77.0}else{78.0},-1.0-(i/3) as f32*1.5);
+                    let id=g.alloc_mob(kind,pos);
+                    if let Some(m)=g.mobs.iter_mut().find(|m|m.id==id) {m.persistent=true;m.yaw=0.5;m.wander_t=100.0;m.wander_dir=None;m.home=Some(pos);m.body.in_water=true;}
+                }
+                g.inv.armor[0]=Some((TURTLE_SHELL,1));
+                g.apply_potion(potions::Potion::NightVision);
+                g.shadows=false;
+                let from=origin+Vec3::new(0.0,77.8,2.5);
+                let d=origin+Vec3::new(0.0,if s.mode=="coastal_floor"{77.2}else{78.2},-1.5)-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                g.player.body.pos=from;g.player.flying=true;
+                g.time=0.3;app.start_game(g);app.show_debug=false;
+            }
             "survival" | "creative" | "inventory" | "night" | "death" => {
                 // --seed N shows someone else's world (to look at a reported bug).
                 let seed = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--seed").and_then(|w| w[1].parse().ok()).unwrap_or(424242);
@@ -981,6 +1008,12 @@ impl App {
                     app.game.player.body.pos = p;
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
+                }
+                if matches!(s.mode.as_str(),"coastal_floor"|"coastal_fish") {
+                    // Keep these controlled model-review poses in view.
+                    for m in &mut app.game.mobs {if m.kind.coastal() && let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
+                    app.game.messages.clear();app.game.toasts.clear();
+                    app.game.inv.slots.fill(None);
                 }
                 if s.mode=="sea_wildlife" && let Some(to)=app.game.mobs.iter().find(|m|m.kind==entity::MobKind::Dolphin).map(|m|m.body.pos+Vec3::Y*0.3) {
                     let mut from=to+Vec3::new(4.0,-0.9,5.0);
@@ -2424,6 +2457,7 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
+    "coastal_floor", "coastal_fish",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
 ];
 

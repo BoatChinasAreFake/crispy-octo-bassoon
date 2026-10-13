@@ -1,10 +1,10 @@
 # v0.6 Part 2 core — development branch
 
-Implements roadmap items 4 to 8. The two originals remain undecided, and Part 2 is not marked released. No changes are merged into main and no release is published.
+Implements roadmap items 4 to 9. The two originals remain undecided, and Part 2 is not marked released. No changes are merged into main and no release is published.
 
 ## Behavior and compatibility
 
-- New worlds use generation revision **10** for relief, islands and beach ecology. Revision 9 retains the previous terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–9** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **46** prevents older clients from clamping revision 10 to revision 9.
+- New worlds use generation revision **10** for relief, islands and beach ecology. Revision 9 retains the previous terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–9** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **47** protects revision 10, the appended coastal mob IDs and the new item IDs.
 - The depth-aware cave selector reuses surface temperature, moisture, continentalness and erosion. Deep Dark takes precedence below height 24 under inland rugged land. Damp, mild land has lush caves from height 24; drier, non-frozen inland land has dripstone at heights 10–48. Bedrock and the top eight blocks below the surface are excluded. Existing carving, blocks, geodes and survival mechanics remain.
 - Climate-target mods use optional bounded axes, a 0.35 per-axis eligibility radius, normalized mean squared distance and stable-key tie-breaking. Targetless patches retain first-match priority. Built-in shape landmarks and rare variants are protected. Targets are ignored in older worlds and rejected for mod dimensions.
 - Surface structures validate their complete bounded footprints, including interiors. Villages check squares, paths, farms and houses; growth sites are filtered too. Mansions remain inside dark forest, and springs require cold, level ground. Overworld mod templates receive supporting foundations, and settling aprons preserve adjacent waterways.
@@ -14,11 +14,11 @@ Implements roadmap items 4 to 8. The two originals remain undecided, and Part 2 
 
 Validated on Linux x86-64 with **Rust 1.90.0**, locked dependencies and the normal release profile (thin LTO):
 
-- `cargo test --release --locked`: **563 passed, 0 failed, 1 ignored** (the manual map export).
+- `cargo test --release --locked`: **567 passed, 0 failed, 1 ignored** (the manual map export).
 - `cargo clippy --release --all-targets --locked -- -D warnings`: clean.
 - `cargo check --release --locked --no-default-features`: passes.
 - Audio mixer tests: **2 passed**. This container required the GNU bfd linker for the standalone vendor test binary.
-- Six-bot, 60-second CLI socket playtest, seed 1234: everyone agrees (122 blocks placed, 106 broken, 129 chat lines). Includes natural cave generation, village foundations, climate-target mod surfaces, bounded rivers, rocky coasts, islands, beach ecology, marine mob snapshots, host edit/restore propagation and advancement delivery.
+- Six-bot, 60-second CLI socket playtest, seed 1234: everyone agrees (122 blocks placed, 106 broken, 129 chat lines). Includes natural cave generation, village foundations, climate-target mod surfaces, bounded rivers, rocky coasts, islands, beach ecology, all nine coastal species, marine mob snapshots, host edit/restore propagation and advancement delivery.
 - The test suite also runs a two-bot/seed-77 scenario and a six-bot/seed-1234 scenario with base content, without installing a mod registry concurrently.
 - Released-generation regression fixtures were captured from merge commit `3ef73d102c6119e4092c2e59b69e47c8c1d4c556` before implementation: seed 424242, chunks (0,0), (-7,11), (31,-29), for every revision 0–7. Revision 8 was captured from commit `59c38343a05c72044b06a08e49f309bafe8feae2` before the revision 9 edits; all ten fixtures pass.
 - Climate parser tests cover finite bounds, omitted axes, old defaults and unsupported dimensions. Integration tests check generated mod-template blocks, foundations, chest locators and a template spanning a chunk boundary.
@@ -85,6 +85,16 @@ A dedicated marine spawning pass tries four water habitats near a player per att
 
 The socket playtest now checks island and decorated-beach regeneration, edit restoration, and delivery of newly spawned marine mobs to the joined player. Revision 9 chunk fixtures were captured from commit `abee1142af7856fb050548c39acec79e4b50f3ca` before this slice.
 
-Current checks: 563 release tests pass, including local marine density, water clearance, hard caps, recycling of distant wild schools, beach support, island isolation/size, increased normalized inland relief, compatibility through revision 9 and socket delivery of marine mobs. Kept marine animals are not recycled. Wild fish and dolphins farther than 192 blocks from every player are removed to free cap space at newly explored coasts.
+The revision 10 terrain slice passed 563 release tests, including local marine density, water clearance, hard caps, recycling of distant wild schools, beach support, island isolation/size, increased normalized inland relief, compatibility through revision 9 and socket delivery of marine mobs. Kept marine animals are not recycled. Wild fish and dolphins farther than 192 blocks from every player are removed to free cap space at newly explored coasts.
 
 Ten matched 512×512-chunk surface maps, sampled every eight blocks, contained 203 dry mushroom-biome components in revision 9 and two in revision 10. The largest sampled dry mushroom component grew from 56 to 496 blocks wide. Across 4,016,492 matched dry inland samples, mean height change over 32 blocks increased from 3.07 to 3.61 blocks (about 18%). These are bounded survey statistics, not exact worldwide rates.
+
+## Coastal species
+
+The requested nine species have separate appended base-mob IDs, procedural textures, collision dimensions and models. Starfish and sea snails crawl slowly on shallow floors; clams, mussels and oysters remain on supported seabeds; crabs walk sandy beaches and shallow water; sardines spawn in schools of five to eight; tuna need at least twelve blocks of ocean depth; eels swim near the bottom. Their runtime spawning also works in older worlds without changing saved generator options or terrain. Frozen oceans are excluded.
+
+The spawning pass samples actual loaded blocks and each species' full collision box, then rechecks every school/colony member's depth and support. Local limits within 96 blocks are twenty sardines, four tuna, six eels, eight crabs and six of each other species. The separate world cap is 80–160 coastal creatures by player count; kept animals count against limits, and distant wild populations recycle beyond 192 blocks of every player. These creatures consume neither land-animal nor hostile caps.
+
+Five raw seafood items cook into Cooked Seafood, and integrate with existing Cooking Pot fish ingredients. Shellfish also leave seashells, with a three-shell to two-Bone-Dust recipe. Starfish have no food drop. Life at the Shore rewards a close encounter, and Shore Supper rewards obtaining raw seafood. Existing base item/mob IDs stay fixed; mod mob saves retain name keys and mod item saves use their palette, so their shifted runtime offsets are remapped on load. Save format 16 and terrain revision 10 remain. Protocol 47 prevents mixed old/new wire IDs.
+
+Four new tests cover actual depth/support, Tuna body clearance and dry-cell rejection, natural Sardine/Tuna population limits, kept/wild cap behavior, bottom movement and stationary colonies, food/cooking, advancement and save round trips. Both socket playtests check delivery of all nine species and the encounter advancement. Controlled `coastal_floor` and `coastal_fish` aquarium scenes support model review; they use held review poses and the existing Night Vision effect, and are explicitly staged scenes rather than evidence of natural spawning.

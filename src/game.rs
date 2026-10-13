@@ -1144,6 +1144,7 @@ impl Game {
             return;
         }
         self.explore_timer = 0.0;
+        if !self.away() && self.mobs.iter().any(|m|m.kind.coastal() && m.body.pos.distance_squared(self.player.body.pos)<8.0*8.0) { self.advance("shore_life"); }
         // Mods' biomes, anywhere (see modgen.rs).
         {
             let p = self.player.body.pos;
@@ -1217,6 +1218,7 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
+            RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH => "shore_supper",
             LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
@@ -3735,6 +3737,7 @@ impl Game {
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama => {}
+                    MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {}
                     MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
@@ -3919,6 +3922,8 @@ impl Game {
                             MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Wilter => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
+                            MobKind::Starfish => {}
+                            MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {},
                             MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
@@ -4077,9 +4082,10 @@ impl Game {
             }
             return;
         }
+        if self.try_coastal_wildlife(p) { return; }
         if self.try_sea_wildlife(p) { return; }
         // Kept animals (bred, tamed) don't count against new ones turning up.
-        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent && !matches!(m.kind,MobKind::Fishy | MobKind::Dolphin | MobKind::GlowSquid | MobKind::Axolotl)).count();
+        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.kind.coastal() && !m.persistent && !matches!(m.kind,MobKind::Fishy | MobKind::Dolphin | MobKind::GlowSquid | MobKind::Axolotl)).count();
         // Only wild monsters count towards the monster cap (not fish, Hmmers, pets or bats).
         let hostile = self.wild_monsters();
         let a = self.rng.range(0.0, TAU);

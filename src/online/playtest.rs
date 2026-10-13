@@ -2619,6 +2619,18 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
             pump(host,team,2.0,|_|idle());
             if spawned.len()<4 { report.problems.push("marine spawning produced no school".into()); }
             if !spawned.iter().any(|&id|team[k].game.mobs.iter().any(|m|m.id==id)) { report.problems.push("joined player never saw the marine school".into()); }
+            // All nine species exercise the normal authoritative snapshot path.
+            report.features.push("coastal species");
+            let species:Vec<_>=crate::entity::MobKind::ALL.into_iter().filter(|kind|kind.coastal()).enumerate().map(|(i,kind)| {
+                let pos=team[k].game.player.body.pos+Vec3::new(i as f32-4.0,0.0,-3.0);
+                (host.alloc_mob(kind,pos),kind)
+            }).collect();
+            pump(host,team,0.8,|_|idle());
+            if !team[k].game.advancements.earned.iter().any(|a|a=="shore_life") {report.problems.push("coastal encounter advancement never arrived".into());}
+            for (id,kind) in species {
+                if !team[k].game.mobs.iter().any(|m|m.id==id && m.kind==kind) {report.problems.push(format!("joined player never saw {kind:?}"));}
+            }
+
         } else { report.problems.push("no open ocean in the wildlife playtest".into()); }
     }
 
@@ -2697,7 +2709,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "sea wildlife"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "sea wildlife", "coastal species"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

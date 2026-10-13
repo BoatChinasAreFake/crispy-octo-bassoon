@@ -105,6 +105,8 @@ pub const ALL: &[Advancement] = &[
     adv("reef_madness", "Reef Madness", "Mine a block of coral. It was so colourful."),
     adv("soggy", "Soggy Bottom", "Defeat a Soggy Groaner. It was having a bad day anyway."),
     adv("spear_it", "Spear It Out", "Throw a Soggy Spear. Go and get it back."),
+    adv("shore_life", "Life at the Shore", "Meet a beach or coastal sea creature up close."),
+    adv("shore_supper", "Shore Supper", "Gather seafood from a coastal creature."),
     adv("fishy_business", "Fishy Business", "Catch a Fishy with your bare hands (well, hit one)."),
     adv("sweet_success", "Sweet Success", "Harvest honey or honeycomb from a hive."),
     adv("ancient_honey", "Older Than Sweet", "Bottle Ancient honey (bees + Torchflowers)."),

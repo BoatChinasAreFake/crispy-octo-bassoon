@@ -66,7 +66,7 @@ pub enum Ing {
 pub fn ingredient(id: Id) -> Option<Ing> {
     Some(match id {
         PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COOKED_CHOP | COOKED_MUTTON | COOKED_CLUCKETS | STEAK => Ing::Meat,
-        COD | SALMON | TROPICAL | COOKED_COD | COOKED_SALMON => Ing::Fish,
+        RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH | COOKED_SEAFOOD | COD | SALMON | TROPICAL | COOKED_COD | COOKED_SALMON => Ing::Fish,
         CARROT | POTATO | BAKED_POTATO | PUMPKIN => Ing::Veg,
         KELP | DRIED_KELP => Ing::Kelp,
         WHEAT | BREAD => Ing::Grain,
@@ -83,7 +83,7 @@ pub fn ingredient(id: Id) -> Option<Ing> {
 /// How fresh an ingredient is as it goes in (leftovers less so; Goo never).
 pub fn freshness(id: Id) -> f32 {
     match id {
-        COOKED_CHOP | COOKED_MUTTON | COOKED_CLUCKETS | STEAK | COOKED_COD | COOKED_SALMON | BREAD | BAKED_POTATO | DRIED_KELP => 0.75,
+        COOKED_SEAFOOD | COOKED_CHOP | COOKED_MUTTON | COOKED_CLUCKETS | STEAK | COOKED_COD | COOKED_SALMON | BREAD | BAKED_POTATO | DRIED_KELP => 0.75,
         GOO | COOKED_BOOT => 0.1,
         _ => 1.0,
     }
