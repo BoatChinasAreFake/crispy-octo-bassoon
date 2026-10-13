@@ -2943,71 +2943,79 @@ static SNOUT_BRUTE: [Part; 7] = {
     [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.12, 1.55, -0.34], [0.24, 0.16, 0.1], [0.0; 3], Limb::Fixed, [T_SNOUT; 6])]
 };
 
-// A fish: a long body, a tail that waggles, a fin on top.
-static STARFISH: [Part; 6] = [
-    part([-0.1, 0.0, -0.1], [0.2, 0.1, 0.2], [0.0;3], Limb::Fixed, [T_STARFISH;6]),
-    part([-0.06, 0.0, -0.3], [0.12, 0.08, 0.25], [0.0;3], Limb::Fixed, [T_STARFISH;6]),
-    part([-0.28, 0.0, -0.12], [0.24, 0.08, 0.12], [0.0;3], Limb::Yaw(-0.7), [T_STARFISH;6]),
-    part([0.04, 0.0, -0.12], [0.24, 0.08, 0.12], [0.0;3], Limb::Yaw(0.7), [T_STARFISH;6]),
-    part([-0.2, 0.0, 0.02], [0.13, 0.08, 0.25], [0.0;3], Limb::Yaw(-0.5), [T_STARFISH;6]),
-    part([0.07, 0.0, 0.02], [0.13, 0.08, 0.25], [0.0;3], Limb::Yaw(0.5), [T_STARFISH;6]),
-];
+// Five equally spaced arms taper through three low, overlapping sections.
+// The raised centre and lower tips keep the animal soft and flat on the sand.
+const fn starfish_model() -> [Part; 17] {
+    let faces=[T_STARFISH_SIDE,T_STARFISH_SIDE,T_STARFISH,T_STARFISH_UNDER,T_STARFISH_SIDE,T_STARFISH_SIDE];
+    let mut parts=[part([-0.08,0.0,-0.08],[0.16,0.065,0.16],[0.0;3],Limb::Fixed,faces);17];
+    parts[1]=part([-0.055,0.065,-0.055],[0.11,0.035,0.11],[0.0;3],Limb::Fixed,faces);
+    let mut i=0;
+    while i<5 {
+        let turn=Limb::Yaw(i as f32 * std::f32::consts::TAU / 5.0);
+        parts[2+i*3]=part([-0.065,0.003,-0.18],[0.13,0.067,0.135],[0.0;3],turn,faces);
+        parts[3+i*3]=part([-0.043,0.006,-0.24],[0.086,0.05,0.10],[0.0;3],turn,faces);
+        parts[4+i*3]=part([-0.023,0.009,-0.29],[0.046,0.032,0.075],[0.0;3],turn,faces);
+        i+=1;
+    }
+    parts
+}
+static STARFISH: [Part;17] = starfish_model();
 static CLAM: [Part; 2] = [
-    part([-0.2, 0.0, -0.2], [0.4, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_CLAM;6]),
-    part([-0.18, 0.08, -0.18], [0.36, 0.1, 0.36], [0.0;3], Limb::Fixed, [T_CLAM;6]),
+    part([-0.2, 0.0, -0.2], [0.4, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_CLAM_SIDE,T_CLAM_SIDE,T_CLAM,T_CLAM_UNDER,T_CLAM_SIDE,T_CLAM_SIDE]),
+    part([-0.18, 0.08, -0.18], [0.36, 0.1, 0.36], [0.0;3], Limb::Fixed, [T_CLAM_SIDE,T_CLAM_SIDE,T_CLAM,T_CLAM_UNDER,T_CLAM_SIDE,T_CLAM_SIDE]),
 ];
 static MUSSEL: [Part; 2] = [
-    part([-0.12, 0.0, -0.2], [0.24, 0.08, 0.4], [0.0;3], Limb::Fixed, [T_MUSSEL;6]),
-    part([-0.09, 0.08, -0.16], [0.18, 0.1, 0.32], [0.0;3], Limb::Fixed, [T_MUSSEL;6]),
+    part([-0.12, 0.0, -0.2], [0.24, 0.08, 0.4], [0.0;3], Limb::Fixed, [T_MUSSEL_SIDE,T_MUSSEL_SIDE,T_MUSSEL,T_MUSSEL_UNDER,T_MUSSEL_SIDE,T_MUSSEL_SIDE]),
+    part([-0.09, 0.08, -0.16], [0.18, 0.1, 0.32], [0.0;3], Limb::Fixed, [T_MUSSEL_SIDE,T_MUSSEL_SIDE,T_MUSSEL,T_MUSSEL_UNDER,T_MUSSEL_SIDE,T_MUSSEL_SIDE]),
 ];
 static OYSTER: [Part; 3] = [
-    part([-0.22, 0.0, -0.18], [0.44, 0.06, 0.36], [0.0;3], Limb::Fixed, [T_OYSTER;6]),
-    part([-0.17, 0.06, -0.2], [0.34, 0.11, 0.4], [0.0;3], Limb::Fixed, [T_OYSTER;6]),
-    part([-0.13, 0.17, -0.1], [0.26, 0.04, 0.2], [0.0;3], Limb::Fixed, [T_OYSTER;6]),
+    part([-0.22, 0.0, -0.18], [0.44, 0.06, 0.36], [0.0;3], Limb::Fixed, [T_OYSTER_SIDE,T_OYSTER_SIDE,T_OYSTER,T_OYSTER_UNDER,T_OYSTER_SIDE,T_OYSTER_SIDE]),
+    part([-0.17, 0.06, -0.2], [0.34, 0.11, 0.4], [0.0;3], Limb::Fixed, [T_OYSTER_SIDE,T_OYSTER_SIDE,T_OYSTER,T_OYSTER_UNDER,T_OYSTER_SIDE,T_OYSTER_SIDE]),
+    part([-0.13, 0.17, -0.1], [0.26, 0.04, 0.2], [0.0;3], Limb::Fixed, [T_OYSTER_SIDE,T_OYSTER_SIDE,T_OYSTER,T_OYSTER_UNDER,T_OYSTER_SIDE,T_OYSTER_SIDE]),
 ];
 static SEASNAIL: [Part; 4] = [
-    part([-0.14, 0.0, -0.2], [0.28, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
+    part([-0.14, 0.0, -0.2], [0.28, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_SEASNAIL_FOOT;6]),
     part([-0.13, 0.07, -0.08], [0.26, 0.22, 0.24], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
-    part([-0.07, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
-    part([0.04, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
+    part([-0.07, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL_FOOT;6]),
+    part([0.04, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL_FOOT;6]),
 ];
 static CRAB: [Part; 13] = [
-    part([-0.22, 0.1, -0.2], [0.44, 0.17, 0.4], [0.0;3], Limb::Fixed, [T_CRAB;6]),
-    part([-0.37, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB;6]),
-    part([0.25, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB;6]),
+    part([-0.22, 0.1, -0.2], [0.44, 0.17, 0.4], [0.0;3], Limb::Fixed, [T_CRAB_SIDE,T_CRAB_SIDE,T_CRAB,T_CRAB_UNDER,T_CRAB_SIDE,T_CRAB_SIDE]),
+    part([-0.37, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB_CLAW;6]),
+    part([0.25, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB_CLAW;6]),
     part([-0.16, 0.27, -0.18], [0.05, 0.06, 0.05], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
     part([0.11, 0.27, -0.18], [0.05, 0.06, 0.05], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
-    part([-0.37, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
-    part([0.19, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
-    part([-0.37, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
-    part([0.19, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
-    part([-0.37, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
-    part([0.19, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
-    part([-0.37, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB;6]),
-    part([0.19, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB;6]),
+    part([-0.37, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
+    part([-0.37, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
+    part([-0.37, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
+    part([-0.37, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
 ];
 static SARDINE: [Part; 5] = [
-    part([-0.07, 0.03, -0.22], [0.14, 0.16, 0.36], [0.0;3], Limb::Fixed, [T_SARDINE;6]),
-    part([-0.02, 0.04, 0.14], [0.04, 0.15, 0.14], [0.0;3], Limb::SwingY(0.5), [T_SARDINE;6]),
-    part([-0.02, 0.19, -0.07], [0.04, 0.06, 0.12], [0.0;3], Limb::SwingY(0.5), [T_SARDINE;6]),
+    part([-0.07, 0.03, -0.22], [0.14, 0.16, 0.36], [0.0;3], Limb::Fixed, [T_SARDINE,T_SARDINE,T_SARDINE_BACK,T_SARDINE_BELLY,T_SARDINE,T_SARDINE_HEAD]),
+    part([-0.02, 0.04, 0.14], [0.04, 0.15, 0.14], [0.0;3], Limb::SwingY(0.5), [T_SARDINE_FIN;6]),
+    part([-0.02, 0.19, -0.07], [0.04, 0.06, 0.12], [0.0;3], Limb::SwingY(0.5), [T_SARDINE_FIN;6]),
     part([0.073, 0.13, -0.19], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
     part([-0.088, 0.13, -0.19], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
 ];
 static TUNA: [Part; 8] = [
-    part([-0.23, 0.12, -0.55], [0.46, 0.42, 0.96], [0.0;3], Limb::Fixed, [T_TUNA;6]),
-    part([-0.16, 0.2, -0.75], [0.32, 0.28, 0.22], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
-    part([-0.025, 0.15, 0.4], [0.05, 0.38, 0.28], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
-    part([-0.025, 0.54, -0.15], [0.05, 0.2, 0.3], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
-    part([-0.4, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
-    part([0.18, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA;6]),
+    part([-0.23, 0.12, -0.55], [0.46, 0.42, 0.96], [0.0;3], Limb::Fixed, [T_TUNA,T_TUNA,T_TUNA_BACK,T_TUNA_BELLY,T_TUNA,T_TUNA_HEAD]),
+    part([-0.16, 0.2, -0.75], [0.32, 0.28, 0.22], [0.0;3], Limb::Fixed, [T_TUNA_HEAD,T_TUNA_HEAD,T_TUNA_BACK,T_TUNA_BELLY,T_TUNA_HEAD,T_TUNA_HEAD]),
+    part([-0.025, 0.15, 0.4], [0.05, 0.38, 0.28], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
+    part([-0.025, 0.54, -0.15], [0.05, 0.2, 0.3], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
+    part([-0.4, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
+    part([0.18, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
     part([0.162, 0.38, -0.65], [0.015, 0.065, 0.065], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
     part([-0.177, 0.38, -0.65], [0.015, 0.065, 0.065], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
 ];
 static EEL: [Part; 6] = [
-    part([-0.09, 0.04, -0.5], [0.18, 0.16, 0.32], [0.0;3], Limb::Fixed, [T_EEL;6]),
-    part([-0.08, 0.04, -0.18], [0.16, 0.14, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL;6]),
-    part([-0.065, 0.04, 0.14], [0.13, 0.12, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL;6]),
-    part([-0.04, 0.04, 0.46], [0.08, 0.08, 0.22], [0.0;3], Limb::SwingY(0.5), [T_EEL;6]),
+    part([-0.09, 0.04, -0.5], [0.18, 0.16, 0.32], [0.0;3], Limb::Fixed, [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL_HEAD]),
+    part([-0.08, 0.04, -0.18], [0.16, 0.14, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL]),
+    part([-0.065, 0.04, 0.14], [0.13, 0.12, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL]),
+    part([-0.04, 0.04, 0.46], [0.08, 0.08, 0.22], [0.0;3], Limb::SwingY(0.5), [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL]),
     part([0.091, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
     part([-0.106, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
 ];

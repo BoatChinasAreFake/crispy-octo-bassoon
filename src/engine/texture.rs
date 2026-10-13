@@ -918,6 +918,31 @@ pub const T_COAST_EYE: u16 = 1131;
 pub const T_SARDINE_ITEM: u16 = 1132;
 pub const T_TUNA_ITEM: u16 = 1133;
 pub const T_EEL_ITEM: u16 = 1134;
+pub const T_STARFISH_SIDE: u16 = 1135;
+pub const T_STARFISH_UNDER: u16 = 1136;
+pub const T_CLAM_SIDE: u16 = 1137;
+pub const T_CLAM_UNDER: u16 = 1138;
+pub const T_MUSSEL_SIDE: u16 = 1139;
+pub const T_MUSSEL_UNDER: u16 = 1140;
+pub const T_OYSTER_SIDE: u16 = 1141;
+pub const T_OYSTER_UNDER: u16 = 1142;
+pub const T_SEASNAIL_FOOT: u16 = 1143;
+pub const T_CRAB_LEG: u16 = 1144;
+pub const T_CRAB_UNDER: u16 = 1145;
+pub const T_CRAB_CLAW: u16 = 1146;
+pub const T_CRAB_SIDE: u16 = 1147;
+pub const T_SARDINE_BACK: u16 = 1148;
+pub const T_SARDINE_BELLY: u16 = 1149;
+pub const T_SARDINE_FIN: u16 = 1150;
+pub const T_SARDINE_HEAD: u16 = 1151;
+pub const T_TUNA_FIN: u16 = 1152;
+pub const T_TUNA_BACK: u16 = 1153;
+pub const T_TUNA_BELLY: u16 = 1154;
+pub const T_TUNA_HEAD: u16 = 1155;
+pub const T_EEL_BACK: u16 = 1156;
+pub const T_EEL_BELLY: u16 = 1157;
+pub const T_EEL_HEAD: u16 = 1158;
+
 // Crop tiles are four in a row: T_CROP_* + stage.
 
 /// Mod textures are allocated from here to the end of the atlas (the base game
@@ -7217,9 +7242,80 @@ fn paint_coastal(a: &mut Atlas) {
         a.sprite(tile,&FISH,&[('#',shade(body,0.45)),('f',body),('F',shade(body,0.75)),('b',rgb(219,223,198)),('w',rgb(255,255,255)),('k',rgb(10,10,10))]);
     }
     a.each(T_COAST_EYE,|x,y,_,_|if (3..6).contains(&x) && (3..6).contains(&y) {rgb(220,225,210)}else{rgb(16,20,23)});
-    for (tile,base) in [(T_STARFISH,rgb(232,133,64)),(T_CLAM,rgb(211,187,153)),(T_CRAB,rgb(185,65,43)),(T_SARDINE,rgb(146,182,198)),(T_TUNA,rgb(48,89,132)),(T_MUSSEL,rgb(43,49,79)),(T_OYSTER,rgb(156,156,130)),(T_SEASNAIL,rgb(191,153,97)),(T_EEL,rgb(79,100,61))] {
-        a.each(tile,|x,y,r,_|shade(base,if (x+y/2)%4==0 {0.72}else{r.range(0.9,1.1)}));
+    // Fine pores and raised pale ossicles replace the striped rock pattern.
+    a.each(T_STARFISH,|x,y,r,_| {
+        let bump=(x*7+y*11)%23<3;
+        shade(if bump {rgb(251,193,113)}else{rgb(217,109,55)},r.range(0.93,1.07))
+    });
+    a.each(T_STARFISH_SIDE,|x,y,r,_|shade(if y<3 || (x*3+y)%13==0 {rgb(241,154,77)}else{rgb(188,80,43)},r.range(0.95,1.05)));
+    a.each(T_STARFISH_UNDER,|x,y,_,_|if (x==5 || x==10) && y%3==0 {rgb(245,224,169)}else if (7..9).contains(&x) {rgb(178,118,64)}else{rgb(221,172,106)});
+    // Radial fan ribs originate at the hinge, with curved growth bands.
+    a.each(T_CLAM,|x,y,r,_| {
+        let dx=x as f32-7.5;let dy=17.0-y as f32;
+        let angle=dx.atan2(dy);let radius=(dx*dx+dy*dy).sqrt();
+        let rib=(angle*24.0).cos();let ring=(radius*1.8).sin();
+        shade(rgb(224,202,163),0.87+rib*0.09+ring*0.035+r.range(-0.025,0.025))
+    });
+    a.each(T_CLAM_SIDE,|x,y,_,_|shade(rgb(193,158,117),if y%4==0 {0.74}else{0.96+(x as f32*0.8).sin()*0.04}));
+    a.each(T_CLAM_UNDER,|x,y,_,_|shade(rgb(225,209,183),if (x as i32-8).abs()<2 && y>11 {0.63}else{0.94}));
+    a.each(T_MUSSEL,|x,y,r,_| {
+        let dx=(x as f32-7.5)*1.5;let dy=y as f32-11.0;
+        let ring=(dx*dx+dy*dy).sqrt().rem_euclid(3.0);
+        let sheen=if (3..6).contains(&x) {1.25}else{1.0};
+        shade(if ring<0.6 {rgb(72,80,107)}else{rgb(29,43,69)},sheen*r.range(0.95,1.05))
+    });
+    a.each(T_MUSSEL_SIDE,|x,y,_,_|if y>12 {rgb(115,97,73)}else{shade(rgb(28,34,54),0.88+(x as f32*0.6).cos()*0.1)});
+    a.each(T_MUSSEL_UNDER,|x,y,_,_|shade(rgb(58,67,82),if (x+y)%7==0 {1.2}else{0.95}));
+    a.each(T_OYSTER,|x,y,r,_| {
+        let dx=x as f32-6.0;let dy=y as f32-10.0;
+        let ridge=((dx*dx+dy*dy).sqrt()+(x as f32*1.3).sin()*1.2).rem_euclid(3.5);
+        shade(if ridge<0.9 {rgb(111,113,91)}else if (x/3+y/2)%3==0 {rgb(178,175,148)}else{rgb(149,153,129)},r.range(0.91,1.09))
+    });
+    a.each(T_OYSTER_SIDE,|x,y,r,_|shade(if (y+(x/3)%3)%4==0 {rgb(100,103,85)}else{rgb(173,168,144)},r.range(0.94,1.06)));
+    a.each(T_OYSTER_UNDER,|x,y,_,_|shade(rgb(209,207,184),if (x+y*3)%11<2 {0.83}else{1.0}));
+    a.each(T_SEASNAIL,|x,y,r,_| {
+        let dx=x as f32-7.5;let dy=y as f32-7.5;
+        let radius=(dx*dx+dy*dy).sqrt();let angle=dy.atan2(dx);
+        let spiral=(radius-angle*1.05).rem_euclid(std::f32::consts::TAU*1.05);
+        shade(if radius<1.2 || spiral<0.8 {rgb(101,61,34)}else if spiral<1.4 {rgb(230,189,118)}else{rgb(184,134,74)},r.range(0.96,1.04))
+    });
+    a.each(T_SEASNAIL_FOOT,|x,y,r,_|shade(if y>11 {rgb(172,158,108)}else{rgb(132,125,82)},if (x*5+y*7)%19==0 {1.18}else{r.range(0.96,1.04)}));
+    a.each(T_CRAB,|x,y,r,_| {
+        let edge=x.min(15-x).min(y.min(15-y));
+        let groove=(x==7 || x==8) && y>5 || y==10 && (3..13).contains(&x);
+        shade(if groove {rgb(121,43,29)}else if edge<2 {rgb(226,125,73)}else if (x*11+y*7)%29<3 {rgb(214,113,64)}else{rgb(167,62,40)},r.range(0.96,1.04))
+    });
+    a.each(T_CRAB_SIDE,|_,y,r,_|shade(if y>11 {rgb(216,160,107)}else{rgb(159,61,37)},r.range(0.93,1.07)));
+    a.each(T_CRAB_UNDER,|x,y,_,_|if y%4==0 || (x==7 || x==8) {rgb(175,129,86)}else{rgb(230,194,139)});
+    a.each(T_CRAB_LEG,|x,_,r,_|shade(if x%6==0 {rgb(115,48,31)}else if x%6==1 {rgb(234,152,94)}else{rgb(187,76,43)},r.range(0.96,1.04)));
+    a.each(T_CRAB_CLAW,|x,y,r,_|shade(if y<4 {rgb(241,195,141)}else if x==7 && y<10 {rgb(100,42,28)}else{rgb(190,77,43)},r.range(0.95,1.05)));
+    // Countershading and offset scale rows, instead of stone-like stripes.
+    for (side,back,belly,head,fin,dark,light) in [
+        (T_SARDINE,T_SARDINE_BACK,T_SARDINE_BELLY,T_SARDINE_HEAD,T_SARDINE_FIN,rgb(59,94,124),rgb(208,220,218)),
+        (T_TUNA,T_TUNA_BACK,T_TUNA_BELLY,T_TUNA_HEAD,T_TUNA_FIN,rgb(24,53,86),rgb(180,199,208)),
+    ] {
+        a.each(side,|x,y,r,_| {
+            let t=(y as f32/15.0).min(1.0);
+            let mut c=[0,0,0,255];for i in 0..3 {c[i]=(dark[i] as f32*(1.0-t)+light[i] as f32*t) as u8;}
+            let scale=(x+(y/3)%2*2)%4==0 && y%3==1;
+            shade(c,if scale {1.16}else if y==8 {0.87}else{r.range(0.97,1.03)})
+        });
+        a.each(back,|x,y,r,_|shade(dark,if (x+y*3)%17<2 {1.2}else{r.range(0.95,1.05)}));
+        a.each(belly,|_,y,r,_|shade(rgb(225,229,211),if y%5==0 {0.95}else{r.range(0.97,1.03)}));
+        a.each(head,|x,y,_,_|shade(light,if y==11 && (4..12).contains(&x) {0.43}else{0.76+y as f32*0.012}));
+        a.each(fin,|x,y,_,_| {
+            let ray=(x as f32-7.5).atan2(17.0-y as f32);
+            let c=if fin==T_TUNA_FIN {rgb(190,164,74)}else{rgb(142,177,192)};
+            shade(c,0.77+(ray*32.0).cos()*0.16)
+        });
     }
+    a.each(T_EEL,|x,y,r,_| {
+        let spot=((x as f32*0.9).sin()+(y as f32*1.2).cos())>0.85;
+        shade(if spot {rgb(68,62,35)}else{rgb(116,126,71)},r.range(0.94,1.06))
+    });
+    a.each(T_EEL_BACK,|x,y,r,_|shade(if (x*3+y*7)%23<4 {rgb(92,92,51)}else{rgb(52,63,35)},r.range(0.96,1.04)));
+    a.each(T_EEL_BELLY,|_,y,r,_|shade(rgb(198,185,121),if y%5==0 {0.91}else{r.range(0.96,1.04)}));
+    a.each(T_EEL_HEAD,|x,y,_,_|if y==10 && (3..13).contains(&x) {rgb(46,45,28)}else{rgb(119,128,74)});
     a.each(T_SEAFOOD,|x,y,r,_|if (x as i32-8).pow(2)+(y as i32-8).pow(2)>38 {[0,0,0,0]}else{shade(rgb(224,160,119),r.range(0.85,1.1))});
     a.each(T_SEASHELL,|x,y,r,_|if (x as i32-8).pow(2)+(y as i32-9).pow(2)>43 {[0,0,0,0]}else{shade(rgb(227,203,165),if (x+y)%3==0 {0.75}else{r.range(0.95,1.05)})});
 }
