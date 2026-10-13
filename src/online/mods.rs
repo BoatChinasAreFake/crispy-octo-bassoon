@@ -710,8 +710,28 @@ fn fill_biome(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>)
         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
         return;
     }
+    let mut climate = crate::modgen::ClimateTarget::default();
+    let axes = [("temperature", &mut climate.temperature), ("moisture", &mut climate.moisture), ("continentalness", &mut climate.continentalness), ("erosion", &mut climate.erosion)];
+    let mut has_climate = false;
+    let mut bad_climate = false;
+    for (axis, slot) in axes {
+        let key = format!("climate_{axis}");
+        if let Some((_, value, line)) = s.get(&key) {
+            has_climate = true;
+            match value.parse::<f32>() {
+                Ok(v) if v.is_finite() && (-1.0..=1.0).contains(&v) => *slot = Some(v),
+                _ => {
+                    errs.push(format!("line {line}: {key} must be a finite number in -1..=1"));
+                    bad_climate = true;
+                }
+            }
+        }
+    }
+    if bad_climate { return; }
     let (mut within, mut dim) = (Vec::new(), None);
-    let (inside, line) = s.get("in").map(|(_, v, l)| (v.clone(), *l)).unwrap_or(("plains".into(), s.line));
+    let default_in = if has_climate { "" } else { "plains" };
+    let (inside, line) = s.get("in").map(|(_, v, l)| (v.clone(), *l)).unwrap_or((default_in.into(), s.line));
+    let mut bad_place = false;
     for name in inside.split(',').map(str::trim).filter(|n| !n.is_empty()) {
         if let Some(b) = base_biome(name) {
             within.push(b);
@@ -719,11 +739,19 @@ fn fill_biome(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>)
             dim = Some(d);
         } else {
             errs.push(format!("line {line}: in = {name}: not a biome or dimension"));
+            bad_place = true;
         }
     }
+    // An empty list means unrestricted climate space. Never let a typo in
+    // an explicit restriction accidentally turn into that wildcard.
+    if has_climate && bad_place { return; }
     if dim.is_some() && !within.is_empty() {
         errs.push(format!("line {line}: a biome is either in base biomes or in a dimension, not both"));
         within.clear();
+    }
+    if has_climate && dim.is_some() {
+        errs.push(format!("line {}: climate targets are only supported in the Overworld", s.line));
+        return;
     }
     let mut plants = Vec::new();
     for (k, v, line) in s.kv.iter().filter(|(k, _, _)| k == "plant") {
@@ -761,6 +789,7 @@ fn fill_biome(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>)
         under: block_key(ctx, m, s, "under", errs),
         plants,
         tree,
+        climate: has_climate.then_some(climate),
     };
     ctx.reg.biomes.push(biome);
 }
@@ -2284,6 +2313,45 @@ projectile_effect_duration = NaN
         // A missing file or a bad code is reported.
         let bad = ModSource { id: "x".into(), files: BTreeMap::from([("mod.txt".to_string(), b"[mod]\nname = x\n[language de]\nfile = nope.txt\n[language d e]\nfile = nope.txt\n".to_vec())]) };
         assert_eq!(build(&[bad], &[]).mods[0].errors.len(), 2);
+    }
+
+    #[test]
+    fn climate_targets_parse_with_finite_bounds_and_legacy_defaults() {
+        with_mods(&[("climate", "[mod]\nname = Climate\n[biome dry]\nclimate_temperature = 0.5\nclimate_moisture = -0.3\nclimate_continentalness = 0.4\nclimate_erosion = -0.2\n[biome old]\n")], |reg| {
+            assert!(reg.mods[0].errors.is_empty(), "{:?}", reg.mods[0].errors);
+            let b = &reg.biomes[0];
+            assert!(b.within.is_empty());
+            assert_eq!(b.climate.as_ref().unwrap(), &crate::modgen::ClimateTarget { temperature: Some(0.5), moisture: Some(-0.3), continentalness: Some(0.4), erosion: Some(-0.2) });
+            assert_eq!(reg.biomes[1].within, [crate::world::Biome::Plains]);
+            assert!(reg.biomes[1].climate.is_none());
+        });
+        for bad in ["NaN", "inf", "-inf", "1.1", "-1.1", "hot"] {
+            let text = format!("[mod]\nname = Bad\n[biome bad]\nclimate_temperature = {bad}\n");
+            with_mods(&[("bad", &text)], |reg| {
+                assert!(reg.biomes.is_empty());
+                assert!(reg.mods[0].errors.iter().any(|e| e.contains("line 4") && e.contains("finite number")), "{:?}", reg.mods[0].errors);
+            });
+        }
+    }
+
+    #[test]
+    fn review_invalid_climate_restrictions_do_not_become_unrestricted() {
+        for inside in ["not_a_biome","plains, not_a_biome"] {
+            let text=format!("[mod]\nname = Invalid Restriction\n[biome fields]\nin = {inside}\nclimate_temperature = 0.1\n");
+            with_mods(&[("invalid",&text)],|reg| {
+                assert!(!reg.mods[0].errors.is_empty());
+                assert!(reg.biomes.is_empty(),"a misspelled restriction must not register a broader target");
+            });
+        }
+    }
+
+    #[test]
+    fn climate_targets_reject_mod_dimensions() {
+        let text = "[mod]\nname = Bad\n[dimension moon]\n[biome bad]\nin = moon\nclimate_moisture = 0.2\n";
+        with_mods(&[("bad", text)], |reg| {
+            assert!(reg.biomes.is_empty());
+            assert!(reg.mods[0].errors.iter().any(|e| e.contains("only supported in the Overworld")));
+        });
     }
 
     #[test]

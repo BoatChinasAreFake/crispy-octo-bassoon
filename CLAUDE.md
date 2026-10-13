@@ -112,7 +112,9 @@ A new world generator (version 7) that keeps what works in the current one (read
 5. Mod biomes can give a target climate (hot, dry, inland, rugged...) and take the places nearest to it that the built-in rules leave free.
 6. Settling in: structures, villages, mansions and hot springs placed sensibly on the new land, and biome maps of many seeds checked for variety and sensible neighbours.
 
-Originals: not chosen yet.
+Originals: not chosen yet. The Part 2 core implements items 4, 5 and 6 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
+
+Implementation compatibility: Part 1 worlds retain generator revision 7. Part 2 core uses revision 8 for new worlds, reusing revision 7's surface shape and climate; revisions 0–7 retain their generation rules.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**

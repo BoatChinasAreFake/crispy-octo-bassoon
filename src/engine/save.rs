@@ -698,6 +698,23 @@ mod tests {
     }
 
     #[test]
+    fn saved_generation_revision_is_preserved() {
+        let root = tmp("generation-revisions");
+        let path = root.join("world.mncr");
+        for version in 0..=crate::world::GenOptions::DEFAULT.version {
+            let options = crate::world::GenOptions { version, ..crate::world::GenOptions::DEFAULT };
+            let mut d = data(77, false);
+            d.extras = vec![("gen".into(), options.pack().to_le_bytes().to_vec())];
+            write_to(&path, &d).unwrap();
+            let back = read_from(&path).unwrap();
+            let bytes: [u8; 4] = back.extras[0].1.as_slice().try_into().unwrap();
+            let expected = if version == 0 { crate::world::GenOptions::LEGACY } else { options };
+            assert_eq!(crate::world::GenOptions::unpack(u32::from_le_bytes(bytes)), expected);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn advancements_round_trip() {
         let root = tmp("adv");
         let path = root.join("w.mncr");

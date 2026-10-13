@@ -1,0 +1,48 @@
+[mod]
+name = Climate Fields
+version = 1.0
+description = Ordinary inland climate slots, with a small hut.
+
+[biome climate_fields]
+name = Climate Fields
+climate_temperature = 0.1
+climate_moisture = -0.1
+climate_continentalness = 0.3
+climate_erosion = 0.2
+share = 0.4
+size = 300
+top = moss_block
+under = dirt
+
+[structure climate_hut]
+in = climate_fields
+spacing = 4
+chance = 1
+block # = cobblestone
+block . = air
+block c = chest
+loot = bread 3 1
+layer
+#####
+#####
+#####
+#####
+#####
+layer
+#####
+#...#
+#.c.#
+#...#
+##.##
+layer
+#####
+#...#
+#...#
+#...#
+##.##
+layer
+#####
+#####
+#####
+#####
+#####

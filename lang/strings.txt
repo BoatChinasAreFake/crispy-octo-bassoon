@@ -1574,6 +1574,7 @@ Pale Oak Planks (Off-White)
 Pale and Interesting
 Palette
 Panda
+Part 2 playtest isn't using the newest generator
 Particles: All
 Particles: Fewer
 Particles: Minimal
@@ -2564,7 +2565,7 @@ Zoomies
 [mob minion]\ntexture \= stone\nhealth \= 4\n\n[mob king]\nname \= Cheese King\ntexture \= stone\ntemplate \= biped\nhealth \= 40\nhostile \= true\nattack_damage \= 2\nattack_cooldown \= 2\naggro_range \= 30\nboss \= true\nenrage_at \= 0.5\nenrage_speed \= 2\nenrage_cooldown \= 0.5\nsummon \= minion 3\nsummon_every \= 5\nxp \= 300\ntame_item \= bone\ntame_chance \= 1\n
 [mob pup]\ntexture \= stone\nhealth \= 12\nhostile \= true\nattack_damage \= 4\naggro_range \= 20\ntame_item \= bone\ntame_chance \= 1\nbreed_item \= wheat\n
 [mob slinger]\nname \= Slinger\ntexture \= stone\ntemplate \= biped\nhostile \= true\nranged_damage \= 6\nranged_range \= 22\nprojectile_speed \= 24\nranged_cooldown \= 2\naggro_range \= 12\n
-[mod]\nname \= Playtest Moon\n[block moon_rock]\ntexture \= stone\n[block moon_frame]\ntexture \= white\n[dimension moon]\nname \= The Playtest Moon\nstone \= moon_rock\ntop \= moon_rock\nunder \= moon_rock\nframe \= moon_frame\nheight \= 40\nhills \= 4\n
+[mod]\nname \= Playtest Moon\n[block moon_rock]\ntexture \= stone\n[block moon_frame]\ntexture \= white\n[dimension moon]\nname \= The Playtest Moon\nstone \= moon_rock\ntop \= moon_rock\nunder \= moon_rock\nframe \= moon_frame\nheight \= 40\nhills \= 4\n\n[biome climate_fields]\nshare \= 0.15\nclimate_temperature \= 0.1\nclimate_moisture \= -0.1\nclimate_continentalness \= 0.3\nclimate_erosion \= 0.2\ntop \= moon_rock\nunder \= moon_rock\n
 [{}] saved variables are damaged ({}); starting fresh
 [{}] {} ran /{}
 a Hmmer at {}'s stall bought: {}, and {} sees {} in the till
@@ -2647,12 +2648,14 @@ burned to a crisp. Extra crispy
 buzzing with bees
 calm under the smoke
 carrying us
+cave visit didn't award {}
 centroid in 
 centroid out 
 charred rattler
 chest recipe
 claims too big
 client snapshots cannot carry effects
+climate and depth caves
 climbed to {}
 collection complete!
 connection closed
@@ -2769,6 +2772,7 @@ line {}: a trade looks like `trade \= gold 2 -> bread 3`
 line {}: a trade needs something to give and something to get
 line {}: armor should be helmet, chestplate, leggings or boots, not {}
 line {}: at most 8 plants a biome
+line {}: climate targets are only supported in the Overworld
 line {}: couldn't read {}: {}
 line {}: count for {} should be 1 to 64
 line {}: don't understand action "{}"
@@ -2827,6 +2831,7 @@ line {}: {} \= {}: needs a block and a chance, like plant \= rose 0.02
 line {}: {} \= {}: needs one letter and a block, like block # \= cobblestone
 line {}: {} \= {}: not a block
 line {}: {} is defined twice
+line {}: {} must be a finite number in -1..=1
 line {}: {} should be a finite number
 line {}: {}: no block or item called "{}"
 login timed out
@@ -2841,6 +2846,9 @@ meat, vegetables and grain
 median stretch {} blocks (it was {})
 mid-stride while walking
 mites at {}%
+mod climate biome
+mod climate targets
+mod climate visit didn't award homebrew
 mod dimension
 mod pack too large
 modded shot uses the generic cause: {}
@@ -2853,9 +2861,12 @@ nested too deeply
 no Pointy Sticks, no shot
 no address found
 no answer
+no climate-target mod patch
 no flowers in reach (they need some within seven blocks)
 no free port
+no naturally open {} cave
 no village anywhere near spawn to try growing villages in
+no village in the placement playtest
 no welcome
 no {} anywhere near spawn
 no {} found
@@ -2907,8 +2918,10 @@ red mooer
 red-spotted mooer
 region file damaged (number too long)
 region file damaged ({})
+released generator {} changed
 repacked id is known
 respawn with a full stomach
+revision 7 keeps its released advancement rule
 right-click opens it
 rivers and beaches
 rotation bonus
@@ -2925,6 +2938,7 @@ script error: {}
 seed {}: spawn at {} stands on {}
 server status
 serviceType
+settled structures
 shader failed to compile: {}
 shadow shader failed to compile: {}
 sheltering from the rain
@@ -3073,6 +3087,7 @@ urn:schemas-upnp-org:device:InternetGatewayDevice:2
 urn:schemas-upnp-org:service:WANIPConnection:1
 urn:schemas-upnp-org:service:WANPPPConnection:1
 vegetables, and nothing that swims or moos
+village foundation
 village life
 village paper
 wall impact cannot apply an effect
@@ -3363,7 +3378,11 @@ zombie hmmer
 {}: OFF
 {}: ON
 {}: best {}
+{}: host edit didn't arrive
+{}: joined player's chunks timed out
 {}: more than {} lines
+{}: regenerated blocks disagree at {}
+{}: restored edit didn't arrive
 {}: too much data to save
 {}: {} blocks
 {}: {} not {}

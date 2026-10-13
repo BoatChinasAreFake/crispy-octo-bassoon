@@ -200,6 +200,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     trade_levels(&mut host, &mut team, &mut report, &mut touched);
     growing_villages(&mut host, &mut team, &mut report);
     new_land(&mut host, &mut team, &mut report);
+    reshaped_depths(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2494,10 +2495,99 @@ fn new_land(host: &mut Game, team: &mut [Bot], report: &mut Report) {
     ground(host, team, k);
 }
 
+/// Natural terrain is regenerated independently by host and joined player.
+/// Also round-trip a block edit at each location through the socket/ledger.
+fn compare_generated_patch(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>, spot: Vec3, label: &str) {
+    let k = team.len()-1;
+    let id = team[k].game.my_id;
+    let mid = spot.as_ivec3();
+    let (cx,cz) = (mid.x.div_euclid(crate::world::CW),mid.z.div_euclid(crate::world::CW));
+    for dz in -1..=1 { for dx in -1..=1 { host.world.load_now(cx+dx,cz+dz); } }
+    if let Some(peer) = host.peers.get_mut(&id) { peer.target = spot; }
+    {
+        let g = &mut team[k].game;
+        g.player.body.pos = spot;
+        g.player.body.vel = Vec3::ZERO;
+        g.player.fall_start = spot.y;
+        let start = Instant::now();
+        while !(-1..=1).all(|dz| (-1..=1).all(|dx| g.world.is_loaded((cx+dx)*16,(cz+dz)*16))) && start.elapsed()<Duration::from_secs(30) {
+            g.world.stream(&[(spot,2)]);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        if !g.world.is_loaded(mid.x,mid.z) { report.problems.push(format!("{label}: joined player's chunks timed out")); return; }
+    }
+    pump(host,team,1.5,|_|idle());
+    // Full central chunk, including hidden foundations and cave decoration.
+    let mismatch = (0..crate::world::CW).flat_map(|z| (0..crate::world::CW).map(move |x|(x,z))).flat_map(|(x,z)| (1..crate::world::CH).map(move |y| IVec3::new(cx*16+x,y,cz*16+z))).find(|&p| host.world.get_v(p)!=team[k].game.world.get_v(p));
+    if let Some(p)=mismatch { report.problems.push(format!("{label}: regenerated blocks disagree at {p}")); }
+    let edited = mid + IVec3::new(2,4,0);
+    let previous = host.world.get_v(edited);
+    host.world.set_v(edited, COBBLE);
+    touched.insert(edited);
+    pump(host,team,0.5,|_|idle());
+    if team[k].game.world.get_v(edited)!=COBBLE { report.problems.push(format!("{label}: host edit didn't arrive")); }
+    host.world.set_v(edited,previous);
+    pump(host,team,0.5,|_|idle());
+    if team[k].game.world.get_v(edited)!=previous { report.problems.push(format!("{label}: restored edit didn't arrive")); }
+}
+
+fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::caves::CaveBiome;
+    if host.world.generator.opts.version != crate::world::GenOptions::DEFAULT.version {
+        report.problems.push("Part 2 playtest isn't using the newest generator".into()); return;
+    }
+    let k=team.len()-1;
+    let home=team[k].game.player.body.pos;
+    report.features.push("climate and depth caves");
+    for want in [CaveBiome::Dripstone,CaveBiome::Lush,CaveBiome::DeepDark] {
+        let mut found=None;
+        'search: for z in (-2400..2400).step_by(64) {
+            for x in (-2400..2400).step_by(64) {
+                let g=&host.world.generator;
+                let y=if want==CaveBiome::DeepDark { 10 } else { 32 };
+                if g.cave_biome_at(x,y,z)!=want { continue; }
+                let (cx,cz)=(x.div_euclid(16),z.div_euclid(16));
+                let blocks=g.generate(cx,cz);
+                for lz in 3..13 { for lx in 3..13 {
+                    for y in 4..g.column(cx*16+lx,cz*16+lz).0-10 {
+                        if g.cave_biome_at(cx*16+lx,y,cz*16+lz)==want && is_solid(blocks[crate::world::idx(lx,y-1,lz)]) && (0..3).all(|dy| blocks[crate::world::idx(lx,y+dy,lz)]==AIR) {
+                            found=Some(Vec3::new((cx*16+lx) as f32+0.5,y as f32+0.05,(cz*16+lz) as f32+0.5));
+                            break 'search;
+                        }
+                    }
+                } }
+            }
+        }
+        let Some(spot)=found else { report.problems.push(format!("no naturally open {want:?} cave")); continue; };
+        compare_generated_patch(host,team,report,touched,spot,&format!("{want:?} cave"));
+        let adv=match want { CaveBiome::Dripstone=>Some("stalac_tight"),CaveBiome::Lush=>Some("lush_life"),_=>None };
+        if let Some(adv)=adv && !team[k].game.advancements.earned.iter().any(|a|a==adv) { report.problems.push(format!("cave visit didn't award {adv}")); }
+    }
+    report.features.push("settled structures");
+    if let Some(at)=host.world.generator.nearest_site(crate::structures::Kind::Village,home,160) {
+        compare_generated_patch(host,team,report,touched,at.as_vec3()+Vec3::new(5.5,2.05,0.5),"village foundation");
+    } else { report.problems.push("no village in the placement playtest".into()); }
+    // The CLI installs this mod before both host and clients build generators.
+    if host.world.generator.biomes.iter().any(|b|b.climate.is_some()) {
+        report.features.push("mod climate targets");
+        let g=&host.world.generator;
+        let found=(-2400..2400).step_by(32).flat_map(|z|(-2400..2400).step_by(32).map(move|x|(x,z))).find(|&(x,z)|g.mod_biome_at(x,z,g.column(x,z).1).is_some_and(|i|g.biomes[i].climate.is_some()));
+        if let Some((x,z))=found {
+            let h=g.column(x,z).0;
+            compare_generated_patch(host,team,report,touched,Vec3::new(x as f32+0.5,h as f32+1.05,z as f32+0.5),"mod climate biome");
+            if !team[k].game.advancements.earned.iter().any(|a|a=="homebrew") { report.problems.push("mod climate visit didn't award homebrew".into()); }
+        } else { report.problems.push("no climate-target mod patch".into()); }
+    }
+    if let Some(peer)=host.peers.get_mut(&team[k].game.my_id) { peer.target=home; }
+    team[k].game.player.body.pos=home;
+    team[k].game.player.fall_start=home.y;
+    ground(host,team,k);
+}
+
 /// A small mod the `--playtest` command installs, so the bots can try a mod's
 /// dimension (see modgen.rs). (Not for the unit test: it would change the
 /// blocks under every other test running alongside.)
-const PLAYTEST_MOD: &str = "[mod]\nname = Playtest Moon\n[block moon_rock]\ntexture = stone\n[block moon_frame]\ntexture = white\n[dimension moon]\nname = The Playtest Moon\nstone = moon_rock\ntop = moon_rock\nunder = moon_rock\nframe = moon_frame\nheight = 40\nhills = 4\n";
+const PLAYTEST_MOD: &str = "[mod]\nname = Playtest Moon\n[block moon_rock]\ntexture = stone\n[block moon_frame]\ntexture = white\n[dimension moon]\nname = The Playtest Moon\nstone = moon_rock\ntop = moon_rock\nunder = moon_rock\nframe = moon_frame\nheight = 40\nhills = 4\n\n[biome climate_fields]\nshare = 0.15\nclimate_temperature = 0.1\nclimate_moisture = -0.1\nclimate_continentalness = 0.3\nclimate_erosion = 0.2\ntop = moon_rock\nunder = moon_rock\n";
 
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
@@ -2534,13 +2624,14 @@ pub fn run(args: &[String]) -> i32 {
 mod tests {
     #[test]
     fn a_short_playtest_passes() {
+        let _lock = crate::mods::registry_test_lock();
         let r = super::playtest(2, 5.0, 77, 26150).expect("it runs");
         assert!(r.ok(), "{:#?}", r.problems);
         // Long enough that more chat goes by than a player's chat log keeps.
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

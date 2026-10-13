@@ -161,6 +161,14 @@ pub fn pick(p: &Place) -> Biome {
     }
 }
 
+/// Ordinary inland climate choices are available to target-climate mods.
+/// Shape landmarks and rare variants always keep their built-in identity.
+pub fn mod_climate_space(p: &Place, biome: Biome) -> bool {
+    p.h > p.sea + 2 && p.c >= COAST.1 && p.h <= p.sea + 44
+        && !p.river && p.wet_low <= 0.4
+        && matches!(biome, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::DarkForest | Biome::Taiga | Biome::Snowy | Biome::Savanna | Biome::Jungle | Biome::Desert | Biome::Badlands | Biome::Meadow)
+}
+
 impl Generator {
     /// The three shape noises at a column: continentalness, erosion and weirdness.
     pub fn shape_noise(&self, x: i32, z: i32) -> (f32, f32, f32) {
@@ -297,7 +305,7 @@ mod tests {
 
     /// A wide look at a seed: biomes (and heights) every few blocks.
     fn survey(seed: u32, step: i32, n: i32) -> Vec<(i32, Biome)> {
-        let g = Generator::with(seed, GenOptions { version: 7, ..GenOptions::DEFAULT });
+        let g = Generator::with(seed, GenOptions::DEFAULT);
         let mut out = Vec::new();
         for j in -n / 2..n / 2 {
             for i in -n / 2..n / 2 {
@@ -328,6 +336,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Fixed, broad seed coverage rather than assertions about exact rarity.
+    const SURVEY_SEEDS: [u32; 12] = [424242, 1234, 77, 1, 3, 6, 11, 42, 2024, 31337, 65535, 987654321];
+
+    #[test]
+    fn many_seeds_keep_variety_depth_and_sensible_neighbours() {
+        let mut all = std::collections::HashSet::new();
+        let mut caves = std::collections::HashSet::new();
+        for seed in SURVEY_SEEDS {
+            let g = Generator::with(seed, GenOptions::DEFAULT);
+            let mut kinds = std::collections::HashSet::new();
+            let mut ocean = 0;
+            for z in (-2048..2048).step_by(32) {
+                for x in (-2048..2048).step_by(32) {
+                    let (h, b) = g.column(x, z);
+                    kinds.insert(b);
+                    all.insert(b);
+                    ocean += usize::from(b.is_ocean());
+                    for y in [10, 32, 48] { caves.insert(g.cave_biome_at(x, y, z)); }
+                    for (dx, dz) in [(16, 0), (0, 16)] {
+                        let neighbour = g.column(x + dx, z + dz).1;
+                        let frozen = |b| matches!(b, Biome::Snowy | Biome::IceSpikes | Biome::FrozenOcean);
+                        let hot = |b| matches!(b, Biome::Desert | Biome::Badlands | Biome::Jungle | Biome::Mangrove | Biome::WarmOcean);
+                        assert!(!(frozen(b) && hot(neighbour) || hot(b) && frozen(neighbour)), "seed {seed}: {b:?} next to {neighbour:?} at {x},{z}");
+                    }
+                    if b == Biome::River { assert!(h < g.sea()); }
+                    if b == Biome::Beach { assert!((g.sea()-1..=g.sea()+2).contains(&h)); }
+                }
+            }
+            assert!(kinds.len() >= 12, "seed {seed}: {kinds:?}");
+            assert!((800..14000).contains(&ocean), "seed {seed}: {ocean} ocean columns of 16384");
+        }
+        assert!(all.len() >= 20, "only {all:?}");
+        for b in [crate::caves::CaveBiome::Plain, crate::caves::CaveBiome::Dripstone, crate::caves::CaveBiome::Lush, crate::caves::CaveBiome::DeepDark] { assert!(caves.contains(&b)); }
     }
 
     #[test]
@@ -366,13 +409,29 @@ mod tests {
     fn biome_maps() {
         let Ok(dir) = std::env::var("MINCERAFT_BIOME_MAPS") else { return };
         let names: Vec<String> = Biome::ALL.iter().map(|b| format!("{b:?}")).collect();
+        std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(format!("{dir}/biome_names.txt"), names.join("\n")).unwrap();
-        for seed in [424242u32, 1234, 77] {
-            let cols = survey(seed, 4, 512);
+        std::fs::write(format!("{dir}/cave_names.txt"), "Plain\nDripstone\nLush\nDeepDark").unwrap();
+        for seed in SURVEY_SEEDS {
+            let g = Generator::with(seed, GenOptions::DEFAULT);
+            let cols = survey(seed, 8, 512);
             let raw: Vec<u8> = cols.iter().map(|c| Biome::ALL.iter().position(|&b| b == c.1).unwrap() as u8).collect();
             std::fs::write(format!("{dir}/biomes_{seed}.raw"), raw).unwrap();
             let hs: Vec<u8> = cols.iter().map(|c| c.0.clamp(0, 255) as u8).collect();
             std::fs::write(format!("{dir}/heights_{seed}.raw"), hs).unwrap();
+            for depth in [10, 32, 48] {
+                let raw: Vec<u8> = (-256..256).flat_map(|j| (-256..256).map(move |i| (i * 8, j * 8))).map(|(x,z)| g.cave_biome_at(x, depth, z) as u8).collect();
+                std::fs::write(format!("{dir}/caves_{seed}_{depth}.raw"), raw).unwrap();
+            }
+            let mods: Vec<u8> = (-256..256).flat_map(|j| (-256..256).map(move |i| (i * 8, j * 8))).map(|(x,z)| g.mod_biome_at(x,z,g.column(x,z).1).map_or(0, |i| i as u8 + 1)).collect();
+            std::fs::write(format!("{dir}/mods_{seed}.raw"), mods).unwrap();
+            let mut sites = String::from("kind,x,y,z\n");
+            for cz in -128..128 {
+                for cx in -128..128 {
+                    if let Some(site) = g.site(cx,cz) { sites.push_str(&format!("{:?},{},{},{}\n",site.kind,site.origin.x,site.origin.y,site.origin.z)); }
+                }
+            }
+            std::fs::write(format!("{dir}/sites_{seed}.csv"), sites).unwrap();
         }
     }
 }

@@ -39,6 +39,9 @@ pub const WARNINGS: u8 = 4;
 impl Generator {
     /// Is (x, z) over a Deep Dark region?
     pub fn deep_dark(&self, x: i32, z: i32) -> bool {
+        if self.opts.version >= 8 {
+            return self.cave_biome_at(x, CITY_Y, z) == crate::caves::CaveBiome::DeepDark;
+        }
         // (Newer worlds have a good deal less of it.)
         let cut = if self.opts.version >= 2 { DEEP_RARE } else { 0.22 };
         self.cavern.noise3(x as f32 / 160.0, 300.5, z as f32 / 160.0) > cut

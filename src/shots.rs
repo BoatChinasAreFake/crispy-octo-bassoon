@@ -26,7 +26,17 @@ pub(crate) fn parse_args() -> Option<ShotArgs> {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     get("--screenshot").map(|path| ShotArgs {
         path,
-        mode: get("--mode").unwrap_or_else(|| "title".into()),
+        mode: match get("--mode").as_deref() {
+            Some("depth_dripstone") => "dripstone".into(),
+            Some("depth_lush") => "lush".into(),
+            Some("depth_dark") => "deepdark".into(),
+            Some("settled_village") => "village".into(),
+            Some("settled_mansion") => "mansion".into(),
+            Some("settled_spring") => "hotspring".into(),
+            Some("climate_mod") => "modhut".into(),
+            Some(mode) => mode.into(),
+            None => "title".into(),
+        },
         frames: get("--frames").and_then(|f| f.parse().ok()).unwrap_or(240),
         time: get("--time").and_then(|f| f.parse().ok()),
         distance: get("--distance").and_then(|f| f.parse().ok()),
@@ -99,7 +109,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 for (dx, dz) in ring(r) {
                     let (cx, cz) = (cx0 + dx, cz0 + dz);
                     let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.cave_biome(cx * 16 + 8 + i * 28, cz * 16 + 8 + j * 28) == want));
-                    if !inside {
+                    if generator.opts.version < 8 && !inside {
                         continue;
                     }
                     let b = generator.generate(cx, cz);
@@ -109,7 +119,8 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                             let at = |x: i32, y: i32, z: i32| b[world::idx(x, y, z)];
                             for y in (10..h - 10).rev() {
                                 let roomy = (0..4).all(|k| (0..6).all(|d| at(lx + d, y + k, lz) == AIR));
-                                if roomy && at(lx, y - 1, lz) == ground {
+                                let identity = generator.opts.version < 8 || generator.cave_biome_at(cx*16+lx,y,cz*16+lz)==want;
+                                if roomy && identity && at(lx, y - 1, lz) == ground {
                                     return Some((Vec3::new((cx * 16 + lx) as f32 + 0.5, y as f32 + 1.6, (cz * 16 + lz) as f32 + 0.5), 1.57, -0.05));
                                 }
                             }
@@ -353,6 +364,8 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 // From the south-west, or (`mansionhall`) along the ground floor's corridor.
                 Kind::Mansion if mode == "mansionhall" => look(o + Vec3::new(-12.5, 1.6, 0.5), o + Vec3::new(12.0, 1.4, 0.5)),
                 Kind::Mansion => look(o + Vec3::new(-27.0, 16.0, 33.0), o + Vec3::Y * 9.0),
+                // Stay inside the pool's cleared space, below tree canopies.
+                Kind::HotSpring if generator.opts.version >= 8 => look(o + Vec3::new(0.0, 2.0, 2.5), o),
                 Kind::HotSpring => look(o + Vec3::new(-7.0, 4.0, 7.0), o),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
@@ -2323,6 +2336,7 @@ impl App {
 /// newest generator) unless `--gen` says otherwise. New scenes go here.
 const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
+    "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is

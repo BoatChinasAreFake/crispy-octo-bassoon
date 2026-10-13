@@ -573,6 +573,7 @@ pub struct GenOptions {
     /// 7: the land shaped by continentalness, erosion and peaks and valleys,
     /// biomes picked from the shape and then the climate, rivers and beaches
     /// (see shape.rs).
+    /// 8: climate-and-depth caves, mod climate targets and footprint placement.
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -585,7 +586,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 7, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 8, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -2267,6 +2268,42 @@ pub fn ray_box(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<(f32, IVec3)> {
 #[cfg(test)]
 mod biome_tests {
     use super::*;
+
+    #[test]
+    fn generation_compatibility_fixtures() {
+        let _lock = crate::mods::registry_test_lock();
+        let expected = [0xe47b0d9ff29082d0, 0xe47b0d9ff29082d0, 0x3afd8bc9b13b404a, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x6e7eb4d6000c7cff, 0x8b9d73f9458eb1fa];
+        for version in 0..=7 {
+            let g = Generator::with(424242, GenOptions { version, ..GenOptions::DEFAULT });
+            let mut hash = 0xcbf29ce484222325u64;
+            for (cx, cz) in [(0, 0), (-7, 11), (31, -29)] {
+                for id in g.generate(cx, cz) {
+                    for byte in id.to_le_bytes() {
+                        hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
+                    }
+                }
+            }
+            assert_eq!(hash, expected[version as usize], "released generator {version} changed");
+        }
+    }
+
+    #[test]
+    fn generation_options_round_trip_without_upgrading_old_worlds() {
+        for version in 1..=GenOptions::DEFAULT.version {
+            let options = GenOptions { version, structures: 1, biome_size: 2, terrain: 3 };
+            assert_eq!(GenOptions::unpack(options.pack()), options);
+        }
+        assert_eq!(GenOptions::unpack(0), GenOptions::LEGACY);
+    }
+
+    #[test]
+    fn generation_is_independent_of_chunk_request_order() {
+        let _lock = crate::mods::registry_test_lock();
+        let g = Generator::with(77, GenOptions::DEFAULT);
+        let order = [(0, 0), (-1, 0), (0, -1), (-1, -1)];
+        let first: Vec<_> = order.iter().map(|&(x, z)| g.generate(x, z)).collect();
+        for (i, &(x, z)) in order.iter().enumerate().rev() { assert_eq!(first[i], g.generate(x, z)); }
+    }
 
     #[test]
     fn every_biome_turns_up_with_its_own_ground() {

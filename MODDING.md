@@ -212,6 +212,28 @@ tree = wheel butter 0.004 4  // log, leaves, chance per column, height
 
 Base-game trees don't grow in a mod biome, so give it a `tree` if it should have any. The F3 screen shows which biome you're in, and `/locate <name>` finds the nearest patch.
 
+#### Optional climate targets (new Overworld worlds, revision 8+)
+
+A biome can target the shared surface climate instead of taking an unrestricted patch in its `in` biomes:
+
+```ini
+[biome dry_hills]
+climate_temperature = 0.5
+climate_moisture = -0.2
+climate_continentalness = 0.3
+climate_erosion = -0.2
+share = 0.25
+size = 300
+top = sand
+under = sandstone
+```
+
+Each target must be a finite number in **-1..=1**. Positive temperature is hotter, positive moisture wetter, positive continentalness farther inland, and negative erosion more rugged. Omitted axes do not affect matching. Every specified axis must be within **0.35** of the column; otherwise that target is ineligible. Among eligible patches, the smallest mean squared distance wins (axis differences divided by 2). Equal distances use the full biome key alphabetically, making ties deterministic. `share` and `size` still control the patch coverage.
+
+Without `in`, a target may use any ordinary inland climate slot. With `in`, it is further restricted to those base biomes. It never replaces oceans, rivers, beaches, peaks, wet lowlands, mushroom islands, or the rare Cherry/Pale Garden/Ice Spikes variants. A targetless patch has priority and retains the existing first-match selection. A target that has no eligible nearby climate leaves the base biome unchanged.
+
+Climate targets apply only to the **Overworld** in generation revision **8 or later**. They are ignored in older worlds; using them with `in = <mod dimension>` is a parse error. Targetless mod dimensions and biomes continue to work as before. See `example-mods/climate/mod.txt` for a complete example with a structure. New Overworld template structures check every footprint column for water, biome suitability and height variation (at most three blocks from their origin), and settle their foundations into the ground.
+
 ### `[structure <name>]`
 
 A structure is a block template, built in layers from the bottom up. Each layer is a few rows of letters, north to south, each row west to east. `.` is air, `_` leaves whatever's already there, and every other letter is in the legend:

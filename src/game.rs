@@ -1192,10 +1192,12 @@ impl Game {
         }
         // Cave biomes, well under the ground (see caves.rs).
         if p.y < (self.world.generator.column(x, z).0 - 8) as f32 && p.y > 4.0 {
-            match self.world.generator.cave_biome(x, z) {
+            let generator = &self.world.generator;
+            let cave = if generator.opts.version >= 8 { generator.cave_biome_at(x, p.y as i32, z) } else { generator.cave_biome(x, z) };
+            match cave {
                 crate::caves::CaveBiome::Dripstone => self.advance("stalac_tight"),
                 crate::caves::CaveBiome::Lush => self.advance("lush_life"),
-                crate::caves::CaveBiome::Plain => {}
+                crate::caves::CaveBiome::Plain | crate::caves::CaveBiome::DeepDark => {}
             }
         }
         // Temples, mineshafts and igloos (see temples.rs).
@@ -5174,6 +5176,18 @@ pub(crate) mod tests {
         for l in 0..15 {
             assert!(shade(l + 1) > shade(l), "level {l}");
         }
+    }
+
+    #[test]
+    fn review_old_world_cave_advancements_keep_their_column_rule() {
+        let _lock = crate::mods::registry_test_lock();
+        let mut g = Game::new_with(77,false,false,crate::world::GenOptions { version:7,..crate::world::GenOptions::DEFAULT });
+        let (x,z) = (-2000..2000).step_by(32).flat_map(|z| (-2000..2000).step_by(32).map(move |x| (x,z)))
+            .find(|&(x,z)| g.world.generator.deep_dark(x,z) && g.world.generator.cave_biome(x,z)==crate::caves::CaveBiome::Dripstone && g.world.generator.column(x,z).0>40).unwrap();
+        g.ready = true;
+        g.player.body.pos = Vec3::new(x as f32+0.5,10.0,z as f32+0.5);
+        g.explore_advancements(1.0);
+        assert!(g.advancements.earned.iter().any(|a|a=="stalac_tight"),"revision 7 keeps its released advancement rule");
     }
 
     #[test]

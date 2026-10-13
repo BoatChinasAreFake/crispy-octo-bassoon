@@ -19,6 +19,9 @@ use crate::noise::{hash2, hash3, Rng};
 use crate::world::{Biome, Generator, World, CH, CW};
 use macroquad::math::{ivec3, IVec3};
 
+/// Surface foundations blend into neighbouring terrain over this distance.
+pub(crate) const SETTLE_RADIUS: i32 = 4;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Kind {
     Dungeon,
@@ -148,9 +151,60 @@ pub struct Site {
 }
 
 impl Generator {
+    /// Check every column of a bounded footprint, including its interior.
+    /// This reads seeded columns only, never loaded chunks or other sites.
+    pub(crate) fn footprint_fits(&self, origin: IVec3, bounds: (i32, i32, i32, i32), tolerance: i32, allowed: impl Fn(Biome, Option<usize>) -> bool) -> bool {
+        let (x0, x1, z0, z1) = bounds;
+        (z0..=z1).all(|dz| (x0..=x1).all(|dx| {
+            let (x, z) = (origin.x + dx, origin.z + dz);
+            let (h, biome, sea, wet) = match self.mod_dim() {
+                Some(d) => (self.mod_height(d, x, z), Biome::Plains, d.sea_level, d.liquid != AIR),
+                None => { let (h, b) = self.column(x, z); (h, b, self.sea(), true) }
+            };
+            (h - origin.y).abs() <= tolerance && (!wet || h > sea)
+                && !biome.is_ocean() && biome != Biome::River
+                && allowed(biome, self.mod_biome_at(x, z, biome))
+        }))
+    }
+
+    /// Village squares, paths, farms, and houses must all have usable land.
+    fn village_fits(&self, site: &Site) -> bool {
+        let allowed = |b: Biome, m: Option<usize>| m.is_none() && matches!(b, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy | Biome::Savanna);
+        let o = site.origin;
+        if !self.footprint_fits(o, (-3, 3, -3, 3), 2, allowed)
+            || !self.footprint_fits(o, (-18, 18, -1, 1), 4, allowed)
+            || !self.footprint_fits(o, (-1, 1, -18, 18), 4, allowed) { return false; }
+        for (x, z) in [(-10, 7), (-6, 15)] {
+            let h = self.column(o.x + x, o.z + z).0;
+            if !self.footprint_fits(ivec3(o.x + x, h, o.z + z), (-4, 4, -3, 3), 2, allowed) { return false; }
+        }
+        self.village_houses(site).iter().all(|&(at, _, _)| self.footprint_fits(at, (-3, 3, -3, 3), 2, allowed))
+    }
+
     /// The structure (if any) that starts in chunk (cx, cz).
     /// (In generator coordinates; see dims.rs.)
     pub fn site(&self, cx: i32, cz: i32) -> Option<Site> {
+        let site = self.site_candidate(cx, cz)?;
+        if self.opts.version < 8 || self.dim != Dim::Over { return Some(site); }
+        if site.kind == Kind::Village { return self.village_fits(&site).then_some(site); }
+        if site.kind.on_surface() {
+            let blocks = self.site_blocks(&site);
+            let floor: Vec<IVec3> = blocks.iter().filter(|(p, id)| *id != AIR && (site.origin.y - 1..=site.origin.y + 3).contains(&p.y)).map(|b| b.0).collect();
+            let bounds = (floor.iter().map(|p| p.x - site.origin.x).min()?, floor.iter().map(|p| p.x - site.origin.x).max()?, floor.iter().map(|p| p.z - site.origin.z).min()?, floor.iter().map(|p| p.z - site.origin.z).max()?);
+            let tolerance = if site.kind == Kind::Mansion { 6 } else { 3 };
+            let allowed = |b: Biome, m: Option<usize>| m.is_none() && match site.kind {
+                Kind::DesertPyramid | Kind::Well => b == Biome::Desert,
+                Kind::JungleTemple => b == Biome::Jungle,
+                Kind::Igloo => b == Biome::Snowy,
+                Kind::Mansion => b == Biome::DarkForest,
+                _ => !matches!(b, Biome::Beach | Biome::Swamp | Biome::Mangrove | Biome::StonyPeaks),
+            };
+            return self.footprint_fits(site.origin, bounds, tolerance, allowed).then_some(site);
+        }
+        Some(site)
+    }
+
+    fn site_candidate(&self, cx: i32, cz: i32) -> Option<Site> {
         match self.dim {
             Dim::Scorch => return self.scorch_site(cx, cz),
             Dim::Hollow | Dim::Mod(_) => return None,
@@ -624,7 +678,9 @@ impl Generator {
         let s = site.seed;
         let skipped = HOUSE_SPOTS.iter().enumerate().filter(|&(i, _)| i >= 3 && hash2(s ^ 0x4053, i as i32, 0) < 0.35);
         let further = GROWTH_SPOTS.iter().enumerate().map(|(k, spot)| (HOUSE_SPOTS.len() + k, spot));
-        skipped.chain(further).map(|(i, &spot)| self.house_at(site, i, spot)).collect()
+        skipped.chain(further).map(|(i, &spot)| self.house_at(site, i, spot))
+            .filter(|&(at, _, _)| self.opts.version < 8 || self.footprint_fits(at, (-3, 3, -3, 3), 2, |b, m| m.is_none() && matches!(b, Biome::Plains | Biome::Desert | Biome::Taiga | Biome::Snowy | Biome::Savanna)))
+            .collect()
     }
 
     /// A house spot's ground floor, facing and seed.
@@ -730,8 +786,8 @@ impl Generator {
     /// building up where it's low and cutting back where it's high, so nothing
     /// stands on stilts of air or sits in a sheer-sided hole. `base` is the
     /// building's ground floor (`origin.y`).
-    fn settle(&self, origin: IVec3, blocks: &[(IVec3, Id)], cx: i32, cz: i32, b: &mut [Id]) {
-        const R: i32 = 4;
+    pub(crate) fn settle(&self, origin: IVec3, blocks: &[(IVec3, Id)], cx: i32, cz: i32, b: &mut [Id]) {
+        const R: i32 = SETTLE_RADIUS;
         let base = origin.y;
         // The footprint: everything it builds at ground level.
         let (mut x0, mut x1, mut z0, mut z1) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
@@ -753,13 +809,31 @@ impl Generator {
                 }
                 let at = |y: i32| crate::world::idx(lx, y, lz);
                 let top = (1..(base + R + 10).min(CH - 2)).rev().find(|&y| ground_like(b[at(y)])).unwrap_or(1);
-                let (cover, fill) = match self.column(x, z).1 {
+                let biome = self.column(x, z).1;
+                let (mut cover, mut fill) = match biome {
                     Biome::Desert | Biome::Badlands => (SAND, SAND),
                     Biome::Snowy | Biome::IceSpikes => (SNOW_GRASS, DIRT),
                     _ => (GRASS, DIRT),
                 };
+                if self.opts.version >= 8 && let Some(m) = self.mod_biome_at(x, z, biome) {
+                    cover = self.biomes[m].top.unwrap_or(cover);
+                    fill = self.biomes[m].under.unwrap_or(fill);
+                }
+                // Revision 8 never extends the apron into an adjacent waterway.
+                if self.opts.version >= 8 && d > 0 {
+                    let (h, biome) = self.column(x, z);
+                    if h <= self.sea() || biome.is_ocean() || biome == Biome::River { continue; }
+                }
                 if d == 0 {
                     // Under the building: no gaps down to the ground.
+                    // A spike or overhang above the floor is not its support.
+                    if self.opts.version >= 8 {
+                        for y in (1..base).rev() {
+                            if ground_like(b[at(y)]) { break; }
+                            b[at(y)] = if y < base - 3 { STONE } else { fill };
+                        }
+                        continue;
+                    }
                     for y in (top + 1..base).rev() {
                         if !ground_like(b[at(y)]) {
                             b[at(y)] = if y < base - 3 { STONE } else { fill };
@@ -1294,6 +1368,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn footprint_checks_reject_water_crossing_the_interior() {
+        let _lock = crate::mods::registry_test_lock();
+        let g = Generator::with(424242, crate::world::GenOptions::DEFAULT);
+        // Locate a real river inside a footprint whose sampled corners are dry.
+        let mut exercised = false;
+        'search: for z in (-2000..2000).step_by(8) {
+            for x in (-2000..2000).step_by(8) {
+                if g.column(x,z).1 != Biome::River { continue; }
+                let corners = [(-12,-12),(12,-12),(-12,12),(12,12)];
+                if corners.iter().all(|&(dx,dz)| { let (h,b)=g.column(x+dx,z+dz); h>g.sea() && !b.is_ocean() && b!=Biome::River }) {
+                    assert!(!g.footprint_fits(ivec3(x,g.sea()+2,z),(-12,12,-12,12),100,|_,_|true));
+                    exercised = true;
+                    break 'search;
+                }
+            }
+        }
+        assert!(exercised, "a footprint enclosing a river");
+    }
+
+    #[test]
+    fn latest_surface_sites_have_supported_foundations_and_safe_growth() {
+        let _lock = crate::mods::registry_test_lock();
+        let g = Generator::with(77, crate::world::GenOptions::DEFAULT);
+        let mut checked = std::collections::HashSet::new();
+        for cz in -100..100 {
+            for cx in -100..100 {
+                let Some(site) = g.site(cx,cz) else { continue };
+                if site.kind == Kind::Village {
+                    for (at,_,_) in g.village_growth_spots(&site) {
+                        for dz in -3..=3 {
+                            for dx in -3..=3 {
+                                let (h,b) = g.column(at.x+dx,at.z+dz);
+                                assert!(h>g.sea() && b!=Biome::River && !b.is_ocean() && (h-at.y).abs()<=2);
+                            }
+                        }
+                    }
+                }
+                if !site.kind.on_surface() || !checked.insert(site.kind) { continue; }
+                let mut chunks = std::collections::HashMap::new();
+                let template: std::collections::HashMap<_,_> = g.site_blocks(&site).into_iter().collect();
+                for (&p,&id) in template.iter().filter(|(p,id)| **id!=AIR && p.y==site.origin.y) {
+                    if !is_solid(id) { continue; }
+                    // A designed cellar or ladder shaft may lie under its floor.
+                    if template.get(&(p-IVec3::Y)).is_some_and(|&id| !is_solid(id)) { continue; }
+                    let key = (p.x.div_euclid(CW),p.z.div_euclid(CW));
+                    let b = chunks.entry(key).or_insert_with(|| g.generate(key.0,key.1));
+                    let below = b[crate::world::idx(p.x.rem_euclid(CW),p.y-1,p.z.rem_euclid(CW))];
+                    assert!(is_solid(below), "{:?}: {} floats above {} at {p}", site.kind,block(id).key,block(below).key);
+                }
+            }
+        }
+        assert!(checked.contains(&Kind::Mansion) && checked.len()>=4, "{checked:?}");
+    }
+
+    #[test]
     fn every_world_has_villages_and_few_lone_huts() {
         for seed in 1..=12u32 {
             let g = Generator::new(seed);
@@ -1323,6 +1452,7 @@ mod tests {
 
     #[test]
     fn villages_build_in_their_biomes_style_with_workstations_in_new_worlds_only() {
+        let _lock = crate::mods::registry_test_lock();
         use crate::houses::Style;
         let mut styles = std::collections::HashSet::new();
         for seed in [11u32, 12, 13, 14] {
