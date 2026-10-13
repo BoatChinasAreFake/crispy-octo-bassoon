@@ -115,7 +115,7 @@ A new world generator (version 7) that keeps what works in the current one (read
 
 Originals: not chosen yet. The Part 2 core implements items 4 to 7 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
 
-Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 9 for the requested terrain refinements; revisions 0–8 retain their generation rules. Protocol 44 prevents older clients from clamping revision 9 to their newest supported generator.
+Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 9 for the requested terrain refinements; revisions 0–8 retain their generation rules. Protocol 45 rejects older clients, including builds with the earlier revision 9 river-bank profile.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**

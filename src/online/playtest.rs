@@ -53,7 +53,9 @@ fn idle() -> Controls {
 /// Load the chunks around a spot (so a game can be played there).
 fn load_around(g: &mut Game, p: Vec3) {
     let start = Instant::now();
-    while g.world.chunks.len() < 25 && start.elapsed() < Duration::from_secs(20) {
+    let (cx,cz)=((p.x.floor() as i32).div_euclid(crate::world::CW),(p.z.floor() as i32).div_euclid(crate::world::CW));
+    let loaded=|g: &Game| (-2..=2).all(|dz| (-2..=2).all(|dx| g.world.is_loaded((cx+dx)*crate::world::CW,(cz+dz)*crate::world::CW)));
+    while !loaded(g) && start.elapsed() < Duration::from_secs(20) {
         g.world.stream(&[(p, 2)]);
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -2638,6 +2640,18 @@ pub fn run(args: &[String]) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn loading_a_new_spot_does_not_count_distant_cached_chunks() {
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=crate::game::Game::new_with(77,true,false,crate::world::GenOptions::DEFAULT);
+        let p=g.spawn;
+        let (cx,cz)=((p.x.floor() as i32).div_euclid(16),(p.z.floor() as i32).div_euclid(16));
+        for dz in -2..=2 { for dx in -2..=2 { g.world.load_now(cx+64+dx,cz+64+dz); } }
+        assert!(g.world.chunks.len()>=25 && !g.world.is_loaded(p.x as i32,p.z as i32));
+        super::load_around(&mut g,p);
+        assert!((-2..=2).all(|dz| (-2..=2).all(|dx| g.world.is_loaded((cx+dx)*16,(cz+dz)*16))));
+    }
+
     #[test]
     fn a_short_playtest_passes() {
         let _lock = crate::mods::registry_test_lock();

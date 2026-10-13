@@ -49,7 +49,7 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
-pub const PROTOCOL: u32 = 44;
+pub const PROTOCOL: u32 = 45;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

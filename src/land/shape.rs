@@ -198,6 +198,16 @@ pub fn river_channel(reach: f32, gradient: f32, half_width: f32) -> f32 {
     (RIVER * reach).min(gradient.max(0.0) * half_width * reach)
 }
 
+/// A shallow centre, an underwater shelf, then a gradual bank. Both
+/// sections meet with zero slope, including where the bank meets the valley.
+pub fn river_bed(sea: f32, distance_in_widths: f32) -> f32 {
+    if distance_in_widths <= 1.0 {
+        sea - 4.0 + 3.0 * smoothstep(0.0, 1.0, distance_in_widths)
+    } else {
+        sea - 1.0 + 2.5 * smoothstep(1.0, 2.0, distance_in_widths)
+    }
+}
+
 /// Ordinary inland climate choices are available to target-climate mods.
 /// Shape landmarks and rare variants always keep their built-in identity.
 pub fn mod_climate_space(p: &Place, biome: Biome) -> bool {
@@ -288,7 +298,7 @@ impl Generator {
         let valley = (1.0 - smoothstep(RIVER, RIVER_VALLEY, aw)) * reach;
         let bank = seaf + 1.5;
         h -= (h - bank).max(0.0) * valley;
-        let channel = if self.opts.version >= 9 && aw < RIVER * reach {
+        let channel = if self.opts.version >= 9 && aw < RIVER * reach * 2.0 {
             let dx = (self.shape_noise(x + 8, z).2 - self.shape_noise(x - 8, z).2) / 16.0;
             let dz = (self.shape_noise(x, z + 8).2 - self.shape_noise(x, z - 8).2) / 16.0;
             let gradient = (dx * dx + dz * dz).sqrt();
@@ -296,7 +306,13 @@ impl Generator {
             river_channel(reach, gradient, width)
         } else { RIVER * reach };
         let river = aw < channel && h < seaf + 3.0;
-        if river {
+        if self.opts.version >= 9 {
+            // Shape the dry bank as well as the waterbed. The old cut only
+            // touched river columns, leaving a three-block ledge at its edge.
+            if channel > 0.0 && aw < channel * 2.0 && h < seaf + 3.0 {
+                h = h.min(river_bed(seaf, aw / channel));
+            }
+        } else if river {
             // Deepest in the middle.
             let bed = seaf - 1.5 - 3.5 * (1.0 - aw / channel.max(1e-4));
             h = h.min(bed);
@@ -362,6 +378,45 @@ mod tests {
             assert!((channel / gradient - 7.0).abs() < 0.001);
             assert_eq!(river_channel(0.0, gradient, 7.0), 0.0);
         }
+    }
+
+    #[test]
+    fn river_banks_rise_continuously_into_the_valley() {
+        assert_eq!(river_bed(63.0,0.0),59.0);
+        assert_eq!(river_bed(63.0,1.0),62.0);
+        assert_eq!(river_bed(63.0,2.0),64.5);
+        assert_eq!(river_bed(63.0,3.0),64.5);
+        for width in [5.0,7.0,11.0] {
+            let mut previous=river_bed(63.0,0.0);
+            for block in 1..=(width*2.0) as i32 {
+                let next=river_bed(63.0,block as f32/width);
+                assert!(next>=previous && next-previous<=1.0,"width {width}: {previous} to {next}");
+                previous=next;
+            }
+            let epsilon=0.001;
+            assert!((river_bed(63.0,1.0-epsilon)-river_bed(63.0,1.0+epsilon)).abs()<0.001);
+        }
+    }
+
+    #[test]
+    fn generated_river_edges_do_not_leave_vertical_bank_ledges() {
+        let mut checked=0;
+        for seed in [424242,77,1234] {
+            let g=Generator::with(seed,GenOptions::DEFAULT);
+            for z in (-2048..2048).step_by(64) {
+                for x in (-2048..2048).step_by(16) {
+                    let (h,b)=g.column(x,z);
+                    if b!=Biome::River { continue; }
+                    for (dx,dz) in [(1,0),(-1,0),(0,1),(0,-1)] {
+                        let (other,biome)=g.column(x+dx,z+dz);
+                        if biome==Biome::River || biome.is_ocean() { continue; }
+                        assert!((other-h).abs()<=2,"seed {seed}: bank jumps from {h} to {other} at {x},{z}");
+                        checked+=1;
+                    }
+                }
+            }
+        }
+        assert!(checked>=40,"only {checked} river bank edges exercised");
     }
 
     #[test]

@@ -4,7 +4,7 @@ Implements roadmap items 4 to 7. The two originals remain undecided, and Part 2 
 
 ## Behavior and compatibility
 
-- New worlds use generation revision **9** for the requested terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–8** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **44** prevents older clients from silently clamping revision 9 to revision 8.
+- New worlds use generation revision **9** for the requested terrain refinements. The original core is revision 8, with revision 7 surface shape/climate. Revisions **0–8** retain their terrain, cave, mod-patch and placement paths. The save format remains version 16; generator options still use the existing packed field. Protocol **45** also rejects clients using the earlier revision 9 bank profile, preventing host/client terrain disagreement.
 - The depth-aware cave selector reuses surface temperature, moisture, continentalness and erosion. Deep Dark takes precedence below height 24 under inland rugged land. Damp, mild land has lush caves from height 24; drier, non-frozen inland land has dripstone at heights 10–48. Bedrock and the top eight blocks below the surface are excluded. Existing carving, blocks, geodes and survival mechanics remain.
 - Climate-target mods use optional bounded axes, a 0.35 per-axis eligibility radius, normalized mean squared distance and stable-key tie-breaking. Targetless patches retain first-match priority. Built-in shape landmarks and rare variants are protected. Targets are ignored in older worlds and rejected for mod dimensions.
 - Surface structures validate their complete bounded footprints, including interiors. Villages check squares, paths, farms and houses; growth sites are filtered too. Mansions remain inside dark forest, and springs require cold, level ground. Overworld mod templates receive supporting foundations, and settling aprons preserve adjacent waterways.
@@ -14,7 +14,7 @@ Implements roadmap items 4 to 7. The two originals remain undecided, and Part 2 
 
 Validated on Linux x86-64 with **Rust 1.90.0**, locked dependencies and the normal release profile (thin LTO):
 
-- `cargo test --release --locked`: **556 passed, 0 failed, 1 ignored** (the manual map export).
+- `cargo test --release --locked`: **559 passed, 0 failed, 1 ignored** (the manual map export).
 - `cargo clippy --release --all-targets --locked -- -D warnings`: clean.
 - `cargo check --release --locked --no-default-features`: passes.
 - Audio mixer tests: **2 passed**. This container required the GNU bfd linker for the standalone vendor test binary.
@@ -49,7 +49,7 @@ Four regression tests first failed against the initial implementation and pass a
 
 Compatibility fixtures include a revision 8 chunk hash captured from the unmodified branch before these changes. Revision 3's historical biome-size comparison explicitly uses revision 3; separate newest-generator surveys verify continuity and variety.
 
-Across the ten seeds used for visual comparison (512×512 chunks, 8-block sampling), mean adjacent-sample biome changes declined from 15.08% (revision 8) to 6.80%; sampled oceans changed from 29.61% to 32.70%, rivers from 3.25% to 1.29%, and snow/ice-spike land from 10.26% to 7.86%. These bounded surveys do not measure exact worldwide area or establish equivalence to Minecraft. Surface biome maps do not show rocky material; generated-block tests and coast screenshots cover it.
+In the initial revision 9 survey, before the bank-profile correction, across the ten comparison seeds (512×512 chunks, 8-block sampling), mean adjacent-sample biome changes declined from 15.08% (revision 8) to 6.80%; sampled oceans changed from 29.61% to 32.70%, rivers from 3.25% to 1.29%, and snow/ice-spike land from 10.26% to 7.86%. These bounded surveys do not measure exact worldwide area or establish equivalence to Minecraft. Surface biome maps do not show rocky material; generated-block tests and coast screenshots cover it.
 
 Screenshot and map PNGs were rendered and visually inspected locally. Automatic approval review rejected uploading these binary payloads to GitHub; they are omitted from this branch. The source harnesses and reproduction commands remain available below.
 
@@ -66,3 +66,9 @@ cargo run --release --locked -- --screenshot out/spring.png --mode settled_sprin
 ```
 
 Other scenes: `depth_dripstone`, `depth_lush`, `depth_dark`, `settled_village`, `settled_mansion`, `climate_mod`. Install `example-mods/climate` as `mods/climate` for the last scene. Raw map palettes and dimensions are documented in the root README. Mod maps from a vanilla test registry contain zero; the CLI playtest and mod integration tests separately exercise climate-target content.
+
+## River-bank correction
+
+The initial revision 9 river cut stopped at the water biome and left a ledge up to the valley floor. Its replacement blends from four blocks below sea level through an underwater shelf to the dry valley floor over twice the channel half-width, with matching slopes at the shelf and bank joins. Revisions 0–8 keep their original river profiles. Profile tests limit adjacent one-block samples to at most one block of rise at normal channel widths; generated-bank tests inspect edge jumps across three seeds. The natural river screenshot is rechecked for this correction. This refines the unreleased revision 9; protocol 45 rejects clients running the previous bank profile.
+
+While rechecking multiplayer, the playtest loading helper was corrected to wait for the 5×5 neighbourhood around the bot, rather than counting distant cached chunks. A regression test preloads a distant area and verifies that the requested local area is still loaded. This fixes premature reads after moves between cached regions.
