@@ -58,6 +58,22 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `random()`, `random_int(lo, hi)` | Random numbers |
 | `get_var(key)`, `set_var(key, value)` | Your mod's memory, **saved with the world** (see below). `get_var` returns `()` for a key that was never set |
 
+**Dimensions and worn armour** (protocol 50):
+
+| Function | Returns |
+| --- | --- |
+| `dimension()` | Stable key of the currently active realm |
+| `player_dimension(player)` | `overworld`, `scorchlands`, `hollow` or a qualified mod dimension key; empty for an unknown player |
+| `wearing(player, item)` | Whether the item is in a worn armour slot; joined reports also require host-ledger ownership and can lag five seconds |
+| `get_block_in(dim, x, y, z)` | Block name in that realm; air if the chunk is unloaded |
+| `chunk_loaded_in(dim, x, z)` | Whether its chunk is present |
+| `surface_y_in(dim, x, z)` | Loaded surface including edits, or the generator's ground estimate for an unloaded column |
+| `mobs_near_in(dim, x, y, z, radius)` | Realm-local count, radius bounded to 128 |
+| `mob_count_in(dim)` | Total mobs in the active or parked realm |
+| `locate_structure_in(dim, qualified_name, x, z)` | `[x,y,z]` of a nearby template structure, or `()`; survey bounded to 96 chunks |
+
+Use fully qualified mod dimension keys. Existing coordinate-only APIs act in the current realm, which may be a joined player's realm during their event. Delayed actions should store the realm key and use the explicit `*_in` APIs. Check `chunk_loaded_in` before treating an unloaded `get_block_in` result as a missing machine. `surface_y_in` outside loaded chunks is an estimate, not a scan of saved edits.
+
 **Changing the world** (applied right after your event function returns):
 
 | Function | Effect |
@@ -74,6 +90,17 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `set_time(t)` | Set the time of day (0–1) for everyone |
 | `play_sound(name, x, y, z)` | `explode hiss oink groan pop click splash craft hurt eat break glass baa warp fanfare boing cluck moo rattle skitter bloop twang thunk woof snip hmm` |
 | `log(text)` / `print(text)` | Debug output: chat in single player, the console on a server |
+
+**Dimension changes** (queued like other world changes):
+
+| Function | Effect |
+| --- | --- |
+| `set_block_in(dim, x, y, z, block)` | Realm-specific block edit |
+| `explode_in(dim, x, y, z, radius)` | Realm-specific host explosion, bounded to radius 8; affected chunks load first |
+| `spawn_mob_in(dim, kind, x, y, z)` | Spawn a base or qualified mod creature only in that realm |
+| `travel(player, dim, x, z)` | Load nearby destination columns and move the local or joined player above dry solid ground, using the normal dimension snapshots |
+
+`travel` checks the requested column and eight nearby columns. If none supports a safe landing below the build ceiling, it leaves the player where they were and sends a message. It does not consume items itself; scripts choose their travel costs. Coordinates must be finite and within 30 million blocks. Realm-local explosions preserve other realms at identical coordinates. No script files run on joining clients.
 
 **Minigames** (changes applied right after your event function returns, like the rest): scores, a sidebar everyone sees, timers, teams and spawns. Everything here is saved with the world.
 

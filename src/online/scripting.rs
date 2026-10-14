@@ -40,6 +40,8 @@ pub enum Cmd {
     Heal(String, f32),
     Damage(String, f32),
     Teleport(String, Vec3),
+    Travel(String, crate::dims::Dim, i32, i32),
+    InRealm(crate::dims::Dim, Box<Cmd>),
     Launch(String, f32),
     Explode(Vec3, f32),
     Spawn(u8, Vec3),
@@ -120,7 +122,7 @@ fn num(d: &Dynamic) -> Res<f64> {
 
 fn coord(d: &Dynamic) -> Res<i32> {
     let v = num(d)?.floor();
-    if v.abs() > 30_000_000.0 { err("coordinate out of range") } else { Ok(v as i32) }
+    if !v.is_finite() || v.abs() > 30_000_000.0 { err("coordinate out of range") } else { Ok(v as i32) }
 }
 
 fn lookup(name: &str) -> Res<Id> {
@@ -158,6 +160,29 @@ fn make_engine() -> Engine {
     e
 }
 
+fn dimension_key(dim: crate::dims::Dim) -> String {
+    match dim {
+        crate::dims::Dim::Over => "overworld".into(),
+        crate::dims::Dim::Scorch => "scorchlands".into(),
+        crate::dims::Dim::Hollow => "hollow".into(),
+        crate::dims::Dim::Mod(k) => reg().dims[k as usize].key.clone(),
+    }
+}
+
+fn dimension_id(key: &str) -> Res<crate::dims::Dim> {
+    match key {
+        "overworld" => Ok(crate::dims::Dim::Over),
+        "scorchlands" => Ok(crate::dims::Dim::Scorch),
+        "hollow" => Ok(crate::dims::Dim::Hollow),
+        key => reg().dims.iter().position(|d| d.key==key).map(|k| crate::dims::Dim::Mod(k as u8))
+            .ok_or_else(|| Box::new(EvalAltResult::ErrorRuntime(Dynamic::from(format!("unknown dimension {key}")),Position::NONE))),
+    }
+}
+
+fn realm_world(g:&Game,dim:crate::dims::Dim)->Option<&crate::world::World> {
+    if g.realm_dim()==dim {Some(&g.world)} else {g.parked.get(&dim).map(|r| &r.world)}
+}
+
 fn register_api(e: &mut Engine) {
     // ---- reading the world
     e.register_fn("get_block", |x: Dynamic, y: Dynamic, z: Dynamic| -> Res<ImmutableString> {
@@ -181,6 +206,15 @@ fn register_api(e: &mut Engine) {
     e.register_fn("held_item", |name: &str| -> Res<ImmutableString> {
         with_game(|g| g.script_held(name).map(|id| reg().key_of(id).into()).unwrap_or_default())
     });
+    e.register_fn("wearing", |name:&str,item:&str| -> Res<bool> {
+        let id=lookup(item)?;
+        with_game(|g| {
+            if g.is_local_player(name) {g.inv.armor.iter().flatten().any(|s|s.0==id)} else {
+                g.peer_by_name(name).and_then(|k|g.peer_ref(k)).is_some_and(|p|p.ledger.bag.count(id)>0 &&
+                    p.report.as_ref().is_some_and(|r|r.slots.iter().skip(36).take(4).any(|s|s.0==id && s.1==1)))
+            }
+        })
+    });
     e.register_fn("count_item", |name: &str, item: &str| -> Res<INT> {
         let id = lookup(item)?;
         with_game(|g| g.script_count(name, id) as INT)
@@ -199,6 +233,65 @@ fn register_api(e: &mut Engine) {
     e.register_fn("random_int", |lo: INT, hi: INT| -> Res<INT> {
         let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
         with_ctx(|c| lo + (c.rng.next_u64() % ((hi - lo) as u64 + 1)) as INT)
+    });
+
+    // Stable dimension names and explicit realm actions keep delayed machines,
+    // wildlife and rockets independent of whichever realm the host is viewing.
+    e.register_fn("dimension", || -> Res<String> {with_game(|g| dimension_key(g.realm_dim()))});
+    e.register_fn("player_dimension", |name:&str| -> Res<String> {with_game(|g| {
+        if g.is_local_player(name) {dimension_key(g.dim)} else {
+            g.peer_by_name(name).and_then(|id|g.peer_dim(id)).map(dimension_key).unwrap_or_default()
+        }
+    })});
+    e.register_fn("get_block_in", |key:&str,x:Dynamic,y:Dynamic,z:Dynamic| -> Res<String> {
+        let (dim,x,y,z)=(dimension_id(key)?,coord(&x)?,coord(&y)?,coord(&z)?);
+        with_game(|g|realm_world(g,dim).map(|w|reg().key_of(w.get(x,y,z)).to_string()).unwrap_or_else(||"air".into()))
+    });
+    e.register_fn("chunk_loaded_in", |key:&str,x:Dynamic,z:Dynamic| -> Res<bool> {
+        let (dim,x,z)=(dimension_id(key)?,coord(&x)?,coord(&z)?);
+        with_game(|g|realm_world(g,dim).is_some_and(|w|w.chunks.contains_key(&(x.div_euclid(crate::world::CW),z.div_euclid(crate::world::CW)))))
+    });
+    e.register_fn("surface_y_in", |key:&str,x:Dynamic,z:Dynamic| -> Res<INT> {
+        let (dim,x,z)=(dimension_id(key)?,coord(&x)?,coord(&z)?);
+        with_game(|g| {
+            if let Some(w)=realm_world(g,dim) && w.chunks.contains_key(&(x.div_euclid(crate::world::CW),z.div_euclid(crate::world::CW))) {return w.surface_y(x,z) as INT;}
+            crate::world::Generator::with_dim(g.world.seed(),g.world.generator.opts,dim).column(x,z).0 as INT
+        })
+    });
+    e.register_fn("mob_count_in", |key:&str| -> Res<INT> {
+        let dim=dimension_id(key)?;
+        with_game(|g|if g.realm_dim()==dim {g.mobs.len() as INT} else {g.parked.get(&dim).map(|r|r.mobs.len() as INT).unwrap_or(0)})
+    });
+    e.register_fn("locate_structure_in", |key:&str,name:&str,x:Dynamic,z:Dynamic| -> Res<Dynamic> {
+        let (dim,x,z)=(dimension_id(key)?,coord(&x)?,coord(&z)?);
+        let Some(index)=reg().structures.iter().position(|s|s.key==name) else {return err(format!("unknown structure {name}"));};
+        with_game(|g| {
+            let genr=crate::world::Generator::with_dim(g.world.seed(),g.world.generator.opts,dim);
+            genr.nearest_mod_structure(index,macroquad::math::ivec3(x,64,z),96).map(|at|
+                Dynamic::from(vec![Dynamic::from(at.x as INT),Dynamic::from(at.y as INT),Dynamic::from(at.z as INT)])).unwrap_or(Dynamic::UNIT)
+        })
+    });
+    e.register_fn("mobs_near_in", |key:&str,x:Dynamic,y:Dynamic,z:Dynamic,r:Dynamic| -> Res<INT> {
+        let dim=dimension_id(key)?;let at=Vec3::new(coord(&x)? as f32,coord(&y)? as f32,coord(&z)? as f32);
+        let radius=num(&r)?.clamp(0.0,128.0) as f32;
+        with_game(|g| {
+            let mobs=if g.realm_dim()==dim {Some(&g.mobs)} else {g.parked.get(&dim).map(|r|&r.mobs)};
+            mobs.map(|m|m.iter().filter(|m|m.body.pos.distance(at)<=radius).count() as INT).unwrap_or(0)
+        })
+    });
+    e.register_fn("travel", |player:&str,key:&str,x:Dynamic,z:Dynamic| -> Res<()> {
+        push(Cmd::Travel(player.into(),dimension_id(key)?,coord(&x)?,coord(&z)?))
+    });
+    e.register_fn("set_block_in", |key:&str,x:Dynamic,y:Dynamic,z:Dynamic,name:&str| -> Res<()> {
+        push(Cmd::InRealm(dimension_id(key)?,Box::new(Cmd::SetBlock(coord(&x)?,coord(&y)?,coord(&z)?,block_id(name)?))))
+    });
+    e.register_fn("explode_in", |key:&str,x:Dynamic,y:Dynamic,z:Dynamic,r:Dynamic| -> Res<()> {
+        let radius=num(&r)?;if !radius.is_finite() {return err("blast radius must be finite");}
+        push(Cmd::InRealm(dimension_id(key)?,Box::new(Cmd::Explode(Vec3::new(coord(&x)? as f32+0.5,coord(&y)? as f32+0.5,coord(&z)? as f32+0.5),radius.clamp(0.5,8.0) as f32))))
+    });
+    e.register_fn("spawn_mob_in", |key:&str,kind:&str,x:Dynamic,y:Dynamic,z:Dynamic| -> Res<()> {
+        let Some(k)=crate::entity::MobKind::from_name(kind) else {return err(format!("unknown mob {kind}"));};
+        push(Cmd::InRealm(dimension_id(key)?,Box::new(Cmd::Spawn(k.index(),Vec3::new(coord(&x)? as f32+0.5,coord(&y)? as f32,coord(&z)? as f32+0.5)))))
     });
 
     // ---- per-mod memory (lives until the world is closed)

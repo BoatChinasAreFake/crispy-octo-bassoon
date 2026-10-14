@@ -16,7 +16,7 @@ use crate::scripting::{Cmd, ScriptHost};
 use rhai::{Dynamic, INT};
 use crate::sound::{material, Sfx};
 use crate::texture::*;
-use crate::world::{Hit, World, CH};
+use crate::world::{Hit, World, CH, CW};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
 use macroquad::miniquad::RenderingBackend;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -1234,6 +1234,10 @@ impl Game {
             BAMBOO => "bamboozled",
             AMETHYST_SHARD => "crystal_clear",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
+            _ if reg().key_of(item)=="half_baked:energy_cell" => "half_baked_power",
+            _ if reg().key_of(item)=="ad_absurdum:rocket_1" => "rocket_paperwork",
+            _ if reg().key_of(item)=="dubiety:beacon" => "pocket_philosopher",
+            _ if reg().key_of(item)=="dusk:hydra_heart" => "complaint_resolved",
             _ => return,
         };
         self.advance(key);
@@ -1768,6 +1772,32 @@ impl Game {
                     } else if let Some(id) = self.peer_by_name(&p) {
                         self.hurt_peer(id, n, "was smitten by a script", Vec3::ZERO);
                     }
+                }
+                Cmd::InRealm(dim,command) => self.in_realm(dim,|g| {
+                    if let Cmd::Explode(at,r)=&*command {
+                        let radius=r.ceil() as i32;
+                        for z in ((at.z as i32-radius).div_euclid(CW))..=((at.z as i32+radius).div_euclid(CW)) {
+                            for x in ((at.x as i32-radius).div_euclid(CW))..=((at.x as i32+radius).div_euclid(CW)) {g.world.load_now(x,z);}
+                        }
+                    }
+                    g.apply_cmds(vec![*command]);
+                }),
+                Cmd::Travel(p,dim,x,z) => {
+                    if !self.is_local_player(&p) && self.peer_by_name(&p).is_none() {continue;}
+                    let to=self.in_realm(dim,|g| {
+                        for (dx,dz) in [(0,0),(8,0),(-8,0),(0,8),(0,-8),(16,16),(-16,16),(16,-16),(-16,-16)] {
+                            let (x,z)=(x+dx,z+dz);g.world.load_now(x.div_euclid(CW),z.div_euclid(CW));
+                            let h=g.world.surface_y(x,z);
+                            if h+3<CH && is_solid(g.world.get(x,h,z)) && !is_liquid(g.world.get(x,h,z)) {
+                                return Some(Vec3::new(x as f32+0.5,h as f32+1.1,z as f32+0.5));
+                            }
+                        }
+                        None
+                    });
+                    if let Some(to)=to {
+                        if self.is_local_player(&p) {self.move_local_player(dim,to);}
+                        else if let Some(id)=self.peer_by_name(&p) {let was=self.realm_dim();self.move_peer(id,dim,to);self.enter(was);}
+                    } else {self.apply_cmds(vec![Cmd::Message(p,"No safe landing site nearby.".into())]);}
                 }
                 Cmd::Teleport(p, to) => {
                     if self.is_local_player(&p) {

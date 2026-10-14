@@ -501,6 +501,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                             scale: 80.0,
                             sky: [0.4, 0.5, 0.7],
                             light: 1.0,
+                            gravity: 1.0,
                             frame: OBSIDIAN,
                             portal,
                         });
@@ -677,6 +678,10 @@ fn fill_dimension(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<Stri
     d.hills = num(s, "hills", 8.0f32, errs).clamp(0.0, 60.0);
     d.scale = num(s, "hill_size", 80.0f32, errs).clamp(8.0, 1000.0);
     d.light = num(s, "light", 1.0f32, errs).clamp(0.0, 1.0);
+    let gravity=num(s,"gravity",1.0f32,errs);
+    d.gravity=if gravity.is_finite() {gravity.clamp(0.15,2.0)} else {
+        errs.push(format!("line {}: gravity must be finite",s.line));1.0
+    };
     if let Some((_, v, line)) = s.get("sky") {
         match parse_color(v) {
             Some(c) => d.sky = [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0],

@@ -207,8 +207,9 @@ impl Player {
         b.vel.x += (target.x - b.vel.x) * k;
         b.vel.z += (target.z - b.vel.z) * k;
 
+        let gravity=GRAVITY*world.generator.mod_dim().map(|d|d.gravity).unwrap_or(1.0);
         if in_water {
-            b.vel.y -= GRAVITY * 0.25 * dt;
+            b.vel.y -= gravity * 0.25 * dt;
             b.vel.y *= (1.0 - dt * 2.5).max(0.0);
             if input.jump {
                 b.vel.y = (b.vel.y + 22.0 * dt).min(3.5);
@@ -221,13 +222,13 @@ impl Player {
             } else if self.sneaking {
                 0.0
             } else {
-                (b.vel.y - GRAVITY * dt).max(-2.5)
+                (b.vel.y - gravity * dt).max(-2.5)
             };
             b.vel.x = b.vel.x.clamp(-2.5, 2.5);
             b.vel.z = b.vel.z.clamp(-2.5, 2.5);
             self.fall_start = b.pos.y;
         } else {
-            b.vel.y = (b.vel.y - GRAVITY * dt).max(-60.0);
+            b.vel.y = (b.vel.y - gravity * dt).max(-60.0);
             if input.jump && b.on_ground {
                 b.vel.y = 8.7 + 2.3 * self.leaping as f32;
                 self.jumped = true;

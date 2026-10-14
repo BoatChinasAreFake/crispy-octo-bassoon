@@ -2676,6 +2676,38 @@ mod tests {
     }
 
     #[test]
+    fn example_rocket_and_local_assistant_work_for_joined_players() {
+        let sources=crate::online::examplemods::sources();
+        let texts:Vec<_>=sources.iter().map(|s|(s.id.as_str(),std::str::from_utf8(&s.files["mod.txt"]).unwrap())).collect();
+        crate::mods::with_mods(&texts,|r| {
+            let mut host=Game::new(792,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+            host.start_scripts_with(&sources);
+            let port=host.open_lan("Hosty",None).unwrap();let mut client=join(&mut host,port,"Astronaut","").unwrap();let peer=client.my_id;
+            let find=|key:&str|r.lookup(key).unwrap();
+            for (key,n) in [("ad_absurdum:rocket_1",1),("ad_absurdum:fuel",2),("ad_absurdum:life_support",1),("ad_absurdum:oxygen",3),("ad_absurdum:space_helmet",1),("ad_absurdum:space_chestplate",1),("dubiety:beacon",1)] {host.give_peer(peer,find(key),n);}
+            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(find("ad_absurdum:space_chestplate"))==1));
+            for (slot,key) in [(0,"ad_absurdum:space_helmet"),(1,"ad_absurdum:space_chestplate")] {let id=find(key);client.inv.remove(id,1);client.inv.armor[slot]=Some((id,1));}
+            client.report_tick(crate::players::REPORT_SECS);
+            assert!(pump(&mut host,&mut client,|h,_|h.peer_ref(peer).unwrap().report.as_ref().is_some_and(|r|r.slots[36].0==find("ad_absurdum:space_helmet"))));
+            let (x,y,z)=(spawn.x.floor() as i32,spawn.y.floor() as i32-1,spawn.z.floor() as i32);
+            host.world.set_or_record(x+1,y,z,find("ad_absurdum:launch_pad"));host.world.set_or_record(x-1,y+1,z,find("ad_absurdum:rocket_workbench"));
+            for yy in y+1..=y+6 {host.world.set_or_record(x+1,yy,z,AIR);}
+            assert!(pump(&mut host,&mut client,|_,c|c.world.get(x+1,y,z)==find("ad_absurdum:launch_pad")));
+            client.send_chat("/astra assemble 1");assert!(pump(&mut host,&mut client,|_,c|c.world.get(x+1,y+5,z)==find("ad_absurdum:rocket_nose")));
+            client.send_chat("/astra launch moon");
+            for _ in 0..100 {host.update(0.05,&idle());client.update(0.05,&idle());}
+            let moon=Dim::Mod(r.dims.iter().position(|d|d.key=="ad_absurdum:moon").unwrap() as u8);
+            assert!(pump(&mut host,&mut client,|h,c|c.dim==moon && h.peer_dim(peer)==Some(moon)));
+            assert_eq!(host.realm_dim(),Dim::Over);assert!(client.scripts.is_none());
+            assert_eq!(host.peer_ref(peer).unwrap().ledger.bag.count(find("ad_absurdum:fuel")),1);
+            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(find("ad_absurdum:rocket_1"))==1));
+            assert_eq!(client.world.generator.mod_dim().unwrap().gravity,0.17);
+            client.send_chat("/dubiety remember Bring fuel home");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.contains("Dubiety remembers: Bring fuel home"))));
+            client.send_chat("/dubiety ask space oxygen");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.starts_with("Dubiety:"))));
+        });
+    }
+
+    #[test]
     fn portals_take_joined_players_through() {
         let mut host = Game::new(792, false, false);
         let spawn = host.spawn;

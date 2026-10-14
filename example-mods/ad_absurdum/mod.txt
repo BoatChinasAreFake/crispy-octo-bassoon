@@ -1,0 +1,1026 @@
+[mod]
+name = Ad Absurdum
+version = 1.0
+author = Minceraft example mods
+description = Four rocket tiers, five separate worlds, oxygen, fuel and exceptionally distant paperwork.
+
+[texture steel]
+color b = 152,165,178
+color a = 227,236,245
+color d = 83,90,97
+dddddddddddddddd
+dbbbbbbbbbabbbbd
+dbbbbbbbbabbbbbd
+dbbbbbbbabbbbbbd
+dbbbbbbabbbbbbbd
+dbbbbbabbbbbbbbd
+dbbbbabbbbbbbbbd
+dbbbabbbbbbbbbbd
+dbbabbbbbbbbbbad
+dbabbbbbbbbbbabd
+dabbbbbbbbbbabbd
+dbbbbbbbbbbabbbd
+dbbbbbbbbbabbbbd
+dbbbbbbbbabbbbbd
+dbbbbbbbabbbbbbd
+dddddddddddddddd
+
+[texture panel]
+color b = 56,71,96
+color a = 54,202,250
+color d = 30,39,52
+dddddddddddddddd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbabbabbabbabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dddddddddddddddd
+
+[texture engine]
+color b = 53,63,77
+color a = 247,122,54
+color d = 29,34,42
+bbbbaaaabbbbaaaa
+bbbaaaabbbbaaaab
+bbaaaabbbbaaaabb
+baaaabbbbaaaabbb
+aaaabbbbaaaabbbb
+aaabbbbaaaabbbba
+aabbbbaaaabbbbaa
+abbbbaaaabbbbaaa
+bbbbaaaabbbbaaaa
+bbbaaaabbbbaaaab
+bbaaaabbbbaaaabb
+baaaabbbbaaaabbb
+aaaabbbbaaaabbbb
+aaabbbbaaaabbbba
+aabbbbaaaabbbbaa
+abbbbaaaabbbbaaa
+
+[texture suit]
+color b = 222,223,212
+color a = 62,160,217
+color d = 122,122,116
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture moon]
+color b = 127,133,147
+color a = 197,207,220
+color d = 69,73,80
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture mars]
+color b = 133,65,43
+color a = 230,118,65
+color d = 73,35,23
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture venus]
+color b = 152,113,47
+color a = 238,211,86
+color d = 83,62,25
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture mercury]
+color b = 77,64,59
+color a = 194,108,81
+color d = 42,35,32
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture glacio]
+color b = 101,155,180
+color a = 211,249,255
+color d = 55,85,99
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture oxygen]
+color b = 110,189,204
+color a = 220,248,255
+color d = 60,103,112
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture fuel]
+color b = 135,71,40
+color a = 239,160,63
+color d = 74,39,22
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture portal]
+color b = 41,39,97
+color a = 126,143,233
+color d = 22,21,53
+dbbbbbbabbbdbbbb
+bbbdbbbabbbbbbdb
+bbbbbbdabbbbbbbb
+bbbbbbbabdbbbbbb
+bdbbbbbabbbbdbbb
+bbbbdbaaabbbbbbd
+bbbbbaaaaabbbbbb
+aaaaaaaaaaaaaaaa
+bbdbbaaaaabbbdbb
+bbbbbdaaabbbbbbb
+bbbbbbbadbbbbbbb
+dbbbbbbabbbdbbbb
+bbbdbbbabbbbbbdb
+bbbbbbdabbbbbbbb
+bbbbbbbabdbbbbbb
+bdbbbbbabbbbdbbb
+
+[block steel_block]
+name = Aerospace Steel
+texture = steel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block launch_pad]
+name = Please Stand Clear Launch Pad
+texture = engine
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block refinery]
+name = Fossil-Free Fuel Refiner
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block oxygen_generator]
+name = Breath Printer
+texture = oxygen
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block rocket_workbench]
+name = Rocket Assembly Bench
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block solar_panel]
+name = Sun Tax Panel
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block rover_crate]
+name = Pocket Rover Crate
+texture = steel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block rocket_engine]
+name = Rocket Engine
+texture = engine
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block rocket_body]
+name = Rocket Body
+texture = steel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block rocket_nose]
+name = Rocket Nose
+texture = suit
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[item steel]
+name = Aerospace Steel Ingot
+texture = steel
+
+[item engine]
+name = Rocket Engine Kit
+texture = engine
+
+[item tank]
+name = Empty Pressure Tank
+texture = steel
+
+[item circuit]
+name = Flight Circuit
+texture = panel
+
+[item fuel]
+name = Rocket Fuel Canister
+texture = fuel
+
+[item oxygen]
+name = Oxygen Canister
+texture = oxygen
+
+[item life_support]
+name = Life Support Pack
+texture = oxygen
+
+[item heat_shield]
+name = Very Serious Heat Shield
+texture = venus
+
+[item battery]
+name = Solar Battery
+texture = panel
+
+[item rover]
+name = Flat-Pack Rover
+texture = steel
+
+[item guide]
+name = Astronaut Paperwork
+texture = panel
+consume = false
+on_use = message /astra help: refine, refill, assemble, launch and return. Five worlds, bring oxygen and a rocket home.
+
+[item space_helmet]
+name = Spacesuit Helmet
+texture = suit
+armor = helmet
+armor_points = 2
+durability = 480
+looks_like = iron
+repair = steel
+
+[item space_chestplate]
+name = Spacesuit Chestplate
+texture = suit
+armor = chestplate
+armor_points = 5
+durability = 480
+looks_like = iron
+repair = steel
+
+[item space_leggings]
+name = Spacesuit Leggings
+texture = suit
+armor = leggings
+armor_points = 4
+durability = 480
+looks_like = iron
+repair = steel
+
+[item space_boots]
+name = Spacesuit Boots
+texture = suit
+armor = boots
+armor_points = 2
+durability = 480
+looks_like = iron
+repair = steel
+
+[block moon_rock]
+name = The Mostly Moon Rock
+texture = moon
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block moon_gate]
+name = The Mostly Moon Beacon Frame
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block moon_ore]
+name = Lunarium Ore
+texture = moon
+hardness = 3
+tool = pickaxe
+tier = 2
+smelts_into = lunarium
+
+[item lunarium]
+name = Lunarium Ingot
+texture = moon
+
+[dimension moon]
+name = The Mostly Moon
+frame = moon_gate
+portal_texture = portal
+stone = moon_rock
+top = moon_rock
+under = moon_rock
+height = 58
+hills = 13
+hill_size = 70
+sky = #101426
+light = 0.6
+gravity = 0.17
+
+[ore moon_veins]
+block = moon_ore
+dimension = moon
+min_y = 8
+max_y = 54
+chance = 0.006
+
+[recipe]
+inputs = steel 4, lunarium 2
+output = moon_gate 4
+
+[mob moon_crawler]
+name = The Mostly Moon Crawler
+texture = moon
+template = blob
+health = 23
+speed = 0.75
+hostile = true
+attack_damage = 3
+attack_reach = 1.2
+drops = lunarium 1
+xp = 9
+
+[structure moon_outpost]
+name = The Mostly Moon Supply Outpost
+dimension = moon
+spacing = 24
+chance = 0.5
+loot = lunarium 3 0.8, oxygen 3 1, fuel 2 0.8
+block # = steel_block
+block c = chest
+block g = glass
+block o = oxygen_generator
+layer
+#####
+#####
+#####
+#####
+#####
+layer
+#####
+#o.c#
+#...#
+#...#
+##.##
+layer
+##g##
+#...#
+#...#
+#...#
+##.##
+layer
+#####
+#####
+#####
+#####
+#####
+
+[block mars_rock]
+name = Marzipan Rock
+texture = mars
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block mars_gate]
+name = Marzipan Beacon Frame
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block mars_ore]
+name = Redium Ore
+texture = mars
+hardness = 3
+tool = pickaxe
+tier = 2
+smelts_into = redium
+
+[item redium]
+name = Redium Ingot
+texture = mars
+
+[dimension mars]
+name = Marzipan
+frame = mars_gate
+portal_texture = portal
+stone = mars_rock
+top = mars_rock
+under = mars_rock
+height = 67
+hills = 22
+hill_size = 110
+sky = #74382b
+light = 0.7
+gravity = 0.38
+
+[ore mars_veins]
+block = mars_ore
+dimension = mars
+min_y = 8
+max_y = 63
+chance = 0.006
+
+[recipe]
+inputs = steel 4, redium 2
+output = mars_gate 4
+
+[mob mars_crawler]
+name = Marzipan Crawler
+texture = mars
+template = blob
+health = 28
+speed = 0.8999999999999999
+hostile = true
+attack_damage = 4
+attack_reach = 1.2
+drops = redium 1
+xp = 10
+
+[structure mars_outpost]
+name = Marzipan Supply Outpost
+dimension = mars
+spacing = 24
+chance = 0.5
+loot = redium 3 0.8, oxygen 3 1, fuel 2 0.8
+block # = steel_block
+block c = chest
+block g = glass
+block o = oxygen_generator
+layer
+#####
+#####
+#####
+#####
+#####
+layer
+#####
+#o.c#
+#...#
+#...#
+##.##
+layer
+##g##
+#...#
+#...#
+#...#
+##.##
+layer
+#####
+#####
+#####
+#####
+#####
+
+[block venus_rock]
+name = Vexing Venus Rock
+texture = venus
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block venus_gate]
+name = Vexing Venus Beacon Frame
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block venus_ore]
+name = Vexium Ore
+texture = venus
+hardness = 3
+tool = pickaxe
+tier = 2
+smelts_into = vexium
+
+[item vexium]
+name = Vexium Ingot
+texture = venus
+
+[dimension venus]
+name = Vexing Venus
+frame = venus_gate
+portal_texture = portal
+stone = venus_rock
+top = venus_rock
+under = venus_rock
+height = 62
+hills = 18
+hill_size = 85
+sky = #927326
+light = 0.65
+gravity = 0.9
+
+[ore venus_veins]
+block = venus_ore
+dimension = venus
+min_y = 8
+max_y = 58
+chance = 0.006
+
+[recipe]
+inputs = steel 4, vexium 2
+output = venus_gate 4
+
+[mob venus_crawler]
+name = Vexing Venus Crawler
+texture = venus
+template = blob
+health = 33
+speed = 1.0499999999999998
+hostile = true
+attack_damage = 5
+attack_reach = 1.2
+drops = vexium 1
+xp = 11
+
+[structure venus_outpost]
+name = Vexing Venus Supply Outpost
+dimension = venus
+spacing = 24
+chance = 0.5
+loot = vexium 3 0.8, oxygen 3 1, fuel 2 0.8
+block # = steel_block
+block c = chest
+block g = glass
+block o = oxygen_generator
+layer
+#####
+#####
+#####
+#####
+#####
+layer
+#####
+#o.c#
+#...#
+#...#
+##.##
+layer
+##g##
+#...#
+#...#
+#...#
+##.##
+layer
+#####
+#####
+#####
+#####
+#####
+
+[block mercury_rock]
+name = Mercurial Rock
+texture = mercury
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block mercury_gate]
+name = Mercurial Beacon Frame
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block mercury_ore]
+name = Sunsteel Ore
+texture = mercury
+hardness = 3
+tool = pickaxe
+tier = 2
+smelts_into = sunsteel
+
+[item sunsteel]
+name = Sunsteel Ingot
+texture = mercury
+
+[dimension mercury]
+name = Mercurial
+frame = mercury_gate
+portal_texture = portal
+stone = mercury_rock
+top = mercury_rock
+under = mercury_rock
+height = 53
+hills = 30
+hill_size = 130
+sky = #271c19
+light = 0.55
+gravity = 0.38
+
+[ore mercury_veins]
+block = mercury_ore
+dimension = mercury
+min_y = 8
+max_y = 49
+chance = 0.006
+
+[recipe]
+inputs = steel 4, sunsteel 2
+output = mercury_gate 4
+
+[mob mercury_crawler]
+name = Mercurial Crawler
+texture = mercury
+template = blob
+health = 33
+speed = 1.0499999999999998
+hostile = true
+attack_damage = 5
+attack_reach = 1.2
+drops = sunsteel 1
+xp = 11
+
+[structure mercury_outpost]
+name = Mercurial Supply Outpost
+dimension = mercury
+spacing = 24
+chance = 0.5
+loot = sunsteel 3 0.8, oxygen 3 1, fuel 2 0.8
+block # = steel_block
+block c = chest
+block g = glass
+block o = oxygen_generator
+layer
+#####
+#####
+#####
+#####
+#####
+layer
+#####
+#o.c#
+#...#
+#...#
+##.##
+layer
+##g##
+#...#
+#...#
+#...#
+##.##
+layer
+#####
+#####
+#####
+#####
+#####
+
+[block glacio_rock]
+name = Glaze-io Rock
+texture = glacio
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block glacio_gate]
+name = Glaze-io Beacon Frame
+texture = panel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block glacio_ore]
+name = Cryosteel Ore
+texture = glacio
+hardness = 3
+tool = pickaxe
+tier = 2
+smelts_into = cryosteel
+
+[item cryosteel]
+name = Cryosteel Ingot
+texture = glacio
+
+[dimension glacio]
+name = Glaze-io
+frame = glacio_gate
+portal_texture = portal
+stone = glacio_rock
+top = glacio_rock
+under = glacio_rock
+height = 70
+hills = 25
+hill_size = 100
+sky = #183c61
+light = 0.8
+gravity = 0.65
+
+[ore glacio_veins]
+block = glacio_ore
+dimension = glacio
+min_y = 8
+max_y = 66
+chance = 0.006
+
+[recipe]
+inputs = steel 4, cryosteel 2
+output = glacio_gate 4
+
+[mob glacio_crawler]
+name = Glaze-io Crawler
+texture = glacio
+template = blob
+health = 38
+speed = 1.2
+hostile = true
+attack_damage = 6
+attack_reach = 1.2
+drops = cryosteel 1
+xp = 12
+
+[structure glacio_outpost]
+name = Glaze-io Supply Outpost
+dimension = glacio
+spacing = 24
+chance = 0.5
+loot = cryosteel 3 0.8, oxygen 3 1, fuel 2 0.8
+block # = steel_block
+block c = chest
+block g = glass
+block o = oxygen_generator
+layer
+#####
+#####
+#####
+#####
+#####
+layer
+#####
+#o.c#
+#...#
+#...#
+##.##
+layer
+##g##
+#...#
+#...#
+#...#
+##.##
+layer
+#####
+#####
+#####
+#####
+#####
+
+[item rocket_1]
+name = Tier 1 Paperwork Rocket
+texture = suit
+stack = 1
+
+[item rocket_2]
+name = Tier 2 Paperwork Rocket
+texture = suit
+stack = 1
+
+[item rocket_3]
+name = Tier 3 Paperwork Rocket
+texture = suit
+stack = 1
+
+[item rocket_4]
+name = Tier 4 Paperwork Rocket
+texture = suit
+stack = 1
+
+[recipe]
+inputs = iron 2, coal 1
+output = steel 2
+
+[recipe]
+inputs = steel 6, gunpowder 3
+output = engine 1
+
+[recipe]
+inputs = steel 3
+output = tank 1
+
+[recipe]
+inputs = gold 1, zap_dust 2
+output = circuit 1
+
+[recipe]
+inputs = steel 4, circuit 1
+output = rocket_workbench 1
+
+[recipe]
+inputs = steel 2, stone 4
+output = launch_pad 4
+
+[recipe]
+inputs = steel 4, circuit 1, tank 1
+output = refinery 1
+
+[recipe]
+inputs = steel 4, glass 2, circuit 1
+output = oxygen_generator 1
+
+[recipe]
+inputs = steel 3, circuit 2, glass 2
+output = solar_panel 1
+
+[recipe]
+inputs = steel 1, gold 1, zap_dust 1
+output = battery 2
+
+[recipe]
+inputs = steel 2, tank 2, circuit 1
+output = life_support 1
+
+[recipe]
+inputs = steel 4, glass 4
+output = heat_shield 1
+
+[recipe]
+inputs = steel 8, engine 1, tank 2, circuit 2
+output = rocket_1 1
+
+[recipe]
+inputs = rocket_1 1, lunarium 6, engine 1
+output = rocket_2 1
+
+[recipe]
+inputs = rocket_2 1, redium 6, engine 1
+output = rocket_3 1
+
+[recipe]
+inputs = rocket_3 1, sunsteel 3, vexium 3, circuit 2
+output = rocket_4 1
+
+[recipe]
+inputs = steel 6, circuit 1, engine 1
+output = rover 1
+
+[recipe]
+inputs = book 1, circuit 1
+output = guide 1
+
+[recipe]
+inputs = steel 3, wool 2, glass 1
+output = space_helmet 1
+
+[recipe]
+inputs = steel 6, wool 2, glass 1
+output = space_chestplate 1
+
+[recipe]
+inputs = steel 5, wool 2, glass 1
+output = space_leggings 1
+
+[recipe]
+inputs = steel 3, wool 2, glass 1
+output = space_boots 1
+
+[mob rover]
+name = Budget Rover
+texture = steel
+width = 1.6
+height = 1.0
+health = 40
+speed = 0.8
+tame_item = circuit
+tame_chance = 1
+breed_item = none
+trade = battery 1 -> oxygen 2
+trade = battery 1 -> fuel 1
+part = chassis -.6 .35 -.55 1.2 .35 1.1
+part = cabin -.3 .7 -.2 .6 .3 .5 face=panel
+part = wheel_l1 -.8 .1 -.45 .25 .45 .3 anim=spin texture=engine
+part = wheel_l2 -.8 .1 .15 .25 .45 .3 anim=spin texture=engine
+part = wheel_r1 .55 .1 -.45 .25 .45 .3 anim=spin texture=engine
+part = wheel_r2 .55 .1 .15 .25 .45 .3 anim=spin texture=engine

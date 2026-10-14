@@ -170,9 +170,33 @@
 ..hHhhhh#oh.....
 ..hHhhhhhhHHh...
 ..hh.....#oHHh..
+/astra assemble 1
+/astra help
+/astra launch mars
+/astra launch moon
+/astra status
 /claim, /claim list, /claim friend add|remove <name>, /claim friends.
+/dubiety ask {}
+/dubiety forget
+/dubiety help
+/dubiety recall
+/dubiety remember Bring coolant home
+/dubiety remember Build beside the little beach
+/dubiety summon
+/dusk challenge lich
+/dusk challenge serpent
+/dusk help
 /gamemode spectator {}
 /gamemode survival {}
+/hbm arm large
+/hbm arm small
+/hbm disarm
+/hbm geiger
+/hbm help
+/hbm reactor
+/hbm refine
+/hbm scram
+/hbm status
 /tc <message> talks to your team.
 /team create <name> [colour], join <name>, leave, list, colour <colour>, friendlyfire on|off, remove <name>.
 /team create Reds red
@@ -262,6 +286,7 @@ Ancient honey: tastes of old stone and starlight. Your eyes tingle.
 Angler level {}  ({} xp)  -  lines snapped: {}  (they were THIS big)
 Angler level {}! The fish have started a group chat about you.
 Ann
+Another
 Another of the same (optional)
 Another shriek. Something is listening. Tiptoe.
 Anti-aliasing: OFF
@@ -547,6 +572,8 @@ Commands: list, seed, help, team, tc. Operators can do more.
 Comparator (Counts Your Stuff)
 Compass (Points Home, Mostly)
 Compiled, not interpreted!
+Complaint Resolved
+Complete a Half-Baked reactor batch and collect an energy cell.
 Complete a culture's collection in your Field Journal.
 Compost (Nitrogen!)
 Compost Happens
@@ -624,6 +651,7 @@ Crack! You pressed too hard. Gently does it.
 Cracked
 Cracked Blackstone Bricks (Lived In)
 Craft a pickaxe. Hitting rocks with rocks, but fancier.
+Craft an Ad Absurdum rocket. The sky has forms to fill in.
 Craft something big at a Crafting Table. It has a job now.
 Craftable now
 Crafted {}. Nobody knows how.
@@ -702,6 +730,7 @@ Defeat a patrol captain. Villages are going to love you.
 Defeat a {}
 Defeat an Elder Guardian. Your arms will thank you.
 Defeat an Oinker. They trusted you.
+Defeat the Slightly Dim Forest final guardian and collect its heart.
 Defeat the Wilter.
 Defeat {} {}s
 Delete
@@ -764,6 +793,7 @@ Dropper (Just Drops Things)
 Drops Ominously
 Drowned Port
 Dry Your Eyes
+Dubiety:
 Dune Grass (Windblown Tufts)
 Dungeon (Mossy, Moody)
 Dye
@@ -1464,6 +1494,7 @@ No player called {}.
 No player or address called {}.
 No player or mob called {}.
 No players remembered yet.
+No safe landing site nearby.
 No script handled {}
 No servers yet. Games on your network show up here by themselves;
 No speech program found: the narrator can't speak (see the README).
@@ -1520,6 +1551,7 @@ OK: everyone agrees.
 ON
 Observer (Nosy)
 Obsidian (Very Committed)
+Obtain a Dubiety Companion Beacon. Small thoughts, portable format.
 Ocean (Wet)
 Ocean Monument (Mind the Eyes)
 Ocean Ruins (Damp History)
@@ -1645,6 +1677,7 @@ Playing on {} ({})
 Playtest: a host and {} bots for {} seconds (seed {})...
 Plinky Plonky
 Pocket Crafting (small things)
+Pocket Philosopher
 Point Taken
 Point a compass at a Lodestone.
 Pointy Rock (Mind Your Head)
@@ -1714,6 +1747,7 @@ Pyramid Scheme
 Queen Bee (In a Jar, Unimpressed)
 Queens caught
 Queens need an empty Beehive (a wild nest won't do).
+Questionable Power
 Quit to Desktop
 Rage Quit to Title
 Raid - Defeat
@@ -1795,6 +1829,7 @@ Riptide (Spear Express)
 River (Going With the Flow)
 Robin Hood (Legally Distinct)
 Rocket Man
+Rocket Paperwork
 Rollo
 Rollo Scute (Shed With Dignity)
 Rollo scuttles
@@ -2111,6 +2146,7 @@ Template, Dimond gear, Scorchite Ingot: Scorchite gear.
 Temple Run
 Terracotta (Fancy Mud)
 Tested on at least one computer!
+Tester
 That Sinking Feeling
 That can't be enchanted (or already is).
 That one needs a Crafting Table. Four planks; you can make one in your pockets.
@@ -2581,6 +2617,7 @@ Zombie Doctor
 Zombie Hmmer
 Zoomies
 [Server] {}
+[block frame]\ntexture \= stone\n[dimension old]\nframe \= frame\n[dimension tiny]\nframe \= frame\ngravity \= 0\n[dimension bad]\nframe \= frame\ngravity \= NaN\n
 [block one]\n[block two]\n[item gem]\n
 [block red]\n
 [item ruby]\n\n[item ruby_pick]\ndurability \= 20\nrepair \= ruby\n\n[item ruby_blade]\ndamage \= 7\ndurability \= 900\nrepair \= ruby\n
@@ -2671,6 +2708,7 @@ beach edit restoration failed
 beach finds and tide pools
 beachcomber advancement never arrived
 birch door
+blast radius must be finite
 blasts never break blocks
 blocks placed and broken
 books are enchantable
@@ -2678,6 +2716,7 @@ bosses shrug off knockback by default
 bounded river
 bounties were done
 broader terrain and rocky coasts
+build house
 burned to a crisp. Extra crispy
 buzzing with bees
 calm under the smoke
@@ -2698,7 +2737,9 @@ connection closed
 connection closed during the handshake (is the other side on an older version?)
 connection refused
 controlURL
+cook food
 cooking pot
+coolant home
 coordinate out of range
 copper golem
 couldn't claim land for {}: {}
@@ -2717,6 +2758,7 @@ drowned. Turns out you do need air
 dry (needs water within 4 blocks)
 dry roots beside water at {} {} {}
 dune grass stays above water
+dusk guardian
 east (+X)
 edit out of range
 effect-only arrows deal no damage
@@ -2735,6 +2777,7 @@ fell into the void. It's not a pool either
 fell off the moon
 fell out of the world. Classic.
 fell too far behind
+fight boss
 fill is too big ({} blocks, max {})
 fish and vegetables
 follows its owner through the air: {}
@@ -2753,10 +2796,12 @@ glow squid
 got too close to a Polar Bear's cub
 grain, maybe sweetened
 grass needs supported soil
+gravity must be finite
 growing village
 hardly any mites
 heads for its owner
 held again: waits first
+higher-tier destination rejected
 hit the ground too hard (the ground is fine)
 holder has one
 hollow wyrm
@@ -2823,6 +2868,7 @@ line {}: file {} not found in the mod folder
 line {}: font {} not found in the mod folder (a .ttf or .otf)
 line {}: full: unknown block "{}"
 line {}: give: unknown item "{}"
+line {}: gravity must be finite
 line {}: in \= {}: not a biome
 line {}: in \= {}: not a biome or dimension
 line {}: looks_like should be wool, iron, gold or diamond, not {}
@@ -2876,6 +2922,7 @@ line {}: {} is defined twice
 line {}: {} must be a finite number in -1..=1
 line {}: {} should be a finite number
 line {}: {}: no block or item called "{}"
+little beach
 login timed out
 looking away
 looking past it
@@ -2888,6 +2935,7 @@ meat and vegetables
 meat, vegetables and grain
 median stretch {} blocks (it was {})
 mid-stride while walking
+mine iron
 mites at {}%
 mod climate biome
 mod climate targets
@@ -2895,6 +2943,7 @@ mod climate visit didn't award homebrew
 mod dimension
 mod pack too large
 modded shot uses the generic cause: {}
+model never varies its word sequences
 monsters on the cave floor: {}
 monsters spawned at night: {}
 ms: game {} mesh {} scene {} draw {} UI {} | GPU {}
@@ -2965,6 +3014,7 @@ powered and lit
 properly cross
 rained on
 ranged off by default: no arrow ever spawns
+reactor coolant
 red mooer
 red-spotted mooer
 region file damaged (number too long)
@@ -3008,6 +3058,7 @@ some mangroves stand in water
 somewhere that's gone
 soul fire
 south (+Z)
+space oxygen
 spectators cannot be damaged by projectiles
 spectators cannot receive projectile effects
 splash damage, less than a direct hit: {}
@@ -3123,6 +3174,7 @@ tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|c
 trade levels
 trading table
 trapped chest
+travel home
 tried to sleep in the Scorchlands
 tried to swim in lava. It's not that kind of pool
 tripped over a Snout
@@ -3132,10 +3184,13 @@ turned {} degrees in 0.1 s at 90 degrees per second
 type an address below and press Add to List to keep one.
 unknown block or item "{}"
 unknown colour "{}" (red, blue, green, yellow, purple, orange, aqua, pink)
+unknown dimension {}
 unknown message type {}
 unknown mob "{}" (oinker, hisser, groaner, fluffer, starer)
+unknown mob {}
 unknown mod ids become nothing
 unknown sound "{}"
+unknown structure {}
 unknown value type {}
 unknown version
 unreadable map

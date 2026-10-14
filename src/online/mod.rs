@@ -17,3 +17,6 @@ pub(crate) mod scripting;
 pub(crate) mod server;
 pub(crate) mod servers;
 pub(crate) mod teams;
+
+#[cfg(test)]
+pub(crate) mod examplemods;

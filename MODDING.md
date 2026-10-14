@@ -281,6 +281,8 @@ sky = #10142a
 light = 0.55               // how bright it is (0 to 1); there's no sun or weather
 ```
 
+Dimensions may also set `gravity = 0.17` for lower **player** gravity. The default is `1`, values clamp to `0.15–2`, and non-finite values are rejected. Gliders and mobs retain their existing physics. Protocol 50 protects this addition. Choose a dimension name that does not match a base biome: for example `twilit_realm` rather than `forest`, because `in = forest` identifies the base Forest biome.
+
 Each dimension gets a portal block (`<name>_portal`) made for it. Ores, plants, biomes and structures can be put in it with `dimension = <name>` or `in = <name>`. Walking through the portal again brings you back to the Overworld. Its terrain is saved in its own folder, by name, so turning the mod off and on again keeps it.
 
 ### `[mob <name>]`
@@ -556,3 +558,7 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 - **Joining a server:** the server's mods replace yours while you're connected, and yours come back when you leave. Servers only send `.txt` and `.png` files.
 - **Dedicated servers:** they load mods from the `mods/` folder where the server runs, and list them in the console at startup.
 - **Turning mods off:** the On/Off buttons on the Mods screen write `mods/disabled.txt`. You can edit that file yourself: one mod folder name per line.
+
+## Larger parody examples
+
+See [example-mods/README.md](example-mods/README.md) for Half-Baked Nuclear Machinery, Dubiety, Ad Absurdum, and The Slightly Dim Forest. All four may be installed together. Their content uses this data format and host-only scripts, with dimension-aware commands for rockets, fallout and wildlife. Their READMEs explain recipes, commands, progression and the deliberate limits of these small engine-native examples.

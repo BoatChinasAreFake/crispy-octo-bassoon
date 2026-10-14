@@ -1,0 +1,195 @@
+//! End-to-end checks of the shipped example packs, read from disk like mods.
+use crate::{block::*, dims::Dim, game::Game, mods, scripting::{Cmd,ScriptHost}, world::{GenOptions,Generator}};
+use macroquad::math::Vec3;
+use rhai::{Dynamic,FLOAT};
+
+pub(crate) fn sources() -> Vec<mods::ModSource> {
+    mods::read_disk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("example-mods")).into_iter()
+        .filter(|s|["half_baked","ad_absurdum","dusk","dubiety"].contains(&s.id.as_str())).collect()
+}
+fn with_packs(body:impl FnOnce()) {
+    let src=sources();assert_eq!(src.len(),4);
+    let texts:Vec<_>=src.iter().map(|s|(s.id.as_str(),std::str::from_utf8(&s.files["mod.txt"]).unwrap())).collect();
+    mods::with_mods(&texts,|_|body());
+}
+fn id(key:&str)->Id {reg().lookup(key).unwrap()}
+fn dim(key:&str)->Dim {Dim::Mod(reg().dims.iter().position(|d|d.key==key).unwrap() as u8)}
+fn game()->Game {
+    let mut g=Game::new_with(77,true,false,GenOptions{structures:0,..GenOptions::DEFAULT});g.player_name="Tester".into();
+    let (host,errors)=ScriptHost::new(&sources());assert!(errors.is_empty(),"{errors:?}");g.scripts=Some(host);call(&mut g,"on_load",vec![]);
+    g.world.load_now(0,0);g.player.body.pos=Vec3::new(4.5,90.0,4.5);g
+}
+fn call(g:&mut Game,hook:&str,args:Vec<Dynamic>)->Vec<Cmd> {
+    let mut host=g.scripts.take().unwrap();let r=host.call(g,hook,args);assert!(r.errors.is_empty(),"{hook}: {:?}",r.errors);g.scripts=Some(host);
+    let cmds=r.cmds.clone();g.apply_cmds(r.cmds);cmds
+}
+fn chat(g:&mut Game,text:&str)->Vec<Cmd>{call(g,"on_chat",vec!["Tester".into(),text.into()])}
+fn tick(g:&mut Game,n:usize){for _ in 0..n {call(g,"on_tick",vec![Dynamic::from(1.0 as FLOAT)]);}}
+fn place(g:&mut Game,x:i32,y:i32,z:i32,key:&str){g.world.load_now(x.div_euclid(16),z.div_euclid(16));g.world.set_or_record(x,y,z,id(key));}
+fn give(g:&mut Game,key:&str,n:u8){g.give(id(key),n);}
+
+#[test]
+fn parody_packs_load_together_without_errors_and_fit_the_transfer_budget() {
+    let src=sources();let r=mods::build(&src,&[]);
+    for m in &r.mods {assert!(m.errors.is_empty(),"{}: {:?}",m.id,m.errors);}
+    assert_eq!(r.dims.len(),6);assert_eq!(r.structures.len(),10);assert_eq!(r.mobs.len(),15);
+    assert!(src.iter().flat_map(|s|s.files.values()).map(Vec::len).sum::<usize>()<160_000);
+    with_packs(||{
+        let mut g=game();for help in ["/hbm help","/astra help","/dusk help","/dubiety help"] {assert!(!chat(&mut g,help).is_empty());}
+        assert_eq!(reg().dims.iter().find(|d|d.key=="ad_absurdum:moon").unwrap().gravity,0.17);
+    });
+}
+
+#[test]
+fn dusk_terrain_content_never_replaces_the_overworld() {
+    let _guard=mods::registry_test_lock();
+    let before=Generator::with(77,GenOptions::DEFAULT).generate(0,0);
+    drop(_guard);
+    let src=sources().into_iter().find(|s|s.id=="dusk").unwrap();
+    mods::with_mods(&[("dusk",std::str::from_utf8(&src.files["mod.txt"]).unwrap())],|r|{
+        assert!(r.biomes.iter().all(|b|b.dim==Some(0)));assert!(r.structures.iter().all(|s|s.dim==Some(0)));
+        assert!(r.ores.iter().all(|o|o.dim==Some(0)));
+        assert_eq!(Generator::with(77,GenOptions::DEFAULT).generate(0,0),before);
+        let forest=Generator::with_dim(77,GenOptions::DEFAULT,Dim::Mod(0));assert_ne!(forest.generate(0,0),before);
+    });
+}
+
+#[test]
+fn nuclear_processing_requires_machines_and_real_inventory() {
+    with_packs(||{
+        let mut g=game();chat(&mut g,"/hbm refine");assert_eq!(g.inv.count(id("half_baked:pellet")),0);
+        place(&mut g,5,90,4,"half_baked:centrifuge");give(&mut g,"half_baked:glowium_dust",2);give(&mut g,"coal",1);
+        chat(&mut g,"/hbm refine");assert_eq!(g.inv.count(id("half_baked:pellet")),1);assert_eq!(g.inv.count(id("half_baked:glowium_dust")),0);
+        place(&mut g,3,90,4,"half_baked:reactor");place(&mut g,4,90,5,"half_baked:cooling_tower");give(&mut g,"half_baked:coolant",1);
+        chat(&mut g,"/hbm reactor");chat(&mut g,"/hbm reactor");assert_eq!(g.inv.count(id("half_baked:pellet")),0);
+        tick(&mut g,16);assert_eq!(g.inv.count(id("half_baked:energy_cell")),4);assert_eq!(g.inv.count(id("half_baked:waste")),1);
+        chat(&mut g,"/hbm status");chat(&mut g,"/hbm scram");chat(&mut g,"/hbm geiger");
+    });
+}
+
+#[test]
+fn nuke_countdowns_disarm_and_explode_only_in_the_armed_dimension() {
+    with_packs(||{
+        let mut g=game();let forest=dim("dusk:twilit_realm");g.move_local_player(forest,Vec3::new(4.5,90.0,4.5));
+        place(&mut g,5,90,4,"half_baked:large_nuke");give(&mut g,"half_baked:arming_key",2);
+        chat(&mut g,"/hbm arm large");tick(&mut g,4);chat(&mut g,"/hbm disarm");tick(&mut g,12);
+        assert_eq!(g.world.get(5,90,4),id("half_baked:large_nuke"));assert_eq!(g.inv.count(id("half_baked:arming_key")),2);
+        chat(&mut g,"/hbm arm large");
+        g.in_realm(Dim::Over,|g|{g.world.load_now(0,0);g.world.set_or_record(5,90,4,GLASS);});
+        g.move_local_player(Dim::Over,Vec3::new(100.0,90.0,100.0));let cmds=call(&mut g,"on_tick",vec![Dynamic::from(10.0 as FLOAT)]);
+        // Each tick is bounded to one second; a delayed event never detonates ten times.
+        assert!(!cmds.iter().any(|c|matches!(c,Cmd::InRealm(_,c) if matches!(**c,Cmd::Explode(..)))));
+        let mut blasts=0;for _ in 0..10 {blasts+=call(&mut g,"on_tick",vec![Dynamic::from(1.0 as FLOAT)]).iter().filter(|c|matches!(c,Cmd::InRealm(_,c) if matches!(**c,Cmd::Explode(..)))).count();}
+        assert_eq!(blasts,9);assert_eq!(g.world.get(5,90,4),GLASS);
+        g.in_realm(forest,|g|assert_eq!(g.world.get(5,90,4),AIR));assert_eq!(g.realm_dim(),Dim::Over);
+    });
+}
+
+#[test]
+fn rockets_charge_fuel_recover_gear_and_land_in_a_separate_planet() {
+    with_packs(||{
+        let mut g=game();give(&mut g,"ad_absurdum:rocket_1",1);give(&mut g,"ad_absurdum:fuel",2);give(&mut g,"ad_absurdum:life_support",1);give(&mut g,"ad_absurdum:oxygen",2);
+        g.inv.armor[0]=Some((id("ad_absurdum:space_helmet"),1));g.inv.armor[1]=Some((id("ad_absurdum:space_chestplate"),1));
+        place(&mut g,5,89,4,"ad_absurdum:launch_pad");place(&mut g,3,90,4,"ad_absurdum:rocket_workbench");
+        for y in 90..95 {g.world.set_or_record(5,y,4,AIR);}
+        chat(&mut g,"/astra assemble 1");assert_eq!(g.inv.count(id("ad_absurdum:rocket_1")),0);
+        chat(&mut g,"/astra launch mars");assert_eq!(g.inv.count(id("ad_absurdum:fuel")),2,"higher-tier destination rejected");
+        chat(&mut g,"/astra launch moon");assert_eq!(g.inv.count(id("ad_absurdum:fuel")),1);tick(&mut g,4);
+        assert_eq!(g.dim,dim("ad_absurdum:moon"));assert_eq!(g.inv.count(id("ad_absurdum:rocket_1")),1);
+        assert_eq!(g.inv.count(id("ad_absurdum:launch_pad")),1);assert_eq!(g.inv.count(id("ad_absurdum:rocket_workbench")),1);
+        g.in_realm(Dim::Over,|g|{assert_eq!(g.world.get(5,89,4),AIR);assert_eq!(g.world.get(3,90,4),AIR);});
+        assert!(g.world.get(g.player.body.pos.x.floor() as i32,g.player.body.pos.y.floor() as i32-1,g.player.body.pos.z.floor() as i32)!=AIR);
+        tick(&mut g,1);assert_eq!(g.inv.count(id("ad_absurdum:oxygen")),1);assert_eq!(g.inv.count(id("ad_absurdum:tank")),1);
+        chat(&mut g,"/astra status");
+    });
+}
+
+#[test]
+fn dusk_guardians_gate_progress_and_reward_cooperation() {
+    with_packs(||{
+        let mut g=game();let forest=dim("dusk:twilit_realm");g.move_local_player(forest,Vec3::new(4.5,90.0,4.5));
+        place(&mut g,5,90,4,"dusk:lich_altar");chat(&mut g,"/dusk challenge lich");assert!(g.mobs.iter().all(|m|m.kind!=crate::entity::MobKind::from_name("dusk:lich").unwrap()));
+        place(&mut g,5,90,4,"dusk:serpent_altar");chat(&mut g,"/dusk challenge serpent");let n=g.mobs.len();assert!(n>0);chat(&mut g,"/dusk challenge serpent");assert_eq!(g.mobs.len(),n);
+        call(&mut g,"on_mob_death",vec!["dusk:serpent".into(),5.into(),91.into(),4.into(),"Friend".into()]);
+        assert_eq!(g.board.score("dusk_progress","Tester"),1);assert_eq!(g.board.score("dusk_progress","Friend"),1);
+        place(&mut g,5,90,4,"dusk:lich_altar");chat(&mut g,"/dusk challenge lich");assert!(g.mobs.iter().any(|m|m.kind==crate::entity::MobKind::from_name("dusk:lich").unwrap()));
+        g.move_local_player(Dim::Over,Vec3::new(4.5,90.0,4.5));tick(&mut g,10);assert!(g.mobs.iter().all(|m|!m.kind.mod_def().is_some_and(|d|d.key.starts_with("dusk:"))));
+    });
+}
+
+#[test]
+fn dubiety_generates_bounded_replies_and_saves_private_notes() {
+    with_packs(||{
+        let mut g=game();give(&mut g,"dubiety:beacon",1);give(&mut g,"dubiety:chip",2);
+        chat(&mut g,"/dubiety remember Build beside the little beach");let mut outputs=std::collections::HashSet::new();
+        for prompt in ["mine iron","cook food","space oxygen","dusk guardian","build house","fight boss","travel home","reactor coolant","hello"] {
+            for _ in 0..6 {for c in chat(&mut g,&format!("/dubiety ask {prompt}")) {if let Cmd::Message(_,text)=c && text.starts_with("Dubiety:") {assert!(text.split_whitespace().count()<=29);outputs.insert(text);}}}
+        }
+        assert!(outputs.len()>12,"model never varies its word sequences");
+        let (saved,errors)=g.scripts.as_ref().unwrap().export_vars();assert!(errors.is_empty(),"{errors:?}");assert!(saved.iter().map(|(_,b)|b.len()).sum::<usize>()<100_000);
+        let (mut fresh,errors)=ScriptHost::new(&sources());assert!(errors.is_empty());assert!(fresh.import_vars(&saved).is_empty());g.scripts=Some(fresh);call(&mut g,"on_load",vec![]);
+        assert!(chat(&mut g,"/dubiety recall").iter().any(|c|matches!(c,Cmd::Message(_,text) if text.contains("little beach"))));
+        let mut peer=crate::multiplayer::Peer::new("Another".into(),g.player.body.pos);peer.ledger.bag.add(id("dubiety:beacon"),1);g.peers.insert(201,peer);
+        let notes=call(&mut g,"on_chat",vec!["Another".into(),"/dubiety recall".into()]);assert!(!notes.iter().any(|c|matches!(c,Cmd::Message(_,text) if text.contains("little beach"))));
+        chat(&mut g,"/dubiety summon");assert!(g.mobs.iter().any(|m|m.kind==crate::entity::MobKind::from_name("dubiety:companion").unwrap()));
+        chat(&mut g,"/dubiety forget");assert!(!chat(&mut g,"/dubiety recall").iter().any(|c|matches!(c,Cmd::Message(_,text) if text.contains("little beach"))));
+    });
+}
+
+#[test]
+fn planetary_player_gravity_and_example_advancements_work() {
+    with_packs(||{
+        let mut g=game();g.player.body.pos=Vec3::new(4.5,200.0,4.5);g.player.body.vel=Vec3::ZERO;
+        g.player.update(0.1,&crate::player::Input::default(),&g.world,false);let earth=g.player.body.vel.y;
+        g.move_local_player(dim("ad_absurdum:moon"),Vec3::new(4.5,200.0,4.5));g.world.load_now(0,0);
+        g.player.update(0.1,&crate::player::Input::default(),&g.world,false);
+        assert!((g.player.body.vel.y-earth*0.17).abs()<0.001);
+        for (item,key) in [("half_baked:energy_cell","half_baked_power"),("ad_absurdum:rocket_1","rocket_paperwork"),("dubiety:beacon","pocket_philosopher"),("dusk:hydra_heart","complaint_resolved")] {
+            g.item_advancements(id(item));assert!(g.advancements.earned.iter().any(|a|a==key));
+        }
+    });
+}
+
+#[test]
+fn mod_gravity_defaults_and_non_finite_values_are_safe() {
+    let text="[block frame]\ntexture = stone\n[dimension old]\nframe = frame\n[dimension tiny]\nframe = frame\ngravity = 0\n[dimension bad]\nframe = frame\ngravity = NaN\n";
+    let mut files=std::collections::BTreeMap::new();files.insert("mod.txt".into(),text.as_bytes().to_vec());
+    let r=mods::build(&[mods::ModSource{id:"gravity".into(),files}],&[]);
+    assert_eq!(r.dims.iter().find(|d|d.key=="gravity:old").unwrap().gravity,1.0);
+    assert_eq!(r.dims.iter().find(|d|d.key=="gravity:tiny").unwrap().gravity,0.15);
+    assert_eq!(r.dims.iter().find(|d|d.key=="gravity:bad").unwrap().gravity,1.0);
+    assert!(r.mods[0].errors.iter().any(|e|e.contains("gravity must be finite")));
+}
+
+#[test]
+fn cooling_loss_melts_a_reactor_and_unloaded_countdowns_pause() {
+    with_packs(||{
+        let mut g=game();place(&mut g,3,90,4,"half_baked:reactor");place(&mut g,4,90,5,"half_baked:cooling_tower");
+        give(&mut g,"half_baked:pellet",1);give(&mut g,"half_baked:coolant",1);chat(&mut g,"/hbm reactor");
+        g.world.set_or_record(4,90,5,AIR);let cmds=call(&mut g,"on_tick",vec![Dynamic::from(1.0 as FLOAT)]);
+        assert!(cmds.iter().any(|c|matches!(c,Cmd::InRealm(_,c) if matches!(**c,Cmd::Explode(..)))));
+        assert_eq!(g.inv.count(id("half_baked:energy_cell")),0);
+        g.player.body.pos=Vec3::new(4.5,90.0,4.5);place(&mut g,5,90,4,"half_baked:small_nuke");give(&mut g,"half_baked:arming_key",1);chat(&mut g,"/hbm arm small");
+        let chunk=g.world.chunks.remove(&(0,0)).unwrap();tick(&mut g,12);g.world.chunks.insert((0,0),chunk);
+        let cmds=call(&mut g,"on_tick",vec![Dynamic::from(1.0 as FLOAT)]);
+        assert!(!cmds.iter().any(|c|matches!(c,Cmd::InRealm(_,c) if matches!(**c,Cmd::Explode(..)))));
+        assert_eq!(g.world.get(5,90,4),id("half_baked:small_nuke"));
+    });
+}
+
+#[test]
+fn pack_notes_reactor_progress_and_realms_survive_a_game_save() {
+    with_packs(||{
+        let mut g=game();give(&mut g,"dubiety:beacon",1);chat(&mut g,"/dubiety remember Bring coolant home");
+        place(&mut g,3,90,4,"half_baked:reactor");place(&mut g,4,90,5,"half_baked:cooling_tower");
+        give(&mut g,"half_baked:pellet",1);give(&mut g,"half_baked:coolant",1);chat(&mut g,"/hbm reactor");tick(&mut g,5);
+        g.move_local_player(dim("ad_absurdum:moon"),Vec3::new(4.5,90.0,4.5));
+        let dir=std::env::temp_dir().join(format!("minceraft-parody-save-{}",std::process::id()));std::fs::create_dir_all(&dir).unwrap();let path=dir.join("world.mncr");
+        crate::save::write_to(&path,&g.to_save()).unwrap();let mut back=Game::from_save(crate::save::read_from(&path).unwrap());back.player_name="Tester".into();back.start_scripts_with(&sources());
+        assert_eq!(back.dim,dim("ad_absurdum:moon"));assert_eq!(back.player_name,"Tester");
+        assert!(chat(&mut back,"/dubiety recall").iter().any(|c|matches!(c,Cmd::Message(_,text) if text.contains("coolant home"))));
+        back.in_realm(Dim::Over,|g|g.world.load_now(0,0));tick(&mut back,10);
+        assert_eq!(back.inv.count(id("half_baked:energy_cell")),4);assert_eq!(back.realm_dim(),dim("ad_absurdum:moon"));
+        std::fs::remove_dir_all(dir).unwrap();
+    });
+}

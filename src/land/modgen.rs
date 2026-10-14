@@ -132,6 +132,8 @@ pub struct ModDim {
     pub sky: [f32; 3],
     /// Light everywhere, 0 (dark) to 1 (noon), on top of block light.
     pub light: f32,
+    /// Player gravity multiplier; all older dimension definitions default to 1.
+    pub gravity: f32,
     /// The portal's frame block, and its sheets (across x, across z).
     pub frame: Id,
     pub portal: [Id; 2],
