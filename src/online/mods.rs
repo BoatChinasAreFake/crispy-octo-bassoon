@@ -775,8 +775,13 @@ fn fill_biome(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>)
         let leaves = parts.get(1).and_then(|b| ctx.resolve(&m.id, b)).filter(|&b| b < FIRST_ITEM);
         let chance = parts.get(2).and_then(|c| c.parse::<f32>().ok()).unwrap_or(0.02).clamp(0.0, 0.2);
         let height = parts.get(3).and_then(|c| c.parse::<i32>().ok()).unwrap_or(5).clamp(2, 16);
+        let style=match parts.get(4).copied().unwrap_or("round") {
+            "round"=>crate::modgen::ModTreeStyle::Round,"twisted"=>crate::modgen::ModTreeStyle::Twisted,
+            "spire"=>crate::modgen::ModTreeStyle::Spire,"umbrella"=>crate::modgen::ModTreeStyle::Umbrella,
+            other=>{errs.push(format!("line {line}: unknown tree style {other}; use round, twisted, spire or umbrella"));return None;}
+        };
         match (log, leaves) {
-            (Some(log), Some(leaves)) => Some(crate::modgen::ModTree { log, leaves, chance, height }),
+            (Some(log), Some(leaves)) => Some(crate::modgen::ModTree { log, leaves, chance, height, style }),
             _ => {
                 errs.push(format!("line {line}: tree = {v}: needs a log and a leaves block (and optionally a chance and height), like tree = oak_log oak_leaves 0.02 5"));
                 None

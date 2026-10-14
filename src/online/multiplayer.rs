@@ -2704,6 +2704,13 @@ mod tests {
             assert_eq!(client.world.generator.mod_dim().unwrap().gravity,0.17);
             client.send_chat("/dubiety remember Bring fuel home");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.contains("Dubiety remembers: Bring fuel home"))));
             client.send_chat("/dubiety ask space oxygen");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.starts_with("Dubiety:"))));
+            let forest=Dim::Mod(r.dims.iter().position(|d|d.key=="dusk:twilit_realm").unwrap() as u8);
+            host.apply_cmds(vec![crate::scripting::Cmd::Travel("Astronaut".into(),forest,8,8)]);
+            assert!(pump(&mut host,&mut client,|h,c|c.dim==forest && h.peer_dim(peer)==Some(forest)));
+            for (cx,cz) in [(0,0),(1,0),(0,1),(1,1)] {
+                let expected=host.in_realm(forest,|g|g.world.generator.generate(cx,cz));
+                assert_eq!(client.world.generator.generate(cx,cz),expected,"custom forest chunk {cx}/{cz}");
+            }
         });
     }
 

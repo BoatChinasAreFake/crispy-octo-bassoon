@@ -210,6 +210,8 @@ plant = cheese_flower 0.06   // a block and a chance per column (up to 8 lines)
 tree = wheel butter 0.004 4  // log, leaves, chance per column, height
 ```
 
+The tree line optionally accepts a fifth field: `round` (default), `twisted` (bent trunk and branching clustered crown), `spire` (tiered conifer), or `umbrella` (low, broad crown). For example `tree = dusk_log dusk_leaves 0.012 10 twisted`. Custom styles use a bounded six-block reach, deterministic orientation and world-coordinate leaf noise; old four-field definitions keep their original shape. Invalid styles report a parse error. Protocol 52 is required.
+
 Base-game trees don't grow in a mod biome, so give it a `tree` if it should have any. The F3 screen shows which biome you're in, and `/locate <name>` finds the nearest patch.
 
 #### Optional climate targets (new Overworld worlds, revision 8+)

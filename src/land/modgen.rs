@@ -23,13 +23,17 @@ use crate::noise::{hash2, hash3};
 use crate::world::{idx, Biome, Generator, CH, CW};
 use macroquad::math::{ivec3, IVec3};
 
-/// A mod tree: a trunk of `log` with a round crown of `leaves`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModTreeStyle { Round, Twisted, Spire, Umbrella }
+
+/// A mod tree with an optional deterministic crown/trunk style.
 #[derive(Clone, Debug)]
 pub struct ModTree {
     pub log: Id,
     pub leaves: Id,
     pub chance: f32,
     pub height: i32,
+    pub style: ModTreeStyle,
 }
 
 #[derive(Clone, Debug)]
@@ -251,11 +255,23 @@ impl Generator {
         if !self.biomes.iter().any(|m| m.tree.is_some()) {
             return;
         }
-        for tz in cz * CW - 3..cz * CW + CW + 3 {
-            for tx in cx * CW - 3..cx * CW + CW + 3 {
+        let reach=if self.biomes.iter().any(|m|m.tree.as_ref().is_some_and(|t|t.style!=ModTreeStyle::Round)) {6}else{3};
+        for tz in cz * CW - reach..cz * CW + CW + reach {
+            for tx in cx * CW - reach..cx * CW + CW + reach {
                 let (h, base) = column(tx, tz);
                 let Some((h, t)) = self.mod_tree_at(tx, tz, h, base) else { continue };
                 let trunk = t.height + (hash2(self.seed ^ 0x7EF, tx, tz) * 2.0) as i32;
+                if t.style!=ModTreeStyle::Round {
+                    if h+trunk+3>=CH || self.mod_dim().is_some_and(|d|d.liquid!=AIR && h<d.sea_level) {continue;}
+                    for (p,id,over) in self.custom_tree_blocks(tx,tz,h,t) {
+                        let (lx,lz)=(p.x-cx*CW,p.z-cz*CW);
+                        if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (1..CH).contains(&p.y) {
+                            let i=idx(lx,p.y,lz);
+                            if over || b[i]==AIR || (!is_solid(b[i]) && !is_liquid(b[i])) {b[i]=id;}
+                        }
+                    }
+                    continue;
+                }
                 // (Only on dry land.)
                 if (0..CW).contains(&(tx - cx * CW)) && (0..CW).contains(&(tz - cz * CW)) && is_liquid(b[idx(tx - cx * CW, h + 1, tz - cz * CW)]) {
                     continue;
@@ -285,6 +301,41 @@ impl Generator {
                 }
             }
         }
+    }
+
+    /// Tree geometry in global coordinates: each neighbouring chunk uses the
+    /// same anchor, orientation and crown noise before clipping to its cells.
+    pub(crate) fn custom_tree_blocks(&self,x:i32,z:i32,h:i32,t:&ModTree)->Vec<(IVec3,Id,bool)> {
+        let trunk=t.height+(hash2(self.seed^0x7EF,x,z)*2.0) as i32;
+        let mut cells=Vec::new();
+        let rotation=(hash2(self.seed^0xD057,x,z)*4.0) as i32;
+        let turn=|dx:i32,dz:i32|match rotation {0=>(dx,dz),1=>(-dz,dx),2=>(-dx,-dz),_=>(dz,-dx)};
+        let mut log=|dx:i32,y:i32,dz:i32| {let (dx,dz)=turn(dx,dz);cells.push((ivec3(x+dx,h+y,z+dz),t.log,true));};
+        match t.style {
+            ModTreeStyle::Twisted => {
+                for y in 1..=trunk {let bend=if y>trunk*2/3 {2}else if y>trunk/3 {1}else{0};log(bend,y,0);
+                    if y==trunk/3+1 {log(0,y,0);}
+                    if y==trunk*2/3+1 {log(1,y,0);}}
+                for direction in [-1,1] {for step in 0..=3 {log(2+direction*step,trunk-2+step/2,direction*step/2);}}
+                for (dx,dz) in [(1,0),(-1,0),(0,1),(0,-1)] {log(dx,1,dz);}
+            }
+            _ => {for y in 1..=trunk {log(0,y,0);}
+                if t.style==ModTreeStyle::Umbrella {for (dx,dz) in [(1,0),(-1,0),(0,1),(0,-1)] {for step in 1..=3 {log(dx*step,trunk-2+step/2,dz*step);}}}
+            }
+        }
+        let crowns=match t.style {
+            ModTreeStyle::Twisted=>vec![(2,trunk,0,3),(-1,trunk-1,-1,2),(4,trunk-1,1,2)],
+            ModTreeStyle::Spire=>(3..=trunk).step_by(3).map(|y|(0,y,0,((trunk-y)*3/trunk+1).clamp(1,3))).chain(std::iter::once((0,trunk+2,0,0))).collect(),
+            ModTreeStyle::Umbrella=>vec![(0,trunk,0,4)],
+            ModTreeStyle::Round=>vec![(0,trunk,0,2)],
+        };
+        for (cx,cy,cz,radius) in crowns {for dy in -1..=1 {for dz in -radius..=radius {for dx in -radius..=radius {
+            let r=if dy==1 {(radius-1).max(if t.style==ModTreeStyle::Spire {0}else{1})}else{radius};
+            if dx*dx+dz*dz>r*r+1 {continue;}
+            let (xx,zz)=turn(cx+dx,cz+dz);
+            if hash3(self.seed^0xD058,x+xx,h+cy+dy,z+zz)<0.96 {cells.push((ivec3(x+xx,h+cy+dy,z+zz),t.leaves,false));}
+        }}}}
+        cells
     }
 
     /// A chunk of a mod dimension.

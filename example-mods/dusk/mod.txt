@@ -247,20 +247,17 @@ tier = 1
 light = 0
 
 [block dusk_log]
-name = Duskwood Log
+name = Twisted Duskwood Log
 texture = bark
-hardness = 2
-tool = pickaxe
-tier = 1
-light = 0
+hardness = 1.5
+sound = wood
 
 [block dusk_leaves]
-name = Duskwood Leaves
-texture = leaves
-hardness = 2
-tool = pickaxe
-tier = 1
-light = 0
+name = Twisted Duskwood Leaves
+texture = dusk_foliage
+hardness = 0.2
+cutout = true
+sound = grass
 
 [block rune_brick]
 name = Rune Bricks
@@ -432,7 +429,7 @@ share = 0.55
 size = 260
 top = dusk_grass
 under = dusk_soil
-tree = dusk_log dusk_leaves 0.018 7
+tree = dusk_log dusk_leaves 0.012 10 twisted
 plant = firefly .045
 
 [biome thicket]
@@ -442,7 +439,7 @@ share = 0.5
 size = 150
 top = dusk_grass
 under = dusk_soil
-tree = dusk_log dusk_leaves 0.01 7
+tree = gloam_log gloam_leaves 0.014 9 spire
 plant = thorn .06
 
 [biome glade]
@@ -452,7 +449,7 @@ share = 1
 size = 320
 top = dusk_grass
 under = dusk_soil
-tree = dusk_log dusk_leaves 0.004 7
+tree = moonwillow_log moonwillow_leaves 0.005 5 umbrella
 plant = berry_bush .04
 
 [structure serpent_court]
@@ -785,3 +782,196 @@ output = firefly_jar 1
 [recipe]
 inputs = book 1, moss_block 1
 output = guide 1
+
+[texture gloam_bark]
+noise = #334448
+variation = 0.12
+
+[block gloam_log]
+name = Gloam Pine Log
+texture = gloam_bark
+hardness = 1.5
+sound = wood
+
+[block gloam_leaves]
+name = Gloam Pine Leaves
+texture = gloam_foliage
+hardness = 0.2
+cutout = true
+sound = grass
+
+[texture moonwillow_bark]
+noise = #81718b
+variation = 0.12
+
+[block moonwillow_log]
+name = Moonwillow Log
+texture = moonwillow_bark
+hardness = 1.5
+sound = wood
+
+[block moonwillow_leaves]
+name = Moonwillow Leaves
+texture = moonwillow_foliage
+hardness = 0.2
+cutout = true
+sound = grass
+
+[texture dusk_foliage]
+color l = #3e776e
+color h = #709c85
+.hl.lhlllhl.lhhl
+lllh.llhhlll.ll.
+lhhll.hl.lhlllhh
+h.llhlllh.lllhll
+ll.hlllhll.hl.lh
+lhl.lh.llhhlll.l
+lllhhll.hlllhll.
+.lhlllhl.lh.lllh
+h.ll.hlllhll.hll
+lllhl.lhlllhh.ll
+lhlllh.ll.hlllhl
+hl.lhlllhl.lhhll
+llh.llhhlll.ll.h
+hhll.hl.lhlllhh.
+.llhlllh.lllhlll
+l.hlllhll.hl.lhh
+
+[texture gloam_foliage]
+color l = #244e51
+color h = #588584
+.hl.lhlllhl.lhhl
+lllh.llhhlll.ll.
+lhhll.hl.lhlllhh
+h.llhlllh.lllhll
+ll.hlllhll.hl.lh
+lhl.lh.llhhlll.l
+lllhhll.hlllhll.
+.lhlllhl.lh.lllh
+h.ll.hlllhll.hll
+lllhl.lhlllhh.ll
+lhlllh.ll.hlllhl
+hl.lhlllhl.lhhll
+llh.llhhlll.ll.h
+hhll.hl.lhlllhh.
+.llhlllh.lllhlll
+l.hlllhll.hl.lhh
+
+[texture moonwillow_foliage]
+color l = #b8a6d3
+color h = #e0d6f1
+.hl.lhlllhl.lhhl
+lllh.llhhlll.ll.
+lhhll.hl.lhlllhh
+h.llhlllh.lllhll
+ll.hlllhll.hl.lh
+lhl.lh.llhhlll.l
+lllhhll.hlllhll.
+.lhlllhl.lh.lllh
+h.ll.hlllhll.hll
+lllhl.lhlllhh.ll
+lhlllh.ll.hlllhl
+hl.lhlllhl.lhhll
+llh.llhhlll.ll.h
+hhll.hl.lhlllhh.
+.llhlllh.lllhlll
+l.hlllhll.hl.lhh
+
+[block duskwood_planks]
+name = Duskwood Planks
+texture = bark
+hardness = 1
+sound = wood
+
+[block duskwood_slab]
+name = Duskwood Slab
+texture = bark
+shape = slab
+full = duskwood_planks
+hardness = 1
+sound = wood
+
+[block duskwood_stairs]
+name = Duskwood Stairs
+texture = bark
+shape = stairs
+hardness = 1
+sound = wood
+
+[recipe]
+inputs = dusk_log 1
+output = duskwood_planks 4
+
+[recipe]
+inputs = duskwood_planks 3
+output = duskwood_slab 6
+
+[recipe]
+inputs = duskwood_planks 6
+output = duskwood_stairs 4
+
+[block gloamwood_planks]
+name = Gloamwood Planks
+texture = gloam_bark
+hardness = 1
+sound = wood
+
+[block gloamwood_slab]
+name = Gloamwood Slab
+texture = gloam_bark
+shape = slab
+full = gloamwood_planks
+hardness = 1
+sound = wood
+
+[block gloamwood_stairs]
+name = Gloamwood Stairs
+texture = gloam_bark
+shape = stairs
+hardness = 1
+sound = wood
+
+[recipe]
+inputs = gloam_log 1
+output = gloamwood_planks 4
+
+[recipe]
+inputs = gloamwood_planks 3
+output = gloamwood_slab 6
+
+[recipe]
+inputs = gloamwood_planks 6
+output = gloamwood_stairs 4
+
+[block moonwillow_planks]
+name = Moonwillow Planks
+texture = moonwillow_bark
+hardness = 1
+sound = wood
+
+[block moonwillow_slab]
+name = Moonwillow Slab
+texture = moonwillow_bark
+shape = slab
+full = moonwillow_planks
+hardness = 1
+sound = wood
+
+[block moonwillow_stairs]
+name = Moonwillow Stairs
+texture = moonwillow_bark
+shape = stairs
+hardness = 1
+sound = wood
+
+[recipe]
+inputs = moonwillow_log 1
+output = moonwillow_planks 4
+
+[recipe]
+inputs = moonwillow_planks 3
+output = moonwillow_slab 6
+
+[recipe]
+inputs = moonwillow_planks 6
+output = moonwillow_stairs 4

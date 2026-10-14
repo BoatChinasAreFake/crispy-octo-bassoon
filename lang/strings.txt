@@ -2914,6 +2914,7 @@ line {}: unknown dimension "{}"
 line {}: unknown item "{}"
 line {}: unknown section [{}]
 line {}: unknown texture "{}"
+line {}: unknown tree style {}; use round, twisted, spire or umbrella
 line {}: write colours like  color # \= 200,180,60
 line {}: {} \= {}: needs a block and a chance, like plant \= rose 0.02
 line {}: {} \= {}: needs one letter and a block, like block # \= cobblestone

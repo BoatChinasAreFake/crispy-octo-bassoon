@@ -2,13 +2,13 @@
 
 An original adventure parody inspired by [The Twilight Forest](https://github.com/TeamTwilight/twilightforest). The entire forest uses **`dusk:twilit_realm`**, a separately generated and saved dimension. Its ores, biomes, ruins and scripted wildlife are restricted to that realm; installing it does not change Overworld terrain.
 
-The pack has sixteen blocks, ten items, seven recipes, ten original pixel textures, three biomes, four ruin templates and eight creature types, including four bosses. The custom deer has antlers and animated legs; the serpent and three-headed final boss use custom box models.
+The pack has 29 blocks, ten items, sixteen recipes, fifteen original pixel textures, three biomes, four ruin templates and eight creature types, including four bosses. The custom deer has antlers and animated legs; the serpent and three-headed final boss use custom box models.
 
 ## Enter and explore
 
 Craft four Duskwood Gate Frames from two Logs, two Moss Blocks and one Dimond. Build the ordinary portal frame shape from these blocks and light it with a Sparker. The generated return portal brings you home through the same portal system.
 
-Duskwood Groves have tall trees and glowing Firefly Reeds. Polite Thorn Thickets have thicker scrub; Moonlit Glades have berries and fewer trees. Harvest Duskberries for food, make Firefly Jars and mine Moonmetal to smelt into stronger pickaxes and swords. Passive Oh Deer and Flying Reading Lamps share the realm with hostile Pocket Accountants and Thorny Issues. Spawning is bounded near players and stops when nobody is visiting.
+Duskwood Groves have bent, branching Twisted Duskwood with buttress roots and clustered crowns. Polite Thorn Thickets have tall, tiered Gloam Pines. Moonlit Glades have shorter Moonwillows with broad lavender umbrella crowns and berries. Each tree uses distinct wood/foliage; all three woods craft into matching planks, slabs and stairs. Firefly Reeds light the groves. Harvest Duskberries for food, make Firefly Jars and mine Moonmetal to smelt into stronger pickaxes and swords. Passive Oh Deer and Flying Reading Lamps share the realm with hostile Pocket Accountants and Thorny Issues. Spawning is bounded near players and stops when nobody is visiting.
 
 ## Guardians
 
@@ -28,3 +28,5 @@ Boss encounters check your saved guardian order before spawning. One encounter o
 Commands: `/dusk help`, `/dusk where <guardian>`, `/dusk challenge <guardian>`, `/dusk journal`.
 
 Guardians, tamed/named creatures, trophies, progression and active encounter records save with the world. Unloaded encounters keep their lock; a loaded, empty encounter area clears a stale lock after a minute. No horror or sleep-harassment mechanics are included.
+
+The optional fifth field in a biome tree line selects its silhouette: `twisted`, `spire` or `umbrella`. Trees use global-coordinate anchors and a six-block reach so neighbouring chunks regenerate the same branches. The older four-field format retains the round-canopy generator. The `dusk_trees` screenshot scene stages the three actual generated tree shapes for comparison; protocol 52 protects their generation rules.

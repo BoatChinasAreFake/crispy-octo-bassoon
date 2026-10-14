@@ -458,6 +458,22 @@ impl App {
     pub(crate) fn shot_setup(&mut self, s: &mut ShotArgs) {
         let app = self;
         match s.mode.as_str() {
+            "dusk_trees" => {
+                let mut g=shot_game(424242,true,false);
+                if let Some(k)=block::reg().dims.iter().position(|d|d.key=="dusk:twilit_realm") {g.move_local_player(dims::Dim::Mod(k as u8),Vec3::new(0.0,90.0,0.0));}
+                for z in -2..=2 {for x in -2..=2 {g.world.load_now(x,z);}}
+                let floor=block::reg().lookup("dusk:dusk_grass").unwrap_or(GRASS);
+                for z in -25..=25 {for x in -25..=25 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {floor}else{AIR});}}}
+                let trees:Vec<_>=g.world.generator.biomes.iter().filter(|b|b.key.starts_with("dusk:")).filter_map(|b|b.tree.clone()).collect();
+                for (i,t) in trees.iter().enumerate() {
+                    for (p,id,over) in g.world.generator.custom_tree_blocks(-10+i as i32*10,-2,79,t) {
+                        if over || g.world.get_v(p)==AIR {g.world.set(p.x,p.y,p.z,id);}
+                    }
+                }
+                g.mobs.clear();let from=Vec3::new(0.0,86.0,24.0);let to=Vec3::new(0.0,85.0,-2.0);let d=to-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
+            }
             "half_baked_lab" | "astra_rocket" | "dusk_guardians" | "dubiety_companion" => {
                 // Controlled displays of the installed example mods, using the
                 // current generator. These are model/content QA, not natural spawns.
@@ -1079,7 +1095,7 @@ impl App {
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
                 }
-                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion") {
+                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dusk_trees") {
                     for m in &mut app.game.mobs {if let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
                     app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
                 }
@@ -2531,7 +2547,7 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
-    "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion",
+    "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion",
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
 ];

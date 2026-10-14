@@ -214,3 +214,24 @@ fn rocket_shapes_have_taper_fins_bounded_geometry_and_inventory_models() {
         for axis in [0,2] {assert!(fins.iter().any(|p|p.lo[axis]==0.0));assert!(fins.iter().any(|p|p.hi[axis]==1.0));}
     });
 }
+
+#[test]
+fn dusk_custom_trees_have_three_distinct_shapes_and_stable_chunk_edges() {
+    with_packs(||{
+        let g=Generator::with_dim(77,GenOptions::DEFAULT,dim("dusk:twilit_realm"));
+        let trees:Vec<_>=g.biomes.iter().filter(|b|b.key.starts_with("dusk:")).filter_map(|b|b.tree.as_ref()).collect();
+        assert_eq!(trees.len(),3);
+        assert_eq!(trees.iter().map(|t|t.style).collect::<Vec<_>>(),vec![crate::modgen::ModTreeStyle::Twisted,crate::modgen::ModTreeStyle::Spire,crate::modgen::ModTreeStyle::Umbrella]);
+        for tree in trees {
+            let blocks=g.custom_tree_blocks(15,15,70,tree);assert_eq!(blocks,g.custom_tree_blocks(15,15,70,tree));
+            assert!(blocks.iter().any(|(p,id,_)|*id==tree.log && p.y>70));
+            assert!(blocks.iter().any(|(p,id,_)|*id==tree.leaves && p.x>=16));
+            assert!(blocks.iter().any(|(p,id,_)|*id==tree.leaves && p.x<16));
+            assert!(blocks.iter().all(|(p,_,_)|(p.x-15).abs()<=6 && (p.z-15).abs()<=6));
+            assert!(block(tree.leaves).solid && !block(tree.leaves).opaque);
+        }
+        let chunks=[(-1,-1),(0,0),(1,0),(0,1)];let first:Vec<_>=chunks.iter().map(|&(x,z)|g.generate(x,z)).collect();
+        for (i,&(x,z)) in chunks.iter().enumerate().rev() {assert_eq!(first[i],g.generate(x,z));}
+        for key in ["dusk:duskwood_planks","dusk:gloamwood_planks","dusk:moonwillow_planks"] {assert!(reg().lookup(key).is_some());}
+    });
+}
