@@ -3681,6 +3681,7 @@ impl Game {
         self.clankers_tick(dt);
         self.beacons_tick(dt);
         self.monument_tick(dt);
+        self.gluttons_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
         self.wildlife_tick(dt);

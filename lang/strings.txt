@@ -179,6 +179,7 @@
 /dubiety ask {}
 /dubiety forget
 /dubiety help
+/dubiety obesity
 /dubiety recall
 /dubiety remember Bring coolant home
 /dubiety remember Build beside the little beach
@@ -424,6 +425,7 @@ Boot-iful
 Boots
 Border
 Bottle Ancient honey (bees + Torchflowers).
+Bottomless Appetite
 Bot{}
 Bounce on a Bouncy Goo Block. Physics weeps.
 Bouncy Goo Block
@@ -851,6 +853,7 @@ Eye Spy
 Eyeblossom (Pretending to Sleep)
 Eyeblossom (Wide Awake)
 FAILED to start: {}
+FEED ME!
 FOR SALE: one bucket, slightly holey. Will trade for a better bucket.
 FOV: {}
 FREE TO A GOOD HOME: mud. Lots of it. Collect from the swamp.
@@ -867,6 +870,7 @@ Feather (Ticklish)
 Fee
 Feed a Dolphin a fish and let it show you the way.
 Feed a Squawker some seeds. It will tell everyone.
+Feed an item to a glutton companion. It still wants seconds.
 Feel a Conduit's power underwater.
 Fence (Keeps Honest Animals In)
 Fence Gate (Swings Both Ways)
@@ -3491,6 +3495,8 @@ zombie hmmer
 {}/{}  LAN
 {}/{}  {} ms
 {}/{} found
+{}: Delicious. Now feed me MORE!
+{}: FEED ME! Food, rocks, tools... I want EVERYTHING!
 {}: OFF
 {}: ON
 {}: best {}

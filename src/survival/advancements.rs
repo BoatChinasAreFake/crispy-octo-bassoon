@@ -233,6 +233,7 @@ pub const ALL: &[Advancement] = &[
     adv("its_a_trap", "It's a Trap!", "Open a Trapped Chest wired up to something."),
     adv("half_baked_power", "Questionable Power", "Complete a Half-Baked reactor batch and collect an energy cell."),
     adv("rocket_paperwork", "Rocket Paperwork", "Craft an Ad Absurdum rocket. The sky has forms to fill in."),
+    adv("bottomless_appetite", "Bottomless Appetite", "Feed an item to a glutton companion. It still wants seconds."),
     adv("pocket_philosopher", "Pocket Philosopher", "Obtain a Dubiety Companion Beacon. Small thoughts, portable format."),
     adv("complaint_resolved", "Complaint Resolved", "Defeat the Slightly Dim Forest final guardian and collect its heart."),
     adv("off_the_map", "Off the Map", "Step through a portal into a mod's dimension."),

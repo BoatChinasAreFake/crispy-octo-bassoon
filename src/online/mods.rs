@@ -517,7 +517,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None, parts: Vec::new(), trades: Vec::new(), boss: false, enrage_at: 0.5, enrage_speed: 1.5, enrage_cooldown: 0.6, summon: None, summon_every: 20.0, knockback_resist: 0.0, xp: None });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None, glutton: false, parts: Vec::new(), trades: Vec::new(), boss: false, enrage_at: 0.5, enrage_speed: 1.5, enrage_cooldown: 0.6, summon: None, summon_every: 20.0, knockback_resist: 0.0, xp: None });
                     }
                 }
                 _ => {}
@@ -1406,6 +1406,7 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.tame_item = tame_item;
     mob.tame_chance = tame_chance;
     mob.breed_item = breed_item;
+    mob.glutton = flag(s, "glutton", false, errs);
     let parts = parse_parts(ctx, m, s, tile, errs);
     ctx.reg.mobs[i].parts = parts;
     let trades = parse_trades(ctx, m, s, errs);

@@ -566,3 +566,10 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 See [example-mods/README.md](example-mods/README.md) for Half-Baked Nuclear Machinery, Dubiety, Ad Absurdum, and The Slightly Dim Forest. All four may be installed together. Their content uses this data format and host-only scripts, with dimension-aware commands for rockets, fallout and wildlife. Their READMEs explain recipes, commands, progression and the deliberate limits of these small engine-native examples.
 
 Rocket shape presets use bounded model geometry and collision boxes: `rocket_engine` includes a bell nozzle and four swept fins, `rocket_body` has a faceted narrow fuselage, and `rocket_nose` tapers in three voxel steps. They share the normal top/side/bottom textures and work in world, held-block and inventory rendering. They require protocol 51.
+
+
+### Glutton companions (protocol 53)
+
+A `[mob]` can opt into `glutton = true` (default `false`). It accepts every non-air held item as a one-unit offering, before name tags, leads, shears and trading interactions; `tame_item` still tames while consuming the offering. Empty-hand owner interaction retains sit/follow. Feeding heals two health, preserves the mob and earns Bottomless Appetite. Normal survival/creative inventory rules and host range/inventory validation apply.
+
+A living, loaded glutton swallows all living Mooers, Oinkers, Fluffers and Clucksters whose body positions are at most five blocks away in 3D. There is no line-of-sight condition. It removes them directly without death drops or kill credit, including babies and kept animals. It never eats other mob types or across dimensions. It requests food from the nearest player within sixteen blocks every eight seconds (at most one demand per player per update). The demand timer is transient; pet ownership and persistence use the existing mob save format. Older mods retain all their previous interactions.

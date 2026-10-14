@@ -871,6 +871,8 @@ pub struct Mob {
     pub hurt: f32,
     pub fuse: f32,
     pub attack_cd: f32,
+    /// Transient demand timer for data-defined glutton companions.
+    pub appetite_cd: f32,
     pub flee: f32,
     pub(crate) wander_t: f32,
     pub(crate) wander_dir: Option<f32>,
@@ -1102,6 +1104,7 @@ impl Mob {
             hurt: 0.0,
             fuse: 0.0,
             attack_cd: 0.0,
+            appetite_cd: 0.0,
             flee: 0.0,
             wander_t: rng.range(0.0, 3.0),
             wander_dir: None,

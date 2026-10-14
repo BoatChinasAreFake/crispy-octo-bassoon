@@ -1,8 +1,8 @@
 # Dubiety
 
-A friendly, original assistant parody inspired by the assistant concept in [Verity JE](https://www.curseforge.com/minecraft/mc-mods/verity-je). There are no horror states, punishments, secret world edits or outside connections.
+A friendly, original assistant parody inspired by the assistant concept in [Verity JE](https://www.curseforge.com/minecraft/mc-mods/verity-je). There are no horror states or outside connections. The ordinary assistant stays friendly; the separately summoned Obesity variant has an explicit appetite for items and livestock.
 
-The pack has a Terminal, three items, four recipes, four original textures and a tameable flying companion with a stepped yellow body and a single face.
+The pack has a Terminal, four items, five recipes, six original textures and two tameable flying companions with a stepped yellow body and a single face.
 
 ## The embedded model
 
@@ -26,3 +26,14 @@ Carry the Beacon or stand within two blocks of a Terminal:
 While carrying the Beacon, urgent health/hunger hints appear at most once every 45 seconds. The companion does not build, fight, manipulate your inventory or secretly learn from public chat. Recent prompts are a bounded journal; they are not added to the model's training corpus. Memory means persistent notes in this world, not cloud or cross-world memory.
 
 Scripts and model inference run only on the host, including for joining players. The original corpus is embedded in `main.rhai`; notes and counters use saved mod variables. Obtaining a Beacon earns **Pocket Philosopher**.
+
+
+## Obesity: the bottomless companion
+
+Craft an **Obesity Companion Beacon** from a normal Companion Beacon and eight Wheat. Carry it and use `/dubiety obesity`; summoning costs one Thinking Chip and shares the normal thirty-second summon cooldown and population limits. Offer another Thinking Chip to tame it. Empty-hand right-click toggles sitting/following.
+
+This larger orange companion has a broad, toothy mouth and demands more food every eight seconds from a player within sixteen blocks. Right-click it with **any held item** to feed one unit: food, blocks, tools, name tags, leads, explosives and mod items all count. The item is consumed using normal survival inventory rules; creative inventory is unchanged. Special item interactions yield to feeding for this variant. It never takes unoffered inventory items or placed blocks.
+
+Every loaded cow (Mooer), pig (Oinker), sheep (Fluffer) and chicken (Cluckster) within a **five-block 3D radius** is swallowed whole, including babies and kept animals, even while the companion sits. Swallowed animals disappear without meat, wool, experience or player kill rewards; animals in other dimensions and all other creature types are unaffected. Feeding heals two health but never satisfies its appetite. Feeding earns **Bottomless Appetite**. A tamed or fed companion saves with the world; swallowed kept livestock stays gone.
+
+These interactions run on the host and synchronize to joined players. Its appetite dialogue is scripted; the ordinary Dubiety word model and notes remain unchanged. Protocol 53 is required. `dubiety_glutton` stages both companion models for comparison.

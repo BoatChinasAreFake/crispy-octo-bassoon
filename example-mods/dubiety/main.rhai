@@ -123,7 +123,7 @@ fn generate(bucket) {
     text+"."
 }
 fn available(player) {
-    if count_item(player,"dubiety:beacon")>0 {return true;}
+    if count_item(player,"dubiety:beacon")>0 || count_item(player,"dubiety:obesity_beacon")>0 {return true;}
     let p=player_pos(player);if p==() {return false;}
     let d=player_dimension(player);
     for y in -1..2 {for z in -2..3 {for x in -2..3 {if get_block_in(d,p[0]+x,p[1]+y,p[2]+z)=="dubiety:terminal" {return true;}}}}
@@ -138,6 +138,7 @@ fn on_chat(player,text) {
     if cmd=="help" {
         message(player,"/dubiety ask <words>: generated local reply. Carry a Companion Beacon or stand beside a Terminal.");
         message(player,"/dubiety remember <note> /dubiety recall /dubiety forget. Up to eight notes, 160 characters each, saved per player in this world.");
+        message(player,"/dubiety obesity: carry an Obesity Beacon and one chip to summon a glutton. It eats any offered item and swallows livestock within five blocks.");
         message(player,"/dubiety status /dubiety summon. A small word model with game-state hints; friendly, imperfect, and never secretly edits your world.");return false;
     }
     if !available(player) {message(player,"Carry a Dubiety Beacon or stand near a Dubiety Terminal.");return false;}
@@ -156,11 +157,12 @@ fn on_chat(player,text) {
         "recall" => {let notes=value(`notes_${player}`,[]);if notes.len()==0 {message(player,"Dubiety: no saved notes yet.");}else{for note in notes {message(player,`Dubiety's note: ${note}`);}}}
         "forget" => {set_var(`notes_${player}`,[]);set_var(`recent_${player}`,[]);message(player,"Dubiety: your notes and recent prompts are cleared.");}
         "status" => {message(player,`Dubiety observes: ${player_dimension(player)}; health ${player_health(player)}; food ${player_food(player)}; ${player_items(player).len()} inventory entries.`);message(player,`Model: ${get_var("model").len()} states, ${get_var("word_count")} transitions. Your chats: ${score_get("dubiety_chats",player)}.`);}
-        "summon" => {
+        "summon" | "obesity" => {
+            if cmd=="obesity" && count_item(player,"dubiety:obesity_beacon")<1 {message(player,"Carry an Obesity Companion Beacon to summon the glutton.");return false;}
             let p=player_pos(player);let d=player_dimension(player);
             if value(`summon_${player}`,0)>0 || mob_count_in(d)>=40 || mobs_near_in(d,p[0],p[1],p[2],32)>=8 {message(player,"Give the nearby creatures some room, or wait thirty seconds.");}
             else if count_item(player,"dubiety:chip")<1 {message(player,"Summoning uses one Thinking Chip; taming uses another.");}
-            else {take(player,"dubiety:chip",1);spawn_mob_in(d,"dubiety:companion",p[0]+2,p[1]+1,p[2]);set_var(`summon_${player}`,30);message(player,"Dubiety has arrived. Offer a Thinking Chip to make it follow you.");}
+            else {take(player,"dubiety:chip",1);spawn_mob_in(d,if cmd=="obesity" {"dubiety:obesity"}else{"dubiety:companion"},p[0]+2,p[1]+1,p[2]);set_var(`summon_${player}`,30);message(player,if cmd=="obesity" {"Obesity has arrived. Offer a Thinking Chip to tame it, or any other item to feed it. It swallows nearby livestock, even while sitting."}else{"Dubiety has arrived. Offer a Thinking Chip to make it follow you."});}
         }
         _ => {message(player,"Dubiety: I do not know that command. Try /dubiety help.");}
     }

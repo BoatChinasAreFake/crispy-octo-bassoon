@@ -32,7 +32,7 @@ fn give(g:&mut Game,key:&str,n:u8){g.give(id(key),n);}
 fn parody_packs_load_together_without_errors_and_fit_the_transfer_budget() {
     let src=sources();let r=mods::build(&src,&[]);
     for m in &r.mods {assert!(m.errors.is_empty(),"{}: {:?}",m.id,m.errors);}
-    assert_eq!(r.dims.len(),6);assert_eq!(r.structures.len(),10);assert_eq!(r.mobs.len(),15);
+    assert_eq!(r.dims.len(),6);assert_eq!(r.structures.len(),10);assert_eq!(r.mobs.len(),16);
     assert!(src.iter().flat_map(|s|s.files.values()).map(Vec::len).sum::<usize>()<160_000);
     with_packs(||{
         let mut g=game();for help in ["/hbm help","/astra help","/dusk help","/dubiety help"] {assert!(!chat(&mut g,help).is_empty());}
@@ -233,5 +233,61 @@ fn dusk_custom_trees_have_three_distinct_shapes_and_stable_chunk_edges() {
         let chunks=[(-1,-1),(0,0),(1,0),(0,1)];let first:Vec<_>=chunks.iter().map(|&(x,z)|g.generate(x,z)).collect();
         for (i,&(x,z)) in chunks.iter().enumerate().rev() {assert_eq!(first[i],g.generate(x,z));}
         for key in ["dusk:duskwood_planks","dusk:gloamwood_planks","dusk:moonwillow_planks"] {assert!(reg().lookup(key).is_some());}
+    });
+}
+
+
+#[test]
+fn obesity_summons_eats_every_offering_and_saves_as_a_companion() {
+    with_packs(||{
+        use crate::{animals::Interaction,entity::MobKind};
+        let mut g=game();g.creative=false;g.mobs.clear();
+        give(&mut g,"dubiety:beacon",1);chat(&mut g,"/dubiety obesity");
+        assert!(g.mobs.is_empty());
+        give(&mut g,"dubiety:obesity_beacon",1);chat(&mut g,"/dubiety obesity");assert!(g.mobs.is_empty());
+        give(&mut g,"dubiety:chip",2);chat(&mut g,"/dubiety obesity");
+        let kind=MobKind::from_name("dubiety:obesity").unwrap();
+        assert_eq!(g.mobs.len(),1);assert_eq!(g.mobs[0].kind,kind);assert_eq!(g.inv.count(id("dubiety:chip")),1);
+        for item in [id("dubiety:chip"),STONE,NAME_TAG,LEAD,SHEARS,PICK_DIAMOND,TNT,id("half_baked:waste"),WHEAT] {
+            if g.inv.count(item)==0 {g.give(item,1);}
+            let before=g.inv.count(item);g.inv.selected=g.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==item)).unwrap();
+            assert!(g.use_on_mob(0));assert_eq!(g.inv.count(item),before-1,"offering {}",block(item).key);
+            assert!(g.naming.is_none());assert!(g.mobs[0].leash.is_none());
+        }
+        assert_eq!(g.mobs[0].owner.as_deref(),Some("tester"));
+        let mob=g.mobs[0].id;let at=g.player.body.pos;
+        assert_eq!(g.interact_mob("tester",at,mob,AIR),Interaction::Toggled);
+        assert_eq!(g.interact_mob("tester",at+Vec3::X*30.0,mob,STONE),Interaction::Nothing);
+        let back=Game::from_save(g.to_save());
+        assert!(back.mobs.iter().any(|m|m.kind==kind && m.owner.as_deref()==Some("tester") && m.persistent));
+    });
+}
+
+#[test]
+fn obesity_swallows_only_livestock_in_its_five_block_sphere_and_keeps_demanding() {
+    with_packs(||{
+        use crate::entity::MobKind;
+        let mut g=game();g.mobs.clear();let at=Vec3::new(8.0,90.0,8.0);g.player.body.pos=at;
+        let kind=MobKind::from_name("dubiety:obesity").unwrap();let glutton=g.alloc_mob(kind,at);
+        for (k,delta) in [(MobKind::Mooer,Vec3::X*2.0),(MobKind::Oinker,-Vec3::X*5.0),(MobKind::Fluffer,Vec3::new(0.0,3.0,4.0)),(MobKind::Cluckster,-Vec3::Y*5.0)] {
+            let id=g.alloc_mob(k,at+delta);let m=g.mobs.iter_mut().find(|m|m.id==id).unwrap();m.persistent=true;m.baby=30.0;
+        }
+        let outside=g.alloc_mob(MobKind::Mooer,at+Vec3::X*5.01);
+        let above=g.alloc_mob(MobKind::Cluckster,at+Vec3::Y*5.01);
+        let wolf=g.alloc_mob(MobKind::Woofer,at);let assistant=g.alloc_mob(MobKind::from_name("dubiety:companion").unwrap(),at);
+        let dead=g.alloc_mob(MobKind::Mooer,at);g.mobs.iter_mut().find(|m|m.id==dead).unwrap().health=0.0;
+        let forest=dim("dusk:twilit_realm");let other=g.in_realm(forest,|g|g.alloc_mob(MobKind::Oinker,at));
+        g.messages.clear();let drops=g.drops.len();let kills=g.stats.kills;
+        g.gluttons_tick(0.1);
+        assert_eq!(g.mobs.iter().map(|m|m.id).collect::<Vec<_>>(),vec![glutton,outside,above,wolf,assistant,dead]);
+        assert_eq!(g.drops.len(),drops);assert_eq!(g.stats.kills,kills);
+        assert!(g.messages.iter().any(|m|m.0.contains("FEED ME!")));
+        let n=g.messages.len();g.gluttons_tick(7.0);assert_eq!(g.messages.len(),n);g.gluttons_tick(1.0);assert_eq!(g.messages.len(),n+1);
+        g.in_realm(forest,|g|assert!(g.mobs.iter().any(|m|m.id==other)));
+        let bytes=crate::animals::encode_mobs(&g.mobs,&std::collections::HashMap::new());let back=crate::animals::decode_mobs(&bytes,&mut g.rng);
+        assert!(!back.iter().any(|m|matches!(m.kind,MobKind::Oinker|MobKind::Fluffer)));
+        g.mobs.iter_mut().find(|m|m.id==glutton).unwrap().health=0.0;
+        g.mobs.iter_mut().find(|m|m.id==outside).unwrap().body.pos=at;g.gluttons_tick(8.0);
+        assert!(g.mobs.iter().any(|m|m.id==outside));
     });
 }

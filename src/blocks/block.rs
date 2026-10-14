@@ -1594,6 +1594,8 @@ pub struct ModMob {
     pub tame_chance: f32,
     /// Feed it this to breed it (and it follows anyone holding it). None: doesn't breed.
     pub breed_item: Option<Id>,
+    /// Eats any offered item and swallows livestock within five blocks. Off by default.
+    pub glutton: bool,
     /// A body built from the mod's own boxes (`part = ...` lines), used
     /// instead of `template` when there are any. At most `MAX_MOD_PARTS`.
     pub parts: Vec<ModPart>,

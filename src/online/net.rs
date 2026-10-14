@@ -53,7 +53,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v50: mod dimensions can set player gravity.
 /// v51: shaped rocket mod blocks render and collide consistently.
 /// v52: optional custom mod-tree silhouettes regenerate identically on peers.
-pub const PROTOCOL: u32 = 52;
+/// v53: glutton mod companions accept all offerings before ordinary interactions.
+pub const PROTOCOL: u32 = 53;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

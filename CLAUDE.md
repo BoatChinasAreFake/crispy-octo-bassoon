@@ -123,7 +123,7 @@ A new world generator (version 7) that keeps what works in the current one (read
 
 Originals: not chosen yet. The Part 2 core implements items 4 to 11 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
 
-Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 12 for narrower shoreline beaches, retaining revision 11 finds and tide pools and revision 10 relief/islands. Revisions 0–11 retain their generation rules. Protocol 52 protects the new generator and appended beach block IDs; older clients cannot join.
+Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 12 for narrower shoreline beaches, retaining revision 11 finds and tide pools and revision 10 relief/islands. Revisions 0–11 retain their generation rules. Protocol 53 protects the new generator and appended beach block IDs; older clients cannot join.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**

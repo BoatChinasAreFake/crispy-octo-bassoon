@@ -2539,6 +2539,38 @@ mod tests {
     }
 
     #[test]
+    fn joined_players_feed_gluttons_and_receive_whole_livestock_removals() {
+        let sources=crate::online::examplemods::sources();
+        let texts:Vec<_>=sources.iter().map(|s|(s.id.as_str(),std::str::from_utf8(&s.files["mod.txt"]).unwrap())).collect();
+        crate::mods::with_mods(&texts,|_| {
+            let mut host=Game::new_with(799,false,false,crate::world::GenOptions::DEFAULT);let spawn=host.spawn;load_around(&mut host,spawn);
+            let port=host.open_lan("Hosty",None).unwrap();let mut client=join(&mut host,port,"Hungry","").unwrap();let peer=client.my_id;
+            host.mobs.clear();let kind=MobKind::from_name("dubiety:obesity").unwrap();let eater=host.alloc_mob(kind,spawn+Vec3::X*2.0);
+            host.mobs[0].persistent=true;host.mobs[0].body.vel=Vec3::ZERO;
+            host.give_peer(peer,NAME_TAG,2);
+            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(NAME_TAG)==2 && c.mobs.iter().any(|m|m.id==eater)));
+            let i=client.mobs.iter().position(|m|m.id==eater).unwrap();
+            client.inv.selected=client.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==NAME_TAG)).unwrap();
+            assert!(client.use_on_mob(i));assert!(client.naming.is_none());
+            assert!(pump(&mut host,&mut client,|h,c|h.peers[&peer].ledger.bag.count(NAME_TAG)==1 && c.inv.count(NAME_TAG)==1));
+            client.net_send_msg(Msg::MobInteract {mob:eater,item:DIAMOND});
+            for _ in 0..25 {host.update(0.016,&idle());client.update(0.016,&idle());}
+            assert_eq!(host.peers[&peer].ledger.bag.count(NAME_TAG),1);
+            let at=host.mobs.iter().find(|m|m.id==eater).unwrap().body.pos;
+            let prey:Vec<_>=[MobKind::Mooer,MobKind::Oinker,MobKind::Fluffer,MobKind::Cluckster].into_iter().map(|k|host.alloc_mob(k,at)).collect();
+            host.gluttons_tick(0.016);
+            assert!(prey.iter().all(|id|host.mobs.iter().all(|m|m.id!=*id)));
+            // Synchronize a live animal first, then move it into the appetite sphere.
+            let cow=host.alloc_mob(MobKind::Mooer,at+Vec3::X*7.0);
+            assert!(pump(&mut host,&mut client,|_,c|c.mobs.iter().any(|m|m.id==cow)));
+            let at=host.mobs.iter().find(|m|m.id==eater).unwrap().body.pos;
+            host.mobs.iter_mut().find(|m|m.id==cow).unwrap().body.pos=at;
+            assert!(pump(&mut host,&mut client,|h,c|h.mobs.iter().all(|m|m.id!=cow) && c.mobs.iter().all(|m|m.id!=cow)));
+            assert!(client.mobs.iter().any(|m|m.id==eater));
+        });
+    }
+
+    #[test]
     fn joined_players_flip_switches() {
         let mut host = Game::new(789, false, false);
         let spawn = host.spawn;

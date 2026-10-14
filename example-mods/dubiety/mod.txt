@@ -1,6 +1,6 @@
 [mod]
 name = Dubiety
-version = 1.0
+version = 1.1
 author = Minceraft example mods
 description = A friendly small word-model companion: local chat, remembered notes and a modest grasp of grammar.
 
@@ -131,3 +131,60 @@ output = beacon 1
 [recipe]
 inputs = book 1, chip 1
 output = notebook 1
+
+
+[texture appetite_face]
+color b = 243,173,41
+color d = 61,33,22
+color w = 255,244,207
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbddbbbbbbbbddbb
+bbddbbbbbbbbddbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bddddddddddddddb
+bdwwwwwwwwwwwwdb
+bddddddddddddddb
+bddddddddddddddb
+bddddddddddddddb
+bddddddddddddddb
+bdwwwwwwwwwwwwdb
+bddddddddddddddb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+
+[texture appetite_shell]
+noise = #f3ad29
+variation = 0.025
+
+[item obesity_beacon]
+name = Obesity Companion Beacon
+texture = appetite_face
+consume = false
+on_use = message /dubiety obesity summons the bottomless glutton. Offer any item. Livestock within five blocks is swallowed whole.
+
+[mob obesity]
+name = Obesity
+texture = appetite_shell
+width = 1.2
+height = 1.25
+health = 40
+speed = 0.7
+flying = true
+fly_height = 1
+fly_speed = 1.6
+tame_item = chip
+tame_chance = 1
+breed_item = none
+glutton = true
+drops = chip 1
+part = belly -.55 .12 -.5 1.1 .95 1 anim=bob amount=.12 face=appetite_face
+part = top -.4 1.07 -.35 .8 .1 .7 anim=bob amount=.12
+part = bottom -.4 .02 -.35 .8 .1 .7 anim=bob amount=.12
+part = left -.66 .28 -.34 .11 .55 .68 anim=bob amount=.12
+part = right .55 .28 -.34 .11 .55 .68 anim=bob amount=.12
+
+[recipe]
+inputs = beacon 1, wheat 8
+output = obesity_beacon 1
