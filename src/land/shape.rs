@@ -247,10 +247,15 @@ impl Generator {
     /// Surface height and biome for a column, in worlds from version 7.
     pub(crate) fn column_v7(&self, x: i32, z: i32) -> (i32, Biome) {
         let place = self.place_v7(x, z);
-        let biome = if self.opts.version >= 9 {
+        let mut biome = if self.opts.version >= 9 {
             let (slope, rocky) = self.shore_shape(x, z, &place);
             if self.opts.version>=10 { pick_v10(&place,slope,rocky) } else { pick_v9(&place, slope, rocky) }
         } else { pick(&place) };
+        if self.opts.version >= 12 && biome == Biome::Beach && !self.near_sea_shore(x,z) {
+            // Flat coastal plains need not be sandy: only the strip beside
+            // actual sea water gets the beach identity and its decorations.
+            biome = pick_v9(&Place { c: COAST.1, ..place }, 0.0, false);
+        }
         let (h, biome) = (place.h, biome);
         // Far out in deep water, now and then, the sea floor rises into a mushroom island.
         if biome.is_ocean() && h < place.sea - 4 {
@@ -383,6 +388,22 @@ impl Generator {
             .iter().all(|&(dx,dz)|self.shape_noise(x+dx,z+dz).0 < -0.22)
     }
 
+    /// Beach reach varies smoothly from 16 to 28 blocks, independent of the
+    /// continental noise scale. Sample terrain, never columns (no recursion),
+    /// and exclude rivers so inland valley banks cannot make sandy plains.
+    pub(crate) fn near_sea_shore(&self,x:i32,z:i32)->bool {
+        let width=(22.0+self.hills.noise2(x as f32/160.0,z as f32/160.0)*6.0).round() as i32;
+        for radius in [8,16,width.clamp(16,28)] {
+            let diagonal=(radius as f32*std::f32::consts::FRAC_1_SQRT_2).floor() as i32;
+            for (dx,dz) in [(radius,0),(-radius,0),(0,radius),(0,-radius),
+                (diagonal,diagonal),(-diagonal,diagonal),(diagonal,-diagonal),(-diagonal,-diagonal)] {
+                let p=self.place_v7(x+dx,z+dz);
+                if p.h<p.sea-1 && !p.river {return true;}
+            }
+        }
+        false
+    }
+
     /// Local slope and rocky-headland flag, sampled only in the coastal band.
     pub fn shore_shape(&self, x: i32, z: i32, p: &Place) -> (f32, bool) {
         if !(COAST.0..COAST.1).contains(&p.c) || !(p.sea - 3..=p.sea + 5).contains(&p.h) || p.river || p.wet_low > 0.5 {
@@ -403,6 +424,37 @@ mod tests {
 
     fn place(h: i32, t: f32, m: f32) -> Place {
         Place { h, sea: 63, c: 0.3, e: 0.0, w: 0.2, pv: peaks_and_valleys(0.2), t, m, river: false, wet_low: 0.0 }
+    }
+
+    #[test]
+    fn revision_eleven_coastal_surface_fixture() {
+        // Captured before narrowing beaches, from commit 9aee2d6.
+        let g=Generator::with(77,GenOptions{version:11,..GenOptions::DEFAULT});
+        let mut hash=0xcbf29ce484222325u64;
+        for z in (-4096..4096).step_by(32) {for x in (-4096..4096).step_by(32) {
+            let (h,b)=g.column_v7(x,z);
+            for byte in (h as u32).to_le_bytes().into_iter().chain([b as u8]) {
+                hash=(hash^byte as u64).wrapping_mul(0x100000001b3);
+            }
+        }}
+        assert_eq!(hash,0x610a7b4aa0302a60,"revision 11 coastline changed");
+    }
+
+    #[test]
+    fn narrower_beaches_keep_terrain_rivers_and_oceans() {
+        for seed in [424242,1234,77,1,3,6,11,42,2024,31337] {
+            let old=Generator::with(seed,GenOptions{version:11,..GenOptions::DEFAULT});
+            let new=Generator::with(seed,GenOptions::DEFAULT);
+            let mut beaches=[0,0];
+            for z in (-4096..4096).step_by(32) {for x in (-4096..4096).step_by(32) {
+                let a=old.column(x,z);let b=new.column(x,z);
+                assert_eq!(a.0,b.0,"terrain moved at {seed}/{x}/{z}");
+                if a.1==Biome::Beach {beaches[0]+=1;} else {assert_eq!(a,b,"non-beach biome changed");}
+                if b.1==Biome::Beach {beaches[1]+=1;assert!(new.near_sea_shore(x,z));}
+            }}
+            assert!(beaches[1]>100,"beaches vanished on seed {seed}");
+            assert!(beaches[1]*4<beaches[0]*3,"beach area did not shrink on seed {seed}");
+        }
     }
 
     #[test]

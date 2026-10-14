@@ -58,7 +58,8 @@ impl Generator {
         if hash2(s,cx,cz)>0.28 {return None;}
         let (x,z)=(cx*64+8+(hash2(s^1,cx,cz)*48.0) as i32,cz*64+8+(hash2(s^2,cx,cz)*48.0) as i32);
         let (h,b)=self.column(x,z);
-        if b!=Biome::Beach || !(self.sea()+1..=self.sea()+3).contains(&h) || self.climate(x,z).0< -0.1 {return None;}
+        let min_height=self.sea()+i32::from(self.opts.version<12);
+        if b!=Biome::Beach || !(min_height..=self.sea()+3).contains(&h) || self.climate(x,z).0< -0.1 {return None;}
         let radius=2+(hash2(s^3,cx,cz)*2.0) as i32;
         for dz in -radius-1..=radius+1 {for dx in -radius-1..=radius+1 {
             let (hh,bb)=self.column(x+dx,z+dz);

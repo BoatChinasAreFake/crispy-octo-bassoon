@@ -2716,6 +2716,7 @@ drifting slowly doesn't shuffle the legs
 drowned. Turns out you do need air
 dry (needs water within 4 blocks)
 dry roots beside water at {} {} {}
+dune grass stays above water
 east (+X)
 edit out of range
 effect-only arrows deal no damage

@@ -578,6 +578,8 @@ pub struct GenOptions {
     /// elevation-aware snow and blended vegetation at ordinary biome borders.
     /// 10: rolling inland relief, offshore islands, rare larger mushroom
     /// islands and beach ecology, preserving revisions 0–9.
+    /// 11: beach finds and sheltered tide pools.
+    /// 12: beaches confined to a narrow strip beside actual sea water.
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -590,8 +592,8 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    // Revision 11 adds beach finds and closed tide pools; old worlds keep their revision.
-    pub const DEFAULT: GenOptions = GenOptions { version: 11, structures: 2, biome_size: 1, terrain: 1 };
+    // Revision 12 narrows beaches; old worlds keep their revision.
+    pub const DEFAULT: GenOptions = GenOptions { version: 12, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
