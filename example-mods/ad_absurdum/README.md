@@ -2,7 +2,7 @@
 
 An original space-tech parody inspired by [Ad Astra](https://github.com/terrarium-earth/Ad-Astra).
 
-25 declared blocks, 24 items, 27 recipes, twelve original pixel textures, six creatures, five supply structures and **five separate planet dimensions**. There are no planet-biome replacements in the Overworld.
+25 declared blocks, 24 items, 27 recipes, sixteen original pixel textures, six creatures, five supply structures and **five separate planet dimensions**. There are no planet-biome replacements in the Overworld.
 
 ## Prepare a first launch
 
@@ -41,3 +41,5 @@ Planet wildlife is host-spawned near visiting players with local/global limits. 
 `/astra help`, `/astra refine`, `/astra refill`, `/astra charge`, `/astra assemble 1|2|3|4`, `/astra pack`, `/astra launch moon|mars|venus|mercury|glacio|home`, `/astra rover`, `/astra status`.
 
 Rockets, pending flights, departure points, oxygen buffers, solar cooldowns and exploration scores persist with the world. Disconnected pilots' departures pause until they return. Each planet has its own saved realm. Crafting a Tier 1 rocket earns **Rocket Paperwork**.
+
+The deployed rocket now has a narrow faceted white fuselage with red trim, a tapered red nose, a dark bell nozzle and four swept red fins. Its five-block assembly and saved block keys are unchanged. The three rocket shape presets keep rendering and collision consistent across clients (protocol 51).

@@ -72,6 +72,29 @@ fn lantern(body: u16, y: f32) -> Vec<Piece> {
 /// The model for a block, if it has one beyond its collision boxes.
 pub fn pieces(id: Id) -> Option<Vec<Piece>> {
     let t = block(id).tex;
+    if matches!(block(id).shape,Shape::RocketEngine | Shape::RocketBody | Shape::RocketNose) {
+        let shape=block(id).shape;
+        if shape!=Shape::RocketEngine {
+            let (boxes,n)=shape.boxes();
+            return Some(boxes[..n].iter().map(|&(lo,hi)|Piece {lo,hi,tiles:[t[1],t[1],t[0],t[2],t[1],t[1]],uv:None,hide:0}).collect());
+        }
+        let mut parts=vec![
+            bx([3.5,7.0,3.5],[12.5,16.0,12.5],t[1]).caps(t[0],t[2]),
+            bx([5.0,4.0,5.0],[11.0,7.0,11.0],t[2]),
+            bx([4.0,1.0,4.0],[12.0,4.0,12.0],t[2]),
+            bx([3.5,0.0,3.5],[12.5,1.0,12.5],t[2]),
+        ];
+        // Four thin, swept fins; all geometry remains inside the assembly cell.
+        for axis in 0..2 {for positive in [false,true] {for step in 0..3 {
+            let width=3.5/3.0;
+            let height=(step+1) as f32*10.0/3.0;
+            let (start,end)=if positive {(16.0-(step+1) as f32*width,16.0-step as f32*width)} else {(step as f32*width,(step+1) as f32*width)};
+            let mut part=bx([start,0.0,7.5],[end,height,8.5],t[0]);
+            if axis==1 {part.lo.swap(0,2);part.hi.swap(0,2);}
+            parts.push(part);
+        }}}
+        return Some(parts);
+    }
     Some(match id {
         DRIFTWOOD | DRIFTWOOD_Z => {
             let mut parts=vec![bx([0.0,0.0,4.0],[16.0,4.0,12.0],T_DRIFTWOOD_SIDE).face(0,T_DRIFTWOOD_END).face(1,T_DRIFTWOOD_END),bx([7.0,2.0,10.0],[10.0,5.0,15.0],T_DRIFTWOOD_SIDE)];

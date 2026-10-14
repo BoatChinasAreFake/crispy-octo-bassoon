@@ -307,21 +307,27 @@ tier = 1
 
 [block rocket_engine]
 name = Rocket Engine
-texture = engine
+texture = rocket_engine_metal
+shape = rocket_engine
 hardness = 2
 tool = pickaxe
 tier = 1
 
+top = rocket_red
+bottom = rocket_nozzle
+
 [block rocket_body]
 name = Rocket Body
-texture = steel
+texture = rocket_skin
+shape = rocket_body
 hardness = 2
 tool = pickaxe
 tier = 1
 
 [block rocket_nose]
 name = Rocket Nose
-texture = suit
+texture = rocket_red
+shape = rocket_nose
 hardness = 2
 tool = pickaxe
 tier = 1
@@ -1024,3 +1030,37 @@ part = wheel_l1 -.8 .1 -.45 .25 .45 .3 anim=spin texture=engine
 part = wheel_l2 -.8 .1 .15 .25 .45 .3 anim=spin texture=engine
 part = wheel_r1 .55 .1 -.45 .25 .45 .3 anim=spin texture=engine
 part = wheel_r2 .55 .1 .15 .25 .45 .3 anim=spin texture=engine
+
+[texture rocket_red]
+noise = #bf3434
+variation = 0.04
+
+[texture rocket_engine_metal]
+noise = #a9b1b8
+variation = 0.04
+
+[texture rocket_nozzle]
+noise = #343b44
+variation = 0.05
+
+[texture rocket_skin]
+color w = #e6e9ec
+color d = #a5afb8
+color r = #b93434
+color b = #636f7b
+dwwwwwwwwwwwwwwd
+dwwwwwwwwwwwwwwd
+rrrrrrrrrrrrrrrr
+rrrrrrrrrrrrrrrr
+dwwwwwwwwwwwwwwd
+dwwwwwwwwwwwwwwd
+dwbwwwwwwwwwwbwd
+dwwwwwwwwwwwwwwd
+dwwwwwwwwwwwwwwd
+dwwwwwwwwwwwwwwd
+dwwwwwwwwwwwwwwd
+dwwwwwwwwwwwwwwd
+dwwwwwwwwwwwwwwd
+dwbwwwwwwwwwwbwd
+dwwwwwwwwwwwwwwd
+dddddddddddddddd

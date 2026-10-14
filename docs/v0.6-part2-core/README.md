@@ -123,7 +123,7 @@ Ten seeds sampled across 8192 × 8192 blocks at 16-block intervals showed 41–5
 
 ## Larger parody example packs
 
-The optional `half_baked`, `dubiety`, `ad_absurdum` and `dusk` folders add 53 declared blocks, 53 items, 58 recipes, 36 original text-defined textures, 15 mobs, six dimensions, three biomes and ten structures. Their individual READMEs document survival routes, crafting, commands, persistence and limits. No source code, textures or training text were copied from the inspiration mods.
+The optional `half_baked`, `dubiety`, `ad_absurdum` and `dusk` folders add 53 declared blocks, 53 items, 58 recipes, 40 original text-defined textures, 15 mobs, six dimensions, three biomes and ten structures. Their individual READMEs document survival routes, crafting, commands, persistence and limits. No source code, textures or training text were copied from the inspiration mods.
 
 Nuclear loops include refining, timed reactor batches, cooling-loss meltdowns, suited/shielded radiation, two armed/disarmable nukes and bounded, dimension-specific blasts/fallout. Space includes four rocket tiers, fuel, equipment/oxygen/heat checks, five separately saved worlds, ore progression, reusable launch equipment and a custom supply rover. Dusk confines all terrain and scripted wild spawns to its own dimension, with three biomes and four cooperative, progression-gated guardian encounters. Dubiety embeds a 4,681-byte original corpus and generates replies with 525 trigram states and 558 weighted transitions; private notes and short prompt history are bounded and saved.
 
@@ -132,3 +132,7 @@ The script API now exposes stable dimension keys, worn equipment, realm-specific
 Four native advancements accompany the packs. Controlled real-game QA scenes are `half_baked_lab`, `astra_rocket`, `dusk_guardians` and `dubiety_companion`; all use the latest generator and require the packs installed. The examples are deliberately compact: command-operated machines, staged rocket departures and realm landings, a supply companion rover, template ruins, per-player oxygen, and word-transition language generation.
 
 Validation for the parody slice: 584 release tests passed (one map-export test ignored); the eleven pack tests also passed after the final script population guards. Clippy on all targets with warnings denied and the no-default-features check are clean. The real socket test verifies a joined player assembling and paying for a rocket, arriving in the Moon realm with the host remaining in the Overworld, recovered launch gear and local assistant replies. A game-file save/reload test verifies private notes, a pending reactor batch and a planet realm. All four native showcase scenes were rendered and visually checked.
+
+Rocket model refinement: three mod shape presets provide a faceted fuselage, tapered nose and a bell nozzle with four swept fins. Four new metal/paint textures replace the original pillar-like appearance. Existing rocket block keys and five-block assembly scripts are unchanged. Protocol 51 rejects clients without the shape presets; model tests verify taper, four fin directions, collision bounds and inventory geometry.
+
+Rocket refinement validation: 585 release tests passed (one map export ignored), Clippy with all targets and warnings denied is clean, and the updated `astra_rocket` scene was rendered and visually checked.

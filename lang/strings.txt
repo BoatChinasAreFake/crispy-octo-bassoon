@@ -2891,7 +2891,7 @@ line {}: projectile_model should be arrow, billboard or cube, not "{}"
 line {}: projectile_scale should be a finite number
 line {}: projectile_spread should be a finite number
 line {}: repair: unknown item "{}"
-line {}: shape should be slab or stairs, not {}
+line {}: shape should be slab or stairs, or rocket_engine/rocket_body/rocket_nose, not {}
 line {}: sky \= {}: not a colour
 line {}: smelts_into: unknown item "{}"
 line {}: sound should be stone, wood, grass, sand or glass, not {}
@@ -3182,6 +3182,7 @@ truncated message
 truncated mod pack
 turned {} degrees in 0.1 s at 90 degrees per second
 type an address below and press Add to List to keep one.
+unbounded {} geometry {}
 unknown block or item "{}"
 unknown colour "{}" (red, blue, green, yellow, purple, orange, aqua, pink)
 unknown dimension {}

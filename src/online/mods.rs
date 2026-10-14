@@ -1122,8 +1122,11 @@ fn fill_shape(ctx: &mut Ctx, m: &ModSource, s: &Section, id: Id, errs: &mut Vec<
         None | Some("cube") => return,
         Some("slab") => vec![Shape::Slab { top: false }, Shape::Slab { top: true }],
         Some("stairs") => (0..4).map(|facing| Shape::Stairs { facing }).collect(),
+        Some("rocket_engine") => vec![Shape::RocketEngine],
+        Some("rocket_body") => vec![Shape::RocketBody],
+        Some("rocket_nose") => vec![Shape::RocketNose],
         Some(other) => {
-            errs.push(format!("line {}: shape should be slab or stairs, not {other}", s.line));
+            errs.push(format!("line {}: shape should be slab or stairs, or rocket_engine/rocket_body/rocket_nose, not {other}", s.line));
             return;
         }
     };

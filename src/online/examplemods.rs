@@ -193,3 +193,24 @@ fn pack_notes_reactor_progress_and_realms_survive_a_game_save() {
         std::fs::remove_dir_all(dir).unwrap();
     });
 }
+
+#[test]
+fn rocket_shapes_have_taper_fins_bounded_geometry_and_inventory_models() {
+    with_packs(||{
+        for (key,shape) in [("rocket_engine",Shape::RocketEngine),("rocket_body",Shape::RocketBody),("rocket_nose",Shape::RocketNose)] {
+            let id=id(&format!("ad_absurdum:{key}"));assert_eq!(block(id).shape,shape);assert_eq!(block(id).model,Model::Shaped);
+            let parts=crate::models::pieces(id).unwrap();assert!(!parts.is_empty());assert_eq!(crate::models::item_parts(id).len(),parts.len());
+            for p in &parts {for axis in 0..3 {assert!(p.lo[axis]>=0.0 && p.hi[axis]<=1.0 && p.lo[axis]<p.hi[axis]);}}
+            let (boxes,n)=shape.boxes();assert_eq!(n,3);
+            for p in &parts {
+                // Every rendered point is inside at least one collision box.
+                for corner in 0..8 {let point=std::array::from_fn::<_,3,_>(|axis|if corner & (1<<axis)==0 {p.lo[axis]}else{p.hi[axis]});
+                    assert!(boxes[..n].iter().any(|(a,b)|(0..3).all(|axis|point[axis]>=a[axis]-0.00001 && point[axis]<=b[axis]+0.00001)),"unbounded {key} geometry {point:?}");}
+            }
+        }
+        let parts=crate::models::pieces(id("ad_absurdum:rocket_nose")).unwrap();
+        assert!(parts.windows(2).all(|p|p[1].hi[0]-p[1].lo[0]<p[0].hi[0]-p[0].lo[0]));
+        let fins=crate::models::pieces(id("ad_absurdum:rocket_engine")).unwrap();assert_eq!(fins.len(),16);
+        for axis in [0,2] {assert!(fins.iter().any(|p|p.lo[axis]==0.0));assert!(fins.iter().any(|p|p.hi[axis]==1.0));}
+    });
+}

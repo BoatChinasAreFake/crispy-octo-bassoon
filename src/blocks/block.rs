@@ -929,6 +929,9 @@ pub fn armor_points(id: Id) -> u8 {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Shape {
     Driftwood { x_axis: bool },
+    RocketEngine,
+    RocketBody,
+    RocketNose,
     Full,
     Slab { top: bool },
     /// `facing` is the side the high step is on.
@@ -1071,6 +1074,9 @@ impl Shape {
                 if !x_axis {for (lo,hi) in &mut boxes[..2] {lo.swap(0,2);hi.swap(0,2);}}
                 (boxes,2)
             }
+            Shape::RocketEngine => ([([0.21875,0.0,0.21875],[0.78125,1.0,0.78125]),([0.0,0.0,0.46875],[1.0,0.625,0.53125]),([0.46875,0.0,0.0],[0.53125,0.625,1.0])],3),
+            Shape::RocketBody => ([([0.3125,0.0,0.1875],[0.6875,1.0,0.25]),([0.21875,0.0,0.25],[0.78125,1.0,0.75]),([0.3125,0.0,0.75],[0.6875,1.0,0.8125])],3),
+            Shape::RocketNose => ([([0.21875,0.0,0.21875],[0.78125,0.375,0.78125]),([0.34375,0.375,0.34375],[0.65625,0.75,0.65625]),([0.4375,0.75,0.4375],[0.5625,1.0,0.5625])],3),
             Shape::Full => ([full; 3], 1),
             Shape::Slab { top: false } => ([([0.0; 3], [1.0, 0.5, 1.0]), full, full], 1),
             Shape::Slab { top: true } => ([([0.0, 0.5, 0.0], [1.0; 3]), full, full], 1),

@@ -494,7 +494,7 @@ impl App {
                 for (key,at) in display_mobs {if let Some(kind)=entity::MobKind::from_name(key) {
                     let id=g.alloc_mob(kind,at);if let Some(m)=g.mobs.iter_mut().find(|m|m.id==id) {m.home=Some(at);m.persistent=true;m.wander_t=100.0;m.wander_dir=None;m.yaw=2.7;}
                 }}
-                let (from,to)=if s.mode=="dubiety_companion" {(Vec3::new(3.8,81.2,4.5),Vec3::new(0.8,80.9,0.0))} else {(Vec3::new(9.0,85.0,12.0),Vec3::new(0.0,81.0,-1.0))};
+                let (from,to)=if s.mode=="astra_rocket" {(Vec3::new(6.0,84.0,9.0),Vec3::new(0.0,82.8,-2.0))} else if s.mode=="dubiety_companion" {(Vec3::new(3.8,81.2,4.5),Vec3::new(0.8,80.9,0.0))} else {(Vec3::new(9.0,85.0,12.0),Vec3::new(0.0,81.0,-1.0))};
                 let d=to-(from+Vec3::Y*player::EYE);(s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
                 g.player.body.pos=from;g.player.flying=true;g.time=0.25;app.start_game(g);app.show_debug=false;
             }

@@ -65,7 +65,7 @@ description = One line shown on the Mods screen.
 | `speed` | Walking speed multiplier on top of it (0.2–3) | `1` |
 | `on_break` | Actions when a player breaks it (see below) | |
 | `creative` | Show it in the creative palette | `true` |
-| `shape` | `slab` or `stairs` (they behave like the base game's: slabs stack into `full`, stairs face away from you) | `cube` |
+| `shape` | `slab`, `stairs`, `rocket_engine`, `rocket_body` or `rocket_nose` (they behave like the base game's: slabs stack into `full`, stairs face away from you) | `cube` |
 | `full` | For slabs: the block two of them make | none (two slabs stay two slabs) |
 | `smelts_into` | What a furnace turns it into | doesn't cook |
 | `burns_for` | Seconds it burns as furnace fuel (0.5–600) | not fuel |
@@ -562,3 +562,5 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 ## Larger parody examples
 
 See [example-mods/README.md](example-mods/README.md) for Half-Baked Nuclear Machinery, Dubiety, Ad Absurdum, and The Slightly Dim Forest. All four may be installed together. Their content uses this data format and host-only scripts, with dimension-aware commands for rockets, fallout and wildlife. Their READMEs explain recipes, commands, progression and the deliberate limits of these small engine-native examples.
+
+Rocket shape presets use bounded model geometry and collision boxes: `rocket_engine` includes a bell nozzle and four swept fins, `rocket_body` has a faceted narrow fuselage, and `rocket_nose` tapers in three voxel steps. They share the normal top/side/bottom textures and work in world, held-block and inventory rendering. They require protocol 51.

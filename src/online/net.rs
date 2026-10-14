@@ -51,7 +51,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
 /// v49: revision 12 confines beach biomes to the immediate shoreline.
 /// v50: mod dimensions can set player gravity.
-pub const PROTOCOL: u32 = 50;
+/// v51: shaped rocket mod blocks render and collide consistently.
+pub const PROTOCOL: u32 = 51;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
