@@ -1807,6 +1807,10 @@ impl World {
                 // Saves and hosts can't be trusted to stay in bounds.
                 if (i as usize) < CHUNK_VOL && valid_block(id) {
                     chunk.blocks.set(i as usize, id);
+                    if crate::factory::kind(id).is_some() {
+                        let (lx,rest)=((i%CW as u32) as i32,i/CW as u32);let (lz,y)=((rest%CW as u32) as i32,(rest/CW as u32) as i32);
+                        self.containers.entry(ivec3(cx*CW+lx,y,cz*CW+lz)).or_insert_with(||Container::for_block(id));
+                    }
                     if id == SAPLING || id == FIRE || id == CONDUIT || id == ROPE || crate::homecraft::is_rod(id) || crate::cooking::is_pot(id) || crate::contraptions::is_comparator(id) || crate::beacon::is_beacon(id) || crate::music::is_jukebox(id) || crate::zapparts::watched(id) {
                         let (lx, rest) = ((i % CW as u32) as i32, i / CW as u32);
                         let (lz, y) = ((rest % CW as u32) as i32, (rest / CW as u32) as i32);
@@ -2014,6 +2018,7 @@ impl World {
         }
         // Placing a chest or furnace makes it an empty inventory; breaking one
         // throws it away (spill it first). A furnace lighting up keeps its own.
+        if crate::factory::kind(id)!=crate::factory::kind(old)&&let Some(c)=self.containers.get_mut(&p){c.cook=0.0;}
         if is_container(id) {
             self.containers.entry(p).or_insert_with(|| Container::for_block(id));
         } else if is_container(old) {

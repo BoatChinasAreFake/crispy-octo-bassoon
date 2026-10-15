@@ -245,6 +245,7 @@ tool = pickaxe
 tier = 1
 
 [block centrifuge]
+shape = industrial
 name = Spin Doctor Centrifuge
 texture = control
 hardness = 2
@@ -252,6 +253,7 @@ tool = pickaxe
 tier = 1
 
 [block reactor]
+shape = industrial
 name = Questionable Reactor
 texture = reactor
 hardness = 2
@@ -259,6 +261,7 @@ tool = pickaxe
 tier = 1
 
 [block cooling_tower]
+shape = industrial
 name = Cool Story Tower
 texture = coolant
 hardness = 2
@@ -266,6 +269,7 @@ tool = pickaxe
 tier = 1
 
 [block battery]
+shape = industrial
 name = Industrial Battery
 texture = fuel
 hardness = 2
@@ -504,3 +508,23 @@ layer
 #######
 #######
 #######
+
+[item empty_cell]
+name = Discharged Energy Cell
+texture = steel
+
+[block cable]
+shape = industrial
+name = Industrial Power Cable
+texture = copper
+solid = false
+transparent = true
+hardness = 0.5
+
+[recipe]
+inputs = copper_ingot 2, steel_ingot 1
+output = cable 8
+
+[recipe]
+inputs = steel_ingot 2, glass 1
+output = empty_cell 2

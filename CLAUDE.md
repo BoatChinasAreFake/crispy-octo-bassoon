@@ -125,13 +125,15 @@ A new world generator (version 7) that keeps what works in the current one (read
 
 13. Action and interaction polish (the user’s approved plan): third-person held/offhand items and tool use; shield, bow, spear and hit-reaction poses; moving and stationary climbing; mob swimming, banking and sitting transitions; native controls for existing nuclear and space machines, with host checks and visible ingredients/progress.
 
-Originals: not chosen yet. The Part 2 core implements items 4 to 13 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
+14. Machine industry (the user’s approved request): persistent inputs/fuel/coolant/outputs, operating animations, hopper automation and automatic batches, and useful power with portable cells, batteries, solar charging, cables and electric consumers.
 
-Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 12 for narrower shoreline beaches, retaining revision 11 finds and tide pools and revision 10 relief/islands. Revisions 0–11 retain their generation rules. Protocol 57 protects the new generator and appended beach block IDs; older clients cannot join.
+Originals: not chosen yet. The Part 2 core implements items 4 to 14 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
+
+Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 12 for narrower shoreline beaches, retaining revision 11 finds and tide pools and revision 10 relief/islands. Revisions 0–11 retain their generation rules. Protocol 58 protects the new generator and appended beach block IDs; older clients cannot join.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**
-- Part 2: items 4 to 13, and the two originals (this is the last part).
+- Part 2: items 4 to 14, and the two originals (this is the last part).
 
 ## v0.7: The Hollow, filled in
 

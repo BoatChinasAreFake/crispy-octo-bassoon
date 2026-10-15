@@ -22,7 +22,8 @@ const ROCKET:&[Action]=&[
 pub fn spec(id:Id)->Option<Spec> {
     Some(match reg().key_of(id) {
         "half_baked:centrifuge"=>Spec{hint:"Turns dust and coal into one pellet.",actions:REFINE},
-        "half_baked:reactor"|"half_baked:cooling_tower"=>Spec{hint:"Keep the cooling tower in place. Output: 4 cells + waste.",actions:REACTOR},
+        "half_baked:reactor"=>Spec{hint:"Keep the cooling tower in place. Output: 4 cells + waste.",actions:REACTOR},
+        "half_baked:cooling_tower"=>Spec{hint:"Passive cooling for reactors within three blocks.",actions:&[]},
         "ad_absurdum:refinery"=>Spec{hint:"Refines coal into rocket fuel.",actions:FUEL},
         "ad_absurdum:oxygen_generator"=>Spec{hint:"Fills oxygen for your Life Support Pack.",actions:OXYGEN},
         "ad_absurdum:solar_panel"=>Spec{hint:"Each recharge needs 60 seconds between batches.",actions:SOLAR},
@@ -34,7 +35,8 @@ pub fn spec(id:Id)->Option<Spec> {
 pub struct Panel {pub dim:crate::dims::Dim,pub pos:IVec3,pub block:Id,pub status:String,pub progress:u8,pub refresh:f32}
 impl Game {
     pub fn open_machine(&mut self,pos:IVec3)->bool {
-        let id=self.world.get_v(pos);if spec(id).is_none(){return false;}
+        let id=self.world.get_v(pos);if crate::factory::kind(id).is_some(){self.open_container(pos);self.advance("push_buttons");return true;}
+        if spec(id).is_none(){return false;}
         self.machine=Some(Panel{dim:self.realm_dim(),pos,block:id,status:"Checking machine...".into(),progress:0,refresh:0.0});
         self.machine_action(255);self.advance("push_buttons");true
     }
@@ -52,6 +54,7 @@ impl Game {
         else {let name=self.player_name.clone();self.operate_machine(self.my_id,&name,p,action);}
     }
     pub(crate) fn operate_machine(&mut self,who:u32,name:&str,pos:IVec3,action:u8) {
+        if crate::factory::kind(self.world.get_v(pos)).is_some(){self.factory_control(who,pos,action);return;}
         let player=if who==self.my_id {(!self.spectator&&self.dead.is_none()).then_some(self.player.body.pos)}else{self.peers.get(&who).filter(|p|p.alive()).map(|p|p.target)};
         let Some(player)=player else{return};if !near(player,pos){return;}
         let id=self.world.get_v(pos);let Some(spec)=spec(id) else{return};
@@ -66,6 +69,10 @@ impl Game {
         else {self.net_send_to(who,Msg::MachineInfo{x:pos.x,y:pos.y,z:pos.z,block:id,status,progress});}
     }
     fn machine_status(&self,id:Id,pos:IVec3,name:&str)->(String,u8) {
+        if reg().key_of(id)=="half_baked:cooling_tower" {
+            let active=self.world.containers.keys().filter(|p|(**p-pos).abs().max_element()<=3).filter_map(|p|self.factory_visual(*p)).find(|v|crate::factory::kind(v.block)==Some(crate::factory::Kind::Reactor)&&v.state==2);
+            return if let Some(v)=active{("Cooling active. Steam venting.".into(),v.progress)}else{("Cooling ready. Keep this tower beside the reactor.".into(),0)};
+        }
         let Some(host)=self.scripts.as_ref() else{return ("Machine script is not installed.".into(),0)};
         let key=reg().key_of(id);let pack=key.split(':').next().unwrap_or("");
         if !host.mod_ids().iter().any(|s|s==pack) {return ("Machine script is not installed.".into(),0);}

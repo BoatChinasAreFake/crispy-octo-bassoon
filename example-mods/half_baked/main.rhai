@@ -33,7 +33,7 @@ fn on_chat(player,text) {
     let args=text.split(" ");let cmd=if args.len()>1 {args[1]} else {"help"};
     switch cmd {
         "help" => {
-            message(player,"/hbm refine near a centrifuge: 2 dust + coal -> pellet. /hbm reactor starts a 15s batch using a pellet and coolant.");
+            message(player,"Load machine input slots and power, then use its panel or /hbm refine. /hbm reactor runs stocked fuel + coolant with a cooling tower.");
             message(player,"/hbm status /hbm scram /hbm geiger /hbm decon /hbm tablet. Wear all four hazmat pieces near fallout.");
             message(player,"/hbm arm small|large near a placed nuke, with an arming key: 10s fuse. /hbm disarm during the fuse. Big blasts leave 120s fallout.");
         }

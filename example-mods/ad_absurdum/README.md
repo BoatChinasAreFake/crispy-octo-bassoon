@@ -2,14 +2,14 @@
 
 An original space-tech parody inspired by [Ad Astra](https://github.com/terrarium-earth/Ad-Astra).
 
-25 declared blocks, 24 items, 27 recipes, sixteen original pixel textures, six creatures, five supply structures and **five separate planet dimensions**. There are no planet-biome replacements in the Overworld.
+28 declared blocks, 25 items, 31 recipes, sixteen original pixel textures, six creatures, five supply structures and **five separate planet dimensions**. There are no planet-biome replacements in the Overworld.
 
 ## Prepare a first launch
 
 1. Craft Aerospace Steel from two Iron and one Coal. Make an engine kit, two pressure tanks and two flight circuits. These combine with eight Steel into a Tier 1 Paperwork Rocket.
 2. Make a launch pad and a Rocket Assembly Bench. Place them within three blocks of your operating position and clear five blocks above the pad. `/astra assemble 1` consumes the rocket kit and builds a five-block engine/body/nose assembly. `/astra pack` repacks an intact nearby rocket you own.
-3. Build a fuel refinery. `/astra refine` beside it consumes two Coal and one empty Tank to make two Fuel Canisters.
-4. Build a Breath Printer. `/astra refill` beside it consumes one Battery and one empty Tank to make four Oxygen Canisters. Batteries have a normal recipe; `/astra charge` at a Sun Tax Panel can also produce two from one Steel and one Zap Dust, once per minute per player.
+3. Build a fuel refinery. Load two Coal and an empty Tank into its slots and supply power. Its panel or `/astra refine` starts a four-second powered batch for two Fuel Canisters.
+4. Build a Breath Printer. Load one Battery and an empty Tank, then supply power for four Oxygen Canisters and a returned empty battery. Build solar panels, cables and a Base Battery Bank; panels generate 6 energy/second in daylight with clear sky. Banks store 1,000 energy. Charged portable Batteries provide 120 energy and return empty shells; recharge those shells in a panel/bank. `/astra charge` starts charging the nearby stocked panel. These systems work without Half Baked installed.
 5. Craft and wear at least a spacesuit Helmet and Chestplate. Carry a Life Support Pack and oxygen. Leggings and Boots add armour; hot planets also require a Heat Shield.
 6. `/astra launch moon` checks the rocket, pad, nearby bench, suit, oxygen, tier and fuel before starting. A visible rocket carries the seated pilot through four seconds of ascent, then transfers to the separate Moon dimension for a three-second powered descent. The rocket, pad and bench are removed from the origin and returned as items after touchdown, so they can be deployed again without duplicating equipment.
 
@@ -40,11 +40,11 @@ Planet wildlife is host-spawned near visiting players with local/global limits. 
 
 `/astra help`, `/astra refine`, `/astra refill`, `/astra charge`, `/astra assemble 1|2|3|4`, `/astra pack`, `/astra launch moon|mars|venus|mercury|glacio|home`, `/astra rover`, `/astra status`.
 
-Rockets, pending flights, departure points, oxygen buffers, solar cooldowns and exploration scores persist with the world. Disconnected pilots' departures pause until they return. Each planet has its own saved realm. Crafting a Tier 1 rocket earns **Rocket Paperwork**.
+Rockets, pending flights, departure points, oxygen buffers and exploration scores persist with the world. Native machine inventories, work, energy and mode are saved with their blocks. Disconnected pilots' departures pause until they return. Each planet has its own saved realm. Crafting a Tier 1 rocket earns **Rocket Paperwork**.
 
 The deployed rocket now has a narrow faceted white fuselage with red trim, a tapered red nose, a dark bell nozzle and four swept red fins. Its five-block assembly and saved block keys are unchanged. The three rocket shape presets keep rendering and collision consistent across clients (protocol 51).
 
 Flight snapshots synchronize the phase, pilot, safe ground anchor and progress to joining players. Saved script flight records reconstruct a pending ascent or descent after loading; offline pilots pause. Equipment is returned once, after touchdown. Protocol 54 is required. `rocket_inflight`, `rocket_landing` and `rocket_cockpit` stage the actual flight renderer for visual checks.
 
 
-Native machine controls: right-click the production machines to see actions, ingredient counts and progress. Sneak-right-click still places against them. Commands remain available; both controls use the same host-side scripts and recipes.
+Native production controls: right-click for Input, secondary ingredient, Output, Byproduct, Power Cell and Empty Cell slots, plus Run once / Stop / Auto. Hoppers feed accepted ingredients/cells from top or sides and take outputs below. Full output slots, missing power and missing supplies pause work; loaded batches resume automatically in Auto mode. Modes, work and energy are saved. A new Electric Smelter cooks furnace recipes in four seconds of powered work, at 8 energy/second. Cables search at most 256 loaded cells without crossing realms. Rocket assembly/deployment still uses the player's crafted rocket kit.

@@ -69,6 +69,7 @@ pub const ALL: &[Advancement] = &[
     adv("the_birds_and_the_bees", "The Birds and the Bees", "Breed two animals. We won't ask how."),
     adv("its_alive", "It's Alive!", "Light a Zappy Lamp with a switch. Electricity: now legally distinct."),
     adv("what_a_deal", "What a Deal", "Trade with a Hmmer. Gold is finally good for something."),
+    adv("factory_floor", "Factory Floor", "Run a stocked machine. The button finally does something useful."),
     adv("push_buttons", "I Know What This Button Does", "Open a machine control panel. Read the label first."),
     adv("not_today", "Not Today", "Block a hit with a shield. It's a door you can carry."),
     adv("portal_open", "Portal Opener", "Light an obsidian frame with a Sparker. Shimmery!"),

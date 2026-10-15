@@ -23,7 +23,7 @@ fn on_chat(player,text) {
     if p==() {return false;}
     switch cmd {
         "help" => {
-            message(player,"/astra refine: refinery + 2 coal + empty tank -> 2 fuel. /astra refill: oxygen generator + battery + empty tank -> 4 oxygen.");
+            message(player,"Load machine input slots and connect power. /astra refine and /astra refill start the nearby stocked machine. Solar panels charge empty batteries.");
             message(player,"Build a launch pad beside a rocket bench. /astra assemble 1|2|3|4 deploys a crafted rocket. /astra launch moon|mars|venus|mercury|glacio|home costs fuel.");
             message(player,"Tier 1 Moon; tier 2 Marzipan; tier 3 Venus/Mercurial; tier 4 Glaze-io. Wear helmet and chestplate; carry a Life Support Pack and oxygen. Hot planets need a Heat Shield.");
             message(player,"/astra status /astra rover /astra charge. Return trips need a rocket, launch pad and fuel too; there is no free return teleport.");

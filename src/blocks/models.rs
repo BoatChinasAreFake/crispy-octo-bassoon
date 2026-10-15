@@ -72,6 +72,17 @@ fn lantern(body: u16, y: f32) -> Vec<Piece> {
 /// The model for a block, if it has one beyond its collision boxes.
 pub fn pieces(id: Id) -> Option<Vec<Piece>> {
     let t = block(id).tex;
+    if reg().key_of(id)=="half_baked:cooling_tower" {return Some(vec![bx([1.0,0.0,1.0],[15.0,3.0,15.0],t[0]),bx([4.0,3.0,4.0],[12.0,12.0,12.0],t[0]),bx([2.0,12.0,2.0],[14.0,16.0,14.0],t[0])]);}
+    if crate::factory::cable(id) {return Some(vec![bx([0.0,7.0,7.0],[16.0,9.0,9.0],t[0]),bx([7.0,0.0,7.0],[9.0,16.0,9.0],t[0]),bx([7.0,7.0,0.0],[9.0,9.0,16.0],t[0])]);}
+    if let Some(k)=crate::factory::kind(id) {
+        use crate::factory::Kind;
+        let parts=match k {
+            Kind::Centrifuge=>vec![bx([1.0,0.0,1.0],[15.0,12.0,15.0],t[0]),bx([5.0,12.0,5.0],[11.0,15.0,11.0],t[0])],
+            Kind::Solar=>vec![bx([6.0,0.0,6.0],[10.0,12.0,10.0],t[0]),bx([0.0,12.0,0.0],[16.0,15.0,16.0],t[0])],
+            Kind::Reactor=>vec![bx([0.0,0.0,0.0],[16.0,3.0,16.0],t[0]),bx([2.0,3.0,2.0],[14.0,14.0,14.0],t[0]),bx([0.0,14.0,0.0],[16.0,16.0,16.0],t[0])],
+            _=>vec![bx([1.0,0.0,1.0],[15.0,15.0,15.0],t[0])],
+        };return Some(parts);
+    }
     if matches!(block(id).shape,Shape::RocketEngine | Shape::RocketBody | Shape::RocketNose) {
         let shape=block(id).shape;
         if shape!=Shape::RocketEngine {

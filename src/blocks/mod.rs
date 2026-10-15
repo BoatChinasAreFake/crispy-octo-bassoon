@@ -38,3 +38,5 @@ pub(crate) mod villageblocks;
 pub(crate) mod zapparts;
 
 pub(crate) mod machines;
+
+pub(crate) mod factory;

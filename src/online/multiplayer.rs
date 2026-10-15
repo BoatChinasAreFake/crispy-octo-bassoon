@@ -516,6 +516,7 @@ impl Game {
         v.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
         if !self.away() && let Some(m)=self.player.animation.meal {v.push(Msg::MealAnimation{id:self.my_id,item:m.item,elapsed:m.elapsed});}
         for (id,p) in &self.peers {if let Some(m)=p.animation.meal {v.push(Msg::MealAnimation{id:*id,item:m.item,elapsed:m.elapsed});}}
+        v.push(Msg::FactoryStates(self.factory_snapshot()));
         v.push(Msg::RocketFlights(self.rockets.clone()));
         v.push(Msg::Swallows(self.swallows.clone()));
         v.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
@@ -1297,6 +1298,9 @@ impl Game {
                     p.trims = trims;
                     p.held=held;p.offhand=offhand;p.gesture=gesture&3;p.draw=if held==BOW {draw}else{0};
                 }
+            }
+            Msg::FactoryStates(list)=>{
+                for v in list {if v.valid(){if self.factory_states.len()>=crate::factory::VISUAL_LIMIT&&!self.factory_states.contains_key(&v.at)&&let Some(p)=self.factory_states.keys().next().copied(){self.factory_states.remove(&p);}self.factory_states.insert(v.at,v);}}
             }
             Msg::MachineInfo{x,y,z,block,status,progress}=>{
                 if let Some(m)=self.machine.as_mut() && m.pos==macroquad::math::IVec3::new(x,y,z)&&m.block==block {m.status=status;m.progress=progress;}
@@ -2664,14 +2668,21 @@ mod tests {
             let pos=spawn.floor().as_ivec3()+macroquad::math::IVec3::Z;let centrifuge=reg().lookup("half_baked:centrifuge").unwrap();
             host.world.set(pos.x,pos.y,pos.z,centrifuge);actor.world.set(pos.x,pos.y,pos.z,centrifuge);
             let dust=reg().lookup("half_baked:glowium_dust").unwrap();let pellet=reg().lookup("half_baked:pellet").unwrap();
-            host.give_peer(id,dust,4);host.give_peer(id,COAL,2);assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(dust)==4));
-            assert!(actor.open_machine(pos));actor.machine_action(0);
+            let cell=reg().lookup("half_baked:energy_cell").unwrap();host.give_peer(id,dust,4);host.give_peer(id,COAL,2);host.give_peer(id,cell,1);
+            assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(cell)==1));assert!(actor.open_machine(pos));
+            assert!(pump(&mut host,&mut actor,|h,c|h.viewers.get(&pos).is_some_and(|v|v.contains(&id))&&c.world.containers.get(&pos).is_some_and(|c|c.slots.len()==crate::factory::SLOTS)));
+            for item in [dust,COAL,cell] {let slot=actor.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==item)).unwrap();actor.container_quick_put(slot);}
+            assert!(pump(&mut host,&mut actor,|h,_|h.world.containers[&pos].slots[0]==Some((dust,4))&&h.world.containers[&pos].slots[4]==Some((cell,1))));
+            actor.factory_action(0);
+            assert!(pump(&mut host,&mut actor,|_,c|c.factory_visual(pos).is_some_and(|v|v.progress>0)));
+            assert!(pump(&mut host,&mut actor,|h,c|h.world.containers[&pos].slots[2]==Some((pellet,1))&&c.world.containers[&pos].slots[2]==Some((pellet,1))));
+            assert_eq!(actor.inv.count(pellet),0);actor.container_click(2,false,true);
             assert!(pump(&mut host,&mut actor,|h,c|h.peers[&id].ledger.bag.count(pellet)==1&&c.inv.count(pellet)==1));
-            assert!(pump(&mut host,&mut actor,|_,c|c.machine.as_ref().is_some_and(|m|m.status.starts_with("Ready"))));
-            actor.net_send_msg(Msg::MachineUse{x:pos.x,y:pos.y,z:pos.z,action:200});
-            actor.net_send_msg(Msg::MachineUse{x:pos.x+40,y:pos.y,z:pos.z,action:0});
+            actor.net_send_msg(Msg::MachineUse{x:pos.x,y:pos.y,z:pos.z,action:200});actor.net_send_msg(Msg::MachineUse{x:pos.x+40,y:pos.y,z:pos.z,action:0});
             for _ in 0..12 {host.update(0.016,&idle());actor.update(0.016,&idle());std::thread::sleep(Duration::from_millis(4));}
-            assert_eq!(host.peers[&id].ledger.bag.count(pellet),1);assert_eq!(host.peers[&id].ledger.bag.count(dust),2);
+            assert_eq!(host.world.containers[&pos].slots[0],Some((dust,2)));assert_eq!(host.peers[&id].ledger.bag.count(pellet),1);
+            let mut late=join(&mut host,port,"LateOperator","").unwrap();late.net_receive(0.016);assert!(late.factory_states.contains_key(&pos));
+
         });
     }
 

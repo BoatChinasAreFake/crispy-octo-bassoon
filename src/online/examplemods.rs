@@ -363,26 +363,88 @@ fn swallowing_is_visual_only_bounded_and_realm_local() {
     });
 }
 
+fn factory_steps(g:&mut Game,n:usize){for _ in 0..n {g.factory_tick(0.25);}}
+fn stock(g:&mut Game,p:macroquad::math::IVec3,slot:usize,key:&str,n:u8){g.world.containers.get_mut(&p).unwrap().slots[slot]=Some((id(key),n));}
 #[test]
-fn native_machine_controls_use_existing_recipes_and_reject_remote_or_invalid_actions() {with_packs(||{
-    let mut g=game();let pos=macroquad::math::IVec3::new(4,90,5);
-    place(&mut g,4,90,5,"half_baked:centrifuge");
-    give(&mut g,"half_baked:glowium_dust",4);give(&mut g,"coal",2);
-    assert!(g.open_machine(pos));g.machine_action(0);
-    assert_eq!(g.inv.count(id("half_baked:pellet")),1);assert_eq!(g.inv.count(id("half_baked:glowium_dust")),2);
-    g.machine_action(200);assert_eq!(g.inv.count(id("half_baked:pellet")),1);
-    g.player.body.pos.x+=20.0;g.machine_action(0);assert_eq!(g.inv.count(id("half_baked:pellet")),1);
-    g.machine_tick(0.1);assert!(g.machine.is_none());
-    g.player.body.pos=Vec3::new(4.5,90.0,4.5);
-    place(&mut g,4,90,5,"half_baked:reactor");place(&mut g,5,90,5,"half_baked:cooling_tower");give(&mut g,"half_baked:coolant",1);
-    assert!(g.open_machine(pos));g.machine_action(0);tick(&mut g,3);g.machine_action(255);
-    assert!(g.machine.as_ref().unwrap().status.contains("12s"));assert!(g.machine.as_ref().unwrap().progress>0);
-    g.machine_action(1);g.machine_action(255);assert!(g.machine.as_ref().unwrap().status.starts_with("Ready"));
-    assert_eq!(g.inv.count(id("half_baked:energy_cell")),0);
-    g.world.set(4,90,5,AIR);g.machine_tick(0.1);assert!(g.machine.is_none());
-    place(&mut g,4,90,5,"ad_absurdum:solar_panel");give(&mut g,"ad_absurdum:steel",2);give(&mut g,"zap_dust",2);
-    assert!(g.open_machine(pos));g.machine_action(0);tick(&mut g,10);g.machine_action(255);
-    assert!(g.machine.as_ref().unwrap().status.contains("50s"));assert_eq!(g.inv.count(id("ad_absurdum:battery")),2);
-    g.machine_action(0);assert_eq!(g.inv.count(id("ad_absurdum:battery")),2);
-    g.dead=Some("test".into());g.machine_action(0);g.machine_tick(0.1);assert!(g.machine.is_none());
+fn native_machine_controls_use_block_stock_and_reject_remote_or_invalid_actions() {with_packs(||{
+    let mut g=game();let p=macroquad::math::IVec3::new(4,90,5);place(&mut g,p.x,p.y,p.z,"half_baked:centrifuge");
+    stock(&mut g,p,0,"half_baked:glowium_dust",4);stock(&mut g,p,1,"coal",2);stock(&mut g,p,4,"half_baked:energy_cell",1);
+    give(&mut g,"half_baked:glowium_dust",1);assert!(g.open_machine(p));assert!(!g.fire("on_chat",vec!["Tester".into(),"/hbm refine".into()]));factory_steps(&mut g,16);assert_eq!(g.inv.count(id("half_baked:glowium_dust")),1);
+    let c=&g.world.containers[&p];assert_eq!(c.slots[2],Some((id("half_baked:pellet"),1)));assert_eq!(c.slots[0].unwrap().1,2);
+    assert_eq!(c.slots[5],Some((id("half_baked:empty_cell"),1)));assert!((c.burn-208.0).abs()<0.01);assert_eq!(g.inv.count(id("half_baked:pellet")),0);
+    g.factory_action(200);g.player.body.pos.x+=40.0;g.factory_action(0);factory_steps(&mut g,20);assert_eq!(g.world.containers[&p].slots[2].unwrap().1,1);
+    g.player.body.pos=Vec3::new(4.5,90.0,4.5);g.dead=Some("test".into());g.factory_action(0);assert_eq!(g.world.containers[&p].burn_total,0.0);
+});}
+#[test]
+fn factory_reactor_blocks_overflow_and_scrams_without_losing_unprocessed_inputs() {with_packs(||{
+    let mut g=game();let p=macroquad::math::IVec3::new(4,90,5);place(&mut g,4,90,5,"half_baked:reactor");place(&mut g,5,90,5,"half_baked:cooling_tower");
+    stock(&mut g,p,0,"half_baked:pellet",2);stock(&mut g,p,1,"half_baked:coolant",2);stock(&mut g,p,2,"half_baked:energy_cell",64);
+    g.open_machine(p);g.factory_action(2);factory_steps(&mut g,16);assert_eq!(g.factory_visual(p).unwrap().state,5);assert_eq!(g.world.containers[&p].cook,0.0);
+    g.world.containers.get_mut(&p).unwrap().slots[2]=None;factory_steps(&mut g,12);assert!((g.world.containers[&p].cook-3.0).abs()<0.01);
+    g.world.set(5,90,5,AIR);factory_steps(&mut g,1);assert_eq!(g.world.containers[&p].burn_total,0.0);assert_eq!(g.factory_visual(p).unwrap().state,7);assert_eq!(g.world.containers[&p].slots[0].unwrap().1,2);
+    place(&mut g,5,90,5,"half_baked:cooling_tower");g.factory_action(0);factory_steps(&mut g,60);
+    assert_eq!(g.world.containers[&p].slots[2],Some((id("half_baked:energy_cell"),4)));assert_eq!(g.world.containers[&p].slots[3],Some((id("half_baked:waste"),1)));assert_eq!(g.world.containers[&p].slots[1].unwrap().1,1);
+});}
+#[test]
+fn factory_hoppers_feed_automatic_batches_and_extract_only_finished_outputs() {with_packs(||{
+    use macroquad::math::IVec3;
+    let mut g=game();let p=IVec3::new(4,90,4);place(&mut g,4,90,4,"half_baked:centrifuge");
+    for (pos,block) in [(p+IVec3::Y,HOPPER_FIRST),(p+IVec3::Y*2,CHEST),(p-IVec3::Y,HOPPER_FIRST),(p-IVec3::Y*2,CHEST)]{g.world.set_v(pos,block);}
+    stock(&mut g,p+IVec3::Y*2,0,"half_baked:glowium_dust",4);stock(&mut g,p+IVec3::Y*2,1,"coal",2);stock(&mut g,p,4,"half_baked:energy_cell",1);
+    g.open_machine(p);g.factory_action(2);for _ in 0..160{g.hoppers_tick(0.25);g.factory_tick(0.25);}
+    let chest=&g.world.containers[&(p-IVec3::Y*2)];assert!(chest.slots.contains(&Some((id("half_baked:pellet"),2))));
+    assert!(chest.slots.iter().flatten().all(|s|matches!(reg().key_of(s.0),"half_baked:pellet"|"half_baked:empty_cell")));assert_eq!(g.world.containers[&p].burn_total,2.0);
+});}
+#[test]
+fn factory_cables_conserve_power_and_disconnects_pause_processing() {with_packs(||{
+    use macroquad::math::IVec3;
+    let mut g=game();let bank=IVec3::new(4,90,4);let wire=bank+IVec3::X;let oven=wire+IVec3::X;
+    place(&mut g,4,90,4,"ad_absurdum:power_bank");place(&mut g,5,90,4,"ad_absurdum:cable");place(&mut g,6,90,4,"ad_absurdum:electric_furnace");
+    g.world.containers.get_mut(&bank).unwrap().burn=240.0;stock(&mut g,oven,0,"sand",2);g.world.containers.get_mut(&oven).unwrap().burn_total=2.0;
+    factory_steps(&mut g,16);assert_eq!(g.world.containers[&oven].slots[2],Some((GLASS,1)));assert!((g.world.containers[&bank].burn-208.0).abs()<0.001);
+    g.world.set_v(wire,AIR);factory_steps(&mut g,16);assert_eq!(g.factory_visual(oven).unwrap().state,6);assert_eq!(g.world.containers[&oven].slots[2].unwrap().1,1);
+    place(&mut g,5,90,4,"ad_absurdum:cable");factory_steps(&mut g,16);assert_eq!(g.world.containers[&oven].slots[2],Some((GLASS,2)));assert!((g.world.containers[&bank].burn-176.0).abs()<0.001);
+    let before=g.world.containers[&bank].clone();let state=crate::containers::decode(&crate::containers::encode(&g.world.containers),4);assert_eq!(state[&bank],before);
+    let mut back=Game::from_save(g.to_save());back.world.load_now(0,0);assert_eq!(back.world.containers[&bank],before);assert_eq!(back.world.containers[&oven].slots[2],Some((GLASS,2)));
+    let dim=dim("ad_absurdum:moon");g.in_realm(dim,|g|{g.world.load_now(0,0);g.world.set_v(oven,id("ad_absurdum:electric_furnace"));stock(g,oven,0,"sand",1);g.world.containers.get_mut(&oven).unwrap().burn_total=2.0;factory_steps(g,20);assert!(g.world.containers[&oven].slots[2].is_none());});
+    assert_eq!(g.world.containers[&bank],before);
+});}
+#[test]
+fn factory_solar_charges_reusable_cells_only_with_visible_daylight() {with_packs(||{
+    let mut g=game();let p=macroquad::math::IVec3::new(4,90,4);place(&mut g,4,90,4,"ad_absurdum:solar_panel");stock(&mut g,p,0,"ad_absurdum:empty_battery",1);
+    g.time=0.75;factory_steps(&mut g,20);assert_eq!(g.world.containers[&p].burn,0.0);
+    g.time=0.25;g.world.set(4,91,4,STONE);factory_steps(&mut g,20);assert_eq!(g.world.containers[&p].burn,0.0);
+    g.world.set(4,91,4,AIR);factory_steps(&mut g,84);assert_eq!(g.world.containers[&p].slots[2],Some((id("ad_absurdum:battery"),1)));
+    let c=&g.world.containers[&p];assert!((c.burn-6.0).abs()<0.1,"{}",c.burn);
+    place(&mut g,5,90,4,"ad_absurdum:cable");place(&mut g,6,90,4,"ad_absurdum:power_bank");factory_steps(&mut g,4);
+    assert!((g.world.containers[&macroquad::math::IVec3::new(6,90,4)].burn-12.0).abs()<0.1);assert_eq!(g.world.containers[&p].burn,0.0);
+    let msg=crate::net::Msg::FactoryStates(g.factory_snapshot());assert_eq!(crate::net::Msg::decode(&msg.encode()).unwrap(),msg);
+    let mut v=g.factory_visual(p).unwrap();v.energy=1001;assert!(crate::net::Msg::decode(&crate::net::Msg::FactoryStates(vec![v]).encode()).is_err());
+});}
+
+#[test]
+fn native_factory_recipes_work_when_each_industrial_pack_is_installed_alone() {
+    for pack in ["half_baked","ad_absurdum"] {
+        let src=sources().into_iter().find(|s|s.id==pack).unwrap();let text=std::str::from_utf8(&src.files["mod.txt"]).unwrap();
+        mods::with_mods(&[(pack,text)],|_|{
+            let mut g=Game::new_with(811,true,false,GenOptions{structures:0,..GenOptions::DEFAULT});g.world.load_now(0,0);g.player.body.pos=Vec3::new(4.5,90.0,4.5);let p=macroquad::math::IVec3::new(4,90,4);
+            let (machine,input,second,cell,result)=if pack=="half_baked"{("half_baked:centrifuge","half_baked:glowium_dust","coal","half_baked:energy_cell","half_baked:pellet")}else{("ad_absurdum:refinery","coal","ad_absurdum:tank","ad_absurdum:battery","ad_absurdum:fuel")};
+            place(&mut g,4,90,4,machine);stock(&mut g,p,0,input,2);stock(&mut g,p,1,second,1);stock(&mut g,p,4,if pack=="half_baked"{"coal"}else{cell},1);g.open_machine(p);g.factory_action(0);factory_steps(&mut g,16);
+            assert_eq!(block(id(machine)).model,Model::Shaped);assert!(crate::models::pieces(id(machine)).is_some());
+            assert_eq!(g.world.containers[&p].slots[2].unwrap().0,id(result));if pack=="half_baked"{assert!((g.world.containers[&p].burn-48.0).abs()<0.001);assert!(g.world.containers[&p].slots[5].is_none());}else{assert_eq!(g.world.containers[&p].slots[5].unwrap().1,1);}
+            // Older placed machines had no container record: replay creates an empty one.
+            g.world.containers.remove(&p);g.world.chunks.remove(&(0,0));g.world.load_now(0,0);assert_eq!(g.world.containers[&p].slots.len(),crate::factory::SLOTS);
+        });
+    }
+}
+
+#[test]
+fn factory_cell_swaps_cannot_convert_partial_low_capacity_work_into_extra_energy() {with_packs(||{
+    let mut g=game();let p=macroquad::math::IVec3::new(4,90,4);place(&mut g,4,90,4,"ad_absurdum:power_bank");
+    stock(&mut g,p,0,"ad_absurdum:empty_battery",1);g.world.containers.get_mut(&p).unwrap().burn=240.0;factory_steps(&mut g,15);
+    assert!((g.world.containers[&p].cook-3.75).abs()<0.01);g.open_container(p);g.inv.cursor=None;g.container_click(0,false,false);
+    assert_eq!(g.world.containers[&p].cook,0.0);g.inv.cursor=Some((id("half_baked:empty_cell"),1));g.inv.cursor_wear=0;g.container_click(0,false,false);factory_steps(&mut g,1);assert!(g.world.containers[&p].slots[2].is_none());
+    // The server path also clears work when an input is withdrawn or replaced.
+    g.peers.insert(77,crate::multiplayer::Peer::new("Loader".into(),g.player.body.pos));g.host_open(77,p);g.world.containers.get_mut(&p).unwrap().cook=3.75;
+    g.host_container_move(77,p,0,id("half_baked:empty_cell"),1,false,0);assert_eq!(g.world.containers[&p].cook,0.0);
 });}

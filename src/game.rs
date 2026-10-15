@@ -256,6 +256,8 @@ pub struct Game {
     /// The enchanting table screen's inputs while it's open (see enchant.rs).
     pub enchanting: Option<crate::enchant::EnchantUi>,
     pub machine:Option<crate::machines::Panel>,
+    pub factory_timer:f32,
+    pub factory_states:std::collections::HashMap<IVec3,crate::factory::Visual>,
     /// How many times we've enchanted something (seeds the table's offers; the host's word when joined).
     pub enchant_count: u32,
     /// Joined players we remember, by name (see players.rs).
@@ -618,7 +620,7 @@ impl Game {
             orbs_sent_empty: true,
             anvil: None,
             enchanting: None,
-            machine:None,
+            machine:None,factory_timer:0.0,factory_states:Default::default(),
             enchant_count: 0,
             saved_players: Default::default(),
             admin: Default::default(),
@@ -1694,6 +1696,7 @@ impl Game {
 
     /// Run a script event. Returns false if a script cancelled the default action.
     pub fn fire(&mut self, hook: &str, args: Vec<Dynamic>) -> bool {
+        if hook=="on_chat"&&self.factory_command(&args){return false;}
         let Some(mut host) = self.scripts.take() else { return true };
         let r = host.call(self, hook, args);
         self.scripts = Some(host);
@@ -4671,6 +4674,7 @@ impl Game {
                 g.cube(&m, [T_WHITE; 6], sky, [0.0, 0.0, 1.0, 1.0]);
             }
         }
+        crate::factory::draw(self,&mut g);
         // Other players
         for (id, p) in self.peers.iter().filter(|(_, p)| p.alive()) {
             // Pilots are enclosed by the rocket hull; do not draw limbs through it.

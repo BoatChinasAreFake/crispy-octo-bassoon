@@ -65,7 +65,7 @@ description = One line shown on the Mods screen.
 | `speed` | Walking speed multiplier on top of it (0.2–3) | `1` |
 | `on_break` | Actions when a player breaks it (see below) | |
 | `creative` | Show it in the creative palette | `true` |
-| `shape` | `slab`, `stairs`, `rocket_engine`, `rocket_body` or `rocket_nose` (they behave like the base game's: slabs stack into `full`, stairs face away from you) | `cube` |
+| `shape` | `slab`, `stairs`, `industrial`, `rocket_engine`, `rocket_body` or `rocket_nose` (they behave like the base game's: slabs stack into `full`, stairs face away from you) | `cube` |
 | `full` | For slabs: the block two of them make | none (two slabs stay two slabs) |
 | `smelts_into` | What a furnace turns it into | doesn't cook |
 | `burns_for` | Seconds it burns as furnace fuel (0.5–600) | not fuel |
@@ -573,3 +573,5 @@ Rocket shape presets use bounded model geometry and collision boxes: `rocket_eng
 A `[mob]` can opt into `glutton = true` (default `false`). It accepts every non-air held item as a one-unit offering, before name tags, leads, shears and trading interactions; `tame_item` still tames while consuming the offering. Empty-hand owner interaction retains sit/follow. Feeding heals two health, preserves the mob and earns Bottomless Appetite. Normal survival/creative inventory rules and host range/inventory validation apply.
 
 A living, loaded glutton swallows all living Mooers, Oinkers, Fluffers and Clucksters whose body positions are at most five blocks away in 3D. There is no line-of-sight condition. It removes them directly without death drops or kill credit, including babies and kept animals. It never eats other mob types or across dimensions. It requests food from the nearest player within sixteen blocks every eight seconds (at most one demand per player per update). The demand timer is transient; pet ownership and persistence use the existing mob save format. Older mods retain all their previous interactions.
+
+`shape = industrial` selects the native detailed model for the bundled production machines and power cables. Other keys fall back to a box. It preserves the declared solidity/transparency, so cables can be thin, non-blocking models.

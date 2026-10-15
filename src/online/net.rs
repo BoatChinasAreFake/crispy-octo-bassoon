@@ -58,7 +58,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v55: bounded realm-local swallowing animation snapshots and burps.
 /// v56: player flight flags, cosmetic meal poses and glutton anticipation timing.
 /// v57: held/offhand equipment, combat gestures and host-checked machine panels.
-pub const PROTOCOL: u32 = 57;
+/// v58: persistent production, power network and realm-local operating states.
+pub const PROTOCOL: u32 = 58;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -284,6 +285,7 @@ pub enum Msg {
     RocketFlights(Vec<crate::rockets::RocketFlight>),
     Swallows(Vec<crate::swallow::Swallow>),
     MealAnimation {id:u32,item:Id,elapsed:f32},
+    FactoryStates(Vec<crate::factory::Visual>),
     MachineUse{x:i32,y:i32,z:i32,action:u8},
     MachineInfo{x:i32,y:i32,z:i32,block:Id,status:String,progress:u8},
     /// client -> host: get in (0), get out (1) or hit (2) this vehicle.
@@ -1000,6 +1002,7 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
+            Msg::FactoryStates(list)=>{w.u8(118);w.u16(list.len() as u16);for v in list {w.i32(v.at.x);w.i32(v.at.y);w.i32(v.at.z);w.u16(v.block);w.u16(v.energy);w.u8(v.progress);w.u8(v.mode);w.u8(v.state);}}
             Msg::MachineUse{x,y,z,action}=>{w.u8(116);w.i32(*x);w.i32(*y);w.i32(*z);w.u8(*action);}
             Msg::MachineInfo{x,y,z,block,status,progress}=>{w.u8(117);w.i32(*x);w.i32(*y);w.i32(*z);w.u16(*block);w.str(status);w.u8(*progress);}
             Msg::MealAnimation {id,item,elapsed} => {w.u8(115);w.u32(*id);w.u16(*item);w.f32(*elapsed);}
@@ -1483,6 +1486,13 @@ impl Msg {
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
             48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            118=>{
+                let n=r.u16()? as usize;if n>crate::factory::VISUAL_LIMIT{return Err(io::Error::new(io::ErrorKind::InvalidData,"too many machine states"));}
+                let mut list=Vec::with_capacity(n);for _ in 0..n {let v=crate::factory::Visual{at:macroquad::math::IVec3::new(r.i32()?,r.i32()?,r.i32()?),block:r.u16()?,energy:r.u16()?,progress:r.u8()?,mode:r.u8()?,state:r.u8()?};
+                    // Registry-dependent checks happen after mod loading, not in the transport.
+                    if v.energy>1000||v.mode>2||v.state>9||!(0..crate::world::CH).contains(&v.at.y){return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid machine state"));}list.push(v);
+                }Msg::FactoryStates(list)
+            }
             116=>Msg::MachineUse{x:r.i32()?,y:r.i32()?,z:r.i32()?,action:r.u8()?},
             117=>Msg::MachineInfo{x:r.i32()?,y:r.i32()?,z:r.i32()?,block:r.u16()?,status:r.str()?,progress:r.u8()?},
             115 => {

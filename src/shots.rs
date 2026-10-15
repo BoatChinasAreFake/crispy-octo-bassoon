@@ -488,6 +488,23 @@ impl App {
                 (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
                 g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
             }
+            "factory_line"|"factory_panel"|"factory_blocked"|"factory_power" => {
+                let mut g=shot_game(424242,true,false);for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
+                for z in -8..=8 {for x in -10..=10 {for y in 79..world::CH {g.world.set(x,y,z,if y<=80 {STONE}else{AIR});}}}g.mobs.clear();g.time=0.25;
+                let lookup=|key:&str|block::reg().lookup(key);
+                for (p,key) in [(IVec3::new(-3,82,0),"half_baked:reactor"),(IVec3::new(-3,82,-2),"half_baked:cooling_tower"),(IVec3::new(0,81,0),"ad_absurdum:power_bank"),(IVec3::new(0,81,-2),"ad_absurdum:solar_panel"),(IVec3::new(2,81,0),"half_baked:centrifuge"),(IVec3::new(4,81,0),"ad_absurdum:electric_furnace")] {if let Some(id)=lookup(key){g.world.set_v(p,id);}}
+                if let Some(cable)=lookup("ad_absurdum:cable") {for p in [IVec3::new(0,81,-1),IVec3::new(1,81,0),IVec3::new(0,81,1),IVec3::new(1,81,1),IVec3::new(2,81,1),IVec3::new(3,81,1),IVec3::new(4,81,1)]{g.world.set_v(p,cable);}}
+                let hop=HOPPER_FIRST+1+contraptions::facing_of(IVec3::X) as Id;for x in -3..= -1 {g.world.set(x,81,0,hop);}
+                for (p,slot,key,n) in [(IVec3::new(-3,82,0),0,"half_baked:pellet",8),(IVec3::new(-3,82,0),1,"half_baked:coolant",8),(IVec3::new(2,81,0),0,"half_baked:glowium_dust",32),(IVec3::new(2,81,0),1,"coal",16),(IVec3::new(4,81,0),0,"sand",32)] {if let Some(id)=lookup(key)&&let Some(c)=g.world.containers.get_mut(&p){c.slots[slot]=Some((id,n));c.burn_total=2.0;}}
+                for _ in 0..90{g.factory_tick(0.25);g.hoppers_tick(0.25);}
+                let from=if s.mode=="factory_line"{Vec3::new(7.0,84.5,8.5)}else{Vec3::new(2.5,81.0,2.5)};let to=Vec3::new(0.0,82.0,0.0);let d=to-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));g.player.body.pos=from;g.player.flying=true;
+                if s.mode!="factory_line"{let p=if s.mode=="factory_power"{IVec3::new(0,81,0)}else if s.mode=="factory_blocked"{IVec3::new(-3,82,0)}else{IVec3::new(2,81,0)};
+                    if s.mode=="factory_blocked" {g.world.set_v(p-IVec3::Y,AIR);if let Some(id)=lookup("half_baked:energy_cell")&&let Some(c)=g.world.containers.get_mut(&p){c.slots[2]=Some((id,64));}}
+                    g.open_container(p);
+                }
+                app.start_game(g);if s.mode!="factory_line"{app.set_screen(Screen::Container);}app.show_debug=false;
+            }
             "machine_reactor"|"machine_rocket"|"mob_movement" => {
                 let mut g=shot_game(424242,true,false);
                 for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
@@ -510,8 +527,8 @@ impl App {
                     g.start_scripts();
                     for key in ["half_baked:pellet","half_baked:coolant","ad_absurdum:rocket_1"] {if let Some(id)=block::reg().lookup(key){g.give(id,2);}}
                     g.open_machine(IVec3::new(0,80,0));
-                    if s.mode=="machine_reactor" {g.machine_action(0);}
-                    app.start_game(g);app.set_screen(Screen::Machine);
+                    if s.mode=="machine_reactor" {let p=IVec3::new(0,80,0);if let (Some(pellet),Some(coolant))=(block::reg().lookup("half_baked:pellet"),block::reg().lookup("half_baked:coolant"))&&let Some(c)=g.world.containers.get_mut(&p){c.slots[0]=Some((pellet,2));c.slots[1]=Some((coolant,2));}g.factory_action(2);}
+                    app.start_game(g);app.set_screen(if s.mode=="machine_reactor"{Screen::Container}else{Screen::Machine});
                 }
                 app.show_debug=false;
             }
@@ -1178,6 +1195,7 @@ impl App {
                     }
                     app.game.messages.clear();app.game.toasts.clear();
                 }
+                if s.mode.starts_with("factory_"){app.game.messages.clear();app.game.toasts.clear();}
                 if s.mode.starts_with("machine_"){app.game.messages.clear();app.game.toasts.clear();}
                 if s.mode.starts_with("pose_") {
                     for p in app.game.peers.values_mut() {p.animation=pose_fixture(&s.mode);p.target=p.pos;
@@ -2649,6 +2667,7 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
+    "factory_line", "factory_panel", "factory_blocked", "factory_power",
     "machine_reactor", "machine_rocket", "mob_movement", "pose_tool", "pose_shield", "pose_bow", "pose_spear", "pose_climb", "pose_hang", "pose_hurt",
     "pose_swim", "pose_tread", "pose_hover", "pose_fly_up", "pose_fly_down", "pose_glide", "pose_crouch", "pose_eat", "pose_drink", "pose_eat_first", "pose_drink_first", "pose_landing", "pose_transition",
     "glutton_inhale", "glutton_swallow", "glutton_gulp", "glutton_belly", "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",

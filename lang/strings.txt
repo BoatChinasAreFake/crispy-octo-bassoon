@@ -213,6 +213,8 @@
 1 player
 1-9 / wheel ... pick hotbar    {} ... pick block (creative)
 100% browser-free!
+2 coal + tank -> 2 fuel; 4s; 8 energy/s.
+2 dust + coal -> pellet; use coal or cells for power.
 3.5 points for ten chops: {}
 30 fps
 60 fps
@@ -323,6 +325,8 @@ Assemble tier 1
 Assemble tier 2
 Assemble tier 3
 Assemble tier 4
+Auto: off
+Auto: on
 Autumn
 Axolotl
 Azalea (Shrub With Ambitions)
@@ -356,6 +360,7 @@ Bastion Treasure Room (Mind the Brute)
 Bat
 Batch running: {}s left. Keep cooling connected.
 Bathe in a hot spring.
+Battery + tank -> 4 oxygen + empty battery; 8 energy/s.
 Be near a Lightning Rod when it takes a strike.
 Be there when a baby Hmmer comes along.
 Be there when a village builds itself a Clanker.
@@ -500,6 +505,7 @@ Butcher (Please Don't Ask)
 Butterfingers
 Button (Press It)
 Buy something from a Wanderer before it wanders off.
+Byproduct
 Cake (Not a Lie)
 Calcite (Chalky)
 Calibrated Sculk Sensor (Picky Listener)
@@ -530,6 +536,7 @@ Chain (Strong Links)
 Change any key in Options > Controls. Game controllers work too (sticks walk and look).
 Char-Broiled
 Charge 2 batteries
+Charge empty cells. Clear daylight generates 6 energy/s.
 Charred Rattler
 Charred Skull (Grins Darkly)
 Chat
@@ -627,6 +634,9 @@ Cooked Seafood
 Cooked to perfection. By a cube. Of cobblestone.
 Cooking Pot (Over-Engineered)
 Cooking it only halved the problem. Still ow.
+Cooling active. Steam venting.
+Cooling disconnected - scrammed
+Cooling ready. Keep this tower beside the reactor.
 Copper
 Copper Block (Shiny, For Now)
 Copper Boots (Squeaky)
@@ -848,6 +858,7 @@ Elder Statesman
 Ember Shroom (Warm to the Touch)
 Ember Shroom on a Stick (Steering Snack)
 Embersand (Clingy)
+Empty cell
 Empty your Bundles first: a Backpack is made from an empty one.
 Enchant
 Enchant something. The table knows words you don't.
@@ -858,6 +869,7 @@ Enchanting
 Enchanting Table (Bookshelf-Powered Guesswork)
 Enchanting Table ({} bookshel{})
 Encrusted Relic (Something's In There)
+Energy: {} / 1000
 English
 Esc / inventory to close
 Ethically Sourced
@@ -883,6 +895,7 @@ FOR SALE: one bucket, slightly holey. Will trade for a better bucket.
 FOV: {}
 FREE TO A GOOD HOME: mud. Lots of it. Collect from the swamp.
 Facing: {}
+Factory Floor
 Fair Trade
 Fancy
 Farm
@@ -991,6 +1004,7 @@ Frost Walker
 Frost Walker (Walk on Water, Sort Of)
 Frozen Ocean (Brr)
 Fruit Compote
+Fuel / coolant
 Full Flight
 Fullscreen
 Fungal Growth
@@ -1184,6 +1198,7 @@ Honey Block (Sticky Situation)
 Honeycomb
 Honeycomb (Hexagonal, Efficient)
 Hopper (Funnel With Ambition)
+Hoppers feed from top / sides; extract below.
 Host
 Host from a world: Esc > Open to LAN. Or run minceraft --server. All play is encrypted.
 Hosting at {}  ({}{})
@@ -1218,6 +1233,8 @@ Igloo (Mind the Basement)
 Inbox
 Inbox ({})
 Ingredient on top: Glowshroom, Zappy Dust, Ember Shroom, Carrot, Feather (or Hisspowder)
+Input
+Inputs
 Internet address: {}:{}
 Inventory
 Inventory (level {})
@@ -1353,6 +1370,7 @@ Load a Minecart with Chest. Choo choo, cargo.
 Load {}
 Loaded world {} (seed {})
 Loaded {} mod(s) from the server.
+Loader
 Local Brewery
 Local Flavour
 Local Hmmer Hmms
@@ -1383,6 +1401,7 @@ MINCERAFT
 MISMATCH: {}
 MODDING.md explains everything a mod can add.
 Mace (Gravity Assisted)
+Machine is unavailable.
 Machine script is not installed.
 Made of cubes!
 Made team {} ({}), and you're on it.
@@ -1439,6 +1458,8 @@ Minecart (Wheeled Bucket)
 Minecart with Chest (Freight)
 Minecart with Hopper (Vacuum)
 Mining Fatigue
+Missing fuel / coolant
+Missing input
 Mobs defeated
 Mobs: {}  Particles: {}
 Mod "{}" has {} problem(s): see the Mods screen.
@@ -1488,8 +1509,10 @@ Nearest structure: none nearby
 Nearest structure: {} at {}, {}, {}
 Nearly There
 Needle in a Haystack
+Needs daylight and clear sky
 Needs fuel: coal, wood, sticks...
 Needs level {}
+Needs power
 Needs {} gold
 Neighbours say they are "fine with it". Somebody has already moved in.
 Nest Egg
@@ -1640,6 +1663,9 @@ Orange
 Orange Terracotta
 Other hand
 Other hand (a shield, torches...)
+Output
+Output full
+Outputs
 Oxidized Copper (Statue Chic)
 Oyster
 PRESSURE - EASE OFF!
@@ -1663,6 +1689,7 @@ Particles: All
 Particles: Fewer
 Particles: Minimal
 Passing Trade
+Passive cooling for reactors within three blocks.
 Password (if the server has one)
 Password removed: anyone can join.
 Password required to join
@@ -1674,6 +1701,7 @@ Peaceful (Nobody Hisses)
 Peak Performance
 Pearl Brooch (Fancy, Damp)
 Pearlescent Froglight (Fancy Glow)
+Pellet + coolant -> 4 cells + waste; 15s; needs tower.
 Perfect. A tear rolls down your blocky cheek.
 Persona Non Grata
 Personal Chest (Yours Alone)
@@ -1744,6 +1772,8 @@ Potatoes
 Potion of Regeneration (Get Well Soon)
 Potion of Strength (Flex)
 Pottery Shard ({})
+Power
+Power cell
 Powered Rail (Zoom)
 Press a key or mouse button (Esc: leave it empty).
 Pressure (let go to ease off)
@@ -1882,6 +1912,9 @@ Round ends in
 Router address didn't resolve
 Router description request failed (HTTP {}).
 Ruined Tower (Structurally Optimistic)
+Run a stocked machine. The button finally does something useful.
+Run once
+Running
 SAVE FAILED: {}
 SERVICES: walls built, roofs mended. No Hissers, please.
 SNAP! The line broke. The fish is telling all its friends about you.
@@ -2002,6 +2035,7 @@ Small
 Small Ads
 Small Amethyst Bud (Patience)
 Smash Hit
+Smelt one item in 4 powered seconds; 8 energy/s.
 Smith (Hits Things Professionally)
 Smithing Table (Hammer Time)
 Smoker (Food, Fast)
@@ -2086,6 +2120,7 @@ Squawker
 Squawker squawks
 Staked a Claim
 Stalac-tight
+Stand beside a {} and load its input slots.
 Stand in a beacon's light. The Wyrm's egg, finally useful.
 Stand on a Magma Block without sneaking. Ow.
 Stand on a sandy beach. Mind the sand in your boots.
@@ -2115,9 +2150,13 @@ Stone Bricks (Fancy Rocks)
 Stone Spear (Flint-ish)
 Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier. Tools wear out. Eat to heal.
 Stony Peaks (Rock Bottom, but Up)
+Stop
 Stop a creaking ceiling from coming down.
+Stopped
 Stopped: {} shows a different key than last time ({} before, {} now). Someone may be pretending to be it. If its owner reset it, choose it and press Forget Key.
 Stopping server...
+Storage full
+Store solar power or discharge cells. Charge empty cells.
 Storm Rattles Rooftops
 Stove
 Stove approves!
@@ -2450,6 +2489,7 @@ Visit the badlands. Admire the terracotta. Don't lick it.
 WANIPConnection
 WANPPPConnection
 WANTED: anyone who has seen a diamond. Just to talk.
+Waiting for host...
 Wake The Hush. Bold choice.
 Wake a Dried Floaty by putting it next to water.
 Walk Backward
@@ -2557,6 +2597,7 @@ Woolly Hat (Hand-Knitted)
 Woolly Jumper (Itchy)
 Woolly Socks (For Sandals)
 Woolly Trousers (Very Itchy)
+Work: {}%
 World Begins
 World Border: None
 World Border: {} blocks
@@ -2858,6 +2899,7 @@ hugged a Pokey Plant. We said not to.
 hung on the east wall
 id is in the palette
 ids moved
+invalid machine state
 invalid meal
 invalid meal animation
 invalid rocket flight
@@ -2940,7 +2982,7 @@ line {}: projectile_model should be arrow, billboard or cube, not "{}"
 line {}: projectile_scale should be a finite number
 line {}: projectile_spread should be a finite number
 line {}: repair: unknown item "{}"
-line {}: shape should be slab or stairs, or rocket_engine/rocket_body/rocket_nose, not {}
+line {}: shape should be slab, stairs, industrial, or rocket_engine/rocket_body/rocket_nose, not {}
 line {}: sky \= {}: not a colour
 line {}: smelts_into: unknown item "{}"
 line {}: sound should be stone, wood, grass, sand or glass, not {}
@@ -3216,6 +3258,7 @@ too dark
 too many chunks
 too many edits
 too many files in pack
+too many machine states
 too many meals
 too many mods in pack
 too many rocket flights
@@ -3557,6 +3600,7 @@ zombie hmmer
 {}: {} not {}
 {}: {} of {} blocks differ from the host's, e.g. {}
 {}: {}, at {}, {}, {}{}
+{}: {}. Ingredients come from its input slots.
 {}: {}; kept as .bad
 {}Potion of {}
 {}{} blocks, {} items, {} recipes{}

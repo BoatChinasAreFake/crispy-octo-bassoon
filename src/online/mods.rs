@@ -1127,11 +1127,12 @@ fn fill_shape(ctx: &mut Ctx, m: &ModSource, s: &Section, id: Id, errs: &mut Vec<
         None | Some("cube") => return,
         Some("slab") => vec![Shape::Slab { top: false }, Shape::Slab { top: true }],
         Some("stairs") => (0..4).map(|facing| Shape::Stairs { facing }).collect(),
+        Some("industrial") => vec![Shape::Full],
         Some("rocket_engine") => vec![Shape::RocketEngine],
         Some("rocket_body") => vec![Shape::RocketBody],
         Some("rocket_nose") => vec![Shape::RocketNose],
         Some(other) => {
-            errs.push(format!("line {}: shape should be slab or stairs, or rocket_engine/rocket_body/rocket_nose, not {other}", s.line));
+            errs.push(format!("line {}: shape should be slab, stairs, industrial, or rocket_engine/rocket_body/rocket_nose, not {other}", s.line));
             return;
         }
     };
@@ -1150,9 +1151,9 @@ fn fill_shape(ctx: &mut Ctx, m: &ModSource, s: &Section, id: Id, errs: &mut Vec<
         b.key = key;
         b.model = Model::Shaped;
         b.shape = shape;
-        b.solid = true;
+        b.solid = if shape == Shape::Full { base.solid } else { true };
         b.opaque = false;
-        b.see_through = false;
+        b.see_through = shape == Shape::Full && base.see_through;
         b.family = id;
         b.full = full;
         b.creative = k == 0 && base.creative;

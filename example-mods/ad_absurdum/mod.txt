@@ -271,6 +271,7 @@ tool = pickaxe
 tier = 1
 
 [block refinery]
+shape = industrial
 name = Fossil-Free Fuel Refiner
 texture = panel
 hardness = 2
@@ -278,6 +279,7 @@ tool = pickaxe
 tier = 1
 
 [block oxygen_generator]
+shape = industrial
 name = Breath Printer
 texture = oxygen
 hardness = 2
@@ -292,6 +294,7 @@ tool = pickaxe
 tier = 1
 
 [block solar_panel]
+shape = industrial
 name = Sun Tax Panel
 texture = panel
 hardness = 2
@@ -1064,3 +1067,45 @@ dwwwwwwwwwwwwwwd
 dwbwwwwwwwwwwbwd
 dwwwwwwwwwwwwwwd
 dddddddddddddddd
+
+[item empty_battery]
+name = Discharged Solar Battery
+texture = steel
+
+[block power_bank]
+shape = industrial
+name = Base Battery Bank
+texture = panel
+hardness = 2
+tool = pickaxe
+
+[block cable]
+shape = industrial
+name = Base Power Cable
+texture = steel
+solid = false
+transparent = true
+hardness = 0.5
+
+[block electric_furnace]
+shape = industrial
+name = Electric Smelter
+texture = engine
+hardness = 2
+tool = pickaxe
+
+[recipe]
+inputs = steel 4, glass 2, circuit 1
+output = power_bank 1
+
+[recipe]
+inputs = steel 2, zap_dust 1
+output = cable 8
+
+[recipe]
+inputs = steel 4, furnace 1, circuit 1
+output = electric_furnace 1
+
+[recipe]
+inputs = steel 1, glass 1
+output = empty_battery 2
