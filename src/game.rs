@@ -414,6 +414,7 @@ pub struct Game {
     pub editing_sign: Option<IVec3>,
     /// Boats and minecarts (see vehicles.rs), the one we're in, and time to the next sync.
     pub vehicles: Vec<crate::vehicles::Vehicle>,
+    pub rockets: Vec<crate::rockets::RocketFlight>,
     pub next_vehicle_id: u32,
     pub riding: Option<u32>,
     pub vehicle_sync: f32,
@@ -704,6 +705,7 @@ impl Game {
             portal_links: HashMap::new(),
             editing_sign: None,
             vehicles: Vec::new(),
+            rockets: Vec::new(),
             next_vehicle_id: 0,
             riding: None,
             vehicle_sync: 0.0,
@@ -1546,7 +1548,7 @@ impl Game {
             // In bed: no walking about (jumping or sneaking gets you up).
             self.sleep_tick(dt, c.input.jump_pressed || c.input.sneak);
             0.0
-        } else if self.riding.is_none() && self.mounted.is_none() {
+        } else if self.riding.is_none() && self.mounted.is_none() && self.rocket_pilot().is_none() {
             self.player.update(dt, &c.input, &self.world, self.creative)
         } else {
             0.0
@@ -1554,6 +1556,7 @@ impl Game {
         if self.player.jumped {
             self.stats.jumps += 1;
         }
+        self.rockets_tick(dt);
         self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
         self.ride_tick(dt, c.input.forward, c.input.strafe, c.input.jump, c.input.sneak);
         self.track_travel(before, dt);
@@ -1615,7 +1618,7 @@ impl Game {
         self.spyglass = looking;
         self.player.blocking = self.blocking;
         self.use_cd = (self.use_cd - dt).max(0.0);
-        self.handle_actions(dt, c);
+        if self.rocket_pilot().is_none() {self.handle_actions(dt, c);}
         self.update_fishing(dt, c.use_held);
         self.update_brushing(dt, c.use_held);
         self.inventory_sync_tick(dt);
@@ -1811,6 +1814,9 @@ impl Game {
                         }
                     }
                 }
+                Cmd::RocketDepart(p,at,tier,left) => self.rocket_stage(&p,false,at,tier,left),
+                Cmd::RocketLand(p,tier,left) => self.rocket_land(&p,tier,left),
+                Cmd::RocketClear(p) => self.rocket_clear(&p),
                 Cmd::Launch(p, v) => {
                     if self.is_local_player(&p) {
                         self.player.body.vel.y = v;
@@ -4640,6 +4646,8 @@ impl Game {
         }
         // Other players
         for (id, p) in self.peers.iter().filter(|(_, p)| p.alive()) {
+            // Pilots are enclosed by the rocket hull; do not draw limbs through it.
+            if self.rockets.iter().any(|f|f.pilot==*id) {continue;}
             let sky = self.world.sky_shade(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
             let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
@@ -4660,7 +4668,7 @@ impl Game {
             crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
         }
         // The player, in third person
-        if self.third_person && !self.menu && !self.spectator {
+        if self.third_person && !self.menu && !self.spectator && self.rocket_pilot().is_none() {
             let p = &self.player;
             let sky = self.world.sky_shade(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
@@ -4692,6 +4700,7 @@ impl Game {
             self.draw_weather(&mut g, eye);
         }
         self.draw_vehicles(&mut g);
+        self.draw_rockets(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_leads(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
@@ -4744,7 +4753,7 @@ impl Game {
                 }
         }
 
-        if !self.third_person && !self.spectator {
+        if !self.third_person && !self.spectator && self.rocket_pilot().is_none() {
             self.draw_hand(&mut g, cam);
         }
         g

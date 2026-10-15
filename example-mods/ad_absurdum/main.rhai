@@ -83,14 +83,15 @@ fn on_chat(player,text) {
             if parse_int(chosen.tier)<tiers[destination] {message(player,"This rocket tier cannot reach that world.");return false;}
             if get_block_in(d,chosen.at[0],chosen.at[1],chosen.at[2])!="ad_absurdum:launch_pad" {message(player,"The launch pad is missing.");return false;}
             for y in 1..6 {let expected=if y==1 {"rocket_engine"}else if y==5 {"rocket_nose"}else{"rocket_body"};if get_block_in(d,chosen.at[0],chosen.at[1]+y,chosen.at[2])!=`ad_absurdum:${expected}` {message(player,"The rocket is incomplete; launch cancelled.");return false;}}
+            for y in 6..55 {if get_block_in(d,chosen.at[0],chosen.at[1]+y,chosen.at[2])!="air" {message(player,"Clear the vertical launch column above the rocket before launching.");return false;}}
             let bench=nearby(player,"rocket_workbench");if bench==() {message(player,"A rocket bench must be nearby for preflight checks.");return false;}
             if !pay(player,[["ad_absurdum:fuel",tiers[destination]]]) {return false;}
             if d=="overworld" {set_var(`home_${player}`,[p[0],p[2]]);}
             let landing=if destination=="home" {home}else{[p[0],p[2]]};
-            flights.push(#{owner:player,origin:d,target:target,at:chosen.at,tier:chosen.tier,left:4,landing:landing});set_var("flights",flights);set_var("rockets",keep);
+            flights.push(#{owner:player,origin:d,target:target,at:chosen.at,tier:chosen.tier,left:4.0,arriving:false,landing:landing});set_var("flights",flights);set_var("rockets",keep);
             for y in 1..6 {set_block_in(d,chosen.at[0],chosen.at[1]+y,chosen.at[2],"air");}
             set_block_in(d,chosen.at[0],chosen.at[1],chosen.at[2],"air");set_block_in(d,bench[0],bench[1],bench[2],"air");
-            launch(player,28);message(player,`Liftoff! Autopilot landing on ${target} in four seconds.`);
+            rocket_depart(player,chosen.at[0],chosen.at[1]+1,chosen.at[2],parse_int(chosen.tier),4);message(player,`Liftoff! Autopilot ascent to ${target}, followed by a powered landing. F5 switches exterior view.`);
         }
         "rover" => {if mob_count_in(d)>=40 {message(player,"Too many creatures for another rover.");} else if pay(player,[["ad_absurdum:rover",1]]) {spawn_mob_in(d,"ad_absurdum:rover",p[0]+2,p[1],p[2]);message(player,"Tame the rover with a Flight Circuit. It follows and trades batteries for supplies.");}}
         "status" => {message(player,`Location: ${d}. Oxygen buffer: ${value(`air_${player}`,0)} seconds. Worlds visited: ${score_get("astra_visits",player)}.`);}
@@ -99,19 +100,32 @@ fn on_chat(player,text) {
     false
 }
 fn on_tick(dt) {
-    let acc=value("acc",0.0)+dt;if acc<1.0 {set_var("acc",acc);return;}set_var("acc",acc-1.0);
     let flights=[];
     for flight in get_var("flights") {
-        if !players().contains(flight.owner) {flights.push(flight);continue;}
-        flight.left-=1;
-        if flight.left<=0 {
-            travel(flight.owner,flight.target,flight.landing[0],flight.landing[1]);
-            give(flight.owner,`ad_absurdum:rocket_${flight.tier}`,1);give(flight.owner,"ad_absurdum:launch_pad",1);give(flight.owner,"ad_absurdum:rocket_workbench",1);
-            let visit=`visited_${flight.owner}_${flight.target}`;if value(visit,false)!=true {score_add("astra_visits",flight.owner,1);set_var(visit,true);}
-            message(flight.owner,"Landing complete. Rocket recovered; deploy the returned pad and bench for the next launch.");
-        } else {flights.push(flight);}
+        if !players().contains(flight.owner) || player_health(flight.owner)<=0 {flights.push(flight);continue;}
+        let arriving=flight.contains("arriving") && flight.arriving;
+        if arriving {
+            if player_dimension(flight.owner)!=flight.target {rocket_clear(flight.owner);travel(flight.owner,flight.target,flight.landing[0],flight.landing[1]);rocket_land(flight.owner,parse_int(flight.tier),flight.left);flights.push(flight);continue;}
+            rocket_land(flight.owner,parse_int(flight.tier),flight.left);flight.left-=min(dt,1.0);
+            if flight.left<=0 {
+                rocket_clear(flight.owner);
+                give(flight.owner,`ad_absurdum:rocket_${flight.tier}`,1);give(flight.owner,"ad_absurdum:launch_pad",1);give(flight.owner,"ad_absurdum:rocket_workbench",1);
+                let visit=`visited_${flight.owner}_${flight.target}`;if value(visit,false)!=true {score_add("astra_visits",flight.owner,1);set_var(visit,true);}
+                message(flight.owner,"Touchdown complete. Rocket recovered; deploy the returned pad and bench for the next launch.");
+            } else {flights.push(flight);}
+        } else {
+            rocket_depart(flight.owner,flight.at[0],flight.at[1]+1,flight.at[2],parse_int(flight.tier),flight.left);flight.left-=min(dt,1.0);
+            if flight.left<=0 {
+                rocket_clear(flight.owner);travel(flight.owner,flight.target,flight.landing[0],flight.landing[1]);
+                flight.arriving=true;flight.left=3.0;rocket_land(flight.owner,parse_int(flight.tier),3);
+                message(flight.owner,"Atmospheric entry. Autopilot is lowering the rocket to the landing site.");
+            }
+            flights.push(flight);
+        }
     }
     set_var("flights",flights);
+    let acc=value("acc",0.0)+dt;if acc<1.0 {set_var("acc",acc);return;}set_var("acc",acc-1.0);
+
     let spawn_clock=value("spawn_clock",0)+1;set_var("spawn_clock",spawn_clock%20);
     for player in players() {
         set_var(`charge_${player}`,max(0,value(`charge_${player}`,0)-1));

@@ -15,7 +15,7 @@ pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, me
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stalls, stash, together, trading, trims, villageblocks, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{animals, beasts, bees, bounties, creaking, critters, entity, floaty, horses, leads, nametags, night, paper, pathing, raids, reputation, skins, sniffers, village_growth, village_life, villagers, wildlife, wilter};
-pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rules, stats, tools, vehicles, xp};
+pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rockets, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, post, scripting, server, servers, teams};
 mod screens;
 mod shots;
@@ -1755,6 +1755,7 @@ impl App {
             }
             _ => {
                 self.hud();
+                self.game.rocket_cockpit();
                 if !self.game.menu && self.game.ready {
                     self.navigation_hud(get_frame_time().min(0.05));
                     self.effects_hud();

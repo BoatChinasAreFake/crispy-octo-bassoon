@@ -43,6 +43,9 @@ pub enum Cmd {
     Travel(String, crate::dims::Dim, i32, i32),
     InRealm(crate::dims::Dim, Box<Cmd>),
     Launch(String, f32),
+    RocketDepart(String,Vec3,u8,f32),
+    RocketLand(String,u8,f32),
+    RocketClear(String),
     Explode(Vec3, f32),
     Spawn(u8, Vec3),
     SetTime(f32),
@@ -339,6 +342,11 @@ fn register_api(e: &mut Engine) {
         let p = Vec3::new(num(&x)? as f32, (num(&y)? as f32).clamp(-10.0, 400.0), num(&z)? as f32);
         push(Cmd::Teleport(player.into(), p))
     });
+    e.register_fn("rocket_depart", |player:&str,x:Dynamic,y:Dynamic,z:Dynamic,tier:INT,left:Dynamic| -> Res<()> {
+        push(Cmd::RocketDepart(player.into(),Vec3::new(coord(&x)? as f32+0.5,coord(&y)? as f32,coord(&z)? as f32+0.5),tier.clamp(1,4) as u8,num(&left)?.clamp(0.0,4.0) as f32))
+    });
+    e.register_fn("rocket_land", |player:&str,tier:INT,left:Dynamic| -> Res<()> {push(Cmd::RocketLand(player.into(),tier.clamp(1,4) as u8,num(&left)?.clamp(0.0,3.0) as f32))});
+    e.register_fn("rocket_clear", |player:&str| push(Cmd::RocketClear(player.into())));
     e.register_fn("launch", |player: &str, v: Dynamic| -> Res<()> { push(Cmd::Launch(player.into(), num(&v)?.clamp(-60.0, 60.0) as f32)) });
     e.register_fn("explode", |x: Dynamic, y: Dynamic, z: Dynamic, r: Dynamic| -> Res<()> {
         push(Cmd::Explode(Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32), num(&r)?.clamp(0.5, 8.0) as f32))

@@ -243,7 +243,10 @@ A swarm moved into your empty hive! Free bees. The best kind.
 A team needs a name (letters, numbers, - and _).
 A treasure map! It leads to... the spot where you're standing. Congratulations.
 A {} queen and {} bee{}, {}, with {}% honey and {}% comb, {}, health {}%, {}, {}
+ALT {}   |   {}s   |   F5: exterior view
 APPDATA
+ASCENT
+AUTOPILOT  |  TIER {}  |  {}
 Abandoned Mineshaft (Mind the Webs)
 Acacia
 Accept
@@ -769,6 +772,7 @@ Disabled
 Disconnect
 Disliked
 Dispenser (Spits Things)
+Display
 Distance flown
 Distance ridden
 Distance swum
@@ -1260,6 +1264,7 @@ Knight Errant
 Knock some Resin out of a Creaking's heart.
 LAN Party
 LAN address: {}:{}
+LANDING
 LEGENDARY! You caught BIG BOB, all {}cm of him. He looks disappointed in you.
 LINE TENSION - EASE OFF!
 LOST: one Clanker's patience. If found, please do not return it.
@@ -2816,6 +2821,7 @@ hugged a Pokey Plant. We said not to.
 hung on the east wall
 id is in the palette
 ids moved
+invalid rocket flight
 inventory too long
 islands and beach ecology
 it finishes
@@ -3172,6 +3178,7 @@ too many chunks
 too many edits
 too many files in pack
 too many mods in pack
+too many rocket flights
 too many world changes in one event
 too soon
 too wide: prop it up

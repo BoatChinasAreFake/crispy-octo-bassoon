@@ -458,6 +458,20 @@ impl App {
     pub(crate) fn shot_setup(&mut self, s: &mut ShotArgs) {
         let app = self;
         match s.mode.as_str() {
+            "rocket_inflight" | "rocket_landing" | "rocket_cockpit" => {
+                let mut g=shot_game(424242,true,false);let landing=s.mode=="rocket_landing";
+                if landing && let Some(k)=block::reg().dims.iter().position(|d|d.key=="ad_absurdum:moon") {g.move_local_player(dims::Dim::Mod(k as u8),Vec3::new(0.0,82.0,0.0));}
+                for z in -2..=2 {for x in -2..=2 {g.world.load_now(x,z);}}
+                for z in -16..=16 {for x in -16..=16 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {STONE}else{AIR});}}}
+                g.mobs.clear();g.time=0.25;
+                let cockpit=s.mode=="rocket_cockpit";
+                let f=rockets::RocketFlight {owner:if cockpit {g.player_name.clone()}else{"Display".into()},pilot:if cockpit {g.my_id}else{u32::MAX},ground:Vec3::new(0.5,80.0,0.5),landing,elapsed:if landing {1.8}else{1.5},tier:1};
+                let target=f.pos()+Vec3::Y*2.5;
+                let from=if cockpit {f.seat()}else{target+Vec3::new(7.0,1.5,10.0)};
+                let d=target-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),if cockpit {0.0}else{d.x.atan2(-d.z)},if cockpit {-0.1}else{d.y.atan2(Vec2::new(d.x,d.z).length())});
+                g.rockets.push(f);g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
+            }
             "dusk_trees" => {
                 let mut g=shot_game(424242,true,false);
                 if let Some(k)=block::reg().dims.iter().position(|d|d.key=="dusk:twilit_realm") {g.move_local_player(dims::Dim::Mod(k as u8),Vec3::new(0.0,90.0,0.0));}
@@ -1099,10 +1113,11 @@ impl App {
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
                 }
-                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dubiety_glutton"|"dusk_trees") {
+                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dubiety_glutton"|"dusk_trees"|"rocket_inflight"|"rocket_landing"|"rocket_cockpit") {
                     for m in &mut app.game.mobs {if let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
                     app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
                 }
+                if s.mode=="rocket_cockpit" && let Some(f)=app.game.rockets.first_mut() {f.elapsed=1.5;app.game.player.body.pos=f.seat();}
                 if matches!(s.mode.as_str(),"coastal_floor"|"coastal_fish"|"coastal_starfish") {
                     // Keep these controlled model-review poses in view.
                     for m in &mut app.game.mobs {if m.kind.coastal() && let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
@@ -2551,7 +2566,7 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
-    "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
+    "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
 ];

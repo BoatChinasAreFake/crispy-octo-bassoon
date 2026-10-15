@@ -520,6 +520,7 @@ impl Game {
         v.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
         v.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
         v.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+        v.push(Msg::RocketFlights(self.rockets.clone()));
         v.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
         v
     }
@@ -1330,6 +1331,7 @@ impl Game {
             }
             Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
             Msg::Vehicles(list) => self.apply_vehicles(list),
+            Msg::RocketFlights(list) => self.rockets=list,
             Msg::SignText { x, y, z, lines } => {
                 self.world.signs.insert(IVec3::new(x, y, z), crate::decor::clean_lines(&lines));
             }
@@ -1668,6 +1670,7 @@ impl Game {
         }
         if self.is_host() {
             if mobs_due {
+                self.net_broadcast(Msg::RocketFlights(self.rockets.clone()));
                 let mobs = self
                     .mobs
                     .iter()
@@ -2727,12 +2730,17 @@ mod tests {
             assert!(pump(&mut host,&mut client,|_,c|c.world.get(x+1,y,z)==find("ad_absurdum:launch_pad")));
             client.send_chat("/astra assemble 1");assert!(pump(&mut host,&mut client,|_,c|c.world.get(x+1,y+5,z)==find("ad_absurdum:rocket_nose")));
             client.send_chat("/astra launch moon");
+            assert!(pump(&mut host,&mut client,|_,c|c.rocket_pilot().is_some_and(|f|!f.landing)));
+            let ascent=client.player.body.pos.y;
+            for _ in 0..10 {host.update(0.05,&idle());client.update(0.05,&idle());}
+            assert!(client.player.body.pos.y>ascent);
             for _ in 0..100 {host.update(0.05,&idle());client.update(0.05,&idle());}
             let moon=Dim::Mod(r.dims.iter().position(|d|d.key=="ad_absurdum:moon").unwrap() as u8);
             assert!(pump(&mut host,&mut client,|h,c|c.dim==moon && h.peer_dim(peer)==Some(moon)));
             assert_eq!(host.realm_dim(),Dim::Over);assert!(client.scripts.is_none());
+            assert!(client.rocket_pilot().is_some_and(|f|f.landing));
             assert_eq!(host.peer_ref(peer).unwrap().ledger.bag.count(find("ad_absurdum:fuel")),1);
-            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(find("ad_absurdum:rocket_1"))==1));
+            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(find("ad_absurdum:rocket_1"))==1 && c.rockets.is_empty()));
             assert_eq!(client.world.generator.mod_dim().unwrap().gravity,0.17);
             client.send_chat("/dubiety remember Bring fuel home");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.contains("Dubiety remembers: Bring fuel home"))));
             client.send_chat("/dubiety ask space oxygen");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.starts_with("Dubiety:"))));

@@ -94,8 +94,12 @@ fn rockets_charge_fuel_recover_gear_and_land_in_a_separate_planet() {
         for y in 90..95 {g.world.set_or_record(5,y,4,AIR);}
         chat(&mut g,"/astra assemble 1");assert_eq!(g.inv.count(id("ad_absurdum:rocket_1")),0);
         chat(&mut g,"/astra launch mars");assert_eq!(g.inv.count(id("ad_absurdum:fuel")),2,"higher-tier destination rejected");
-        chat(&mut g,"/astra launch moon");assert_eq!(g.inv.count(id("ad_absurdum:fuel")),1);tick(&mut g,4);
-        assert_eq!(g.dim,dim("ad_absurdum:moon"));assert_eq!(g.inv.count(id("ad_absurdum:rocket_1")),1);
+        chat(&mut g,"/astra launch moon");assert_eq!(g.inv.count(id("ad_absurdum:fuel")),1);tick(&mut g,2);
+        let mut back=Game::from_save(g.to_save());back.player_name="Tester".into();back.start_scripts_with(&sources());
+        assert!(back.rockets.is_empty());tick(&mut back,1);assert_eq!(back.rocket_pilot().unwrap().elapsed,2.0);
+        g=back;tick(&mut g,1);
+        assert_eq!(g.dim,dim("ad_absurdum:moon"));assert!(g.rockets.iter().any(|f|f.landing));assert_eq!(g.inv.count(id("ad_absurdum:rocket_1")),0);
+        tick(&mut g,3);assert!(g.rockets.is_empty());assert_eq!(g.inv.count(id("ad_absurdum:rocket_1")),1);
         assert_eq!(g.inv.count(id("ad_absurdum:launch_pad")),1);assert_eq!(g.inv.count(id("ad_absurdum:rocket_workbench")),1);
         g.in_realm(Dim::Over,|g|{assert_eq!(g.world.get(5,89,4),AIR);assert_eq!(g.world.get(3,90,4),AIR);});
         assert!(g.world.get(g.player.body.pos.x.floor() as i32,g.player.body.pos.y.floor() as i32-1,g.player.body.pos.z.floor() as i32)!=AIR);
@@ -289,5 +293,29 @@ fn obesity_swallows_only_livestock_in_its_five_block_sphere_and_keeps_demanding(
         g.mobs.iter_mut().find(|m|m.id==glutton).unwrap().health=0.0;
         g.mobs.iter_mut().find(|m|m.id==outside).unwrap().body.pos=at;g.gluttons_tick(8.0);
         assert!(g.mobs.iter().any(|m|m.id==outside));
+    });
+}
+
+
+#[test]
+fn rocket_snapshots_attach_pilots_and_descent_reuses_its_safe_anchor() {
+    with_packs(||{
+        let mut g=game();g.mobs.clear();let ground=Vec3::new(4.5,90.0,4.5);
+        g.rocket_stage("Tester",false,ground,2,4.0);
+        g.rockets_tick(1.0);let first=g.player.body.pos;
+        g.rockets_tick(1.0);assert!(g.player.body.pos.y>first.y);
+        assert_eq!(g.player.body.pos,g.rocket_pilot().unwrap().seat());assert_eq!(g.player.body.vel,Vec3::ZERO);
+        let msg=crate::net::Msg::RocketFlights(g.rockets.clone());
+        assert_eq!(crate::net::Msg::decode(&msg.encode()).unwrap(),msg);
+        let mut bad=g.rockets.clone();bad[0].ground.y=f32::NAN;assert!(crate::net::Msg::decode(&crate::net::Msg::RocketFlights(bad).encode()).is_err());
+        // A script-started phase reconstructed after load begins at its saved remaining time.
+        g.rocket_clear("Tester");g.rocket_stage("Tester",false,ground,2,2.0);
+        assert_eq!(g.rocket_pilot().unwrap().elapsed,2.0);assert_eq!(g.rocket_pilot().unwrap().pos().y,ground.y+12.0);
+        g.rocket_clear("Tester");g.rocket_land("Tester",2,3.0);
+        let high=g.rocket_pilot().unwrap().pos().y;g.rockets_tick(1.5);
+        assert!(g.rocket_pilot().unwrap().pos().y<high);let anchor=g.rocket_pilot().unwrap().ground;
+        g.rocket_land("Tester",2,1.5);assert_eq!(g.rocket_pilot().unwrap().ground,anchor);
+        g.rockets_tick(1.5);assert_eq!(g.rocket_pilot().unwrap().pos(),anchor);
+        g.rocket_clear("Tester");assert!(g.rocket_pilot().is_none());assert_eq!(g.player.body.pos,anchor);
     });
 }

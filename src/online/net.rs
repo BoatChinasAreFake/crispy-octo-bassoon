@@ -54,7 +54,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v51: shaped rocket mod blocks render and collide consistently.
 /// v52: optional custom mod-tree silhouettes regenerate identically on peers.
 /// v53: glutton mod companions accept all offerings before ordinary interactions.
-pub const PROTOCOL: u32 = 53;
+/// v54: host-authoritative rocket flights and cockpit/landing snapshots.
+pub const PROTOCOL: u32 = 54;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -277,6 +278,7 @@ pub enum Msg {
     UsePortal { x: i32, y: i32, z: i32 },
     /// host -> client: every boat and minecart: (id, kind, position, yaw, rider id + 1 or 0).
     Vehicles(Vec<(u32, u8, Vec3, f32, u32)>),
+    RocketFlights(Vec<crate::rockets::RocketFlight>),
     /// client -> host: get in (0), get out (1) or hit (2) this vehicle.
     VehicleUse { id: u32, action: u8 },
     /// client -> host: where I've driven the vehicle I'm in.
@@ -989,6 +991,10 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
+            Msg::RocketFlights(list) => {
+                w.u8(113);w.u8(list.len().min(16) as u8);
+                for f in list.iter().take(16) {w.str(&f.owner);w.u32(f.pilot);w.v3(f.ground);w.u8(f.landing as u8);w.f32(f.elapsed);w.u8(f.tier);}
+            }
             Msg::Vehicles(list) => {
                 w.u8(49);
                 w.u32(list.len() as u32);
@@ -1459,6 +1465,13 @@ impl Msg {
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
             48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            113 => {
+                let n=r.u8()?;if n>16 {return Err(io::Error::new(io::ErrorKind::InvalidData,"too many rocket flights"));}
+                let mut list=Vec::new();for _ in 0..n {
+                    let f=crate::rockets::RocketFlight {owner:r.str()?,pilot:r.u32()?,ground:r.v3()?,landing:r.u8()?!=0,elapsed:r.f32()?,tier:r.u8()?};
+                    if !f.valid() {return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid rocket flight"));}list.push(f);
+                }Msg::RocketFlights(list)
+            }
             49 => {
                 let n = r.count(25)?;
                 let mut list = Vec::with_capacity(n);

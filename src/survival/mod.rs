@@ -20,3 +20,5 @@ pub(crate) mod stats;
 pub(crate) mod tools;
 pub(crate) mod vehicles;
 pub(crate) mod xp;
+
+pub(crate) mod rockets;

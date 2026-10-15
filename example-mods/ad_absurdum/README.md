@@ -11,9 +11,9 @@ An original space-tech parody inspired by [Ad Astra](https://github.com/terrariu
 3. Build a fuel refinery. `/astra refine` beside it consumes two Coal and one empty Tank to make two Fuel Canisters.
 4. Build a Breath Printer. `/astra refill` beside it consumes one Battery and one empty Tank to make four Oxygen Canisters. Batteries have a normal recipe; `/astra charge` at a Sun Tax Panel can also produce two from one Steel and one Zap Dust, once per minute per player.
 5. Craft and wear at least a spacesuit Helmet and Chestplate. Carry a Life Support Pack and oxygen. Leggings and Boots add armour; hot planets also require a Heat Shield.
-6. `/astra launch moon` checks the rocket, pad, nearby bench, suit, oxygen, tier and fuel before starting. The pilot launches upward; after four seconds, autopilot lands on the separate Moon dimension. The rocket, pad and bench are removed from the origin and returned as items at landing, so they can be deployed again without duplicating equipment.
+6. `/astra launch moon` checks the rocket, pad, nearby bench, suit, oxygen, tier and fuel before starting. A visible rocket carries the seated pilot through four seconds of ascent, then transfers to the separate Moon dimension for a three-second powered descent. The rocket, pad and bench are removed from the origin and returned as items after touchdown, so they can be deployed again without duplicating equipment.
 
-The engine looks for nearby dry solid ground and places the arriving pilot above it. Rocket flight is a short scripted departure followed by a realm transition, not orbital or vehicle physics. Each player owns their deployed rockets; up to 64 may be deployed and sixteen departures may run concurrently.
+The engine looks for nearby dry solid ground and places the arriving pilot above it. Rocket flight uses a visible, host-controlled autopilot vehicle: the pilot stays attached while it rises and descends, nearby observers see its moving hull, bright engine flame and drifting exhaust, and first-person pilots see a cockpit window frame and instrument panel. F5 switches to the exterior third-person view. The transition between planets remains a dimension change; this is not an orbital simulation. Each player owns their deployed rockets; up to 64 may be deployed and sixteen departures may run concurrently.
 
 ## Worlds and progression
 
@@ -43,3 +43,5 @@ Planet wildlife is host-spawned near visiting players with local/global limits. 
 Rockets, pending flights, departure points, oxygen buffers, solar cooldowns and exploration scores persist with the world. Disconnected pilots' departures pause until they return. Each planet has its own saved realm. Crafting a Tier 1 rocket earns **Rocket Paperwork**.
 
 The deployed rocket now has a narrow faceted white fuselage with red trim, a tapered red nose, a dark bell nozzle and four swept red fins. Its five-block assembly and saved block keys are unchanged. The three rocket shape presets keep rendering and collision consistent across clients (protocol 51).
+
+Flight snapshots synchronize the phase, pilot, safe ground anchor and progress to joining players. Saved script flight records reconstruct a pending ascent or descent after loading; offline pilots pause. Equipment is returned once, after touchdown. Protocol 54 is required. `rocket_inflight`, `rocket_landing` and `rocket_cockpit` stage the actual flight renderer for visual checks.
