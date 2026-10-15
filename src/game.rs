@@ -1495,6 +1495,7 @@ impl Game {
         };
         self.net_receive(dt);
         self.update_local(dt, c);
+        self.tick_player_pose(dt);
         self.foreign_tick(dt);
         self.net_send(dt);
     }
@@ -2801,6 +2802,7 @@ impl Game {
         }
         if held == PUFFER {
             self.use_up_held();
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.player.hurt = 0.0;
             self.hurt_player(4.0, "ate a Pufferfish. It said 'Do Not Eat' right on it");
@@ -2810,6 +2812,7 @@ impl Game {
         }
         if held == COOKED_PUFFER {
             self.use_up_held();
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.player.hurt = 0.0;
             self.hurt_player(2.0, "ate a Cooked Pufferfish. Cooking it did not help");
@@ -2821,6 +2824,7 @@ impl Game {
             // Suspicious for a reason.
             let heal = self.rng.range(-3.0, 8.0).round();
             self.use_up_held();
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.player.hunger.eat(6.0, 0.6);
             if heal < 0.0 {
@@ -2875,6 +2879,7 @@ impl Game {
                 let me = self.my_id;
                 self.give_effect_to(me, crate::potions::Potion::BadOmen, crate::raids::OMEN_SECS);
             }
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.msg("You feel a Bad Omen. Something's going to go wrong (on purpose).");
             if !self.creative {
@@ -2928,7 +2933,8 @@ impl Game {
                 if !self.creative {
                     self.use_up_held();
                 }
-                self.sfx(Sfx::Eat, None);
+                self.animate_consumption(held);
+            self.sfx(Sfx::Eat, None);
                 self.msg(match held {
                     GOO => "You ate Groaner Goo. You feel... gooey.",
                     MUTTON => "Raw Baa-con. Crunchy? No. Wool-adjacent? Yes.",
@@ -3027,6 +3033,7 @@ impl Game {
             self.player.hunger.eat(14.0, 0.1);
             self.world.set_v(hit_pos, AIR);
             self.block_particles_tile(hit_pos, T_CAKE_SIDE, 12);
+            self.animate_consumption(CAKE);
             self.sfx(Sfx::Eat, None);
             self.msg("You ate the whole cake in one bite. The cake was not a lie.");
             self.advance("cake");
@@ -3738,6 +3745,7 @@ impl Game {
                 .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
                 .unwrap_or((u32::MAX, ppos));
             let evs = m.update(dt, &self.world, target, target_id != u32::MAX, daylight, &mut self.rng);
+            crate::swallow::focus(m,&self.swallows);
             let id = m.id;
             events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
             if fuse_before == 0.0 && m.fuse > 0.0 && !crate::monument::is_guardian(m.kind) {
@@ -4656,21 +4664,22 @@ impl Game {
             let sky = self.world.sky_shade(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
             let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
-            let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
-            let gliding = p.flags & crate::net::FLAG_GLIDE != 0;
+
+
             // Asleep: lying in the bed they're on.
             let bed = p.pos.floor().as_ivec3();
             let asleep = p.flags & crate::net::FLAG_SLEEP != 0 && crate::beds::is_bed(self.world.get_v(bed));
             let root = if asleep {
                 crate::beds::pose(bed, crate::beds::facing(self.world.get_v(bed)))
             } else {
-                Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding)
+                Mat4::from_translation(p.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root()
             };
             match self.skin_slot(*id) {
-                Some(slot) => draw_model(&mut g, &root, &crate::skins::model(slot), p.anim, sky, true),
-                None => draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true),
+                Some(slot) => crate::poses::draw_parts(&mut g,&root,&crate::skins::model(slot),if asleep {Default::default()}else{p.animation.pose},sky),
+                None => crate::poses::draw_parts(&mut g,&root,&crate::nametags::SKIN_MODELS[p.skin as usize % 6],if asleep {Default::default()}else{p.animation.pose},sky),
             }
-            crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
+            crate::entity::draw_player_armor(&mut g,&root,p.armor,p.trims,sky,if asleep {Default::default()}else{p.animation.pose});
+            if !asleep {crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
         }
         // The player, in third person
         if self.third_person && !self.menu && !self.spectator && self.rocket_pilot().is_none() {
@@ -4680,13 +4689,14 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let root = match self.sleeping {
                 Some(s) => crate::beds::pose(s.bed, crate::beds::facing(self.world.get_v(s.bed))),
-                None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding),
+                None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root(),
             };
             match self.skin_slot(crate::skins::ME) {
-                Some(slot) => draw_model(&mut g, &root, &crate::skins::model(slot), p.bob * 2.0, sky, true),
-                None => draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true),
+                Some(slot) => crate::poses::draw_parts(&mut g,&root,&crate::skins::model(slot),if self.sleeping.is_some() {Default::default()}else{p.animation.pose},sky),
+                None => crate::poses::draw_parts(&mut g,&root,&crate::nametags::SKIN_MODELS[self.skin as usize % 6],if self.sleeping.is_some() {Default::default()}else{p.animation.pose},sky),
             }
-            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), crate::trims::look(&self.inv.armor, &self.inv.armor_wear), p.bob * 2.0, sky, p.gliding);
+            crate::entity::draw_player_armor(&mut g,&root,self.inv.armor_look(),crate::trims::look(&self.inv.armor,&self.inv.armor_wear),sky,if self.sleeping.is_some() {Default::default()}else{p.animation.pose});
+            if self.sleeping.is_none() {crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
         }
         // Primed TNT
         for t in &self.tnts {
@@ -4775,11 +4785,24 @@ impl Game {
         let s = self.player.swing;
         let swing = (s * PI).sin();
         let bob = self.player.bob;
-        let local = Mat4::from_translation(Vec3::new(0.42 - swing * 0.15, -0.42 + (bob * 2.0).sin().abs() * 0.03 + swing * 0.12, -0.72 - swing * 0.1))
+        let mut local = Mat4::from_translation(Vec3::new(0.42 - swing * 0.15, -0.42 + (bob * 2.0).sin().abs() * 0.03 + swing * 0.12, -0.72 - swing * 0.1))
             * Mat4::from_rotation_x(-swing * 0.9);
         let held = self.inv.held();
+        let meal=self.player.animation.meal;
+        let held=meal.map(|m|m.item).unwrap_or(held);
+        if let Some(m)=meal {
+            let w=m.weight();let bob=(m.elapsed*19.0).sin()*0.025;
+            local=Mat4::from_translation(Vec3::new(0.42-0.31*w,-0.42+(0.23+bob)*w,-0.72+0.20*w))
+                *Mat4::from_rotation_z(if crate::poses::drink(m.item) {0.65*w}else{bob*3.0});
+        }
         let tint = if self.player.hurt > 0.3 { [1.0, 0.6, 0.6, 1.0] } else { [1.0; 4] };
         g.begin(Pass::Overlay, tint, false);
+        if meal.is_some() {
+            let hand=basis*local*Mat4::from_translation(Vec3::new(-0.05,-0.20,0.03))*Mat4::from_scale(Vec3::new(0.12,0.23,0.12));
+            let parts=&crate::nametags::SKIN_MODELS[self.skin as usize%6];
+            let tiles=self.skin_slot(crate::skins::ME).map(|slot|crate::skins::model(slot)[4].tiles).unwrap_or(parts[4].tiles);
+            g.cube(&hand,tiles,sky,[0.0,0.0,1.0,1.0]);
+        }
         if held == AIR {
             // The forearm rises from below the bottom-right corner toward the
             // crosshair, like a raised fist; the sleeve covers its near end.
@@ -5016,14 +5039,6 @@ fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
     Some(t0)
 }
 
-/// Gliding players lie flat, head first (turned about the middle of the body).
-fn glide_pose(gliding: bool) -> Mat4 {
-    if !gliding {
-        return Mat4::IDENTITY;
-    }
-    let mid = Vec3::Y * 0.9;
-    Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
-}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -5043,6 +5058,20 @@ pub(crate) mod tests {
             }
         }
         w
+    }
+
+    #[test]
+    fn successful_food_and_drinks_animate_the_item_after_the_last_unit_is_used() {
+        let mut g=Game::new(786,false,false);g.player.hunger.food=5.0;g.give(BREAD,1);
+        g.inv.selected=g.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==BREAD)).unwrap();g.target=None;
+        g.use_item();assert_eq!(g.inv.count(BREAD),0);assert_eq!(g.player.animation.meal.unwrap().item,BREAD);
+        g.tick_player_pose(0.1);assert!(g.player.animation.meal.unwrap().elapsed>0.0);
+        g.player.animation=Default::default();g.player.hunger.food=20.0;g.give(BREAD,1);
+        g.inv.selected=g.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==BREAD)).unwrap();g.use_item();assert!(g.player.animation.meal.is_none());
+        let potion=crate::potions::potion_item(crate::potions::Potion::Healing,false);g.give(potion,1);
+        g.inv.selected=g.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==potion)).unwrap();assert!(g.use_potion(potion));
+        assert_eq!(g.inv.count(potion),0);assert!(crate::poses::drink(g.player.animation.meal.unwrap().item));
+        g.menu=true;g.tick_player_pose(0.1);assert!(g.player.animation.meal.is_none());
     }
 
     #[test]

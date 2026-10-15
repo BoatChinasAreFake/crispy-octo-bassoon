@@ -2619,7 +2619,6 @@ impl Mob {
             // Stretch a little mid-hop.
             scale *= Vec3::new(0.9, 1.2, 0.9);
         }
-        if let Some(t)=gulp {scale *= crate::swallow::belly(t);}
         if self.sitting {
             p.y -= 0.15 * scale.y;
         }
@@ -2637,6 +2636,7 @@ impl Mob {
                 let parts = modded_parts(def);
                 // A template body is scaled (keeping its proportions) to the
                 // mob's own height (custom parts are already measured in blocks).
+                let root=if def.glutton && let Some(t)=gulp {crate::swallow::root(self,t)}else{root};
                 let root = if def.parts.is_empty() {
                     use crate::block::MobTemplate::*;
                     let base = match def.template {
@@ -3909,6 +3909,13 @@ type ArmorPiece = ([f32; 3], [f32; 3], [f32; 3], Limb);
 /// Worn armour over the player model (`look` from `Inventory::armor_look`):
 /// slightly larger boxes that follow the same limbs.
 pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f32, sky: f32, gliding: bool) {
+    draw_armor_inner(geo,root,look,trims,anim,sky,if gliding {1.0}else{0.0},None);
+}
+pub fn draw_player_armor(geo:&mut DynGeo,root:&Mat4,look:u16,trims:u32,sky:f32,pose:crate::poses::Pose) {
+    draw_armor_inner(geo,root,look,trims,0.0,sky,pose.wings,Some(pose));
+}
+#[allow(clippy::too_many_arguments)]
+fn draw_armor_inner(geo:&mut DynGeo,root:&Mat4,look:u16,trims:u32,anim:f32,sky:f32,spread:f32,pose:Option<crate::poses::Pose>) {
     if look == 0 {
         return;
     }
@@ -3970,15 +3977,16 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f3
         ],
     );
     add(BOOTS, &[([-0.29, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(1.0)), ([-0.04, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(-1.0))]);
-    draw_model(geo, root, &parts, anim, sky, true);
+    if let Some(p)=pose {crate::poses::draw_parts(geo,root,&parts,p,sky);}else{draw_model(geo,root,&parts,anim,sky,true);}
     // A Glider: folded down the back, or spread wide while gliding.
     if tier(CHESTPLATE) as usize == GLIDER_TIER + 1 {
         let wings = [
             part([-0.3, 0.45, 0.13], [0.28, 1.0, 0.04], [-0.05, 1.45, 0.15], Limb::Flap(-1.0), [T_GLIDER_WING; 6]),
             part([0.02, 0.45, 0.13], [0.28, 1.0, 0.04], [0.05, 1.45, 0.15], Limb::Flap(1.0), [T_GLIDER_WING; 6]),
         ];
-        let spread = if gliding { std::f32::consts::FRAC_PI_2 } else { 0.12 };
-        draw_posed(geo, root, &wings, 0.0, spread, sky);
+        let spread = 0.12+spread*(std::f32::consts::FRAC_PI_2-0.12);
+        let wing_root=if let Some(p)=pose {*root*p.torso()}else{*root};
+        draw_posed(geo, &wing_root, &wings, 0.0, spread, sky);
     }
 }
 

@@ -595,6 +595,7 @@ impl Game {
             self.use_up_held();
         }
         self.warm_up(20.0 + 40.0 * q);
+        self.animate_consumption(item);
         self.sfx(Sfx::Eat, None);
         self.msg(format!("{} (Grade {}). {}", d.name(), GRADES[g as usize], ["Edible. Technically.", "Not bad.", "Rather good, actually.", "Delicious.", "Wonderful.", "Perfect. A tear rolls down your blocky cheek."][g as usize]));
         true

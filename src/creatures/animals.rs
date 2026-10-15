@@ -457,9 +457,15 @@ impl Game {
                 if let Some((id,_))=eater {meals.push(crate::swallow::Swallow::meal(*id,m));}
                 eater.is_none()
             });
-            for meal in meals {
-                if self.swallows.len()<crate::swallow::CAP {self.swallows.push(meal);}
-            }
+            // Focus each eater on its closest claimed meal, once per new batch.
+            let mut aim=std::collections::BTreeMap::new();
+            for meal in &meals {if let Some(m)=self.mobs.iter().find(|m|m.id==meal.eater) {
+                let delta=meal.from-m.body.pos;let dist=delta.length_squared();
+                let entry=aim.entry(meal.eater).or_insert((dist,delta));if dist<entry.0 {*entry=(dist,delta);}
+            }}
+            for (id,(_,delta)) in aim {if !self.swallows.iter().any(|f|f.eater==id) && delta.x*delta.x+delta.z*delta.z>0.01
+                && let Some(m)=self.mobs.iter_mut().find(|m|m.id==id) {m.yaw=delta.x.atan2(-delta.z);}}
+            for meal in meals {if self.swallows.len()<crate::swallow::CAP {self.swallows.push(meal);}}
         }
         for (who,text) in requests {self.tell(&who,&text);}
     }

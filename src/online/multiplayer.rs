@@ -18,6 +18,7 @@ pub enum Net {
 }
 
 pub struct Peer {
+    pub animation: crate::poses::Animator,
     pub name: String,
     /// Smoothed position used for drawing.
     pub pos: Vec3,
@@ -58,7 +59,7 @@ pub struct Peer {
 
 impl Peer {
     pub(crate) fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, own_skin: None, skin_due: false, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
+        Peer { animation:Default::default(), name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, own_skin: None, skin_due: false, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -72,7 +73,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn | Sfx::Thud)
+    matches!(s, Sfx::Burp | Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn | Sfx::Thud)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -300,17 +301,8 @@ impl Game {
     // ------------------------------------------------------------ receive
 
     pub fn net_receive(&mut self, dt: f32) {
-        // Smooth remote players toward their latest positions.
-        for p in self.peers.values_mut().chain(self.parked.values_mut().flat_map(|r| r.peers.values_mut())) {
-            let before = p.pos;
-            let k = (dt * 12.0).min(1.0);
-            p.pos += (p.target - p.pos) * k;
-            if p.pos.distance(p.target) > 8.0 {
-                p.pos = p.target;
-            }
-            let moved = Vec3::new(p.pos.x - before.x, 0.0, p.pos.z - before.z).length();
-            crate::entity::step_anim(&mut p.anim, moved / dt.max(1e-4), dt, 2.4);
-        }
+        crate::poses::tick_peers(&mut self.peers,&self.world,dt);
+        for r in self.parked.values_mut() {crate::poses::tick_peers(&mut r.peers,&r.world,dt);}
 
         let mut inbox: Vec<(u32, Msg)> = std::mem::take(&mut self.pending_msgs).into_iter().map(|m| (0, m)).collect();
         let mut left: Vec<(u32, String, String)> = Vec::new();
@@ -496,7 +488,8 @@ impl Game {
                 // Mods first: the client needs them before it builds its world.
                 c.conn.send(&Msg::ModPack { data: crate::mods::active_pack() });
                 c.conn.send(&welcome);
-                for m in mods.iter().chain(roster.iter()) {
+                // Meal poses reference player IDs: install the roster before replaying them.
+                for m in mods.iter().filter(|m|!matches!(m,Msg::MealAnimation{..})).chain(roster.iter()).chain(mods.iter().filter(|m|matches!(m,Msg::MealAnimation{..}))) {
                     c.conn.send(m);
                 }
             }
@@ -520,6 +513,8 @@ impl Game {
         v.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
         v.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
         v.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+        if !self.away() && let Some(m)=self.player.animation.meal {v.push(Msg::MealAnimation{id:self.my_id,item:m.item,elapsed:m.elapsed});}
+        for (id,p) in &self.peers {if let Some(m)=p.animation.meal {v.push(Msg::MealAnimation{id:*id,item:m.item,elapsed:m.elapsed});}}
         v.push(Msg::RocketFlights(self.rockets.clone()));
         v.push(Msg::Swallows(self.swallows.clone()));
         v.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
@@ -653,6 +648,7 @@ impl Game {
                     }
             }
             Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, trims, .. } => {
+                let flags=if self.peer_free(from) {flags}else{flags & !FLAG_FLY};
                 self.set_peer_held(from, held, held_ench);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // Just died: their experience spills (items come separately, see `drop_everything`).
@@ -677,6 +673,12 @@ impl Game {
                 p.armor = armor;
                 p.trims = trims;
                 self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor, trims });
+            }
+            Msg::MealAnimation {item,..} => {
+                if !crate::poses::edible(item)||!self.peer_rate_ok(from,"meal_pose",0.25) {return;}
+                let Some(p)=self.peers.get_mut(&from).filter(|p|p.alive()) else {return};
+                p.animation.start(crate::poses::Meal{item,elapsed:0.0});
+                self.relay(from,Msg::MealAnimation{id:from,item,elapsed:0.0});
             }
             Msg::Attack { mob, dmg, .. } => {
                 // Hits come from where the player actually is, within reach, at a human pace.
@@ -1291,6 +1293,9 @@ impl Game {
                     p.trims = trims;
                 }
             }
+            Msg::MealAnimation {id,item,elapsed} => {
+                if let Some(p)=self.peer_mut(id) {p.animation.start(crate::poses::Meal{item,elapsed});}
+            }
             Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
                 self.fireballs = fireballs.into_iter().map(|(pos, vel, big)| crate::fortress::Fireball { pos, vel, big, life: 1.0, shooter: 0, returned: None }).collect();
                 self.falling = falling.into_iter().map(|(pos, vel, id)| crate::falling::FallingBlock { pos, vel, id, from: pos.y }).filter(|f| valid_block(f.id)).collect();
@@ -1623,6 +1628,7 @@ impl Game {
             if self.spectator {
                 flags |= FLAG_GHOST;
             }
+            if p.flying {flags |= FLAG_FLY;}
             if p.gliding {
                 flags |= FLAG_GLIDE;
             }
@@ -2577,7 +2583,60 @@ mod tests {
             let effect=client.swallows.iter().find(|f|f.prey==cow).unwrap();
             assert_eq!(effect.eater,eater);assert_eq!(effect.kind,MobKind::Mooer.index());
             assert!(pump(&mut host,&mut client,|h,c|h.swallows.is_empty() && c.swallows.is_empty()));
+            assert!(client.sounds.iter().any(|(s,_)|*s==Sfx::Burp));
         });
+    }
+
+    #[test]
+    fn player_gestures_and_flight_flags_sync_without_consuming_inventory() {
+        let mut host=Game::new(796,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+        let port=host.open_lan("PoseHost",None).unwrap();let mut actor=join(&mut host,port,"Actor","").unwrap();
+        let mut viewer=join(&mut host,port,"Viewer","").unwrap();let id=actor.my_id;
+        host.give_peer(id,BREAD,2);host.give_peer(id,DIAMOND,1);
+        assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(BREAD)==2));
+        actor.net_send_msg(Msg::MealAnimation{id:host.my_id,item:DIAMOND,elapsed:0.0});
+        for _ in 0..8 {host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());}
+        assert!(host.peers[&id].animation.meal.is_none());
+        actor.animate_consumption(BREAD);
+        let mut seen=false;
+        for _ in 0..80 {
+            host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());
+            if host.peers[&id].animation.meal.is_some()&&viewer.peers.get(&id).is_some_and(|p|p.animation.meal.is_some_and(|m|m.item==BREAD)) {seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(seen);assert_eq!(host.peers[&id].ledger.bag.count(BREAD),2);assert_eq!(actor.inv.count(BREAD),2);
+        assert!(host.world_msgs().iter().any(|m|matches!(m,Msg::MealAnimation{id:who,item:BREAD,..} if *who==id)));
+        assert!(host.player.animation.meal.is_none());
+        // Survival clients cannot make their model advertise creative flight.
+        actor.player.flying=true;
+        for _ in 0..10 {host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());}
+        assert_eq!(host.peers[&id].flags&FLAG_FLY,0);
+        host.set_peer_mode(id,crate::modes::GameMode::Creative);
+        assert!(pump(&mut host,&mut actor,|_,c|c.creative));actor.player.flying=true;
+        let rise=Controls{input:Input{jump:true,..Default::default()},..Default::default()};
+        let mut seen=false;
+        for _ in 0..100 {
+            host.update(0.016,&idle());actor.update(0.016,&rise);viewer.update(0.016,&idle());
+            if viewer.peers.get(&id).is_some_and(|p|p.flags&FLAG_FLY!=0&&p.animation.pose.arms[1].z>0.2) {seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(seen);
+        for _ in 0..100 {host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());}
+        assert!(host.peers[&id].animation.meal.is_none());assert!(viewer.peers[&id].animation.meal.is_none());
+    }
+
+    #[test]
+    fn late_joiners_receive_active_meals_after_the_player_roster() {
+        let mut host=Game::new(795,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+        let port=host.open_lan("MealHost",None).unwrap();let actor=join(&mut host,port,"Diner","").unwrap();let id=actor.my_id;
+        let potion=crate::potions::potion_item(crate::potions::Potion::Healing,false);
+        host.peers.get_mut(&id).unwrap().animation.start(crate::poses::Meal{item:potion,elapsed:0.3});
+        host.animate_consumption(BREAD);
+        let mut late=join(&mut host,port,"LateViewer","").unwrap();late.net_receive(0.016);
+        let local=late.peers[&host.my_id].animation.meal.expect("host's meal survives roster setup");
+        let remote=late.peers[&id].animation.meal.expect("peer's meal survives roster setup");
+        assert_eq!(local.item,BREAD);assert!(local.elapsed>0.0);
+        assert_eq!(remote.item,potion);assert!(remote.elapsed>=0.3);
     }
 
     #[test]

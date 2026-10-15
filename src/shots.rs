@@ -488,7 +488,26 @@ impl App {
                 (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
                 g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
             }
-            "half_baked_lab" | "astra_rocket" | "dusk_guardians" | "dubiety_companion" | "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" => {
+            mode if mode.starts_with("pose_") => {
+                let mut g=shot_game(424242,true,false);
+                for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
+                for z in -8..=8 {for x in -10..=10 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {STONE}else{AIR});}}}
+                let swim=matches!(mode,"pose_swim"|"pose_tread");
+                if swim {for z in -3..=3 {for x in -6..=6 {g.world.set(x,79,z,WATER);g.world.set(x,78,z,STONE);}}}
+                g.mobs.clear();g.peers.clear();
+                for (i,x) in [-2.2,0.0,2.2].into_iter().enumerate() {
+                    let mut p=crate::multiplayer::Peer::new(["Built-in","Custom skin","Armour"][i].into(),Vec3::new(x,if swim {79.2}else if mode.contains("fly")||mode=="pose_hover"||mode=="pose_glide" {81.0}else{80.0},0.0));
+                    p.yaw=if i==1 {std::f32::consts::PI-0.35}else{std::f32::consts::PI*0.55};p.skin=i as u8;
+                    if i==1 {p.own_skin=Some(crate::skins::test_card());}
+                    if i==2 {p.armor=0x4444;if mode=="pose_glide" {p.armor=(p.armor&!0xF0)|((GLIDER_TIER as u16+1)<<4);}}
+                    g.peers.insert(100+i as u32,p);
+                }
+                g.refresh_skin_slots();
+                let from=Vec3::new(4.5,81.7,6.5);let to=Vec3::new(0.0,80.8,0.0);let d=to-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                g.player.body.pos=from;g.player.flying=true;g.time=0.25;app.start_game(g);app.show_debug=false;
+            }
+            "half_baked_lab" | "astra_rocket" | "dusk_guardians" | "dubiety_companion" | "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" | "glutton_inhale" => {
                 // Controlled displays of the installed example mods, using the
                 // current generator. These are model/content QA, not natural spawns.
                 let mut g=shot_game(424242,true,false);
@@ -516,7 +535,7 @@ impl App {
                     "dusk_guardians" => {
                         for (x,key) in [(-6.0,"serpent"),(-2.0,"lich"),(2.0,"minotax"),(6.0,"hydra")] {display_mobs.push((match key {"serpent"=>"dusk:serpent","lich"=>"dusk:lich","minotax"=>"dusk:minotax",_=>"dusk:hydra"},Vec3::new(x,80.0,-1.0)));}
                     }
-                    "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" => {
+                    "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" | "glutton_inhale" => {
                         display_mobs.push(("dubiety:companion",Vec3::new(-1.5,81.0,0.0)));
                         display_mobs.push(("dubiety:obesity",Vec3::new(1.0,80.5,0.0)));
                     }
@@ -537,7 +556,7 @@ impl App {
                     g.swallows.push(crate::swallow::Swallow::meal(eater,prey));g.mobs.retain(|m|m.id!=id);
                     }
                 }
-                let (from,to)=if s.mode=="astra_rocket" {(Vec3::new(6.0,84.0,9.0),Vec3::new(0.0,82.8,-2.0))} else if matches!(s.mode.as_str(),"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly") {(Vec3::new(3.8,81.7,5.5),Vec3::new(0.0,81.0,0.0))} else if s.mode=="dubiety_companion" {(Vec3::new(3.8,81.2,4.5),Vec3::new(0.8,80.9,0.0))} else {(Vec3::new(9.0,85.0,12.0),Vec3::new(0.0,81.0,-1.0))};
+                let (from,to)=if s.mode=="astra_rocket" {(Vec3::new(6.0,84.0,9.0),Vec3::new(0.0,82.8,-2.0))} else if matches!(s.mode.as_str(),"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly"|"glutton_inhale") {(Vec3::new(3.8,81.7,5.5),Vec3::new(0.0,81.0,0.0))} else if s.mode=="dubiety_companion" {(Vec3::new(3.8,81.2,4.5),Vec3::new(0.8,80.9,0.0))} else {(Vec3::new(9.0,85.0,12.0),Vec3::new(0.0,81.0,-1.0))};
                 let d=to-(from+Vec3::Y*player::EYE);(s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
                 g.player.body.pos=from;g.player.flying=true;g.time=0.25;app.start_game(g);app.show_debug=false;
             }
@@ -1122,13 +1141,18 @@ impl App {
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
                 }
-                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly"|"dusk_trees"|"rocket_inflight"|"rocket_landing"|"rocket_cockpit") {
+                if s.mode.starts_with("pose_") {
+                    for p in app.game.peers.values_mut() {p.animation=pose_fixture(&s.mode);p.target=p.pos;}
+                    if s.mode.ends_with("_first") {app.game.player.animation=pose_fixture(&s.mode);}
+                    app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
+                }
+                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly"|"glutton_inhale"|"dusk_trees"|"rocket_inflight"|"rocket_landing"|"rocket_cockpit") {
                     for m in &mut app.game.mobs {if let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
                     app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
                 }
                 if s.mode.starts_with("glutton_") {
                     // Freeze a deterministic point in the real effect, not a substitute illustration.
-                    let elapsed=match s.mode.as_str() {"glutton_swallow"=>0.45,"glutton_gulp"=>0.80,_=>1.40};
+                    let elapsed=match s.mode.as_str() {"glutton_inhale"=>0.23,"glutton_swallow"=>0.75,"glutton_gulp"=>1.2,_=>1.8};
                     if let Some(m)=app.game.mobs.first() {
                         let f=crate::swallow::Swallow {eater:m.id,prey:u32::MAX,kind:entity::MobKind::Mooer.index(),from:Vec3::new(1.0,80.0,3.5),yaw:0.0,scale:1.0,sheared:false,elapsed};
                         app.game.swallows=vec![f];
@@ -2583,7 +2607,8 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
-    "glutton_swallow", "glutton_gulp", "glutton_belly", "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
+    "pose_swim", "pose_tread", "pose_hover", "pose_fly_up", "pose_fly_down", "pose_glide", "pose_crouch", "pose_eat", "pose_drink", "pose_eat_first", "pose_drink_first", "pose_landing", "pose_transition",
+    "glutton_inhale", "glutton_swallow", "glutton_gulp", "glutton_belly", "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
 ];
@@ -2635,4 +2660,25 @@ fn half_built_house(g: &mut Game, o: IVec3) -> Option<IVec3> {
         g.grow_village(key);
     }
     Some(g.growth_spots(&site)[spot].0)
+}
+
+/// Deterministic native animation fixtures, using exactly the gameplay controller.
+fn pose_fixture(mode:&str)->crate::poses::Animator {
+    use crate::poses::{Animator,Motion,Meal};
+    let mut a=Animator::default();let mut m=Motion::default();
+    match mode {
+        "pose_swim"=>{m.swim=true;m.grounded=false;m.velocity=Vec3::new(0.0,0.0,-2.5);}
+        "pose_tread"=>{m.swim=true;m.grounded=false;}
+        "pose_hover"=>{m.fly=true;m.grounded=false;}
+        "pose_fly_up"=>{m.fly=true;m.grounded=false;m.velocity=Vec3::new(1.0,8.0,-5.0);}
+        "pose_fly_down"=>{m.fly=true;m.grounded=false;m.velocity=Vec3::new(-1.0,-8.0,-2.0);}
+        "pose_glide"=>{m.glide=true;m.grounded=false;m.velocity=Vec3::new(4.0,-1.0,-12.0);m.pitch= -0.15;}
+        "pose_crouch"|"pose_transition"=>{m.crouch=true;m.velocity=Vec3::new(0.0,0.0,-1.0);}
+        "pose_landing"=>{a.tick(0.1,Motion{grounded:false,velocity:-Vec3::Y*12.0,..Default::default()});}
+        _=>{}
+    }
+    if mode.starts_with("pose_eat") {a.start(Meal{item:BREAD,elapsed:0.0});}
+    if mode.starts_with("pose_drink") {a.start(Meal{item:crate::potions::potion_item(crate::potions::Potion::Healing,false),elapsed:0.0});}
+    for _ in 0..if mode=="pose_transition"||mode=="pose_landing" {1}else{33} {a.tick(1.0/60.0,m);}
+    a
 }

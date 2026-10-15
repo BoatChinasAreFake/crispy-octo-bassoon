@@ -121,13 +121,15 @@ A new world generator (version 7) that keeps what works in the current one (read
 
 11. Larger parody example mods (the user's request): nuclear machinery with nukes, a tiny embedded word-model assistant without horror, rockets and separate planet dimensions, and an isolated twilight-style forest, with survival progression, original assets, documentation and multiplayer checks. Dubiety’s glutton has a visible whole-mob swallowing animation (the user’s request).
 
-Originals: not chosen yet. The Part 2 core implements items 4 to 11 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
+12. Player animation polish (the user’s request): shared blended swimming, hovering, ascending/descending flight, gliding, crouching, eating/drinking, and landing poses; built-in/custom skins and armour; multiplayer state; and glutton anticipation before swallowing.
 
-Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 12 for narrower shoreline beaches, retaining revision 11 finds and tide pools and revision 10 relief/islands. Revisions 0–11 retain their generation rules. Protocol 55 protects the new generator and appended beach block IDs; older clients cannot join.
+Originals: not chosen yet. The Part 2 core implements items 4 to 12 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
+
+Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 12 for narrower shoreline beaches, retaining revision 11 finds and tide pools and revision 10 relief/islands. Revisions 0–11 retain their generation rules. Protocol 56 protects the new generator and appended beach block IDs; older clients cannot join.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**
-- Part 2: items 4 to 11, and the two originals (this is the last part).
+- Part 2: items 4 to 12, and the two originals (this is the last part).
 
 ## v0.7: The Hollow, filled in
 

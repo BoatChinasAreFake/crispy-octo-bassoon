@@ -332,7 +332,13 @@ fn swallowing_is_visual_only_bounded_and_realm_local() {
         g.gluttons_tick(0.016);
         assert_eq!(g.swallows,vec![expected]);assert!(!g.mobs.iter().any(|m|m.id==prey));
         assert_eq!(g.drops.len(),drops);assert_eq!(g.stats.kills,kills);
-        let mouth=swallow::mouth(&g.mobs[0]);let (start,scale)=g.swallows[0].pose(mouth);
+        let mouth=swallow::mouth_at(&g.mobs[0],0.0);let (start,scale)=g.swallows[0].pose(mouth);
+        let mut waiting=g.swallows[0].clone();waiting.elapsed=swallow::INHALE*0.5;
+        let (held,held_scale)=waiting.pose(swallow::mouth_at(&g.mobs[0],waiting.elapsed));
+        assert!(held.distance(start)<0.0001);assert_eq!(held_scale,scale);
+        assert!(swallow::anticipation(waiting.elapsed)>0.99);assert_eq!(swallow::anticipation(swallow::INHALE),0.0);
+        assert!(swallow::root(&g.mobs[0],waiting.elapsed).transform_point3(Vec3::Y).distance(swallow::root(&g.mobs[0],0.0).transform_point3(Vec3::Y))>0.05);
+
         assert!(start.is_finite());assert_eq!(scale,Vec3::splat(0.55));
         let msg=crate::net::Msg::Swallows(g.swallows.clone());assert_eq!(crate::net::Msg::decode(&msg.encode()).unwrap(),msg);
         assert!(g.world_msgs().contains(&msg));
@@ -351,8 +357,8 @@ fn swallowing_is_visual_only_bounded_and_realm_local() {
         g.swallows_tick(2.0);assert!(g.swallows.is_empty());
         for _ in 0..swallow::CAP+4 {g.alloc_mob(MobKind::Mooer,at);}
         g.gluttons_tick(0.016);assert_eq!(g.swallows.len(),swallow::CAP);assert_eq!(g.mobs.len(),1);
-        assert_eq!(swallow::opening(0.0),0.0);assert!(swallow::opening(0.5)>0.99);
+        assert_eq!(swallow::opening(0.0),0.0);assert!(swallow::opening(0.6)>0.99);
         assert_eq!(swallow::opening(swallow::DURATION),0.0);
-        assert!(swallow::belly(1.4).x>1.1);assert!((swallow::belly(swallow::DURATION)-Vec3::ONE).length()<0.001);
+        assert!(swallow::belly(swallow::GULP+0.35).x>1.1);assert!((swallow::belly(swallow::DURATION)-Vec3::ONE).length()<0.001);
     });
 }

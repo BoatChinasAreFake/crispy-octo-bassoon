@@ -56,7 +56,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v53: glutton mod companions accept all offerings before ordinary interactions.
 /// v54: host-authoritative rocket flights and cockpit/landing snapshots.
 /// v55: bounded realm-local swallowing animation snapshots and burps.
-pub const PROTOCOL: u32 = 55;
+/// v56: player flight flags, cosmetic meal poses and glutton anticipation timing.
+pub const PROTOCOL: u32 = 56;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -281,6 +282,7 @@ pub enum Msg {
     Vehicles(Vec<(u32, u8, Vec3, f32, u32)>),
     RocketFlights(Vec<crate::rockets::RocketFlight>),
     Swallows(Vec<crate::swallow::Swallow>),
+    MealAnimation {id:u32,item:Id,elapsed:f32},
     /// client -> host: get in (0), get out (1) or hit (2) this vehicle.
     VehicleUse { id: u32, action: u8 },
     /// client -> host: where I've driven the vehicle I'm in.
@@ -373,6 +375,8 @@ pub const FLAG_GHOST: u8 = 16;
 pub const FLAG_GLIDE: u8 = 32;
 /// Asleep in a bed (see beds.rs).
 pub const FLAG_SLEEP: u8 = 64;
+/// Creative flight (survival clients cannot advertise it).
+pub const FLAG_FLY:u8=128;
 
 // ------------------------------------------------------------------ encoding
 
@@ -993,6 +997,7 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
+            Msg::MealAnimation {id,item,elapsed} => {w.u8(115);w.u32(*id);w.u16(*item);w.f32(*elapsed);}
             Msg::Swallows(list) => {
                 w.u8(114);w.u8(list.len().min(crate::swallow::CAP) as u8);
                 for f in list.iter().take(crate::swallow::CAP) {
@@ -1473,6 +1478,11 @@ impl Msg {
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
             48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            115 => {
+                let (id,item,elapsed)=(r.u32()?,r.u16()?,r.f32()?);
+                if !elapsed.is_finite()||!(0.0..crate::poses::MEAL_SECONDS).contains(&elapsed) {return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid meal animation"));}
+                Msg::MealAnimation{id,item,elapsed}
+            }
             114 => {
                 let n=r.u8()? as usize;if n>crate::swallow::CAP {return Err(io::Error::new(io::ErrorKind::InvalidData,"too many meals"));}
                 let mut list=Vec::with_capacity(n);

@@ -478,6 +478,7 @@ Build a Copper Golem: a pumpkin on a block of copper.
 Build a Snow Golem.
 Build the Wilter. Why would you do that?
 Building Blocks
+Built-in
 Bullseye
 Bundle (Bag of Bits)
 Buried Treasure (X Marks the Spot)
@@ -688,6 +689,7 @@ Crunch. You can see slightly better. (You can't.)
 Crunch. You stepped on the Turtle Eggs. The label did say.
 Crystal Clear
 Cure a Zombie Hmmer with a Golden Chop.
+Custom skin
 DALTONIZE
 DIMONDS!
 Damage dealt
@@ -2823,6 +2825,7 @@ hung on the east wall
 id is in the palette
 ids moved
 invalid meal
+invalid meal animation
 invalid rocket flight
 inventory too long
 islands and beach ecology

@@ -1101,6 +1101,7 @@ impl Game {
             self.use_up_held();
             self.inv.add(GLASS_BOTTLE, 1);
         }
+        self.animate_consumption(held);
         self.sfx(Sfx::Eat, None);
         self.msg(f.taste());
         true

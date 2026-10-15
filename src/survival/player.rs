@@ -22,6 +22,7 @@ pub struct Input {
 }
 
 pub struct Player {
+    pub animation: crate::poses::Animator,
     pub body: Body,
     pub yaw: f32,
     pub pitch: f32,
@@ -66,6 +67,7 @@ pub struct Player {
 impl Player {
     pub fn new(pos: Vec3) -> Self {
         Player {
+            animation: Default::default(),
             body: Body::new(pos, 0.3, 1.8),
             yaw: 0.0,
             pitch: -0.2,

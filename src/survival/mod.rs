@@ -22,3 +22,5 @@ pub(crate) mod vehicles;
 pub(crate) mod xp;
 
 pub(crate) mod rockets;
+
+pub(crate) mod poses;
