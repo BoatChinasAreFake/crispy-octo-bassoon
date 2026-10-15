@@ -362,3 +362,27 @@ fn swallowing_is_visual_only_bounded_and_realm_local() {
         assert!(swallow::belly(swallow::GULP+0.35).x>1.1);assert!((swallow::belly(swallow::DURATION)-Vec3::ONE).length()<0.001);
     });
 }
+
+#[test]
+fn native_machine_controls_use_existing_recipes_and_reject_remote_or_invalid_actions() {with_packs(||{
+    let mut g=game();let pos=macroquad::math::IVec3::new(4,90,5);
+    place(&mut g,4,90,5,"half_baked:centrifuge");
+    give(&mut g,"half_baked:glowium_dust",4);give(&mut g,"coal",2);
+    assert!(g.open_machine(pos));g.machine_action(0);
+    assert_eq!(g.inv.count(id("half_baked:pellet")),1);assert_eq!(g.inv.count(id("half_baked:glowium_dust")),2);
+    g.machine_action(200);assert_eq!(g.inv.count(id("half_baked:pellet")),1);
+    g.player.body.pos.x+=20.0;g.machine_action(0);assert_eq!(g.inv.count(id("half_baked:pellet")),1);
+    g.machine_tick(0.1);assert!(g.machine.is_none());
+    g.player.body.pos=Vec3::new(4.5,90.0,4.5);
+    place(&mut g,4,90,5,"half_baked:reactor");place(&mut g,5,90,5,"half_baked:cooling_tower");give(&mut g,"half_baked:coolant",1);
+    assert!(g.open_machine(pos));g.machine_action(0);tick(&mut g,3);g.machine_action(255);
+    assert!(g.machine.as_ref().unwrap().status.contains("12s"));assert!(g.machine.as_ref().unwrap().progress>0);
+    g.machine_action(1);g.machine_action(255);assert!(g.machine.as_ref().unwrap().status.starts_with("Ready"));
+    assert_eq!(g.inv.count(id("half_baked:energy_cell")),0);
+    g.world.set(4,90,5,AIR);g.machine_tick(0.1);assert!(g.machine.is_none());
+    place(&mut g,4,90,5,"ad_absurdum:solar_panel");give(&mut g,"ad_absurdum:steel",2);give(&mut g,"zap_dust",2);
+    assert!(g.open_machine(pos));g.machine_action(0);tick(&mut g,10);g.machine_action(255);
+    assert!(g.machine.as_ref().unwrap().status.contains("50s"));assert_eq!(g.inv.count(id("ad_absurdum:battery")),2);
+    g.machine_action(0);assert_eq!(g.inv.count(id("ad_absurdum:battery")),2);
+    g.dead=Some("test".into());g.machine_action(0);g.machine_tick(0.1);assert!(g.machine.is_none());
+});}

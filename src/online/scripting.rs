@@ -163,7 +163,7 @@ fn make_engine() -> Engine {
     e
 }
 
-fn dimension_key(dim: crate::dims::Dim) -> String {
+pub(crate) fn dimension_key(dim: crate::dims::Dim) -> String {
     match dim {
         crate::dims::Dim::Over => "overworld".into(),
         crate::dims::Dim::Scorch => "scorchlands".into(),
@@ -497,6 +497,8 @@ impl ScriptHost {
     pub fn is_empty(&self) -> bool {
         self.mods.is_empty()
     }
+
+    pub(crate) fn variable(&self,pack:&str,name:&str)->Option<Dynamic> {self.mods.iter().find(|m|m.id==pack&&!m.disabled).and_then(|m|m.vars.get(name)).cloned()}
 
     pub fn mod_ids(&self) -> Vec<String> {
         self.mods.iter().map(|m| m.id.clone()).collect()

@@ -18,10 +18,11 @@ impl Meal {
 }
 #[derive(Clone,Copy,Debug)]
 pub struct Motion {
+    pub held:Id,pub offhand:Id,pub off_swing:f32,pub blocking:bool,pub bow:f32,pub climb:bool,pub hurt:f32,
     pub velocity:Vec3,pub pitch:f32,pub crouch:bool,pub swim:bool,pub fly:bool,pub glide:bool,pub grounded:bool,pub swing:f32,
 }
 impl Default for Motion {
-    fn default()->Self {Self{velocity:Vec3::ZERO,pitch:0.0,crouch:false,swim:false,fly:false,glide:false,grounded:true,swing:0.0}}
+    fn default()->Self {Self{held:AIR,offhand:AIR,off_swing:0.0,blocking:false,bow:0.0,climb:false,hurt:0.0,velocity:Vec3::ZERO,pitch:0.0,crouch:false,swim:false,fly:false,glide:false,grounded:true,swing:0.0}}
 }
 #[derive(Clone,Copy,Debug,Default,PartialEq)]
 pub struct Pose {
@@ -72,10 +73,11 @@ impl Animator {
         let v=if input.velocity.is_finite(){input.velocity.clamp_length_max(40.0)}else{Vec3::ZERO};
         let speed=Vec2::new(v.x,v.z).length();
         let aquatic=input.swim&&!input.fly&&!input.glide;
-        let airborne=input.fly||input.glide||aquatic;
+        let climbing=input.climb&&!input.fly&&!input.glide&&!aquatic;
+        let airborne=input.fly||input.glide||aquatic||climbing;
         if input.grounded&&!self.grounded&&!airborne {self.landing=(-self.fall_speed/15.0).clamp(0.0,0.8);}
         self.grounded=input.grounded;self.fall_speed=v.y;self.landing*=(-12.0*dt).exp();
-        self.phase=(self.phase+dt*if aquatic {2.6+speed*0.5}else if airborne {2.5}else{speed*2.4}).rem_euclid(TAU);
+        self.phase=(self.phase+dt*if climbing {v.y.abs()*3.0}else if aquatic {2.6+speed*0.5}else if airborne {2.5}else{speed*2.4}).rem_euclid(TAU);
         let s=self.phase.sin();let pitch=if input.pitch.is_finite(){input.pitch.clamp(-1.3,1.3)}else{0.0};
         let mut target=Pose{head:pitch, ..Default::default()};
         let walk=(speed/3.0).clamp(0.0,1.0);
@@ -105,7 +107,36 @@ impl Animator {
             target.thighs=[0.13+s*0.06,0.13-s*0.06];target.knees=[-0.28-(v.y/30.0).clamp(-0.15,0.2);2];
         }
         if !airborne {let bend=self.landing*0.4;target.lower+=0.75*(1.0-bend.cos());for i in 0..2 {target.thighs[i]+=bend;target.knees[i]-=bend*2.0;}}
-        if input.swing.is_finite()&&input.swing>0.0 {target.arms[1].x+=(input.swing.clamp(0.0,1.0)*PI).sin()*1.4;}
+        if climbing {
+            target.torso= -0.08;target.head=pitch*0.5;
+            for i in 0..2 {
+                let stroke=if i==0 {s}else{-s};
+                target.arms[i]=Vec3::new(2.45+stroke*0.35,0.0,if i==0 {-0.12}else{0.12});
+                target.elbows[i]=0.45+stroke*0.2;target.thighs[i]=0.65-stroke*0.35;target.knees[i]=-0.8+stroke*0.4;
+            }
+        } else {
+            if input.held!=AIR {target.arms[1].x=target.arms[1].x*0.35+0.22;target.elbows[1]=0.25;}
+            if input.offhand!=AIR {target.arms[0].x=target.arms[0].x*0.35+0.22;target.elbows[0]=0.25;}
+            if input.swing.is_finite()&&input.swing>0.0 {
+                let hit=(input.swing.clamp(0.0,1.0)*PI).sin();
+                target.arms[1].x+=hit*if is_spear(input.held){1.05}else{1.65};
+                target.arms[1].y-=hit*0.35;target.elbows[1]+=hit*0.45;target.bank+=hit*0.07;
+            }
+            if input.off_swing.is_finite()&&input.off_swing>0.0 {
+                let w=(input.off_swing.clamp(0.0,1.0)*PI).sin();target.arms[0].x+=w*1.3;target.elbows[0]+=w*0.4;
+            }
+            if input.blocking {
+                let i=if input.held==SHIELD {1}else{0};
+                target.arms[i]=Vec3::new(1.1,if i==0 {-0.55}else{0.55},0.0);target.elbows[i]=1.0;
+            }
+            if input.held==BOW&&input.bow.is_finite()&&input.bow>0.0 {
+                let w=input.bow.clamp(0.0,1.0);
+                target.arms[1]=Vec3::new(1.45+pitch*0.7,-0.3,0.0);target.elbows[1]=0.08;
+                target.arms[0]=Vec3::new(1.25+pitch*0.7,-0.6-w*0.15,-0.35);target.elbows[0]=0.65+w*0.95;
+                target.torso= -0.08;
+            }
+        }
+        if input.hurt.is_finite()&&input.hurt>0.0 {let w=(input.hurt/0.6).clamp(0.0,1.0)*0.16;target.bank+=w;target.torso+=w;}
         if let Some(meal)=self.meal {
             let w=meal.weight();let sip=drink(meal.item);let bite=(meal.elapsed*19.0).sin();
             let arm=Vec3::new(if sip {1.25}else{1.05+bite*0.1},0.60,0.0);
@@ -125,14 +156,19 @@ pub fn tick_peers(peers:&mut BTreeMap<u32,Peer>,world:&World,dt:f32) {
         crate::entity::step_anim(&mut p.anim,Vec2::new(velocity.x,velocity.z).length(),dt,2.4);
         if !p.alive()||p.flags&FLAG_SLEEP!=0 {p.animation=Animator::default();continue;}
         if teleport {p.animation=Animator::default();}
-        p.animation.tick(dt,Motion{velocity:relative(velocity,p.yaw),pitch:p.pitch,crouch:p.flags&FLAG_SNEAK!=0,swim:immersed(world,p.pos),fly:p.flags&FLAG_FLY!=0,glide:p.flags&FLAG_GLIDE!=0,grounded:is_solid(world.get_v((p.pos-Vec3::Y*0.08).floor().as_ivec3())),swing:if p.flags&FLAG_SWING!=0 {0.6}else{0.0}});
+        p.animation.tick(dt,Motion{velocity:relative(velocity,p.yaw),pitch:p.pitch,crouch:p.flags&FLAG_SNEAK!=0,swim:immersed(world,p.pos),fly:p.flags&FLAG_FLY!=0,glide:p.flags&FLAG_GLIDE!=0,grounded:is_solid(world.get_v((p.pos-Vec3::Y*0.08).floor().as_ivec3())),swing:{if (p.flags&FLAG_SWING!=0||p.gesture&2!=0)&&p.swing<0.3 {p.swing=1.0;}p.swing=(p.swing-dt*4.0).max(0.0);if p.flags&FLAG_SWING!=0 {p.swing}else{0.0}},off_swing:if p.gesture&2!=0 {p.swing}else{0.0},held:p.held,offhand:p.offhand,blocking:p.gesture&1!=0,bow:p.draw as f32/255.0,climb:climb_at(world,p.pos),hurt:if p.flags&FLAG_HURT!=0 {0.4}else{0.0}});
     }
+}
+fn climb_at(world:&World,pos:Vec3)->bool {
+    let min=pos-Vec3::new(0.3,0.0,0.3);let max=pos+Vec3::new(0.3,1.8,0.3);
+    crate::carpentry::on_ladder(world,min,max)||crate::masonry::in_scaffolding(world,min,max)
 }
 impl Game {
     pub(crate) fn tick_player_pose(&mut self,dt:f32) {
         if self.menu||self.dead.is_some()||self.sleeping.is_some()||self.spectator||self.rocket_pilot().is_some() {self.player.animation=Animator::default();return;}
+        self.off_swing=(self.off_swing-dt.max(0.0)*4.0).max(0.0);
         let p=&self.player;
-        let input=Motion{velocity:relative(p.body.vel,p.yaw),pitch:p.pitch,crouch:p.sneaking,swim:immersed(&self.world,p.body.pos),fly:p.flying,glide:p.gliding,grounded:p.body.on_ground,swing:p.swing};
+        let input=Motion{velocity:relative(p.body.vel,p.yaw),pitch:p.pitch,crouch:p.sneaking,swim:immersed(&self.world,p.body.pos),fly:p.flying,glide:p.gliding,grounded:p.body.on_ground,swing:p.swing,held:self.inv.held(),offhand:self.inv.offhand.map_or(AIR,|s|s.0),off_swing:self.off_swing,blocking:self.blocking,bow:self.bow_draw,climb:climb_at(&self.world,p.body.pos),hurt:p.hurt};
         self.player.animation.tick(dt,input);
     }
     pub(crate) fn animate_consumption(&mut self,item:Id) {
@@ -167,6 +203,25 @@ pub fn draw_parts(g:&mut DynGeo,root:&Mat4,parts:&[Part],pose:Pose,sky:f32) {
         } else {draw(g,min,min+size,false);}
     }
 }
+pub fn draw_held(g:&mut DynGeo,root:&Mat4,a:&Animator,held:Id,offhand:Id,blocking:bool,sky:f32) {
+    for (i,item) in [(0,offhand),(1,held)] {
+        if item==AIR||(i==1&&a.meal.is_some()) {continue;}
+        let x=if i==0 {-0.375}else{0.375};
+        let bone=a.pose.bone(i+3,true);let grip=Vec3::new(x,0.80,-0.10);
+        // A shield and a bow stay upright while their grip follows the wrist.
+        let hand=if matches!(item,SHIELD|BOW) {*root*Mat4::from_translation(bone.transform_point3(grip))}else{*root*bone*Mat4::from_translation(grip)};
+        g.begin(Pass::Opaque,[1.0;4],false);
+        if crate::models::drawn_as_block(item) {
+            let frame=hand*Mat4::from_scale(Vec3::splat(0.28))*Mat4::from_translation(Vec3::splat(-0.5));
+            for ((lo,size),tiles,uv) in crate::models::item_parts(item) {let m=frame*Mat4::from_translation(Vec3::from_array(lo))*Mat4::from_scale(Vec3::from_array(size));g.cube(&m,tiles,sky,uv);}
+        } else {
+            // Tools sit diagonally across the palm; the handle extends below it.
+            let tool=is_sword(item)||pick_tier(item)>0||crate::tools::tool_uses(item).is_some();
+            let frame=hand*Mat4::from_rotation_y(if item==SHIELD&&blocking {0.0}else{PI*0.5})*Mat4::from_rotation_z(if tool {-0.65}else{0.0})*Mat4::from_translation(Vec3::new(0.0,if tool {0.15}else{0.0},0.0));
+            crate::game::extruded_sprite(g,&frame,crate::models::flat_tile(item),if item==SHIELD {0.7}else if item==BOW {0.65}else if is_spear(item){0.9}else if tool {0.65}else{0.4},sky);
+        }
+    }
+}
 pub fn draw_meal(g:&mut DynGeo,root:&Mat4,a:&Animator,sky:f32) {
     let Some(meal)=a.meal else{return};let w=meal.weight();if w<=0.01 {return;}
     let at=a.pose.bone(4,true).transform_point3(Vec3::new(0.375,0.76,-0.05));
@@ -198,6 +253,27 @@ mod tests {
         let (up,down)=(fly(8.0),fly(-8.0));assert!(up.pose.lean< -0.1&&up.pose.bank< -0.05);assert!(down.pose.arms[1].z>up.pose.arms[1].z+0.2);
         let glide=settle(Motion{glide:true,grounded:false,velocity:Vec3::new(2.0,0.0,-10.0),..Default::default()});assert!(glide.pose.wings>0.99&&glide.pose.lean< -1.4);
         let mut blend=crouch;let before=blend.pose.lean;blend.tick(1.0/60.0,Motion{swim:true,grounded:false,velocity:-Vec3::Z*3.0,..Default::default()});assert!(blend.pose.lean<before&&blend.pose.lean> -1.0);
+    }
+    #[test]
+    fn combat_grips_and_climbing_override_walk_without_detaching_hands() {
+        let idle=settle(Motion::default());
+        let shield=settle(Motion{held:SWORD_IRON,offhand:SHIELD,blocking:true,..Default::default()});
+        assert!(shield.pose.arms[0].x>1.0&&shield.pose.elbows[0]>0.9);
+        assert!(shield.pose.arms[1].x>idle.pose.arms[1].x);
+        let hurt=settle(Motion{hurt:0.4,..Default::default()});assert!(hurt.pose.bank>0.1&&hurt.pose.torso>0.1);
+        let bow=settle(Motion{held:BOW,bow:1.0,..Default::default()});
+        assert!(bow.pose.arms[1].x>1.4&&bow.pose.elbows[0]>1.5);
+        let climbing=settle(Motion{climb:true,grounded:false,velocity:Vec3::Y*3.0,..Default::default()});
+        assert!(climbing.pose.arms.iter().all(|a|a.x>2.0));assert!(climbing.pose.knees[0] < -0.3);
+        let mut hang=climbing;let phase=hang.phase;
+        for _ in 0..30 {hang.tick(1.0/60.0,Motion{climb:true,grounded:false,..Default::default()});}
+        assert_eq!(phase,hang.phase);assert!(hang.pose.arms[0].x>2.0);
+        let place=settle(Motion{held:PICK_IRON,offhand:STONE,off_swing:0.5,..Default::default()});
+        assert!(place.pose.arms[0].x>1.4&&place.pose.arms[1].x<0.3);
+        let swing=settle(Motion{held:SWORD_IRON,swing:0.5,..Default::default()});
+        assert!(swing.pose.arms[1].x>1.5);
+        for _ in 0..120 {hang.tick(1.0/60.0,Motion::default());}
+        assert!(hang.pose.arms[0].length()<0.01);
     }
     #[test]
     fn skeleton_joints_keep_limbs_attached_and_crouched_feet_on_the_floor() {

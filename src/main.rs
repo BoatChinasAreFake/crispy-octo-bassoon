@@ -13,7 +13,7 @@ mod online;
 
 pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, mesher, meshpool, narrator, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
-pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stalls, stash, together, trading, trims, villageblocks, tripwire, wiring, woods, zapparts};
+pub(crate) use blocks::{machines,anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stalls, stash, together, trading, trims, villageblocks, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{swallow, animals, beasts, bees, bounties, creaking, critters, entity, floaty, horses, leads, nametags, night, paper, pathing, raids, reputation, skins, sniffers, village_growth, village_life, villagers, wildlife, wilter};
 pub(crate) use survival::{poses, advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rockets, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, post, scripting, server, servers, teams};
@@ -75,6 +75,7 @@ enum Screen {
     Anvil,
     /// An enchanting table is open (see enchant.rs).
     Enchant,
+    Machine,
     /// Trading with a Hmmer (see villagers.rs).
     Trade,
     /// Reading a village's Notice Board (see bounties.rs).
@@ -408,6 +409,7 @@ impl App {
         if s == Screen::Playing {
             self.pause_page = PausePage::Main;
         }
+        if s!=Screen::Playing {self.game.bow_draw=0.0;}
         let playing = s == Screen::Playing && self.chat.is_none();
         grab(playing);
         self.last_mouse = None;
@@ -418,6 +420,7 @@ impl App {
             self.game.close_container();
             self.post_focus = 0;
         }
+        if self.screen == Screen::Machine && s != Screen::Machine {self.game.machine=None;}
         if self.screen == Screen::Anvil && s != Screen::Anvil {
             self.game.close_anvil();
         }
@@ -928,7 +931,7 @@ impl App {
                     type_into(&mut self.post_letter, post::LETTER_LEN);
                 }
             }
-            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Board | Screen::Bench => {
+            Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Board | Screen::Bench | Screen::Machine => {
                 let pad = self.pad_frame;
                 if is_key_pressed(KeyCode::Escape) || self.settings.binds.pressed(keybinds::Action::Inventory) || pad.inventory || pad.back {
                     self.set_screen(Screen::Playing);
@@ -1069,7 +1072,7 @@ impl App {
 
         let controls = self.controls();
         // Multiplayer worlds never pause: other people are still in them.
-        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Board | Screen::Bench | Screen::Journal | Screen::Title | Screen::Dead) || self.game.net.is_some();
+        let simulate = matches!(self.screen, Screen::Playing | Screen::Inventory | Screen::Container | Screen::Anvil | Screen::Enchant | Screen::Trade | Screen::Board | Screen::Bench | Screen::Machine | Screen::Journal | Screen::Title | Screen::Dead) || self.game.net.is_some();
         let t_tick = std::time::Instant::now();
         if simulate {
             if self.game.map_colors.len() != self.map_colors.len() {
@@ -1101,6 +1104,8 @@ impl App {
             self.journal_back = Screen::Playing;
             self.set_screen(Screen::Journal);
         }
+        if self.game.machine.is_some() && self.screen==Screen::Playing {self.set_screen(Screen::Machine);}
+        else if self.screen==Screen::Machine && !self.game.machine_still_there() {self.set_screen(Screen::Playing);}
         if self.game.enchanting.is_some() && self.screen == Screen::Playing {
             self.set_screen(Screen::Enchant);
         } else if self.screen == Screen::Enchant && !self.game.enchanting_still_there() {
@@ -1778,6 +1783,7 @@ impl App {
                     Screen::Container => self.container_screen(),
                     Screen::Anvil => self.anvil_screen(),
                     Screen::Enchant => self.enchant_screen(),
+                    Screen::Machine => self.machine_screen(),
                     Screen::Trade => self.trade_screen(),
                     Screen::Board => self.board_screen(),
                     Screen::Sign => self.sign_screen(),

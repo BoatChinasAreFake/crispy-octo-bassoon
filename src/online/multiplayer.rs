@@ -27,6 +27,7 @@ pub struct Peer {
     pub yaw: f32,
     pub pitch: f32,
     pub flags: u8,
+    pub held:Id,pub offhand:Id,pub gesture:u8,pub draw:u8,pub swing:f32,
     /// What they're wearing (see `Inventory::armor_look`).
     pub armor: u16,
     /// Their armour trims (see `trims::look`).
@@ -59,7 +60,7 @@ pub struct Peer {
 
 impl Peer {
     pub(crate) fn new(name: String, pos: Vec3) -> Peer {
-        Peer { animation:Default::default(), name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, own_skin: None, skin_due: false, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
+        Peer { animation:Default::default(), name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, held:AIR,offhand:AIR,gesture:0,draw:0,swing:0.0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, own_skin: None, skin_due: false, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -647,7 +648,8 @@ impl Game {
                         }
                     }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, trims, .. } => {
+            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, trims, offhand, gesture, draw, .. } => {
+                let held=if valid_item(held){held}else{AIR};let offhand=if valid_item(offhand){offhand}else{AIR};
                 let flags=if self.peer_free(from) {flags}else{flags & !FLAG_FLY};
                 self.set_peer_held(from, held, held_ench);
                 let Some(p) = self.peers.get_mut(&from) else { return };
@@ -672,8 +674,10 @@ impl Game {
                 p.flags = flags;
                 p.armor = armor;
                 p.trims = trims;
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor, trims });
+                p.held=held;p.offhand=offhand;p.gesture=gesture&3;p.draw=if held==BOW {draw}else{0};
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor, trims , offhand, gesture, draw });
             }
+            Msg::MachineUse{x,y,z,action}=>{let name=self.peer_name(from);self.operate_machine(from,&name,macroquad::math::IVec3::new(x,y,z),action);}
             Msg::MealAnimation {item,..} => {
                 if !crate::poses::edible(item)||!self.peer_rate_ok(from,"meal_pose",0.25) {return;}
                 let Some(p)=self.peers.get_mut(&from).filter(|p|p.alive()) else {return};
@@ -1283,7 +1287,7 @@ impl Game {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, armor, trims, .. } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held, offhand, gesture, draw, armor, trims, .. } => {
                 if let Some(p) = self.peers.get_mut(&id) {
                     p.target = pos;
                     p.yaw = yaw;
@@ -1291,7 +1295,11 @@ impl Game {
                     p.flags = flags;
                     p.armor = armor;
                     p.trims = trims;
+                    p.held=held;p.offhand=offhand;p.gesture=gesture&3;p.draw=if held==BOW {draw}else{0};
                 }
+            }
+            Msg::MachineInfo{x,y,z,block,status,progress}=>{
+                if let Some(m)=self.machine.as_mut() && m.pos==macroquad::math::IVec3::new(x,y,z)&&m.block==block {m.status=status;m.progress=progress;}
             }
             Msg::MealAnimation {id,item,elapsed} => {
                 if let Some(p)=self.peer_mut(id) {p.animation.start(crate::poses::Meal{item,elapsed});}
@@ -1466,7 +1474,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } => {}
+            Msg::MachineUse{..} | Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } => {}
         }
     }
 
@@ -1544,6 +1552,7 @@ impl Game {
             let moved = Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length();
             crate::entity::step_anim(&mut m.anim, moved / dt.max(1e-4), dt, 5.0);
             m.flutter(before.y - m.body.pos.y > 0.5 * dt, dt);
+            m.tick_pose(&self.world,(m.body.pos-before)/dt.max(1e-4),dt);
             m.hurt = (m.hurt - dt).max(0.0);
             // Babies stay babies until the host says otherwise.
             if m.baby > 0.0 {
@@ -1635,7 +1644,7 @@ impl Game {
             if self.sleeping.is_some() {
                 flags |= crate::net::FLAG_SLEEP;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) , offhand:self.inv.offhand.map_or(AIR,|s|s.0), gesture:u8::from(self.blocking)|if self.off_swing>0.0 {2}else{0}, draw:(self.bow_draw.clamp(0.0,1.0)*255.0) as u8 };
             self.net_send_msg(m);
         }
         if self.is_host() && self.net_timers[2] <= 0.0 {
@@ -2082,7 +2091,7 @@ mod tests {
 
         // Teleporting across the map is refused and the client is put back.
         // (NaN positions never get this far: the decoder drops the connection.)
-        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0, trims: 0 });
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0, trims: 0 , offhand:0, gesture:0, draw:0 });
         for _ in 0..20 {
             host.update(0.016, &idle());
             std::thread::sleep(Duration::from_millis(4));
@@ -2623,6 +2632,47 @@ mod tests {
         assert!(seen);
         for _ in 0..100 {host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());}
         assert!(host.peers[&id].animation.meal.is_none());assert!(viewer.peers[&id].animation.meal.is_none());
+    }
+
+    #[test]
+    fn equipment_and_combat_poses_reach_observers_over_real_sockets() {
+        let mut host=Game::new(799,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+        let port=host.open_lan("EquipmentHost",None).unwrap();let mut actor=join(&mut host,port,"Archer","").unwrap();
+        let mut viewer=join(&mut host,port,"Observer","").unwrap();let id=actor.my_id;
+        host.give_peer(id,SWORD_IRON,1);host.give_peer(id,SHIELD,1);host.give_peer(id,BOW,1);
+        assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(BOW)==1));
+        actor.inv.slots.fill(None);actor.inv.selected=0;actor.inv.slots[0]=Some((SWORD_IRON,1));actor.inv.offhand=Some((SHIELD,1));
+        let use_it=Controls{use_held:true,..Default::default()};let mut seen=false;
+        for _ in 0..120 {host.update(0.016,&idle());actor.update(0.016,&use_it);viewer.update(0.016,&idle());
+            if viewer.peers.get(&id).is_some_and(|p|p.held==SWORD_IRON&&p.offhand==SHIELD&&p.gesture==1&&p.animation.pose.elbows[0]>0.6){seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }assert!(seen,"shield and equipment reach an observer");
+        actor.inv.slots[0]=Some((BOW,1));let mut seen=false;
+        for _ in 0..120 {host.update(0.016,&idle());actor.update(0.016,&use_it);viewer.update(0.016,&idle());
+            if viewer.peers.get(&id).is_some_and(|p|p.held==BOW&&p.draw>150&&p.animation.pose.arms[1].x>1.0){seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }assert!(seen,"drawn bow reaches an observer");
+        assert_eq!(host.peers[&id].ledger.bag.count(BOW),1);
+    }
+
+    #[test]
+    fn native_machine_buttons_are_host_checked_over_real_sockets() {
+        let sources=crate::online::examplemods::sources();let texts:Vec<_>=sources.iter().map(|s|(s.id.as_str(),std::str::from_utf8(&s.files["mod.txt"]).unwrap())).collect();
+        crate::mods::with_mods(&texts,|_|{
+            let mut host=Game::new(798,false,false);let spawn=host.spawn;load_around(&mut host,spawn);host.start_scripts_with(&sources);
+            let port=host.open_lan("MachineHost",None).unwrap();let mut actor=join(&mut host,port,"Operator","").unwrap();let id=actor.my_id;
+            let pos=spawn.floor().as_ivec3()+macroquad::math::IVec3::Z;let centrifuge=reg().lookup("half_baked:centrifuge").unwrap();
+            host.world.set(pos.x,pos.y,pos.z,centrifuge);actor.world.set(pos.x,pos.y,pos.z,centrifuge);
+            let dust=reg().lookup("half_baked:glowium_dust").unwrap();let pellet=reg().lookup("half_baked:pellet").unwrap();
+            host.give_peer(id,dust,4);host.give_peer(id,COAL,2);assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(dust)==4));
+            assert!(actor.open_machine(pos));actor.machine_action(0);
+            assert!(pump(&mut host,&mut actor,|h,c|h.peers[&id].ledger.bag.count(pellet)==1&&c.inv.count(pellet)==1));
+            assert!(pump(&mut host,&mut actor,|_,c|c.machine.as_ref().is_some_and(|m|m.status.starts_with("Ready"))));
+            actor.net_send_msg(Msg::MachineUse{x:pos.x,y:pos.y,z:pos.z,action:200});
+            actor.net_send_msg(Msg::MachineUse{x:pos.x+40,y:pos.y,z:pos.z,action:0});
+            for _ in 0..12 {host.update(0.016,&idle());actor.update(0.016,&idle());std::thread::sleep(Duration::from_millis(4));}
+            assert_eq!(host.peers[&id].ledger.bag.count(pellet),1);assert_eq!(host.peers[&id].ledger.bag.count(dust),2);
+        });
     }
 
     #[test]

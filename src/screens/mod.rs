@@ -6,3 +6,5 @@ mod inventory;
 mod stations;
 mod logs;
 pub(crate) mod hud;
+
+mod machines;

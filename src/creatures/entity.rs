@@ -5,7 +5,7 @@ use crate::noise::Rng;
 use crate::render::{DynGeo, Pass};
 use crate::texture::*;
 use crate::world::World;
-use macroquad::math::{Mat4, Vec3};
+use macroquad::math::{Mat3,Mat4,Vec2,Vec3};
 
 pub const GRAVITY: f32 = 28.0;
 
@@ -879,6 +879,9 @@ pub struct Mob {
     pub anim: f32,
     /// Wingbeats while a bird drops through the air.
     pub flap: f32,
+    /// Smoothed cosmetic pitch, bank, bob and sitting weight (never affects physics).
+    pub motion_pose:Vec3,
+    pub sit_pose:f32,
     pub(crate) knock: Vec3,
     pub burning: bool,
     /// Seconds left on fire (from lava; water puts it out).
@@ -1091,6 +1094,21 @@ impl Mob {
         step_anim(&mut self.flap, if (bird && falling) || flier { 5.0 } else { 0.0 }, dt, 5.0);
     }
 
+    pub fn tick_pose(&mut self,world:&World,velocity:Vec3,dt:f32) {
+        let dt=if dt.is_finite(){dt.clamp(0.0,0.25)}else{0.0};
+        let k=1.0-(-10.0*dt).exp();
+        let v=if velocity.is_finite(){velocity.clamp_length_max(30.0)}else{Vec3::ZERO};
+        let local=Mat3::from_rotation_y(self.yaw)*v;
+        let wet=is_water(world.get_v((self.body.pos+Vec3::Y*self.body.height*0.5).floor().as_ivec3()));
+        let flying=self.kind.flies()&&!self.body.on_ground&&!self.sitting;
+        let moving=Vec2::new(v.x,v.z).length();
+        let target=if flying {Vec3::new((-v.y*0.035).clamp(-0.35,0.35),(-local.x*0.06).clamp(-0.35,0.35),self.flap.sin()*0.025)}
+            else if wet {Vec3::new((-v.y*0.07).clamp(-0.3,0.3),(-local.x*0.035).clamp(-0.15,0.15),self.anim.sin()*0.035)}else{Vec3::ZERO};
+        self.motion_pose=self.motion_pose.lerp(target,k);
+        let sit=if self.sitting {1.0}else{0.0};self.sit_pose+=(sit-self.sit_pose)*k;
+        if wet&&!self.sitting {step_anim(&mut self.anim,moving.max(0.65),dt,3.0);}
+    }
+
     pub fn new(kind: MobKind, pos: Vec3, rng: &mut Rng) -> Self {
         let (half, h) = kind.dims();
         Mob {
@@ -1110,6 +1128,7 @@ impl Mob {
             wander_dir: None,
             anim: 0.0,
             flap: 0.0,
+            motion_pose:Vec3::ZERO,sit_pose:0.0,
             knock: Vec3::ZERO,
             burning: false,
             on_fire: 0.0,
@@ -2454,6 +2473,7 @@ impl Mob {
             step_anim(&mut self.anim, spd, dt, 5.0);
         }
         self.flutter(!self.body.on_ground && !self.body.in_water && self.body.vel.y < -0.5, dt);
+        self.tick_pose(world,self.body.vel,dt);
         if self.body.pos.y < -20.0 {
             self.health = -100.0;
         }
@@ -2619,10 +2639,8 @@ impl Mob {
             // Stretch a little mid-hop.
             scale *= Vec3::new(0.9, 1.2, 0.9);
         }
-        if self.sitting {
-            p.y -= 0.15 * scale.y;
-        }
-        let mut root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
+        p.y += (self.motion_pose.z-0.15*self.sit_pose)*scale.y;
+        let mut root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_rotation_z(self.motion_pose.y) * Mat4::from_rotation_x(self.motion_pose.x) * Mat4::from_scale(scale*Vec3::new(1.0,1.0-0.08*self.sit_pose,1.0));
         // A Hmmer asleep lies in its bed (see village_life.rs).
         if self.kind == MobKind::Hmmer && self.sitting {
             let at = self.body.pos.floor().as_ivec3();
@@ -2650,7 +2668,7 @@ impl Mob {
                 } else {
                     root
                 };
-                draw_posed(geo, &root, &parts, self.anim, self.flap, sky);
+                draw_pet_pose(geo, &root, &parts, self.anim, self.flap, sky,self.sit_pose);
                 if def.glutton && let Some(t)=gulp {crate::swallow::draw_mouth(geo,&root,t,sky);}
             }
             return;
@@ -2665,19 +2683,19 @@ impl Mob {
             MobKind::Strutter if !is_lava(world.get(p.x.floor() as i32, (p.y - 0.3).floor() as i32, p.z.floor() as i32)) && !self.body.in_lava => &STRUTTER_COLD[..],
             k => model(k),
         };
-        let pose = if self.sitting { 0.0 } else { self.anim };
+        let pose = self.anim;
         if self.kind == MobKind::Hmmer {
             // The robe in the colours of its job; face and hands as they are.
             let robe = if crate::village_life::jobless(self) { [1.0, 0.95, 0.85] } else { job_robe(crate::villagers::Job::of_mob(self).index()) };
             geo.begin(Pass::Opaque, [tint[0] * robe[0], tint[1] * robe[1], tint[2] * robe[2], tint[3]], false);
-            draw_posed(geo, &root, &parts[..5], pose, self.flap, sky);
+            draw_pet_pose(geo, &root, &parts[..5], pose, self.flap, sky,self.sit_pose);
             geo.begin(Pass::Opaque, tint, false);
-            draw_posed(geo, &root, &parts[5..], pose, self.flap, sky);
+            draw_pet_pose(geo, &root, &parts[5..], pose, self.flap, sky,self.sit_pose);
         } else if self.kind == MobKind::GlowSquid {
             // It glows: drawn at full brightness whatever the light.
-            draw_posed(geo, &root, parts, pose, self.flap, 1.0);
+            draw_pet_pose(geo, &root, parts, pose, self.flap, 1.0,self.sit_pose);
         } else {
-            draw_posed(geo, &root, parts, pose, self.flap, sky);
+            draw_pet_pose(geo, &root, parts, pose, self.flap, sky,self.sit_pose);
         }
         // An Allay carries what it was given in its arms.
         if self.kind == MobKind::Allay && self.seed != 0 {
@@ -2703,7 +2721,7 @@ impl Mob {
             draw_model(geo, &root, &PACK_CHESTS, 0.0, sky, false);
         }
         if self.barding > 0 && self.kind == MobKind::Galloper {
-            draw_posed(geo, &root, &BARDING[(self.barding.min(3) - 1) as usize], pose, self.flap, sky);
+            draw_pet_pose(geo, &root, &BARDING[(self.barding.min(3) - 1) as usize], pose, self.flap, sky,self.sit_pose);
         }
         if self.kind == MobKind::Pilferer && self.seed == 1 {
             draw_model(geo, &root, &BANNER_BACK, 0.0, sky, false);
@@ -3877,11 +3895,14 @@ pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky:
 
 /// `draw_model` with birds' wings beating to `flap`.
 fn draw_posed(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, flap: f32, sky: f32) {
-    let swing = anim.sin() * 0.7;
+    draw_pet_pose(geo,root,parts,anim,flap,sky,0.0);
+}
+fn draw_pet_pose(geo:&mut DynGeo,root:&Mat4,parts:&[Part],anim:f32,flap:f32,sky:f32,sit:f32) {
+    let swing = anim.sin() * 0.7*(1.0-sit);
     for p in parts {
         let rot = match p.limb {
             Limb::Fixed => Mat4::IDENTITY,
-            Limb::Swing(s) => Mat4::from_rotation_x(swing * s),
+            Limb::Swing(s) => Mat4::from_rotation_x(swing * s+if p.pivot[1]<1.0 {sit*0.65}else{0.0}),
             Limb::Forward => Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2 + swing * 0.1),
             Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
             Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
@@ -4196,6 +4217,21 @@ pub struct PrimedTnt {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn locomotion_pose_blends_sitting_swimming_and_flight_without_changing_physics() {
+        let mut g=crate::game::Game::new(801,true,false);g.world.load_now(0,0);
+        let at=Vec3::new(4.5,90.0,4.5);let mut rng=Rng::new(31);let mut m=Mob::new(MobKind::Woofer,at,&mut rng);m.sitting=true;
+        m.tick_pose(&g.world,Vec3::ZERO,0.016);assert!(m.sit_pose>0.0&&m.sit_pose<1.0);
+        for _ in 0..120 {m.tick_pose(&g.world,Vec3::ZERO,0.016);}assert!(m.sit_pose>0.99);assert_eq!(m.body.pos,at);
+        m.sitting=false;for _ in 0..120 {m.tick_pose(&g.world,Vec3::ZERO,0.016);}assert!(m.sit_pose<0.01);
+        g.world.set(4,90,4,WATER);g.world.set(4,91,4,WATER);
+        m.tick_pose(&g.world,Vec3::new(1.0,2.0,-1.0),0.1);assert!(m.motion_pose.x<0.0&&m.anim>0.0);
+        let mut bird=Mob::new(MobKind::Allay,at,&mut rng);bird.body.on_ground=false;
+        for _ in 0..60 {bird.tick_pose(&g.world,Vec3::new(4.0,3.0,-2.0),0.016);}
+        assert!(bird.motion_pose.y.abs()>0.1&&bird.motion_pose.x< -0.05);
+        bird.tick_pose(&g.world,Vec3::splat(f32::NAN),f32::NAN);assert!(bird.motion_pose.is_finite());
+    }
+
     use super::*;
     use crate::noise::Rng;
     use macroquad::math::IVec3;

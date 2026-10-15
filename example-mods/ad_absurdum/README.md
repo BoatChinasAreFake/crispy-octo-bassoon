@@ -45,3 +45,6 @@ Rockets, pending flights, departure points, oxygen buffers, solar cooldowns and 
 The deployed rocket now has a narrow faceted white fuselage with red trim, a tapered red nose, a dark bell nozzle and four swept red fins. Its five-block assembly and saved block keys are unchanged. The three rocket shape presets keep rendering and collision consistent across clients (protocol 51).
 
 Flight snapshots synchronize the phase, pilot, safe ground anchor and progress to joining players. Saved script flight records reconstruct a pending ascent or descent after loading; offline pilots pause. Equipment is returned once, after touchdown. Protocol 54 is required. `rocket_inflight`, `rocket_landing` and `rocket_cockpit` stage the actual flight renderer for visual checks.
+
+
+Native machine controls: right-click the production machines to see actions, ingredient counts and progress. Sneak-right-click still places against them. Commands remain available; both controls use the same host-side scripts and recipes.

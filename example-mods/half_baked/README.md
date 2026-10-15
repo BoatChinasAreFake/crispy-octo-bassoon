@@ -31,4 +31,7 @@ Carry a Click Counter for `/hbm geiger`. `/hbm decon` requires a Portable Scrubb
 
 Processing, fuses, fallout and doses are stored in this mod's saved variables. Machine batches and fuses pause while their chunks are unloaded and resume when those chunks return. On reopening a save, a still-present cooling tower is checked before processing continues. Fallout continues to count down while the world runs; nothing advances while the world is closed.
 
-Machines use inventory transactions through chat commands. They do not implement a separate power-grid or machine-inventory GUI. All multiplayer transactions and explosions run on the host.
+Machine buttons and chat commands use the same inventory transactions. There is no separate power grid or machine storage inventory. All multiplayer transactions and explosions run on the host.
+
+
+Native machine controls: right-click the production machines to see actions, ingredient counts and progress. Sneak-right-click still places against them. Commands remain available; both controls use the same host-side scripts and recipes.

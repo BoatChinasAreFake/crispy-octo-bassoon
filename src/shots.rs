@@ -488,6 +488,33 @@ impl App {
                 (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
                 g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
             }
+            "machine_reactor"|"machine_rocket"|"mob_movement" => {
+                let mut g=shot_game(424242,true,false);
+                for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
+                for z in -8..=8 {for x in -10..=10 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {STONE}else{AIR});}}}
+                g.mobs.clear();g.time=0.25;
+                let from=Vec3::new(2.5,80.0,2.5);let d=Vec3::new(0.5,80.5,0.5)-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));g.player.body.pos=from;
+                if s.mode=="mob_movement" {
+                    for z in -3..=3 {for x in -6..=0 {
+                        let rim=x==-6||x==0||z==-3||z==3;
+                        g.world.set(x,79,z,if rim {STONE}else{WATER});g.world.set(x,80,z,if rim {STONE}else{WATER});
+                    }}
+                    for (kind,at) in [(entity::MobKind::Woofer,Vec3::new(1.5,80.0,0.0)),(entity::MobKind::Mooer,Vec3::new(-2.0,79.5,0.0)),(entity::MobKind::Allay,Vec3::new(0.0,82.0,-1.0))] {let id=g.alloc_mob(kind,at);let m=g.mobs.iter_mut().find(|m|m.id==id).unwrap();m.home=Some(at);m.persistent=true;m.yaw=2.7;}
+                    let from=Vec3::new(5.5,82.5,8.0);let d=Vec3::new(-0.5,80.8,0.0)-(from+Vec3::Y*player::EYE);(s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));g.player.body.pos=from;
+                    app.start_game(g);
+                } else {
+                    let key=if s.mode=="machine_reactor" {"half_baked:reactor"}else{"ad_absurdum:rocket_workbench"};
+                    if let Some(id)=block::reg().lookup(key) {g.world.set(0,80,0,id);}
+                    if let Some(id)=block::reg().lookup("half_baked:cooling_tower") {g.world.set(1,80,0,id);}
+                    g.start_scripts();
+                    for key in ["half_baked:pellet","half_baked:coolant","ad_absurdum:rocket_1"] {if let Some(id)=block::reg().lookup(key){g.give(id,2);}}
+                    g.open_machine(IVec3::new(0,80,0));
+                    if s.mode=="machine_reactor" {g.machine_action(0);}
+                    app.start_game(g);app.set_screen(Screen::Machine);
+                }
+                app.show_debug=false;
+            }
             mode if mode.starts_with("pose_") => {
                 let mut g=shot_game(424242,true,false);
                 for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
@@ -495,9 +522,11 @@ impl App {
                 let swim=matches!(mode,"pose_swim"|"pose_tread");
                 if swim {for z in -3..=3 {for x in -6..=6 {g.world.set(x,79,z,WATER);g.world.set(x,78,z,STONE);}}}
                 g.mobs.clear();g.peers.clear();
+                if matches!(mode,"pose_climb"|"pose_hang") {for x in [-3,0,2] {for y in 80..=84 {g.world.set(x,y,-1,STONE);g.world.set(x,y,0,LADDER_FIRST);}}}
                 for (i,x) in [-2.2,0.0,2.2].into_iter().enumerate() {
                     let mut p=crate::multiplayer::Peer::new(["Built-in","Custom skin","Armour"][i].into(),Vec3::new(x,if swim {79.2}else if mode.contains("fly")||mode=="pose_hover"||mode=="pose_glide" {81.0}else{80.0},0.0));
-                    p.yaw=if i==1 {std::f32::consts::PI-0.35}else{std::f32::consts::PI*0.55};p.skin=i as u8;
+                    if matches!(mode,"pose_climb"|"pose_hang") {p.pos.x=p.pos.x.floor()+0.5;p.pos.z=0.45;p.pos.y=80.7;p.target=p.pos;}
+                    p.yaw=if matches!(mode,"pose_climb"|"pose_hang") {0.0}else if i==1 {std::f32::consts::PI-0.35}else{std::f32::consts::PI*0.55};p.skin=i as u8;
                     if i==1 {p.own_skin=Some(crate::skins::test_card());}
                     if i==2 {p.armor=0x4444;if mode=="pose_glide" {p.armor=(p.armor&!0xF0)|((GLIDER_TIER as u16+1)<<4);}}
                     g.peers.insert(100+i as u32,p);
@@ -1141,8 +1170,21 @@ impl App {
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
                 }
+                if s.mode=="mob_movement" {
+                    for m in &mut app.game.mobs {if let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}
+                        m.sitting=m.kind==entity::MobKind::Woofer;m.body.on_ground=m.sitting;
+                        let velocity=if m.kind.flies(){Vec3::new(4.0,2.0,-1.0)}else{Vec3::new(0.0,0.0,-1.5)};
+                        m.tick_pose(&app.game.world,velocity,0.05);m.anim=1.0;m.flap=1.2;
+                    }
+                    app.game.messages.clear();app.game.toasts.clear();
+                }
+                if s.mode.starts_with("machine_"){app.game.messages.clear();app.game.toasts.clear();}
                 if s.mode.starts_with("pose_") {
-                    for p in app.game.peers.values_mut() {p.animation=pose_fixture(&s.mode);p.target=p.pos;}
+                    for p in app.game.peers.values_mut() {p.animation=pose_fixture(&s.mode);p.target=p.pos;
+                        p.held=match s.mode.as_str(){"pose_tool"=>PICK_DIAMOND,"pose_shield"|"pose_hurt"=>SWORD_IRON,"pose_bow"=>BOW,"pose_spear"=>SPEAR,_=>AIR};
+                        p.offhand=match s.mode.as_str(){"pose_tool"=>TORCH,"pose_shield"=>SHIELD,_=>AIR};
+                        p.draw=if s.mode=="pose_bow"{255}else{0};p.gesture=u8::from(s.mode=="pose_shield");
+                        p.flags=match s.mode.as_str(){"pose_tool"|"pose_spear"=>net::FLAG_SWING,"pose_hurt"=>net::FLAG_HURT,_=>0};}
                     if s.mode.ends_with("_first") {app.game.player.animation=pose_fixture(&s.mode);}
                     app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
                 }
@@ -2607,6 +2649,7 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
+    "machine_reactor", "machine_rocket", "mob_movement", "pose_tool", "pose_shield", "pose_bow", "pose_spear", "pose_climb", "pose_hang", "pose_hurt",
     "pose_swim", "pose_tread", "pose_hover", "pose_fly_up", "pose_fly_down", "pose_glide", "pose_crouch", "pose_eat", "pose_drink", "pose_eat_first", "pose_drink_first", "pose_landing", "pose_transition",
     "glutton_inhale", "glutton_swallow", "glutton_gulp", "glutton_belly", "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
@@ -2667,6 +2710,13 @@ fn pose_fixture(mode:&str)->crate::poses::Animator {
     use crate::poses::{Animator,Motion,Meal};
     let mut a=Animator::default();let mut m=Motion::default();
     match mode {
+        "pose_tool"=>{m.held=PICK_DIAMOND;m.offhand=TORCH;m.swing=0.5;}
+        "pose_shield"=>{m.held=SWORD_IRON;m.offhand=SHIELD;m.blocking=true;}
+        "pose_bow"=>{m.held=BOW;m.bow=1.0;}
+        "pose_spear"=>{m.held=SPEAR;m.swing=0.5;}
+        "pose_climb"=>{m.climb=true;m.grounded=false;m.velocity=Vec3::Y*3.0;}
+        "pose_hang"=>{m.climb=true;m.grounded=false;}
+        "pose_hurt"=>{m.held=SWORD_IRON;m.hurt=0.2;}
         "pose_swim"=>{m.swim=true;m.grounded=false;m.velocity=Vec3::new(0.0,0.0,-2.5);}
         "pose_tread"=>{m.swim=true;m.grounded=false;}
         "pose_hover"=>{m.fly=true;m.grounded=false;}

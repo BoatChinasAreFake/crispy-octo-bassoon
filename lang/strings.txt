@@ -171,9 +171,16 @@
 ..hHhhhhhhHHh...
 ..hh.....#oHHh..
 /astra assemble 1
+/astra assemble 2
+/astra assemble 3
+/astra assemble 4
+/astra charge
 /astra help
 /astra launch mars
 /astra launch moon
+/astra pack
+/astra refill
+/astra refine
 /astra status
 /claim, /claim list, /claim friend add|remove <name>, /claim friends.
 /dubiety ask {}
@@ -312,6 +319,10 @@ As intended. Starving stops at half a heart.
 Asked to elaborate, the Hmmer hmmed again. We will keep readers informed.
 Asking the router to forward the port (UPnP)...
 Asking your router to open the port (UPnP)...
+Assemble tier 1
+Assemble tier 2
+Assemble tier 3
+Assemble tier 4
 Autumn
 Axolotl
 Azalea (Shrub With Ambitions)
@@ -343,6 +354,7 @@ Basalt Deltas (Ashes to Ashes)
 Base
 Bastion Treasure Room (Mind the Brute)
 Bat
+Batch running: {}s left. Keep cooling connected.
 Bathe in a hot spring.
 Be near a Lightning Rod when it takes a strike.
 Be there when a baby Hmmer comes along.
@@ -375,6 +387,7 @@ Bees buzz
 Bell
 Bell (Ding Dong)
 Bellford
+Bench and pad must be nearby, with five clear blocks above.
 Benchmarking
 Big Backpack (45 Slots of Your Pack)
 Big Bob
@@ -516,11 +529,13 @@ Centurion
 Chain (Strong Links)
 Change any key in Options > Controls. Game controllers work too (sticks walk and look).
 Char-Broiled
+Charge 2 batteries
 Charred Rattler
 Charred Skull (Grins Darkly)
 Chat
 Cheat death with a Totem of Not Dying.
 Cheats: {}
+Checking machine...
 Cheese Kingdom
 Cheese Merchant
 Chef's Kiss
@@ -550,6 +565,7 @@ Clean Slate
 Clean an Encrusted Relic at a Restoration Bench.
 Cleric (Mysterious, Purple)
 Click: a stack. Right-click: one.
+Close
 Clouds: Fancy
 Clouds: Fast
 Clouds: OFF
@@ -808,6 +824,7 @@ Dungeon (Mossy, Moody)
 Dye
 Dye Job
 Dyed {}
+Each recharge needs 60 seconds between batches.
 Early Night
 Earn Your Stripes
 Earn a Sneaker's trust with Cluckets.
@@ -842,6 +859,7 @@ Enchanting Table (Bookshelf-Powered Guesswork)
 Enchanting Table ({} bookshel{})
 Encrusted Relic (Something's In There)
 English
+Esc / inventory to close
 Ethically Sourced
 Every recipe discovered!
 Every relic, every culture, all Pristine. Museums weep.
@@ -885,8 +903,10 @@ Fetch!
 Few
 Field Journal
 Field Journal (Mostly Sketches)
+Fill 4 oxygen canisters
 Fill a Crypt's ring of Eye Frames. Something opened.
 Fill all four seats on a Floaty.
+Fills oxygen for your Life Support Pack.
 Find a Crimson Forest down in the Scorchlands.
 Find a Dimond. Spelled that way for legal reasons.
 Find a Hmmer tucked up in bed at night.
@@ -1190,6 +1210,7 @@ Hushed Mask (Do Not Wear)
 Hushed Ones
 Hut (Definitely Not a Village)
 Hybrid Vigour
+I Know What This Button Does
 IT'S HERE.
 Ice (Nature's Floor Wax)
 Ice Spikes (Pointy, Chilly)
@@ -1252,6 +1273,7 @@ Keep Inventory: OFF (hardcore)
 Keep Inventory: OFF (it's hardcore)
 Keep Inventory: OFF (you drop everything)
 Keep Inventory: ON (dying costs nothing)
+Keep the cooling tower in place. Output: 4 cells + waste.
 Kelp (Seaweed, Ambitious)
 Kelp Broth
 Kelp Me
@@ -1361,6 +1383,7 @@ MINCERAFT
 MISMATCH: {}
 MODDING.md explains everything a mod can add.
 Mace (Gravity Assisted)
+Machine script is not installed.
 Made of cubes!
 Made team {} ({}), and you're on it.
 Magma Block (Hot Feet Guaranteed)
@@ -1498,6 +1521,7 @@ No block called "{}".
 No block or item called "{}".
 No controller found. Plug one in any time.
 No friends named yet. /claim friend add <name>
+No ingredients
 No letters. Things sent to you arrive in the slots above.
 No mods installed yet.
 No monsters, no hunger. Health comes back on its own.
@@ -1602,6 +1626,7 @@ Open a Trapped Chest wired up to something.
 Open a Vault with a Trial Key.
 Open a chest in a shipwreck. Finders keepers.
 Open a door. Then close it. Then open it again.
+Open a machine control panel. Read the label first.
 Open an Ominous Vault with an Ominous Trial Key.
 Open for Business
 Open the treasure chest in a Snout Bastion.
@@ -1618,6 +1643,7 @@ Other hand (a shield, torches...)
 Oxidized Copper (Statue Chic)
 Oyster
 PRESSURE - EASE OFF!
+Pack owned rockets
 Packed Ice (Never Melts)
 Page {} of {}
 Paint one of your banners on your shield
@@ -1796,6 +1822,8 @@ Reach level 30. Nothing to spend it on but anvils. For now.
 Read a paper whose lead story is about you.
 Read the village paper.
 Ready
+Ready. Ingredients come from your inventory.
+Recharging: {}s until the next batch.
 Recovery Compass (Points to Your Last Mistake)
 Red
 Red Mushroom Block (Spotty Roof)
@@ -1804,6 +1832,9 @@ Red Terracotta
 Reds
 Reef Madness
 Reel it in (hold right-click)
+Refine 2 fuel canisters
+Refine pellet
+Refines coal into rocket fuel.
 Reformed Lumberjack
 Refresh
 Regeneration
@@ -1894,6 +1925,7 @@ Scorchite Sword (Unreasonably Sharp)
 Scorchite Upgrade Template
 Scorchite Upgrade Template (Some Assembly Required)
 Scorchrock (Grumbly)
+Scram owned batches
 Screenshot
 Script error {}
 Script variable not saved: {}
@@ -2065,6 +2097,7 @@ Starfish
 Staring Champion
 Staring Eye (It Knows)
 Starred Beacon (Twice the Lighthouse)
+Start 15-second batch
 Statistics
 Statue Chic
 Steady
@@ -2344,6 +2377,7 @@ Tuna
 Tune a Note Block. Perfect pitch not required.
 Tuning In
 Turned away {} from {} (not on the allow-list)
+Turns dust and coal into one pellet.
 Turtle
 Turtle Eggs (Do Not Step On)
 Turtle Scute (Shell Shard)

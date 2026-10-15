@@ -255,6 +255,7 @@ pub struct Game {
     pub anvil: Option<crate::anvil::AnvilUi>,
     /// The enchanting table screen's inputs while it's open (see enchant.rs).
     pub enchanting: Option<crate::enchant::EnchantUi>,
+    pub machine:Option<crate::machines::Panel>,
     /// How many times we've enchanted something (seeds the table's offers; the host's word when joined).
     pub enchant_count: u32,
     /// Joined players we remember, by name (see players.rs).
@@ -403,6 +404,9 @@ pub struct Game {
     /// Seconds since the last swing (weapons charge back up; see combat.rs), and a raised shield.
     pub since_attack: f32,
     pub blocking: bool,
+    /// Cosmetic bow wind-up; arrows are released on button-up.
+    pub bow_draw:f32,
+    pub off_swing:f32,
     /// Portals (see scorch.rs): seconds spent standing in one, seconds before
     /// another trip, and whether we've stepped out since the last.
     pub portal_time: f32,
@@ -614,6 +618,7 @@ impl Game {
             orbs_sent_empty: true,
             anvil: None,
             enchanting: None,
+            machine:None,
             enchant_count: 0,
             saved_players: Default::default(),
             admin: Default::default(),
@@ -700,6 +705,7 @@ impl Game {
             trading: None,
             since_attack: 10.0,
             blocking: false,
+            bow_draw:0.0,off_swing:0.0,
             portal_time: 0.0,
             portal_cooldown: 0.0,
             left_portal: true,
@@ -1496,6 +1502,7 @@ impl Game {
         self.net_receive(dt);
         self.update_local(dt, c);
         self.tick_player_pose(dt);
+        self.machine_tick(dt);
         self.foreign_tick(dt);
         self.net_send(dt);
     }
@@ -2594,14 +2601,20 @@ impl Game {
             self.breaking = None;
         }
 
-        if (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
+        if held==BOW {
+            if c.use_held||c.use_pressed {self.bow_draw=(self.bow_draw+dt).min(1.0);}
+            else if self.bow_draw>0.0 {self.shoot_bow();self.bow_draw=0.0;}
+        } else {self.bow_draw=0.0;}
+        if held!=BOW && (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
             self.use_cd = 0.25;
             // With a weapon or tool in hand, a block (torches, say) in the other hand gets placed.
             let other = self.inv.offhand.map(|s| s.0).unwrap_or(AIR);
             if other != AIR && other != SHIELD && is_block_item(other) && offhand_first(self.inv.held()) && matches!(self.target, Some(Target::Block(_))) {
+                let right_swing=self.player.swing;
                 self.inv.swap_hands();
                 self.use_item();
                 self.inv.swap_hands();
+                self.off_swing=1.0;self.player.swing=right_swing;
             } else {
                 self.use_item();
             }
@@ -2661,6 +2674,7 @@ impl Game {
             && !self.player.sneaking
         {
             let (pos, id) = (h.pos, self.world.get_v(h.pos));
+            if self.open_machine(pos) {return;}
             if id == SHOP_STALL {
                 self.open_stall(pos);
                 return;
@@ -4679,7 +4693,7 @@ impl Game {
                 None => crate::poses::draw_parts(&mut g,&root,&crate::nametags::SKIN_MODELS[p.skin as usize % 6],if asleep {Default::default()}else{p.animation.pose},sky),
             }
             crate::entity::draw_player_armor(&mut g,&root,p.armor,p.trims,sky,if asleep {Default::default()}else{p.animation.pose});
-            if !asleep {crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
+            if !asleep {crate::poses::draw_held(&mut g,&root,&p.animation,p.held,p.offhand,p.gesture&1!=0,sky);crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
         }
         // The player, in third person
         if self.third_person && !self.menu && !self.spectator && self.rocket_pilot().is_none() {
@@ -4696,7 +4710,7 @@ impl Game {
                 None => crate::poses::draw_parts(&mut g,&root,&crate::nametags::SKIN_MODELS[self.skin as usize % 6],if self.sleeping.is_some() {Default::default()}else{p.animation.pose},sky),
             }
             crate::entity::draw_player_armor(&mut g,&root,self.inv.armor_look(),crate::trims::look(&self.inv.armor,&self.inv.armor_wear),sky,if self.sleeping.is_some() {Default::default()}else{p.animation.pose});
-            if self.sleeping.is_none() {crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
+            if self.sleeping.is_none() {crate::poses::draw_held(&mut g,&root,&p.animation,self.inv.held(),self.inv.offhand.map_or(AIR,|s|s.0),self.blocking,sky);crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
         }
         // Primed TNT
         for t in &self.tnts {
@@ -4788,6 +4802,7 @@ impl Game {
         let mut local = Mat4::from_translation(Vec3::new(0.42 - swing * 0.15, -0.42 + (bob * 2.0).sin().abs() * 0.03 + swing * 0.12, -0.72 - swing * 0.1))
             * Mat4::from_rotation_x(-swing * 0.9);
         let held = self.inv.held();
+        if held==BOW&&self.bow_draw>0.0 {local=local*Mat4::from_translation(Vec3::new(-0.12*self.bow_draw,0.10*self.bow_draw,0.10*self.bow_draw))*Mat4::from_rotation_y(-0.3*self.bow_draw);}
         let meal=self.player.animation.meal;
         let held=meal.map(|m|m.item).unwrap_or(held);
         if let Some(m)=meal {
@@ -4915,7 +4930,7 @@ pub fn offhand_first(held: Id) -> bool {
     held == AIR || is_sword(held) || held == MACE || pick_tier(held) > 0 || crate::tools::tool_uses(held).is_some()
 }
 
-fn extruded_sprite(g: &mut DynGeo, m: &Mat4, tile: u16, size: f32, sky: f32) {
+pub(crate) fn extruded_sprite(g: &mut DynGeo, m: &Mat4, tile: u16, size: f32, sky: f32) {
     use crate::texture::{solid, TILE};
     let px = size / TILE as f32;
     let (z0, z1) = (-px / 2.0, px / 2.0);
@@ -5058,6 +5073,18 @@ pub(crate) mod tests {
             }
         }
         w
+    }
+
+    #[test]
+    fn bow_draw_waits_for_release_and_switching_items_cancels_it() {
+        let mut g=Game::new(803,true,false);g.inv.selected=0;g.inv.slots[0]=Some((BOW,1));
+        let hold=Controls{use_held:true,..Default::default()};
+        g.handle_actions(0.2,&hold);g.handle_actions(0.2,&hold);
+        assert!(g.bow_draw>0.3);assert!(g.arrows.is_empty());
+        g.handle_actions(0.016,&Controls::default());assert_eq!(g.arrows.len(),1);assert_eq!(g.bow_draw,0.0);
+        g.handle_actions(0.016,&Controls::default());assert_eq!(g.arrows.len(),1);
+        g.handle_actions(0.2,&hold);g.inv.slots[0]=Some((STONE,1));g.handle_actions(0.016,&Controls::default());
+        assert_eq!(g.bow_draw,0.0);assert_eq!(g.arrows.len(),1);
     }
 
     #[test]
