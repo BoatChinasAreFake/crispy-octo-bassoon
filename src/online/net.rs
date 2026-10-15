@@ -55,7 +55,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v52: optional custom mod-tree silhouettes regenerate identically on peers.
 /// v53: glutton mod companions accept all offerings before ordinary interactions.
 /// v54: host-authoritative rocket flights and cockpit/landing snapshots.
-pub const PROTOCOL: u32 = 54;
+/// v55: bounded realm-local swallowing animation snapshots and burps.
+pub const PROTOCOL: u32 = 55;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -279,6 +280,7 @@ pub enum Msg {
     /// host -> client: every boat and minecart: (id, kind, position, yaw, rider id + 1 or 0).
     Vehicles(Vec<(u32, u8, Vec3, f32, u32)>),
     RocketFlights(Vec<crate::rockets::RocketFlight>),
+    Swallows(Vec<crate::swallow::Swallow>),
     /// client -> host: get in (0), get out (1) or hit (2) this vehicle.
     VehicleUse { id: u32, action: u8 },
     /// client -> host: where I've driven the vehicle I'm in.
@@ -991,6 +993,12 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
+            Msg::Swallows(list) => {
+                w.u8(114);w.u8(list.len().min(crate::swallow::CAP) as u8);
+                for f in list.iter().take(crate::swallow::CAP) {
+                    w.u32(f.eater);w.u32(f.prey);w.u8(f.kind);w.v3(f.from);w.f32(f.yaw);w.f32(f.scale);w.u8(f.sheared as u8);w.f32(f.elapsed);
+                }
+            }
             Msg::RocketFlights(list) => {
                 w.u8(113);w.u8(list.len().min(16) as u8);
                 for f in list.iter().take(16) {w.str(&f.owner);w.u32(f.pilot);w.v3(f.ground);w.u8(f.landing as u8);w.f32(f.elapsed);w.u8(f.tier);}
@@ -1465,6 +1473,15 @@ impl Msg {
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
             48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            114 => {
+                let n=r.u8()? as usize;if n>crate::swallow::CAP {return Err(io::Error::new(io::ErrorKind::InvalidData,"too many meals"));}
+                let mut list=Vec::with_capacity(n);
+                for _ in 0..n {
+                    let f=crate::swallow::Swallow {eater:r.u32()?,prey:r.u32()?,kind:r.u8()?,from:r.v3()?,yaw:r.f32()?,scale:r.f32()?,sheared:r.u8()?!=0,elapsed:r.f32()?};
+                    if !f.valid() {return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid meal"));}list.push(f);
+                }
+                Msg::Swallows(list)
+            }
             113 => {
                 let n=r.u8()?;if n>16 {return Err(io::Error::new(io::ErrorKind::InvalidData,"too many rocket flights"));}
                 let mut list=Vec::new();for _ in 0..n {

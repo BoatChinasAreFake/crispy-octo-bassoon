@@ -319,3 +319,40 @@ fn rocket_snapshots_attach_pilots_and_descent_reuses_its_safe_anchor() {
         g.rocket_clear("Tester");assert!(g.rocket_pilot().is_none());assert_eq!(g.player.body.pos,anchor);
     });
 }
+
+#[test]
+fn swallowing_is_visual_only_bounded_and_realm_local() {
+    with_packs(||{
+        use crate::{entity::MobKind,swallow::{self,Swallow}};
+        let mut g=game();g.mobs.clear();let at=g.player.body.pos;
+        let eater=g.alloc_mob(MobKind::from_name("dubiety:obesity").unwrap(),at);
+        let prey=g.alloc_mob(MobKind::Fluffer,at+Vec3::Z*3.0);
+        let sheep=g.mobs.iter_mut().find(|m|m.id==prey).unwrap();sheep.baby=30.0;sheep.sheared=true;
+        let expected=Swallow::meal(eater,sheep);let drops=g.drops.len();let kills=g.stats.kills;
+        g.gluttons_tick(0.016);
+        assert_eq!(g.swallows,vec![expected]);assert!(!g.mobs.iter().any(|m|m.id==prey));
+        assert_eq!(g.drops.len(),drops);assert_eq!(g.stats.kills,kills);
+        let mouth=swallow::mouth(&g.mobs[0]);let (start,scale)=g.swallows[0].pose(mouth);
+        assert!(start.is_finite());assert_eq!(scale,Vec3::splat(0.55));
+        let msg=crate::net::Msg::Swallows(g.swallows.clone());assert_eq!(crate::net::Msg::decode(&msg.encode()).unwrap(),msg);
+        assert!(g.world_msgs().contains(&msg));
+        let mut bad=g.swallows.clone();bad[0].elapsed=f32::NAN;
+        assert!(crate::net::Msg::decode(&crate::net::Msg::Swallows(bad).encode()).is_err());
+        let mut bad=g.swallows.clone();bad[0].kind=MobKind::Woofer.index();
+        assert!(crate::net::Msg::decode(&crate::net::Msg::Swallows(bad).encode()).is_err());
+        let forest=dim("dusk:twilit_realm");
+        g.in_realm(forest,|g|{assert!(g.swallows.is_empty());g.swallows_tick(5.0);});assert_eq!(g.swallows.len(),1);
+        g.sounds.clear();g.swallows_tick(swallow::GULP);
+        let (end,scale)=g.swallows[0].pose(mouth);assert!(end.distance(mouth)<0.0001);assert_eq!(scale,Vec3::ZERO);
+        assert_eq!(g.sounds.iter().filter(|(s,_)|*s==crate::sound::Sfx::Burp).count(),1);
+        g.swallows_tick(0.1);assert_eq!(g.sounds.iter().filter(|(s,_)|*s==crate::sound::Sfx::Burp).count(),1);
+        // The cosmetic meal is intentionally absent from saves; swallowed livestock stays gone.
+        let back=Game::from_save(g.to_save());assert!(back.swallows.is_empty());assert!(!back.mobs.iter().any(|m|m.id==prey));
+        g.swallows_tick(2.0);assert!(g.swallows.is_empty());
+        for _ in 0..swallow::CAP+4 {g.alloc_mob(MobKind::Mooer,at);}
+        g.gluttons_tick(0.016);assert_eq!(g.swallows.len(),swallow::CAP);assert_eq!(g.mobs.len(),1);
+        assert_eq!(swallow::opening(0.0),0.0);assert!(swallow::opening(0.5)>0.99);
+        assert_eq!(swallow::opening(swallow::DURATION),0.0);
+        assert!(swallow::belly(1.4).x>1.1);assert!((swallow::belly(swallow::DURATION)-Vec3::ONE).length()<0.001);
+    });
+}

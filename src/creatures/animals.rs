@@ -440,7 +440,7 @@ impl Game {
         for m in &mut self.mobs {
             let Some(d)=m.kind.mod_def().filter(|d|d.glutton) else {continue};
             if m.health<=0.0 || !self.world.is_loaded(m.body.pos.x.floor() as i32,m.body.pos.z.floor() as i32) {continue;}
-            eaters.push(m.body.pos);
+            eaters.push((m.id,m.body.pos));
             m.appetite_cd=(m.appetite_cd-dt.max(0.0)).max(0.0);
             if m.appetite_cd<=0.0 && let Some((who,_,_))=players.iter().filter(|p|p.1.distance(m.body.pos)<=16.0).min_by(|a,b|a.1.distance_squared(m.body.pos).total_cmp(&b.1.distance_squared(m.body.pos))) {
                 m.appetite_cd=8.0;
@@ -450,12 +450,16 @@ impl Game {
         if !eaters.is_empty() {
             let mut meals=Vec::new();
             self.mobs.retain(|m| {
-                let swallowed=m.health>0.0 && matches!(m.kind,MobKind::Mooer|MobKind::Oinker|MobKind::Fluffer|MobKind::Cluckster)
-                    && eaters.iter().any(|p|p.distance_squared(m.body.pos)<=25.0);
-                if swallowed {meals.push(m.body.pos+Vec3::Y*0.5);}
-                !swallowed
+                let eater=if m.health>0.0 && matches!(m.kind,MobKind::Mooer|MobKind::Oinker|MobKind::Fluffer|MobKind::Cluckster) {
+                    eaters.iter().filter(|(_,p)|p.distance_squared(m.body.pos)<=25.0)
+                        .min_by(|a,b|a.1.distance_squared(m.body.pos).total_cmp(&b.1.distance_squared(m.body.pos)).then(a.0.cmp(&b.0)))
+                } else {None};
+                if let Some((id,_))=eater {meals.push(crate::swallow::Swallow::meal(*id,m));}
+                eater.is_none()
             });
-            for p in meals {self.smoke(p,5,0.2);self.sfx(Sfx::Eat,Some(p));}
+            for meal in meals {
+                if self.swallows.len()<crate::swallow::CAP {self.swallows.push(meal);}
+            }
         }
         for (who,text) in requests {self.tell(&who,&text);}
     }

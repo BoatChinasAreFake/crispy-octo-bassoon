@@ -415,6 +415,7 @@ pub struct Game {
     /// Boats and minecarts (see vehicles.rs), the one we're in, and time to the next sync.
     pub vehicles: Vec<crate::vehicles::Vehicle>,
     pub rockets: Vec<crate::rockets::RocketFlight>,
+    pub swallows: Vec<crate::swallow::Swallow>,
     pub next_vehicle_id: u32,
     pub riding: Option<u32>,
     pub vehicle_sync: f32,
@@ -706,6 +707,7 @@ impl Game {
             editing_sign: None,
             vehicles: Vec::new(),
             rockets: Vec::new(),
+            swallows: Vec::new(),
             next_vehicle_id: 0,
             riding: None,
             vehicle_sync: 0.0,
@@ -1557,6 +1559,7 @@ impl Game {
             self.stats.jumps += 1;
         }
         self.rockets_tick(dt);
+        self.swallows_tick(dt);
         self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
         self.ride_tick(dt, c.input.forward, c.input.strafe, c.input.jump, c.input.sneak);
         self.track_travel(before, dt);
@@ -4598,7 +4601,9 @@ impl Game {
         // Mobs
         for m in &self.mobs {
             if m.body.pos.distance(eye) < (render_distance * 16) as f32 {
-                m.draw(&mut g, &self.world);
+                if self.swallows.iter().any(|f|f.prey==m.id) {continue;}
+                let gulp=self.swallows.iter().filter(|f|f.eater==m.id).map(|f|f.elapsed).min_by(f32::total_cmp);
+                if gulp.is_some() {m.draw_with_gulp(&mut g,&self.world,gulp);}else{m.draw(&mut g,&self.world);}
                 // A Bell's ring makes raiders glow (see raids.rs).
                 if self.bell_glow > 0.0 && m.kind.raider() {
                     m.draw_glow(&mut g, &self.world);
@@ -4701,6 +4706,7 @@ impl Game {
         }
         self.draw_vehicles(&mut g);
         self.draw_rockets(&mut g);
+        self.draw_swallows(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_leads(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);

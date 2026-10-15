@@ -57,6 +57,7 @@ macro_rules! realm_fields {
             powered_doors: HashSet<IVec3>,
             vehicles: Vec<crate::vehicles::Vehicle>,
             rockets: Vec<crate::rockets::RocketFlight>,
+            swallows: Vec<crate::swallow::Swallow>,
             hives: HashMap<IVec3, crate::bees::Colony>,
             pots: HashMap<IVec3, crate::cooking::Pot>,
             buzz: Vec<crate::bees::Buzz>,
@@ -130,6 +131,7 @@ impl Realm {
             powered_doors: HashSet::new(),
             vehicles: Vec::new(),
             rockets: Vec::new(),
+            swallows: Vec::new(),
             hives: HashMap::new(),
             pots: HashMap::new(),
             buzz: Vec::new(),
@@ -253,6 +255,7 @@ impl Game {
         self.liquid_tick(dt);
         self.zap_tick(dt);
         self.rockets_tick(dt);
+        self.swallows_tick(dt);
         self.vehicles_tick(dt, 0.0, 0.0, false);
         let centers: Vec<(Vec3, i32)> = self.peers.values().map(|p| (p.target, 4)).collect();
         self.world.stream(&centers);

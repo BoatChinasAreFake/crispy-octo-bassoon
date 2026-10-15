@@ -14,7 +14,7 @@ mod online;
 pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, mesher, meshpool, narrator, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
 pub(crate) use land::{archaeology, bastion, caveins, caves, copper, deepdark, dims, falling, fire, fortress, hollow, houses, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stalls, stash, together, trading, trims, villageblocks, tripwire, wiring, woods, zapparts};
-pub(crate) use creatures::{animals, beasts, bees, bounties, creaking, critters, entity, floaty, horses, leads, nametags, night, paper, pathing, raids, reputation, skins, sniffers, village_growth, village_life, villagers, wildlife, wilter};
+pub(crate) use creatures::{swallow, animals, beasts, bees, bounties, creaking, critters, entity, floaty, horses, leads, nametags, night, paper, pathing, raids, reputation, skins, sniffers, village_growth, village_life, villagers, wildlife, wilter};
 pub(crate) use survival::{advancements, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rockets, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, post, scripting, server, servers, teams};
 mod screens;

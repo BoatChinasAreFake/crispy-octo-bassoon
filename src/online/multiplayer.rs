@@ -521,6 +521,7 @@ impl Game {
         v.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
         v.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
         v.push(Msg::RocketFlights(self.rockets.clone()));
+        v.push(Msg::Swallows(self.swallows.clone()));
         v.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
         v
     }
@@ -1332,6 +1333,7 @@ impl Game {
             Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
             Msg::Vehicles(list) => self.apply_vehicles(list),
             Msg::RocketFlights(list) => self.rockets=list,
+            Msg::Swallows(list) => self.swallows=list,
             Msg::SignText { x, y, z, lines } => {
                 self.world.signs.insert(IVec3::new(x, y, z), crate::decor::clean_lines(&lines));
             }
@@ -1671,6 +1673,7 @@ impl Game {
         if self.is_host() {
             if mobs_due {
                 self.net_broadcast(Msg::RocketFlights(self.rockets.clone()));
+                self.net_broadcast(Msg::Swallows(self.swallows.clone()));
                 let mobs = self
                     .mobs
                     .iter()
@@ -2570,6 +2573,10 @@ mod tests {
             host.mobs.iter_mut().find(|m|m.id==cow).unwrap().body.pos=at;
             assert!(pump(&mut host,&mut client,|h,c|h.mobs.iter().all(|m|m.id!=cow) && c.mobs.iter().all(|m|m.id!=cow)));
             assert!(client.mobs.iter().any(|m|m.id==eater));
+            assert!(pump(&mut host,&mut client,|h,c|h.swallows.iter().any(|f|f.prey==cow) && c.swallows.iter().any(|f|f.prey==cow)));
+            let effect=client.swallows.iter().find(|f|f.prey==cow).unwrap();
+            assert_eq!(effect.eater,eater);assert_eq!(effect.kind,MobKind::Mooer.index());
+            assert!(pump(&mut host,&mut client,|h,c|h.swallows.is_empty() && c.swallows.is_empty()));
         });
     }
 

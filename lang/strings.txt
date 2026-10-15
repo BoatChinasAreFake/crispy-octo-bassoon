@@ -574,6 +574,7 @@ Colours: {}.
 Command
 Commands: list, players, info <name>, say <text>, kick <name>, ban <name|ip>, unban <ip>, bans, time <day|noon|night|midnight|0-1>, op <name>, deop <name>, ops, allowlist <on|off|add|remove|list> [name], forget <name>, password <pw|off>, pvp <on|off>, team <create|join|leave|list|colour|friendlyfire|remove>, tc <message>
 Commands: list, seed, help, team, tc. Operators can do more.
+Companion burps
 Comparator (Counts Your Stuff)
 Compass (Points Home, Mostly)
 Compiled, not interpreted!
@@ -2821,6 +2822,7 @@ hugged a Pokey Plant. We said not to.
 hung on the east wall
 id is in the palette
 ids moved
+invalid meal
 invalid rocket flight
 inventory too long
 islands and beach ecology
@@ -3177,6 +3179,7 @@ too dark
 too many chunks
 too many edits
 too many files in pack
+too many meals
 too many mods in pack
 too many rocket flights
 too many world changes in one event

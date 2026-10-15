@@ -2579,7 +2579,9 @@ impl Mob {
         draw_posed(geo, &root, model(self.kind), self.anim, self.flap, 1.0);
     }
 
-    pub fn draw(&self, geo: &mut DynGeo, world: &World) {
+    pub fn draw(&self, geo: &mut DynGeo, world: &World) { self.draw_with_gulp(geo,world,None); }
+
+    pub fn draw_with_gulp(&self, geo: &mut DynGeo, world: &World, gulp:Option<f32>) {
         let flash = self.kind == MobKind::Hisser && self.fuse > 0.0 && (self.fuse * 14.0).sin() > 0.0;
         let tint = if self.hurt > 0.3 {
             [1.0, 0.45, 0.45, 1.0]
@@ -2617,6 +2619,7 @@ impl Mob {
             // Stretch a little mid-hop.
             scale *= Vec3::new(0.9, 1.2, 0.9);
         }
+        if let Some(t)=gulp {scale *= crate::swallow::belly(t);}
         if self.sitting {
             p.y -= 0.15 * scale.y;
         }
@@ -2648,6 +2651,7 @@ impl Mob {
                     root
                 };
                 draw_posed(geo, &root, &parts, self.anim, self.flap, sky);
+                if def.glutton && let Some(t)=gulp {crate::swallow::draw_mouth(geo,&root,t,sky);}
             }
             return;
         }
@@ -3338,7 +3342,7 @@ static FLOATY_HARNESS: [Part; 3] = [
 ];
 pub static SADDLE_PART: [Part; 1] = [part([-0.32, 1.44, -0.3], [0.64, 0.1, 0.5], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6])];
 static WOOFER_COLLAR: [Part; 1] = [part([-0.21, 0.52, -0.46], [0.42, 0.1, 0.08], [0.0; 3], Limb::Fixed, [T_COLLAR; 6])];
-static FLUFFER_SHEARED: [Part; 6] = [
+pub(crate) static FLUFFER_SHEARED: [Part; 6] = [
     part([-0.3, 0.5, -0.45], [0.6, 0.5, 0.9], [0.0; 3], Limb::Fixed, [FS; 6]),
     part([-0.22, 0.75, -0.85], [0.44, 0.45, 0.4], [0.0; 3], Limb::Fixed, [FS, FS, FS, FS, FS, T_FLUFF_FACE]),
     part([-0.3, 0.0, -0.4], [0.18, 0.5, 0.18], [0.0, 0.5, -0.3], Limb::Swing(1.0), [FS; 6]),

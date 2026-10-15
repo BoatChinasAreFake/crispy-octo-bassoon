@@ -488,7 +488,7 @@ impl App {
                 (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
                 g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
             }
-            "half_baked_lab" | "astra_rocket" | "dusk_guardians" | "dubiety_companion" | "dubiety_glutton" => {
+            "half_baked_lab" | "astra_rocket" | "dusk_guardians" | "dubiety_companion" | "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" => {
                 // Controlled displays of the installed example mods, using the
                 // current generator. These are model/content QA, not natural spawns.
                 let mut g=shot_game(424242,true,false);
@@ -516,7 +516,7 @@ impl App {
                     "dusk_guardians" => {
                         for (x,key) in [(-6.0,"serpent"),(-2.0,"lich"),(2.0,"minotax"),(6.0,"hydra")] {display_mobs.push((match key {"serpent"=>"dusk:serpent","lich"=>"dusk:lich","minotax"=>"dusk:minotax",_=>"dusk:hydra"},Vec3::new(x,80.0,-1.0)));}
                     }
-                    "dubiety_glutton" => {
+                    "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" => {
                         display_mobs.push(("dubiety:companion",Vec3::new(-1.5,81.0,0.0)));
                         display_mobs.push(("dubiety:obesity",Vec3::new(1.0,80.5,0.0)));
                     }
@@ -528,7 +528,16 @@ impl App {
                 for (key,at) in display_mobs {if let Some(kind)=entity::MobKind::from_name(key) {
                     let id=g.alloc_mob(kind,at);if let Some(m)=g.mobs.iter_mut().find(|m|m.id==id) {m.home=Some(at);m.persistent=true;m.wander_t=100.0;m.wander_dir=None;m.yaw=2.7;}
                 }}
-                let (from,to)=if s.mode=="astra_rocket" {(Vec3::new(6.0,84.0,9.0),Vec3::new(0.0,82.8,-2.0))} else if s.mode=="dubiety_glutton" {(Vec3::new(3.8,81.7,5.5),Vec3::new(0.0,81.0,0.0))} else if s.mode=="dubiety_companion" {(Vec3::new(3.8,81.2,4.5),Vec3::new(0.8,80.9,0.0))} else {(Vec3::new(9.0,85.0,12.0),Vec3::new(0.0,81.0,-1.0))};
+                if s.mode.starts_with("glutton_") {
+                    g.mobs.retain(|m|m.kind.mod_def().is_some_and(|d|d.glutton));
+                    if let Some(m)=g.mobs.first_mut() {m.yaw=std::f32::consts::PI;}
+                    if let Some(eater)=g.mobs.first().map(|m|m.id) {
+                    let id=g.alloc_mob(entity::MobKind::Mooer,Vec3::new(1.0,80.0,3.5));
+                    let prey=g.mobs.iter().find(|m|m.id==id).unwrap();
+                    g.swallows.push(crate::swallow::Swallow::meal(eater,prey));g.mobs.retain(|m|m.id!=id);
+                    }
+                }
+                let (from,to)=if s.mode=="astra_rocket" {(Vec3::new(6.0,84.0,9.0),Vec3::new(0.0,82.8,-2.0))} else if matches!(s.mode.as_str(),"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly") {(Vec3::new(3.8,81.7,5.5),Vec3::new(0.0,81.0,0.0))} else if s.mode=="dubiety_companion" {(Vec3::new(3.8,81.2,4.5),Vec3::new(0.8,80.9,0.0))} else {(Vec3::new(9.0,85.0,12.0),Vec3::new(0.0,81.0,-1.0))};
                 let d=to-(from+Vec3::Y*player::EYE);(s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
                 g.player.body.pos=from;g.player.flying=true;g.time=0.25;app.start_game(g);app.show_debug=false;
             }
@@ -1113,9 +1122,17 @@ impl App {
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
                 }
-                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dubiety_glutton"|"dusk_trees"|"rocket_inflight"|"rocket_landing"|"rocket_cockpit") {
+                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly"|"dusk_trees"|"rocket_inflight"|"rocket_landing"|"rocket_cockpit") {
                     for m in &mut app.game.mobs {if let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
                     app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
+                }
+                if s.mode.starts_with("glutton_") {
+                    // Freeze a deterministic point in the real effect, not a substitute illustration.
+                    let elapsed=match s.mode.as_str() {"glutton_swallow"=>0.45,"glutton_gulp"=>0.80,_=>1.40};
+                    if let Some(m)=app.game.mobs.first() {
+                        let f=crate::swallow::Swallow {eater:m.id,prey:u32::MAX,kind:entity::MobKind::Mooer.index(),from:Vec3::new(1.0,80.0,3.5),yaw:0.0,scale:1.0,sheared:false,elapsed};
+                        app.game.swallows=vec![f];
+                    }
                 }
                 if s.mode=="rocket_cockpit" && let Some(f)=app.game.rockets.first_mut() {f.elapsed=1.5;app.game.player.body.pos=f.seat();}
                 if matches!(s.mode.as_str(),"coastal_floor"|"coastal_fish"|"coastal_starfish") {
@@ -2566,7 +2583,7 @@ const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
     "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
     "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
-    "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
+    "glutton_swallow", "glutton_gulp", "glutton_belly", "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
 ];

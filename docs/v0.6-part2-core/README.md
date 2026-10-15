@@ -142,3 +142,12 @@ Dusk custom trees: Twisted Duskwood, Gloam Pine and Moonwillow replace its gener
 Dubiety now has a separately summoned Obesity variant with a larger orange companion model and a dedicated beacon. It accepts all offered item types and swallows living cows, pigs, sheep and chickens inside a five-block sphere without death loot. Hunger demands repeat every eight seconds; feeding, realm isolation and client inventory/removal synchronization are verified independently of the ordinary word-model assistant. Protocol 53 protects interaction precedence.
 
 Rocket trips now show the shaped hull moving with its pilot, a first-person cockpit, full-bright engine flames and moving exhaust. Ascent lasts four seconds and destination descent lasts three; gear is recovered after touchdown. Native flight snapshots are realm-local and host-authoritative, and saved Rhai phase records restore animation after loading. Protocol 54 protects the new snapshot message.
+
+
+## Glutton swallowing animation
+
+Obesity now opens a toothy mouth on its existing face and pulls a temporary model of nearby livestock through a hopping, shrinking arc. At 1.05 seconds the meal disappears into the mouth; a belly squash/bounce and a synthesized burp finish the 1.8-second sequence. Babies and sheared sheep keep their appearance. Only the cosmetic copy remains after the host consumes livestock, so it cannot be attacked, bred, milked or saved again, and creates no loot or kill rewards.
+
+Each realm owns at most 64 visual meals. Periodic host snapshots include the eater/prey IDs, appearance, origin and current phase; new arrivals receive the same state. The effect expires without replaying on save/load. Protocol 55 protects the snapshot and appended sound ID; generation revision 12 and save format 16 stay unchanged. `glutton_swallow`, `glutton_gulp` and `glutton_belly` stage the actual effect for render inspection.
+
+Validation: 591 release tests passed (one manual map export ignored); all-target release Clippy with warnings denied and the no-default-features check passed on Rust 1.90.0. Focused lifecycle/protocol checks were rerun after visual alignment. All three native animation stages were rendered and inspected; synthesized audio tests pass, but playback could not be auditioned without a sound device. Existing Bottomless Appetite feeding progression remains available.
