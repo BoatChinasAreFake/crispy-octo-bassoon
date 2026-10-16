@@ -521,6 +521,7 @@ Carrots
 Carry acacia, birch and dark oak logs at once.
 Cartographer (Knows Where Things Are)
 Cartography Table (Here Be Dragons)
+Castaway
 Castle Town
 Cat
 Catch a Fishy with your bare hands (well, hit one).
@@ -1992,6 +1993,7 @@ Send Post
 Server
 Server list name: {}. Encrypted; host key fingerprint {} (in {})
 Set a Wilter Star in a beacon.
+Set foot on an island far out at sea. Bring a boat home.
 Set off a firework from the ground.
 Set {}, {}, {} to {}.
 Setback for Local Adventurer
@@ -2761,6 +2763,7 @@ already as good as it gets
 already in love
 an alarming number of mites
 an arrow actually travelled before landing
+an island
 an odd fan includes the center ray
 an odd mix
 an older
