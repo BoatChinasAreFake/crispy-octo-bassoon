@@ -2824,6 +2824,7 @@ a newer
 a parcel
 a quarter per ruby
 a script gets time to move it on
+a second click straight after does nothing
 a sitting flier lands: y \= {}
 a skin must be 64x64
 a skin must be 64x64 pixels (this is {}x{})
@@ -3249,6 +3250,7 @@ starving for potassium (Wood Ash)
 statistics too long
 stepped up onto the slabs
 still holding it
+still in its grace
 still there
 stone arch
 stopped by the wall: {}

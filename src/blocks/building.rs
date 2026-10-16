@@ -56,6 +56,9 @@ impl Game {
             REPEATER_FIRST => return crate::contraptions::repeater(self.facing(), false),
             COMPARATOR_FIRST => return crate::contraptions::comparator(self.facing(), false, false),
             HOPPER_FIRST => return Game::hopper_facing(normal),
+            // A Petrified Log lies along whichever way it was put against something.
+            PETRIFIED_LOG if normal.x != 0 => return PETRIFIED_LOG_X,
+            PETRIFIED_LOG if normal.z != 0 => return PETRIFIED_LOG_Z,
             _ => {}
         }
         // A bed's head goes the way you're looking (you climb in from the foot).

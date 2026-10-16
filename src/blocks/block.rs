@@ -1273,6 +1273,9 @@ pub fn made_of(id: Id) -> Id {
 /// place directly; door tops come free with their bottom half).
 pub fn placing_item(id: Id) -> Option<Id> {
     if matches!(id,DRIFTWOOD|DRIFTWOOD_Z) {return Some(DRIFTWOOD);}
+    if matches!(id, PETRIFIED_LOG_X | PETRIFIED_LOG_Z) {
+        return Some(PETRIFIED_LOG);
+    }
     if matches!(id,SHELL_PATCH|SHELL_PATCH_WET) {return Some(SHELL_PATCH);}
     if id == WIRE {
         return Some(ZAP_DUST);
@@ -2671,6 +2674,7 @@ impl Registry {
         for key in ["petrified_log_x", "petrified_log_z"] {
             let mut b = def(key, "Petrified Log (Was a Tree, Got Over It)", Cube, true, true, [T_PETRIFIED_SIDE_H, T_PETRIFIED_SIDE_H, T_PETRIFIED_SIDE_H], 1.8, 1, true, PETRIFIED_LOG, 0.0, S_STONE);
             b.creative = false;
+            b.family = PETRIFIED_LOG;
             blocks.push(b);
         }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);

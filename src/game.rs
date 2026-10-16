@@ -5159,6 +5159,16 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn petrified_logs_lie_the_way_they_are_placed() {
+        let g = arena(807);
+        assert_eq!(g.oriented(PETRIFIED_LOG, IVec3::X, 0.5), PETRIFIED_LOG_X);
+        assert_eq!(g.oriented(PETRIFIED_LOG, IVec3::NEG_Z, 0.5), PETRIFIED_LOG_Z);
+        assert_eq!(g.oriented(PETRIFIED_LOG, IVec3::Y, 0.5), PETRIFIED_LOG);
+        assert_eq!(placing_item(PETRIFIED_LOG_Z), Some(PETRIFIED_LOG));
+        assert_eq!(block(PETRIFIED_LOG_X).drop, PETRIFIED_LOG);
+    }
+
+    #[test]
     fn low_gravity_softens_falls() {
         assert_eq!(crate::player::fall_damage(9.0, 1.0), 6.0);
         // A standing jump on the moon peaks near eight blocks up.
