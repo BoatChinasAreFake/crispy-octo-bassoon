@@ -708,6 +708,8 @@ impl App {
                         g.rainbow = skies::RAINBOW_SECS - 20.0;
                         g.time = s.time.unwrap_or(0.38);
                     }
+                    // Deep caves in new worlds are found far from any light: see them as a player with Night Vision would.
+                    "dripstone" | "deepdark" if g.world.generator.opts.version >= 8 => g.apply_potion(potions::Potion::NightVision),
                     // A Turtle Shell, to see further underwater.
                     "monument" => g.inv.armor[0] = Some((block::TURTLE_SHELL, 1)),
                     _ => {}
