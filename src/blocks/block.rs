@@ -495,7 +495,10 @@ pub const SHELL_PATCH_WET: Id = MYCELIUM + 112;
 pub const DUNE_GRASS: Id = MYCELIUM + 113;
 /// Stone-hard wood from a petrified forest (see landmarks.rs).
 pub const PETRIFIED_LOG: Id = MYCELIUM + 114;
-pub const NUM_BLOCKS: Id = MYCELIUM + 115;
+/// A fallen Petrified Log, lying east-west (`_X`) or north-south (`_Z`).
+pub const PETRIFIED_LOG_X: Id = MYCELIUM + 115;
+pub const PETRIFIED_LOG_Z: Id = MYCELIUM + 116;
+pub const NUM_BLOCKS: Id = MYCELIUM + 117;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -2665,6 +2668,11 @@ impl Registry {
         }
         blocks.push(def("dune_grass","Dune Grass (Windblown Tufts)",Cross,false,false,[T_DUNE_GRASS;3],0.0,0,false,DUNE_GRASS,0.0,S_GRASS));
         blocks.push(def("petrified_log", "Petrified Log (Was a Tree, Got Over It)", Cube, true, true, [T_PETRIFIED_TOP, T_PETRIFIED_SIDE, T_PETRIFIED_TOP], 1.8, 1, true, PETRIFIED_LOG, 0.0, S_STONE));
+        for key in ["petrified_log_x", "petrified_log_z"] {
+            let mut b = def(key, "Petrified Log (Was a Tree, Got Over It)", Cube, true, true, [T_PETRIFIED_SIDE_H, T_PETRIFIED_SIDE_H, T_PETRIFIED_SIDE_H], 1.8, 1, true, PETRIFIED_LOG, 0.0, S_STONE);
+            b.creative = false;
+            blocks.push(b);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");

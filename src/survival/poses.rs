@@ -433,7 +433,8 @@ pub fn draw_parts(g: &mut DynGeo, root: &Mat4, parts: &[Part], pose: Pose, sky: 
             3 | 4 => Some(1.125),
             _ => None,
         };
-        let draw = |g: &mut DynGeo, lo: Vec3, hi: Vec3, lower: bool| {
+        // The faces where a limb bends (the elbow, the knee) are inside it: skin, not the shoulder's cap.
+        let draw = |g: &mut DynGeo, lo: Vec3, hi: Vec3, lower: bool, cut: bool| {
             let frame = *root * pose.bone(slot, lower) * Mat4::from_translation(lo) * Mat4::from_scale(hi - lo);
             let v0 = (min.y + size.y - hi.y) / size.y;
             let v1 = (min.y + size.y - lo.y) / size.y;
@@ -441,18 +442,19 @@ pub fn draw_parts(g: &mut DynGeo, root: &Mat4, parts: &[Part], pose: Pose, sky: 
             for (f, (_, corners, shade)) in crate::mesher::FACES.iter().enumerate() {
                 let c = corners.map(|v| frame.transform_point3(Vec3::from_array(v)));
                 let uv = if f == 2 || f == 3 { [0.0, 0.0, 1.0, 1.0] } else { [0.0, v0, 1.0, v1] };
-                g.quad(c, p.tiles[f], uv, [*shade, sky]);
+                let tile = if cut && ((lower && f == 2) || (!lower && f == 3)) { p.tiles[0] } else { p.tiles[f] };
+                g.quad(c, tile, uv, [*shade, sky]);
             }
         };
         if let Some(y) = split {
             if min.y < y && min.y + size.y > y {
-                draw(g, min, Vec3::new(min.x + size.x, y, min.z + size.z), true);
-                draw(g, Vec3::new(min.x, y, min.z), min + size, false);
+                draw(g, min, Vec3::new(min.x + size.x, y, min.z + size.z), true, true);
+                draw(g, Vec3::new(min.x, y, min.z), min + size, false, true);
             } else {
-                draw(g, min, min + size, min.y + size.y <= y);
+                draw(g, min, min + size, min.y + size.y <= y, false);
             }
         } else {
-            draw(g, min, min + size, false);
+            draw(g, min, min + size, false, false);
         }
     }
 }

@@ -101,7 +101,7 @@ Parts:
 - Part 3: items 5 and 6. **(released)**
 - Part 4: the two originals (this is the last part). **(released)**
 
-## v0.6: The land, reshaped (the user's request)
+## v0.6: The land, reshaped (the user's request) (released)
 
 A new world generator (version 7) that keeps what works in the current one (readable biome rules, temperature bands so neighbours make sense, warped borders) and takes from modern Minecraft's (the land's shape and its biomes coming from the same noises). Worlds made before it keep generating as they always have.
 
@@ -126,7 +126,7 @@ Originals:
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**
-- Part 2: items 4 to 14, and the two originals (this is the last part).
+- Part 2: items 4 to 14, and the two originals (this is the last part). **(released)**
 
 ## v0.7: The Hollow, filled in
 

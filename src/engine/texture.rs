@@ -949,6 +949,7 @@ pub const T_DUNE_GRASS: u16 = 1162;
 pub const T_PETRIFIED_SIDE: u16 = 1163;
 pub const T_PETRIFIED_TOP: u16 = 1164;
 pub const T_ATLAS: u16 = 1165;
+pub const T_PETRIFIED_SIDE_H: u16 = 1166;
 
 // Crop tiles are four in a row: T_CROP_* + stage.
 
@@ -7251,6 +7252,12 @@ fn paint_landmarks(a: &mut Atlas) {
     a.each(T_PETRIFIED_SIDE, |x, y, r, _| {
         let stripe = if x % 4 == 0 { 0.72 } else if x % 4 == 2 { 0.88 } else { 1.0 };
         let rust = (x * 5 + y / 3) % 11 == 0;
+        shade(if rust { rgb(160, 102, 64) } else { rgb(128, 120, 112) }, stripe * r.range(0.9, 1.08))
+    });
+    // The same bark with its grain running across the tile (for logs on their side).
+    a.each(T_PETRIFIED_SIDE_H, |x, y, r, _| {
+        let stripe = if y % 4 == 0 { 0.72 } else if y % 4 == 2 { 0.88 } else { 1.0 };
+        let rust = (y * 5 + x / 3) % 11 == 0;
         shade(if rust { rgb(160, 102, 64) } else { rgb(128, 120, 112) }, stripe * r.range(0.9, 1.08))
     });
     // The cut end: tight rings of agate colours.

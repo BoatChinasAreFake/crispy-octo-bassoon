@@ -280,7 +280,7 @@ impl Generator {
                 let on_x = hash2(s ^ 31, tx, tz) < 0.5;
                 let hit = if on_x { z == az && (ax..ax + len).contains(&x) } else { x == ax && (az..az + len).contains(&z) };
                 if hit && base + 1 < CH {
-                    b[idx(lx, base + 1, lz)] = PETRIFIED_LOG;
+                    b[idx(lx, base + 1, lz)] = if on_x { PETRIFIED_LOG_X } else { PETRIFIED_LOG_Z };
                 }
             } else if x == ax && z == az {
                 let tall = 4 + (hash2(s ^ 37, tx, tz) * 6.0) as i32;
@@ -353,7 +353,10 @@ mod tests {
                 }
             }
             match k {
-                Kind::PetrifiedForest => assert!(counts.get(&PETRIFIED_LOG).copied().unwrap_or(0) > 20, "{k:?}"),
+                Kind::PetrifiedForest => {
+                    assert!(counts.get(&PETRIFIED_LOG).copied().unwrap_or(0) > 20, "{k:?}");
+                    assert!(counts.get(&PETRIFIED_LOG_X).copied().unwrap_or(0) + counts.get(&PETRIFIED_LOG_Z).copied().unwrap_or(0) > 4, "fallen logs lie on their side");
+                }
                 Kind::CraterLake => assert!(counts.get(&WATER).copied().unwrap_or(0) + counts.get(&ICE).copied().unwrap_or(0) > 2000, "{k:?}"),
                 Kind::Arch => {
                     // Rock in the air over the middle.

@@ -4846,9 +4846,9 @@ impl Game {
         g.begin(Pass::Overlay, tint, false);
         if meal.is_some() {
             let hand=basis*local*Mat4::from_translation(Vec3::new(-0.05,-0.20,0.03))*Mat4::from_scale(Vec3::new(0.12,0.23,0.12));
-            let parts=&crate::nametags::SKIN_MODELS[self.skin as usize%6];
-            let tiles=self.skin_slot(crate::skins::ME).map(|slot|crate::skins::model(slot)[4].tiles).unwrap_or(parts[4].tiles);
-            g.cube(&hand,tiles,sky,[0.0,0.0,1.0,1.0]);
+            // Just the hand: skin all round (the arm's top is the shirt's shoulder).
+            let tone=match self.skin_slot(crate::skins::ME) {Some(slot)=>crate::skins::tile(slot,4,5),None=>crate::nametags::skin_tiles(self.skin as u16%6)[0]};
+            g.cube(&hand,[tone;6],sky,[0.0,0.0,1.0,1.0]);
         }
         if held == AIR {
             // The forearm rises from below the bottom-right corner toward the
@@ -4874,7 +4874,11 @@ impl Game {
                 None => crate::nametags::skin_tiles(self.skin as u16 % 6),
             };
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
-            g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            // The built-in looks have short sleeves, up at the shoulder and out of
+            // sight: the arm is bare. A skin of your own shows its own sleeve.
+            if self.skin_slot(crate::skins::ME).is_some() {
+                g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            }
         } else if crate::models::drawn_as_block(held) {
             for ((a, b), tiles, rect) in crate::models::item_parts(held) {
                 let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
@@ -5136,6 +5140,22 @@ pub(crate) mod tests {
         g.handle_actions(0.016, &Controls::default());
         assert!(g.arrows.is_empty(), "no arrow on letting go");
         assert_eq!(g.inv.count(ARROW), 4);
+    }
+
+    #[test]
+    fn mobs_get_half_a_second_of_grace_after_a_hit() {
+        let mut g = arena(806);
+        let mut m = crate::entity::Mob::new(crate::entity::MobKind::Oinker, Vec3::new(2.5, 50.0, 0.5), &mut g.rng);
+        let full = m.health;
+        m.damage(2.0, Vec3::ZERO);
+        m.damage(2.0, Vec3::ZERO);
+        assert_eq!(m.health, full - 2.0, "a second click straight after does nothing");
+        m.hurt = 0.1;
+        m.damage(2.0, Vec3::ZERO);
+        assert_eq!(m.health, full - 2.0, "still in its grace");
+        m.hurt = 0.0;
+        m.damage(2.0, Vec3::ZERO);
+        assert_eq!(m.health, full - 4.0);
     }
 
     #[test]

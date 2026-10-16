@@ -1212,7 +1212,9 @@ impl Mob {
     }
 
     pub fn damage(&mut self, amount: f32, from: Vec3) {
-        if self.hurt > 0.25 {
+        // Half a second's grace after each hit, so clicking fast doesn't beat
+        // waiting for a weapon to charge (see combat.rs).
+        if self.hurt > 0.0 {
             return;
         }
         // A Creaking shrugs everything off (only breaking its heart works), as
