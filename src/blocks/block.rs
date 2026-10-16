@@ -488,12 +488,22 @@ pub const FROST_SHINGLES: Id = MYCELIUM + 106;
 pub const NOTICE_BOARD: Id = MYCELIUM + 107;
 /// A player's own shop (see stalls.rs).
 pub const SHOP_STALL: Id = MYCELIUM + 108;
-pub const NUM_BLOCKS: Id = MYCELIUM + 109;
+pub const DRIFTWOOD: Id = MYCELIUM + 109;
+pub const DRIFTWOOD_Z: Id = MYCELIUM + 110;
+pub const SHELL_PATCH: Id = MYCELIUM + 111;
+pub const SHELL_PATCH_WET: Id = MYCELIUM + 112;
+pub const DUNE_GRASS: Id = MYCELIUM + 113;
+/// Stone-hard wood from a petrified forest (see landmarks.rs).
+pub const PETRIFIED_LOG: Id = MYCELIUM + 114;
+/// A fallen Petrified Log, lying east-west (`_X`) or north-south (`_Z`).
+pub const PETRIFIED_LOG_X: Id = MYCELIUM + 115;
+pub const PETRIFIED_LOG_Z: Id = MYCELIUM + 116;
+pub const NUM_BLOCKS: Id = MYCELIUM + 117;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
 pub fn waterlogged(id: Id) -> bool {
-    matches!(id, MANGROVE_ROOTS_WET | KELP | SEAGRASS | SEA_PICKLE)
+    matches!(id, MANGROVE_ROOTS_WET | KELP | SEAGRASS | SEA_PICKLE | SHELL_PATCH_WET)
 }
 
 /// Water, or something sitting in it.
@@ -758,7 +768,16 @@ pub const COOKBOOK: Id = FIRST_ITEM + 267;
 pub const DISH_FIRST: Id = FIRST_ITEM + 268;
 /// The village paper (see paper.rs): its wear says which issue.
 pub const NEWSPAPER: Id = FIRST_ITEM + 277;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 278;
+pub const RAW_SARDINE: Id = FIRST_ITEM + 278;
+pub const RAW_TUNA: Id = FIRST_ITEM + 279;
+pub const RAW_EEL: Id = FIRST_ITEM + 280;
+pub const CRAB_MEAT: Id = FIRST_ITEM + 281;
+pub const SHELLFISH: Id = FIRST_ITEM + 282;
+pub const COOKED_SEAFOOD: Id = FIRST_ITEM + 283;
+pub const SEASHELL: Id = FIRST_ITEM + 284;
+/// Fills in a map of the biomes as you travel (see atlas.rs).
+pub const EXPLORERS_ATLAS: Id = FIRST_ITEM + 285;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 286;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -916,6 +935,10 @@ pub fn armor_points(id: Id) -> u8 {
 /// Facings: 0 north (-z), 1 east (+x), 2 south (+z), 3 west (-x).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Shape {
+    Driftwood { x_axis: bool },
+    RocketEngine,
+    RocketBody,
+    RocketNose,
     Full,
     Slab { top: bool },
     /// `facing` is the side the high step is on.
@@ -1053,6 +1076,14 @@ impl Shape {
     pub fn boxes(self) -> ([Aabb; 3], usize) {
         let full = ([0.0; 3], [1.0; 3]);
         match self {
+            Shape::Driftwood { x_axis } => {
+                let mut boxes=[([0.0,0.0,0.25],[1.0,0.25,0.75]),([0.4375,0.125,0.625],[0.625,0.3125,0.9375]),full];
+                if !x_axis {for (lo,hi) in &mut boxes[..2] {lo.swap(0,2);hi.swap(0,2);}}
+                (boxes,2)
+            }
+            Shape::RocketEngine => ([([0.21875,0.0,0.21875],[0.78125,1.0,0.78125]),([0.0,0.0,0.46875],[1.0,0.625,0.53125]),([0.46875,0.0,0.0],[0.53125,0.625,1.0])],3),
+            Shape::RocketBody => ([([0.3125,0.0,0.1875],[0.6875,1.0,0.25]),([0.21875,0.0,0.25],[0.78125,1.0,0.75]),([0.3125,0.0,0.75],[0.6875,1.0,0.8125])],3),
+            Shape::RocketNose => ([([0.21875,0.0,0.21875],[0.78125,0.375,0.78125]),([0.34375,0.375,0.34375],[0.65625,0.75,0.65625]),([0.4375,0.75,0.4375],[0.5625,1.0,0.5625])],3),
             Shape::Full => ([full; 3], 1),
             Shape::Slab { top: false } => ([([0.0; 3], [1.0, 0.5, 1.0]), full, full], 1),
             Shape::Slab { top: true } => ([([0.0, 0.5, 0.0], [1.0; 3]), full, full], 1),
@@ -1241,6 +1272,11 @@ pub fn made_of(id: Id) -> Id {
 /// The item a player spends to place block `id` (None: not something players
 /// place directly; door tops come free with their bottom half).
 pub fn placing_item(id: Id) -> Option<Id> {
+    if matches!(id,DRIFTWOOD|DRIFTWOOD_Z) {return Some(DRIFTWOOD);}
+    if matches!(id, PETRIFIED_LOG_X | PETRIFIED_LOG_Z) {
+        return Some(PETRIFIED_LOG);
+    }
+    if matches!(id,SHELL_PATCH|SHELL_PATCH_WET) {return Some(SHELL_PATCH);}
     if id == WIRE {
         return Some(ZAP_DUST);
     }
@@ -1568,6 +1604,8 @@ pub struct ModMob {
     pub tame_chance: f32,
     /// Feed it this to breed it (and it follows anyone holding it). None: doesn't breed.
     pub breed_item: Option<Id>,
+    /// Eats any offered item and swallows livestock within five blocks. Off by default.
+    pub glutton: bool,
     /// A body built from the mod's own boxes (`part = ...` lines), used
     /// instead of `template` when there are any. At most `MAX_MOD_PARTS`.
     pub parts: Vec<ModPart>,
@@ -2623,6 +2661,22 @@ impl Registry {
         blocks.extend(crate::zapparts::defs());
         blocks.extend(crate::together::defs());
         blocks.extend(crate::villageblocks::defs());
+        for (id,key,name,x_axis) in [(DRIFTWOOD,"driftwood","Driftwood (Weathered Shore Wood)",true),(DRIFTWOOD_Z,"driftwood_z","Driftwood (Weathered Shore Wood)",false)] {
+            let mut b=def(key,name,Shaped,true,false,[T_DRIFTWOOD_SIDE;3],0.8,0,false,DRIFTWOOD,0.0,S_WOOD);
+            b.shape=Shape::Driftwood{x_axis};b.family=DRIFTWOOD;b.creative=id==DRIFTWOOD;blocks.push(b);
+        }
+        for (id,key) in [(SHELL_PATCH,"shell_patch"),(SHELL_PATCH_WET,"shell_patch_wet")] {
+            let mut b=def(key,"Shell Patch (Beach Treasure)",Shaped,false,false,[T_SHELL_PATCH;3],0.1,0,false,SEASHELL,0.0,S_STONE);
+            b.shape=Shape::Layer{eighths:2};b.family=SHELL_PATCH;b.creative=id==SHELL_PATCH;blocks.push(b);
+        }
+        blocks.push(def("dune_grass","Dune Grass (Windblown Tufts)",Cross,false,false,[T_DUNE_GRASS;3],0.0,0,false,DUNE_GRASS,0.0,S_GRASS));
+        blocks.push(def("petrified_log", "Petrified Log (Was a Tree, Got Over It)", Cube, true, true, [T_PETRIFIED_TOP, T_PETRIFIED_SIDE, T_PETRIFIED_TOP], 1.8, 1, true, PETRIFIED_LOG, 0.0, S_STONE));
+        for key in ["petrified_log_x", "petrified_log_z"] {
+            let mut b = def(key, "Petrified Log (Was a Tree, Got Over It)", Cube, true, true, [T_PETRIFIED_SIDE_H, T_PETRIFIED_SIDE_H, T_PETRIFIED_SIDE_H], 1.8, 1, true, PETRIFIED_LOG, 0.0, S_STONE);
+            b.creative = false;
+            b.family = PETRIFIED_LOG;
+            blocks.push(b);
+        }
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2895,6 +2949,12 @@ impl Registry {
         items.push(ItemDef { stack: 1, consume: false, ..item("woodland_map", "Woodland Explorer Map (Here Be Pilferers)", T_WOODLAND_MAP) });
         items.extend(crate::cooking::items());
         items.push(ItemDef { stack: 1, consume: false, ..item("newspaper", "Newspaper (Hold to Read)", T_NEWSPAPER) });
+        for (key,name,tile) in [("raw_sardine","Raw Sardine",T_SARDINE_ITEM),("raw_tuna","Raw Tuna",T_TUNA_ITEM),("raw_eel","Raw Eel",T_EEL_ITEM),("crab_meat","Raw Crab Meat",T_SEAFOOD),("shellfish","Raw Shellfish",T_SEASHELL)] {
+            items.push(ItemDef { food:Some(1.0),..item(key,name,tile) });
+        }
+        items.push(ItemDef { food:Some(6.0),..item("cooked_seafood","Cooked Seafood",T_SEAFOOD) });
+        items.push(item("seashell","Seashell",T_SEASHELL));
+        items.push(ItemDef { stack: 1, consume: false, ..item("explorers_atlas", "Explorer's Atlas (Hold to Read)", T_ATLAS) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -2960,6 +3020,10 @@ impl Registry {
             r(&[(IRON, 1), (STICK, 1), (GLASS, 1)], (SOIL_PROBE, 1)),
             r(&[(WHEAT, 3)], (BREAD, 1)),
             r(&[(STICK, 3), (STRING, 2)], (ROD, 1)),
+            r(&[(DRIFTWOOD, 1)], (PLANKS, 2)),
+            r(&[(SEASHELL, 2)], (SHELL_PATCH, 1)),
+            r(&[(SEASHELL, 3)], (BONE_DUST, 2)),
+            r(&[(BOOK, 1), (MAP, 1)], (EXPLORERS_ATLAS, 1)),
             r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),
@@ -3310,7 +3374,7 @@ pub fn food_value(id: Id) -> Option<f32> {
 /// How long a food keeps you full (its saturation per point, Minecraft style).
 pub fn food_quality(id: Id) -> f32 {
     match id {
-        PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COD | SALMON | TROPICAL | POTATO => 0.3,
+        RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH | PORKCHOP | MUTTON | CLUCKETS | MOO_STEAK | COD | SALMON | TROPICAL | POTATO => 0.3,
         GOO | COOKED_BOOT => 0.1,
         CARROT | BREAD | APPLE => 0.6,
         GOLDEN_CHOP | BIG_BOB => 1.2,

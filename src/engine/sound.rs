@@ -128,6 +128,7 @@ pub enum Sfx {
     Groan,
     Explode,
     Eat,
+    Burp,
     Pop,
     Click,
     Splash,
@@ -585,6 +586,12 @@ fn synth(s: Sfx, rng: &mut Rng) -> Vec<f32> {
                 *x = (rumble * (-t * 2.2).exp() + thump) * (t / 0.004).min(1.0);
             }
             finish(v, 1.3)
+        }
+        Sfx::Burp => {
+            let mut v=vec![0.0;samples(0.38)];
+            tone(&mut v,0.0,0.36,160.0,55.0,6.0,0.8,&[1.0,0.6,0.3]);
+            burst(&mut v,0.04,0.28,18.0,90.0,420.0,0.25,rng);
+            finish(v,0.7)
         }
         Sfx::Eat => {
             let mut v = vec![0.0; samples(0.6)];
@@ -1245,6 +1252,7 @@ pub(crate) fn all_sfx() -> Vec<Sfx> {
         Sfx::Firework,
         Sfx::Horn,
         Sfx::Bubbles,
+        Sfx::Burp,
     ]);
     v
 }

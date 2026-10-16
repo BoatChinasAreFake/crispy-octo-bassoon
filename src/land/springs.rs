@@ -115,6 +115,11 @@ impl Generator {
         if !snowy || h <= self.sea() + 6 {
             return None;
         }
+        if self.opts.version >= 8 {
+            let r = 4 + (seed % 2) as i32;
+            return self.footprint_fits(ivec3(ox, h, oz), (-r, r, -r, r), 2, |b, m| m.is_none() && matches!(b, Biome::Snowy | Biome::IceSpikes | Biome::StonyPeaks | Biome::Taiga))
+                .then_some(Site { kind: Kind::HotSpring, origin: ivec3(ox, h, oz), facing, seed });
+        }
         let level = [(-4, -4), (4, -4), (-4, 4), (4, 4)].iter().all(|&(dx, dz)| (self.column(ox + dx, oz + dz).0 - h).abs() <= 2);
         level.then_some(Site { kind: Kind::HotSpring, origin: ivec3(ox, h, oz), facing, seed })
     }
@@ -226,6 +231,7 @@ mod tests {
 
     #[test]
     fn springs_steam_in_snowy_mountains_and_bathing_warms() {
+        let _lock = crate::mods::registry_test_lock();
         let s = Site { kind: Kind::HotSpring, origin: ivec3(10, 90, 10), facing: 0, seed: 7 };
         let b: std::collections::HashMap<IVec3, Id> = spring_blocks(&s).into_iter().collect();
         assert_eq!(b.get(&s.origin), Some(&WATER));

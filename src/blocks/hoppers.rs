@@ -34,7 +34,7 @@ pub fn spout(id: Id) -> IVec3 {
 
 /// Slots of `c` (a container of block `kind`) an item may be taken from by a hopper below.
 fn takeable(kind: Id, c: &Container) -> Vec<usize> {
-    if is_three_slot(kind) { vec![OUTPUT] } else { (0..c.slots.len()).collect() }
+    if crate::factory::kind(kind).is_some(){vec![2,3,5]}else if is_three_slot(kind) { vec![OUTPUT] } else { (0..c.slots.len()).collect() }
 }
 
 /// The slot an item arriving from direction `from` (the hopper's spout) goes into.
@@ -43,6 +43,7 @@ fn landing_slot(kind: Id, c: &Container, item: Id, wear: Wear, from_above: bool)
         None => accepts(kind, i, item),
         Some((id, n)) => id == item && n < max_stack(id) && c.wear[i] == wear && accepts(kind, i, item),
     };
+    if crate::factory::kind(kind).is_some(){let order=if from_above{[0,1,4]}else{[1,4,0]};return order.into_iter().find(|i|fits(*i));}
     if is_three_slot(kind) {
         let i = if from_above { INPUT } else { FUEL };
         return fits(i).then_some(i);
@@ -81,6 +82,7 @@ impl Game {
             if crate::wiring::powered(&self.world, p) {
                 continue;
             }
+            for at in [p+IVec3::Y,p+spout(self.world.get_v(p))] {if crate::factory::kind(self.world.get_v(at)).is_some(){self.ensure_container(at);}}
             self.hopper_pull(p);
             self.hopper_push(p);
         }
@@ -112,8 +114,10 @@ impl Game {
         if let Some(c) = store(&mut self.world, &mut self.vehicles, to)
             && let Some(j) = landing_slot(dst_kind, c, item, wear, from_above)
         {
+            if crate::factory::kind(dst_kind).is_some()&&j<2&&c.slots[j].is_none(){c.cook=0.0;}
             put_one(c, j, item, wear);
         }
+        if crate::factory::kind(src_kind).is_some()&&i<2&&let Some(c)=store(&mut self.world,&mut self.vehicles,from)&&c.slots[i].is_none(){c.cook=0.0;}
         self.dirty_containers.insert(from);
         self.dirty_containers.insert(to);
         true

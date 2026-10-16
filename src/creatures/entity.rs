@@ -5,7 +5,7 @@ use crate::noise::Rng;
 use crate::render::{DynGeo, Pass};
 use crate::texture::*;
 use crate::world::World;
-use macroquad::math::{Mat4, Vec3};
+use macroquad::math::{Mat3,Mat4,Vec2,Vec3};
 
 pub const GRAVITY: f32 = 28.0;
 
@@ -303,6 +303,16 @@ pub enum MobKind {
     SnowGolem,
     /// A mob type defined by a mod (`[mob]` in mod.txt); indexes `reg().mobs`.
     /// Its wire/save index is `BASE_MOBS + i` (see `index`/`from_index`).
+    // Coastal wildlife: append to ALL to preserve every existing base index.
+    Starfish,
+    Clam,
+    Crab,
+    Sardine,
+    Tuna,
+    Mussel,
+    Oyster,
+    SeaSnail,
+    Eel,
     Modded(u16),
 }
 
@@ -316,7 +326,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 68] = [
+    pub const ALL: [MobKind; 77] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -386,6 +396,15 @@ impl MobKind {
         MobKind::Donkey,
         MobKind::Mule,
         MobKind::SnowGolem,
+        MobKind::Starfish,
+        MobKind::Clam,
+        MobKind::Crab,
+        MobKind::Sardine,
+        MobKind::Tuna,
+        MobKind::Mussel,
+        MobKind::Oyster,
+        MobKind::SeaSnail,
+        MobKind::Eel,
     ];
 
     pub fn index(self) -> u8 {
@@ -474,6 +493,15 @@ impl MobKind {
             "floaty" | "happy_ghast" => Some(MobKind::Floaty),
             "rotsteed" | "zombie_horse" => Some(MobKind::Rotsteed),
             "turtle" => Some(MobKind::Turtle),
+            "starfish" => Some(MobKind::Starfish),
+            "clam" => Some(MobKind::Clam),
+            "crab" => Some(MobKind::Crab),
+            "sardine" => Some(MobKind::Sardine),
+            "tuna" => Some(MobKind::Tuna),
+            "mussel" => Some(MobKind::Mussel),
+            "oyster" => Some(MobKind::Oyster),
+            "sea_snail" | "sea snail" | "seasnail" => Some(MobKind::SeaSnail),
+            "eel" => Some(MobKind::Eel),
             "dolphin" => Some(MobKind::Dolphin),
             "panda" => Some(MobKind::Panda),
             "polar bear" | "polar_bear" | "polarbear" => Some(MobKind::PolarBear),
@@ -551,6 +579,16 @@ impl MobKind {
             MobKind::Rotsteed => "Rotsteed",
             MobKind::Turtle => "Turtle",
             MobKind::Dolphin => "Dolphin",
+            MobKind::Starfish => "Starfish",
+            MobKind::Clam => "Clam",
+            MobKind::Crab => "Crab",
+            MobKind::Sardine => "Sardine",
+            MobKind::Tuna => "Tuna",
+            MobKind::Mussel => "Mussel",
+            MobKind::Oyster => "Oyster",
+            MobKind::SeaSnail => "Sea Snail",
+            MobKind::Eel => "Eel",
+
             MobKind::Panda => "Panda",
             MobKind::PolarBear => "Polar Bear",
             MobKind::Llama => "Llama",
@@ -578,7 +616,7 @@ impl MobKind {
         }
     }
     /// Half-width and height at size 1.
-    fn dims(self) -> (f32, f32) {
+    pub(crate) fn dims(self) -> (f32, f32) {
         if let MobKind::Modded(_) = self {
             return self.mod_def().map(|d| (d.half_width, d.height)).unwrap_or((0.4, 0.9));
         }
@@ -633,6 +671,14 @@ impl MobKind {
             MobKind::Rotsteed => (0.6, 1.6),
             MobKind::Turtle => (0.55, 0.45),
             MobKind::Dolphin => (0.45, 0.6),
+            MobKind::Starfish => (0.3, 0.12),
+            MobKind::Clam | MobKind::Oyster => (0.22, 0.18),
+            MobKind::Mussel => (0.16, 0.18),
+            MobKind::SeaSnail => (0.2, 0.3),
+            MobKind::Crab => (0.43, 0.34),
+            MobKind::Sardine => (0.3, 0.25),
+            MobKind::Tuna => (0.8, 0.75),
+            MobKind::Eel => (0.7, 0.25),
             MobKind::Panda => (0.6, 1.25),
             MobKind::PolarBear => (0.6, 1.4),
             MobKind::Llama => (0.45, 1.85),
@@ -697,6 +743,10 @@ impl MobKind {
             MobKind::Rotsteed => 18.0,
             MobKind::Turtle => 30.0,
             MobKind::Dolphin => 10.0,
+            MobKind::Starfish | MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => 4.0,
+            MobKind::Crab | MobKind::Eel => 6.0,
+            MobKind::Sardine => 3.0,
+            MobKind::Tuna => 12.0,
             MobKind::Panda => 20.0,
             MobKind::PolarBear => 30.0,
             MobKind::Llama => 22.0,
@@ -745,8 +795,11 @@ impl MobKind {
             // depends on attack_damage > 0 (see Mob::update's Modded arm).
             return self.mod_def().is_some_and(|d| d.hostile);
         }
-        !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Sporeling | MobKind::SnowGolem)
+        !self.coastal() && !self.passive() && !matches!(self, MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Clanker | MobKind::Fishy | MobKind::Bee | MobKind::Hush | MobKind::Snout | MobKind::Fee | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed | MobKind::Dolphin | MobKind::PolarBear | MobKind::Wanderer | MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Sporeling | MobKind::SnowGolem)
     }
+    /// Beach and ocean species have their own habitat and population rules.
+    pub fn coastal(self) -> bool { matches!(self, MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel) }
+    pub fn benthic(self) -> bool { matches!(self, MobKind::Starfish | MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Crab) }
     /// Farm animals: wander, flee when hit, spawn in daylight on grass.
     pub fn passive(self) -> bool {
         matches!(self, MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Galloper | MobKind::Squawker | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo | MobKind::Strutter | MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::Turtle | MobKind::Panda | MobKind::Llama | MobKind::Donkey | MobKind::Mule)
@@ -818,12 +871,17 @@ pub struct Mob {
     pub hurt: f32,
     pub fuse: f32,
     pub attack_cd: f32,
+    /// Transient demand timer for data-defined glutton companions.
+    pub appetite_cd: f32,
     pub flee: f32,
     pub(crate) wander_t: f32,
     pub(crate) wander_dir: Option<f32>,
     pub anim: f32,
     /// Wingbeats while a bird drops through the air.
     pub flap: f32,
+    /// Smoothed cosmetic pitch, bank, bob and sitting weight (never affects physics).
+    pub motion_pose:Vec3,
+    pub sit_pose:f32,
     pub(crate) knock: Vec3,
     pub burning: bool,
     /// Seconds left on fire (from lava; water puts it out).
@@ -1036,6 +1094,21 @@ impl Mob {
         step_anim(&mut self.flap, if (bird && falling) || flier { 5.0 } else { 0.0 }, dt, 5.0);
     }
 
+    pub fn tick_pose(&mut self,world:&World,velocity:Vec3,dt:f32) {
+        let dt=if dt.is_finite(){dt.clamp(0.0,0.25)}else{0.0};
+        let k=1.0-(-10.0*dt).exp();
+        let v=if velocity.is_finite(){velocity.clamp_length_max(30.0)}else{Vec3::ZERO};
+        let local=Mat3::from_rotation_y(self.yaw)*v;
+        let wet=is_water(world.get_v((self.body.pos+Vec3::Y*self.body.height*0.5).floor().as_ivec3()));
+        let flying=self.kind.flies()&&!self.body.on_ground&&!self.sitting;
+        let moving=Vec2::new(v.x,v.z).length();
+        let target=if flying {Vec3::new((-v.y*0.035).clamp(-0.35,0.35),(-local.x*0.06).clamp(-0.35,0.35),self.flap.sin()*0.025)}
+            else if wet {Vec3::new((-v.y*0.07).clamp(-0.3,0.3),(-local.x*0.035).clamp(-0.15,0.15),self.anim.sin()*0.035)}else{Vec3::ZERO};
+        self.motion_pose=self.motion_pose.lerp(target,k);
+        let sit=if self.sitting {1.0}else{0.0};self.sit_pose+=(sit-self.sit_pose)*k;
+        if wet&&!self.sitting {step_anim(&mut self.anim,moving.max(0.65),dt,3.0);}
+    }
+
     pub fn new(kind: MobKind, pos: Vec3, rng: &mut Rng) -> Self {
         let (half, h) = kind.dims();
         Mob {
@@ -1049,11 +1122,13 @@ impl Mob {
             hurt: 0.0,
             fuse: 0.0,
             attack_cd: 0.0,
+            appetite_cd: 0.0,
             flee: 0.0,
             wander_t: rng.range(0.0, 3.0),
             wander_dir: None,
             anim: 0.0,
             flap: 0.0,
+            motion_pose:Vec3::ZERO,sit_pose:0.0,
             knock: Vec3::ZERO,
             burning: false,
             on_fire: 0.0,
@@ -1137,7 +1212,9 @@ impl Mob {
     }
 
     pub fn damage(&mut self, amount: f32, from: Vec3) {
-        if self.hurt > 0.25 {
+        // Half a second's grace after each hit, so clicking fast doesn't beat
+        // waiting for a weapon to charge (see combat.rs).
+        if self.hurt > 0.0 {
             return;
         }
         // A Creaking shrugs everything off (only breaking its heart works), as
@@ -1405,7 +1482,24 @@ impl Mob {
                     }
                 }
             }
-            MobKind::Fishy => {
+            MobKind::Starfish | MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Crab => {
+                may_wander = false;
+                if self.body.in_water { swim_vy = Some(-0.6); }
+                let mobile = matches!(self.kind, MobKind::Crab | MobKind::SeaSnail | MobKind::Starfish);
+                if mobile {
+                    self.wander_t -= dt;
+                    if self.wander_t <= 0.0 { self.wander_t=rng.range(3.0,8.0);self.wander_dir=Some(rng.range(0.0,std::f32::consts::TAU)); }
+                    if let Some(yaw)=self.wander_dir {
+                        let ahead=self.body.pos+Vec3::new(yaw.sin(),0.0,-yaw.cos())*0.8;
+                        let floor=ground_below(world,ahead,3);
+                        if (floor-self.body.pos.y).abs()<0.6 && (self.kind==MobKind::Crab || is_wet(world.get_v(ahead.floor().as_ivec3()))) {
+                            want=Some((yaw,if self.kind==MobKind::Crab {0.65}else{0.08}));
+                        } else { self.wander_t=0.0; }
+                    }
+                }
+                if !self.body.in_water && self.kind!=MobKind::Crab { self.health-=dt*0.25; }
+            }
+            MobKind::Fishy | MobKind::Sardine | MobKind::Tuna | MobKind::Eel => {
                 if self.body.in_water {
                     // Drift about, never out of the water.
                     let ahead = self.body.pos + Vec3::new(self.yaw.sin(), 0.2, -self.yaw.cos()) * 0.8;
@@ -1415,9 +1509,17 @@ impl Mob {
                     }
                     if self.flee > 0.0 {
                         want = Some(((-flat.x).atan2(flat.z), 4.5));
+                    } else if self.kind == MobKind::Sardine {
+                        let school = (self.seed as f32 * 0.001 + self.anim * 0.03).sin() * 0.5;
+                        want = Some((self.wander_dir.unwrap_or(school), 1.6));
+                    } else if self.kind == MobKind::Tuna {
+                        want = Some((self.wander_dir.unwrap_or(self.yaw), 2.2));
                     }
-                    let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + 0.8).floor() as i32, self.body.pos.z.floor() as i32);
-                    let drift = (self.wander_t * 1.7 + self.id as f32).sin() * 0.8;
+                    let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + self.body.height + 0.4).floor() as i32, self.body.pos.z.floor() as i32);
+                    let drift = if self.kind==MobKind::Eel {
+                        let floor=ground_below(world,self.body.pos,8);
+                        ((floor+0.5-self.body.pos.y)*1.5).clamp(-1.0,1.0)
+                    } else { (self.wander_t * 1.7 + self.id as f32).sin() * 0.8 };
                     swim_vy = Some(if is_water(above) { drift } else { drift.min(0.0) - 0.3 });
                 } else {
                     // Out of the water: flop, and slowly dry out.
@@ -2374,6 +2476,7 @@ impl Mob {
             step_anim(&mut self.anim, spd, dt, 5.0);
         }
         self.flutter(!self.body.on_ground && !self.body.in_water && self.body.vel.y < -0.5, dt);
+        self.tick_pose(world,self.body.vel,dt);
         if self.body.pos.y < -20.0 {
             self.health = -100.0;
         }
@@ -2403,6 +2506,11 @@ impl Mob {
             MobKind::SnowGolem => Some((SNOW_BLOCK, 1)),
             MobKind::Grumbler if n > 0 => Some((GOO, n)),
             MobKind::Clanker => Some((IRON, 3 + n)),
+            MobKind::Sardine => Some((RAW_SARDINE,1)),
+            MobKind::Tuna => Some((RAW_TUNA,2+n)),
+            MobKind::Eel => Some((RAW_EEL,1)),
+            MobKind::Crab => Some((CRAB_MEAT,1)),
+            MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => Some((SHELLFISH,1)),
             MobKind::Fishy => Some(([COD, COD, SALMON, TROPICAL][rng.int(0, 3) as usize], 1)),
             // An armed one drops its spear now and then; otherwise it's soggy goo.
             MobKind::Soggy if self.seed == 1 && rng.chance(0.25) => Some((SPEAR, 1)),
@@ -2451,6 +2559,7 @@ impl Mob {
     /// Anything dropped besides `loot` (Baa-con, Cluckets, spare Pointy Sticks).
     pub fn extra_loot(&self, rng: &mut Rng) -> Option<(Id, u8)> {
         match self.kind {
+            MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => Some((SEASHELL,1)),
             MobKind::Fluffer if rng.chance(0.7) => Some((MUTTON, 1)),
             MobKind::Cluckster => Some((CLUCKETS, 1)),
             MobKind::Rattler if rng.chance(0.6) => Some((ARROW, rng.int(1, 2) as u8)),
@@ -2493,7 +2602,9 @@ impl Mob {
         draw_posed(geo, &root, model(self.kind), self.anim, self.flap, 1.0);
     }
 
-    pub fn draw(&self, geo: &mut DynGeo, world: &World) {
+    pub fn draw(&self, geo: &mut DynGeo, world: &World) { self.draw_with_gulp(geo,world,None); }
+
+    pub fn draw_with_gulp(&self, geo: &mut DynGeo, world: &World, gulp:Option<f32>) {
         let flash = self.kind == MobKind::Hisser && self.fuse > 0.0 && (self.fuse * 14.0).sin() > 0.0;
         let tint = if self.hurt > 0.3 {
             [1.0, 0.45, 0.45, 1.0]
@@ -2531,10 +2642,8 @@ impl Mob {
             // Stretch a little mid-hop.
             scale *= Vec3::new(0.9, 1.2, 0.9);
         }
-        if self.sitting {
-            p.y -= 0.15 * scale.y;
-        }
-        let mut root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_scale(scale);
+        p.y += (self.motion_pose.z-0.15*self.sit_pose)*scale.y;
+        let mut root = Mat4::from_translation(p) * Mat4::from_rotation_y(-self.yaw) * Mat4::from_rotation_z(self.motion_pose.y) * Mat4::from_rotation_x(self.motion_pose.x) * Mat4::from_scale(scale*Vec3::new(1.0,1.0-0.08*self.sit_pose,1.0));
         // A Hmmer asleep lies in its bed (see village_life.rs).
         if self.kind == MobKind::Hmmer && self.sitting {
             let at = self.body.pos.floor().as_ivec3();
@@ -2548,6 +2657,7 @@ impl Mob {
                 let parts = modded_parts(def);
                 // A template body is scaled (keeping its proportions) to the
                 // mob's own height (custom parts are already measured in blocks).
+                let root=if def.glutton && let Some(t)=gulp {crate::swallow::root(self,t)}else{root};
                 let root = if def.parts.is_empty() {
                     use crate::block::MobTemplate::*;
                     let base = match def.template {
@@ -2561,7 +2671,8 @@ impl Mob {
                 } else {
                     root
                 };
-                draw_posed(geo, &root, &parts, self.anim, self.flap, sky);
+                draw_pet_pose(geo, &root, &parts, self.anim, self.flap, sky,self.sit_pose);
+                if def.glutton && let Some(t)=gulp {crate::swallow::draw_mouth(geo,&root,t,sky);}
             }
             return;
         }
@@ -2575,19 +2686,19 @@ impl Mob {
             MobKind::Strutter if !is_lava(world.get(p.x.floor() as i32, (p.y - 0.3).floor() as i32, p.z.floor() as i32)) && !self.body.in_lava => &STRUTTER_COLD[..],
             k => model(k),
         };
-        let pose = if self.sitting { 0.0 } else { self.anim };
+        let pose = self.anim;
         if self.kind == MobKind::Hmmer {
             // The robe in the colours of its job; face and hands as they are.
             let robe = if crate::village_life::jobless(self) { [1.0, 0.95, 0.85] } else { job_robe(crate::villagers::Job::of_mob(self).index()) };
             geo.begin(Pass::Opaque, [tint[0] * robe[0], tint[1] * robe[1], tint[2] * robe[2], tint[3]], false);
-            draw_posed(geo, &root, &parts[..5], pose, self.flap, sky);
+            draw_pet_pose(geo, &root, &parts[..5], pose, self.flap, sky,self.sit_pose);
             geo.begin(Pass::Opaque, tint, false);
-            draw_posed(geo, &root, &parts[5..], pose, self.flap, sky);
+            draw_pet_pose(geo, &root, &parts[5..], pose, self.flap, sky,self.sit_pose);
         } else if self.kind == MobKind::GlowSquid {
             // It glows: drawn at full brightness whatever the light.
-            draw_posed(geo, &root, parts, pose, self.flap, 1.0);
+            draw_pet_pose(geo, &root, parts, pose, self.flap, 1.0,self.sit_pose);
         } else {
-            draw_posed(geo, &root, parts, pose, self.flap, sky);
+            draw_pet_pose(geo, &root, parts, pose, self.flap, sky,self.sit_pose);
         }
         // An Allay carries what it was given in its arms.
         if self.kind == MobKind::Allay && self.seed != 0 {
@@ -2613,7 +2724,7 @@ impl Mob {
             draw_model(geo, &root, &PACK_CHESTS, 0.0, sky, false);
         }
         if self.barding > 0 && self.kind == MobKind::Galloper {
-            draw_posed(geo, &root, &BARDING[(self.barding.min(3) - 1) as usize], pose, self.flap, sky);
+            draw_pet_pose(geo, &root, &BARDING[(self.barding.min(3) - 1) as usize], pose, self.flap, sky,self.sit_pose);
         }
         if self.kind == MobKind::Pilferer && self.seed == 1 {
             draw_model(geo, &root, &BANNER_BACK, 0.0, sky, false);
@@ -2860,7 +2971,83 @@ static SNOUT_BRUTE: [Part; 7] = {
     [h[0], h[1], h[2], h[3], h[4], h[5], part([-0.12, 1.55, -0.34], [0.24, 0.16, 0.1], [0.0; 3], Limb::Fixed, [T_SNOUT; 6])]
 };
 
-// A fish: a long body, a tail that waggles, a fin on top.
+// Five equally spaced arms taper through three low, overlapping sections.
+// The raised centre and lower tips keep the animal soft and flat on the sand.
+const fn starfish_model() -> [Part; 17] {
+    let faces=[T_STARFISH_SIDE,T_STARFISH_SIDE,T_STARFISH,T_STARFISH_UNDER,T_STARFISH_SIDE,T_STARFISH_SIDE];
+    let mut parts=[part([-0.08,0.0,-0.08],[0.16,0.065,0.16],[0.0;3],Limb::Fixed,faces);17];
+    parts[1]=part([-0.055,0.065,-0.055],[0.11,0.035,0.11],[0.0;3],Limb::Fixed,faces);
+    let mut i=0;
+    while i<5 {
+        let turn=Limb::Yaw(i as f32 * std::f32::consts::TAU / 5.0);
+        parts[2+i*3]=part([-0.065,0.003,-0.18],[0.13,0.067,0.135],[0.0;3],turn,faces);
+        parts[3+i*3]=part([-0.043,0.006,-0.24],[0.086,0.05,0.10],[0.0;3],turn,faces);
+        parts[4+i*3]=part([-0.023,0.009,-0.29],[0.046,0.032,0.075],[0.0;3],turn,faces);
+        i+=1;
+    }
+    parts
+}
+static STARFISH: [Part;17] = starfish_model();
+static CLAM: [Part; 2] = [
+    part([-0.2, 0.0, -0.2], [0.4, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_CLAM_SIDE,T_CLAM_SIDE,T_CLAM,T_CLAM_UNDER,T_CLAM_SIDE,T_CLAM_SIDE]),
+    part([-0.18, 0.08, -0.18], [0.36, 0.1, 0.36], [0.0;3], Limb::Fixed, [T_CLAM_SIDE,T_CLAM_SIDE,T_CLAM,T_CLAM_UNDER,T_CLAM_SIDE,T_CLAM_SIDE]),
+];
+static MUSSEL: [Part; 2] = [
+    part([-0.12, 0.0, -0.2], [0.24, 0.08, 0.4], [0.0;3], Limb::Fixed, [T_MUSSEL_SIDE,T_MUSSEL_SIDE,T_MUSSEL,T_MUSSEL_UNDER,T_MUSSEL_SIDE,T_MUSSEL_SIDE]),
+    part([-0.09, 0.08, -0.16], [0.18, 0.1, 0.32], [0.0;3], Limb::Fixed, [T_MUSSEL_SIDE,T_MUSSEL_SIDE,T_MUSSEL,T_MUSSEL_UNDER,T_MUSSEL_SIDE,T_MUSSEL_SIDE]),
+];
+static OYSTER: [Part; 3] = [
+    part([-0.22, 0.0, -0.18], [0.44, 0.06, 0.36], [0.0;3], Limb::Fixed, [T_OYSTER_SIDE,T_OYSTER_SIDE,T_OYSTER,T_OYSTER_UNDER,T_OYSTER_SIDE,T_OYSTER_SIDE]),
+    part([-0.17, 0.06, -0.2], [0.34, 0.11, 0.4], [0.0;3], Limb::Fixed, [T_OYSTER_SIDE,T_OYSTER_SIDE,T_OYSTER,T_OYSTER_UNDER,T_OYSTER_SIDE,T_OYSTER_SIDE]),
+    part([-0.13, 0.17, -0.1], [0.26, 0.04, 0.2], [0.0;3], Limb::Fixed, [T_OYSTER_SIDE,T_OYSTER_SIDE,T_OYSTER,T_OYSTER_UNDER,T_OYSTER_SIDE,T_OYSTER_SIDE]),
+];
+static SEASNAIL: [Part; 4] = [
+    part([-0.14, 0.0, -0.2], [0.28, 0.07, 0.4], [0.0;3], Limb::Fixed, [T_SEASNAIL_FOOT;6]),
+    part([-0.13, 0.07, -0.08], [0.26, 0.22, 0.24], [0.0;3], Limb::Fixed, [T_SEASNAIL;6]),
+    part([-0.07, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL_FOOT;6]),
+    part([0.04, 0.1, -0.24], [0.03, 0.1, 0.04], [0.0;3], Limb::Fixed, [T_SEASNAIL_FOOT;6]),
+];
+static CRAB: [Part; 13] = [
+    part([-0.22, 0.1, -0.2], [0.44, 0.17, 0.4], [0.0;3], Limb::Fixed, [T_CRAB_SIDE,T_CRAB_SIDE,T_CRAB,T_CRAB_UNDER,T_CRAB_SIDE,T_CRAB_SIDE]),
+    part([-0.37, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB_CLAW;6]),
+    part([0.25, 0.1, -0.4], [0.12, 0.12, 0.18], [0.0;3], Limb::Fixed, [T_CRAB_CLAW;6]),
+    part([-0.16, 0.27, -0.18], [0.05, 0.06, 0.05], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([0.11, 0.27, -0.18], [0.05, 0.06, 0.05], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.37, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, -0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
+    part([-0.37, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, 0.0], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
+    part([-0.37, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, 0.15], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
+    part([-0.37, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(-0.3), [T_CRAB_LEG;6]),
+    part([0.19, 0.0, 0.24], [0.18, 0.06, 0.08], [0.0;3], Limb::Yaw(0.3), [T_CRAB_LEG;6]),
+];
+static SARDINE: [Part; 5] = [
+    part([-0.07, 0.03, -0.22], [0.14, 0.16, 0.36], [0.0;3], Limb::Fixed, [T_SARDINE,T_SARDINE,T_SARDINE_BACK,T_SARDINE_BELLY,T_SARDINE,T_SARDINE_HEAD]),
+    part([-0.02, 0.04, 0.14], [0.04, 0.15, 0.14], [0.0;3], Limb::SwingY(0.5), [T_SARDINE_FIN;6]),
+    part([-0.02, 0.19, -0.07], [0.04, 0.06, 0.12], [0.0;3], Limb::SwingY(0.5), [T_SARDINE_FIN;6]),
+    part([0.073, 0.13, -0.19], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.088, 0.13, -0.19], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+];
+static TUNA: [Part; 8] = [
+    part([-0.23, 0.12, -0.55], [0.46, 0.42, 0.96], [0.0;3], Limb::Fixed, [T_TUNA,T_TUNA,T_TUNA_BACK,T_TUNA_BELLY,T_TUNA,T_TUNA_HEAD]),
+    part([-0.16, 0.2, -0.75], [0.32, 0.28, 0.22], [0.0;3], Limb::Fixed, [T_TUNA_HEAD,T_TUNA_HEAD,T_TUNA_BACK,T_TUNA_BELLY,T_TUNA_HEAD,T_TUNA_HEAD]),
+    part([-0.025, 0.15, 0.4], [0.05, 0.38, 0.28], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
+    part([-0.025, 0.54, -0.15], [0.05, 0.2, 0.3], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
+    part([-0.4, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
+    part([0.18, 0.25, -0.22], [0.22, 0.04, 0.26], [0.0;3], Limb::SwingY(0.5), [T_TUNA_FIN;6]),
+    part([0.162, 0.38, -0.65], [0.015, 0.065, 0.065], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.177, 0.38, -0.65], [0.015, 0.065, 0.065], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+];
+static EEL: [Part; 6] = [
+    part([-0.09, 0.04, -0.5], [0.18, 0.16, 0.32], [0.0;3], Limb::Fixed, [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL_HEAD]),
+    part([-0.08, 0.04, -0.18], [0.16, 0.14, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL]),
+    part([-0.065, 0.04, 0.14], [0.13, 0.12, 0.32], [0.0;3], Limb::SwingY(0.5), [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL]),
+    part([-0.04, 0.04, 0.46], [0.08, 0.08, 0.22], [0.0;3], Limb::SwingY(0.5), [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL]),
+    part([0.091, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+    part([-0.106, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+];
+
 static FISHY: [Part; 3] = [
     part([-0.12, 0.05, -0.3], [0.24, 0.3, 0.55], [0.0; 3], Limb::Fixed, [T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY, T_FISHY_FACE]),
     part([-0.02, 0.06, 0.25], [0.04, 0.28, 0.22], [0.0, 0.2, 0.25], Limb::SwingY(2.0), [T_FISHY_FIN; 6]),
@@ -3176,7 +3363,7 @@ static FLOATY_HARNESS: [Part; 3] = [
 ];
 pub static SADDLE_PART: [Part; 1] = [part([-0.32, 1.44, -0.3], [0.64, 0.1, 0.5], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6])];
 static WOOFER_COLLAR: [Part; 1] = [part([-0.21, 0.52, -0.46], [0.42, 0.1, 0.08], [0.0; 3], Limb::Fixed, [T_COLLAR; 6])];
-static FLUFFER_SHEARED: [Part; 6] = [
+pub(crate) static FLUFFER_SHEARED: [Part; 6] = [
     part([-0.3, 0.5, -0.45], [0.6, 0.5, 0.9], [0.0; 3], Limb::Fixed, [FS; 6]),
     part([-0.22, 0.75, -0.85], [0.44, 0.45, 0.4], [0.0; 3], Limb::Fixed, [FS, FS, FS, FS, FS, T_FLUFF_FACE]),
     part([-0.3, 0.0, -0.4], [0.18, 0.5, 0.18], [0.0, 0.5, -0.3], Limb::Swing(1.0), [FS; 6]),
@@ -3556,7 +3743,7 @@ pub static CAMEL_SADDLE: [Part; 2] = [
     part([-0.44, 1.84, 0.3], [0.88, 0.1, 0.45], [0.0; 3], Limb::Fixed, [T_SADDLE_LEATHER; 6]),
 ];
 
-fn model(kind: MobKind) -> &'static [Part] {
+pub(crate) fn model(kind: MobKind) -> &'static [Part] {
     match kind {
         MobKind::Oinker => &OINKER,
         MobKind::Hisser => &HISSER,
@@ -3585,6 +3772,16 @@ fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Squawker => &SQUAWKER,
         MobKind::Clanker => &CLANKER,
         MobKind::Fishy => &FISHY,
+        MobKind::Starfish => &STARFISH,
+        MobKind::Clam => &CLAM,
+        MobKind::Crab => &CRAB,
+        MobKind::Sardine => &SARDINE,
+        MobKind::Tuna => &TUNA,
+        MobKind::Mussel => &MUSSEL,
+        MobKind::Oyster => &OYSTER,
+        MobKind::SeaSnail => &SEASNAIL,
+        MobKind::Eel => &EEL,
+
         MobKind::Soggy => &SOGGY,
         MobKind::Bee => &BEE,
         MobKind::Sneaker => &SNEAKER,
@@ -3701,11 +3898,14 @@ pub fn draw_model(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, sky:
 
 /// `draw_model` with birds' wings beating to `flap`.
 fn draw_posed(geo: &mut DynGeo, root: &Mat4, parts: &[Part], anim: f32, flap: f32, sky: f32) {
-    let swing = anim.sin() * 0.7;
+    draw_pet_pose(geo,root,parts,anim,flap,sky,0.0);
+}
+fn draw_pet_pose(geo:&mut DynGeo,root:&Mat4,parts:&[Part],anim:f32,flap:f32,sky:f32,sit:f32) {
+    let swing = anim.sin() * 0.7*(1.0-sit);
     for p in parts {
         let rot = match p.limb {
             Limb::Fixed => Mat4::IDENTITY,
-            Limb::Swing(s) => Mat4::from_rotation_x(swing * s),
+            Limb::Swing(s) => Mat4::from_rotation_x(swing * s+if p.pivot[1]<1.0 {sit*0.65}else{0.0}),
             Limb::Forward => Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2 + swing * 0.1),
             Limb::SwingY(s) => Mat4::from_rotation_y(swing * s * 0.5),
             Limb::Wing(s) => Mat4::from_rotation_z(anim.sin() * 0.6 * s),
@@ -3733,6 +3933,13 @@ type ArmorPiece = ([f32; 3], [f32; 3], [f32; 3], Limb);
 /// Worn armour over the player model (`look` from `Inventory::armor_look`):
 /// slightly larger boxes that follow the same limbs.
 pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f32, sky: f32, gliding: bool) {
+    draw_armor_inner(geo,root,look,trims,anim,sky,if gliding {1.0}else{0.0},None);
+}
+pub fn draw_player_armor(geo:&mut DynGeo,root:&Mat4,look:u16,trims:u32,sky:f32,pose:crate::poses::Pose) {
+    draw_armor_inner(geo,root,look,trims,0.0,sky,pose.wings,Some(pose));
+}
+#[allow(clippy::too_many_arguments)]
+fn draw_armor_inner(geo:&mut DynGeo,root:&Mat4,look:u16,trims:u32,anim:f32,sky:f32,spread:f32,pose:Option<crate::poses::Pose>) {
     if look == 0 {
         return;
     }
@@ -3794,15 +4001,16 @@ pub fn draw_armor(geo: &mut DynGeo, root: &Mat4, look: u16, trims: u32, anim: f3
         ],
     );
     add(BOOTS, &[([-0.29, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(1.0)), ([-0.04, -0.01, -0.165], [0.33, 0.3, 0.33], hip, Limb::Swing(-1.0))]);
-    draw_model(geo, root, &parts, anim, sky, true);
+    if let Some(p)=pose {crate::poses::draw_parts(geo,root,&parts,p,sky);}else{draw_model(geo,root,&parts,anim,sky,true);}
     // A Glider: folded down the back, or spread wide while gliding.
     if tier(CHESTPLATE) as usize == GLIDER_TIER + 1 {
         let wings = [
             part([-0.3, 0.45, 0.13], [0.28, 1.0, 0.04], [-0.05, 1.45, 0.15], Limb::Flap(-1.0), [T_GLIDER_WING; 6]),
             part([0.02, 0.45, 0.13], [0.28, 1.0, 0.04], [0.05, 1.45, 0.15], Limb::Flap(1.0), [T_GLIDER_WING; 6]),
         ];
-        let spread = if gliding { std::f32::consts::FRAC_PI_2 } else { 0.12 };
-        draw_posed(geo, root, &wings, 0.0, spread, sky);
+        let spread = 0.12+spread*(std::f32::consts::FRAC_PI_2-0.12);
+        let wing_root=if let Some(p)=pose {*root*p.torso()}else{*root};
+        draw_posed(geo, &wing_root, &wings, 0.0, spread, sky);
     }
 }
 
@@ -4012,6 +4220,21 @@ pub struct PrimedTnt {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn locomotion_pose_blends_sitting_swimming_and_flight_without_changing_physics() {
+        let mut g=crate::game::Game::new(801,true,false);g.world.load_now(0,0);
+        let at=Vec3::new(4.5,90.0,4.5);let mut rng=Rng::new(31);let mut m=Mob::new(MobKind::Woofer,at,&mut rng);m.sitting=true;
+        m.tick_pose(&g.world,Vec3::ZERO,0.016);assert!(m.sit_pose>0.0&&m.sit_pose<1.0);
+        for _ in 0..120 {m.tick_pose(&g.world,Vec3::ZERO,0.016);}assert!(m.sit_pose>0.99);assert_eq!(m.body.pos,at);
+        m.sitting=false;for _ in 0..120 {m.tick_pose(&g.world,Vec3::ZERO,0.016);}assert!(m.sit_pose<0.01);
+        g.world.set(4,90,4,WATER);g.world.set(4,91,4,WATER);
+        m.tick_pose(&g.world,Vec3::new(1.0,2.0,-1.0),0.1);assert!(m.motion_pose.x<0.0&&m.anim>0.0);
+        let mut bird=Mob::new(MobKind::Allay,at,&mut rng);bird.body.on_ground=false;
+        for _ in 0..60 {bird.tick_pose(&g.world,Vec3::new(4.0,3.0,-2.0),0.016);}
+        assert!(bird.motion_pose.y.abs()>0.1&&bird.motion_pose.x< -0.05);
+        bird.tick_pose(&g.world,Vec3::splat(f32::NAN),f32::NAN);assert!(bird.motion_pose.is_finite());
+    }
+
     use super::*;
     use crate::noise::Rng;
     use macroquad::math::IVec3;

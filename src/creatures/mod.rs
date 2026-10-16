@@ -25,3 +25,5 @@ pub(crate) mod village_life;
 pub(crate) mod villagers;
 pub(crate) mod wilter;
 pub(crate) mod wildlife;
+
+pub(crate) mod swallow;

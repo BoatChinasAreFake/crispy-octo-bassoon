@@ -18,6 +18,7 @@ pub enum Net {
 }
 
 pub struct Peer {
+    pub animation: crate::poses::Animator,
     pub name: String,
     /// Smoothed position used for drawing.
     pub pos: Vec3,
@@ -26,6 +27,7 @@ pub struct Peer {
     pub yaw: f32,
     pub pitch: f32,
     pub flags: u8,
+    pub held:Id,pub offhand:Id,pub gesture:u8,pub draw:u8,pub swing:f32,
     /// What they're wearing (see `Inventory::armor_look`).
     pub armor: u16,
     /// Their armour trims (see `trims::look`).
@@ -58,7 +60,7 @@ pub struct Peer {
 
 impl Peer {
     pub(crate) fn new(name: String, pos: Vec3) -> Peer {
-        Peer { name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, own_skin: None, skin_due: false, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
+        Peer { animation:Default::default(), name, pos, target: pos, yaw: 0.0, pitch: 0.0, flags: 0, held:AIR,offhand:AIR,gesture:0,draw:0,swing:0.0, armor: 0, trims: 0, anim: 0.0, last: HashMap::new(), chat_tokens: 5.0, strikes: 0, ledger: Default::default(), report: None, skin: 0, own_skin: None, skin_due: false, mode: crate::modes::GameMode::Survival, stats: Vec::new(), last_step: pos, dim: Default::default() }
     }
     pub fn alive(&self) -> bool {
         self.flags & (FLAG_DEAD | FLAG_GHOST) == 0
@@ -72,7 +74,7 @@ impl Peer {
 
 /// Sounds the host forwards to clients; everything else is produced locally.
 fn forwarded(s: Sfx) -> bool {
-    matches!(s, Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn | Sfx::Thud)
+    matches!(s, Sfx::Burp | Sfx::Note(..) | Sfx::Oink | Sfx::Groan | Sfx::Hiss | Sfx::MobHurt | Sfx::Baa | Sfx::Warp | Sfx::Cluck | Sfx::Moo | Sfx::Rattle | Sfx::Skitter | Sfx::Bloop | Sfx::Twang | Sfx::Thunk | Sfx::Gust | Sfx::Bleat | Sfx::Firework | Sfx::Horn | Sfx::Thud)
 }
 
 pub fn sanitize_name(name: &str) -> String {
@@ -300,17 +302,8 @@ impl Game {
     // ------------------------------------------------------------ receive
 
     pub fn net_receive(&mut self, dt: f32) {
-        // Smooth remote players toward their latest positions.
-        for p in self.peers.values_mut().chain(self.parked.values_mut().flat_map(|r| r.peers.values_mut())) {
-            let before = p.pos;
-            let k = (dt * 12.0).min(1.0);
-            p.pos += (p.target - p.pos) * k;
-            if p.pos.distance(p.target) > 8.0 {
-                p.pos = p.target;
-            }
-            let moved = Vec3::new(p.pos.x - before.x, 0.0, p.pos.z - before.z).length();
-            crate::entity::step_anim(&mut p.anim, moved / dt.max(1e-4), dt, 2.4);
-        }
+        crate::poses::tick_peers(&mut self.peers,&self.world,dt);
+        for r in self.parked.values_mut() {crate::poses::tick_peers(&mut r.peers,&r.world,dt);}
 
         let mut inbox: Vec<(u32, Msg)> = std::mem::take(&mut self.pending_msgs).into_iter().map(|m| (0, m)).collect();
         let mut left: Vec<(u32, String, String)> = Vec::new();
@@ -496,7 +489,8 @@ impl Game {
                 // Mods first: the client needs them before it builds its world.
                 c.conn.send(&Msg::ModPack { data: crate::mods::active_pack() });
                 c.conn.send(&welcome);
-                for m in mods.iter().chain(roster.iter()) {
+                // Meal poses reference player IDs: install the roster before replaying them.
+                for m in mods.iter().filter(|m|!matches!(m,Msg::MealAnimation{..})).chain(roster.iter()).chain(mods.iter().filter(|m|matches!(m,Msg::MealAnimation{..}))) {
                     c.conn.send(m);
                 }
             }
@@ -520,6 +514,11 @@ impl Game {
         v.extend(self.world.signs.iter().map(|(p, l)| Msg::SignText { x: p.x, y: p.y, z: p.z, lines: l.to_vec() }));
         v.extend(self.world.sign_styles.iter().map(|(p, &style)| Msg::SignStyle { x: p.x, y: p.y, z: p.z, style, item: AIR }));
         v.extend(self.world.frames.iter().map(|(p, &(item, wear))| Msg::FrameItem { x: p.x, y: p.y, z: p.z, item, wear }));
+        if !self.away() && let Some(m)=self.player.animation.meal {v.push(Msg::MealAnimation{id:self.my_id,item:m.item,elapsed:m.elapsed});}
+        for (id,p) in &self.peers {if let Some(m)=p.animation.meal {v.push(Msg::MealAnimation{id:*id,item:m.item,elapsed:m.elapsed});}}
+        v.push(Msg::FactoryStates(self.factory_snapshot()));
+        v.push(Msg::RocketFlights(self.rockets.clone()));
+        v.push(Msg::Swallows(self.swallows.clone()));
         v.extend(self.banners.iter().map(|(p, &(design, facing))| Msg::Banner { x: p.x, y: p.y, z: p.z, design, facing, up: true }));
         v
     }
@@ -650,7 +649,9 @@ impl Game {
                         }
                     }
             }
-            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, trims, .. } => {
+            Msg::PlayerState { pos, yaw, pitch, flags, held, held_ench, armor, trims, offhand, gesture, draw, .. } => {
+                let held=if valid_item(held){held}else{AIR};let offhand=if valid_item(offhand){offhand}else{AIR};
+                let flags=if self.peer_free(from) {flags}else{flags & !FLAG_FLY};
                 self.set_peer_held(from, held, held_ench);
                 let Some(p) = self.peers.get_mut(&from) else { return };
                 // Just died: their experience spills (items come separately, see `drop_everything`).
@@ -674,7 +675,15 @@ impl Game {
                 p.flags = flags;
                 p.armor = armor;
                 p.trims = trims;
-                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor, trims });
+                p.held=held;p.offhand=offhand;p.gesture=gesture&3;p.draw=if held==BOW {draw}else{0};
+                self.relay(from, Msg::PlayerState { id: from, pos, yaw, pitch, flags, held, held_ench, armor, trims , offhand, gesture, draw });
+            }
+            Msg::MachineUse{x,y,z,action}=>{let name=self.peer_name(from);self.operate_machine(from,&name,macroquad::math::IVec3::new(x,y,z),action);}
+            Msg::MealAnimation {item,..} => {
+                if !crate::poses::edible(item)||!self.peer_rate_ok(from,"meal_pose",0.25) {return;}
+                let Some(p)=self.peers.get_mut(&from).filter(|p|p.alive()) else {return};
+                p.animation.start(crate::poses::Meal{item,elapsed:0.0});
+                self.relay(from,Msg::MealAnimation{id:from,item,elapsed:0.0});
             }
             Msg::Attack { mob, dmg, .. } => {
                 // Hits come from where the player actually is, within reach, at a human pace.
@@ -1151,6 +1160,12 @@ impl Game {
         if block(old).hardness < 0.0 && !replaceable(old) {
             return false;
         }
+        // Beach decorations keep their placement support and wet/dry state.
+        let below=self.world.get(x,y-1,z);
+        if new==DUNE_GRASS {return replaceable(old) && !is_wet(old) && matches!(below,SAND|RED_SAND|GRAVEL|DIRT|GRASS);}
+        if matches!(new,SHELL_PATCH|SHELL_PATCH_WET) {
+            return replaceable(old) && is_solid(below) && (new==SHELL_PATCH_WET)==is_wet(old);
+        }
         // Crops only appear on farmland, and only as seedlings: the host grows them.
         if let Some((_, stage)) = Crop::of_block(new) {
             let on_farmland = is_farmland(self.world.get(x, y - 1, z));
@@ -1273,7 +1288,7 @@ impl Game {
                     self.msg(format!("{} left the game", p.name));
                 }
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, armor, trims, .. } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held, offhand, gesture, draw, armor, trims, .. } => {
                 if let Some(p) = self.peers.get_mut(&id) {
                     p.target = pos;
                     p.yaw = yaw;
@@ -1281,7 +1296,17 @@ impl Game {
                     p.flags = flags;
                     p.armor = armor;
                     p.trims = trims;
+                    p.held=held;p.offhand=offhand;p.gesture=gesture&3;p.draw=if held==BOW {draw}else{0};
                 }
+            }
+            Msg::FactoryStates(list)=>{
+                for v in list {if v.valid(){if self.factory_states.len()>=crate::factory::VISUAL_LIMIT&&!self.factory_states.contains_key(&v.at)&&let Some(p)=self.factory_states.keys().next().copied(){self.factory_states.remove(&p);}self.factory_states.insert(v.at,v);}}
+            }
+            Msg::MachineInfo{x,y,z,block,status,progress}=>{
+                if let Some(m)=self.machine.as_mut() && m.pos==macroquad::math::IVec3::new(x,y,z)&&m.block==block {m.status=status;m.progress=progress;}
+            }
+            Msg::MealAnimation {id,item,elapsed} => {
+                if let Some(p)=self.peer_mut(id) {p.animation.start(crate::poses::Meal{item,elapsed});}
             }
             Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
                 self.fireballs = fireballs.into_iter().map(|(pos, vel, big)| crate::fortress::Fireball { pos, vel, big, life: 1.0, shooter: 0, returned: None }).collect();
@@ -1324,6 +1349,8 @@ impl Game {
             }
             Msg::Enchanted { item, ench, count } => self.apply_enchanted(item, ench, count),
             Msg::Vehicles(list) => self.apply_vehicles(list),
+            Msg::RocketFlights(list) => self.rockets=list,
+            Msg::Swallows(list) => self.swallows=list,
             Msg::SignText { x, y, z, lines } => {
                 self.world.signs.insert(IVec3::new(x, y, z), crate::decor::clean_lines(&lines));
             }
@@ -1451,7 +1478,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } => {}
+            Msg::MachineUse{..} | Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } => {}
         }
     }
 
@@ -1529,6 +1556,7 @@ impl Game {
             let moved = Vec3::new(m.body.pos.x - before.x, 0.0, m.body.pos.z - before.z).length();
             crate::entity::step_anim(&mut m.anim, moved / dt.max(1e-4), dt, 5.0);
             m.flutter(before.y - m.body.pos.y > 0.5 * dt, dt);
+            m.tick_pose(&self.world,(m.body.pos-before)/dt.max(1e-4),dt);
             m.hurt = (m.hurt - dt).max(0.0);
             // Babies stay babies until the host says otherwise.
             if m.baby > 0.0 {
@@ -1613,13 +1641,14 @@ impl Game {
             if self.spectator {
                 flags |= FLAG_GHOST;
             }
+            if p.flying {flags |= FLAG_FLY;}
             if p.gliding {
                 flags |= FLAG_GLIDE;
             }
             if self.sleeping.is_some() {
                 flags |= crate::net::FLAG_SLEEP;
             }
-            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) };
+            let m = Msg::PlayerState { id: self.my_id, pos: p.body.pos, yaw: p.yaw, pitch: p.pitch, flags, held: self.inv.held(), held_ench: crate::enchant::enchants(self.inv.wear[self.inv.selected]), armor: self.inv.armor_look(), trims: crate::trims::look(&self.inv.armor, &self.inv.armor_wear) , offhand:self.inv.offhand.map_or(AIR,|s|s.0), gesture:u8::from(self.blocking)|if self.off_swing>0.0 {2}else{0}, draw:(self.bow_draw.clamp(0.0,1.0)*255.0) as u8 };
             self.net_send_msg(m);
         }
         if self.is_host() && self.net_timers[2] <= 0.0 {
@@ -1662,6 +1691,8 @@ impl Game {
         }
         if self.is_host() {
             if mobs_due {
+                self.net_broadcast(Msg::RocketFlights(self.rockets.clone()));
+                self.net_broadcast(Msg::Swallows(self.swallows.clone()));
                 let mobs = self
                     .mobs
                     .iter()
@@ -2064,7 +2095,7 @@ mod tests {
 
         // Teleporting across the map is refused and the client is put back.
         // (NaN positions never get this far: the decoder drops the connection.)
-        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0, trims: 0 });
+        client.net_send_msg(Msg::PlayerState { id, pos: spawn + Vec3::new(500.0, 0.0, 0.0), yaw: 0.0, pitch: 0.0, flags: 0, held: 0, held_ench: 0, armor: 0, trims: 0 , offhand:0, gesture:0, draw:0 });
         for _ in 0..20 {
             host.update(0.016, &idle());
             std::thread::sleep(Duration::from_millis(4));
@@ -2533,6 +2564,143 @@ mod tests {
     }
 
     #[test]
+    fn joined_players_feed_gluttons_and_receive_whole_livestock_removals() {
+        let sources=crate::online::examplemods::sources();
+        let texts:Vec<_>=sources.iter().map(|s|(s.id.as_str(),std::str::from_utf8(&s.files["mod.txt"]).unwrap())).collect();
+        crate::mods::with_mods(&texts,|_| {
+            let mut host=Game::new_with(799,false,false,crate::world::GenOptions::DEFAULT);let spawn=host.spawn;load_around(&mut host,spawn);
+            let port=host.open_lan("Hosty",None).unwrap();let mut client=join(&mut host,port,"Hungry","").unwrap();let peer=client.my_id;
+            host.mobs.clear();let kind=MobKind::from_name("dubiety:obesity").unwrap();let eater=host.alloc_mob(kind,spawn+Vec3::X*2.0);
+            host.mobs[0].persistent=true;host.mobs[0].body.vel=Vec3::ZERO;
+            host.give_peer(peer,NAME_TAG,2);
+            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(NAME_TAG)==2 && c.mobs.iter().any(|m|m.id==eater)));
+            let i=client.mobs.iter().position(|m|m.id==eater).unwrap();
+            client.inv.selected=client.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==NAME_TAG)).unwrap();
+            assert!(client.use_on_mob(i));assert!(client.naming.is_none());
+            assert!(pump(&mut host,&mut client,|h,c|h.peers[&peer].ledger.bag.count(NAME_TAG)==1 && c.inv.count(NAME_TAG)==1));
+            client.net_send_msg(Msg::MobInteract {mob:eater,item:DIAMOND});
+            for _ in 0..25 {host.update(0.016,&idle());client.update(0.016,&idle());}
+            assert_eq!(host.peers[&peer].ledger.bag.count(NAME_TAG),1);
+            let at=host.mobs.iter().find(|m|m.id==eater).unwrap().body.pos;
+            let prey:Vec<_>=[MobKind::Mooer,MobKind::Oinker,MobKind::Fluffer,MobKind::Cluckster].into_iter().map(|k|host.alloc_mob(k,at)).collect();
+            host.gluttons_tick(0.016);
+            assert!(prey.iter().all(|id|host.mobs.iter().all(|m|m.id!=*id)));
+            // Synchronize a live animal first, then move it into the appetite sphere.
+            let cow=host.alloc_mob(MobKind::Mooer,at+Vec3::X*7.0);
+            assert!(pump(&mut host,&mut client,|_,c|c.mobs.iter().any(|m|m.id==cow)));
+            let at=host.mobs.iter().find(|m|m.id==eater).unwrap().body.pos;
+            host.mobs.iter_mut().find(|m|m.id==cow).unwrap().body.pos=at;
+            assert!(pump(&mut host,&mut client,|h,c|h.mobs.iter().all(|m|m.id!=cow) && c.mobs.iter().all(|m|m.id!=cow)));
+            assert!(client.mobs.iter().any(|m|m.id==eater));
+            assert!(pump(&mut host,&mut client,|h,c|h.swallows.iter().any(|f|f.prey==cow) && c.swallows.iter().any(|f|f.prey==cow)));
+            let effect=client.swallows.iter().find(|f|f.prey==cow).unwrap();
+            assert_eq!(effect.eater,eater);assert_eq!(effect.kind,MobKind::Mooer.index());
+            assert!(pump(&mut host,&mut client,|h,c|h.swallows.is_empty() && c.swallows.is_empty()));
+            assert!(client.sounds.iter().any(|(s,_)|*s==Sfx::Burp));
+        });
+    }
+
+    #[test]
+    fn player_gestures_and_flight_flags_sync_without_consuming_inventory() {
+        let mut host=Game::new(796,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+        let port=host.open_lan("PoseHost",None).unwrap();let mut actor=join(&mut host,port,"Actor","").unwrap();
+        let mut viewer=join(&mut host,port,"Viewer","").unwrap();let id=actor.my_id;
+        host.give_peer(id,BREAD,2);host.give_peer(id,DIAMOND,1);
+        assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(BREAD)==2));
+        actor.net_send_msg(Msg::MealAnimation{id:host.my_id,item:DIAMOND,elapsed:0.0});
+        for _ in 0..8 {host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());}
+        assert!(host.peers[&id].animation.meal.is_none());
+        actor.animate_consumption(BREAD);
+        let mut seen=false;
+        for _ in 0..80 {
+            host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());
+            if host.peers[&id].animation.meal.is_some()&&viewer.peers.get(&id).is_some_and(|p|p.animation.meal.is_some_and(|m|m.item==BREAD)) {seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(seen);assert_eq!(host.peers[&id].ledger.bag.count(BREAD),2);assert_eq!(actor.inv.count(BREAD),2);
+        assert!(host.world_msgs().iter().any(|m|matches!(m,Msg::MealAnimation{id:who,item:BREAD,..} if *who==id)));
+        assert!(host.player.animation.meal.is_none());
+        // Survival clients cannot make their model advertise creative flight.
+        actor.player.flying=true;
+        for _ in 0..10 {host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());}
+        assert_eq!(host.peers[&id].flags&FLAG_FLY,0);
+        host.set_peer_mode(id,crate::modes::GameMode::Creative);
+        assert!(pump(&mut host,&mut actor,|_,c|c.creative));actor.player.flying=true;
+        let rise=Controls{input:Input{jump:true,..Default::default()},..Default::default()};
+        let mut seen=false;
+        for _ in 0..100 {
+            host.update(0.016,&idle());actor.update(0.016,&rise);viewer.update(0.016,&idle());
+            if viewer.peers.get(&id).is_some_and(|p|p.flags&FLAG_FLY!=0&&p.animation.pose.arms[1].z>0.2) {seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        assert!(seen);
+        for _ in 0..100 {host.update(0.016,&idle());actor.update(0.016,&idle());viewer.update(0.016,&idle());}
+        assert!(host.peers[&id].animation.meal.is_none());assert!(viewer.peers[&id].animation.meal.is_none());
+    }
+
+    #[test]
+    fn equipment_and_combat_poses_reach_observers_over_real_sockets() {
+        let mut host=Game::new(799,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+        let port=host.open_lan("EquipmentHost",None).unwrap();let mut actor=join(&mut host,port,"Archer","").unwrap();
+        let mut viewer=join(&mut host,port,"Observer","").unwrap();let id=actor.my_id;
+        host.give_peer(id,SWORD_IRON,1);host.give_peer(id,SHIELD,1);host.give_peer(id,BOW,1);
+        assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(BOW)==1));
+        actor.inv.slots.fill(None);actor.inv.selected=0;actor.inv.slots[0]=Some((SWORD_IRON,1));actor.inv.offhand=Some((SHIELD,1));
+        let use_it=Controls{use_held:true,..Default::default()};let mut seen=false;
+        for _ in 0..120 {host.update(0.016,&idle());actor.update(0.016,&use_it);viewer.update(0.016,&idle());
+            if viewer.peers.get(&id).is_some_and(|p|p.held==SWORD_IRON&&p.offhand==SHIELD&&p.gesture==1&&p.animation.pose.elbows[0]>0.6){seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }assert!(seen,"shield and equipment reach an observer");
+        actor.inv.slots[0]=Some((BOW,1));let mut seen=false;
+        for _ in 0..120 {host.update(0.016,&idle());actor.update(0.016,&use_it);viewer.update(0.016,&idle());
+            if viewer.peers.get(&id).is_some_and(|p|p.held==BOW&&p.draw>150&&p.animation.pose.arms[1].x>1.0){seen=true;break;}
+            std::thread::sleep(Duration::from_millis(4));
+        }assert!(seen,"drawn bow reaches an observer");
+        assert_eq!(host.peers[&id].ledger.bag.count(BOW),1);
+    }
+
+    #[test]
+    fn native_machine_buttons_are_host_checked_over_real_sockets() {
+        let sources=crate::online::examplemods::sources();let texts:Vec<_>=sources.iter().map(|s|(s.id.as_str(),std::str::from_utf8(&s.files["mod.txt"]).unwrap())).collect();
+        crate::mods::with_mods(&texts,|_|{
+            let mut host=Game::new(798,false,false);let spawn=host.spawn;load_around(&mut host,spawn);host.start_scripts_with(&sources);
+            let port=host.open_lan("MachineHost",None).unwrap();let mut actor=join(&mut host,port,"Operator","").unwrap();let id=actor.my_id;
+            let pos=spawn.floor().as_ivec3()+macroquad::math::IVec3::Z;let centrifuge=reg().lookup("half_baked:centrifuge").unwrap();
+            host.world.set(pos.x,pos.y,pos.z,centrifuge);actor.world.set(pos.x,pos.y,pos.z,centrifuge);
+            let dust=reg().lookup("half_baked:glowium_dust").unwrap();let pellet=reg().lookup("half_baked:pellet").unwrap();
+            let cell=reg().lookup("half_baked:energy_cell").unwrap();host.give_peer(id,dust,4);host.give_peer(id,COAL,2);host.give_peer(id,cell,1);
+            assert!(pump(&mut host,&mut actor,|_,c|c.inv.count(cell)==1));assert!(actor.open_machine(pos));
+            assert!(pump(&mut host,&mut actor,|h,c|h.viewers.get(&pos).is_some_and(|v|v.contains(&id))&&c.world.containers.get(&pos).is_some_and(|c|c.slots.len()==crate::factory::SLOTS)));
+            for item in [dust,COAL,cell] {let slot=actor.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==item)).unwrap();actor.container_quick_put(slot);}
+            assert!(pump(&mut host,&mut actor,|h,_|h.world.containers[&pos].slots[0]==Some((dust,4))&&h.world.containers[&pos].slots[4]==Some((cell,1))));
+            actor.factory_action(0);
+            assert!(pump(&mut host,&mut actor,|_,c|c.factory_visual(pos).is_some_and(|v|v.progress>0)));
+            assert!(pump(&mut host,&mut actor,|h,c|h.world.containers[&pos].slots[2]==Some((pellet,1))&&c.world.containers[&pos].slots[2]==Some((pellet,1))));
+            assert_eq!(actor.inv.count(pellet),0);actor.container_click(2,false,true);
+            assert!(pump(&mut host,&mut actor,|h,c|h.peers[&id].ledger.bag.count(pellet)==1&&c.inv.count(pellet)==1));
+            actor.net_send_msg(Msg::MachineUse{x:pos.x,y:pos.y,z:pos.z,action:200});actor.net_send_msg(Msg::MachineUse{x:pos.x+40,y:pos.y,z:pos.z,action:0});
+            for _ in 0..12 {host.update(0.016,&idle());actor.update(0.016,&idle());std::thread::sleep(Duration::from_millis(4));}
+            assert_eq!(host.world.containers[&pos].slots[0],Some((dust,2)));assert_eq!(host.peers[&id].ledger.bag.count(pellet),1);
+            let mut late=join(&mut host,port,"LateOperator","").unwrap();late.net_receive(0.016);assert!(late.factory_states.contains_key(&pos));
+
+        });
+    }
+
+    #[test]
+    fn late_joiners_receive_active_meals_after_the_player_roster() {
+        let mut host=Game::new(795,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+        let port=host.open_lan("MealHost",None).unwrap();let actor=join(&mut host,port,"Diner","").unwrap();let id=actor.my_id;
+        let potion=crate::potions::potion_item(crate::potions::Potion::Healing,false);
+        host.peers.get_mut(&id).unwrap().animation.start(crate::poses::Meal{item:potion,elapsed:0.3});
+        host.animate_consumption(BREAD);
+        let mut late=join(&mut host,port,"LateViewer","").unwrap();late.net_receive(0.016);
+        let local=late.peers[&host.my_id].animation.meal.expect("host's meal survives roster setup");
+        let remote=late.peers[&id].animation.meal.expect("peer's meal survives roster setup");
+        assert_eq!(local.item,BREAD);assert!(local.elapsed>0.0);
+        assert_eq!(remote.item,potion);assert!(remote.elapsed>=0.3);
+    }
+
+    #[test]
     fn joined_players_flip_switches() {
         let mut host = Game::new(789, false, false);
         let spawn = host.spawn;
@@ -2667,6 +2835,50 @@ mod tests {
             client.update(0.016, &idle());
         }
         assert_eq!(host.peers[&id].ledger.bag.count(GOLD_INGOT), 1);
+    }
+
+    #[test]
+    fn example_rocket_and_local_assistant_work_for_joined_players() {
+        let sources=crate::online::examplemods::sources();
+        let texts:Vec<_>=sources.iter().map(|s|(s.id.as_str(),std::str::from_utf8(&s.files["mod.txt"]).unwrap())).collect();
+        crate::mods::with_mods(&texts,|r| {
+            let mut host=Game::new(792,false,false);let spawn=host.spawn;load_around(&mut host,spawn);
+            host.start_scripts_with(&sources);
+            let port=host.open_lan("Hosty",None).unwrap();let mut client=join(&mut host,port,"Astronaut","").unwrap();let peer=client.my_id;
+            let find=|key:&str|r.lookup(key).unwrap();
+            for (key,n) in [("ad_absurdum:rocket_1",1),("ad_absurdum:fuel",2),("ad_absurdum:life_support",1),("ad_absurdum:oxygen",3),("ad_absurdum:space_helmet",1),("ad_absurdum:space_chestplate",1),("dubiety:beacon",1)] {host.give_peer(peer,find(key),n);}
+            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(find("ad_absurdum:space_chestplate"))==1));
+            for (slot,key) in [(0,"ad_absurdum:space_helmet"),(1,"ad_absurdum:space_chestplate")] {let id=find(key);client.inv.remove(id,1);client.inv.armor[slot]=Some((id,1));}
+            client.report_tick(crate::players::REPORT_SECS);
+            assert!(pump(&mut host,&mut client,|h,_|h.peer_ref(peer).unwrap().report.as_ref().is_some_and(|r|r.slots[36].0==find("ad_absurdum:space_helmet"))));
+            let (x,y,z)=(spawn.x.floor() as i32,spawn.y.floor() as i32-1,spawn.z.floor() as i32);
+            host.world.set_or_record(x+1,y,z,find("ad_absurdum:launch_pad"));host.world.set_or_record(x-1,y+1,z,find("ad_absurdum:rocket_workbench"));
+            for yy in y+1..=y+6 {host.world.set_or_record(x+1,yy,z,AIR);}
+            assert!(pump(&mut host,&mut client,|_,c|c.world.get(x+1,y,z)==find("ad_absurdum:launch_pad")));
+            client.send_chat("/astra assemble 1");assert!(pump(&mut host,&mut client,|_,c|c.world.get(x+1,y+5,z)==find("ad_absurdum:rocket_nose")));
+            client.send_chat("/astra launch moon");
+            assert!(pump(&mut host,&mut client,|_,c|c.rocket_pilot().is_some_and(|f|!f.landing)));
+            let ascent=client.player.body.pos.y;
+            for _ in 0..10 {host.update(0.05,&idle());client.update(0.05,&idle());}
+            assert!(client.player.body.pos.y>ascent);
+            for _ in 0..100 {host.update(0.05,&idle());client.update(0.05,&idle());}
+            let moon=Dim::Mod(r.dims.iter().position(|d|d.key=="ad_absurdum:moon").unwrap() as u8);
+            assert!(pump(&mut host,&mut client,|h,c|c.dim==moon && h.peer_dim(peer)==Some(moon)));
+            assert_eq!(host.realm_dim(),Dim::Over);assert!(client.scripts.is_none());
+            assert!(client.rocket_pilot().is_some_and(|f|f.landing));
+            assert_eq!(host.peer_ref(peer).unwrap().ledger.bag.count(find("ad_absurdum:fuel")),1);
+            assert!(pump(&mut host,&mut client,|_,c|c.inv.count(find("ad_absurdum:rocket_1"))==1 && c.rockets.is_empty()));
+            assert_eq!(client.world.generator.mod_dim().unwrap().gravity,0.17);
+            client.send_chat("/dubiety remember Bring fuel home");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.contains("Dubiety remembers: Bring fuel home"))));
+            client.send_chat("/dubiety ask space oxygen");assert!(pump(&mut host,&mut client,|_,c|c.messages.iter().any(|m|m.0.starts_with("Dubiety:"))));
+            let forest=Dim::Mod(r.dims.iter().position(|d|d.key=="dusk:twilit_realm").unwrap() as u8);
+            host.apply_cmds(vec![crate::scripting::Cmd::Travel("Astronaut".into(),forest,8,8)]);
+            assert!(pump(&mut host,&mut client,|h,c|c.dim==forest && h.peer_dim(peer)==Some(forest)));
+            for (cx,cz) in [(0,0),(1,0),(0,1),(1,1)] {
+                let expected=host.in_realm(forest,|g|g.world.generator.generate(cx,cz));
+                assert_eq!(client.world.generator.generate(cx,cz),expected,"custom forest chunk {cx}/{cz}");
+            }
+        });
     }
 
     #[test]

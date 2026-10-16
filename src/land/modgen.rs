@@ -23,13 +23,17 @@ use crate::noise::{hash2, hash3};
 use crate::world::{idx, Biome, Generator, CH, CW};
 use macroquad::math::{ivec3, IVec3};
 
-/// A mod tree: a trunk of `log` with a round crown of `leaves`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModTreeStyle { Round, Twisted, Spire, Umbrella }
+
+/// A mod tree with an optional deterministic crown/trunk style.
 #[derive(Clone, Debug)]
 pub struct ModTree {
     pub log: Id,
     pub leaves: Id,
     pub chance: f32,
     pub height: i32,
+    pub style: ModTreeStyle,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +50,39 @@ pub struct ModBiome {
     pub under: Option<Id>,
     pub plants: Vec<(Id, f32)>,
     pub tree: Option<ModTree>,
+    /// Optional target on the Overworld's shared climate axes (version 8 on).
+    pub climate: Option<ClimateTarget>,
+}
+
+/// Each specified axis is in -1..=1; omitted axes do not affect distance.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ClimateTarget {
+    pub temperature: Option<f32>,
+    pub moisture: Option<f32>,
+    pub continentalness: Option<f32>,
+    pub erosion: Option<f32>,
+}
+
+impl ClimateTarget {
+    /// A target occupies nearby climate only; a lone hot/dry mod cannot
+    /// take every cold/wet inland column just by being the nearest candidate.
+    pub fn accepts(&self, p: &crate::land::shape::Place) -> bool {
+        [(self.temperature, p.t), (self.moisture, p.m), (self.continentalness, p.c), (self.erosion, p.e)]
+            .iter().all(|&(target, actual)| target.is_none_or(|t| (actual - t).abs() <= 0.35))
+    }
+
+    pub fn distance(&self, p: &crate::land::shape::Place) -> f32 {
+        let axes = [(self.temperature, p.t), (self.moisture, p.m), (self.continentalness, p.c), (self.erosion, p.e)];
+        let mut distance = 0.0;
+        let mut count = 0;
+        for (target, actual) in axes {
+            if let Some(target) = target {
+                distance += ((actual - target) / 2.0).powi(2);
+                count += 1;
+            }
+        }
+        distance / count.max(1) as f32
+    }
 }
 
 /// Where a structure may go: a base biome, or a mod one.
@@ -99,6 +136,8 @@ pub struct ModDim {
     pub sky: [f32; 3],
     /// Light everywhere, 0 (dark) to 1 (noon), on top of block light.
     pub light: f32,
+    /// Player gravity multiplier; all older dimension definitions default to 1.
+    pub gravity: f32,
     /// The portal's frame block, and its sheets (across x, across z).
     pub frame: Id,
     pub portal: [Id; 2],
@@ -143,7 +182,16 @@ impl Generator {
             Dim::Over => None,
             _ => return None,
         };
-        self.biomes.iter().enumerate().find_map(|(i, b)| {
+        // Legacy patches retain their index salts and first-match ordering.
+        // Target biomes never participate in old worlds or mod dimensions.
+        let patch = |i: usize, b: &ModBiome| {
+            if b.share >= 0.999 { return true; }
+            let off = 7919.0 * (i as f32 + 1.0);
+            let n = self.continent.noise2((x as f32 + off) / b.size.max(16.0), (z as f32 - off) / b.size.max(16.0));
+            n > 0.45 - b.share * 0.9
+        };
+        let legacy = self.biomes.iter().enumerate().find_map(|(i, b)| {
+            if b.climate.is_some() { return None; }
             let allowed = match here {
                 Some(k) => b.dim == Some(k),
                 None => b.dim.is_none() && b.within.contains(&base),
@@ -151,13 +199,18 @@ impl Generator {
             if !allowed {
                 return None;
             }
-            if b.share >= 0.999 {
-                return Some(i);
-            }
-            let off = 7919.0 * (i as f32 + 1.0);
-            let n = self.continent.noise2((x as f32 + off) / b.size.max(16.0), (z as f32 - off) / b.size.max(16.0));
-            (n > 0.45 - b.share * 0.9).then_some(i)
-        })
+            patch(i, b).then_some(i)
+        });
+        if legacy.is_some() || here.is_some() || self.opts.version < 8 || !self.biomes.iter().any(|b| b.climate.is_some()) {
+            return legacy;
+        }
+        let p = self.place_v7(x, z);
+        if !crate::land::shape::mod_climate_space(&p, base) { return None; }
+        self.biomes.iter().enumerate().filter_map(|(i, b)| {
+            let target = b.climate.as_ref()?;
+            (b.dim.is_none() && target.accepts(&p) && (b.within.is_empty() || b.within.contains(&base)) && patch(i, b))
+                .then_some((i, target.distance(&p), b.key.as_str()))
+        }).min_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.2.cmp(b.2))).map(|c| c.0)
     }
 
     /// Dress a finished column in its mod biome: ground, plants. (Overworld and mod dimensions.)
@@ -202,11 +255,23 @@ impl Generator {
         if !self.biomes.iter().any(|m| m.tree.is_some()) {
             return;
         }
-        for tz in cz * CW - 3..cz * CW + CW + 3 {
-            for tx in cx * CW - 3..cx * CW + CW + 3 {
+        let reach=if self.biomes.iter().any(|m|m.tree.as_ref().is_some_and(|t|t.style!=ModTreeStyle::Round)) {6}else{3};
+        for tz in cz * CW - reach..cz * CW + CW + reach {
+            for tx in cx * CW - reach..cx * CW + CW + reach {
                 let (h, base) = column(tx, tz);
                 let Some((h, t)) = self.mod_tree_at(tx, tz, h, base) else { continue };
                 let trunk = t.height + (hash2(self.seed ^ 0x7EF, tx, tz) * 2.0) as i32;
+                if t.style!=ModTreeStyle::Round {
+                    if h+trunk+3>=CH || self.mod_dim().is_some_and(|d|d.liquid!=AIR && h<d.sea_level) {continue;}
+                    for (p,id,over) in self.custom_tree_blocks(tx,tz,h,t) {
+                        let (lx,lz)=(p.x-cx*CW,p.z-cz*CW);
+                        if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (1..CH).contains(&p.y) {
+                            let i=idx(lx,p.y,lz);
+                            if over || b[i]==AIR || (!is_solid(b[i]) && !is_liquid(b[i])) {b[i]=id;}
+                        }
+                    }
+                    continue;
+                }
                 // (Only on dry land.)
                 if (0..CW).contains(&(tx - cx * CW)) && (0..CW).contains(&(tz - cz * CW)) && is_liquid(b[idx(tx - cx * CW, h + 1, tz - cz * CW)]) {
                     continue;
@@ -236,6 +301,41 @@ impl Generator {
                 }
             }
         }
+    }
+
+    /// Tree geometry in global coordinates: each neighbouring chunk uses the
+    /// same anchor, orientation and crown noise before clipping to its cells.
+    pub(crate) fn custom_tree_blocks(&self,x:i32,z:i32,h:i32,t:&ModTree)->Vec<(IVec3,Id,bool)> {
+        let trunk=t.height+(hash2(self.seed^0x7EF,x,z)*2.0) as i32;
+        let mut cells=Vec::new();
+        let rotation=(hash2(self.seed^0xD057,x,z)*4.0) as i32;
+        let turn=|dx:i32,dz:i32|match rotation {0=>(dx,dz),1=>(-dz,dx),2=>(-dx,-dz),_=>(dz,-dx)};
+        let mut log=|dx:i32,y:i32,dz:i32| {let (dx,dz)=turn(dx,dz);cells.push((ivec3(x+dx,h+y,z+dz),t.log,true));};
+        match t.style {
+            ModTreeStyle::Twisted => {
+                for y in 1..=trunk {let bend=if y>trunk*2/3 {2}else if y>trunk/3 {1}else{0};log(bend,y,0);
+                    if y==trunk/3+1 {log(0,y,0);}
+                    if y==trunk*2/3+1 {log(1,y,0);}}
+                for direction in [-1,1] {for step in 0..=3 {log(2+direction*step,trunk-2+step/2,direction*step/2);}}
+                for (dx,dz) in [(1,0),(-1,0),(0,1),(0,-1)] {log(dx,1,dz);}
+            }
+            _ => {for y in 1..=trunk {log(0,y,0);}
+                if t.style==ModTreeStyle::Umbrella {for (dx,dz) in [(1,0),(-1,0),(0,1),(0,-1)] {for step in 1..=3 {log(dx*step,trunk-2+step/2,dz*step);}}}
+            }
+        }
+        let crowns=match t.style {
+            ModTreeStyle::Twisted=>vec![(2,trunk,0,3),(-1,trunk-1,-1,2),(4,trunk-1,1,2)],
+            ModTreeStyle::Spire=>(3..=trunk).step_by(3).map(|y|(0,y,0,((trunk-y)*3/trunk+1).clamp(1,3))).chain(std::iter::once((0,trunk+2,0,0))).collect(),
+            ModTreeStyle::Umbrella=>vec![(0,trunk,0,4)],
+            ModTreeStyle::Round=>vec![(0,trunk,0,2)],
+        };
+        for (cx,cy,cz,radius) in crowns {for dy in -1..=1 {for dz in -radius..=radius {for dx in -radius..=radius {
+            let r=if dy==1 {(radius-1).max(if t.style==ModTreeStyle::Spire {0}else{1})}else{radius};
+            if dx*dx+dz*dz>r*r+1 {continue;}
+            let (xx,zz)=turn(cx+dx,cz+dz);
+            if hash3(self.seed^0xD058,x+xx,h+cy+dy,z+zz)<0.96 {cells.push((ivec3(x+xx,h+cy+dy,z+zz),t.leaves,false));}
+        }}}}
+        cells
     }
 
     /// A chunk of a mod dimension.
@@ -324,7 +424,8 @@ impl Generator {
                     let [w, _, dd] = st.size;
                     let (x0, z0) = (ox - w / 2, oz - dd / 2);
                     let (x1, z1) = (x0 + w - 1, z0 + dd - 1);
-                    if x1 < cx * CW || x0 >= cx * CW + CW || z1 < cz * CW || z0 >= cz * CW + CW {
+                    let apron = if self.opts.version >= 8 && self.dim == Dim::Over { crate::structures::SETTLE_RADIUS } else { 0 };
+                    if x1 + apron < cx * CW || x0 - apron >= cx * CW + CW || z1 + apron < cz * CW || z0 - apron >= cz * CW + CW {
                         continue;
                     }
                     let (h, base, dry) = match self.mod_dim() {
@@ -340,6 +441,9 @@ impl Generator {
                     if !dry || !fits(&st.places, base, self.mod_biome_at(ox, oz, base)) {
                         continue;
                     }
+                    if self.opts.version >= 8 && !self.footprint_fits(ivec3(ox, h, oz), (x0 - ox, x1 - ox, z0 - oz, z1 - oz), 3, |b, m| fits(&st.places, b, m)) {
+                        continue;
+                    }
                     out.push((si, ivec3(ox, h + 1 - st.sink, oz)));
                 }
             }
@@ -353,6 +457,17 @@ impl Generator {
             let st = &self.structures[si];
             let [w, h, d] = st.size;
             let (x0, z0) = (o.x - w / 2, o.z - d / 2);
+            if self.opts.version >= 8 && self.dim == Dim::Over {
+                let mut blocks = Vec::new();
+                for y in 0..h {
+                    for z in 0..d {
+                        for x in 0..w {
+                            if let Some(id) = st.at(x, y, z) { blocks.push((ivec3(x0 + x, o.y + y, z0 + z), id)); }
+                        }
+                    }
+                }
+                self.settle(o, &blocks, cx, cz, b);
+            }
             for y in 0..h {
                 for z in 0..d {
                     for x in 0..w {
@@ -510,6 +625,109 @@ chance = 0.03
 min_y = 2
 max_y = 50
 "#;
+
+    #[test]
+    fn review_mod_settling_apron_reaches_the_next_chunk() {
+        let text = include_str!("../../example-mods/climate/mod.txt").replace("#####","#############").replace("#...#","#...........#").replace("#.c.#","#.....c.....#").replace("##.##","######.######");
+        crate::mods::with_mods(&[("climate",&text)], |_| {
+            let g = Generator::with(424242,GenOptions::DEFAULT);
+            let o = (-80..80).flat_map(|cz| (-80..80).map(move |cx| (cx,cz)))
+                .find_map(|(cx,cz)| g.mod_structure_origins(cx,cz).into_iter().map(|(_,o)|o).find(|o| {
+                    let (h,b)=g.column(o.x+8,o.z); h>g.sea() && !b.is_ocean() && b!=Biome::River
+                })).unwrap();
+            let (cx,cz) = ((o.x+8).div_euclid(CW),o.z.div_euclid(CW));
+            assert_eq!(cx,o.x.div_euclid(CW)+1);
+            let mut b = vec![AIR;(CW*CW*CH) as usize];
+            for lz in 0..CW { for lx in 0..CW { for y in 0..o.y-4 { b[idx(lx,y,lz)]=STONE; } } }
+            g.place_mod_structures(cx,cz,&mut b);
+            assert!(is_solid(b[idx(0,o.y-2,o.z.rem_euclid(CW))]),"the apron continues beyond the template's chunk");
+        });
+    }
+
+    #[test]
+    fn climate_biomes_choose_the_nearest_target_and_protect_landmarks() {
+        let text = "[mod]\nname = Climate\n[biome z_dry]\nshare = 1\nclimate_moisture = -0.3\n[biome a_wet]\nshare = 1\nclimate_moisture = 0.3\n";
+        crate::mods::with_mods(&[("climate", text)], |reg| {
+            assert!(reg.mods[0].errors.is_empty());
+            let g = Generator::with(77, GenOptions::DEFAULT);
+            let old = Generator::with(77, GenOptions { version: 7, ..GenOptions::DEFAULT });
+            let mut chosen = [0, 0];
+            let mut protected = 0;
+            for z in (-2500..2500).step_by(64) {
+                for x in (-2500..2500).step_by(64) {
+                    let (_, base) = g.column(x, z);
+                    let p = g.place_v7(x, z);
+                    assert_eq!(old.mod_biome_at(x, z, base), None);
+                    if crate::land::shape::mod_climate_space(&p, base) && p.m.abs() <= 0.65 {
+                        let index = g.mod_biome_at(x, z, base).unwrap();
+                        let expected = if p.m < 0.0 { 0 } else { 1 };
+                        assert_eq!(index, expected);
+                        chosen[index] += 1;
+                    } else {
+                        assert_eq!(g.mod_biome_at(x, z, base), None, "protected {base:?}");
+                        protected += 1;
+                    }
+                }
+            }
+            assert!(chosen.iter().all(|&n| n > 100) && protected > 100);
+            let mut tie = Generator::with(77, GenOptions::DEFAULT);
+            tie.biomes[0].climate = tie.biomes[1].climate.clone();
+            let (x, z) = (-2000..2000).step_by(64).flat_map(|z| (-2000..2000).step_by(64).map(move |x| (x,z))).find(|&(x,z)| tie.mod_biome_at(x,z,tie.column(x,z).1).is_some()).unwrap();
+            assert_eq!(tie.mod_biome_at(x,z,tie.column(x,z).1), Some(1), "ties use the stable biome key");
+            tie.biomes.swap(0, 1);
+            assert_eq!(tie.mod_biome_at(x,z,tie.column(x,z).1), Some(0));
+        });
+    }
+
+    #[test]
+    fn climate_example_and_wide_templates_have_chests_and_foundations() {
+        let example = include_str!("../../example-mods/climate/mod.txt");
+        let wide = example.replace("#####","#################").replace("#...#","#...............#").replace("#.c.#","#.......c.......#").replace("##.##","########.########");
+        for text in [example,wide.as_str()] {
+        crate::mods::with_mods(&[("climate", text)], |reg| {
+            assert!(reg.mods[0].errors.is_empty(), "{:?}",reg.mods[0].errors);
+            let g = Generator::with(424242, GenOptions::DEFAULT);
+            let (si,o)=(-80..80).flat_map(|cz|(-80..80).map(move|cx|(cx,cz))).find_map(|(cx,cz)|g.mod_structure_origins(cx,cz).first().copied()).expect("a climate-target hut");
+            let st=&reg.structures[si];
+            let [w,h,d]=st.size;
+            let (x0,z0)=(o.x-w/2,o.z-d/2);
+            let mut chunks=std::collections::HashMap::new();
+            let mut chests=0;
+            for z in 0..d { for x in 0..w {
+                let (xx,zz)=(x0+x,z0+z);
+                assert_eq!(g.mod_biome_at(xx,zz,g.column(xx,zz).1),Some(0));
+                let key=(xx.div_euclid(CW),zz.div_euclid(CW));
+                let b=chunks.entry(key).or_insert_with(||g.generate(key.0,key.1));
+                for y in 0..h {
+                    if let Some(id)=st.at(x,y,z) {
+                        assert_eq!(b[idx(xx.rem_euclid(CW),o.y+y,zz.rem_euclid(CW))],id);
+                        if id==CHEST {
+                            chests+=1;
+                            assert!(g.mod_structure_chests(key.0,key.1).iter().any(|&(p,index,_)|p==ivec3(xx,o.y+y,zz) && index==si));
+                        }
+                    }
+                }
+                assert!(is_solid(b[idx(xx.rem_euclid(CW),o.y-1,zz.rem_euclid(CW))]), "supported floor at {xx},{zz}");
+            }}
+            assert!(chests>0);
+            if w>16 { assert!(chunks.len()>1,"the wide hut crosses a chunk boundary"); }
+        });
+        }
+    }
+
+    #[test]
+    fn targetless_mod_patches_keep_their_released_selection() {
+        crate::mods::with_mods(&[("moon", LAND_MOD)], |_| {
+            let old = Generator::with(77, GenOptions { version: 7, ..GenOptions::DEFAULT });
+            let new = Generator::with(77, GenOptions::DEFAULT);
+            for z in (-2000..2000).step_by(48) {
+                for x in (-2000..2000).step_by(48) {
+                    let base = old.column(x,z).1;
+                    assert_eq!(new.mod_biome_at(x,z,base), old.mod_biome_at(x,z,base));
+                }
+            }
+        });
+    }
 
     #[test]
     fn mod_biomes_structures_and_dimensions_generate() {

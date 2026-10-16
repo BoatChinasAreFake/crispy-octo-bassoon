@@ -49,7 +49,12 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
-pub const PROTOCOL: u32 = 42;
+/// v59: v0.6 Part 2: generator 8 (caves by depth, broader land, islands,
+/// beach finds, landmarks and Petrified Logs), the coastal creatures, the
+/// Explorer's Atlas, held items and poses, rocket flights,
+/// swallowing gluttons and the example packs' machines (FactoryStates,
+/// MachineUse, MachineInfo, RocketFlights, Swallows, MealAnimation).
+pub const PROTOCOL: u32 = 59;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -123,7 +128,7 @@ pub enum Msg {
     /// Both directions; the host fills in `id` when relaying.
     /// `held` is the item in hand (the host only believes it if the player owns one).
     /// `held_ench`: its enchantments (believed only if the host knows they have them).
-    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16, trims: u32 },
+    PlayerState { id: u32, pos: Vec3, yaw: f32, pitch: f32, flags: u8, held: Id, held_ench: u16, armor: u16, trims: u32 , offhand:Id, gesture:u8, draw:u8 },
     /// Mobs, primed TNT, arrows in flight, falling blocks and fireballs.
     Mobs { mobs: Vec<MobSnap>, tnts: Vec<(Vec3, f32)>, arrows: Vec<ArrowSnap>, falling: Vec<(Vec3, f32, Id)>, fireballs: Vec<(Vec3, Vec3, bool)> },
     /// client -> host
@@ -272,6 +277,12 @@ pub enum Msg {
     UsePortal { x: i32, y: i32, z: i32 },
     /// host -> client: every boat and minecart: (id, kind, position, yaw, rider id + 1 or 0).
     Vehicles(Vec<(u32, u8, Vec3, f32, u32)>),
+    RocketFlights(Vec<crate::rockets::RocketFlight>),
+    Swallows(Vec<crate::swallow::Swallow>),
+    MealAnimation {id:u32,item:Id,elapsed:f32},
+    FactoryStates(Vec<crate::factory::Visual>),
+    MachineUse{x:i32,y:i32,z:i32,action:u8},
+    MachineInfo{x:i32,y:i32,z:i32,block:Id,status:String,progress:u8},
     /// client -> host: get in (0), get out (1) or hit (2) this vehicle.
     VehicleUse { id: u32, action: u8 },
     /// client -> host: where I've driven the vehicle I'm in.
@@ -364,6 +375,8 @@ pub const FLAG_GHOST: u8 = 16;
 pub const FLAG_GLIDE: u8 = 32;
 /// Asleep in a bed (see beds.rs).
 pub const FLAG_SLEEP: u8 = 64;
+/// Creative flight (survival clients cannot advertise it).
+pub const FLAG_FLY:u8=128;
 
 // ------------------------------------------------------------------ encoding
 
@@ -517,7 +530,7 @@ impl Msg {
                 w.u8(6);
                 w.u32(*id);
             }
-            Msg::PlayerState { id, pos, yaw, pitch, flags, held, held_ench, armor, trims } => {
+            Msg::PlayerState { id, pos, yaw, pitch, flags, held, held_ench, armor, trims , offhand, gesture, draw } => {
                 w.u8(7);
                 w.u32(*id);
                 w.v3(*pos);
@@ -527,7 +540,7 @@ impl Msg {
                 w.u16(*held);
                 w.u16(*held_ench);
                 w.u16(*armor);
-                w.u32(*trims);
+                w.u32(*trims);w.u16(*offhand);w.u8(*gesture);w.u8(*draw);
             }
             Msg::Mobs { mobs, tnts, arrows, falling, fireballs } => {
                 w.u8(8);
@@ -984,6 +997,20 @@ impl Msg {
                 w.i32(*y);
                 w.i32(*z);
             }
+            Msg::FactoryStates(list)=>{w.u8(118);w.u16(list.len() as u16);for v in list {w.i32(v.at.x);w.i32(v.at.y);w.i32(v.at.z);w.u16(v.block);w.u16(v.energy);w.u8(v.progress);w.u8(v.mode);w.u8(v.state);}}
+            Msg::MachineUse{x,y,z,action}=>{w.u8(116);w.i32(*x);w.i32(*y);w.i32(*z);w.u8(*action);}
+            Msg::MachineInfo{x,y,z,block,status,progress}=>{w.u8(117);w.i32(*x);w.i32(*y);w.i32(*z);w.u16(*block);w.str(status);w.u8(*progress);}
+            Msg::MealAnimation {id,item,elapsed} => {w.u8(115);w.u32(*id);w.u16(*item);w.f32(*elapsed);}
+            Msg::Swallows(list) => {
+                w.u8(114);w.u8(list.len().min(crate::swallow::CAP) as u8);
+                for f in list.iter().take(crate::swallow::CAP) {
+                    w.u32(f.eater);w.u32(f.prey);w.u8(f.kind);w.v3(f.from);w.f32(f.yaw);w.f32(f.scale);w.u8(f.sheared as u8);w.f32(f.elapsed);
+                }
+            }
+            Msg::RocketFlights(list) => {
+                w.u8(113);w.u8(list.len().min(16) as u8);
+                for f in list.iter().take(16) {w.str(&f.owner);w.u32(f.pilot);w.v3(f.ground);w.u8(f.landing as u8);w.f32(f.elapsed);w.u8(f.tier);}
+            }
             Msg::Vehicles(list) => {
                 w.u8(49);
                 w.u32(list.len() as u32);
@@ -1275,7 +1302,7 @@ impl Msg {
             }
             5 => Msg::PlayerJoin { id: r.u32()?, name: r.str()? },
             6 => Msg::PlayerLeave { id: r.u32()? },
-            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()?, trims: r.u32()? },
+            7 => Msg::PlayerState { id: r.u32()?, pos: r.v3()?, yaw: r.f32()?, pitch: r.f32()?, flags: r.u8()?, held: r.u16()?, held_ench: r.u16()?, armor: r.u16()?, trims: r.u32()? , offhand:r.u16()?, gesture:r.u8()? & 3, draw:r.u8()? },
             8 => {
                 let n = r.count(32)?;
                 let mut mobs = Vec::with_capacity(n);
@@ -1454,6 +1481,36 @@ impl Msg {
             46 => Msg::MobInteract { mob: r.u32()?, item: r.u16()? },
             47 => Msg::Trade { mob: r.u32()?, index: r.u8()? },
             48 => Msg::UsePortal { x: r.i32()?, y: r.i32()?, z: r.i32()? },
+            118=>{
+                let n=r.u16()? as usize;if n>crate::factory::VISUAL_LIMIT{return Err(io::Error::new(io::ErrorKind::InvalidData,"too many machine states"));}
+                let mut list=Vec::with_capacity(n);for _ in 0..n {let v=crate::factory::Visual{at:macroquad::math::IVec3::new(r.i32()?,r.i32()?,r.i32()?),block:r.u16()?,energy:r.u16()?,progress:r.u8()?,mode:r.u8()?,state:r.u8()?};
+                    // Registry-dependent checks happen after mod loading, not in the transport.
+                    if v.energy>1000||v.mode>2||v.state>9||!(0..crate::world::CH).contains(&v.at.y){return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid machine state"));}list.push(v);
+                }Msg::FactoryStates(list)
+            }
+            116=>Msg::MachineUse{x:r.i32()?,y:r.i32()?,z:r.i32()?,action:r.u8()?},
+            117=>Msg::MachineInfo{x:r.i32()?,y:r.i32()?,z:r.i32()?,block:r.u16()?,status:r.str()?,progress:r.u8()?},
+            115 => {
+                let (id,item,elapsed)=(r.u32()?,r.u16()?,r.f32()?);
+                if !elapsed.is_finite()||!(0.0..crate::poses::MEAL_SECONDS).contains(&elapsed) {return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid meal animation"));}
+                Msg::MealAnimation{id,item,elapsed}
+            }
+            114 => {
+                let n=r.u8()? as usize;if n>crate::swallow::CAP {return Err(io::Error::new(io::ErrorKind::InvalidData,"too many meals"));}
+                let mut list=Vec::with_capacity(n);
+                for _ in 0..n {
+                    let f=crate::swallow::Swallow {eater:r.u32()?,prey:r.u32()?,kind:r.u8()?,from:r.v3()?,yaw:r.f32()?,scale:r.f32()?,sheared:r.u8()?!=0,elapsed:r.f32()?};
+                    if !f.valid() {return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid meal"));}list.push(f);
+                }
+                Msg::Swallows(list)
+            }
+            113 => {
+                let n=r.u8()?;if n>16 {return Err(io::Error::new(io::ErrorKind::InvalidData,"too many rocket flights"));}
+                let mut list=Vec::new();for _ in 0..n {
+                    let f=crate::rockets::RocketFlight {owner:r.str()?,pilot:r.u32()?,ground:r.v3()?,landing:r.u8()?!=0,elapsed:r.f32()?,tier:r.u8()?};
+                    if !f.valid() {return Err(io::Error::new(io::ErrorKind::InvalidData,"invalid rocket flight"));}list.push(f);
+                }Msg::RocketFlights(list)
+            }
             49 => {
                 let n = r.count(25)?;
                 let mut list = Vec::with_capacity(n);
@@ -2175,7 +2232,7 @@ mod tests {
             Msg::Welcome { id: 3, seed: 42, time: 0.25, creative: true, spawn: Vec3::new(1.0, 2.0, 3.0), keep_inventory: true, worldgen: crate::world::GenOptions::DEFAULT.pack() },
             Msg::Mods { cx: -1, cz: 7, entries: vec![(5, 3), (99, 1234)] },
             Msg::Blocks(vec![(1, 2, 3, 4), (-9, 100, 12, 0x8123)]),
-            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102, trims: 0x2A },
+            Msg::PlayerState { id: 2, pos: Vec3::ONE, yaw: 1.5, pitch: -0.2, flags: FLAG_SNEAK | FLAG_SWING, held: 0x8003, held_ench: 0x21, armor: 0x4102, trims: 0x2A , offhand:crate::block::SHIELD, gesture:1, draw:200 },
             Msg::Craft { recipe: 12, times: 64 },
             Msg::Consume { item: 0x8005, n: 1 },
             Msg::InventoryCheck { items: vec![(3, 64), (0x8000, 2)] },
@@ -2277,6 +2334,8 @@ mod tests {
                 fireballs: vec![(Vec3::ONE, Vec3::X * 10.0, true)],
             },
             Msg::HurtYou { dmg: 3.0, cause: "was groaned".into(), knock: Vec3::Y },
+            Msg::MachineUse{x:4,y:90,z:-2,action:0},
+            Msg::MachineInfo{x:4,y:90,z:-2,block:crate::block::STONE,status:"Running".into(),progress:120},
             Msg::Chat { from: 0, text: "hello 🧱".into() },
             Msg::Challenge { nonce: [7; 16], password: true },
             Msg::Auth { proof: [9; 32] },

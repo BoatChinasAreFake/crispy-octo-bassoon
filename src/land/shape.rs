@@ -161,6 +161,63 @@ pub fn pick(p: &Place) -> Biome {
     }
 }
 
+/// The rules for worlds from version 8: alpine snow apart from cold
+/// lowlands, sand on gentle shores, and steep headlands left to their
+/// inland biome. Then the warm climate choices of `pick`.
+pub fn pick_shaped(p: &Place, slope: f32, rocky: bool) -> Biome {
+    if p.river { return Biome::River; }
+    let coast = (COAST.0..COAST.1).contains(&p.c);
+    if coast && !rocky && slope <= 0.25 && (p.sea - 1..=p.sea + 4).contains(&p.h) && p.wet_low < 0.5 && p.t >= -0.38 {
+        return Biome::Beach;
+    }
+    if p.h < p.sea - 1 {
+        return if p.t < -0.38 { Biome::FrozenOcean } else { sea_by_temperature(p.t.max(-0.32)) };
+    }
+    let alpine = p.h > p.sea + 52 || (p.pv > 0.8 && p.e < -0.35 && p.h > p.sea + 44);
+    if alpine {
+        let cooling = ((p.h - p.sea - 24).max(0) as f32 * 0.007).min(0.3);
+        return if p.t - cooling < -0.32 { Biome::Snowy } else { Biome::StonyPeaks };
+    }
+    let beach_top = if slope <= 0.125 { p.sea + 2 } else { p.sea + 1 };
+    if coast && !rocky && slope <= 0.375 && p.h <= beach_top && p.wet_low < 0.5 {
+        return if p.t < -0.38 { Biome::Snowy } else { Biome::Beach };
+    }
+    if p.t < -0.38 {
+        return if p.w > 0.42 && p.h < p.sea + 30 { Biome::IceSpikes } else { Biome::Snowy };
+    }
+    if p.t < -0.17 { return Biome::Taiga; }
+    pick(&Place { c: if coast { COAST.1 } else { p.c }, ..*p })
+}
+
+/// River channel half-width in blocks; the broad valley has its own scale.
+pub fn river_half_width(detail: f32) -> f32 {
+    (7.0 + detail * 4.0).clamp(5.0, 11.0)
+}
+
+/// Convert a weirdness value into an approximate distance to its zero line.
+/// Flat extrema with no measurable gradient do not create enormous lakes.
+pub fn river_channel(reach: f32, gradient: f32, half_width: f32) -> f32 {
+    (RIVER * reach).min(gradient.max(0.0) * half_width * reach)
+}
+
+/// A shallow centre, an underwater shelf, then a gradual bank. Both
+/// sections meet with zero slope, including where the bank meets the valley.
+pub fn river_bed(sea: f32, distance_in_widths: f32) -> f32 {
+    if distance_in_widths <= 1.0 {
+        sea - 4.0 + 3.0 * smoothstep(0.0, 1.0, distance_in_widths)
+    } else {
+        sea - 1.0 + 2.5 * smoothstep(1.0, 2.0, distance_in_widths)
+    }
+}
+
+/// Ordinary inland climate choices are available to target-climate mods.
+/// Shape landmarks and rare variants always keep their built-in identity.
+pub fn mod_climate_space(p: &Place, biome: Biome) -> bool {
+    p.h > p.sea + 2 && p.c >= COAST.1 && p.h <= p.sea + 44
+        && !p.river && p.wet_low <= 0.4
+        && matches!(biome, Biome::Plains | Biome::Forest | Biome::BirchForest | Biome::DarkForest | Biome::Taiga | Biome::Snowy | Biome::Savanna | Biome::Jungle | Biome::Desert | Biome::Badlands | Biome::Meadow)
+}
+
 impl Generator {
     /// The three shape noises at a column: continentalness, erosion and weirdness.
     pub fn shape_noise(&self, x: i32, z: i32) -> (f32, f32, f32) {
@@ -169,24 +226,41 @@ impl Generator {
         // (A little warp, so no ridge or coast runs straight.)
         let (wx, wz) = (self.hills.noise2(fx / 97.0 - 210.0, fz / 97.0) * 30.0, self.hills.noise2(fx / 97.0, fz / 97.0 + 330.0) * 30.0);
         let norm = |v: f32| (v * 2.6).clamp(-1.0, 1.0);
-        let c = norm(self.continent.fbm2((fx + wx) / (900.0 * bs), (fz + wz) / (900.0 * bs), 4) + 0.11);
-        let e = norm(self.erosion.fbm2((fx - wz) / (520.0 * bs), (fz + wx) / (520.0 * bs), 3));
-        let w = norm(self.weird.fbm2((fx + wz * 0.5) / (440.0 * bs), (fz - wx * 0.5) / (440.0 * bs), 3));
+        let scale = if self.opts.version >= 8 { 3.0 } else { 1.0 };
+        let mut c = norm(self.continent.fbm2((fx + wx) / (900.0 * bs * scale), (fz + wz) / (900.0 * bs * scale), 4) + 0.11);
+        let e = norm(self.erosion.fbm2((fx - wz) / (520.0 * bs * scale), (fz + wx) / (520.0 * bs * scale), 3));
+        let w = norm(self.weird.fbm2((fx + wz * 0.5) / (440.0 * bs * scale), (fz - wx * 0.5) / (440.0 * bs * scale), 3));
+        if self.opts.version >= 8 {
+            // Bays/headlands add local variation only near the coast.
+            let coastal = 1.0 - smoothstep(0.12, 0.3, (c + 0.12).abs());
+            c = (c + self.hills.fbm2(fx / 180.0, fz / 180.0, 2) * 0.045 * coastal).clamp(-1.0, 1.0);
+        }
         (c, e, w)
     }
 
     /// Surface height and biome for a column, in worlds from version 7.
     pub(crate) fn column_v7(&self, x: i32, z: i32) -> (i32, Biome) {
         let place = self.place_v7(x, z);
-        let biome = pick(&place);
+        let mut biome = if self.opts.version >= 8 {
+            let (slope, rocky) = self.shore_shape(x, z, &place);
+            pick_shaped(&place, slope, rocky)
+        } else { pick(&place) };
+        if self.opts.version >= 8 && biome == Biome::Beach && !self.near_sea_shore(x,z) {
+            // Flat coastal plains need not be sandy: only the strip beside
+            // actual sea water gets the beach identity and its decorations.
+            biome = pick_shaped(&Place { c: COAST.1, ..place }, 0.0, false);
+        }
         let (h, biome) = (place.h, biome);
         // Far out in deep water, now and then, the sea floor rises into a mushroom island.
         if biome.is_ocean() && h < place.sea - 4 {
             let k = self.mushroom_isle(x, z);
             if k > 0.0 {
                 let seaf = place.sea as f32;
-                let top = seaf + 1.0 + (k - 0.5).max(0.0) * 10.0;
-                let hh = (h as f32 + (top - h as f32) * (k * 2.0).min(1.0)).round() as i32;
+                let top = if self.opts.version >= 8 {
+                    seaf + 4.0 + k * k * 8.0 + self.hills.fbm2(x as f32 / 140.0, z as f32 / 140.0, 2) * 4.0
+                } else { seaf + 1.0 + (k - 0.5).max(0.0) * 10.0 };
+                let blend = if self.opts.version >= 8 { smoothstep(0.0,0.6,k) } else { (k * 2.0).min(1.0) };
+                let hh = (h as f32 + (top - h as f32) * blend).round() as i32;
                 return (hh, if hh >= place.sea - 1 { Biome::MushroomIslands } else { biome });
             }
         }
@@ -198,7 +272,7 @@ impl Generator {
         let (fx, fz) = (x as f32, z as f32);
         let sea = self.sea();
         let seaf = sea as f32;
-        let (c, e, w) = self.shape_noise(x, z);
+        let (mut c, e, w) = self.shape_noise(x, z);
         let pv = peaks_and_valleys(w);
         let relief = self.opts.relief();
         // Inland the peaks and valleys count; at sea, hardly.
@@ -206,8 +280,27 @@ impl Generator {
         let rugged = RUGGED.at(e);
         let mut h = seaf + CONTINENT.at(c);
         h += inland * PEAKS.at(pv) * rugged * relief;
+        if self.opts.version >= 8 {
+            let mountain = inland * smoothstep(0.15, 0.8, pv) * (1.0 - smoothstep(-0.15, 0.35, e));
+            // Local saddles interrupt long ridges; shoulders soften their feet.
+            let pass = smoothstep(0.12, 0.42, self.hills.noise2(fx / 360.0 + 91.0, fz / 360.0));
+            h -= mountain * pass * 18.0 * relief;
+            h += inland * smoothstep(-0.5, 0.3, pv) * (1.0 - smoothstep(0.1, 0.5, e))
+                * (3.0 + self.hills.fbm2(fx / 240.0, fz / 240.0, 2) * 5.0) * relief;
+            // Worn uplands flatten into plateaus, while occasional rugged
+            // summits get a sharper cap without enlarging surface detail.
+            let plateau = inland * smoothstep(0.1, 0.45, e) * smoothstep(0.1, 0.6, pv) * 0.45;
+            h += (seaf + 18.0 + c.max(0.0) * 12.0 - h) * plateau;
+            h += mountain * smoothstep(0.25, 0.55, self.hills.noise2(fx / 110.0 - 73.0, fz / 110.0)) * 16.0 * relief;
+        }
         // A little detail on top: more where it's rugged.
         h += self.hills.fbm2(fx / 70.0, fz / 70.0, 3) * (1.5 + 6.0 * rugged) * (0.3 + 0.7 * inland) * relief.sqrt();
+        if self.opts.version >= 8 {
+            // Medium-scale hills give the broad continents readable relief.
+            // They fade away at the coast, keeping beaches and wet flats low.
+            let rolling = self.hills.fbm2(fx / 180.0 + 137.0, fz / 180.0 - 83.0, 3);
+            h += rolling * (12.0 + 8.0 * rugged) * inland * relief;
+        }
         // Tall peaks ease off toward the top of the world instead of being cut flat.
         let knee = seaf + 44.0;
         if h > knee {
@@ -218,12 +311,25 @@ impl Generator {
         // little over the sea, then the channel drops below it.
         let reach = smoothstep(-0.26, -0.12, c) * (1.0 - smoothstep(seaf + 34.0, seaf + 60.0, h));
         let aw = w.abs();
-        let valley = (1.0 - smoothstep(RIVER, RIVER_VALLEY, aw)) * reach;
+        let valley_end = if self.opts.version >= 8 { 0.19 } else { RIVER_VALLEY };
+        let valley = (1.0 - smoothstep(RIVER, valley_end, aw)) * reach;
         let bank = seaf + 1.5;
         h -= (h - bank).max(0.0) * valley;
-        let channel = RIVER * reach;
+        let channel = if self.opts.version >= 8 && aw < RIVER * reach * 2.0 {
+            let dx = (self.shape_noise(x + 8, z).2 - self.shape_noise(x - 8, z).2) / 16.0;
+            let dz = (self.shape_noise(x, z + 8).2 - self.shape_noise(x, z - 8).2) / 16.0;
+            let gradient = (dx * dx + dz * dz).sqrt();
+            let width = river_half_width(self.hills.noise2(fx / 170.0, fz / 170.0));
+            river_channel(reach, gradient, width)
+        } else { RIVER * reach };
         let river = aw < channel && h < seaf + 3.0;
-        if river {
+        if self.opts.version >= 8 {
+            // Shape the dry bank as well as the waterbed. The old cut only
+            // touched river columns, leaving a three-block ledge at its edge.
+            if channel > 0.0 && aw < channel * 2.0 && h < seaf + 3.0 {
+                h = h.min(river_bed(seaf, aw / channel));
+            }
+        } else if river {
             // Deepest in the middle.
             let bed = seaf - 1.5 - 3.5 * (1.0 - aw / channel.max(1e-4));
             h = h.min(bed);
@@ -235,10 +341,73 @@ impl Generator {
         let wet_low = smoothstep(0.1, 0.26, m) * (1.0 - smoothstep(seaf + 1.0, seaf + 5.0, h)) * smoothstep(seaf - 4.0, seaf - 1.0, h) * smoothstep(-0.3, 0.0, e) * smoothstep(-0.14, -0.04, c);
         if !river {
             let bumps = seaf - 0.6 + self.hills.noise2(fx / 9.0, fz / 9.0) * 2.2;
-            h += (bumps - h) * wet_low * 0.7;
+            let wet_blend=if self.opts.version >= 8 { 0.35 } else { 0.7 };
+            h += (bumps - h) * wet_low * wet_blend;
         }
-        let h = (h.round() as i32).clamp(4, sea + 68);
+        let mut h = (h.round() as i32).clamp(4, sea + 68);
+        if self.opts.version >= 8 && h < sea - 8 && !river {
+            let k = self.ocean_island(x,z) * (1.0 - smoothstep(0.0,0.2,self.mushroom_isle(x,z)));
+            if k > 0.0 {
+                let top = seaf + 4.0 + k*k*26.0 + self.hills.fbm2(fx/100.0,fz/100.0,2)*4.0;
+                h = (h as f32 + (top-h as f32)*smoothstep(0.0,0.7,k)).round() as i32;
+                if h >= sea - 1 { c = if h <= sea+2 { -0.12 } else { 0.1 }; }
+            }
+        }
         Place { h, sea, c, e, w, pv, t, m, river, wet_low }
+    }
+
+    /// Ordinary offshore islands, separate from the much rarer mushroom grid.
+    pub fn ocean_island(&self, x: i32, z: i32) -> f32 {
+        const GRID:i32=1024;
+        let s=self.seed^0x15_1A4D;
+        let (gx,gz)=(x.div_euclid(GRID),z.div_euclid(GRID));
+        let mut best:f32=0.0;
+        for dz in -1..=1 { for dx in -1..=1 {
+            let (cx,cz)=(gx+dx,gz+dz);
+            if crate::noise::hash2(s,cx,cz)>0.24 { continue; }
+            let (mx,mz)=(cx*GRID+280+(crate::noise::hash2(s^1,cx,cz)*464.0) as i32,cz*GRID+280+(crate::noise::hash2(s^2,cx,cz)*464.0) as i32);
+            let radius=120.0+crate::noise::hash2(s^3,cx,cz)*130.0;
+            let dist=(((x-mx) as f32).powi(2)+((z-mz) as f32).powi(2)).sqrt();
+            if dist>radius+28.0 || !self.offshore_room(mx,mz,radius as i32) { continue; }
+            let edge=self.hills.fbm2(x as f32/75.0,z as f32/75.0,2)*28.0;
+            best=best.max(1.0-(dist+edge)/radius);
+        } }
+        best.clamp(0.0,1.0)
+    }
+
+    /// Keep island cores and their shores in deep water, rather than
+    /// manufacturing mushroom peninsulas along an existing continent.
+    pub fn offshore_room(&self,x:i32,z:i32,radius:i32)->bool {
+        self.shape_noise(x,z).0 < -0.28 && [(radius,0),(-radius,0),(0,radius),(0,-radius)]
+            .iter().all(|&(dx,dz)|self.shape_noise(x+dx,z+dz).0 < -0.22)
+    }
+
+    /// Beach reach varies smoothly from 16 to 28 blocks, independent of the
+    /// continental noise scale. Sample terrain, never columns (no recursion),
+    /// and exclude rivers so inland valley banks cannot make sandy plains.
+    pub(crate) fn near_sea_shore(&self,x:i32,z:i32)->bool {
+        let width=(22.0+self.hills.noise2(x as f32/160.0,z as f32/160.0)*6.0).round() as i32;
+        for radius in [8,16,width.clamp(16,28)] {
+            let diagonal=(radius as f32*std::f32::consts::FRAC_1_SQRT_2).floor() as i32;
+            for (dx,dz) in [(radius,0),(-radius,0),(0,radius),(0,-radius),
+                (diagonal,diagonal),(-diagonal,diagonal),(diagonal,-diagonal),(-diagonal,-diagonal)] {
+                let p=self.place_v7(x+dx,z+dz);
+                if p.h<p.sea-1 && !p.river {return true;}
+            }
+        }
+        false
+    }
+
+    /// Local slope and rocky-headland flag, sampled only in the coastal band.
+    pub fn shore_shape(&self, x: i32, z: i32, p: &Place) -> (f32, bool) {
+        if !(COAST.0..COAST.1).contains(&p.c) || !(p.sea - 3..=p.sea + 5).contains(&p.h) || p.river || p.wet_low > 0.5 {
+            return (0.0, false);
+        }
+        let slope = [(4, 0), (-4, 0), (0, 4), (0, -4)].iter()
+            .map(|&(dx, dz)| (self.place_v7(x + dx, z + dz).h - p.h).abs() as f32 / 4.0)
+            .fold(0.0, f32::max);
+        let rocky = slope > 0.375 || (p.e < -0.25 && self.hills.noise2(x as f32 / 90.0, z as f32 / 90.0) > 0.05);
+        (slope, rocky)
     }
 }
 
@@ -264,6 +433,122 @@ mod tests {
         }
         assert_eq!(peaks_and_valleys(0.0), -1.0, "valley floors where weirdness is nought");
         assert!((peaks_and_valleys(2.0 / 3.0) - 1.0).abs() < 1e-5, "ridges");
+    }
+
+    #[test]
+    fn rivers_have_block_widths_independent_of_valley_scale() {
+        for detail in [-2.0, -0.5, 0.0, 0.5, 2.0] {
+            assert!((5.0..=11.0).contains(&river_half_width(detail)));
+        }
+        assert_eq!(river_channel(1.0, 0.0, 7.0), 0.0);
+        for gradient in [0.0001, 0.001, 0.004] {
+            let channel = river_channel(1.0, gradient, 7.0);
+            assert!((channel / gradient - 7.0).abs() < 0.001);
+            assert_eq!(river_channel(0.0, gradient, 7.0), 0.0);
+        }
+    }
+
+    #[test]
+    fn river_banks_rise_continuously_into_the_valley() {
+        assert_eq!(river_bed(63.0,0.0),59.0);
+        assert_eq!(river_bed(63.0,1.0),62.0);
+        assert_eq!(river_bed(63.0,2.0),64.5);
+        assert_eq!(river_bed(63.0,3.0),64.5);
+        for width in [5.0,7.0,11.0] {
+            let mut previous=river_bed(63.0,0.0);
+            for block in 1..=(width*2.0) as i32 {
+                let next=river_bed(63.0,block as f32/width);
+                assert!(next>=previous && next-previous<=1.0,"width {width}: {previous} to {next}");
+                previous=next;
+            }
+            let epsilon=0.001;
+            assert!((river_bed(63.0,1.0-epsilon)-river_bed(63.0,1.0+epsilon)).abs()<0.001);
+        }
+    }
+
+    #[test]
+    fn generated_river_edges_do_not_leave_vertical_bank_ledges() {
+        let mut checked=0;
+        for seed in [424242,77,1234] {
+            let g=Generator::with(seed,GenOptions::DEFAULT);
+            for z in (-2048..2048).step_by(64) {
+                for x in (-2048..2048).step_by(16) {
+                    let (h,b)=g.column(x,z);
+                    if b!=Biome::River { continue; }
+                    for (dx,dz) in [(1,0),(-1,0),(0,1),(0,-1)] {
+                        let (other,biome)=g.column(x+dx,z+dz);
+                        if biome==Biome::River || biome.is_ocean() { continue; }
+                        assert!((other-h).abs()<=2,"seed {seed}: bank jumps from {h} to {other} at {x},{z}");
+                        checked+=1;
+                    }
+                }
+            }
+        }
+        assert!(checked>=40,"only {checked} river bank edges exercised");
+    }
+
+    #[test]
+    fn alpine_snow_and_cold_lowlands_are_separate() {
+        assert_eq!(pick_shaped(&place(120, -0.08, 0.0), 0.0, false), Biome::StonyPeaks);
+        assert_eq!(pick_shaped(&place(120, -0.14, 0.0), 0.0, false), Biome::Snowy);
+        assert_eq!(pick_shaped(&place(75, -0.35, 0.0), 0.0, false), Biome::Taiga);
+        assert_eq!(pick_shaped(&place(75, -0.4, 0.0), 0.0, false), Biome::Snowy);
+        assert_eq!(pick_shaped(&place(50, -0.35, 0.0), 0.0, false), Biome::Ocean);
+        assert_eq!(pick_shaped(&place(50, -0.4, 0.0), 0.0, false), Biome::FrozenOcean);
+    }
+
+    #[test]
+    fn beaches_follow_gentle_slopes_and_leave_rocky_headlands() {
+        let p = Place { c: -0.12, ..place(65, 0.1, 0.0) };
+        assert_eq!(pick_shaped(&p, 0.0, false), Biome::Beach);
+        assert_ne!(pick_shaped(&p, 0.3, false), Biome::Beach);
+        assert_ne!(pick_shaped(&p, 0.0, true), Biome::Beach);
+        assert_ne!(pick_shaped(&Place { h: 64, ..p }, 0.5, false), Biome::Beach);
+        assert_eq!(pick_shaped(&Place { river: true, ..p }, 0.0, true), Biome::River);
+    }
+
+    #[test]
+    fn ordinary_islands_and_large_mushroom_islands_are_offshore() {
+        let g=Generator::with(77,GenOptions::DEFAULT);
+        let s=g.seed^0x15E;
+        let mut found=None;
+        for cz in -16..16 { for cx in -16..16 {
+            let (x,z)=(cx*4096+1024+(crate::noise::hash2(s^1,cx,cz)*2048.0) as i32,cz*4096+1024+(crate::noise::hash2(s^2,cx,cz)*2048.0) as i32);
+            if g.column(x,z).1==Biome::MushroomIslands { found=Some((x,z,360.0+crate::noise::hash2(s^3,cx,cz)*160.0));break; }
+        } if found.is_some() { break; } }
+        let (x,z,radius)=found.expect("rare mushroom island in a wide search");
+        let span=(-600..=600).step_by(8).filter(|&dx|g.column(x+dx,z).1==Biome::MushroomIslands).count()*8;
+        assert!(span>=280,"only {span} blocks of exposed mushroom island");
+        let ring=(radius*0.85) as i32;
+        assert!(g.column(x+ring,z).0<g.sea()-3 && g.column(x-ring,z).0<g.sea()-3,"deep water separates the mushroom shore from nearby land");
+        let mut ordinary=0;
+        for z in (-4096..4096).step_by(32) { for x in (-4096..4096).step_by(32) {
+            if g.ocean_island(x,z)>0.7 && g.shape_noise(x,z).0< -0.28 && g.column(x,z).0>g.sea()+2 && g.column(x,z).1!=Biome::MushroomIslands { ordinary+=1; }
+        } }
+        assert!(ordinary>20,"only {ordinary} ordinary island samples");
+    }
+
+    #[test]
+    fn broader_generation_reduces_fragmentation_without_losing_landmarks() {
+        let mut transitions = [0usize; 2];
+        let mut landmarks = std::collections::HashSet::new();
+        for seed in [424242, 77, 1234] {
+            for (i, version) in [7, 8].into_iter().enumerate() {
+                let g = Generator::with(seed, GenOptions { version, ..GenOptions::DEFAULT });
+                for z in (-4096..4096).step_by(64) {
+                    let mut previous = None;
+                    for x in (-4096..4096).step_by(64) {
+                        let (h, b) = g.column(x, z);
+                        assert!((4..=g.sea()+68).contains(&h));
+                        transitions[i] += usize::from(previous.is_some_and(|old| old != b));
+                        previous = Some(b);
+                        if version == 8 { landmarks.insert(b); }
+                    }
+                }
+            }
+        }
+        assert!(transitions[1] * 5 < transitions[0] * 4, "{transitions:?}");
+        for b in [Biome::River, Biome::Beach, Biome::StonyPeaks, Biome::Meadow, Biome::Snowy, Biome::Ocean] { assert!(landmarks.contains(&b), "missing {b:?}"); }
     }
 
     #[test]
@@ -297,7 +582,7 @@ mod tests {
 
     /// A wide look at a seed: biomes (and heights) every few blocks.
     fn survey(seed: u32, step: i32, n: i32) -> Vec<(i32, Biome)> {
-        let g = Generator::with(seed, GenOptions { version: 7, ..GenOptions::DEFAULT });
+        let g = Generator::with(seed, GenOptions::DEFAULT);
         let mut out = Vec::new();
         for j in -n / 2..n / 2 {
             for i in -n / 2..n / 2 {
@@ -310,7 +595,7 @@ mod tests {
     #[test]
     fn new_worlds_have_rivers_beaches_and_plenty_of_land() {
         for seed in [424242, 1234, 77] {
-            let cols = survey(seed, 16, 128);
+            let cols = survey(seed, 64, 128);
             let share = |b: Biome| cols.iter().filter(|c| c.1 == b).count() as f32 / cols.len() as f32;
             let sea: f32 = Biome::ALL.iter().filter(|b| b.is_ocean()).map(|&b| share(b)).sum();
             assert!((0.2..0.7).contains(&sea), "seed {seed}: sea {sea}");
@@ -322,12 +607,47 @@ mod tests {
             for &(h, b) in &cols {
                 match b {
                     Biome::River => assert!(h < 63, "a river below the sea"),
-                    Biome::Beach => assert!((62..=65).contains(&h)),
+                    Biome::Beach => assert!((62..=67).contains(&h)),
                     b if b.is_ocean() => assert!(h < 62),
                     _ => assert!(h >= 62),
                 }
             }
         }
+    }
+
+    /// Fixed, broad seed coverage rather than assertions about exact rarity.
+    const SURVEY_SEEDS: [u32; 12] = [424242, 1234, 77, 1, 3, 6, 11, 42, 2024, 31337, 65535, 987654321];
+
+    #[test]
+    fn many_seeds_keep_variety_depth_and_sensible_neighbours() {
+        let mut all = std::collections::HashSet::new();
+        let mut caves = std::collections::HashSet::new();
+        for seed in SURVEY_SEEDS {
+            let g = Generator::with(seed, GenOptions::DEFAULT);
+            let mut kinds = std::collections::HashSet::new();
+            let mut ocean = 0;
+            for z in (-4096..4096).step_by(64) {
+                for x in (-4096..4096).step_by(64) {
+                    let (h, b) = g.column(x, z);
+                    kinds.insert(b);
+                    all.insert(b);
+                    ocean += usize::from(b.is_ocean());
+                    for y in [10, 32, 48] { caves.insert(g.cave_biome_at(x, y, z)); }
+                    for (dx, dz) in [(16, 0), (0, 16)] {
+                        let neighbour = g.column(x + dx, z + dz).1;
+                        let frozen = |b| matches!(b, Biome::Snowy | Biome::IceSpikes | Biome::FrozenOcean);
+                        let hot = |b| matches!(b, Biome::Desert | Biome::Badlands | Biome::Jungle | Biome::Mangrove | Biome::WarmOcean);
+                        assert!(!(frozen(b) && hot(neighbour) || hot(b) && frozen(neighbour)), "seed {seed}: {b:?} next to {neighbour:?} at {x},{z}");
+                    }
+                    if b == Biome::River { assert!(h < g.sea()); }
+                    if b == Biome::Beach { assert!((g.sea()-1..=g.sea()+4).contains(&h)); }
+                }
+            }
+            assert!(kinds.len() >= 12, "seed {seed}: {kinds:?}");
+            assert!((800..14000).contains(&ocean), "seed {seed}: {ocean} ocean columns of 16384");
+        }
+        assert!(all.len() >= 20, "only {all:?}");
+        for b in [crate::caves::CaveBiome::Plain, crate::caves::CaveBiome::Dripstone, crate::caves::CaveBiome::Lush, crate::caves::CaveBiome::DeepDark] { assert!(caves.contains(&b)); }
     }
 
     #[test]
@@ -365,14 +685,36 @@ mod tests {
     #[ignore]
     fn biome_maps() {
         let Ok(dir) = std::env::var("MINCERAFT_BIOME_MAPS") else { return };
+        let chunks = std::env::var("MINCERAFT_MAP_CHUNKS").map_or(256, |v| v.parse::<i32>().expect("map chunks must be an integer"));
+        assert!((2..=1024).contains(&chunks) && chunks % 2 == 0, "map chunks must be even and between 2 and 1024");
+        let n = chunks * 2; // One sample every eight blocks, sixteen blocks/chunk.
+        let surface_only = std::env::var("MINCERAFT_MAP_SURFACE_ONLY").is_ok_and(|v| v == "1");
         let names: Vec<String> = Biome::ALL.iter().map(|b| format!("{b:?}")).collect();
+        std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(format!("{dir}/biome_names.txt"), names.join("\n")).unwrap();
-        for seed in [424242u32, 1234, 77] {
-            let cols = survey(seed, 4, 512);
+        std::fs::write(format!("{dir}/cave_names.txt"), "Plain\nDripstone\nLush\nDeepDark").unwrap();
+        std::fs::write(format!("{dir}/map_metadata.txt"), format!("generator={}\nchunks={}\nsamples={}\nstep=8\nminimum={}\n", GenOptions::DEFAULT.version, chunks, n, -chunks*8)).unwrap();
+        for seed in SURVEY_SEEDS {
+            let g = Generator::with(seed, GenOptions::DEFAULT);
+            let cols = survey(seed, 8, n);
             let raw: Vec<u8> = cols.iter().map(|c| Biome::ALL.iter().position(|&b| b == c.1).unwrap() as u8).collect();
             std::fs::write(format!("{dir}/biomes_{seed}.raw"), raw).unwrap();
             let hs: Vec<u8> = cols.iter().map(|c| c.0.clamp(0, 255) as u8).collect();
             std::fs::write(format!("{dir}/heights_{seed}.raw"), hs).unwrap();
+            if surface_only { continue; }
+            for depth in [10, 32, 48] {
+                let raw: Vec<u8> = (-n/2..n/2).flat_map(|j| (-n/2..n/2).map(move |i| (i * 8, j * 8))).map(|(x,z)| g.cave_biome_at(x, depth, z) as u8).collect();
+                std::fs::write(format!("{dir}/caves_{seed}_{depth}.raw"), raw).unwrap();
+            }
+            let mods: Vec<u8> = (-n/2..n/2).flat_map(|j| (-n/2..n/2).map(move |i| (i * 8, j * 8))).map(|(x,z)| g.mod_biome_at(x,z,g.column(x,z).1).map_or(0, |i| i as u8 + 1)).collect();
+            std::fs::write(format!("{dir}/mods_{seed}.raw"), mods).unwrap();
+            let mut sites = String::from("kind,x,y,z\n");
+            for cz in -chunks/2..chunks/2 {
+                for cx in -chunks/2..chunks/2 {
+                    if let Some(site) = g.site(cx,cz) { sites.push_str(&format!("{:?},{},{},{}\n",site.kind,site.origin.x,site.origin.y,site.origin.z)); }
+                }
+            }
+            std::fs::write(format!("{dir}/sites_{seed}.csv"), sites).unwrap();
         }
     }
 }

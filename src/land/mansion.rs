@@ -320,6 +320,10 @@ impl Generator {
         if biome != Biome::DarkForest || h <= self.sea() + 1 || h > self.sea() + 50 {
             return None;
         }
+        if self.opts.version >= 8 {
+            return self.footprint_fits(ivec3(ox, h, oz), (-W, W, -D, D + 2), 6, |b, m| b == Biome::DarkForest && m.is_none())
+                .then_some(Site { kind: Kind::Mansion, origin: ivec3(ox, h, oz), facing, seed });
+        }
         let level = [(-W, -D), (W, -D), (-W, D), (W, D), (0, D), (0, -D), (W, 0), (-W, 0)].iter().all(|&(dx, dz)| {
             let (hh, b) = self.column(ox + dx, oz + dz);
             (hh - h).abs() <= 6 && !b.is_ocean()
@@ -435,6 +439,7 @@ mod tests {
 
     #[test]
     fn mansions_grow_in_dark_forests_and_maps_find_them() {
+        let _lock = crate::mods::registry_test_lock();
         let mut found = 0;
         for seed in [1u32, 2, 3, 4, 5, 6] {
             let g = Generator::with(seed, GenOptions::DEFAULT);

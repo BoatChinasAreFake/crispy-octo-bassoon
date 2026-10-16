@@ -53,7 +53,9 @@ fn idle() -> Controls {
 /// Load the chunks around a spot (so a game can be played there).
 fn load_around(g: &mut Game, p: Vec3) {
     let start = Instant::now();
-    while g.world.chunks.len() < 25 && start.elapsed() < Duration::from_secs(20) {
+    let (cx,cz)=((p.x.floor() as i32).div_euclid(crate::world::CW),(p.z.floor() as i32).div_euclid(crate::world::CW));
+    let loaded=|g: &Game| (-2..=2).all(|dz| (-2..=2).all(|dx| g.world.is_loaded((cx+dx)*crate::world::CW,(cz+dz)*crate::world::CW)));
+    while !loaded(g) && start.elapsed() < Duration::from_secs(20) {
         g.world.stream(&[(p, 2)]);
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -200,6 +202,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     trade_levels(&mut host, &mut team, &mut report, &mut touched);
     growing_villages(&mut host, &mut team, &mut report);
     new_land(&mut host, &mut team, &mut report);
+    reshaped_depths(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2494,10 +2497,214 @@ fn new_land(host: &mut Game, team: &mut [Bot], report: &mut Report) {
     ground(host, team, k);
 }
 
+/// Natural terrain is regenerated independently by host and joined player.
+/// Also round-trip a block edit at each location through the socket/ledger.
+fn compare_generated_patch(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>, spot: Vec3, label: &str) {
+    let k = team.len()-1;
+    let id = team[k].game.my_id;
+    let mid = spot.as_ivec3();
+    let (cx,cz) = (mid.x.div_euclid(crate::world::CW),mid.z.div_euclid(crate::world::CW));
+    for dz in -1..=1 { for dx in -1..=1 { host.world.load_now(cx+dx,cz+dz); } }
+    if let Some(peer) = host.peers.get_mut(&id) { peer.target = spot; }
+    {
+        let g = &mut team[k].game;
+        g.player.body.pos = spot;
+        g.player.body.vel = Vec3::ZERO;
+        g.player.fall_start = spot.y;
+        let start = Instant::now();
+        while !(-1..=1).all(|dz| (-1..=1).all(|dx| g.world.is_loaded((cx+dx)*16,(cz+dz)*16))) && start.elapsed()<Duration::from_secs(30) {
+            g.world.stream(&[(spot,2)]);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        if !g.world.is_loaded(mid.x,mid.z) { report.problems.push(format!("{label}: joined player's chunks timed out")); return; }
+    }
+    pump(host,team,1.5,|_|idle());
+    // Full central chunk, including hidden foundations and cave decoration.
+    let mismatch = (0..crate::world::CW).flat_map(|z| (0..crate::world::CW).map(move |x|(x,z))).flat_map(|(x,z)| (1..crate::world::CH).map(move |y| IVec3::new(cx*16+x,y,cz*16+z))).find(|&p| host.world.get_v(p)!=team[k].game.world.get_v(p));
+    if let Some(p)=mismatch { report.problems.push(format!("{label}: regenerated blocks disagree at {p}")); }
+    let edited = mid + IVec3::new(2,4,0);
+    let previous = host.world.get_v(edited);
+    host.world.set_v(edited, COBBLE);
+    touched.insert(edited);
+    pump(host,team,0.5,|_|idle());
+    if team[k].game.world.get_v(edited)!=COBBLE { report.problems.push(format!("{label}: host edit didn't arrive")); }
+    host.world.set_v(edited,previous);
+    pump(host,team,0.5,|_|idle());
+    if team[k].game.world.get_v(edited)!=previous { report.problems.push(format!("{label}: restored edit didn't arrive")); }
+}
+
+fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::caves::CaveBiome;
+    if host.world.generator.opts.version != crate::world::GenOptions::DEFAULT.version {
+        report.problems.push("Part 2 playtest isn't using the newest generator".into()); return;
+    }
+    let k=team.len()-1;
+    let home=team[k].game.player.body.pos;
+    report.features.push("climate and depth caves");
+    for want in [CaveBiome::Dripstone,CaveBiome::Lush,CaveBiome::DeepDark] {
+        let mut found=None;
+        'search: for z in (-2400..2400).step_by(64) {
+            for x in (-2400..2400).step_by(64) {
+                let g=&host.world.generator;
+                let y=if want==CaveBiome::DeepDark { 10 } else { 32 };
+                if g.cave_biome_at(x,y,z)!=want { continue; }
+                let (cx,cz)=(x.div_euclid(16),z.div_euclid(16));
+                let blocks=g.generate(cx,cz);
+                for lz in 3..13 { for lx in 3..13 {
+                    for y in 4..g.column(cx*16+lx,cz*16+lz).0-10 {
+                        if g.cave_biome_at(cx*16+lx,y,cz*16+lz)==want && is_solid(blocks[crate::world::idx(lx,y-1,lz)]) && (0..3).all(|dy| blocks[crate::world::idx(lx,y+dy,lz)]==AIR) {
+                            found=Some(Vec3::new((cx*16+lx) as f32+0.5,y as f32+0.05,(cz*16+lz) as f32+0.5));
+                            break 'search;
+                        }
+                    }
+                } }
+            }
+        }
+        let Some(spot)=found else { report.problems.push(format!("no naturally open {want:?} cave")); continue; };
+        compare_generated_patch(host,team,report,touched,spot,&format!("{want:?} cave"));
+        let adv=match want { CaveBiome::Dripstone=>Some("stalac_tight"),CaveBiome::Lush=>Some("lush_life"),_=>None };
+        if let Some(adv)=adv && !team[k].game.advancements.earned.iter().any(|a|a==adv) { report.problems.push(format!("cave visit didn't award {adv}")); }
+    }
+    report.features.push("settled structures");
+    if let Some(at)=host.world.generator.nearest_site(crate::structures::Kind::Village,home,160) {
+        compare_generated_patch(host,team,report,touched,at.as_vec3()+Vec3::new(5.5,2.05,0.5),"village foundation");
+    } else { report.problems.push("no village in the placement playtest".into()); }
+    if host.world.generator.opts.version >= 8 {
+        report.features.push("broader terrain and rocky coasts");
+        for rocky in [false,true] {
+            let g=&host.world.generator;
+            let found=(-4096..4096).step_by(32).flat_map(|z|(-4096..4096).step_by(32).map(move|x|(x,z)))
+                .find(|&(x,z)| {
+                    let (h,b)=g.column(x,z);
+                    if rocky { h>=g.sea() && !matches!(b,crate::world::Biome::Snowy | crate::world::Biome::IceSpikes) && g.shore_shape(x,z,&g.place_v7(x,z)).1 }
+                    else { b==crate::world::Biome::River }
+                });
+            if let Some((x,z))=found {
+                let h=g.column(x,z).0.max(g.sea());
+                compare_generated_patch(host,team,report,touched,Vec3::new(x as f32+0.5,h as f32+1.05,z as f32+0.5),if rocky { "rocky coast" } else { "bounded river" });
+            } else { report.problems.push(if rocky { "no rocky coast in the placement playtest" } else { "no river in the placement playtest" }.into()); }
+        }
+    }
+    // The CLI installs this mod before both host and clients build generators.
+    if host.world.generator.opts.version >= 8 {
+        report.features.push("islands and beach ecology");
+        for beach in [false,true] {
+            let g=&host.world.generator;
+            let found=(-4096..4096).step_by(8).flat_map(|z|(-4096..4096).step_by(8).map(move|x|(x,z)))
+                .find(|&(x,z)| {
+                    let (h,b)=g.column(x,z);
+                    if beach {
+                        b==crate::world::Biome::Beach && h>g.sea() && g.beach_feature(x,z,h).is_some_and(|id|
+                            g.generate(x.div_euclid(16),z.div_euclid(16))[crate::world::idx(x.rem_euclid(16),h+1,z.rem_euclid(16))]==id)
+                    } else { h>g.sea()+3 && b!=crate::world::Biome::MushroomIslands && g.ocean_island(x,z)>0.7 && g.shape_noise(x,z).0< -0.28 }
+                });
+            if let Some((x,z))=found {
+                let h=g.column(x,z).0;
+                compare_generated_patch(host,team,report,touched,Vec3::new(x as f32+0.5,h as f32+2.05,z as f32+0.5),if beach { "beach ecology" } else { "offshore island" });
+            } else { report.problems.push(if beach { "no decorated beach in the placement playtest" } else { "no offshore island in the placement playtest" }.into()); }
+        }
+        // Landmarks: each kind built the same for the joined player, who hears they've been somewhere.
+        report.features.push("landmarks");
+        let near=host.world.generator.landmarks_near(host.spawn.x as i32,host.spawn.z as i32,12000);
+        for kind in crate::landmarks::Kind::ALL {
+            let Some(l)=near.iter().find(|l|l.kind==kind).cloned() else { report.problems.push(format!("no {} for the playtest",kind.label())); continue; };
+            let spot=Vec3::new(l.x as f32+0.5,l.y as f32+if kind==crate::landmarks::Kind::CraterLake {4.05} else {1.05},l.z as f32+0.5);
+            compare_generated_patch(host,team,report,touched,spot,kind.label());
+        }
+        if !team[team.len()-1].game.advancements.earned.iter().any(|a|a=="sightseer") {
+            report.problems.push("a bot stood at three landmarks but never heard about sightseer".into());
+        }
+        report.features.push("sea wildlife");
+        let g=&host.world.generator;
+        let found=(-4096..4096).step_by(64).flat_map(|z|(-4096..4096).step_by(64).map(move|x|(x,z)))
+            .find(|&(x,z)|[-64,0,64].iter().all(|&dx|[-64,0,64].iter().all(|&dz|{
+                let (h,b)=g.column(x+dx,z+dz);b==crate::world::Biome::Ocean && h<g.sea()-12
+            })));
+        if let Some((x,z))=found {
+            let spot=Vec3::new(x as f32+0.5,g.sea() as f32+2.05,z as f32+0.5);
+            compare_generated_patch(host,team,report,touched,spot,"open ocean");
+            for dz in -4..=4 { for dx in -4..=4 { host.world.load_now(x.div_euclid(16)+dx,z.div_euclid(16)+dz); } }
+            let first=host.mobs.iter().map(|m|m.id).max().unwrap_or(0);
+            for _ in 0..80 { host.try_sea_wildlife(spot); }
+            let spawned:Vec<u32>=host.mobs.iter().filter(|m|m.id>first && matches!(m.kind,crate::entity::MobKind::Fishy | crate::entity::MobKind::Dolphin)).map(|m|m.id).collect();
+            pump(host,team,2.0,|_|idle());
+            if spawned.len()<4 { report.problems.push("marine spawning produced no school".into()); }
+            if !spawned.iter().any(|&id|team[k].game.mobs.iter().any(|m|m.id==id)) { report.problems.push("joined player never saw the marine school".into()); }
+            // All nine species exercise the normal authoritative snapshot path.
+            report.features.push("coastal species");
+            let species:Vec<_>=crate::entity::MobKind::ALL.into_iter().filter(|kind|kind.coastal()).enumerate().map(|(i,kind)| {
+                let pos=team[k].game.player.body.pos+Vec3::new(i as f32-4.0,0.0,-3.0);
+                (host.alloc_mob(kind,pos),kind)
+            }).collect();
+            pump(host,team,0.8,|_|idle());
+            if !team[k].game.advancements.earned.iter().any(|a|a=="shore_life") {report.problems.push("coastal encounter advancement never arrived".into());}
+            for (id,kind) in species {
+                if !team[k].game.mobs.iter().any(|m|m.id==id && m.kind==kind) {report.problems.push(format!("joined player never saw {kind:?}"));}
+            }
+
+        } else { report.problems.push("no open ocean in the wildlife playtest".into()); }
+    }
+
+    if host.world.generator.opts.version >= 8 {
+        report.features.push("beach finds and tide pools");
+        let ledger=|host:&Game,id:u32,item:Id|host.peers.get(&id).map(|p|p.ledger.bag.count(item)).unwrap_or(0);
+        let g=&host.world.generator;
+        let found=(-128..128).flat_map(|z|(-128..128).map(move|x|(x,z))).find_map(|(x,z)|g.beach_pool_cell(x,z));
+        if let Some((x,z,level,radius))=found {
+            let spot=Vec3::new(x as f32+0.5,level as f32+1.05,z as f32+0.5);
+            compare_generated_patch(host,team,report,touched,spot,"tide pool");
+            {
+                let g=&mut team[k].game;
+                g.player.body.pos=Vec3::new(x as f32+0.5,level as f32-0.2,z as f32+0.5);
+                g.player.body.vel=Vec3::ZERO;g.player.flying=false;g.player.gliding=false;
+                g.player.fall_start=g.player.body.pos.y;
+            }
+            pump(host,team,0.6,|_|idle());
+            if !team[k].game.advancements.earned.iter().any(|a|a=="tide_time") {report.problems.push("tide pool advancement never arrived".into());}
+            let who=team[k].game.my_id;
+            for (item,new,wet) in [(DRIFTWOOD,DRIFTWOOD_Z,false),(SHELL_PATCH,SHELL_PATCH_WET,true),(DUNE_GRASS,DUNE_GRASS,false)] {
+                let at=if wet {IVec3::new(x,level-1,z)}else{IVec3::new(x+radius+1,host.world.generator.column(x+radius+1,z).0+1,z)};
+                let old=host.world.get_v(at);
+                host.world.set_v(at,if wet {WATER}else{AIR});touched.insert(at);
+                let before=ledger(host,who,item);host.give_peer(who,item,1);pump(host,team,0.6,|_|idle());
+                team[k].game.world.set_v(at,new);team[k].game.inv.remove(item,1);
+                pump(host,team,0.6,|_|idle());
+                if host.world.get_v(at)!=new || ledger(host,who,item)!=before {report.problems.push(format!("joined player couldn't place/pay for beach block {new}"));}
+                host.world.set_v(at,old);pump(host,team,0.3,|_|idle());
+            }
+            host.give_peer(who,SEASHELL,1);pump(host,team,0.5,|_|idle());
+            if !team[k].game.advancements.earned.iter().any(|a|a=="beachcomber") {report.problems.push("beachcomber advancement never arrived".into());}
+
+            for (i,id) in [DRIFTWOOD,DRIFTWOOD_Z,SHELL_PATCH,SHELL_PATCH_WET,DUNE_GRASS].into_iter().enumerate() {
+                let at=spot.floor().as_ivec3()+IVec3::new(i as i32-2,4,0);let old=host.world.get_v(at);
+                host.world.set_v(at,id);touched.insert(at);pump(host,team,0.3,|_|idle());
+                if team[k].game.world.get_v(at)!=id {report.problems.push(format!("beach block {id} never arrived"));}
+                host.world.set_v(at,old);pump(host,team,0.2,|_|idle());
+                if team[k].game.world.get_v(at)!=old {report.problems.push("beach edit restoration failed".into());}
+            }
+        } else {report.problems.push("no tide pool in the beach playtest".into());}
+    }
+
+    if host.world.generator.biomes.iter().any(|b|b.climate.is_some()) {
+        report.features.push("mod climate targets");
+        let g=&host.world.generator;
+        let found=(-2400..2400).step_by(32).flat_map(|z|(-2400..2400).step_by(32).map(move|x|(x,z))).find(|&(x,z)|g.mod_biome_at(x,z,g.column(x,z).1).is_some_and(|i|g.biomes[i].climate.is_some()));
+        if let Some((x,z))=found {
+            let h=g.column(x,z).0;
+            compare_generated_patch(host,team,report,touched,Vec3::new(x as f32+0.5,h as f32+1.05,z as f32+0.5),"mod climate biome");
+            if !team[k].game.advancements.earned.iter().any(|a|a=="homebrew") { report.problems.push("mod climate visit didn't award homebrew".into()); }
+        } else { report.problems.push("no climate-target mod patch".into()); }
+    }
+    if let Some(peer)=host.peers.get_mut(&team[k].game.my_id) { peer.target=home; }
+    team[k].game.player.body.pos=home;
+    team[k].game.player.fall_start=home.y;
+    ground(host,team,k);
+}
+
 /// A small mod the `--playtest` command installs, so the bots can try a mod's
 /// dimension (see modgen.rs). (Not for the unit test: it would change the
 /// blocks under every other test running alongside.)
-const PLAYTEST_MOD: &str = "[mod]\nname = Playtest Moon\n[block moon_rock]\ntexture = stone\n[block moon_frame]\ntexture = white\n[dimension moon]\nname = The Playtest Moon\nstone = moon_rock\ntop = moon_rock\nunder = moon_rock\nframe = moon_frame\nheight = 40\nhills = 4\n";
+const PLAYTEST_MOD: &str = "[mod]\nname = Playtest Moon\n[block moon_rock]\ntexture = stone\n[block moon_frame]\ntexture = white\n[dimension moon]\nname = The Playtest Moon\nstone = moon_rock\ntop = moon_rock\nunder = moon_rock\nframe = moon_frame\nheight = 40\nhills = 4\n\n[biome climate_fields]\nshare = 0.15\nclimate_temperature = 0.1\nclimate_moisture = -0.1\nclimate_continentalness = 0.3\nclimate_erosion = 0.2\ntop = moon_rock\nunder = moon_rock\n";
 
 /// The `--playtest` command.
 pub fn run(args: &[String]) -> i32 {
@@ -2533,14 +2740,27 @@ pub fn run(args: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn loading_a_new_spot_does_not_count_distant_cached_chunks() {
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=crate::game::Game::new_with(77,true,false,crate::world::GenOptions::DEFAULT);
+        let p=g.spawn;
+        let (cx,cz)=((p.x.floor() as i32).div_euclid(16),(p.z.floor() as i32).div_euclid(16));
+        for dz in -2..=2 { for dx in -2..=2 { g.world.load_now(cx+64+dx,cz+64+dz); } }
+        assert!(g.world.chunks.len()>=25 && !g.world.is_loaded(p.x as i32,p.z as i32));
+        super::load_around(&mut g,p);
+        assert!((-2..=2).all(|dz| (-2..=2).all(|dx| g.world.is_loaded((cx+dx)*16,(cz+dz)*16))));
+    }
+
+    #[test]
     fn a_short_playtest_passes() {
+        let _lock = crate::mods::registry_test_lock();
         let r = super::playtest(2, 5.0, 77, 26150).expect("it runs");
         assert!(r.ok(), "{:#?}", r.problems);
         // Long enough that more chat goes by than a player's chat log keeps.
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

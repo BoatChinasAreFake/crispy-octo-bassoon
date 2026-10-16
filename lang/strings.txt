@@ -170,9 +170,41 @@
 ..hHhhhh#oh.....
 ..hHhhhhhhHHh...
 ..hh.....#oHHh..
+/astra assemble 1
+/astra assemble 2
+/astra assemble 3
+/astra assemble 4
+/astra charge
+/astra help
+/astra launch mars
+/astra launch moon
+/astra pack
+/astra refill
+/astra refine
+/astra status
 /claim, /claim list, /claim friend add|remove <name>, /claim friends.
+/dubiety ask {}
+/dubiety forget
+/dubiety help
+/dubiety obesity
+/dubiety recall
+/dubiety remember Bring coolant home
+/dubiety remember Build beside the little beach
+/dubiety summon
+/dusk challenge lich
+/dusk challenge serpent
+/dusk help
 /gamemode spectator {}
 /gamemode survival {}
+/hbm arm large
+/hbm arm small
+/hbm disarm
+/hbm geiger
+/hbm help
+/hbm reactor
+/hbm refine
+/hbm scram
+/hbm status
 /tc <message> talks to your team.
 /team create <name> [colour], join <name>, leave, list, colour <colour>, friendlyfire on|off, remove <name>.
 /team create Reds red
@@ -181,6 +213,8 @@
 1 player
 1-9 / wheel ... pick hotbar    {} ... pick block (creative)
 100% browser-free!
+2 coal + tank -> 2 fuel; 4s; 8 energy/s.
+2 dust + coal -> pellet; use coal or cells for power.
 3.5 points for ten chops: {}
 30 fps
 60 fps
@@ -197,6 +231,7 @@ A Cluckster takes it. They get it even if they're away.
 A Hisser was seen
 A Hmmer bought {} {} from your stall for {} gold.
 A Hmmer is now a Master of its trade{}. Prices are said to reflect this.
+A Little Tide Time
 A Minceraft server
 A Square Deal
 A Water Bottle (or a potion) below
@@ -217,9 +252,13 @@ A swarm moved into your empty hive! Free bees. The best kind.
 A team needs a name (letters, numbers, - and _).
 A treasure map! It leads to... the spot where you're standing. Congratulations.
 A {} queen and {} bee{}, {}, with {}% honey and {}% comb, {}, health {}%, {}, {}
+ALT {}   |   {}s   |   F5: exterior view
 APPDATA
+ASCENT
+AUTOPILOT  |  TIER {}  |  {}
 Abandoned Mineshaft (Mind the Webs)
 Acacia
+Acacias, llamas and savanna villages.
 Accept
 Accept: application/vnd.github+json
 Accepted
@@ -240,6 +279,7 @@ Advancements: {}/{} (they're per world, like memories)
 Adventure
 Ahoy!
 Air
+Ald
 Alexa
 All
 Allay
@@ -261,6 +301,7 @@ Ancient honey: tastes of old stone and starlight. Your eyes tingle.
 Angler level {}  ({} xp)  -  lines snapped: {}  (they were THIS big)
 Angler level {}! The fish have started a group chat about you.
 Ann
+Another
 Another of the same (optional)
 Another shriek. Something is listening. Tiptoe.
 Anti-aliasing: OFF
@@ -279,9 +320,18 @@ Armourer (Clanks When Walking)
 Arms Up
 Arrow hits
 As intended. Starving stops at half a heart.
+Ashen Grove
 Asked to elaborate, the Hmmer hmmed again. We will keep readers informed.
 Asking the router to forward the port (UPnP)...
 Asking your router to open the port (UPnP)...
+Assemble tier 1
+Assemble tier 2
+Assemble tier 3
+Assemble tier 4
+Atlas: {} (a {}) marked.
+Atlas: {} added. {}
+Auto: off
+Auto: on
 Autumn
 Axolotl
 Azalea (Shrub With Ambitions)
@@ -305,6 +355,7 @@ Bamboo Stairs (Up, Mostly)
 Bamboozled
 Banned {}.
 Banner (Flag-Adjacent)
+Bare stone, llamas, and the best view in the world.
 Barnacled Compass (Points Down)
 Barrel (A Chest, but Round)
 Barter with a Snout. Gold for... whatever that is.
@@ -313,13 +364,16 @@ Basalt Deltas (Ashes to Ashes)
 Base
 Bastion Treasure Room (Mind the Brute)
 Bat
+Batch running: {}s left. Keep cooling connected.
 Bathe in a hot spring.
+Battery + tank -> 4 oxygen + empty battery; 8 energy/s.
 Be near a Lightning Rod when it takes a strike.
 Be there when a baby Hmmer comes along.
 Be there when a village builds itself a Clanker.
 Be there when a village finishes a new house.
 Be under a ceiling when it comes down.
 Beach (Sandy Everywhere)
+Beachcomber
 Beacon (Wyrm-Powered Lighthouse)
 Beaconator
 Bead Necklace (Hand-Strung)
@@ -341,9 +395,11 @@ Beekeeper level {}  ({} xp)  -  stung {} time{}
 Beekeeper level {}! The bees have started calling you 'the big one'.
 Beekeeping Log
 Bees buzz
+Bees in the oaks, and wood for everything.
 Bell
 Bell (Ding Dong)
 Bellford
+Bench and pad must be nearby, with five clear blocks above.
 Benchmarking
 Big Backpack (45 Slots of Your Pack)
 Big Bob
@@ -360,6 +416,7 @@ Birch, Please
 Black
 Blackstone (Goth Cobblestone)
 Blackstone Bricks (Snout Architecture)
+Blank so far. Carry it somewhere new.
 Blast Furnace (Blasting)
 Blast Furnace (Everything but Food, Fast)
 Blender
@@ -397,6 +454,7 @@ Boot-iful
 Boots
 Border
 Bottle Ancient honey (bees + Torchflowers).
+Bottomless Appetite
 Bot{}
 Bounce on a Bouncy Goo Block. Physics weeps.
 Bouncy Goo Block
@@ -419,8 +477,10 @@ Breeze Rod (Whooshy Stick)
 Breeze Through
 Brewing Stand (Chemistry, Loosely)
 Bricks
+Bridge
 Bright
 Brightness: {}
+Brin
 Bring bounties are handed in all at once; Defeat bounties count since they went up.
 Bring down a column of kelp.
 Bring {} {}
@@ -446,6 +506,7 @@ Build a Copper Golem: a pumpkin on a block of copper.
 Build a Snow Golem.
 Build the Wilter. Why would you do that?
 Building Blocks
+Built-in
 Bullseye
 Bundle (Bag of Bits)
 Buried Treasure (X Marks the Spot)
@@ -454,6 +515,7 @@ Butcher (Please Don't Ask)
 Butterfingers
 Button (Press It)
 Buy something from a Wanderer before it wanders off.
+Byproduct
 Cake (Not a Lie)
 Calcite (Chalky)
 Calibrated Sculk Sensor (Picky Listener)
@@ -469,6 +531,7 @@ Carrots
 Carry acacia, birch and dark oak logs at once.
 Cartographer (Knows Where Things Are)
 Cartography Table (Here Be Dragons)
+Castaway
 Castle Town
 Cat
 Catch a Fishy with your bare hands (well, hit one).
@@ -483,11 +546,14 @@ Centurion
 Chain (Strong Links)
 Change any key in Options > Controls. Game controllers work too (sticks walk and look).
 Char-Broiled
+Charge 2 batteries
+Charge empty cells. Clear daylight generates 6 energy/s.
 Charred Rattler
 Charred Skull (Grins Darkly)
 Chat
 Cheat death with a Totem of Not Dying.
 Cheats: {}
+Checking machine...
 Cheese Kingdom
 Cheese Merchant
 Chef's Kiss
@@ -507,6 +573,7 @@ Chunks: {} meshed, {} loaded; {} regions of edits in memory
 Claim
 Claim some land with a Survey Post.
 Claimed
+Clam
 Clank You Very Much
 Clankbury
 Clanker
@@ -516,6 +583,7 @@ Clean Slate
 Clean an Encrusted Relic at a Restoration Bench.
 Cleric (Mysterious, Purple)
 Click: a stack. Right-click: one.
+Close
 Clouds: Fancy
 Clouds: Fast
 Clouds: OFF
@@ -531,7 +599,9 @@ Cobble Green
 Cobbled Deepslate (Moody Rubble)
 Cobblestun
 Cobweb (Sticky Situation)
+Cold
 Cold Feet
+Collect driftwood or seashells from the coast.
 Collection complete: {}! Museums would fight over this.
 Colonies known nearby
 Colonies started
@@ -540,9 +610,12 @@ Colours: {}.
 Command
 Commands: list, players, info <name>, say <text>, kick <name>, ban <name|ip>, unban <ip>, bans, time <day|noon|night|midnight|0-1>, op <name>, deop <name>, ops, allowlist <on|off|add|remove|list> [name], forget <name>, password <pw|off>, pvp <on|off>, team <create|join|leave|list|colour|friendlyfire|remove>, tc <message>
 Commands: list, seed, help, team, tc. Operators can do more.
+Companion burps
 Comparator (Counts Your Stuff)
 Compass (Points Home, Mostly)
 Compiled, not interpreted!
+Complaint Resolved
+Complete a Half-Baked reactor batch and collect an energy cell.
 Complete a culture's collection in your Field Journal.
 Compost (Nitrogen!)
 Compost Happens
@@ -569,9 +642,13 @@ Cooked Cod-ish
 Cooked Oinkchop
 Cooked Pufferfish (Still Do Not Eat)
 Cooked Salmon-ish
+Cooked Seafood
 Cooked to perfection. By a cube. Of cobblestone.
 Cooking Pot (Over-Engineered)
 Cooking it only halved the problem. Still ow.
+Cooling active. Steam venting.
+Cooling disconnected - scrammed
+Cooling ready. Keep this tower beside the reactor.
 Copper
 Copper Block (Shiny, For Now)
 Copper Boots (Squeaky)
@@ -587,6 +664,7 @@ Copper Leggings (Clanky)
 Copper Ore (Future Statue)
 Copper Pickaxe (Between Stone and Iron)
 Copper Sword (Tarnishes Beautifully)
+Coral reefs, tropical Fishies, sea pickles.
 Cordon Bleu
 Cornflower (Suspiciously Blue)
 Couldn't back up this world first: {}
@@ -614,10 +692,12 @@ Couldn't write {}: {}
 Country Lode, Take Me Home
 Courier
 Cover Me in Dimonds
+Crab
 Crack! You pressed too hard. Gently does it.
 Cracked
 Cracked Blackstone Bricks (Lived In)
 Craft a pickaxe. Hitting rocks with rocks, but fancier.
+Craft an Ad Absurdum rocket. The sky has forms to fill in.
 Craft something big at a Crafting Table. It has a job now.
 Craftable now
 Crafted {}. Nobody knows how.
@@ -640,6 +720,7 @@ Creature
 Creatures
 Crimson
 Crimson Forest (Seeing Red)
+Crooked
 Crop Rotation Enthusiast
 Crop rotation bonus! The soil appreciates the variety.
 Cross
@@ -648,6 +729,7 @@ Crunch. You can see slightly better. (You can't.)
 Crunch. You stepped on the Turtle Eggs. The label did say.
 Crystal Clear
 Cure a Zombie Hmmer with a Golden Chop.
+Custom skin
 DALTONIZE
 DIMONDS!
 Damage dealt
@@ -696,6 +778,7 @@ Defeat a patrol captain. Villages are going to love you.
 Defeat a {}
 Defeat an Elder Guardian. Your arms will thank you.
 Defeat an Oinker. They trusted you.
+Defeat the Slightly Dim Forest final guardian and collect its heart.
 Defeat the Wilter.
 Defeat {} {}s
 Delete
@@ -732,6 +815,7 @@ Disabled
 Disconnect
 Disliked
 Dispenser (Spits Things)
+Display
 Distance flown
 Distance ridden
 Distance swum
@@ -751,16 +835,22 @@ Door (Opens Both Ways, Emotionally)
 Down by the River
 Dried Floaty (Just Add Water)
 Dried Kelp (Crunchy Ocean)
+Driftwood (Weathered Shore Wood)
+Driftwood, shells, turtles, and tide pools.
 Drink a potion you brewed. Or found. We don't judge.
 Dripstone Block (Drippy Stone)
 Dropper (Just Drops Things)
 Drops Ominously
 Drowned Port
 Dry Your Eyes
+Dubiety:
+Dun
+Dune Grass (Windblown Tufts)
 Dungeon (Mossy, Moody)
 Dye
 Dye Job
 Dyed {}
+Each recharge needs 60 seconds between batches.
 Early Night
 Earn Your Stripes
 Earn a Sneaker's trust with Cluckets.
@@ -773,16 +863,19 @@ Echo
 Echo Idol (Whispers Back)
 Echo Shard (Hums Faintly)
 Edible. Technically.
+Eel
 Efficiency
 Efficiency (Faster Hitting of Rocks)
 Efficiency doesn't fit a sword
 Efficiency/Frost Walker/Riptide
+Elbow
 Elbow Grease
 Elder Guardian
 Elder Statesman
 Ember Shroom (Warm to the Touch)
 Ember Shroom on a Stick (Steering Snack)
 Embersand (Clingy)
+Empty cell
 Empty your Bundles first: a Backpack is made from an empty one.
 Enchant
 Enchant something. The table knows words you don't.
@@ -793,7 +886,9 @@ Enchanting
 Enchanting Table (Bookshelf-Powered Guesswork)
 Enchanting Table ({} bookshel{})
 Encrusted Relic (Something's In There)
+Energy: {} / 1000
 English
+Esc / inventory to close
 Ethically Sourced
 Every recipe discovered!
 Every relic, every culture, all Pristine. Museums weep.
@@ -802,6 +897,8 @@ Everything Else
 Experienced
 Expert
 Explorer
+Explorer's Atlas (Hold to Read)
+Explorer's Atlas ({} of {} biomes)
 Explosion
 Exposed Copper (Ageing Gracefully)
 Extra! Extra!
@@ -812,10 +909,12 @@ Eye Spy
 Eyeblossom (Pretending to Sleep)
 Eyeblossom (Wide Awake)
 FAILED to start: {}
+FEED ME!
 FOR SALE: one bucket, slightly holey. Will trade for a better bucket.
 FOV: {}
 FREE TO A GOOD HOME: mud. Lots of it. Collect from the swamp.
 Facing: {}
+Factory Floor
 Fair Trade
 Fancy
 Farm
@@ -828,6 +927,7 @@ Feather (Ticklish)
 Fee
 Feed a Dolphin a fish and let it show you the way.
 Feed a Squawker some seeds. It will tell everyone.
+Feed an item to a glutton companion. It still wants seconds.
 Feel a Conduit's power underwater.
 Fence (Keeps Honest Animals In)
 Fence Gate (Swings Both Ways)
@@ -835,8 +935,11 @@ Fetch!
 Few
 Field Journal
 Field Journal (Mostly Sketches)
+Fill 4 oxygen canisters
 Fill a Crypt's ring of Eye Frames. Something opened.
 Fill all four seats on a Floaty.
+Fill in twelve biomes in an Explorer's Atlas.
+Fills oxygen for your Life Support Pack.
 Find a Crimson Forest down in the Scorchlands.
 Find a Dimond. Spelled that way for legal reasons.
 Find a Hmmer tucked up in bed at night.
@@ -881,6 +984,7 @@ Fish n' Chips. Legally distinct, emotionally identical.
 Fish up a Soggy Boot. Just the left one.
 Fish up something valuable.
 Fisher (Smells Faintly of Cod)
+Fishies, and a winding way down to the sea.
 Fishing Log
 Fishing Stick (Advanced)
 Fishing: cast, wait for the real bite (not the nibbles!), reel in. Big fish: mind the line tension.
@@ -889,6 +993,7 @@ Fishy Business
 Flat Tops
 Flat-ish
 Floaty
+Flowers, bees, and a long view.
 Fluffer
 Fluffer Escapes, Is Found, Was Never Lost
 Fluffer baas
@@ -907,6 +1012,7 @@ Forgot {}'s key: the next one it shows will be trusted.
 Forgot {}: next time they start afresh.
 Fortune
 Fortune (Rocks Pay Better)
+Fossil Wood
 Found coal in the gravel. Don't ask.
 Frame time: {} ms average, {} ms worst
 Freeze Frame
@@ -921,6 +1027,7 @@ Frost Walker
 Frost Walker (Walk on Water, Sort Of)
 Frozen Ocean (Brr)
 Fruit Compote
+Fuel / coolant
 Full Flight
 Fullscreen
 Fungal Growth
@@ -929,7 +1036,9 @@ Fungus Among Us
 Furnace (Omnidirectional)
 Furnace (Toasty)
 GPU: {}
+Gall
 Galloper
+Gallopers, villages, and the odd beehive.
 Game Mode: Creative
 Game Mode: Hardcore
 Game Mode: Survival
@@ -938,6 +1047,8 @@ Game over!
 Game over. You can still look around.
 Garbled reply from the router
 Garden Soup
+Gate
+Gather seafood from a coastal creature.
 Gather, craft, and try not to get hissed at.
 Gave {} {} to {}.
 Gazette
@@ -965,6 +1076,7 @@ Get the Oinkstep disc from a Snout. Bangers only.
 GetExternalIPAddress
 Getting Started
 Getting Wood
+Giant
 Giddy Up
 Gilded Age
 Gilded Blackstone (Bling, Geologically)
@@ -997,6 +1109,7 @@ Gold Chest (Showing Off)
 Gold Galloper Armour (Showy, Surprisingly Sturdy)
 Gold Ingot (Too Soft for Anything)
 Gold Ore (Shiny, Useless)
+Gold close to the surface, and mineshafts in the open.
 Gold ingots (1 to 3)
 Gold is too soft for tools, so you got a wooden one. Economics!
 Gold: shiny, useless, beloved!
@@ -1017,6 +1130,8 @@ Gravelton
 Great 
 Green
 Green Thumb
+Grey
+Grey Timber
 Grilled fish. The Fish Log would be proud.
 Grind the enchantments off something.
 Grinds off the enchantments: about {} experience back.
@@ -1047,6 +1162,7 @@ Hardcore: one life, hard mode. Good luck.
 Hardy
 Harness (Floaty-Sized)
 Harness Test World
+Harrow
 Harvest a crop grown where a different one grew before.
 Harvest a fully grown crop. Farming simulator unlocked.
 Harvest honey or honeycomb from a hive.
@@ -1101,6 +1217,7 @@ Hmph. (This village won't trade with you.)
 Hodgepodge
 Hoe (Dirt Scratcher)
 Hold a Banner to pattern it (or a Shield to paint one of your banners on it).
+Hollin
 Hollow Box (Bigger on the Inside)
 Hollow Portal (Starry)
 Hollow Spire (Loot at the Top of the World)
@@ -1113,6 +1230,7 @@ Honey Block (Sticky Situation)
 Honeycomb
 Honeycomb (Hexagonal, Efficient)
 Hopper (Funnel With Ambition)
+Hoppers feed from top / sides; extract below.
 Host
 Host from a world: Esc > Open to LAN. Or run minceraft --server. All play is encrypted.
 Hosting at {}  ({}{})
@@ -1139,13 +1257,18 @@ Hushed Mask (Do Not Wear)
 Hushed Ones
 Hut (Definitely Not a Village)
 Hybrid Vigour
+I Know What This Button Does
 IT'S HERE.
 Ice (Nature's Floor Wax)
 Ice Spikes (Pointy, Chilly)
+Icebergs, and sea ice thick enough to walk on.
 Igloo (Mind the Basement)
+Igloos with a secret, polar bears, and hot springs up in the hills.
 Inbox
 Inbox ({})
 Ingredient on top: Glowshroom, Zappy Dust, Ember Shroom, Carrot, Feather (or Hisspowder)
+Input
+Inputs
 Internet address: {}:{}
 Inventory
 Inventory (level {})
@@ -1180,6 +1303,7 @@ Item picked up
 Items crafted
 Its builds, inventory, script data and backups will be gone for good.
 Its material, or another one like it
+Ivel
 Jack o'Lantern (Faces Everywhere)
 Join
 Join a game that turned up on your network by itself.
@@ -1195,15 +1319,18 @@ Jungle (Humid)
 Jungle Leaves (Extra Leafy)
 Jungle Log (Tall Tree Chunk)
 Jungle Temple (Mind the String)
+Jungle temples, melons, pandas in the bamboo.
 Just Add Water
 Kaboom
 Keep Inventory: OFF (hardcore)
 Keep Inventory: OFF (it's hardcore)
 Keep Inventory: OFF (you drop everything)
 Keep Inventory: ON (dying costs nothing)
+Keep the cooling tower in place. Output: 4 cells + waste.
 Kelp (Seaweed, Ambitious)
 Kelp Broth
 Kelp Me
+Kesh
 Kettle
 Key
 Key changed!
@@ -1216,10 +1343,12 @@ Knight Errant
 Knock some Resin out of a Creaking's heart.
 LAN Party
 LAN address: {}:{}
+LANDING
 LEGENDARY! You caught BIG BOB, all {}cm of him. He looks disappointed in you.
 LINE TENSION - EASE OFF!
 LOST: one Clanker's patience. If found, please do not return it.
 Ladder (Up, Mostly)
+Lake {}
 Land a Mace blow on the way down. Gravity did most of the work.
 Land claims are off (posts stay put, and come back into force if they're turned on again).
 Land claims are off here (an operator can turn them on with /claims on).
@@ -1227,11 +1356,13 @@ Land claims are off here.
 Land claims are on: a Survey Post claims the land around it.
 Land claims are {}.
 Land: {}
+Landmarks
 Language
 Lantern (Fancy Torch)
 Lantern (Hanging)
 Large
 Large Amethyst Bud (Nearly)
+Lark
 Launch yourself with a Wind Charge.
 Lava (On the Move)
 Lava (Spicy Water)
@@ -1257,6 +1388,7 @@ Lever (Pull It)
 Librarian (Shh)
 Library
 Library/Application Support/Minceraft
+Life at the Shore
 Life's a Beach
 Light Show
 Light a Zappy Lamp with a switch. Electricity: now legally distinct.
@@ -1278,6 +1410,7 @@ Load a Minecart with Chest. Choo choo, cargo.
 Load {}
 Loaded world {} (seed {})
 Loaded {} mod(s) from the server.
+Loader
 Local Brewery
 Local Flavour
 Local Hmmer Hmms
@@ -1287,6 +1420,7 @@ Lodestone
 Lodestone (Magnetic Personality)
 Lodestone: gone
 Logs and Progress
+Long
 Long Live the Queen
 Look Ma, No Hands
 Look through a Spyglass.
@@ -1308,6 +1442,8 @@ MINCERAFT
 MISMATCH: {}
 MODDING.md explains everything a mod can add.
 Mace (Gravity Assisted)
+Machine is unavailable.
+Machine script is not installed.
 Made of cubes!
 Made team {} ({}), and you're on it.
 Magma Block (Hot Feet Guaranteed)
@@ -1333,12 +1469,14 @@ Max FPS: Unlimited{}
 Max FPS: {}{}
 Meadow (Hay Fever)
 Medium
+Meet a beach or coastal sea creature up close.
 Melon (Heavy Snack)
 Melon Baller
 Melon Slice (Mostly Water)
 Mending
 Mending (Experience Fixes It)
 Merge
+Merrow
 Message in a Bottle
 Mince responsibly!
 Minceraft
@@ -1362,6 +1500,8 @@ Minecart (Wheeled Bucket)
 Minecart with Chest (Freight)
 Minecart with Hopper (Vacuum)
 Mining Fatigue
+Missing fuel / coolant
+Missing input
 Mobs defeated
 Mobs: {}  Particles: {}
 Mod "{}" has {} problem(s): see the Mods screen.
@@ -1379,18 +1519,21 @@ Mooer moos
 Moss Block (Soft, Green, Suspicious)
 Moss Carpet (Rug of the Earth)
 Mossy Cobblestun (Vintage)
+Mother
 Mouse Sensitivity: {}%
 MouseLeft
 MouseMiddle
 MouseRight
 Mud (Squelchy)
 Mud Bricks (Sun-Baked, Slightly Crumbly)
+Mud, roots, and frogs in the shallows.
 Muddlecombe
 Mule
 Multiplayer
 Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.
 Museum Piece
 Mushmooer
+Mushmooers, and no monsters at all.
 Mushroom (Probably Fine)
 Mushroom Islands (Fungi to Be With)
 Mushroom Risotto
@@ -1398,6 +1541,7 @@ Mushroom Stem (A Very Tall Stalk)
 Music Disc ({})
 Music: OFF
 Music: ON
+Mussel
 My World
 Mycelium (Grass, but Fungal)
 NOTICE: the Bell is for raids, not for fun. You know who you are.
@@ -1410,8 +1554,10 @@ Nearest structure: none nearby
 Nearest structure: {} at {}, {}, {}
 Nearly There
 Needle in a Haystack
+Needs daylight and clear sky
 Needs fuel: coal, wood, sticks...
 Needs level {}
+Needs power
 Needs {} gold
 Neighbours say they are "fine with it". Somebody has already moved in.
 Nest Egg
@@ -1443,6 +1589,8 @@ No block called "{}".
 No block or item called "{}".
 No controller found. Plug one in any time.
 No friends named yet. /claim friend add <name>
+No ingredients
+No landmarks within 6,000 blocks (they're only in worlds made from v0.6 Part 2 on).
 No letters. Things sent to you arrive in the slots above.
 No mods installed yet.
 No monsters, no hunger. Health comes back on its own.
@@ -1451,6 +1599,7 @@ No player called {}.
 No player or address called {}.
 No player or mob called {}.
 No players remembered yet.
+No safe landing site nearby.
 No script handled {}
 No servers yet. Games on your network show up here by themselves;
 No speech program found: the narrator can't speak (see the README).
@@ -1505,8 +1654,10 @@ OFF
 OK
 OK: everyone agrees.
 ON
+Ober
 Observer (Nosy)
 Obsidian (Very Committed)
+Obtain a Dubiety Companion Beacon. Small thoughts, portable format.
 Ocean (Wet)
 Ocean Monument (Mind the Eyes)
 Ocean Ruins (Damp History)
@@ -1520,6 +1671,7 @@ Offline
 Oinker
 Oinker oinks
 Oinkstep
+Old
 Old 
 Old Debris (Ancient, Stubborn)
 Old Faithful
@@ -1545,6 +1697,7 @@ Open a Trapped Chest wired up to something.
 Open a Vault with a Trial Key.
 Open a chest in a shipwreck. Finders keepers.
 Open a door. Then close it. Then open it again.
+Open a machine control panel. Read the label first.
 Open an Ominous Vault with an Ominous Trial Key.
 Open for Business
 Open the treasure chest in a Snout Bastion.
@@ -1558,8 +1711,13 @@ Orange
 Orange Terracotta
 Other hand
 Other hand (a shield, torches...)
+Output
+Output full
+Outputs
 Oxidized Copper (Statue Chic)
+Oyster
 PRESSURE - EASE OFF!
+Pack owned rockets
 Packed Ice (Never Melts)
 Page {} of {}
 Paint one of your banners on your shield
@@ -1574,10 +1732,12 @@ Pale Oak Planks (Off-White)
 Pale and Interesting
 Palette
 Panda
+Part 2 playtest isn't using the newest generator
 Particles: All
 Particles: Fewer
 Particles: Minimal
 Passing Trade
+Passive cooling for reactors within three blocks.
 Password (if the server has one)
 Password removed: anyone can join.
 Password required to join
@@ -1589,10 +1749,12 @@ Peaceful (Nobody Hisses)
 Peak Performance
 Pearl Brooch (Fancy, Damp)
 Pearlescent Froglight (Fancy Glow)
+Pellet + coolant -> 4 cells + waste; 15s; needs tower.
 Perfect. A tear rolls down your blocky cheek.
 Persona Non Grata
 Personal Chest (Yours Alone)
 Personal Space
+Petrified Log (Was a Tree, Got Over It)
 Phosphorus up (and a little nitrogen). The soil feels... bony.
 Pick Block
 Pick Glow Berries off a cave vine. Snack and nightlight in one.
@@ -1603,6 +1765,7 @@ Pilferer Outpost (Keep Out)
 Pilferers Sent Packing
 Pillar of the Community
 Pink Petals (Ground Confetti)
+Pink petals, and the bees love it.
 Piston (Pushy)
 Piston Head
 Pitcher Plant (Ancient, Teal)
@@ -1630,6 +1793,7 @@ Playing on {} ({})
 Playtest: a host and {} bots for {} seconds (seed {})...
 Plinky Plonky
 Pocket Crafting (small things)
+Pocket Philosopher
 Point Taken
 Point a compass at a Lodestone.
 Pointy Rock (Mind Your Head)
@@ -1658,6 +1822,8 @@ Potatoes
 Potion of Regeneration (Get Well Soon)
 Potion of Strength (Flex)
 Pottery Shard ({})
+Power
+Power cell
 Powered Rail (Zoom)
 Press a key or mouse button (Esc: leave it empty).
 Pressure (let go to ease off)
@@ -1696,9 +1862,12 @@ Put out a Wisp for good.
 Put something in the slot above to sell it.
 Put something in, or write a letter.
 Pyramid Scheme
+Pyramids with a trap in the floor, and desert villages.
 Queen Bee (In a Jar, Unimpressed)
 Queens caught
 Queens need an empty Beehive (a wild nest won't do).
+Questionable Power
+Quiet Grove
 Quit to Desktop
 Rage Quit to Title
 Raid - Defeat
@@ -1718,10 +1887,15 @@ Raw Baa-con
 Raw Baa-con. Crunchy? No. Wool-adjacent? Yes.
 Raw Cluckets
 Raw Cod-ish
+Raw Crab Meat
+Raw Eel
 Raw Moo-steak
 Raw Oinkchop
 Raw Salmon-ish
+Raw Sardine
+Raw Shellfish
 Raw Spud (Regrettable)
+Raw Tuna
 Raw fish. Sushi, technically.
 Raw food goes on top (twice as fast)
 Raw food, sand or cobble goes on top
@@ -1730,6 +1904,8 @@ Reach level 30. Nothing to spend it on but anvils. For now.
 Read a paper whose lead story is about you.
 Read the village paper.
 Ready
+Ready. Ingredients come from your inventory.
+Recharging: {}s until the next batch.
 Recovery Compass (Points to Your Last Mistake)
 Red
 Red Mushroom Block (Spotty Roof)
@@ -1738,6 +1914,9 @@ Red Terracotta
 Reds
 Reef Madness
 Reel it in (hold right-click)
+Refine 2 fuel canisters
+Refine pellet
+Refines coal into rocket fuel.
 Reformed Lumberjack
 Refresh
 Regeneration
@@ -1775,6 +1954,7 @@ Riptide (Spear Express)
 River (Going With the Flow)
 Robin Hood (Legally Distinct)
 Rocket Man
+Rocket Paperwork
 Rollo
 Rollo Scute (Shed With Dignity)
 Rollo scuttles
@@ -1784,17 +1964,22 @@ Round ends in
 Router address didn't resolve
 Router description request failed (HTTP {}).
 Ruined Tower (Structurally Optimistic)
+Run a stocked machine. The button finally does something useful.
+Run once
+Running
 SAVE FAILED: {}
 SERVICES: walls built, roofs mended. No Hissers, please.
 SNAP! The line broke. The fish is telling all its friends about you.
 SOAPAction
 STOVEVILLE
+Saddle
 Saddle (Some Assembly Required)
 Salt (A Pinch)
 Sand
 Sand, cobble and the like on top (twice as fast; no food)
 Sandstone (Sand, But Committed)
 Sapling (Tree, Eventually)
+Sardine
 Savanna (Flat Tops)
 Save Name
 Save World Now
@@ -1826,6 +2011,7 @@ Scorchite Sword (Unreasonably Sharp)
 Scorchite Upgrade Template
 Scorchite Upgrade Template (Some Assembly Required)
 Scorchrock (Grumbly)
+Scram owned batches
 Screenshot
 Script error {}
 Script variable not saved: {}
@@ -1839,9 +2025,12 @@ Sculk clicks
 Scute Cute
 Sea Lantern (Glows Under Pressure)
 Sea Pickle (Not for Eating)
+Sea Snail
 Seagrass (Wet Lawn)
+Seagrass, dolphins, and ruins in the sand.
 Search recipes...
 Search...
+Seashell
 Seasons: OFF
 Seasons: ON (eight days each)
 Secret Passage
@@ -1857,6 +2046,7 @@ Send Post
 Server
 Server list name: {}. Encrypted; host key fingerprint {} (in {})
 Set a Wilter Star in a beacon.
+Set foot on an island far out at sea. Bring a boat home.
 Set off a firework from the ground.
 Set {}, {}, {} to {}.
 Setback for Local Adventurer
@@ -1868,12 +2058,16 @@ Sheaf
 Shear the mushrooms off a Mushmooer.
 Shears (For Fluffers, Not Haircuts)
 Shears snip
+Shell Patch (Beach Treasure)
 Shield (Door You Can Carry)
 Ship's Bell (Still Rings)
 Shipwreck (Abandoned, Soggy)
+Shipwrecks, ocean ruins and buried treasure maps.
 Shop Stall (Everything Must Go)
+Shore Supper
 Shrieker shrieks
 Shroomlight (Glows, Squishily)
+Sightseer
 Sign
 Sign (Words Go Here)
 Sign a book you wrote. A literary career begins.
@@ -1891,6 +2085,7 @@ Skin{}
 Skull
 Sky no longer falling, say experts. Celebrations are expected to be loud.
 Sleep in a bed and skip the night. Time is a construct.
+Sleeping
 Slow
 Slowness
 Sly Friend
@@ -1898,6 +2093,7 @@ Small
 Small Ads
 Small Amethyst Bud (Patience)
 Smash Hit
+Smelt one item in 4 powered seconds; 8 energy/s.
 Smith (Hits Things Professionally)
 Smithing Table (Hammer Time)
 Smoker (Food, Fast)
@@ -1934,9 +2130,11 @@ Some Assembly Required
 Some sun, some cloud, and the sky in its usual place. More of the same is forecast.
 Something
 Something enchanted (or worn)
+Something in the pale oaks wakes at night. Eyeblossoms.
 Something teleports
 Something to enchant
 Something's hurt
+Sorrow
 Sorrow Sand (Sighs Underfoot)
 Sort
 Sorted
@@ -1957,6 +2155,7 @@ Spectating  -  fly with Jump/Sneak, sprint to go faster
 Spectator
 Speed
 Spelunker's Rope (Throw It Down a Hole)
+Spikes of packed ice taller than houses.
 Spire
 Spire Trim Template
 Splash
@@ -1977,11 +2176,14 @@ Sprint: Toggle
 Sprouting
 Spruce Log (Pointy Tree Chunk)
 Spruce Needles
+Spruce villages, Woofers, and the odd llama.
 Spyglass (Pirate Approved)
 Squawker
 Squawker squawks
 Staked a Claim
 Stalac-tight
+Stand at a landmark: an arch, a crater lake or a stone forest.
+Stand beside a {} and load its input slots.
 Stand in a beacon's light. The Wyrm's egg, finally useful.
 Stand on a Magma Block without sneaking. Ow.
 Stand on a sandy beach. Mind the sand in your boots.
@@ -1989,28 +2191,37 @@ Stand on a stony peak.
 Star Power
 Stare Pearl (Throw to Teleport)
 Starer
+Starfish
 Staring Champion
 Staring Eye (It Knows)
 Starred Beacon (Twice the Lighthouse)
+Start 15-second batch
 Statistics
 Statue Chic
 Steady
+Step into a sheltered beach tide pool.
 Step into the Hollow. It's very quiet. Too quiet.
 Step into the Scorchlands. Bring a snack. And a bucket of regret.
 Step through a portal into a mod's dimension.
 Stick (Artisanal)
 Sticky Piston (Clingy)
 Sticky Situation
+Still Forest
 Stone
 Stone Age
 Stone Brick
 Stone Bricks (Fancy Rocks)
 Stone Spear (Flint-ish)
+Stone Wood
 Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier. Tools wear out. Eat to heal.
 Stony Peaks (Rock Bottom, but Up)
+Stop
 Stop a creaking ceiling from coming down.
+Stopped
 Stopped: {} shows a different key than last time ({} before, {} now). Someone may be pretending to be it. If its owner reset it, choose it and press Forget Key.
 Stopping server...
+Storage full
+Store solar power or discharge cells. Charge empty cells.
 Storm Rattles Rooftops
 Stove
 Stove approves!
@@ -2068,6 +2279,8 @@ Take 64 gold at your Shop Stall.
 Take Back
 Take the potion out first.
 Tall Grass
+Tall white birches, quiet and bright.
+Tam
 Tame a Galloper. It only took several hundred attempts.
 Tame a Llama. It still might spit.
 Tame a Woofer with a bone. It's you. You're the good boy now.
@@ -2084,6 +2297,7 @@ Template, Dimond gear, Scorchite Ingot: Scorchite gear.
 Temple Run
 Terracotta (Fancy Mud)
 Tested on at least one computer!
+Tester
 That Sinking Feeling
 That can't be enchanted (or already is).
 That one needs a Crafting Table. Four planks; you can make one in your pockets.
@@ -2151,6 +2365,7 @@ The ice melted. Science!
 The line ran out. You reel it back in.
 The message reads: {}
 The music is kept smaller (or larger) next time the game starts.
+The nearest is {}, a {}, at {}, {}, {} ({} blocks {}).
 The nearest {} is around {}, {} ({} blocks away).
 The nearest {} is around {}, {}, down in the Scorchlands ({} blocks from {}, {}).
 The nearest {} is at {}, {}, {} ({} blocks away).
@@ -2185,6 +2400,7 @@ The worn thing
 The {} has been defeated!
 The {} is yours now. It's sitting; right-click to call it along.
 The {} is yours. It could use a Saddle.
+The {} of {}
 The {} {}
 There's already a team called {}.
 Things eaten
@@ -2202,6 +2418,7 @@ This is {}'s land{}.
 This is {}'s stall. (Look, don't touch.)
 This server needs a password. Type it in the Password box.
 This world isn't open to anyone.
+Thorn
 Throw Item
 Throw a Riptide spear in the rain or the sea, and go with it.
 Throw a Soggy Spear. Go and get it back.
@@ -2265,9 +2482,11 @@ Tropical Fish (Suspiciously Colorful)
 Try the example: copy example-mods/cheese into mods/, then press Reload.
 Tube Coral Block (Blue, Busy)
 Tuff Bricks (Grey, Proud)
+Tuna
 Tune a Note Block. Perfect pitch not required.
 Tuning In
 Turned away {} from {} (not on the allow-list)
+Turns dust and coal into one pellet.
 Turtle
 Turtle Eggs (Do Not Step On)
 Turtle Scute (Shell Shard)
@@ -2340,6 +2559,7 @@ Visit the badlands. Admire the terracotta. Don't lick it.
 WANIPConnection
 WANPPPConnection
 WANTED: anyone who has seen a diamond. Just to talk.
+Waiting for host...
 Wake The Hush. Bold choice.
 Wake a Dried Floaty by putting it next to water.
 Walk Backward
@@ -2390,6 +2610,7 @@ Weed Whacker
 Weeds (Unwelcome)
 Weeper
 Weeper Tear (It Was Sad)
+Weeping
 Weeping Vines (Having a Little Cry)
 Welcome
 Welcome back! Your things were right where you left them.
@@ -2401,6 +2622,8 @@ Welcome to your village paper. Yesterday's news, every morning, from the Notice 
 Welcome to {}. Somebody made this.
 Well
 Well Bucket Missing Again
+Well Travelled
+Wend
 What a Deal
 What the hell is wrong with you?
 Wheat
@@ -2427,11 +2650,13 @@ Wilting
 Wilting Heights
 Wind Charge (Bottled Gust)
 Wind gusts
+Window
 Window: {}x{}  UI size {}
 Winter
 Wishing Well (Doesn't Grant)
 Wisp
 Witch
+Witch huts, mud, and lily pads to walk on.
 Witnesses describe it as "sudden". More tomorrow.
 Wonderful.
 Wood Ash (Potassium!)
@@ -2439,6 +2664,7 @@ Wooden
 Wooden Spear (Pointy Stick, Promoted)
 Woodland Explorer Map (Here Be Pilferers)
 Woodland Mansion (Pilferers' Country House)
+Woodland mansions full of Pilferers, and huge mushrooms.
 Woofer
 Woofer Armour (Very Good Boy Protection)
 Woofer woofs
@@ -2447,6 +2673,7 @@ Woolly Hat (Hand-Knitted)
 Woolly Jumper (Itchy)
 Woolly Socks (For Sandals)
 Woolly Trousers (Very Itchy)
+Work: {}%
 World Begins
 World Border: None
 World Border: {} blocks
@@ -2474,6 +2701,7 @@ XRRConfigCurrentRate
 XRRFreeScreenConfigInfo
 XRRGetScreenInfo
 XYZ: {} / {} / {} in {}
+Yawn
 Yellow
 Yellow Terracotta
 You are banned from this server.
@@ -2553,6 +2781,7 @@ Zombie Doctor
 Zombie Hmmer
 Zoomies
 [Server] {}
+[block frame]\ntexture \= stone\n[dimension old]\nframe \= frame\n[dimension tiny]\nframe \= frame\ngravity \= 0\n[dimension bad]\nframe \= frame\ngravity \= NaN\n
 [block one]\n[block two]\n[item gem]\n
 [block red]\n
 [item ruby]\n\n[item ruby_pick]\ndurability \= 20\nrepair \= ruby\n\n[item ruby_blade]\ndamage \= 7\ndurability \= 900\nrepair \= ruby\n
@@ -2564,7 +2793,7 @@ Zoomies
 [mob minion]\ntexture \= stone\nhealth \= 4\n\n[mob king]\nname \= Cheese King\ntexture \= stone\ntemplate \= biped\nhealth \= 40\nhostile \= true\nattack_damage \= 2\nattack_cooldown \= 2\naggro_range \= 30\nboss \= true\nenrage_at \= 0.5\nenrage_speed \= 2\nenrage_cooldown \= 0.5\nsummon \= minion 3\nsummon_every \= 5\nxp \= 300\ntame_item \= bone\ntame_chance \= 1\n
 [mob pup]\ntexture \= stone\nhealth \= 12\nhostile \= true\nattack_damage \= 4\naggro_range \= 20\ntame_item \= bone\ntame_chance \= 1\nbreed_item \= wheat\n
 [mob slinger]\nname \= Slinger\ntexture \= stone\ntemplate \= biped\nhostile \= true\nranged_damage \= 6\nranged_range \= 22\nprojectile_speed \= 24\nranged_cooldown \= 2\naggro_range \= 12\n
-[mod]\nname \= Playtest Moon\n[block moon_rock]\ntexture \= stone\n[block moon_frame]\ntexture \= white\n[dimension moon]\nname \= The Playtest Moon\nstone \= moon_rock\ntop \= moon_rock\nunder \= moon_rock\nframe \= moon_frame\nheight \= 40\nhills \= 4\n
+[mod]\nname \= Playtest Moon\n[block moon_rock]\ntexture \= stone\n[block moon_frame]\ntexture \= white\n[dimension moon]\nname \= The Playtest Moon\nstone \= moon_rock\ntop \= moon_rock\nunder \= moon_rock\nframe \= moon_frame\nheight \= 40\nhills \= 4\n\n[biome climate_fields]\nshare \= 0.15\nclimate_temperature \= 0.1\nclimate_moisture \= -0.1\nclimate_continentalness \= 0.3\nclimate_erosion \= 0.2\ntop \= moon_rock\nunder \= moon_rock\n
 [{}] saved variables are damaged ({}); starting fresh
 [{}] {} ran /{}
 a Hmmer at {}'s stall bought: {}, and {} sees {} in the till
@@ -2576,6 +2805,7 @@ a bit bland
 a bit grumpy
 a blast shot is used up when it lands
 a boss never despawns
+a bot stood at three landmarks but never heard about sightseer
 a cactus in the water at {} {} {}
 a cave-in never came down on the host
 a change in front sends a pulse out of the back
@@ -2593,6 +2823,8 @@ a modded shot must not be blamed on a Rattler: {}
 a newer
 a parcel
 a quarter per ruby
+a script gets time to move it on
+a second click straight after does nothing
 a sitting flier lands: y \= {}
 a skin must be 64x64
 a skin must be 64x64 pixels (this is {}x{})
@@ -2608,6 +2840,7 @@ already as good as it gets
 already in love
 an alarming number of mites
 an arrow actually travelled before landing
+an island
 an odd fan includes the center ray
 an odd mix
 an older
@@ -2625,6 +2858,7 @@ ate a Pufferfish. It said 'Do Not Eat' right on it
 ate a Suspicious Stew. It was, in fact, suspicious
 baby Hmmers were
 back at the first portal: {}
+back on the ground, not left in the sky
 bad char
 bad data: {}
 bad element count
@@ -2637,33 +2871,49 @@ bad world id
 barely bothering
 barely knocked up
 base items the palette doesn't mention stay put
+beach block {} never arrived
+beach ecology
+beach edit restoration failed
+beach finds and tide pools
+beachcomber advancement never arrived
 birch door
+blast radius must be finite
 blasts never break blocks
 blocks placed and broken
 books are enchantable
 bosses shrug off knockback by default
+bounded river
 bounties were done
+broader terrain and rocky coasts
+build house
 burned to a crisp. Extra crispy
 buzzing with bees
 calm under the smoke
 carrying us
+cave visit didn't award {}
 centroid in 
 centroid out 
 charred rattler
 chest recipe
 claims too big
 client snapshots cannot carry effects
+climate and depth caves
 climbed to {}
+coastal encounter advancement never arrived
+coastal species
 collection complete!
 connection closed
 connection closed during the handshake (is the other side on an older version?)
 connection refused
 controlURL
+cook food
 cooking pot
+coolant home
 coordinate out of range
 copper golem
 couldn't claim land for {}: {}
 couldn't host: {}
+crater lake
 create Blues blue
 create Reds red
 creatures dying
@@ -2677,6 +2927,8 @@ drifting slowly doesn't shuffle the legs
 drowned. Turns out you do need air
 dry (needs water within 4 blocks)
 dry roots beside water at {} {} {}
+dune grass stays above water
+dusk guardian
 east (+X)
 edit out of range
 effect-only arrows deal no damage
@@ -2695,6 +2947,7 @@ fell into the void. It's not a pool either
 fell off the moon
 fell out of the world. Classic.
 fell too far behind
+fight boss
 fill is too big ({} blocks, max {})
 fish and vegetables
 follows its owner through the air: {}
@@ -2712,10 +2965,13 @@ glow berries
 glow squid
 got too close to a Polar Bear's cub
 grain, maybe sweetened
+grass needs supported soil
+gravity must be finite
 growing village
 hardly any mites
 heads for its owner
 held again: waits first
+higher-tier destination rejected
 hit the ground too hard (the ground is fine)
 holder has one
 hollow wyrm
@@ -2726,7 +2982,12 @@ hugged a Pokey Plant. We said not to.
 hung on the east wall
 id is in the palette
 ids moved
+invalid machine state
+invalid meal
+invalid meal animation
+invalid rocket flight
 inventory too long
+islands and beach ecology
 it finishes
 it gave up on all of them
 it pours into the hole left behind
@@ -2734,6 +2995,9 @@ it takes a while ({} looks)
 it turns toward the player
 join Blues
 join Reds
+joined player couldn't place/pay for beach block {}
+joined player never saw the marine school
+joined player never saw {}
 just added
 just made
 just now
@@ -2769,6 +3033,7 @@ line {}: a trade looks like `trade \= gold 2 -> bread 3`
 line {}: a trade needs something to give and something to get
 line {}: armor should be helmet, chestplate, leggings or boots, not {}
 line {}: at most 8 plants a biome
+line {}: climate targets are only supported in the Overworld
 line {}: couldn't read {}: {}
 line {}: count for {} should be 1 to 64
 line {}: don't understand action "{}"
@@ -2777,6 +3042,7 @@ line {}: file {} not found in the mod folder
 line {}: font {} not found in the mod folder (a .ttf or .otf)
 line {}: full: unknown block "{}"
 line {}: give: unknown item "{}"
+line {}: gravity must be finite
 line {}: in \= {}: not a biome
 line {}: in \= {}: not a biome or dimension
 line {}: looks_like should be wool, iron, gold or diamond, not {}
@@ -2799,7 +3065,7 @@ line {}: projectile_model should be arrow, billboard or cube, not "{}"
 line {}: projectile_scale should be a finite number
 line {}: projectile_spread should be a finite number
 line {}: repair: unknown item "{}"
-line {}: shape should be slab or stairs, not {}
+line {}: shape should be slab, stairs, industrial, or rocket_engine/rocket_body/rocket_nose, not {}
 line {}: sky \= {}: not a colour
 line {}: smelts_into: unknown item "{}"
 line {}: sound should be stone, wood, grass, sand or glass, not {}
@@ -2822,13 +3088,16 @@ line {}: unknown dimension "{}"
 line {}: unknown item "{}"
 line {}: unknown section [{}]
 line {}: unknown texture "{}"
+line {}: unknown tree style {}; use round, twisted, spire or umbrella
 line {}: write colours like  color # \= 200,180,60
 line {}: {} \= {}: needs a block and a chance, like plant \= rose 0.02
 line {}: {} \= {}: needs one letter and a block, like block # \= cobblestone
 line {}: {} \= {}: not a block
 line {}: {} is defined twice
+line {}: {} must be a finite number in -1..=1
 line {}: {} should be a finite number
 line {}: {}: no block or item called "{}"
+little beach
 login timed out
 looking away
 looking past it
@@ -2836,14 +3105,20 @@ looking straight at its face
 lost a staring contest with a Starer
 magma bloop
 magma cube
+marine spawning produced no school
 meat and vegetables
 meat, vegetables and grain
 median stretch {} blocks (it was {})
 mid-stride while walking
+mine iron
 mites at {}%
+mod climate biome
+mod climate targets
+mod climate visit didn't award homebrew
 mod dimension
 mod pack too large
 modded shot uses the generic cause: {}
+model never varies its word sequences
 monsters on the cave floor: {}
 monsters spawned at night: {}
 ms: game {} mesh {} scene {} draw {} UI {} | GPU {}
@@ -2853,11 +3128,22 @@ nested too deeply
 no Pointy Sticks, no shot
 no address found
 no answer
+no arrow on letting go
+no climate-target mod patch
+no decorated beach in the placement playtest
 no flowers in reach (they need some within seven blocks)
 no free port
+no naturally open {} cave
+no offshore island in the placement playtest
+no open ocean in the wildlife playtest
+no river in the placement playtest
+no rocky coast in the placement playtest
+no tide pool in the beach playtest
 no village anywhere near spawn to try growing villages in
+no village in the placement playtest
 no welcome
 no {} anywhere near spawn
+no {} for the playtest
 no {} found
 nobody got the bottle of honey from the hive
 nobody listed
@@ -2876,6 +3162,7 @@ nothing changed yet
 nothing fits
 nothing left to shear
 notice board
+offshore island
 on, stays on, off, stays off
 once on the press
 one book at a time
@@ -2885,6 +3172,7 @@ one projectile always uses angle zero
 one twang per volley
 only once
 only ores
+open ocean
 open to LAN
 ordinary arrows carry no effect
 overlapping projectiles pass through spectators without being consumed
@@ -2892,6 +3180,7 @@ oversized message
 own skin
 perched (landed: {}) and took off again (flew: {})
 perfectly content
+petrified forest
 pickaxes can be enchanted
 planks into sticks
 plenty of mites
@@ -2903,14 +3192,18 @@ powered and lit
 properly cross
 rained on
 ranged off by default: no arrow ever spawns
+reactor coolant
 red mooer
 red-spotted mooer
 region file damaged (number too long)
 region file damaged ({})
+released generator {} changed
 repacked id is known
 respawn with a full stomach
+revision 7 keeps its released advancement rule
 right-click opens it
 rivers and beaches
+rocky coast
 rotation bonus
 rotation bonus!
 rotation preserves the vertical lob
@@ -2922,9 +3215,12 @@ save is from a newer version ({})
 scooped up
 script context vanished
 script error: {}
+sea snail
+sea wildlife
 seed {}: spawn at {} stands on {}
 server status
 serviceType
+settled structures
 shader failed to compile: {}
 shadow shader failed to compile: {}
 sheltering from the rain
@@ -2940,6 +3236,7 @@ some mangroves stand in water
 somewhere that's gone
 soul fire
 south (+Z)
+space oxygen
 spectators cannot be damaged by projectiles
 spectators cannot receive projectile effects
 splash damage, less than a direct hit: {}
@@ -2953,10 +3250,13 @@ starving for potassium (Wood Ash)
 statistics too long
 stepped up onto the slabs
 still holding it
+still in its grace
 still there
+stone arch
 stopped by the wall: {}
 string too long
 struck down
+support loss keeps the patch's water
 swamps meet their neighbours gently (worst step {} over 2 blocks)
 teams too big
 teleported directly into a bad decision
@@ -3038,13 +3338,18 @@ the village's site
 the whole line lights up
 the wilter
 this computer's IP
+tide pool
+tide pool advancement never arrived
 tilling makes a soil record
 timed out
 too dark
 too many chunks
 too many edits
 too many files in pack
+too many machine states
+too many meals
 too many mods in pack
+too many rocket flights
 too many world changes in one event
 too soon
 too wide: prop it up
@@ -3052,6 +3357,7 @@ tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|c
 trade levels
 trading table
 trapped chest
+travel home
 tried to sleep in the Scorchlands
 tried to swim in lava. It's not that kind of pool
 tripped over a Snout
@@ -3059,12 +3365,16 @@ truncated message
 truncated mod pack
 turned {} degrees in 0.1 s at 90 degrees per second
 type an address below and press Add to List to keep one.
+unbounded {} geometry {}
 unknown block or item "{}"
 unknown colour "{}" (red, blue, green, yellow, purple, orange, aqua, pink)
+unknown dimension {}
 unknown message type {}
 unknown mob "{}" (oinker, hisser, groaner, fluffer, starer)
+unknown mob {}
 unknown mod ids become nothing
 unknown sound "{}"
+unknown structure {}
 unknown value type {}
 unknown version
 unreadable map
@@ -3073,6 +3383,7 @@ urn:schemas-upnp-org:device:InternetGatewayDevice:2
 urn:schemas-upnp-org:service:WANIPConnection:1
 urn:schemas-upnp-org:service:WANPPPConnection:1
 vegetables, and nothing that swims or moos
+village foundation
 village life
 village paper
 wall impact cannot apply an effect
@@ -3137,6 +3448,7 @@ wear kept
 went out with a bang
 went out with a bang (TNT)
 west (-X)
+wet patch cannot manufacture water
 wglSwapIntervalEXT
 what didn't fit is on the floor
 whatever's left
@@ -3159,6 +3471,7 @@ zombie hmmer
 {} (backup {})
 {} (from {})
 {} ({} in): {}.
+{} ({}, at {}, {})
 {} - ITS KEY HAS CHANGED: is it really the same server?
 {} - a different version (protocol {})
 {} - can't reach it: {}
@@ -3269,6 +3582,7 @@ zombie hmmer
 {} made a team and {} joined it, and the host doesn't have them together
 {} made you an operator. Try /help.
 {} mixed columns at {} borders
+{} mixed, {} protected
 {} near {}, and then, briefly, not seen at all. Repairs are under way.
 {} never had the village at {} load around them
 {} never heard how {} died
@@ -3360,15 +3674,22 @@ zombie hmmer
 {}/{}  LAN
 {}/{}  {} ms
 {}/{} found
+{}: Delicious. Now feed me MORE!
+{}: FEED ME! Food, rocks, tools... I want EVERYTHING!
 {}: OFF
 {}: ON
 {}: best {}
+{}: host edit didn't arrive
+{}: joined player's chunks timed out
 {}: more than {} lines
+{}: regenerated blocks disagree at {}
+{}: restored edit didn't arrive
 {}: too much data to save
 {}: {} blocks
 {}: {} not {}
 {}: {} of {} blocks differ from the host's, e.g. {}
 {}: {}, at {}, {}, {}{}
+{}: {}. Ingredients come from its input slots.
 {}: {}; kept as .bad
 {}Potion of {}
 {}{} blocks, {} items, {} recipes{}

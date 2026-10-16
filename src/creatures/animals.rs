@@ -90,11 +90,16 @@ impl Game {
     /// Right-click on a mob by `who` (a record key) holding `item`.
     pub fn interact_mob(&mut self, who: &str, at: Vec3, mob_id: u32, item: Id) -> Interaction {
         let Some(i) = self.mobs.iter().position(|m| m.id == mob_id) else { return Interaction::Nothing };
-        if self.mobs[i].body.pos.distance(at) > 6.0 {
+        if self.mobs[i].health <= 0.0 || self.mobs[i].body.pos.distance(at) > 6.0 {
             return Interaction::Nothing;
         }
         if self.mobs[i].kind == MobKind::Allay {
             return self.allay_interact(who, at, i, item);
+        }
+        // Glutton offerings take precedence over tools, leads and name tags.
+        if item != AIR && self.mobs[i].kind.mod_def().is_some_and(|d|d.glutton) {
+            let pos=self.mobs[i].body.pos+Vec3::Y*self.mobs[i].body.height;
+            return self.modded_interact(who,i,item,pos).unwrap_or(Interaction::Nothing);
         }
         // Leads on and off (see leads.rs).
         if let Some(r) = self.lead_interact(who, i, item) {
@@ -261,6 +266,16 @@ impl Game {
             } else {
                 self.smoke(pos, 5, 0.2);
             }
+            if def.glutton {self.advance_for(who,"bottomless_appetite");}
+            return Some(Interaction::Ate);
+        }
+        if item != AIR && def.glutton {
+            m.persistent=true;
+            m.health=(m.health+2.0).min(def.max_health);
+            self.hearts(pos,2);
+            self.sfx(Sfx::Eat,Some(pos));
+            self.tell(who,&format!("{}: Delicious. Now feed me MORE!",def.name));
+            self.advance_for(who,"bottomless_appetite");
             return Some(Interaction::Ate);
         }
         if item != AIR && def.breed_item == Some(item) {
@@ -291,7 +306,7 @@ impl Game {
         let mob = &self.mobs[mob_index];
         let id = mob.id;
         // A Name Tag asks for a name (see nametags.rs).
-        if held == NAME_TAG {
+        if held == NAME_TAG && !mob.kind.mod_def().is_some_and(|d|d.glutton) {
             self.naming = Some(id);
             return true;
         }
@@ -307,7 +322,7 @@ impl Game {
             return true;
         }
         // A trader (unless you're offering it its taming or breeding food).
-        let feeding = mob.kind.mod_def().is_some_and(|d| held != AIR && (d.tame_item == Some(held) || d.breed_item == Some(held)));
+        let feeding = mob.kind.mod_def().is_some_and(|d| held != AIR && (d.glutton || d.tame_item == Some(held) || d.breed_item == Some(held)));
         if !feeding && crate::villagers::trades_of(mob).is_some() {
             self.open_trade(id);
             return true;
@@ -414,6 +429,45 @@ impl Game {
         for m in self.mobs.iter_mut().filter(|m| m.owner.as_deref() == Some(owner) && !m.sitting && m.id != target && fights(m)) {
             m.prey = Some(target);
         }
+    }
+
+    /// Host-only appetite. Realm-local mob lists prevent cross-dimension meals.
+    /// Removed prey bypass death loot, kill rewards and breeding entirely.
+    pub(crate) fn gluttons_tick(&mut self, dt:f32) {
+        if self.is_client() {return;}
+        let players=self.player_spots();
+        let mut eaters=Vec::new();let mut requests=Vec::new();
+        for m in &mut self.mobs {
+            let Some(d)=m.kind.mod_def().filter(|d|d.glutton) else {continue};
+            if m.health<=0.0 || !self.world.is_loaded(m.body.pos.x.floor() as i32,m.body.pos.z.floor() as i32) {continue;}
+            eaters.push((m.id,m.body.pos));
+            m.appetite_cd=(m.appetite_cd-dt.max(0.0)).max(0.0);
+            if m.appetite_cd<=0.0 && let Some((who,_,_))=players.iter().filter(|p|p.1.distance(m.body.pos)<=16.0).min_by(|a,b|a.1.distance_squared(m.body.pos).total_cmp(&b.1.distance_squared(m.body.pos))) {
+                m.appetite_cd=8.0;
+                if !requests.iter().any(|(key,_)|key==who) {requests.push((who.clone(),format!("{}: FEED ME! Food, rocks, tools... I want EVERYTHING!",d.name)));}
+            }
+        }
+        if !eaters.is_empty() {
+            let mut meals=Vec::new();
+            self.mobs.retain(|m| {
+                let eater=if m.health>0.0 && matches!(m.kind,MobKind::Mooer|MobKind::Oinker|MobKind::Fluffer|MobKind::Cluckster) {
+                    eaters.iter().filter(|(_,p)|p.distance_squared(m.body.pos)<=25.0)
+                        .min_by(|a,b|a.1.distance_squared(m.body.pos).total_cmp(&b.1.distance_squared(m.body.pos)).then(a.0.cmp(&b.0)))
+                } else {None};
+                if let Some((id,_))=eater {meals.push(crate::swallow::Swallow::meal(*id,m));}
+                eater.is_none()
+            });
+            // Focus each eater on its closest claimed meal, once per new batch.
+            let mut aim=std::collections::BTreeMap::new();
+            for meal in &meals {if let Some(m)=self.mobs.iter().find(|m|m.id==meal.eater) {
+                let delta=meal.from-m.body.pos;let dist=delta.length_squared();
+                let entry=aim.entry(meal.eater).or_insert((dist,delta));if dist<entry.0 {*entry=(dist,delta);}
+            }}
+            for (id,(_,delta)) in aim {if !self.swallows.iter().any(|f|f.eater==id) && delta.x*delta.x+delta.z*delta.z>0.01
+                && let Some(m)=self.mobs.iter_mut().find(|m|m.id==id) {m.yaw=delta.x.atan2(-delta.z);}}
+            for meal in meals {if self.swallows.len()<crate::swallow::CAP {self.swallows.push(meal);}}
+        }
+        for (who,text) in requests {self.tell(&who,&text);}
     }
 
     /// Where the world lives: give animals somewhere to go, breed, bite, regrow.

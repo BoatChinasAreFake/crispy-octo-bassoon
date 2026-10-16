@@ -221,6 +221,24 @@ impl Game {
                 None => vec![format!("No {} within 2,500 blocks.", kind.name())],
             };
         }
+        // Landmarks (see landmarks.rs): "landmark", or one kind of them.
+        let landmark = match what.to_ascii_lowercase().replace('_', " ").as_str() {
+            "landmark" | "landmarks" => Some(None),
+            "arch" | "stone arch" => Some(Some(crate::landmarks::Kind::Arch)),
+            "crater" | "crater lake" => Some(Some(crate::landmarks::Kind::CraterLake)),
+            "petrified forest" | "petrified" => Some(Some(crate::landmarks::Kind::PetrifiedForest)),
+            _ => None,
+        };
+        if let Some(kind) = landmark {
+            let found = g.landmarks_near(here.x as i32, here.z as i32, 6000).into_iter().find(|l| kind.is_none_or(|k| l.kind == k));
+            return match found {
+                Some(l) => {
+                    let d = Vec3::new(l.x as f32 - here.x, 0.0, l.z as f32 - here.z);
+                    vec![format!("The nearest is {}, a {}, at {}, {}, {} ({:.0} blocks {}).", l.name, l.kind.label(), l.x, l.y, l.z, d.length(), crate::archaeology::compass_word(d))]
+                }
+                None => vec!["No landmarks within 6,000 blocks (they're only in worlds made from v0.6 Part 2 on).".into()],
+            };
+        }
         // The Scorchlands' biomes: searched from here if you're down there, else from where a portal here would lead.
         if let Some(biome) = crate::wilds::ScorchBiome::from_name(&what) {
             let from = if self.world.is_scorch() { here.floor().as_ivec3() } else { crate::scorch::destination(self.realm_dim(), here.floor().as_ivec3()).1 };
@@ -456,7 +474,7 @@ impl Game {
                 ("kill", 0) => [players(), mobs(), vec!["mobs".into()]].concat(),
                 ("locate", 0) => {
                     let mut v = Vec::new();
-                    for name in ["village", "outpost", "fortress", "bastion", "monument", "mineshaft", "igloo", "desert_pyramid", "jungle_temple", "trial_chambers", "shipwreck", "buried_treasure", "hushed_city", "ocean_ruins", "trail_ruins", "desert_ruins", "snout_camp", "dungeon", "tower", "hut", "well"] {
+                    for name in ["village", "outpost", "fortress", "bastion", "monument", "mineshaft", "igloo", "desert_pyramid", "jungle_temple", "trial_chambers", "shipwreck", "buried_treasure", "hushed_city", "ocean_ruins", "trail_ruins", "desert_ruins", "snout_camp", "dungeon", "tower", "hut", "well", "landmark", "arch", "crater_lake", "petrified_forest"] {
                         v.push(name.into());
                     }
                     v.extend(crate::world::Biome::ALL.iter().map(|b| format!("{b:?}").to_ascii_lowercase()));

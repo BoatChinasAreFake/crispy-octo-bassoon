@@ -66,7 +66,9 @@ const CORNER_UV: [[f32; 2]; 4] = [[0., 1.], [1., 1.], [1., 0.], [0., 0.]];
 /// How far merged faces are grown past their edges (see `merge_flats`).
 const SEAM: f32 = 1.0 / 2048.0;
 /// How far inside its edges a merged face's texture starts (in tiles).
-const UV_INSET: f32 = 1.0 / 64.0;
+/// (Tiny, and never more: it scales the texture across the face, so anything
+/// bigger shifts the pixels of merged faces as edits split and rejoin them.)
+const UV_INSET: f32 = 1.0 / 1024.0;
 const AO_CURVE: [f32; 4] = [0.58, 0.73, 0.87, 1.0];
 /// Face shading for foliage (same order as `FACES`). Light scatters through
 /// leaves, so their sides and undersides are much less dark than solid blocks',
@@ -79,6 +81,12 @@ const UV_EPS: f32 = 1.0 / 4096.0;
 pub fn face_tile(id: Id, face: usize) -> u16 {
     if let Some(t) = crate::contraptions::face_tile(id, face) {
         return t;
+    }
+    // Logs lying on their side: the rings at the ends, the grain along the log.
+    if id == PETRIFIED_LOG_X || id == PETRIFIED_LOG_Z {
+        let end = if id == PETRIFIED_LOG_X { face < 2 } else { face >= 4 };
+        let across = id == PETRIFIED_LOG_Z && (2..4).contains(&face);
+        return if end { crate::texture::T_PETRIFIED_TOP } else if across { crate::texture::T_PETRIFIED_SIDE } else { crate::texture::T_PETRIFIED_SIDE_H };
     }
     let t = block(id).tex;
     match face {

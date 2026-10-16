@@ -72,7 +72,51 @@ fn lantern(body: u16, y: f32) -> Vec<Piece> {
 /// The model for a block, if it has one beyond its collision boxes.
 pub fn pieces(id: Id) -> Option<Vec<Piece>> {
     let t = block(id).tex;
+    if reg().key_of(id)=="half_baked:cooling_tower" {return Some(vec![bx([1.0,0.0,1.0],[15.0,3.0,15.0],t[0]),bx([4.0,3.0,4.0],[12.0,12.0,12.0],t[0]),bx([2.0,12.0,2.0],[14.0,16.0,14.0],t[0])]);}
+    if crate::factory::cable(id) {return Some(vec![bx([0.0,7.0,7.0],[16.0,9.0,9.0],t[0]),bx([7.0,0.0,7.0],[9.0,16.0,9.0],t[0]),bx([7.0,7.0,0.0],[9.0,9.0,16.0],t[0])]);}
+    if let Some(k)=crate::factory::kind(id) {
+        use crate::factory::Kind;
+        let parts=match k {
+            Kind::Centrifuge=>vec![bx([1.0,0.0,1.0],[15.0,12.0,15.0],t[0]),bx([5.0,12.0,5.0],[11.0,15.0,11.0],t[0])],
+            Kind::Solar=>vec![bx([6.0,0.0,6.0],[10.0,12.0,10.0],t[0]),bx([0.0,12.0,0.0],[16.0,15.0,16.0],t[0])],
+            Kind::Reactor=>vec![bx([0.0,0.0,0.0],[16.0,3.0,16.0],t[0]),bx([2.0,3.0,2.0],[14.0,14.0,14.0],t[0]),bx([0.0,14.0,0.0],[16.0,16.0,16.0],t[0])],
+            _=>vec![bx([1.0,0.0,1.0],[15.0,15.0,15.0],t[0])],
+        };return Some(parts);
+    }
+    if matches!(block(id).shape,Shape::RocketEngine | Shape::RocketBody | Shape::RocketNose) {
+        let shape=block(id).shape;
+        if shape!=Shape::RocketEngine {
+            let (boxes,n)=shape.boxes();
+            return Some(boxes[..n].iter().map(|&(lo,hi)|Piece {lo,hi,tiles:[t[1],t[1],t[0],t[2],t[1],t[1]],uv:None,hide:0}).collect());
+        }
+        let mut parts=vec![
+            bx([3.5,7.0,3.5],[12.5,16.0,12.5],t[1]).caps(t[0],t[2]),
+            bx([5.0,4.0,5.0],[11.0,7.0,11.0],t[2]),
+            bx([4.0,1.0,4.0],[12.0,4.0,12.0],t[2]),
+            bx([3.5,0.0,3.5],[12.5,1.0,12.5],t[2]),
+        ];
+        // Four thin, swept fins; all geometry remains inside the assembly cell.
+        for axis in 0..2 {for positive in [false,true] {for step in 0..3 {
+            let width=3.5/3.0;
+            let height=(step+1) as f32*10.0/3.0;
+            let (start,end)=if positive {(16.0-(step+1) as f32*width,16.0-step as f32*width)} else {(step as f32*width,(step+1) as f32*width)};
+            let mut part=bx([start,0.0,7.5],[end,height,8.5],t[0]);
+            if axis==1 {part.lo.swap(0,2);part.hi.swap(0,2);}
+            parts.push(part);
+        }}}
+        return Some(parts);
+    }
     Some(match id {
+        DRIFTWOOD | DRIFTWOOD_Z => {
+            let mut parts=vec![bx([0.0,0.0,4.0],[16.0,4.0,12.0],T_DRIFTWOOD_SIDE).face(0,T_DRIFTWOOD_END).face(1,T_DRIFTWOOD_END),bx([7.0,2.0,10.0],[10.0,5.0,15.0],T_DRIFTWOOD_SIDE)];
+            if id==DRIFTWOOD_Z {for p in &mut parts {p.lo.swap(0,2);p.hi.swap(0,2);p.tiles.swap(0,4);p.tiles.swap(1,5);}}
+            parts
+        }
+        SHELL_PATCH | SHELL_PATCH_WET => vec![
+            bx([2.0,0.0,2.0],[7.0,2.0,7.0],T_SHELL_PATCH).stretched(ALL),
+            bx([8.0,0.0,7.0],[14.0,3.0,12.0],T_SHELL_PATCH).stretched(ALL),
+            bx([3.0,0.0,11.0],[6.0,1.0,14.0],T_SHELL_PATCH).stretched(ALL),
+        ],
         LANTERN => lantern(T_LANTERN_BODY, 0.0),
         SOUL_LANTERN => lantern(T_SOUL_LANTERN_BODY, 0.0),
         LANTERN_HANGING => {
@@ -280,7 +324,7 @@ mod tests {
 
     #[test]
     fn models_stay_inside_their_cell_and_have_something_to_show() {
-        for id in [LANTERN, SOUL_LANTERN, LANTERN_HANGING, BELL, ENCHANTING_TABLE, GRINDSTONE, POT_FIRST, POT_FIRST + 12, SCAFFOLDING, CHAIN, CHARRED_SKULL, EYE_FRAME, EYE_FRAME_FULL, BREWING_STAND] {
+        for id in [DRIFTWOOD, DRIFTWOOD_Z, SHELL_PATCH, SHELL_PATCH_WET, LANTERN, SOUL_LANTERN, LANTERN_HANGING, BELL, ENCHANTING_TABLE, GRINDSTONE, POT_FIRST, POT_FIRST + 12, SCAFFOLDING, CHAIN, CHARRED_SKULL, EYE_FRAME, EYE_FRAME_FULL, BREWING_STAND] {
             let v = pieces(id).unwrap_or_else(|| panic!("{id} has a model"));
             assert!(!v.is_empty());
             for p in &v {

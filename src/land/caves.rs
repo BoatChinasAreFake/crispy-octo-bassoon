@@ -28,11 +28,28 @@ use crate::world::{idx, Generator, CH, CW};
 use macroquad::math::{ivec3, IVec3, Vec3};
 
 /// What kind of cave a column's caves are.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum CaveBiome {
     Plain,
     Dripstone,
     Lush,
+    DeepDark,
+}
+
+/// Shared climate, then depth. Depth is measured in the world's existing
+/// coordinates; no new carving noise or independent biome noise is needed.
+pub fn pick_cave(p: &crate::land::shape::Place, y: i32) -> CaveBiome {
+    if y < 3 || y >= p.h - 8 { return CaveBiome::Plain; }
+    if y < crate::deepdark::DEEP_TOP && p.c > 0.05 && p.e < -0.1 && p.m < 0.22 {
+        return CaveBiome::DeepDark;
+    }
+    if y >= 24 && p.m > 0.08 && p.t > -0.17 {
+        return CaveBiome::Lush;
+    }
+    if (10..=48).contains(&y) && p.m <= 0.08 && p.t > -0.32 && p.c > -0.12 {
+        return CaveBiome::Dripstone;
+    }
+    CaveBiome::Plain
 }
 
 /// Geodes: one may sit in each square this wide.
@@ -71,6 +88,20 @@ impl Geode {
 }
 
 impl Generator {
+    /// Actual cave identity, including depth. Older worlds retain their
+    /// column-wide selections and the original Deep Dark region noise.
+    pub fn cave_biome_at(&self, x: i32, y: i32, z: i32) -> CaveBiome {
+        if self.dim != crate::dims::Dim::Over { return CaveBiome::Plain; }
+        if self.opts.version >= 8 {
+            return pick_cave(&self.place_v7(x, z), y);
+        }
+        if y < crate::deepdark::DEEP_TOP && self.deep_dark(x, z) && self.column(x, z).0 > crate::deepdark::DEEP_TOP + 6 {
+            CaveBiome::DeepDark
+        } else {
+            self.cave_biome(x, z)
+        }
+    }
+
     /// The cave biome under (x, z).
     pub fn cave_biome(&self, x: i32, z: i32) -> CaveBiome {
         let (fx, fz) = (x as f32 / 110.0, z as f32 / 110.0);
@@ -120,12 +151,31 @@ impl Generator {
     /// Dress one column's caves for its cave biome. `lo` is the lowest cave
     /// height it touches (above the Deep Dark), `h` the ground.
     pub(crate) fn cave_column(&self, b: &mut [Id], (lx, lz): (i32, i32), (x, z): (i32, i32), h: i32, lo: i32) {
+        if self.opts.version >= 8 {
+            let p = self.place_v7(x, z);
+            let hi = (h - 8).min(CH - 2);
+            // The depth selector reserves Deep Dark itself. The old column
+            // exclusion would otherwise leave heights 24 and 25 undressed.
+            let mut start = 3;
+            while start < hi {
+                let biome = pick_cave(&p, start);
+                let mut end = start + 1;
+                while end < hi && pick_cave(&p, end) == biome { end += 1; }
+                self.cave_band(b, (lx, lz), (x, z), start, end, biome);
+                start = end;
+            }
+            return;
+        }
         let biome = self.cave_biome(x, z);
+        self.cave_band(b, (lx, lz), (x, z), lo, (h - 6).min(CH - 2), biome);
+    }
+
+    /// Existing decorators, bounded to one run of the selected cave biome.
+    fn cave_band(&self, b: &mut [Id], (lx, lz): (i32, i32), (x, z): (i32, i32), lo: i32, hi: i32, biome: CaveBiome) {
         if biome == CaveBiome::Plain {
             return;
         }
         let s = self.seed ^ 0xCA5E;
-        let hi = (h - 6).min(CH - 2);
         let stony = |id: Id| matches!(id, STONE | DEEPSLATE | GRAVEL | DIRT);
         match biome {
             CaveBiome::Dripstone => {
@@ -149,12 +199,12 @@ impl Generator {
                     let r = hash3(s ^ 2, x, y, z);
                     if matches!(below, DRIPSTONE_BLOCK | STONE) && r < 0.14 {
                         b[idx(lx, y, lz)] = POINTY_ROCK;
-                        if r < 0.05 && b[idx(lx, y + 1, lz)] == AIR && b[idx(lx, y + 2, lz)] == AIR {
+                        if r < 0.05 && (self.opts.version < 8 || y + 2 < hi) && b[idx(lx, y + 1, lz)] == AIR && b[idx(lx, y + 2, lz)] == AIR {
                             b[idx(lx, y + 1, lz)] = POINTY_ROCK;
                         }
                     } else if matches!(above, DRIPSTONE_BLOCK | STONE) && r > 0.84 {
                         b[idx(lx, y, lz)] = POINTY_ROCK;
-                        if r > 0.95 && b[idx(lx, y - 1, lz)] == AIR && b[idx(lx, y - 2, lz)] == AIR {
+                        if r > 0.95 && (self.opts.version < 8 || y - 2 >= lo) && b[idx(lx, y - 1, lz)] == AIR && b[idx(lx, y - 2, lz)] == AIR {
                             b[idx(lx, y - 1, lz)] = POINTY_ROCK;
                         }
                     }
@@ -168,7 +218,7 @@ impl Generator {
                     }
                     let (bi, ai) = (idx(lx, y - 1, lz), idx(lx, y + 1, lz));
                     let r = hash3(s ^ 3, x, y, z);
-                    if stony(b[bi]) {
+                    if stony(b[bi]) && (self.opts.version < 8 || y > lo) {
                         // A mossy floor, now and then a little pool.
                         b[bi] = if r < 0.04 && stony(b[idx(lx, y - 2, lz)]) { WATER } else { MOSS_BLOCK };
                         if b[bi] == MOSS_BLOCK {
@@ -180,7 +230,7 @@ impl Generator {
                             };
                         }
                     }
-                    if stony(b[ai]) {
+                    if stony(b[ai]) && (self.opts.version < 8 || y + 1 < hi) {
                         if r > 0.45 {
                             b[ai] = MOSS_BLOCK;
                         }
@@ -198,7 +248,7 @@ impl Generator {
                     }
                 }
             }
-            CaveBiome::Plain => {}
+            CaveBiome::Plain | CaveBiome::DeepDark => {}
         }
     }
 
@@ -517,6 +567,77 @@ mod tests {
     use crate::world::GenOptions;
 
     #[test]
+    fn review_depth_transition_has_no_legacy_exclusion_gap() {
+        let _lock = crate::mods::registry_test_lock();
+        let g = Generator::with(77, GenOptions::DEFAULT);
+        let (x,z) = (-2400..2400).step_by(32).flat_map(|z| (-2400..2400).step_by(32).map(move |x| (x,z)))
+            .find(|&(x,z)| g.cave_biome_at(x,10,z)==CaveBiome::DeepDark && g.cave_biome_at(x,25,z)==CaveBiome::Lush).unwrap();
+        let mut b = vec![STONE; (CW*CW*CH) as usize];
+        b[idx(0,23,0)] = BEDROCK; // No random little pool under the test floor.
+        for y in 25..30 { b[idx(0,y,0)] = AIR; }
+        g.cave_column(&mut b,(0,0),(x,z),g.column(x,z).0,crate::deepdark::DEEP_TOP+2);
+        assert_eq!(b[idx(0,24,0)],MOSS_BLOCK,"the first lush floor above Deep Dark must be dressed");
+    }
+
+    #[test]
+    fn cave_rules_share_climate_and_respect_depth() {
+        let g = Generator::with(77, GenOptions::DEFAULT);
+        let base = crate::land::shape::Place { h: 90, sea: 63, c: 0.4, e: -0.3, w: 0.2, pv: 0.0, t: 0.1, m: 0.0, river: false, wet_low: 0.0 };
+        assert_eq!(pick_cave(&base, 10), CaveBiome::DeepDark);
+        assert_eq!(pick_cave(&base, 23), CaveBiome::DeepDark);
+        assert_eq!(pick_cave(&base, 24), CaveBiome::Dripstone);
+        assert_eq!(pick_cave(&base, 48), CaveBiome::Dripstone);
+        assert_eq!(pick_cave(&base, 49), CaveBiome::Plain);
+        assert_eq!(pick_cave(&base, 2), CaveBiome::Plain);
+        assert_eq!(pick_cave(&base, 82), CaveBiome::Plain);
+        let wet = crate::land::shape::Place { m: 0.3, ..base };
+        assert_eq!(pick_cave(&wet, 23), CaveBiome::Plain);
+        assert_eq!(pick_cave(&wet, 24), CaveBiome::Lush);
+        assert_eq!(pick_cave(&crate::land::shape::Place { t: -0.4, ..wet }, 40), CaveBiome::Plain);
+        for z in (-1000..1000).step_by(80) {
+            for x in (-1000..1000).step_by(80) {
+                assert_eq!(g.deep_dark(x, z), g.cave_biome_at(x, crate::deepdark::CITY_Y, z) == CaveBiome::DeepDark);
+                assert_eq!(g.cave_biome_at(x, 40, z), pick_cave(&g.place_v7(x, z), 40));
+            }
+        }
+    }
+
+    #[test]
+    fn revision_eight_decorates_each_depth_without_crossing_bands() {
+        let _lock = crate::mods::registry_test_lock();
+        let g = Generator::with(77, GenOptions { structures: 0, ..GenOptions::DEFAULT });
+        let mut found = std::collections::HashSet::new();
+        for want in [CaveBiome::Dripstone, CaveBiome::Lush, CaveBiome::DeepDark] {
+            let mut n = 0;
+            'search: for z in (-2400..2400).step_by(64) {
+                for x in (-2400..2400).step_by(64) {
+                    let depth = if want == CaveBiome::DeepDark { 10 } else { 32 };
+                    if g.cave_biome_at(x, depth, z) != want { continue; }
+                    let (cx, cz) = (x.div_euclid(CW), z.div_euclid(CW));
+                    let b = g.generate(cx, cz);
+                    for lz in 0..CW {
+                        for lx in 0..CW {
+                            let (xx, zz) = (cx * CW + lx, cz * CW + lz);
+                            for y in 3..g.column(xx, zz).0 - 8 {
+                                let id = b[idx(lx, y, lz)];
+                                if [DRIPSTONE_BLOCK, MOSS_BLOCK, CAVE_VINES, CAVE_VINES_LIT, SCULK].contains(&id) {
+                                    found.insert(id);
+                                    let expected = if id == DRIPSTONE_BLOCK { CaveBiome::Dripstone } else if id == SCULK { CaveBiome::DeepDark } else { CaveBiome::Lush };
+                                    assert_eq!(g.cave_biome_at(xx, y, zz), expected, "{} at {xx},{y},{zz}", block(id).key);
+                                }
+                            }
+                        }
+                    }
+                    n += 1;
+                    if n == 12 { break 'search; }
+                }
+            }
+            assert!(n > 0, "no {want:?} columns");
+        }
+        for id in [DRIPSTONE_BLOCK, MOSS_BLOCK, CAVE_VINES, CAVE_VINES_LIT, SCULK] { assert!(found.contains(&id), "no {}", block(id).key); }
+    }
+
+    #[test]
     fn long_spikes_are_drawn_as_one() {
         use crate::texture::*;
         // A stalagmite three long on the floor (y 1..=3), and a stalactite two long from the ceiling (y 8..=9).
@@ -536,14 +657,14 @@ mod tests {
 
     #[test]
     fn cave_biomes_and_geodes_turn_up() {
-        let worldgen = Generator::with(7, GenOptions::DEFAULT);
+        let worldgen = Generator::with(7, GenOptions { version: 7, ..GenOptions::DEFAULT });
         let (mut drip, mut lush) = (0, 0);
         for z in (-2000..2000).step_by(40) {
             for x in (-2000..2000).step_by(40) {
                 match worldgen.cave_biome(x, z) {
                     CaveBiome::Dripstone => drip += 1,
                     CaveBiome::Lush => lush += 1,
-                    CaveBiome::Plain => {}
+                    CaveBiome::Plain | CaveBiome::DeepDark => {}
                 }
             }
         }
@@ -556,7 +677,7 @@ mod tests {
 
     #[test]
     fn generated_caves_have_their_blocks() {
-        let worldgen = Generator::with(7, GenOptions::DEFAULT);
+        let worldgen = Generator::with(7, GenOptions { version: 7, ..GenOptions::DEFAULT });
         let mut seen = std::collections::HashSet::new();
         // Find a chunk with a geode in it, and chunks in each cave biome.
         let g = (0..40).flat_map(|z| (0..40).map(move |x| (x, z))).find_map(|(x, z)| worldgen.geode_in(x, z)).expect("a geode");

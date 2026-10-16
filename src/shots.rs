@@ -26,7 +26,21 @@ pub(crate) fn parse_args() -> Option<ShotArgs> {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     get("--screenshot").map(|path| ShotArgs {
         path,
-        mode: get("--mode").unwrap_or_else(|| "title".into()),
+        mode: match get("--mode").as_deref() {
+            Some("depth_dripstone") => "dripstone".into(),
+            Some("depth_lush") => "lush".into(),
+            Some("depth_dark") => "deepdark".into(),
+            Some("settled_village") => "village".into(),
+            Some("settled_mansion") => "mansion".into(),
+            Some("settled_spring") => "hotspring".into(),
+            Some("climate_mod") => "modhut".into(),
+            Some("terrain_mountains") => "stonypeaks".into(),
+            Some("terrain_meadow") => "meadow".into(),
+            Some("terrain_river") => "river".into(),
+            Some("terrain_beach") => "beach".into(),
+            Some(mode) => mode.into(),
+            None => "title".into(),
+        },
         frames: get("--frames").and_then(|f| f.parse().ok()).unwrap_or(240),
         time: get("--time").and_then(|f| f.parse().ok()),
         distance: get("--distance").and_then(|f| f.parse().ok()),
@@ -68,6 +82,32 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
     }
     // The Scorchlands' structures are a long way east.
     let (cx0, cz0) = if matches!(mode, "fortress" | "camp" | "bastion") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
+    // Landmarks (see landmarks.rs): the nearest of the kind, from a little way off and up.
+    if let Some(want) = match mode {
+        "landmark_arch" => Some(Some(crate::landmarks::Kind::Arch)),
+        "landmark_crater" => Some(Some(crate::landmarks::Kind::CraterLake)),
+        "landmark_grove" => Some(Some(crate::landmarks::Kind::PetrifiedForest)),
+        "atlas" | "landmark_map" => Some(None),
+        _ => None,
+    } {
+        let (x0, z0) = (cx0 * 16, cz0 * 16);
+        let l = generator.landmarks_near(x0, z0, 8000).into_iter().find(|l| want.is_none_or(|k| l.kind == k))?;
+        let to = Vec3::new(l.x as f32 + 0.5, l.y as f32 + if l.kind == crate::landmarks::Kind::Arch { 9.0 } else { 1.0 }, l.z as f32 + 0.5);
+        let (back, up) = match l.kind {
+            crate::landmarks::Kind::Arch => (34.0, 6.0),
+            crate::landmarks::Kind::CraterLake => (40.0, 16.0),
+            crate::landmarks::Kind::PetrifiedForest => (30.0, 10.0),
+        };
+        // (Side on to an arch, so you see through it.)
+        let side = if l.kind == crate::landmarks::Kind::Arch && l.seed % 2 == 0 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(0.7, 0.0, 0.7) };
+        let mut from = to + side * back;
+        from.y = (generator.column(from.x as i32, from.z as i32).0 as f32 + 3.0).max(l.y as f32 + up);
+        if matches!(mode, "atlas" | "landmark_map") {
+            from = Vec3::new(l.x as f32 + 0.5, l.y as f32 + 2.0, l.z as f32 + 0.5) + Vec3::new(30.0, 0.0, 30.0);
+            from.y = generator.column(from.x as i32, from.z as i32).0 as f32 + 14.0;
+        }
+        return Some(look(from, to));
+    }
     let kind = match mode {
         "outpost" => Kind::Outpost,
         "trials" => Kind::TrialChambers,
@@ -99,7 +139,7 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 for (dx, dz) in ring(r) {
                     let (cx, cz) = (cx0 + dx, cz0 + dz);
                     let inside = (-1..=1).all(|i| (-1..=1).all(|j| generator.cave_biome(cx * 16 + 8 + i * 28, cz * 16 + 8 + j * 28) == want));
-                    if !inside {
+                    if generator.opts.version < 8 && !inside {
                         continue;
                     }
                     let b = generator.generate(cx, cz);
@@ -109,7 +149,8 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                             let at = |x: i32, y: i32, z: i32| b[world::idx(x, y, z)];
                             for y in (10..h - 10).rev() {
                                 let roomy = (0..4).all(|k| (0..6).all(|d| at(lx + d, y + k, lz) == AIR));
-                                if roomy && at(lx, y - 1, lz) == ground {
+                                let identity = generator.opts.version < 8 || generator.cave_biome_at(cx*16+lx,y,cz*16+lz)==want;
+                                if roomy && identity && at(lx, y - 1, lz) == ground {
                                     return Some((Vec3::new((cx * 16 + lx) as f32 + 0.5, y as f32 + 1.6, (cz * 16 + lz) as f32 + 0.5), 1.57, -0.05));
                                 }
                             }
@@ -248,6 +289,80 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
             }
             return None;
         }
+        "tide_pool" | "beach_showcase" => {
+            let (gx,gz)=((cx0*16).div_euclid(64),(cz0*16).div_euclid(64));
+            for r in 0..128 {for (dx,dz) in ring(r) {
+                if let Some((x,z,level,_))=generator.beach_pool_cell(gx+dx,gz+dz) {
+                    let to=Vec3::new(x as f32+0.5,level as f32+0.2,z as f32+0.5);
+                    return Some(look(to+Vec3::new(6.0,6.0,7.0),to));
+                }
+            }}
+            return None;
+        }
+        "rolling_hills" | "offshore_island" | "large_mushroom" | "beach_ecology" | "sea_wildlife" => {
+            if matches!(mode,"offshore_island"|"large_mushroom") {
+                let mushroom=mode=="large_mushroom";
+                let grid=if mushroom {4096}else{1024};
+                let salt=generator.seed^if mushroom {0x15E}else{0x15_1A4D};
+                let (gx,gz)=((cx0*16).div_euclid(grid),(cz0*16).div_euclid(grid));
+                for r in 0..16 { for (dx,dz) in ring(r) {
+                    let (cx,cz)=(gx+dx,gz+dz);
+                    let (margin,spread)=if mushroom {(1024,2048.0)}else{(280,464.0)};
+                    let (x,z)=(cx*grid+margin+(crate::noise::hash2(salt^1,cx,cz)*spread) as i32,cz*grid+margin+(crate::noise::hash2(salt^2,cx,cz)*spread) as i32);
+                    let (h,b)=generator.column(x,z);
+                    let fits=if mushroom {b==world::Biome::MushroomIslands}else{h>generator.sea()+6 && generator.ocean_island(x,z)>0.7 && generator.shape_noise(x,z).0< -0.28};
+                    if fits {
+                        let (fx,fz)=(x+70,z+70);
+                        let from=Vec3::new(fx as f32,generator.column(fx,fz).0.max(h) as f32+18.0,fz as f32);
+                        return Some(look(from,Vec3::new(x as f32,h as f32+2.0,z as f32)));
+                    }
+                } }
+                return None;
+            }
+            for r in 0..400 { for (dx,dz) in ring(r) {
+                let (x,z)=((cx0+dx)*16+8,(cz0+dz)*16+8);
+                let (h,b)=generator.column(x,z);
+                let fits=match mode {
+                    "rolling_hills"=>matches!(b,world::Biome::Plains|world::Biome::Meadow|world::Biome::Savanna) && h>generator.sea()+10 && generator.shape_noise(x,z).0>0.25
+                        && [(64,0),(-64,0),(0,64),(0,-64)].iter().all(|&(i,j)|{let (_,bb)=generator.column(x+i,z+j);!bb.is_ocean() && bb!=world::Biome::River})
+                        && [(64,0),(-64,0),(0,64),(0,-64)].iter().any(|&(i,j)|(generator.column(x+i,z+j).0-h).abs()>=10),
+                    "beach_ecology"=>b==world::Biome::Beach && h>generator.sea() && generator.beach_feature(x,z,h).is_some_and(|id|
+                        generator.generate(x.div_euclid(16),z.div_euclid(16))[world::idx(x.rem_euclid(16),h+1,z.rem_euclid(16))]==id),
+                    _=>b==world::Biome::Ocean && h<generator.sea()-12 && [-48,0,48].iter().all(|&i|[-48,0,48].iter().all(|&j|generator.column(x+i,z+j).1==world::Biome::Ocean)),
+                };
+                if fits {
+                    let to=Vec3::new(x as f32,h as f32+1.0,z as f32);
+                    if mode=="sea_wildlife" { return Some((Vec3::new(x as f32,generator.sea() as f32-4.0,z as f32),0.8,-0.1)); }
+                    let lift=if mode=="beach_ecology" {6.0}else{16.0};
+                    return Some(look(to+Vec3::new(10.0,lift,14.0),to));
+                }
+            } }
+            return None;
+        }
+        "rockyshore" | "biomeborder" => {
+            for r in 0..400 {
+                for (dx, dz) in ring(r) {
+                    let (x, z) = ((cx0 + dx) * 16 + 8, (cz0 + dz) * 16 + 8);
+                    let (h, b) = generator.column(x, z);
+                    let fits = if mode == "rockyshore" {
+                        h >= generator.sea() - 1 && h <= generator.sea() + 5
+                            && generator.shore_shape(x, z, &generator.place_v7(x, z)).1
+                            && !matches!(b, world::Biome::Snowy | world::Biome::IceSpikes)
+                    } else {
+                        h > generator.sea() + 3 && b == world::Biome::Plains
+                            && [(20, 0), (-20, 0), (0, 20), (0, -20)].iter()
+                                .any(|&(i,j)| generator.column(x+i,z+j).1 == world::Biome::Forest)
+                    };
+                    if fits {
+                        let to = Vec3::new(x as f32, h as f32 + 1.0, z as f32);
+                        let (fx, fz) = (x + 24, z + 24);
+                        let from = Vec3::new(fx as f32, generator.column(fx,fz).0.max(h) as f32 + 12.0, fz as f32);
+                        return Some(look(from, to));
+                    }
+                }
+            }
+            return None;
+        }
         "river" | "beach" => {
             // From the land beside a river, looking along its valley; or from
             // above a beach, looking out to sea.
@@ -260,17 +375,19 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                     }
                     for (sx, sz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                         let away = |k: i32| generator.column(x + sx * k, z + sz * k);
+                        // How far this side's bank is (rivers run 10 to 20-odd blocks wide).
+                        let bank = (1..=24).find(|&k| away(k).1 != world::Biome::River).unwrap_or(99);
                         let fits = if mode == "river" {
                             // Inland: land on this side, no sea for a long way, and more river a little way along it.
-                            let inland = [(48, 0), (-48, 0), (0, 48), (0, -48), (34, 34), (-34, 34), (34, -34), (-34, -34)].iter().all(|&(i, j)| !generator.column(x + i, z + j).1.is_ocean());
-                            inland && (8..=16).all(|k| !away(k).1.is_ocean() && away(k).1 != world::Biome::River) && (-12..=12).filter(|k| generator.column(x + sz * k, z + sx * k).1 == world::Biome::River).count() >= 9
+                            let inland = [(64, 0), (-64, 0), (0, 64), (0, -64), (45, 45), (-45, 45), (45, -45), (-45, -45)].iter().all(|&(i, j)| !generator.column(x + i, z + j).1.is_ocean());
+                            inland && bank <= 24 && (bank..bank + 10).all(|k| !away(k).1.is_ocean() && away(k).1 != world::Biome::River) && (-12..=12).filter(|k| generator.column(x + sz * k, z + sx * k).1 == world::Biome::River).count() >= 9
                         } else {
                             // The sea out on one side, land behind on the other.
                             (-14..=-8).all(|k| away(k).1.is_ocean()) && (6..=12).all(|k| !away(k).1.is_ocean())
                         };
                         if fits {
                             let sea = generator.sea() as f32;
-                            let (back, up) = if mode == "river" { (14.0, 9.0) } else { (10.0, 6.0) };
+                            let (back, up) = if mode == "river" { (bank as f32 + 8.0, 10.0) } else { (10.0, 6.0) };
                             let to = Vec3::new(x as f32 + 0.5 - sx as f32 * 4.0, sea, z as f32 + 0.5 - sz as f32 * 4.0);
                             let (fx, fz) = (x + sx * back as i32, z + sz * back as i32);
                             // (Above the ground there, and any trees on it.)
@@ -353,6 +470,8 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                 // From the south-west, or (`mansionhall`) along the ground floor's corridor.
                 Kind::Mansion if mode == "mansionhall" => look(o + Vec3::new(-12.5, 1.6, 0.5), o + Vec3::new(12.0, 1.4, 0.5)),
                 Kind::Mansion => look(o + Vec3::new(-27.0, 16.0, 33.0), o + Vec3::Y * 9.0),
+                // Stay inside the pool's cleared space, below tree canopies.
+                Kind::HotSpring if generator.opts.version >= 8 => look(o + Vec3::new(0.0, 2.0, 2.5), o),
                 Kind::HotSpring => look(o + Vec3::new(-7.0, 4.0, 7.0), o),
                 _ => look(o + Vec3::new(-8.0, 6.0, -8.0), o + Vec3::Y * 1.5),
             });
@@ -367,6 +486,182 @@ impl App {
     pub(crate) fn shot_setup(&mut self, s: &mut ShotArgs) {
         let app = self;
         match s.mode.as_str() {
+            "rocket_inflight" | "rocket_landing" | "rocket_cockpit" => {
+                let mut g=shot_game(424242,true,false);let landing=s.mode=="rocket_landing";
+                if landing && let Some(k)=block::reg().dims.iter().position(|d|d.key=="ad_absurdum:moon") {g.move_local_player(dims::Dim::Mod(k as u8),Vec3::new(0.0,82.0,0.0));}
+                for z in -2..=2 {for x in -2..=2 {g.world.load_now(x,z);}}
+                for z in -16..=16 {for x in -16..=16 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {STONE}else{AIR});}}}
+                g.mobs.clear();g.time=0.25;
+                let cockpit=s.mode=="rocket_cockpit";
+                let f=rockets::RocketFlight {owner:if cockpit {g.player_name.clone()}else{"Display".into()},pilot:if cockpit {g.my_id}else{u32::MAX},ground:Vec3::new(0.5,80.0,0.5),landing,elapsed:if landing {1.8}else{1.5},tier:1};
+                let target=f.pos()+Vec3::Y*2.5;
+                let from=if cockpit {f.seat()}else{target+Vec3::new(7.0,1.5,10.0)};
+                let d=target-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),if cockpit {0.0}else{d.x.atan2(-d.z)},if cockpit {-0.1}else{d.y.atan2(Vec2::new(d.x,d.z).length())});
+                g.rockets.push(f);g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
+            }
+            "dusk_trees" => {
+                let mut g=shot_game(424242,true,false);
+                if let Some(k)=block::reg().dims.iter().position(|d|d.key=="dusk:twilit_realm") {g.move_local_player(dims::Dim::Mod(k as u8),Vec3::new(0.0,90.0,0.0));}
+                for z in -2..=2 {for x in -2..=2 {g.world.load_now(x,z);}}
+                let floor=block::reg().lookup("dusk:dusk_grass").unwrap_or(GRASS);
+                for z in -25..=25 {for x in -25..=25 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {floor}else{AIR});}}}
+                let trees:Vec<_>=g.world.generator.biomes.iter().filter(|b|b.key.starts_with("dusk:")).filter_map(|b|b.tree.clone()).collect();
+                for (i,t) in trees.iter().enumerate() {
+                    for (p,id,over) in g.world.generator.custom_tree_blocks(-10+i as i32*10,-2,79,t) {
+                        if over || g.world.get_v(p)==AIR {g.world.set(p.x,p.y,p.z,id);}
+                    }
+                }
+                g.mobs.clear();let from=Vec3::new(0.0,86.0,24.0);let to=Vec3::new(0.0,85.0,-2.0);let d=to-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                g.player.body.pos=from;g.player.flying=true;app.start_game(g);app.show_debug=false;
+            }
+            "factory_line"|"factory_panel"|"factory_blocked"|"factory_power" => {
+                let mut g=shot_game(424242,true,false);for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
+                for z in -8..=8 {for x in -10..=10 {for y in 79..world::CH {g.world.set(x,y,z,if y<=80 {STONE}else{AIR});}}}g.mobs.clear();g.time=0.25;
+                let lookup=|key:&str|block::reg().lookup(key);
+                for (p,key) in [(IVec3::new(-3,82,0),"half_baked:reactor"),(IVec3::new(-3,82,-2),"half_baked:cooling_tower"),(IVec3::new(0,81,0),"ad_absurdum:power_bank"),(IVec3::new(0,81,-2),"ad_absurdum:solar_panel"),(IVec3::new(2,81,0),"half_baked:centrifuge"),(IVec3::new(4,81,0),"ad_absurdum:electric_furnace")] {if let Some(id)=lookup(key){g.world.set_v(p,id);}}
+                if let Some(cable)=lookup("ad_absurdum:cable") {for p in [IVec3::new(0,81,-1),IVec3::new(1,81,0),IVec3::new(0,81,1),IVec3::new(1,81,1),IVec3::new(2,81,1),IVec3::new(3,81,1),IVec3::new(4,81,1)]{g.world.set_v(p,cable);}}
+                let hop=HOPPER_FIRST+1+contraptions::facing_of(IVec3::X) as Id;for x in -3..= -1 {g.world.set(x,81,0,hop);}
+                for (p,slot,key,n) in [(IVec3::new(-3,82,0),0,"half_baked:pellet",8),(IVec3::new(-3,82,0),1,"half_baked:coolant",8),(IVec3::new(2,81,0),0,"half_baked:glowium_dust",32),(IVec3::new(2,81,0),1,"coal",16),(IVec3::new(4,81,0),0,"sand",32)] {if let Some(id)=lookup(key)&&let Some(c)=g.world.containers.get_mut(&p){c.slots[slot]=Some((id,n));c.burn_total=2.0;}}
+                for _ in 0..90{g.factory_tick(0.25);g.hoppers_tick(0.25);}
+                let from=if s.mode=="factory_line"{Vec3::new(7.0,84.5,8.5)}else{Vec3::new(2.5,81.0,2.5)};let to=Vec3::new(0.0,82.0,0.0);let d=to-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));g.player.body.pos=from;g.player.flying=true;
+                if s.mode!="factory_line"{let p=if s.mode=="factory_power"{IVec3::new(0,81,0)}else if s.mode=="factory_blocked"{IVec3::new(-3,82,0)}else{IVec3::new(2,81,0)};
+                    if s.mode=="factory_blocked" {g.world.set_v(p-IVec3::Y,AIR);if let Some(id)=lookup("half_baked:energy_cell")&&let Some(c)=g.world.containers.get_mut(&p){c.slots[2]=Some((id,64));}}
+                    g.open_container(p);
+                }
+                app.start_game(g);if s.mode!="factory_line"{app.set_screen(Screen::Container);}app.show_debug=false;
+            }
+            "machine_reactor"|"machine_rocket"|"mob_movement" => {
+                let mut g=shot_game(424242,true,false);
+                for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
+                for z in -8..=8 {for x in -10..=10 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {STONE}else{AIR});}}}
+                g.mobs.clear();g.time=0.25;
+                let from=Vec3::new(2.5,80.0,2.5);let d=Vec3::new(0.5,80.5,0.5)-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));g.player.body.pos=from;
+                if s.mode=="mob_movement" {
+                    for z in -3..=3 {for x in -6..=0 {
+                        let rim=x==-6||x==0||z==-3||z==3;
+                        g.world.set(x,79,z,if rim {STONE}else{WATER});g.world.set(x,80,z,if rim {STONE}else{WATER});
+                    }}
+                    for (kind,at) in [(entity::MobKind::Woofer,Vec3::new(1.5,80.0,0.0)),(entity::MobKind::Mooer,Vec3::new(-2.0,79.5,0.0)),(entity::MobKind::Allay,Vec3::new(0.0,82.0,-1.0))] {let id=g.alloc_mob(kind,at);let m=g.mobs.iter_mut().find(|m|m.id==id).unwrap();m.home=Some(at);m.persistent=true;m.yaw=2.7;}
+                    let from=Vec3::new(5.5,82.5,8.0);let d=Vec3::new(-0.5,80.8,0.0)-(from+Vec3::Y*player::EYE);(s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));g.player.body.pos=from;
+                    app.start_game(g);
+                } else {
+                    let key=if s.mode=="machine_reactor" {"half_baked:reactor"}else{"ad_absurdum:rocket_workbench"};
+                    if let Some(id)=block::reg().lookup(key) {g.world.set(0,80,0,id);}
+                    if let Some(id)=block::reg().lookup("half_baked:cooling_tower") {g.world.set(1,80,0,id);}
+                    g.start_scripts();
+                    for key in ["half_baked:pellet","half_baked:coolant","ad_absurdum:rocket_1"] {if let Some(id)=block::reg().lookup(key){g.give(id,2);}}
+                    g.open_machine(IVec3::new(0,80,0));
+                    if s.mode=="machine_reactor" {let p=IVec3::new(0,80,0);if let (Some(pellet),Some(coolant))=(block::reg().lookup("half_baked:pellet"),block::reg().lookup("half_baked:coolant"))&&let Some(c)=g.world.containers.get_mut(&p){c.slots[0]=Some((pellet,2));c.slots[1]=Some((coolant,2));}g.factory_action(2);}
+                    app.start_game(g);app.set_screen(if s.mode=="machine_reactor"{Screen::Container}else{Screen::Machine});
+                }
+                app.show_debug=false;
+            }
+            mode if mode.starts_with("pose_") => {
+                let mut g=shot_game(424242,true,false);
+                for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
+                for z in -8..=8 {for x in -10..=10 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {STONE}else{AIR});}}}
+                let swim=matches!(mode,"pose_swim"|"pose_tread");
+                if swim {for z in -3..=3 {for x in -6..=6 {g.world.set(x,79,z,WATER);g.world.set(x,78,z,STONE);}}}
+                g.mobs.clear();g.peers.clear();
+                if matches!(mode,"pose_climb"|"pose_hang") {for x in [-3,0,2] {for y in 80..=84 {g.world.set(x,y,-1,STONE);g.world.set(x,y,0,LADDER_FIRST);}}}
+                for (i,x) in [-2.2,0.0,2.2].into_iter().enumerate() {
+                    let mut p=crate::multiplayer::Peer::new(["Built-in","Custom skin","Armour"][i].into(),Vec3::new(x,if swim {79.2}else if mode.contains("fly")||mode=="pose_hover"||mode=="pose_glide" {81.0}else{80.0},0.0));
+                    if matches!(mode,"pose_climb"|"pose_hang") {p.pos.x=p.pos.x.floor()+0.5;p.pos.z=0.45;p.pos.y=80.7;p.target=p.pos;}
+                    p.yaw=if matches!(mode,"pose_climb"|"pose_hang") {0.0}else if i==1 {std::f32::consts::PI-0.35}else{std::f32::consts::PI*0.55};p.skin=i as u8;
+                    if i==1 {p.own_skin=Some(crate::skins::test_card());}
+                    if i==2 {p.armor=0x4444;if mode=="pose_glide" {p.armor=(p.armor&!0xF0)|((GLIDER_TIER as u16+1)<<4);}}
+                    g.peers.insert(100+i as u32,p);
+                }
+                g.refresh_skin_slots();
+                let from=Vec3::new(4.5,81.7,6.5);let to=Vec3::new(0.0,80.8,0.0);let d=to-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                g.player.body.pos=from;g.player.flying=true;g.time=0.25;app.start_game(g);app.show_debug=false;
+            }
+            "half_baked_lab" | "astra_rocket" | "dusk_guardians" | "dubiety_companion" | "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" | "glutton_inhale" => {
+                // Controlled displays of the installed example mods, using the
+                // current generator. These are model/content QA, not natural spawns.
+                let mut g=shot_game(424242,true,false);
+                let realm=match s.mode.as_str() {"astra_rocket"=>Some("ad_absurdum:moon"),"dusk_guardians"=>Some("dusk:twilit_realm"),_=>None};
+                if let Some(key)=realm && let Some(k)=block::reg().dims.iter().position(|d|d.key==key) {g.move_local_player(dims::Dim::Mod(k as u8),Vec3::new(0.0,82.0,0.0));}
+                for z in -1..=1 {for x in -1..=1 {g.world.load_now(x,z);}}
+                let floor=block::reg().lookup(if s.mode=="dusk_guardians" {"dusk:rune_brick"} else {"stone"}).unwrap_or(STONE);
+                for z in -10..=8 {for x in -12..=12 {for y in 78..world::CH {g.world.set(x,y,z,if y<=79 {floor}else{AIR});}}}
+                g.mobs.clear();
+                let mut display_mobs=Vec::new();
+                match s.mode.as_str() {
+                    "half_baked_lab" => {
+                        for (i,key) in ["centrifuge","reactor","cooling_tower","waste_barrel","small_nuke","large_nuke"].iter().enumerate() {
+                            if let Some(id)=block::reg().lookup(&format!("half_baked:{key}")) {g.world.set(-5+i as i32*2,80,0,id);}
+                        }
+                        if let Some(id)=block::reg().lookup("half_baked:shielding") {for x in -7..=7 {for y in 80..=82 {g.world.set(x,y,-3,id);}}}
+                    }
+                    "astra_rocket" => {
+                        for x in [-4,0,4] {for (y,key) in [(80,"launch_pad"),(81,"rocket_engine"),(82,"rocket_body"),(83,"rocket_body"),(84,"rocket_body"),(85,"rocket_nose")] {
+                            if let Some(id)=block::reg().lookup(&format!("ad_absurdum:{key}")) {g.world.set(x,y,-2,id);}
+                        }}
+                        for (x,key) in [(-6,"refinery"),(-3,"oxygen_generator"),(0,"rocket_workbench"),(3,"solar_panel")] {if let Some(id)=block::reg().lookup(&format!("ad_absurdum:{key}")) {g.world.set(x,80,2,id);}}
+                        display_mobs.push(("ad_absurdum:rover",Vec3::new(6.0,80.0,2.0)));
+                    }
+                    "dusk_guardians" => {
+                        for (x,key) in [(-6.0,"serpent"),(-2.0,"lich"),(2.0,"minotax"),(6.0,"hydra")] {display_mobs.push((match key {"serpent"=>"dusk:serpent","lich"=>"dusk:lich","minotax"=>"dusk:minotax",_=>"dusk:hydra"},Vec3::new(x,80.0,-1.0)));}
+                    }
+                    "dubiety_glutton" | "glutton_swallow" | "glutton_gulp" | "glutton_belly" | "glutton_inhale" => {
+                        display_mobs.push(("dubiety:companion",Vec3::new(-1.5,81.0,0.0)));
+                        display_mobs.push(("dubiety:obesity",Vec3::new(1.0,80.5,0.0)));
+                    }
+                    _ => {
+                        if let Some(id)=block::reg().lookup("dubiety:terminal") {g.world.set(0,80,0,id);}
+                        display_mobs.push(("dubiety:companion",Vec3::new(1.5,81.0,0.0)));
+                    }
+                }
+                for (key,at) in display_mobs {if let Some(kind)=entity::MobKind::from_name(key) {
+                    let id=g.alloc_mob(kind,at);if let Some(m)=g.mobs.iter_mut().find(|m|m.id==id) {m.home=Some(at);m.persistent=true;m.wander_t=100.0;m.wander_dir=None;m.yaw=2.7;}
+                }}
+                if s.mode.starts_with("glutton_") {
+                    g.mobs.retain(|m|m.kind.mod_def().is_some_and(|d|d.glutton));
+                    if let Some(m)=g.mobs.first_mut() {m.yaw=std::f32::consts::PI;}
+                    if let Some(eater)=g.mobs.first().map(|m|m.id) {
+                    let id=g.alloc_mob(entity::MobKind::Mooer,Vec3::new(1.0,80.0,3.5));
+                    let prey=g.mobs.iter().find(|m|m.id==id).unwrap();
+                    g.swallows.push(crate::swallow::Swallow::meal(eater,prey));g.mobs.retain(|m|m.id!=id);
+                    }
+                }
+                let (from,to)=if s.mode=="astra_rocket" {(Vec3::new(6.0,84.0,9.0),Vec3::new(0.0,82.8,-2.0))} else if matches!(s.mode.as_str(),"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly"|"glutton_inhale") {(Vec3::new(3.8,81.7,5.5),Vec3::new(0.0,81.0,0.0))} else if s.mode=="dubiety_companion" {(Vec3::new(3.8,81.2,4.5),Vec3::new(0.8,80.9,0.0))} else {(Vec3::new(9.0,85.0,12.0),Vec3::new(0.0,81.0,-1.0))};
+                let d=to-(from+Vec3::Y*player::EYE);(s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                g.player.body.pos=from;g.player.flying=true;g.time=0.25;app.start_game(g);app.show_debug=false;
+            }
+            "coastal_floor" | "coastal_fish" | "coastal_starfish" => {
+                // Controlled aquarium for model QA; natural habitat rules are
+                // exercised separately by spawning tests and playtests.
+                let mut g=shot_game(424242,true,false);
+                let (ox,oz)=(-4096..4096).step_by(128).flat_map(|z|(-4096..4096).step_by(128).map(move|x|(x,z))).find(|&(x,z)|g.world.generator.climate(x,z).0>0.35).unwrap_or((0,0));
+                let origin=Vec3::new(ox as f32,0.0,oz as f32);
+                for dz in -1..=1 {for dx in -1..=1 {g.world.load_now(ox.div_euclid(16)+dx,oz.div_euclid(16)+dz);} }
+                for z in -12..=8 {for x in -12..=12 {for y in 74..crate::world::CH {
+                    g.world.set(ox+x,y,oz+z,if y<76 {STONE}else if y==76 {SAND}else if y<=81 {WATER}else{AIR});
+                } } }
+                g.mobs.clear();
+                use entity::MobKind as K;
+                let kinds=if s.mode=="coastal_starfish" {vec![K::Starfish]} else if s.mode=="coastal_floor" {vec![K::Starfish,K::Clam,K::Crab,K::Mussel,K::Oyster,K::SeaSnail]} else {vec![K::Sardine,K::Tuna,K::Eel]};
+                for (i,kind) in kinds.into_iter().enumerate() {
+                    let pos=origin+if s.mode=="coastal_starfish" {Vec3::new(0.0,77.0,0.0)}else{Vec3::new(-1.5+(i%3) as f32*1.5,if kind.benthic(){77.0}else{78.0},-1.0-(i/3) as f32*1.5)};
+                    let id=g.alloc_mob(kind,pos);
+                    if let Some(m)=g.mobs.iter_mut().find(|m|m.id==id) {m.persistent=true;m.yaw=if s.mode=="coastal_starfish" {0.0}else if s.mode=="coastal_fish" {-1.1}else{0.5};m.wander_t=100.0;m.wander_dir=None;m.home=Some(pos);m.body.in_water=true;}
+                }
+                g.inv.armor[0]=Some((TURTLE_SHELL,1));
+                g.apply_potion(potions::Potion::NightVision);
+                g.shadows=false;
+                let from=origin+if s.mode=="coastal_starfish" {Vec3::new(0.25,77.5,0.4)}else{Vec3::new(0.0,77.8,2.5)};
+                let target=origin+if s.mode=="coastal_starfish" {Vec3::new(0.0,77.05,0.0)}else{Vec3::new(0.0,if s.mode=="coastal_floor"{77.2}else{78.2},-1.5)};
+                let d=target-(from+Vec3::Y*player::EYE);
+                (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                g.player.body.pos=from;g.player.flying=true;
+                g.time=0.3;app.start_game(g);app.show_debug=false;
+            }
             "survival" | "creative" | "inventory" | "night" | "death" => {
                 // --seed N shows someone else's world (to look at a reported bug).
                 let seed = std::env::args().collect::<Vec<_>>().windows(2).find(|w| w[0] == "--seed").and_then(|w| w[1].parse().ok()).unwrap_or(424242);
@@ -421,7 +716,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" | "rockyshore" | "biomeborder" | "rolling_hills" | "offshore_island" | "large_mushroom" | "beach_ecology" | "sea_wildlife" | "tide_pool" | "beach_showcase" | "landmark_arch" | "landmark_crater" | "landmark_grove" | "atlas" | "landmark_map" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -439,6 +734,8 @@ impl App {
                         g.rainbow = skies::RAINBOW_SECS - 20.0;
                         g.time = s.time.unwrap_or(0.38);
                     }
+                    // Deep caves in new worlds are found far from any light: see them as a player with Night Vision would.
+                    "dripstone" | "deepdark" if g.world.generator.opts.version >= 8 => g.apply_potion(potions::Potion::NightVision),
                     // A Turtle Shell, to see further underwater.
                     "monument" => g.inv.armor[0] = Some((block::TURTLE_SHELL, 1)),
                     _ => {}
@@ -459,6 +756,56 @@ impl App {
                         g.move_local_player(crate::dims::Dim::Scorch, pos);
                     }
                     (s.pos, s.yaw, s.pitch) = (Some(pos), yaw, pitch);
+                }
+                if matches!(s.mode.as_str(),"tide_pool"|"beach_showcase") && let Some(pos)=s.pos {
+                    let (cx,cz)=((pos.x.floor() as i32).div_euclid(16),(pos.z.floor() as i32).div_euclid(16));
+                    for dz in -3..=3 {for dx in -3..=3 {g.world.load_now(cx+dx,cz+dz);}}
+                    if s.mode=="beach_showcase" {
+                        let cell=(pos.x.floor() as i32-6).div_euclid(64);let row=(pos.z.floor() as i32-7).div_euclid(64);
+                        if let Some((x,z,_,radius))=g.world.generator.beach_pool_cell(cell,row) {
+                            let xx=x+radius+2;let h=g.world.generator.column(xx,z).0;
+                            for (i,id) in [DRIFTWOOD,SHELL_PATCH,DUNE_GRASS].into_iter().enumerate() {
+                                let zz=z+i as i32-1;
+                                g.world.set(xx,h-1,zz,SANDSTONE);g.world.set(xx,h,zz,SAND);
+                                for y in h+1..=h+4 {g.world.set(xx,y,zz,AIR);}
+                                g.world.set(xx,h+1,zz,id);
+                            }
+                            let target=Vec3::new(xx as f32+0.5,h as f32+1.1,z as f32+0.5);
+                            let from=target+Vec3::new(3.5,2.0,2.5);let d=target-(from+Vec3::Y*player::EYE);
+                            (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                        }
+                    }
+                }
+                // Holding an Atlas filled in for a few hundred blocks round about, or a map.
+                if s.mode == "atlas" || s.mode == "landmark_map" {
+                    g.inv.selected = 0;
+                    g.inv.slots[0] = Some((if s.mode == "atlas" { block::EXPLORERS_ATLAS } else { block::MAP }, 1));
+                    if let Some(pos) = s.pos {
+                        let (mx, mz) = ((pos.x as i32).div_euclid(crate::atlas::CELL), (pos.z as i32).div_euclid(crate::atlas::CELL));
+                        for dz in -12..=12 {
+                            for dx in -9..=14 {
+                                if dx * dx + dz * dz > 150 {
+                                    continue;
+                                }
+                                let (cx, cz) = (mx + dx, mz + dz);
+                                let b = g.world.generator.column(cx * crate::atlas::CELL + 32, cz * crate::atlas::CELL + 32).1;
+                                g.atlas.cells.insert((cx, cz), world::Biome::ALL.iter().position(|&x| x == b).unwrap_or(0) as u8);
+                            }
+                        }
+                        for l in g.world.generator.landmarks_near(pos.x as i32, pos.z as i32, 900) {
+                            g.atlas.landmarks.push(crate::atlas::Found { name: l.name, kind: l.kind, x: l.x, z: l.z });
+                        }
+                    }
+                }
+                if s.mode=="sea_wildlife" && let Some(pos)=s.pos {
+                    let (cx,cz)=((pos.x.floor() as i32).div_euclid(16),(pos.z.floor() as i32).div_euclid(16));
+                    for dz in -4..=4 { for dx in -4..=4 { g.world.load_now(cx+dx,cz+dz); } }
+                    for _ in 0..60 { g.try_sea_wildlife(pos); }
+                    if let Some(m)=g.mobs.iter().find(|m|m.kind==entity::MobKind::Dolphin) {
+                        let to=m.body.pos;let from=to+Vec3::new(6.0,-1.5,6.0);let d=to-from;
+                        (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                    }
+                    g.inv.armor[0]=Some((block::TURTLE_SHELL,1));
                 }
                 // In front of a village's Notice Board, or looking at where it will build next.
                 if let Some(o) = matches!(s.mode.as_str(), "noticeboard" | "growingvillage" | "shopstall" | "newspaper").then(|| g.world.nearest_site(structures::Kind::Village, g.spawn, 60)).flatten() {
@@ -890,6 +1237,52 @@ impl App {
                     app.game.player.body.pos = p;
                     app.game.player.body.vel = Vec3::ZERO;
                     app.game.player.flying = true;
+                }
+                if s.mode=="mob_movement" {
+                    for m in &mut app.game.mobs {if let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}
+                        m.sitting=m.kind==entity::MobKind::Woofer;m.body.on_ground=m.sitting;
+                        let velocity=if m.kind.flies(){Vec3::new(4.0,2.0,-1.0)}else{Vec3::new(0.0,0.0,-1.5)};
+                        m.tick_pose(&app.game.world,velocity,0.05);m.anim=1.0;m.flap=1.2;
+                    }
+                    app.game.messages.clear();app.game.toasts.clear();
+                }
+                if s.mode.starts_with("factory_"){app.game.messages.clear();app.game.toasts.clear();}
+                if s.mode.starts_with("machine_"){app.game.messages.clear();app.game.toasts.clear();}
+                if s.mode.starts_with("pose_") {
+                    for p in app.game.peers.values_mut() {p.animation=pose_fixture(&s.mode);p.target=p.pos;
+                        p.held=match s.mode.as_str(){"pose_tool"=>PICK_DIAMOND,"pose_shield"|"pose_hurt"=>SWORD_IRON,"pose_bow"=>BOW,"pose_spear"=>SPEAR,_=>AIR};
+                        p.offhand=match s.mode.as_str(){"pose_tool"=>TORCH,"pose_shield"=>SHIELD,_=>AIR};
+                        p.draw=if s.mode=="pose_bow"{255}else{0};p.gesture=u8::from(s.mode=="pose_shield");
+                        p.flags=match s.mode.as_str(){"pose_tool"|"pose_spear"=>net::FLAG_SWING,"pose_hurt"=>net::FLAG_HURT,_=>0};}
+                    if s.mode.ends_with("_first") {app.game.player.animation=pose_fixture(&s.mode);}
+                    app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
+                }
+                if matches!(s.mode.as_str(),"half_baked_lab"|"astra_rocket"|"dusk_guardians"|"dubiety_companion"|"dubiety_glutton"|"glutton_swallow"|"glutton_gulp"|"glutton_belly"|"glutton_inhale"|"dusk_trees"|"rocket_inflight"|"rocket_landing"|"rocket_cockpit") {
+                    for m in &mut app.game.mobs {if let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
+                    app.game.messages.clear();app.game.toasts.clear();app.game.inv.slots.fill(None);
+                }
+                if s.mode.starts_with("glutton_") {
+                    // Freeze a deterministic point in the real effect, not a substitute illustration.
+                    let elapsed=match s.mode.as_str() {"glutton_inhale"=>0.23,"glutton_swallow"=>0.75,"glutton_gulp"=>1.2,_=>1.8};
+                    if let Some(m)=app.game.mobs.first() {
+                        let f=crate::swallow::Swallow {eater:m.id,prey:u32::MAX,kind:entity::MobKind::Mooer.index(),from:Vec3::new(1.0,80.0,3.5),yaw:0.0,scale:1.0,sheared:false,elapsed};
+                        app.game.swallows=vec![f];
+                    }
+                }
+                if s.mode=="rocket_cockpit" && let Some(f)=app.game.rockets.first_mut() {f.elapsed=1.5;app.game.player.body.pos=f.seat();}
+                if matches!(s.mode.as_str(),"coastal_floor"|"coastal_fish"|"coastal_starfish") {
+                    // Keep these controlled model-review poses in view.
+                    for m in &mut app.game.mobs {if m.kind.coastal() && let Some(at)=m.home {m.body.pos=at;m.body.vel=Vec3::ZERO;}}
+                    app.game.messages.clear();app.game.toasts.clear();
+                    app.game.inv.slots.fill(None);
+                }
+                if s.mode=="sea_wildlife" && let Some(to)=app.game.mobs.iter().find(|m|m.kind==entity::MobKind::Dolphin).map(|m|m.body.pos+Vec3::Y*0.3) {
+                    let mut from=to+Vec3::new(4.0,-0.9,5.0);
+                    from.y=from.y.min(app.game.world.sea() as f32-2.0);
+                    let d=to-(from+Vec3::Y*player::EYE);
+                    app.game.player.body.pos=from;
+                    app.game.player.yaw=d.x.atan2(-d.z);
+                    app.game.player.pitch=d.y.atan2(Vec2::new(d.x,d.z).length());
                 }
             }
             if frames >= 150 && frames < 150 + s.chat.len() as u32 {
@@ -2323,6 +2716,15 @@ impl App {
 /// newest generator) unless `--gen` says otherwise. New scenes go here.
 const LATEST_SCENES: &[&str] = &[
     "desertvillage", "savannavillage", "taigavillage", "snowyvillage", "bedtime", "tradeliked", "tradedisliked", "tradehated", "noticeboard", "growingvillage", "shopstall", "newspaper", "river", "beach",
+    "depth_dripstone", "depth_lush", "depth_dark", "settled_village", "settled_mansion", "settled_spring", "climate_mod",
+    "terrain_mountains", "terrain_meadow", "terrain_river", "terrain_beach", "rockyshore", "biomeborder",
+    "factory_line", "factory_panel", "factory_blocked", "factory_power",
+    "machine_reactor", "machine_rocket", "mob_movement", "pose_tool", "pose_shield", "pose_bow", "pose_spear", "pose_climb", "pose_hang", "pose_hurt",
+    "pose_swim", "pose_tread", "pose_hover", "pose_fly_up", "pose_fly_down", "pose_glide", "pose_crouch", "pose_eat", "pose_drink", "pose_eat_first", "pose_drink_first", "pose_landing", "pose_transition",
+    "glutton_inhale", "glutton_swallow", "glutton_gulp", "glutton_belly", "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
+    "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
+    "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
+    "landmark_arch", "landmark_crater", "landmark_grove", "atlas", "landmark_map",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is
@@ -2372,4 +2774,32 @@ fn half_built_house(g: &mut Game, o: IVec3) -> Option<IVec3> {
         g.grow_village(key);
     }
     Some(g.growth_spots(&site)[spot].0)
+}
+
+/// Deterministic native animation fixtures, using exactly the gameplay controller.
+fn pose_fixture(mode:&str)->crate::poses::Animator {
+    use crate::poses::{Animator,Motion,Meal};
+    let mut a=Animator::default();let mut m=Motion::default();
+    match mode {
+        "pose_tool"=>{m.held=PICK_DIAMOND;m.offhand=TORCH;m.swing=0.5;}
+        "pose_shield"=>{m.held=SWORD_IRON;m.offhand=SHIELD;m.blocking=true;}
+        "pose_bow"=>{m.held=BOW;m.bow=1.0;}
+        "pose_spear"=>{m.held=SPEAR;m.swing=0.5;}
+        "pose_climb"=>{m.climb=true;m.grounded=false;m.velocity=Vec3::Y*3.0;}
+        "pose_hang"=>{m.climb=true;m.grounded=false;}
+        "pose_hurt"=>{m.held=SWORD_IRON;m.hurt=0.2;}
+        "pose_swim"=>{m.swim=true;m.grounded=false;m.velocity=Vec3::new(0.0,0.0,-2.5);}
+        "pose_tread"=>{m.swim=true;m.grounded=false;}
+        "pose_hover"=>{m.fly=true;m.grounded=false;}
+        "pose_fly_up"=>{m.fly=true;m.grounded=false;m.velocity=Vec3::new(1.0,8.0,-5.0);}
+        "pose_fly_down"=>{m.fly=true;m.grounded=false;m.velocity=Vec3::new(-1.0,-8.0,-2.0);}
+        "pose_glide"=>{m.glide=true;m.grounded=false;m.velocity=Vec3::new(4.0,-1.0,-12.0);m.pitch= -0.15;}
+        "pose_crouch"|"pose_transition"=>{m.crouch=true;m.velocity=Vec3::new(0.0,0.0,-1.0);}
+        "pose_landing"=>{a.tick(0.1,Motion{grounded:false,velocity:-Vec3::Y*12.0,..Default::default()});}
+        _=>{}
+    }
+    if mode.starts_with("pose_eat") {a.start(Meal{item:BREAD,elapsed:0.0});}
+    if mode.starts_with("pose_drink") {a.start(Meal{item:crate::potions::potion_item(crate::potions::Potion::Healing,false),elapsed:0.0});}
+    for _ in 0..if mode=="pose_transition"||mode=="pose_landing" {1}else{33} {a.tick(1.0/60.0,m);}
+    a
 }

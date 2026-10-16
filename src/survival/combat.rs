@@ -5,7 +5,9 @@
 //!   (swords 0.6 s, pickaxes 0.8 s, hands 0.3 s); a bar under the crosshair
 //!   fills up. Hitting early does less damage (a fifth, rising with the
 //!   square of the charge), and only a fully charged blow counts as a
-//!   falling critical or knocks back hard when sprinting.
+//!   falling critical or knocks back hard when sprinting. A mob that's
+//!   just been hit can't be hurt again for half a second, so clicking fast
+//!   doesn't beat waiting for the charge.
 //! - **Sweep.** A fully charged sword blow on the ground also catches mobs
 //!   right next to the target for a point of damage.
 //! - **Shields.** Hold right-click with a shield to block: you move slowly,

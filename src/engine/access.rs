@@ -27,6 +27,7 @@ pub fn caption(s: Sfx) -> Option<&'static str> {
         Sfx::Hiss => "Hissing!",
         Sfx::Groan => "Groaner groans",
         Sfx::Explode => "Explosion",
+        Sfx::Burp => "Companion burps",
         Sfx::Eat => "Eating",
         Sfx::Pop => "Item picked up",
         Sfx::Splash => "Splash",

@@ -1,0 +1,530 @@
+[mod]
+name = Half-Baked Nuclear Machinery
+version = 1.0
+author = Minceraft example mods
+description = Glowing industry, coolant, radiation and two very bad ideas with countdowns.
+
+[texture steel]
+color b = 89,103,109
+color a = 172,188,197
+color d = 48,56,59
+dddddddddddddddd
+dbbbbbbbbbabbbbd
+dbbbbbbbbabbbbbd
+dbbbbbbbabbbbbbd
+dbbbbbbabbbbbbbd
+dbbbbbabbbbbbbbd
+dbbbbabbbbbbbbbd
+dbbbabbbbbbbbbbd
+dbbabbbbbbbbbbad
+dbabbbbbbbbbbabd
+dabbbbbbbbbbabbd
+dbbbbbbbbbbabbbd
+dbbbbbbbbbabbbbd
+dbbbbbbbbabbbbbd
+dbbbbbbbabbbbbbd
+dddddddddddddddd
+
+[texture glowium]
+color b = 65,75,58
+color a = 158,229,51
+color d = 35,41,31
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture copper]
+color b = 153,85,49
+color a = 244,175,73
+color d = 84,46,26
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture hazard]
+color b = 26,29,24
+color a = 243,216,53
+color d = 14,15,13
+bbbbaaaabbbbaaaa
+bbbaaaabbbbaaaab
+bbaaaabbbbaaaabb
+baaaabbbbaaaabbb
+aaaabbbbaaaabbbb
+aaabbbbaaaabbbba
+aabbbbaaaabbbbaa
+abbbbaaaabbbbaaa
+bbbbaaaabbbbaaaa
+bbbaaaabbbbaaaab
+bbaaaabbbbaaaabb
+baaaabbbbaaaabbb
+aaaabbbbaaaabbbb
+aaabbbbaaaabbbba
+aabbbbaaaabbbbaa
+abbbbaaaabbbbaaa
+
+[texture reactor]
+color b = 48,67,60
+color a = 56,225,120
+color d = 26,36,33
+dddddddddddddddd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbabbabbabbabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dddddddddddddddd
+
+[texture control]
+color b = 44,54,66
+color a = 244,78,69
+color d = 24,29,36
+dddddddddddddddd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbabbabbabbabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dddddddddddddddd
+
+[texture fuel]
+color b = 70,104,37
+color a = 173,245,52
+color d = 38,57,20
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture coolant]
+color b = 28,84,119
+color a = 108,213,242
+color d = 15,46,65
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture waste]
+color b = 51,51,38
+color a = 229,154,54
+color d = 28,28,20
+bbbbaaaabbbbaaaa
+bbbaaaabbbbaaaab
+bbaaaabbbbaaaabb
+baaaabbbbaaaabbb
+aaaabbbbaaaabbbb
+aaabbbbaaaabbbba
+aabbbbaaaabbbbaa
+abbbbaaaabbbbaaa
+bbbbaaaabbbbaaaa
+bbbaaaabbbbaaaab
+bbaaaabbbbaaaabb
+baaaabbbbaaaabbb
+aaaabbbbaaaabbbb
+aaabbbbaaaabbbba
+aabbbbaaaabbbbaa
+abbbbaaaabbbbaaa
+
+[texture tablet]
+color b = 225,230,198
+color a = 136,210,178
+color d = 123,126,108
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[block glowium_ore]
+name = Glowium Ore
+texture = glowium
+hardness = 3
+tool = pickaxe
+tier = 2
+drops = glowium_dust
+
+[block copper_ore]
+name = Budget Copper Ore
+texture = copper
+hardness = 3
+tool = pickaxe
+tier = 2
+smelts_into = copper_ingot
+
+[block steel_block]
+name = Budget Steel Block
+texture = steel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block shielding]
+name = Very Heavy Shielding
+texture = hazard
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block centrifuge]
+shape = industrial
+name = Spin Doctor Centrifuge
+texture = control
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block reactor]
+shape = industrial
+name = Questionable Reactor
+texture = reactor
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block cooling_tower]
+shape = industrial
+name = Cool Story Tower
+texture = coolant
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block battery]
+shape = industrial
+name = Industrial Battery
+texture = fuel
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block waste_barrel]
+name = Definitely Fine Waste Barrel
+texture = waste
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block small_nuke]
+name = Pocket Apocalypse
+texture = hazard
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[block large_nuke]
+name = Management Decision
+texture = control
+hardness = 2
+tool = pickaxe
+tier = 1
+
+[item glowium_dust]
+name = Glowium Dust
+texture = fuel
+
+[item copper_ingot]
+name = Budget Copper Ingot
+texture = copper
+
+[item steel_ingot]
+name = Budget Steel Ingot
+texture = steel
+
+[item pellet]
+name = Spicy Fuel Pellet
+texture = fuel
+
+[item coolant]
+name = Coolant Canister
+texture = coolant
+
+[item energy_cell]
+name = Energy Cell
+texture = fuel
+
+[item waste]
+name = Spent Nonsense
+texture = waste
+
+[item arming_key]
+name = Bad Idea Key
+texture = control
+
+[item geiger]
+name = Click Counter
+texture = control
+
+[item scrubber]
+name = Portable Scrubber
+texture = coolant
+
+[item tablet]
+name = Anti-Spicy Tablet
+texture = tablet
+
+[item hazmat_hood]
+name = Hazmat Hood
+texture = hazard
+armor = helmet
+armor_points = 2
+looks_like = gold
+durability = 380
+repair = steel_ingot
+
+[item hazmat_jacket]
+name = Hazmat Jacket
+texture = hazard
+armor = chestplate
+armor_points = 2
+looks_like = gold
+durability = 380
+repair = steel_ingot
+
+[item hazmat_trousers]
+name = Hazmat Trousers
+texture = hazard
+armor = leggings
+armor_points = 2
+looks_like = gold
+durability = 380
+repair = steel_ingot
+
+[item hazmat_boots]
+name = Hazmat Boots
+texture = hazard
+armor = boots
+armor_points = 2
+looks_like = gold
+durability = 380
+repair = steel_ingot
+
+[item manual]
+name = Half-Baked Safety Manual
+texture = control
+consume = false
+on_use = message /hbm help: machines, radiation, arming and scram. Read the README before pulling a lever.
+
+[ore glowium]
+block = glowium_ore
+min_y = 5
+max_y = 45
+chance = 0.003
+
+[ore copper]
+block = copper_ore
+min_y = 12
+max_y = 85
+chance = 0.004
+
+[recipe]
+inputs = iron 2, coal 1
+output = steel_ingot 2
+
+[recipe]
+inputs = steel_ingot 9
+output = steel_block 1
+
+[recipe]
+inputs = steel_ingot 6, stone 4
+output = shielding 4
+
+[recipe]
+inputs = steel_ingot 6, copper_ingot 4, zap_dust 2
+output = centrifuge 1
+
+[recipe]
+inputs = steel_ingot 8, shielding 4, glass 2
+output = reactor 1
+
+[recipe]
+inputs = steel_ingot 4, glass 2
+output = cooling_tower 1
+
+[recipe]
+inputs = glass_bottle 1, ice 2
+output = coolant 2
+
+[recipe]
+inputs = steel_ingot 2, gold 1, zap_dust 1
+output = arming_key 1
+
+[recipe]
+inputs = steel_ingot 2, copper_ingot 1, zap_dust 1
+output = geiger 1
+
+[recipe]
+inputs = steel_ingot 4, sponge 1
+output = scrubber 1
+
+[recipe]
+inputs = bread 1, apple 1
+output = tablet 2
+
+[recipe]
+inputs = steel_ingot 4, pellet 3, gunpowder 8
+output = small_nuke 1
+
+[recipe]
+inputs = steel_ingot 8, pellet 6, small_nuke 1, energy_cell 4
+output = large_nuke 1
+
+[recipe]
+inputs = steel_ingot 4, energy_cell 2
+output = battery 1
+
+[recipe]
+inputs = steel_ingot 3, waste 1
+output = waste_barrel 1
+
+[recipe]
+inputs = book 1, copper_ingot 1
+output = manual 1
+
+[recipe]
+inputs = steel_ingot 3, wool 2
+output = hazmat_hood 1
+
+[recipe]
+inputs = steel_ingot 6, wool 2
+output = hazmat_jacket 1
+
+[recipe]
+inputs = steel_ingot 5, wool 2
+output = hazmat_trousers 1
+
+[recipe]
+inputs = steel_ingot 3, wool 2
+output = hazmat_boots 1
+
+[structure research_shed]
+name = Half-Baked Research Shed
+spacing = 28
+chance = 0.5
+loot = steel_ingot 4 1, manual 1 1, geiger 1 0.5
+block # = steel_block
+block c = chest
+block r = centrifuge
+block w = waste_barrel
+layer
+#######
+#######
+#######
+#######
+#######
+layer
+#######
+#r...w#
+#.....#
+#..c..#
+###.###
+layer
+#######
+#.....#
+#.....#
+#.....#
+###.###
+layer
+#######
+#######
+#######
+#######
+#######
+
+[item empty_cell]
+name = Discharged Energy Cell
+texture = steel
+
+[block cable]
+shape = industrial
+name = Industrial Power Cable
+texture = copper
+solid = false
+transparent = true
+hardness = 0.5
+
+[recipe]
+inputs = copper_ingot 2, steel_ingot 1
+output = cable 8
+
+[recipe]
+inputs = steel_ingot 2, glass 1
+output = empty_cell 2

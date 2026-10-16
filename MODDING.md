@@ -65,7 +65,7 @@ description = One line shown on the Mods screen.
 | `speed` | Walking speed multiplier on top of it (0.2–3) | `1` |
 | `on_break` | Actions when a player breaks it (see below) | |
 | `creative` | Show it in the creative palette | `true` |
-| `shape` | `slab` or `stairs` (they behave like the base game's: slabs stack into `full`, stairs face away from you) | `cube` |
+| `shape` | `slab`, `stairs`, `industrial`, `rocket_engine`, `rocket_body` or `rocket_nose` (they behave like the base game's: slabs stack into `full`, stairs face away from you) | `cube` |
 | `full` | For slabs: the block two of them make | none (two slabs stay two slabs) |
 | `smelts_into` | What a furnace turns it into | doesn't cook |
 | `burns_for` | Seconds it burns as furnace fuel (0.5–600) | not fuel |
@@ -210,7 +210,31 @@ plant = cheese_flower 0.06   // a block and a chance per column (up to 8 lines)
 tree = wheel butter 0.004 4  // log, leaves, chance per column, height
 ```
 
+The tree line optionally accepts a fifth field: `round` (default), `twisted` (bent trunk and branching clustered crown), `spire` (tiered conifer), or `umbrella` (low, broad crown). For example `tree = dusk_log dusk_leaves 0.012 10 twisted`. Custom styles use a bounded six-block reach, deterministic orientation and world-coordinate leaf noise; old four-field definitions keep their original shape. Invalid styles report a parse error. Protocol 52 is required.
+
 Base-game trees don't grow in a mod biome, so give it a `tree` if it should have any. The F3 screen shows which biome you're in, and `/locate <name>` finds the nearest patch.
+
+#### Optional climate targets (Overworlds made from v0.6 Part 2 on)
+
+A biome can target the shared surface climate instead of taking an unrestricted patch in its `in` biomes:
+
+```ini
+[biome dry_hills]
+climate_temperature = 0.5
+climate_moisture = -0.2
+climate_continentalness = 0.3
+climate_erosion = -0.2
+share = 0.25
+size = 300
+top = sand
+under = sandstone
+```
+
+Each target must be a finite number in **-1..=1**. Positive temperature is hotter, positive moisture wetter, positive continentalness farther inland, and negative erosion more rugged. Omitted axes do not affect matching. Every specified axis must be within **0.35** of the column; otherwise that target is ineligible. Among eligible patches, the smallest mean squared distance wins (axis differences divided by 2). Equal distances use the full biome key alphabetically, making ties deterministic. `share` and `size` still control the patch coverage.
+
+Without `in`, a target may use any ordinary inland climate slot. With `in`, it is further restricted to those base biomes. It never replaces oceans, rivers, beaches, peaks, wet lowlands, mushroom islands, or the rare Cherry/Pale Garden/Ice Spikes variants. A targetless patch has priority and retains the existing first-match selection. A target that has no eligible nearby climate leaves the base biome unchanged.
+
+Climate targets apply only to the **Overworld** in generation revision **8 or later**. They are ignored in older worlds; using them with `in = <mod dimension>` is a parse error. Targetless mod dimensions and biomes continue to work as before. See `example-mods/climate/mod.txt` for a complete example with a structure. New Overworld template structures check every footprint column for water, biome suitability and height variation (at most three blocks from their origin), and settle their foundations into the ground.
 
 ### `[structure <name>]`
 
@@ -258,6 +282,8 @@ hill_size = 60             // how wide they are
 sky = #10142a
 light = 0.55               // how bright it is (0 to 1); there's no sun or weather
 ```
+
+Dimensions may also set `gravity = 0.17` for lower **player** gravity. The default is `1`, values clamp to `0.15–2`, and non-finite values are rejected. Gliders and mobs retain their existing physics. Protocol 50 protects this addition. Choose a dimension name that does not match a base biome: for example `twilit_realm` rather than `forest`, because `in = forest` identifies the base Forest biome.
 
 Each dimension gets a portal block (`<name>_portal`) made for it. Ores, plants, biomes and structures can be put in it with `dimension = <name>` or `in = <name>`. Walking through the portal again brings you back to the Overworld. Its terrain is saved in its own folder, by name, so turning the mod off and on again keeps it.
 
@@ -534,3 +560,18 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 - **Joining a server:** the server's mods replace yours while you're connected, and yours come back when you leave. Servers only send `.txt` and `.png` files.
 - **Dedicated servers:** they load mods from the `mods/` folder where the server runs, and list them in the console at startup.
 - **Turning mods off:** the On/Off buttons on the Mods screen write `mods/disabled.txt`. You can edit that file yourself: one mod folder name per line.
+
+## Larger parody examples
+
+See [example-mods/README.md](example-mods/README.md) for Half-Baked Nuclear Machinery, Dubiety, Ad Absurdum, and The Slightly Dim Forest. All four may be installed together. Their content uses this data format and host-only scripts, with dimension-aware commands for rockets, fallout and wildlife. Their READMEs explain recipes, commands, progression and the deliberate limits of these small engine-native examples.
+
+Rocket shape presets use bounded model geometry and collision boxes: `rocket_engine` includes a bell nozzle and four swept fins, `rocket_body` has a faceted narrow fuselage, and `rocket_nose` tapers in three voxel steps. They share the normal top/side/bottom textures and work in world, held-block and inventory rendering.
+
+
+### Glutton companions
+
+A `[mob]` can opt into `glutton = true` (default `false`). It accepts every non-air held item as a one-unit offering, before name tags, leads, shears and trading interactions; `tame_item` still tames while consuming the offering. Empty-hand owner interaction retains sit/follow. Feeding heals two health, preserves the mob and earns Bottomless Appetite. Normal survival/creative inventory rules and host range/inventory validation apply.
+
+A living, loaded glutton swallows all living Mooers, Oinkers, Fluffers and Clucksters whose body positions are at most five blocks away in 3D. There is no line-of-sight condition. It removes them directly without death drops or kill credit, including babies and kept animals. It never eats other mob types or across dimensions. It requests food from the nearest player within sixteen blocks every eight seconds (at most one demand per player per update). The demand timer is transient; pet ownership and persistence use the existing mob save format. Older mods retain all their previous interactions.
+
+`shape = industrial` selects the native detailed model for the bundled production machines and power cables. Other keys fall back to a box. It preserves the declared solidity/transparency, so cables can be thin, non-blocking models.

@@ -22,6 +22,7 @@ pub struct Input {
 }
 
 pub struct Player {
+    pub animation: crate::poses::Animator,
     pub body: Body,
     pub yaw: f32,
     pub pitch: f32,
@@ -63,9 +64,17 @@ pub struct Player {
     pub air: f32,
 }
 
+/// Damage for landing after dropping `drop` blocks. Landing speed is what
+/// hurts, so in low gravity (`pull` under 1) the same drop lands softer.
+pub fn fall_damage(drop: f32, pull: f32) -> f32 {
+    let fall = drop * pull;
+    if fall > 3.5 { (fall - 3.0).floor() } else { 0.0 }
+}
+
 impl Player {
     pub fn new(pos: Vec3) -> Self {
         Player {
+            animation: Default::default(),
             body: Body::new(pos, 0.3, 1.8),
             yaw: 0.0,
             pitch: -0.2,
@@ -207,8 +216,10 @@ impl Player {
         b.vel.x += (target.x - b.vel.x) * k;
         b.vel.z += (target.z - b.vel.z) * k;
 
+        let pull = world.generator.mod_dim().map(|d| d.gravity).unwrap_or(1.0);
+        let gravity = GRAVITY * pull;
         if in_water {
-            b.vel.y -= GRAVITY * 0.25 * dt;
+            b.vel.y -= gravity * 0.25 * dt;
             b.vel.y *= (1.0 - dt * 2.5).max(0.0);
             if input.jump {
                 b.vel.y = (b.vel.y + 22.0 * dt).min(3.5);
@@ -221,13 +232,13 @@ impl Player {
             } else if self.sneaking {
                 0.0
             } else {
-                (b.vel.y - GRAVITY * dt).max(-2.5)
+                (b.vel.y - gravity * dt).max(-2.5)
             };
             b.vel.x = b.vel.x.clamp(-2.5, 2.5);
             b.vel.z = b.vel.z.clamp(-2.5, 2.5);
             self.fall_start = b.pos.y;
         } else {
-            b.vel.y = (b.vel.y - GRAVITY * dt).max(-60.0);
+            b.vel.y = (b.vel.y - gravity * dt).max(-60.0);
             if input.jump && b.on_ground {
                 b.vel.y = 8.7 + 2.3 * self.leaping as f32;
                 self.jumped = true;
@@ -280,12 +291,12 @@ impl Player {
         if b.in_water {
             self.fall_start = b.pos.y;
         } else if b.on_ground {
-            let fall = self.fall_start - b.pos.y;
+            let fall = (self.fall_start - b.pos.y) * pull;
             if fall > 0.6 {
                 self.landed = Some(fall);
             }
-            if fall > 3.5 && !creative {
-                dmg = (fall - 3.0).floor();
+            if !creative {
+                dmg = fall_damage(self.fall_start - b.pos.y, pull);
             }
             self.fall_start = b.pos.y;
         } else if b.vel.y > 0.0 || b.pos.y > self.fall_start {

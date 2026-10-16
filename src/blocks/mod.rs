@@ -36,3 +36,7 @@ pub(crate) mod together;
 pub(crate) mod trading;
 pub(crate) mod villageblocks;
 pub(crate) mod zapparts;
+
+pub(crate) mod machines;
+
+pub(crate) mod factory;

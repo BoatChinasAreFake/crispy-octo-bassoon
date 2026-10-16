@@ -42,6 +42,8 @@ macro_rules! realm_fields {
             peers: BTreeMap<u32, Peer>,
             viewers: HashMap<IVec3, HashSet<u32>>,
             dirty_containers: HashSet<IVec3>,
+            factory_timer:f32,
+            factory_states:HashMap<IVec3,crate::factory::Visual>,
             detectors: HashMap<IVec3, f32>,
             drops: Vec<crate::drops::ItemDrop>,
             orbs: Vec<crate::xp::XpOrb>,
@@ -56,6 +58,8 @@ macro_rules! realm_fields {
             plates: HashMap<IVec3, f32>,
             powered_doors: HashSet<IVec3>,
             vehicles: Vec<crate::vehicles::Vehicle>,
+            rockets: Vec<crate::rockets::RocketFlight>,
+            swallows: Vec<crate::swallow::Swallow>,
             hives: HashMap<IVec3, crate::bees::Colony>,
             pots: HashMap<IVec3, crate::cooking::Pot>,
             buzz: Vec<crate::bees::Buzz>,
@@ -114,6 +118,7 @@ impl Realm {
             peers: BTreeMap::new(),
             viewers: HashMap::new(),
             dirty_containers: HashSet::new(),
+            factory_timer:0.0,factory_states:HashMap::new(),
             detectors: HashMap::new(),
             drops: Vec::new(),
             orbs: Vec::new(),
@@ -128,6 +133,8 @@ impl Realm {
             plates: HashMap::new(),
             powered_doors: HashSet::new(),
             vehicles: Vec::new(),
+            rockets: Vec::new(),
+            swallows: Vec::new(),
             hives: HashMap::new(),
             pots: HashMap::new(),
             buzz: Vec::new(),
@@ -250,6 +257,8 @@ impl Game {
     pub fn realm_tick(&mut self, dt: f32) {
         self.liquid_tick(dt);
         self.zap_tick(dt);
+        self.rockets_tick(dt);
+        self.swallows_tick(dt);
         self.vehicles_tick(dt, 0.0, 0.0, false);
         let centers: Vec<(Vec3, i32)> = self.peers.values().map(|p| (p.target, 4)).collect();
         self.world.stream(&centers);

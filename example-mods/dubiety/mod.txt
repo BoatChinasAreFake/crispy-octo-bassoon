@@ -1,0 +1,190 @@
+[mod]
+name = Dubiety
+version = 1.1
+author = Minceraft example mods
+description = A friendly small word-model companion: local chat, remembered notes and a modest grasp of grammar.
+
+[texture orb]
+color b = 239,203,52
+color a = 252,236,143
+color d = 131,111,28
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbddbbbbddbbbb
+bbbbddbbbbddbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbdbbbbbbdbbbb
+bbbbbddddddbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+
+[texture terminal]
+color b = 48,58,67
+color a = 111,233,169
+color d = 26,31,36
+dddddddddddddddd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbaaaaaaaaaabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dbbabbabbabbabbd
+dbbbbbbbbbbbbbbd
+dbbbbbbbbbbbbbbd
+dddddddddddddddd
+
+[texture chip]
+color b = 62,99,103
+color a = 204,236,160
+color d = 34,54,56
+dddddddddddddddd
+dbbbbbbbbbabbbbd
+dbbbbbbbbabbbbbd
+dbbbbbbbabbbbbbd
+dbbbbbbabbbbbbbd
+dbbbbbabbbbbbbbd
+dbbbbabbbbbbbbbd
+dbbbabbbbbbbbbbd
+dbbabbbbbbbbbbad
+dbabbbbbbbbbbabd
+dabbbbbbbbbbabbd
+dbbbbbbbbbbabbbd
+dbbbbbbbbbabbbbd
+dbbbbbbbbabbbbbd
+dbbbbbbbabbbbbbd
+dddddddddddddddd
+
+[block terminal]
+name = Dubiety Terminal
+texture = terminal
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 4
+
+[item chip]
+name = Quite Small Thinking Chip
+texture = chip
+
+[item beacon]
+name = Dubiety Companion Beacon
+texture = orb
+consume = false
+on_use = message /dubiety summon to meet the companion, /dubiety ask <words> for local word-model replies.
+
+[item notebook]
+name = Dubiety Notebook
+texture = terminal
+consume = false
+on_use = message /dubiety remember <note>, /dubiety recall, /dubiety forget, /dubiety status. Notes are local to this world.
+
+[texture orb_shell]
+noise = #efcb34
+variation = 0.03
+
+[mob companion]
+name = Dubiety
+texture = orb_shell
+width = 0.65
+height = 0.75
+health = 30
+speed = 0.8
+flying = true
+fly_height = 2
+fly_speed = 2
+perches = true
+tame_item = chip
+tame_chance = 1
+breed_item = none
+drops = chip 1
+part = core -.25 .12 -.25 .5 .5 .5 anim=bob amount=.25 face=orb
+part = top -.2 .62 -.2 .4 .07 .4 anim=bob amount=.25
+part = bottom -.2 .05 -.2 .4 .07 .4 anim=bob amount=.25
+part = left -.32 .2 -.18 .07 .34 .36 anim=bob amount=.25
+part = right .25 .2 -.18 .07 .34 .36 anim=bob amount=.25
+
+[recipe]
+inputs = gold 1, zap_dust 1, book 1
+output = chip 1
+
+[recipe]
+inputs = iron 3, glass 1, chip 1
+output = terminal 1
+
+[recipe]
+inputs = chip 1, glass 2
+output = beacon 1
+
+[recipe]
+inputs = book 1, chip 1
+output = notebook 1
+
+
+[texture appetite_face]
+color b = 243,173,41
+color d = 61,33,22
+color w = 255,244,207
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbddbbbbbbbbddbb
+bbddbbbbbbbbddbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bddddddddddddddb
+bdwwwwwwwwwwwwdb
+bddddddddddddddb
+bddddddddddddddb
+bddddddddddddddb
+bddddddddddddddb
+bdwwwwwwwwwwwwdb
+bddddddddddddddb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+
+[texture appetite_shell]
+noise = #f3ad29
+variation = 0.025
+
+[item obesity_beacon]
+name = Obesity Companion Beacon
+texture = appetite_face
+consume = false
+on_use = message /dubiety obesity summons the bottomless glutton. Offer any item. Livestock within five blocks is swallowed whole.
+
+[mob obesity]
+name = Obesity
+texture = appetite_shell
+width = 1.2
+height = 1.25
+health = 40
+speed = 0.7
+flying = true
+fly_height = 1
+fly_speed = 1.6
+tame_item = chip
+tame_chance = 1
+breed_item = none
+glutton = true
+drops = chip 1
+part = belly -.55 .12 -.5 1.1 .95 1 anim=bob amount=.12 face=appetite_face
+part = top -.4 1.07 -.35 .8 .1 .7 anim=bob amount=.12
+part = bottom -.4 .02 -.35 .8 .1 .7 anim=bob amount=.12
+part = left -.66 .28 -.34 .11 .55 .68 anim=bob amount=.12
+part = right .55 .28 -.34 .11 .55 .68 anim=bob amount=.12
+
+[recipe]
+inputs = beacon 1, wheat 8
+output = obesity_beacon 1

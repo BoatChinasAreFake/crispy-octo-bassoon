@@ -31,6 +31,7 @@ pub struct Container {
     pub slots: Vec<Stack>,
     /// Wear of any tools or armour stored here (see `durability`).
     pub wear: Vec<Wear>,
+    /// Production machines: stored energy, mode (0 stopped / 1 single / 2 auto), and work seconds.
     /// Furnace: seconds of fuel left, how long the current fuel lasts, and
     /// progress on the current item (seconds).
     pub burn: f32,
@@ -39,7 +40,7 @@ pub struct Container {
 }
 
 pub fn is_container(id: Id) -> bool {
-    crate::chests::is_chest(id) || matches!(id, BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::zapparts::is_dropper(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id) || id == TRADING_TABLE || id == SHOP_STALL
+    crate::factory::kind(id).is_some() || crate::chests::is_chest(id) || matches!(id, BARREL | FURNACE | FURNACE_LIT | SMOKER | SMOKER_LIT | BLAST_FURNACE | BLAST_FURNACE_LIT | BREWING_STAND | HOLLOW_BOX) || crate::home::is_stand(id) || crate::contraptions::is_dispenser(id) || crate::zapparts::is_dropper(id) || crate::contraptions::is_crafter(id) || crate::hoppers::is_hopper(id) || id == TRADING_TABLE || id == SHOP_STALL
 }
 
 /// Furnaces and brewing stands: an input on top, a second slot below
@@ -60,6 +61,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         MUTTON => COOKED_MUTTON,
         CLUCKETS => COOKED_CLUCKETS,
         MOO_STEAK => STEAK,
+        RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH => COOKED_SEAFOOD,
         COD => COOKED_COD,
         SALMON => COOKED_SALMON,
         POTATO => BAKED_POTATO,
@@ -87,6 +89,7 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
         COAL => 80.0,
         LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | PLANKS | CHERRY_PLANKS | MANGROVE_PLANKS | PALE_OAK_PLANKS | TABLE | BOOKSHELF | CHEST | SCARECROW => 15.0,
         HAY => 45.0,
+        DRIFTWOOD | DRIFTWOOD_Z => 10.0,
         STICK | WHEAT => 5.0,
         DOOR | ACACIA_DOOR | BIRCH_DOOR | DARK_OAK_DOOR => 10.0,
         id if is_log(id) || crate::woods::is_planks(id) => 15.0,
@@ -103,6 +106,7 @@ pub fn fuel_secs(id: Id) -> Option<f32> {
 
 /// Can `item` go into slot `slot` of a container of block `kind`?
 pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
+    if crate::factory::kind(kind).is_some(){return crate::factory::accepts(kind,slot,item);}
     if kind == BREWING_STAND {
         return match slot {
             INPUT => item == GUNPOWDER || crate::potions::BREWABLE.iter().any(|p| p.brews_from(item)),
@@ -142,7 +146,7 @@ pub fn accepts(kind: Id, slot: usize, item: Id) -> bool {
 
 impl Container {
     pub fn for_block(id: Id) -> Container {
-        let n = if is_three_slot(id) {
+        let n = if crate::factory::kind(id).is_some(){crate::factory::SLOTS}else if is_three_slot(id) {
             3
         } else if crate::contraptions::is_dispenser(id) || crate::zapparts::is_dropper(id) || crate::contraptions::is_crafter(id) {
             DISPENSER_SLOTS
@@ -157,7 +161,7 @@ impl Container {
         } else {
             crate::chests::slots(id)
         };
-        Container { slots: vec![None; n], wear: vec![0; n], burn: 0.0, burn_total: 0.0, cook: 0.0 }
+        Container { slots: vec![None; n], wear: vec![0; n], burn: 0.0, burn_total: if matches!(crate::factory::kind(id),Some(crate::factory::Kind::Solar|crate::factory::Kind::Battery)){2.0}else{0.0}, cook: 0.0 }
     }
 
     /// Everything inside, with its wear (for spilling when it's broken).
@@ -528,10 +532,10 @@ impl Game {
             // Only what the slot accepts may go in (the output is take-only).
             let put_ok = cursor.map(|(id, _)| accepts(kind, slot, id) && !crate::post::is_inbox(pos)).unwrap_or(true);
             let same = matches!((cursor, s), (Some((a, _)), Some((b, _))) if a == b);
-            if !(put_ok || cursor.is_none() || (slot == OUTPUT && is_three_slot(kind))) {
+            if !(put_ok || cursor.is_none() || ((slot == OUTPUT && is_three_slot(kind)) || (crate::factory::kind(kind).is_some()&&crate::factory::output(slot)))) {
                 return;
             }
-            if is_three_slot(kind) && slot == OUTPUT {
+            if (is_three_slot(kind) && slot == OUTPUT) || (crate::factory::kind(kind).is_some()&&crate::factory::output(slot)) {
                 // Take-only: grab it all (or top up a matching stack in the cursor).
                 match (s, cursor) {
                     (Some(st), None) => {
@@ -551,6 +555,7 @@ impl Game {
                 click_stack(&mut s, &mut cursor);
             }
         }
+        if crate::factory::kind(kind).is_some()&&slot<2&&before.map(|s|s.0)!=s.map(|s|s.0){c.cook=0.0;}
         c.slots[slot] = s;
         self.inv.cursor = cursor;
         if !shift {
@@ -622,6 +627,7 @@ impl Game {
             };
             let put = left.min(max_stack(id).saturating_sub(have));
             if put > 0 {
+                if crate::factory::kind(kind).is_some()&&i<2&&have==0{c.cook=0.0;}
                 c.slots[i] = Some((id, have + put));
                 if have == 0 {
                     c.wear[i] = self.inv.wear[inv_slot];
@@ -649,7 +655,7 @@ impl Game {
     pub fn sort_container(&mut self) {
         let Some(pos) = self.open else { return };
         let kind = store_kind(&self.world, &self.vehicles, pos);
-        if is_three_slot(kind) || kind == TRADING_TABLE || kind == SHOP_STALL {
+        if crate::factory::kind(kind).is_some() || is_three_slot(kind) || kind == TRADING_TABLE || kind == SHOP_STALL {
             return;
         }
         if let Some(c) = store(&mut self.world, &mut self.vehicles, pos) {
@@ -664,7 +670,7 @@ impl Game {
     pub fn host_sort(&mut self, from: u32, p: IVec3) {
         let open = self.viewers.get(&p).map(|v| v.contains(&from)).unwrap_or(false);
         let kind = store_kind(&self.world, &self.vehicles, p);
-        if !open || !self.peer_near(from, p) || is_three_slot(kind) || kind == TRADING_TABLE || kind == SHOP_STALL {
+        if !open || !self.peer_near(from, p) || crate::factory::kind(kind).is_some() || is_three_slot(kind) || kind == TRADING_TABLE || kind == SHOP_STALL {
             return;
         }
         if let Some(c) = store(&mut self.world, &mut self.vehicles, p) {
@@ -713,6 +719,7 @@ impl Game {
 
     /// Furnaces cook, glow, and tell whoever's watching.
     pub fn container_tick(&mut self, dt: f32) {
+        self.factory_tick(dt);
         let stands: Vec<IVec3> = self.world.containers.keys().copied().filter(|p| self.world.is_loaded(p.x, p.z) && self.world.get_v(*p) == BREWING_STAND).collect();
         for p in stands {
             if let Some(c) = self.world.containers.get_mut(&p)
@@ -886,6 +893,7 @@ impl Game {
         let wear = self.launder(from, item, wear);
         let c = store(&mut self.world, &mut self.vehicles, p).expect("checked");
         let have = c.slots[slot].map(|s| s.1).unwrap_or(0);
+        if crate::factory::kind(kind).is_some()&&slot<2&&have==0{c.cook=0.0;}
         c.slots[slot] = Some((item, have + n));
         if have == 0 {
             // Their word for how worn it is (wear is only cosmetic to the host: see `host_wear`).
@@ -895,7 +903,8 @@ impl Game {
     }
 
     fn container_take(&mut self, from: u32, p: IVec3, slot: usize, item: Id, n: u8) -> bool {
-        let furnace = is_furnace(store_kind(&self.world, &self.vehicles, p));
+        let kind=store_kind(&self.world,&self.vehicles,p);
+        let furnace = is_furnace(kind);
         let Some(c) = store(&mut self.world, &mut self.vehicles, p) else { return false };
         let ench = (c.wear.get(slot).copied().unwrap_or(0) >> 16) as u16;
         match c.slots[slot] {
@@ -904,6 +913,7 @@ impl Game {
             }
             _ => return false,
         }
+        if crate::factory::kind(kind).is_some()&&slot<2&&c.slots[slot].is_none(){c.cook=0.0;}
         if !self.peer_free(from)
             && let Some(peer) = self.peers.get_mut(&from)
         {

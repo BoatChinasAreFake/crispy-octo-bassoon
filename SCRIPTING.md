@@ -58,6 +58,22 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `random()`, `random_int(lo, hi)` | Random numbers |
 | `get_var(key)`, `set_var(key, value)` | Your mod's memory, **saved with the world** (see below). `get_var` returns `()` for a key that was never set |
 
+**Dimensions and worn armour**:
+
+| Function | Returns |
+| --- | --- |
+| `dimension()` | Stable key of the currently active realm |
+| `player_dimension(player)` | `overworld`, `scorchlands`, `hollow` or a qualified mod dimension key; empty for an unknown player |
+| `wearing(player, item)` | Whether the item is in a worn armour slot; joined reports also require host-ledger ownership and can lag five seconds |
+| `get_block_in(dim, x, y, z)` | Block name in that realm; air if the chunk is unloaded |
+| `chunk_loaded_in(dim, x, z)` | Whether its chunk is present |
+| `surface_y_in(dim, x, z)` | Loaded surface including edits, or the generator's ground estimate for an unloaded column |
+| `mobs_near_in(dim, x, y, z, radius)` | Realm-local count, radius bounded to 128 |
+| `mob_count_in(dim)` | Total mobs in the active or parked realm |
+| `locate_structure_in(dim, qualified_name, x, z)` | `[x,y,z]` of a nearby template structure, or `()`; survey bounded to 96 chunks |
+
+Use fully qualified mod dimension keys. Existing coordinate-only APIs act in the current realm, which may be a joined player's realm during their event. Delayed actions should store the realm key and use the explicit `*_in` APIs. Check `chunk_loaded_in` before treating an unloaded `get_block_in` result as a missing machine. `surface_y_in` outside loaded chunks is an estimate, not a scan of saved edits.
+
 **Changing the world** (applied right after your event function returns):
 
 | Function | Effect |
@@ -74,6 +90,17 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `set_time(t)` | Set the time of day (0–1) for everyone |
 | `play_sound(name, x, y, z)` | `explode hiss oink groan pop click splash craft hurt eat break glass baa warp fanfare boing cluck moo rattle skitter bloop twang thunk woof snip hmm` |
 | `log(text)` / `print(text)` | Debug output: chat in single player, the console on a server |
+
+**Dimension changes** (queued like other world changes):
+
+| Function | Effect |
+| --- | --- |
+| `set_block_in(dim, x, y, z, block)` | Realm-specific block edit |
+| `explode_in(dim, x, y, z, radius)` | Realm-specific host explosion, bounded to radius 8; affected chunks load first |
+| `spawn_mob_in(dim, kind, x, y, z)` | Spawn a base or qualified mod creature only in that realm |
+| `travel(player, dim, x, z)` | Load nearby destination columns and move the local or joined player above dry solid ground, using the normal dimension snapshots |
+
+`travel` checks the requested column and eight nearby columns. If none supports a safe landing below the build ceiling, it leaves the player where they were and sends a message. It does not consume items itself; scripts choose their travel costs. Coordinates must be finite and within 30 million blocks. Realm-local explosions preserve other realms at identical coordinates. No script files run on joining clients.
 
 **Minigames** (changes applied right after your event function returns, like the rest): scores, a sidebar everyone sees, timers, teams and spawns. Everything here is saved with the world.
 
@@ -151,3 +178,7 @@ Errors appear in chat, in the console, and on the Mods screen (errors when loadi
 - **Joined players:** scripts can read a joined player's position, health, food, held item and inventory (read-only; to change them use `give`, `take`, `heal` and the other commands).
 - **New mob types:** a mod can now define new mob *types* with a `[mob <name>]` section in its `mod.txt` (name, texture, size, health, speed, a drop, and one of a few base body shapes). Because a code mod is a single folder that may ship both `mod.txt` and `.rhai` files, a script can spawn its own data-defined mobs with `spawn_mob("mymob", x, y, z)` (or the mod `spawn <name>` action), and `on_mob_death` reports the mob's name. See the `[mob]` section in [MODDING.md](MODDING.md). These mobs are host-authoritative and sync to joined players like blocks and items. A mob is a passive wanderer by default, but a `hostile` mob can pursue and melee-attack via `attack_damage`, `attack_reach`, `aggro_range`, and `attack_cooldown`. It can also fire host-resolved projectiles configured with bounded damage, range, speed, arrow/billboard/cube appearance, a safe timed effect (including effect-only shots), and a deterministic one-to-five-shot fan. Projectile state and appearance replicate to joined players; collision, damage, and effects remain host-authoritative. Projectiles can also home in (`projectile_homing`) or burst over an area (`projectile_blast`), and mobs can fly (`flying`, `fly_height`, `fly_speed`, `perches`) and be tamed and bred (`tame_item`, `tame_chance`, `breed_item`). Mobs can also have custom bodies built from up to 16 animated boxes (`part` lines). They can trade (`trade` lines, on the Hmmer trading screen) and be bosses (`boss`, with a health bar, an enraged phase and summons). Arbitrary projectile geometry/rendering and custom UI screens still require Rust code.
 - **Custom UI screens and bespoke rendering still need a Rust change.** Modded mobs reuse an existing body template painted with the mod's texture; arbitrary per-mob geometry is not exposed. Game screens (menus, inventories, the furnace UI, and so on) are Rust state machines in `ui.rs`/`main.rs` with no scripting surface, so a mod cannot add or replace a screen. These remain out of scope.
+
+### Autopilot rocket scenes
+
+`rocket_depart(player, x, y, z, tier, remaining)` attaches a pilot to a four-second ascent from the engine origin. `rocket_land(player, tier, remaining)` starts or resumes a three-second descent above the player’s current safe landing column. `rocket_clear(player)` removes that player’s scene from every realm and releases a descending pilot at the saved ground anchor. Tiers are 1–4 and times are clamped to the corresponding phase duration. These commands run only on the host, which sends the moving model, exhaust and cockpit to everyone. A flight that has finished and isn't moved on (or cleared) within ten seconds ends by itself, setting its pilot down at the ground anchor; so does one whose pilot leaves. Repeating a phase updates its pilot association without restarting its animation. Scripts retain travel, resource checks and saved phase records.

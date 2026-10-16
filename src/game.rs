@@ -16,7 +16,7 @@ use crate::scripting::{Cmd, ScriptHost};
 use rhai::{Dynamic, INT};
 use crate::sound::{material, Sfx};
 use crate::texture::*;
-use crate::world::{Hit, World, CH};
+use crate::world::{Hit, World, CH, CW};
 use macroquad::math::{ivec3, IVec3, Mat4, Vec3, Vec4};
 use macroquad::miniquad::RenderingBackend;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -255,6 +255,9 @@ pub struct Game {
     pub anvil: Option<crate::anvil::AnvilUi>,
     /// The enchanting table screen's inputs while it's open (see enchant.rs).
     pub enchanting: Option<crate::enchant::EnchantUi>,
+    pub machine:Option<crate::machines::Panel>,
+    pub factory_timer:f32,
+    pub factory_states:std::collections::HashMap<IVec3,crate::factory::Visual>,
     /// How many times we've enchanted something (seeds the table's offers; the host's word when joined).
     pub enchant_count: u32,
     /// Joined players we remember, by name (see players.rs).
@@ -403,6 +406,9 @@ pub struct Game {
     /// Seconds since the last swing (weapons charge back up; see combat.rs), and a raised shield.
     pub since_attack: f32,
     pub blocking: bool,
+    /// Cosmetic bow wind-up; arrows are released on button-up.
+    pub bow_draw:f32,
+    pub off_swing:f32,
     /// Portals (see scorch.rs): seconds spent standing in one, seconds before
     /// another trip, and whether we've stepped out since the last.
     pub portal_time: f32,
@@ -414,6 +420,8 @@ pub struct Game {
     pub editing_sign: Option<IVec3>,
     /// Boats and minecarts (see vehicles.rs), the one we're in, and time to the next sync.
     pub vehicles: Vec<crate::vehicles::Vehicle>,
+    pub rockets: Vec<crate::rockets::RocketFlight>,
+    pub swallows: Vec<crate::swallow::Swallow>,
     pub next_vehicle_id: u32,
     pub riding: Option<u32>,
     pub vehicle_sync: f32,
@@ -433,6 +441,8 @@ pub struct Game {
     /// Cooking (see cooking.rs): what's in each pot, and the local player's Cookbook.
     pub pots: HashMap<IVec3, crate::cooking::Pot>,
     pub cookbook: [u8; crate::cooking::DISHES],
+    /// The Explorer's Atlas's map and landmarks (see atlas.rs).
+    pub atlas: crate::atlas::Atlas,
     /// The local player's chill, and the clocks for a spring's healing and the
     /// cold's bite (see springs.rs).
     pub chill: f32,
@@ -612,6 +622,7 @@ impl Game {
             orbs_sent_empty: true,
             anvil: None,
             enchanting: None,
+            machine:None,factory_timer:0.0,factory_states:Default::default(),
             enchant_count: 0,
             saved_players: Default::default(),
             admin: Default::default(),
@@ -698,12 +709,15 @@ impl Game {
             trading: None,
             since_attack: 10.0,
             blocking: false,
+            bow_draw:0.0,off_swing:0.0,
             portal_time: 0.0,
             portal_cooldown: 0.0,
             left_portal: true,
             portal_links: HashMap::new(),
             editing_sign: None,
             vehicles: Vec::new(),
+            rockets: Vec::new(),
+            swallows: Vec::new(),
             next_vehicle_id: 0,
             riding: None,
             vehicle_sync: 0.0,
@@ -716,6 +730,7 @@ impl Game {
             hives: HashMap::new(),
             pots: HashMap::new(),
             cookbook: [0; crate::cooking::DISHES],
+            atlas: Default::default(),
             chill: 0.0,
             spring_heal: 0.0,
             chill_bite: 0.0,
@@ -951,6 +966,7 @@ impl Game {
             ("hives".to_string(), crate::bees::encode(&self.hives)),
             ("pots".to_string(), crate::cooking::encode(&self.pots)),
             ("cookbook".to_string(), crate::cooking::encode_book(&self.cookbook)),
+            ("atlas".to_string(), self.atlas.encode()),
             ("chill".to_string(), self.chill.to_le_bytes().to_vec()),
             ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
             ("banners".to_string(), crate::banners::encode(&self.banners)),
@@ -1043,6 +1059,9 @@ impl Game {
         }
         if let Some(b) = extra("cookbook") {
             self.cookbook = crate::cooking::decode_book(b);
+        }
+        if let Some(b) = extra("atlas") {
+            self.atlas = crate::atlas::Atlas::decode(b);
         }
         if let Some(b) = extra("chill").and_then(|b| b.get(..4)) {
             let c = f32::from_le_bytes(b.try_into().unwrap());
@@ -1144,6 +1163,9 @@ impl Game {
             return;
         }
         self.explore_timer = 0.0;
+        let p=self.player.body.pos;
+        if self.world.generator.beach_pool_at(p.x.floor() as i32,p.z.floor() as i32).is_some() && is_wet(self.world.get_v((p+Vec3::Y*0.3).floor().as_ivec3())) {self.advance("tide_time");}
+        if !self.away() && self.mobs.iter().any(|m|m.kind.coastal() && m.body.pos.distance_squared(self.player.body.pos)<8.0*8.0) { self.advance("shore_life"); }
         // Mods' biomes, anywhere (see modgen.rs).
         {
             let p = self.player.body.pos;
@@ -1186,16 +1208,29 @@ impl Game {
         if let Some(k) = key {
             self.advance(k);
         }
+        // Landmarks (see landmarks.rs), and the Explorer's Atlas filling in (see atlas.rs).
+        if self.world.generator.landmark_at(x, z).is_some() {
+            self.advance("sightseer");
+        }
+        self.atlas_tick();
+        // Dry land on one of the islands out at sea (see shape.rs).
+        let generator = &self.world.generator;
+        if generator.opts.version >= 8 && generator.dim == crate::dims::Dim::Over && !self.player.body.in_water
+            && generator.ocean_island(x, z) > 0.4 && generator.shape_noise(x, z).0 < -0.28 && generator.column(x, z).0 > generator.sea() {
+            self.advance("castaway");
+        }
         let near_village = self.world.generator.villages_near(x.div_euclid(16), z.div_euclid(16)).iter().any(|v| v.origin.as_vec3().distance(p) < 24.0);
         if near_village {
             self.advance("village_people");
         }
         // Cave biomes, well under the ground (see caves.rs).
         if p.y < (self.world.generator.column(x, z).0 - 8) as f32 && p.y > 4.0 {
-            match self.world.generator.cave_biome(x, z) {
+            let generator = &self.world.generator;
+            let cave = if generator.opts.version >= 8 { generator.cave_biome_at(x, p.y as i32, z) } else { generator.cave_biome(x, z) };
+            match cave {
                 crate::caves::CaveBiome::Dripstone => self.advance("stalac_tight"),
                 crate::caves::CaveBiome::Lush => self.advance("lush_life"),
-                crate::caves::CaveBiome::Plain => {}
+                crate::caves::CaveBiome::Plain | crate::caves::CaveBiome::DeepDark => {}
             }
         }
         // Temples, mineshafts and igloos (see temples.rs).
@@ -1215,6 +1250,8 @@ impl Game {
     /// Advancements for getting hold of an item.
     pub fn item_advancements(&mut self, item: Id) {
         let key = match item {
+            SEASHELL | DRIFTWOOD | DRIFTWOOD_Z => "beachcomber",
+            RAW_SARDINE | RAW_TUNA | RAW_EEL | CRAB_MEAT | SHELLFISH => "shore_supper",
             LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG => "getting_wood",
             COBBLE => "stone_age",
             IRON => "iron_will",
@@ -1227,6 +1264,10 @@ impl Game {
             BAMBOO => "bamboozled",
             AMETHYST_SHARD => "crystal_clear",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
+            _ if reg().key_of(item)=="half_baked:energy_cell" => "half_baked_power",
+            _ if reg().key_of(item)=="ad_absurdum:rocket_1" => "rocket_paperwork",
+            _ if reg().key_of(item)=="dubiety:beacon" => "pocket_philosopher",
+            _ if reg().key_of(item)=="dusk:hydra_heart" => "complaint_resolved",
             _ => return,
         };
         self.advance(key);
@@ -1480,6 +1521,8 @@ impl Game {
         };
         self.net_receive(dt);
         self.update_local(dt, c);
+        self.tick_player_pose(dt);
+        self.machine_tick(dt);
         self.foreign_tick(dt);
         self.net_send(dt);
     }
@@ -1535,7 +1578,7 @@ impl Game {
             // In bed: no walking about (jumping or sneaking gets you up).
             self.sleep_tick(dt, c.input.jump_pressed || c.input.sneak);
             0.0
-        } else if self.riding.is_none() && self.mounted.is_none() {
+        } else if self.riding.is_none() && self.mounted.is_none() && self.rocket_pilot().is_none() {
             self.player.update(dt, &c.input, &self.world, self.creative)
         } else {
             0.0
@@ -1543,6 +1586,8 @@ impl Game {
         if self.player.jumped {
             self.stats.jumps += 1;
         }
+        self.rockets_tick(dt);
+        self.swallows_tick(dt);
         self.vehicles_tick(dt, c.input.forward, c.input.strafe, c.input.sneak);
         self.ride_tick(dt, c.input.forward, c.input.strafe, c.input.jump, c.input.sneak);
         self.track_travel(before, dt);
@@ -1604,7 +1649,7 @@ impl Game {
         self.spyglass = looking;
         self.player.blocking = self.blocking;
         self.use_cd = (self.use_cd - dt).max(0.0);
-        self.handle_actions(dt, c);
+        if self.rocket_pilot().is_none() {self.handle_actions(dt, c);}
         self.update_fishing(dt, c.use_held);
         self.update_brushing(dt, c.use_held);
         self.inventory_sync_tick(dt);
@@ -1669,6 +1714,7 @@ impl Game {
 
     /// Run a script event. Returns false if a script cancelled the default action.
     pub fn fire(&mut self, hook: &str, args: Vec<Dynamic>) -> bool {
+        if hook=="on_chat"&&self.factory_command(&args){return false;}
         let Some(mut host) = self.scripts.take() else { return true };
         let r = host.call(self, hook, args);
         self.scripts = Some(host);
@@ -1762,6 +1808,32 @@ impl Game {
                         self.hurt_peer(id, n, "was smitten by a script", Vec3::ZERO);
                     }
                 }
+                Cmd::InRealm(dim,command) => self.in_realm(dim,|g| {
+                    if let Cmd::Explode(at,r)=&*command {
+                        let radius=r.ceil() as i32;
+                        for z in ((at.z as i32-radius).div_euclid(CW))..=((at.z as i32+radius).div_euclid(CW)) {
+                            for x in ((at.x as i32-radius).div_euclid(CW))..=((at.x as i32+radius).div_euclid(CW)) {g.world.load_now(x,z);}
+                        }
+                    }
+                    g.apply_cmds(vec![*command]);
+                }),
+                Cmd::Travel(p,dim,x,z) => {
+                    if !self.is_local_player(&p) && self.peer_by_name(&p).is_none() {continue;}
+                    let to=self.in_realm(dim,|g| {
+                        for (dx,dz) in [(0,0),(8,0),(-8,0),(0,8),(0,-8),(16,16),(-16,16),(16,-16),(-16,-16)] {
+                            let (x,z)=(x+dx,z+dz);g.world.load_now(x.div_euclid(CW),z.div_euclid(CW));
+                            let h=g.world.surface_y(x,z);
+                            if h+3<CH && is_solid(g.world.get(x,h,z)) && !is_liquid(g.world.get(x,h,z)) {
+                                return Some(Vec3::new(x as f32+0.5,h as f32+1.1,z as f32+0.5));
+                            }
+                        }
+                        None
+                    });
+                    if let Some(to)=to {
+                        if self.is_local_player(&p) {self.move_local_player(dim,to);}
+                        else if let Some(id)=self.peer_by_name(&p) {let was=self.realm_dim();self.move_peer(id,dim,to);self.enter(was);}
+                    } else {self.apply_cmds(vec![Cmd::Message(p,"No safe landing site nearby.".into())]);}
+                }
                 Cmd::Teleport(p, to) => {
                     if self.is_local_player(&p) {
                         self.player.body.pos = to;
@@ -1774,6 +1846,9 @@ impl Game {
                         }
                     }
                 }
+                Cmd::RocketDepart(p,at,tier,left) => self.rocket_stage(&p,false,at,tier,left),
+                Cmd::RocketLand(p,tier,left) => self.rocket_land(&p,tier,left),
+                Cmd::RocketClear(p) => self.rocket_clear(&p),
                 Cmd::Launch(p, v) => {
                     if self.is_local_player(&p) {
                         self.player.body.vel.y = v;
@@ -2547,16 +2622,30 @@ impl Game {
             self.breaking = None;
         }
 
-        if (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
+        let using = c.use_held || c.use_pressed;
+        if self.bow_draw <= 0.0 && using && self.use_cd <= 0.0 {
             self.use_cd = 0.25;
             // With a weapon or tool in hand, a block (torches, say) in the other hand gets placed.
             let other = self.inv.offhand.map(|s| s.0).unwrap_or(AIR);
             if other != AIR && other != SHIELD && is_block_item(other) && offhand_first(self.inv.held()) && matches!(self.target, Some(Target::Block(_))) {
+                let right_swing=self.player.swing;
                 self.inv.swap_hands();
                 self.use_item();
                 self.inv.swap_hands();
+                self.off_swing=1.0;self.player.swing=right_swing;
             } else {
                 self.use_item();
+            }
+        }
+        // A bow is drawn only when use_item found nothing else to do (a chest, a mob, a boat...).
+        if held != BOW || (!using && self.bow_draw <= 0.0) {
+            self.bow_draw = 0.0;
+        } else if self.bow_draw > 0.0 {
+            if using {
+                self.bow_draw = (self.bow_draw + dt).min(1.0);
+            } else {
+                self.shoot_bow();
+                self.bow_draw = 0.0;
             }
         }
         if !c.use_held {
@@ -2614,6 +2703,7 @@ impl Game {
             && !self.player.sneaking
         {
             let (pos, id) = (h.pos, self.world.get_v(h.pos));
+            if self.open_machine(pos) {return;}
             if id == SHOP_STALL {
                 self.open_stall(pos);
                 return;
@@ -2755,6 +2845,7 @@ impl Game {
         }
         if held == PUFFER {
             self.use_up_held();
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.player.hurt = 0.0;
             self.hurt_player(4.0, "ate a Pufferfish. It said 'Do Not Eat' right on it");
@@ -2764,6 +2855,7 @@ impl Game {
         }
         if held == COOKED_PUFFER {
             self.use_up_held();
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.player.hurt = 0.0;
             self.hurt_player(2.0, "ate a Cooked Pufferfish. Cooking it did not help");
@@ -2775,6 +2867,7 @@ impl Game {
             // Suspicious for a reason.
             let heal = self.rng.range(-3.0, 8.0).round();
             self.use_up_held();
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.player.hunger.eat(6.0, 0.6);
             if heal < 0.0 {
@@ -2829,6 +2922,7 @@ impl Game {
                 let me = self.my_id;
                 self.give_effect_to(me, crate::potions::Potion::BadOmen, crate::raids::OMEN_SECS);
             }
+            self.animate_consumption(held);
             self.sfx(Sfx::Eat, None);
             self.msg("You feel a Bad Omen. Something's going to go wrong (on purpose).");
             if !self.creative {
@@ -2882,7 +2976,8 @@ impl Game {
                 if !self.creative {
                     self.use_up_held();
                 }
-                self.sfx(Sfx::Eat, None);
+                self.animate_consumption(held);
+            self.sfx(Sfx::Eat, None);
                 self.msg(match held {
                     GOO => "You ate Groaner Goo. You feel... gooey.",
                     MUTTON => "Raw Baa-con. Crunchy? No. Wool-adjacent? Yes.",
@@ -2924,7 +3019,8 @@ impl Game {
             return;
         }
         if held == BOW {
-            self.shoot_bow();
+            // Drawn in handle_actions and loosed on release.
+            self.bow_draw = f32::EPSILON;
             return;
         }
         if held == CROSSBOW {
@@ -2981,6 +3077,7 @@ impl Game {
             self.player.hunger.eat(14.0, 0.1);
             self.world.set_v(hit_pos, AIR);
             self.block_particles_tile(hit_pos, T_CAKE_SIDE, 12);
+            self.animate_consumption(CAKE);
             self.sfx(Sfx::Eat, None);
             self.msg("You ate the whole cake in one bite. The cake was not a lie.");
             self.advance("cake");
@@ -3044,6 +3141,8 @@ impl Game {
         }
         let below = self.world.get_v(place - IVec3::Y);
         match held {
+            DUNE_GRASS if is_wet(self.world.get_v(place)) || !matches!(below,SAND|RED_SAND|GRAVEL|DIRT|GRASS) => return,
+            SHELL_PATCH | SHELL_PATCH_WET if !is_solid(below) => return,
             FLOWER | TALL_GRASS | SAPLING if !matches!(below, GRASS | DIRT | SNOW_GRASS) => return,
             // Torches go on walls too.
             TORCH if !(is_solid(below) || normal.y == 0 && is_solid(hit_id)) => return,
@@ -3075,6 +3174,8 @@ impl Game {
             }
         }
         let mut oriented = self.oriented(held, normal, if replaceable(hit_id) { 0.0 } else { hit_y });
+        if matches!(held,DRIFTWOOD|DRIFTWOOD_Z) {oriented=if matches!(self.facing(),0|2) {DRIFTWOOD_Z}else{DRIFTWOOD};}
+        if matches!(held,SHELL_PATCH|SHELL_PATCH_WET) {oriented=if is_wet(self.world.get_v(place)) {SHELL_PATCH_WET}else{SHELL_PATCH};}
         if held == TORCH
             && is_solid(hit_id)
             && !replaceable(hit_id)
@@ -3208,8 +3309,8 @@ impl Game {
         // Plants and torches pop off with their support.
         let above = pos + IVec3::Y;
         let a = self.world.get_v(above);
-        if (block(a).model == Model::Cross && !is_wall_torch(a)) || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
-            self.world.set_v(above, AIR);
+        if matches!(a,SHELL_PATCH|SHELL_PATCH_WET) || (block(a).model == Model::Cross && !is_wall_torch(a)) || door_state(a).is_some_and(|(_, _, top)| !top) || crate::wiring::needs_floor(a) {
+            self.world.set_v(above, if waterlogged(a) {WATER}else{AIR});
             if is_door(a) {
                 self.world.set_v(above + IVec3::Y, AIR);
             }
@@ -3640,6 +3741,7 @@ impl Game {
         self.clankers_tick(dt);
         self.beacons_tick(dt);
         self.monument_tick(dt);
+        self.gluttons_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
         self.wildlife_tick(dt);
@@ -3687,6 +3789,7 @@ impl Game {
                 .min_by(|a, b| a.1.distance_squared(p).total_cmp(&b.1.distance_squared(p)))
                 .unwrap_or((u32::MAX, ppos));
             let evs = m.update(dt, &self.world, target, target_id != u32::MAX, daylight, &mut self.rng);
+            crate::swallow::focus(m,&self.swallows);
             let id = m.id;
             events.extend(evs.into_iter().map(|e| (target_id, target, id, e)));
             if fuse_before == 0.0 && m.fuse > 0.0 && !crate::monument::is_guardian(m.kind) {
@@ -3733,6 +3836,7 @@ impl Game {
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama => {}
+                    MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {}
                     MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
@@ -3917,6 +4021,8 @@ impl Game {
                             MobKind::GlowSquid | MobKind::Bat | MobKind::Allay | MobKind::Wilter => {}
                             MobKind::Goat | MobKind::Axolotl | MobKind::Camel | MobKind::Sniffer | MobKind::CopperGolem | MobKind::Floaty | MobKind::Rotsteed => {}
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
+                            MobKind::Starfish => {}
+                            MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {},
                             MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
@@ -4075,8 +4181,11 @@ impl Game {
             }
             return;
         }
+        // Sea life has its own caps and doesn't use up the turn for land animals and monsters.
+        self.try_coastal_wildlife(p);
+        self.try_sea_wildlife(p);
         // Kept animals (bred, tamed) don't count against new ones turning up.
-        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.persistent && m.kind != MobKind::Fishy).count();
+        let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.kind.coastal() && !m.persistent && !matches!(m.kind,MobKind::Fishy | MobKind::Dolphin | MobKind::GlowSquid | MobKind::Axolotl)).count();
         // Only wild monsters count towards the monster cap (not fish, Hmmers, pets or bats).
         let hostile = self.wild_monsters();
         let a = self.rng.range(0.0, TAU);
@@ -4107,19 +4216,14 @@ impl Game {
                 }
                 return;
             }
-            // Dolphins in the open sea, in little pods.
-            let dolphins = self.mobs.iter().filter(|m| m.kind == MobKind::Dolphin).count();
-            if dolphins < 6 && depth >= 5 && matches!(biome, Biome::Ocean | Biome::WarmOcean | Biome::LukewarmOcean) && !self.is_night() && self.rng.chance(0.15) {
-                for i in 0..self.rng.int(1, 3) {
-                    self.alloc_mob(MobKind::Dolphin, Vec3::new(x as f32 + 0.5 + i as f32 * 1.2, (y - 2) as f32, z as f32 + 0.5));
-                }
-                return;
-            }
-            if fish < 12 && depth >= 2 && self.rng.chance(0.6) {
+            // Ocean schools/pods use the dedicated marine pass above.
+            // Rivers retain fish even when another coast already has schools.
+            let local_fish=self.mobs.iter().filter(|m|m.kind==MobKind::Fishy && m.body.pos.distance_squared(p)<96.0*96.0).count();
+            if !biome.is_ocean() && fish<128 && local_fish<12 && depth >= 2 && self.rng.chance(0.6) {
                 let n = self.rng.int(2, 4);
                 for i in 0..n {
                     let pos = Vec3::new(x as f32 + 0.5 + i as f32 * 0.6, (y - depth / 2) as f32, z as f32 + 0.5 - i as f32 * 0.4);
-                    self.alloc_mob(MobKind::Fishy, pos);
+                    if self.sea_spawn_room(pos) && self.mobs.iter().filter(|m|m.kind==MobKind::Fishy).count()<128 && i < (12-local_fish) as i32 { self.alloc_mob(MobKind::Fishy, pos); }
                 }
                 return;
             }
@@ -4550,7 +4654,9 @@ impl Game {
         // Mobs
         for m in &self.mobs {
             if m.body.pos.distance(eye) < (render_distance * 16) as f32 {
-                m.draw(&mut g, &self.world);
+                if self.swallows.iter().any(|f|f.prey==m.id) {continue;}
+                let gulp=self.swallows.iter().filter(|f|f.eater==m.id).map(|f|f.elapsed).min_by(f32::total_cmp);
+                if gulp.is_some() {m.draw_with_gulp(&mut g,&self.world,gulp);}else{m.draw(&mut g,&self.world);}
                 // A Bell's ring makes raiders glow (see raids.rs).
                 if self.bell_glow > 0.0 && m.kind.raider() {
                     m.draw_glow(&mut g, &self.world);
@@ -4596,42 +4702,47 @@ impl Game {
                 g.cube(&m, [T_WHITE; 6], sky, [0.0, 0.0, 1.0, 1.0]);
             }
         }
+        crate::factory::draw(self,&mut g);
         // Other players
         for (id, p) in self.peers.iter().filter(|(_, p)| p.alive()) {
+            // Pilots are enclosed by the rocket hull; do not draw limbs through it.
+            if self.rockets.iter().any(|f|f.pilot==*id) {continue;}
             let sky = self.world.sky_shade(p.pos.x.floor() as i32, (p.pos.y + 1.0).floor() as i32, p.pos.z.floor() as i32);
             let tint = if p.flags & crate::net::FLAG_HURT != 0 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
-            let sneak = if p.flags & crate::net::FLAG_SNEAK != 0 { 0.12 } else { 0.0 };
-            let gliding = p.flags & crate::net::FLAG_GLIDE != 0;
+
+
             // Asleep: lying in the bed they're on.
             let bed = p.pos.floor().as_ivec3();
             let asleep = p.flags & crate::net::FLAG_SLEEP != 0 && crate::beds::is_bed(self.world.get_v(bed));
             let root = if asleep {
                 crate::beds::pose(bed, crate::beds::facing(self.world.get_v(bed)))
             } else {
-                Mat4::from_translation(p.pos - Vec3::Y * sneak) * Mat4::from_rotation_y(-p.yaw) * glide_pose(gliding)
+                Mat4::from_translation(p.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root()
             };
             match self.skin_slot(*id) {
-                Some(slot) => draw_model(&mut g, &root, &crate::skins::model(slot), p.anim, sky, true),
-                None => draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[p.skin as usize % 6], p.anim, sky, true),
+                Some(slot) => crate::poses::draw_parts(&mut g,&root,&crate::skins::model(slot),if asleep {Default::default()}else{p.animation.pose},sky),
+                None => crate::poses::draw_parts(&mut g,&root,&crate::nametags::SKIN_MODELS[p.skin as usize % 6],if asleep {Default::default()}else{p.animation.pose},sky),
             }
-            crate::entity::draw_armor(&mut g, &root, p.armor, p.trims, p.anim, sky, gliding);
+            crate::entity::draw_player_armor(&mut g,&root,p.armor,p.trims,sky,if asleep {Default::default()}else{p.animation.pose});
+            if !asleep {crate::poses::draw_held(&mut g,&root,&p.animation,p.held,p.offhand,p.gesture&1!=0,sky);crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
         }
         // The player, in third person
-        if self.third_person && !self.menu && !self.spectator {
+        if self.third_person && !self.menu && !self.spectator && self.rocket_pilot().is_none() {
             let p = &self.player;
             let sky = self.world.sky_shade(p.body.pos.x.floor() as i32, (p.body.pos.y + 1.0).floor() as i32, p.body.pos.z.floor() as i32);
             let tint = if p.hurt > 0.3 { [1.0, 0.5, 0.5, 1.0] } else { [1.0; 4] };
             g.begin(Pass::Opaque, tint, false);
             let root = match self.sleeping {
                 Some(s) => crate::beds::pose(s.bed, crate::beds::facing(self.world.get_v(s.bed))),
-                None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * glide_pose(p.gliding),
+                None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root(),
             };
             match self.skin_slot(crate::skins::ME) {
-                Some(slot) => draw_model(&mut g, &root, &crate::skins::model(slot), p.bob * 2.0, sky, true),
-                None => draw_model(&mut g, &root, &crate::nametags::SKIN_MODELS[self.skin as usize % 6], p.bob * 2.0, sky, true),
+                Some(slot) => crate::poses::draw_parts(&mut g,&root,&crate::skins::model(slot),if self.sleeping.is_some() {Default::default()}else{p.animation.pose},sky),
+                None => crate::poses::draw_parts(&mut g,&root,&crate::nametags::SKIN_MODELS[self.skin as usize % 6],if self.sleeping.is_some() {Default::default()}else{p.animation.pose},sky),
             }
-            crate::entity::draw_armor(&mut g, &root, self.inv.armor_look(), crate::trims::look(&self.inv.armor, &self.inv.armor_wear), p.bob * 2.0, sky, p.gliding);
+            crate::entity::draw_player_armor(&mut g,&root,self.inv.armor_look(),crate::trims::look(&self.inv.armor,&self.inv.armor_wear),sky,if self.sleeping.is_some() {Default::default()}else{p.animation.pose});
+            if self.sleeping.is_none() {crate::poses::draw_held(&mut g,&root,&p.animation,self.inv.held(),self.inv.offhand.map_or(AIR,|s|s.0),self.blocking,sky);crate::poses::draw_meal(&mut g,&root,&p.animation,sky);}
         }
         // Primed TNT
         for t in &self.tnts {
@@ -4650,6 +4761,8 @@ impl Game {
             self.draw_weather(&mut g, eye);
         }
         self.draw_vehicles(&mut g);
+        self.draw_rockets(&mut g);
+        self.draw_swallows(&mut g);
         self.draw_beacons(&mut g, eye, (render_distance * 16) as f32);
         self.draw_leads(&mut g, eye, (render_distance * 16) as f32);
         self.draw_frames(&mut g, eye, (render_distance * 16) as f32);
@@ -4702,7 +4815,7 @@ impl Game {
                 }
         }
 
-        if !self.third_person && !self.spectator {
+        if !self.third_person && !self.spectator && self.rocket_pilot().is_none() {
             self.draw_hand(&mut g, cam);
         }
         g
@@ -4718,11 +4831,25 @@ impl Game {
         let s = self.player.swing;
         let swing = (s * PI).sin();
         let bob = self.player.bob;
-        let local = Mat4::from_translation(Vec3::new(0.42 - swing * 0.15, -0.42 + (bob * 2.0).sin().abs() * 0.03 + swing * 0.12, -0.72 - swing * 0.1))
+        let mut local = Mat4::from_translation(Vec3::new(0.42 - swing * 0.15, -0.42 + (bob * 2.0).sin().abs() * 0.03 + swing * 0.12, -0.72 - swing * 0.1))
             * Mat4::from_rotation_x(-swing * 0.9);
         let held = self.inv.held();
+        if held==BOW&&self.bow_draw>0.0 {local=local*Mat4::from_translation(Vec3::new(-0.12*self.bow_draw,0.10*self.bow_draw,0.10*self.bow_draw))*Mat4::from_rotation_y(-0.3*self.bow_draw);}
+        let meal=self.player.animation.meal;
+        let held=meal.map(|m|m.item).unwrap_or(held);
+        if let Some(m)=meal {
+            let w=m.weight();let bob=(m.elapsed*19.0).sin()*0.025;
+            local=Mat4::from_translation(Vec3::new(0.42-0.31*w,-0.42+(0.23+bob)*w,-0.72+0.20*w))
+                *Mat4::from_rotation_z(if crate::poses::drink(m.item) {0.65*w}else{bob*3.0});
+        }
         let tint = if self.player.hurt > 0.3 { [1.0, 0.6, 0.6, 1.0] } else { [1.0; 4] };
         g.begin(Pass::Overlay, tint, false);
+        if meal.is_some() {
+            let hand=basis*local*Mat4::from_translation(Vec3::new(-0.05,-0.20,0.03))*Mat4::from_scale(Vec3::new(0.12,0.23,0.12));
+            // Just the hand: skin all round (the arm's top is the shirt's shoulder).
+            let tone=match self.skin_slot(crate::skins::ME) {Some(slot)=>crate::skins::tile(slot,4,5),None=>crate::nametags::skin_tiles(self.skin as u16%6)[0]};
+            g.cube(&hand,[tone;6],sky,[0.0,0.0,1.0,1.0]);
+        }
         if held == AIR {
             // The forearm rises from below the bottom-right corner toward the
             // crosshair, like a raised fist; the sleeve covers its near end.
@@ -4747,7 +4874,11 @@ impl Game {
                 None => crate::nametags::skin_tiles(self.skin as u16 % 6),
             };
             g.cube(&hand, [tone; 6], light, [0.0, 0.0, 1.0, 1.0]);
-            g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            // The built-in looks have short sleeves, up at the shoulder and out of
+            // sight: the arm is bare. A skin of your own shows its own sleeve.
+            if self.skin_slot(crate::skins::ME).is_some() {
+                g.cube(&sleeve, [shirt; 6], light, [0.0, 0.0, 1.0, 1.0]);
+            }
         } else if crate::models::drawn_as_block(held) {
             for ((a, b), tiles, rect) in crate::models::item_parts(held) {
                 let (a, b) = (Vec3::from_array(a), Vec3::from_array(b));
@@ -4835,7 +4966,7 @@ pub fn offhand_first(held: Id) -> bool {
     held == AIR || is_sword(held) || held == MACE || pick_tier(held) > 0 || crate::tools::tool_uses(held).is_some()
 }
 
-fn extruded_sprite(g: &mut DynGeo, m: &Mat4, tile: u16, size: f32, sky: f32) {
+pub(crate) fn extruded_sprite(g: &mut DynGeo, m: &Mat4, tile: u16, size: f32, sky: f32) {
     use crate::texture::{solid, TILE};
     let px = size / TILE as f32;
     let (z0, z1) = (-px / 2.0, px / 2.0);
@@ -4959,14 +5090,6 @@ fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
     Some(t0)
 }
 
-/// Gliding players lie flat, head first (turned about the middle of the body).
-fn glide_pose(gliding: bool) -> Mat4 {
-    if !gliding {
-        return Mat4::IDENTITY;
-    }
-    let mid = Vec3::Y * 0.9;
-    Mat4::from_translation(mid) * Mat4::from_rotation_x(-std::f32::consts::FRAC_PI_2) * Mat4::from_translation(-mid)
-}
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -4986,6 +5109,111 @@ pub(crate) mod tests {
             }
         }
         w
+    }
+
+    #[test]
+    fn landing_on_an_island_out_at_sea_is_an_advancement() {
+        let mut g = Game::new_with(77, false, false, crate::world::GenOptions::DEFAULT);
+        let wg = &g.world.generator;
+        let spot = (-4096..4096).step_by(32).flat_map(|z| (-4096..4096).step_by(32).map(move |x| (x, z)))
+            .find(|&(x, z)| wg.ocean_island(x, z) > 0.6 && wg.shape_noise(x, z).0 < -0.28 && wg.column(x, z).0 > wg.sea() + 2)
+            .expect("an island");
+        let h = wg.column(spot.0, spot.1).0;
+        g.player.body.pos = Vec3::new(spot.0 as f32 + 0.5, h as f32 + 1.0, spot.1 as f32 + 0.5);
+        g.ready = true;
+        g.explore_advancements(5.0);
+        assert!(g.advancements.has("castaway"));
+    }
+
+    #[test]
+    fn a_bow_in_hand_still_opens_chests() {
+        let mut g = arena(804);
+        let chest = IVec3::new(2, 50, 0);
+        g.world.set_v(chest, CHEST);
+        g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+        g.inv.selected = 0;
+        g.inv.slots[0] = Some((BOW, 1));
+        g.inv.slots[1] = Some((ARROW, 4));
+        g.target = Some(Target::Block(crate::world::Hit { pos: chest, normal: IVec3::NEG_X, dist: 1.5 }));
+        g.handle_actions(0.016, &Controls { use_pressed: true, ..Default::default() });
+        assert_eq!(g.open, Some(chest));
+        g.handle_actions(0.016, &Controls::default());
+        assert!(g.arrows.is_empty(), "no arrow on letting go");
+        assert_eq!(g.inv.count(ARROW), 4);
+    }
+
+    #[test]
+    fn mobs_get_half_a_second_of_grace_after_a_hit() {
+        let mut g = arena(806);
+        let mut m = crate::entity::Mob::new(crate::entity::MobKind::Oinker, Vec3::new(2.5, 50.0, 0.5), &mut g.rng);
+        let full = m.health;
+        m.damage(2.0, Vec3::ZERO);
+        m.damage(2.0, Vec3::ZERO);
+        assert_eq!(m.health, full - 2.0, "a second click straight after does nothing");
+        m.hurt = 0.1;
+        m.damage(2.0, Vec3::ZERO);
+        assert_eq!(m.health, full - 2.0, "still in its grace");
+        m.hurt = 0.0;
+        m.damage(2.0, Vec3::ZERO);
+        assert_eq!(m.health, full - 4.0);
+    }
+
+    #[test]
+    fn petrified_logs_lie_the_way_they_are_placed() {
+        let g = arena(807);
+        assert_eq!(g.oriented(PETRIFIED_LOG, IVec3::X, 0.5), PETRIFIED_LOG_X);
+        assert_eq!(g.oriented(PETRIFIED_LOG, IVec3::NEG_Z, 0.5), PETRIFIED_LOG_Z);
+        assert_eq!(g.oriented(PETRIFIED_LOG, IVec3::Y, 0.5), PETRIFIED_LOG);
+        assert_eq!(placing_item(PETRIFIED_LOG_Z), Some(PETRIFIED_LOG));
+        assert_eq!(block(PETRIFIED_LOG_X).drop, PETRIFIED_LOG);
+    }
+
+    #[test]
+    fn low_gravity_softens_falls() {
+        assert_eq!(crate::player::fall_damage(9.0, 1.0), 6.0);
+        // A standing jump on the moon peaks near eight blocks up.
+        assert_eq!(crate::player::fall_damage(7.9, 0.17), 0.0);
+        assert_eq!(crate::player::fall_damage(3.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn a_stalled_rocket_flight_sets_its_pilot_down() {
+        let mut g = arena(805);
+        let ground = Vec3::new(0.5, 51.0, 0.5);
+        let f = crate::rockets::RocketFlight { owner: g.player_name.clone(), pilot: g.my_id, ground, landing: false, elapsed: 4.0, tier: 1 };
+        g.rockets.push(f);
+        g.rockets_tick(1.0);
+        assert_eq!(g.rockets.len(), 1, "a script gets time to move it on");
+        g.rockets_tick(crate::rockets::GRACE);
+        g.rockets_tick(0.016);
+        assert!(g.rockets.is_empty());
+        assert!(g.player.body.pos.distance(ground) < 1.0, "back on the ground, not left in the sky");
+    }
+
+    #[test]
+    fn bow_draw_waits_for_release_and_switching_items_cancels_it() {
+        let mut g=Game::new(803,true,false);g.inv.selected=0;g.inv.slots[0]=Some((BOW,1));
+        let hold=Controls{use_held:true,..Default::default()};
+        g.handle_actions(0.2,&hold);g.handle_actions(0.2,&hold);
+        assert!(g.bow_draw>0.3);assert!(g.arrows.is_empty());
+        g.handle_actions(0.016,&Controls::default());assert_eq!(g.arrows.len(),1);assert_eq!(g.bow_draw,0.0);
+        g.handle_actions(0.016,&Controls::default());assert_eq!(g.arrows.len(),1);
+        g.handle_actions(0.2,&hold);g.inv.slots[0]=Some((STONE,1));g.handle_actions(0.016,&Controls::default());
+        assert_eq!(g.bow_draw,0.0);assert_eq!(g.arrows.len(),1);
+    }
+
+    #[test]
+    fn successful_food_and_drinks_animate_the_item_after_the_last_unit_is_used() {
+        let mut g=Game::new(786,false,false);g.player.hunger.food=5.0;g.give(BREAD,1);
+        g.inv.selected=g.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==BREAD)).unwrap();g.target=None;
+        g.use_item();assert_eq!(g.inv.count(BREAD),0);assert_eq!(g.player.animation.meal.unwrap().item,BREAD);
+        g.tick_player_pose(0.1);assert!(g.player.animation.meal.unwrap().elapsed>0.0);
+        g.player.animation=Default::default();g.player.hunger.food=20.0;g.give(BREAD,1);
+        g.inv.selected=g.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==BREAD)).unwrap();g.use_item();assert!(g.player.animation.meal.is_none());
+        let potion=crate::potions::potion_item(crate::potions::Potion::Healing,false);g.give(potion,1);
+        g.inv.selected=g.inv.slots.iter().position(|s|s.is_some_and(|s|s.0==potion)).unwrap();assert!(g.use_potion(potion));
+        assert_eq!(g.inv.count(potion),0);assert!(crate::poses::drink(g.player.animation.meal.unwrap().item));
+        g.menu=true;g.tick_player_pose(0.1);assert!(g.player.animation.meal.is_none());
     }
 
     #[test]
@@ -5135,6 +5363,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn beach_blocks_place_harvest_and_preserve_water() {
+        let _lock=crate::mods::registry_test_lock();
+        let mut g=Game::new_with(7,true,false,crate::world::GenOptions::DEFAULT);
+        g.world.load_now(0,0);g.player.body.pos=Vec3::new(10.0,82.0,10.0);
+        let base=IVec3::new(3,80,3);let at=base+IVec3::Y;
+        g.world.set_v(base,SAND);g.world.set_v(at,AIR);
+        g.target=Some(Target::Block(crate::world::Hit{pos:base,normal:IVec3::Y,dist:1.0}));
+        g.inv.slots[0]=Some((DRIFTWOOD,1));g.inv.selected=0;g.player.yaw=0.0;g.use_item();
+        assert_eq!(g.world.get_v(at),DRIFTWOOD_Z);
+        g.world.set_v(at,WATER);g.inv.slots[0]=Some((SHELL_PATCH,1));g.use_item();
+        assert_eq!(g.world.get_v(at),SHELL_PATCH_WET);
+        assert_eq!(placing_item(DRIFTWOOD_Z),Some(DRIFTWOOD));assert_eq!(placing_item(SHELL_PATCH_WET),Some(SHELL_PATCH));
+        assert!(!g.edit_allowed(at.x,at.y,at.z,AIR,SHELL_PATCH_WET),"wet patch cannot manufacture water");
+        g.creative=false;g.break_block(at,true);g.refill_tick();
+        assert_eq!(g.world.get_v(at),WATER);
+        assert!(g.drops.iter().any(|d|d.item==SEASHELL));
+        g.world.set_v(at,SHELL_PATCH_WET);g.break_block(base,true);
+        assert_eq!(g.world.get_v(at),WATER,"support loss keeps the patch's water");
+        g.creative=true;g.world.set_v(base,SAND);g.world.set_v(at,AIR);
+        g.inv.slots[0]=Some((DUNE_GRASS,1));g.use_item();assert_eq!(g.world.get_v(at),DUNE_GRASS);
+        g.world.set_v(at,WATER);g.use_item();assert_eq!(g.world.get_v(at),WATER,"dune grass stays above water");
+        g.world.set_v(base,AIR);g.world.set_v(base-IVec3::Y,AIR);g.world.set_v(at,AIR);g.use_item();assert_eq!(g.world.get_v(at),AIR,"grass needs supported soil");
+        g.item_advancements(SEASHELL);assert!(g.advancements.earned.iter().any(|a|a=="beachcomber"));
+    }
+
+    #[test]
     fn mob_kinds_round_trip() {
         for k in MobKind::ALL {
             assert_eq!(MobKind::from_index(k.index()), Some(k));
@@ -5174,6 +5428,18 @@ pub(crate) mod tests {
         for l in 0..15 {
             assert!(shade(l + 1) > shade(l), "level {l}");
         }
+    }
+
+    #[test]
+    fn review_old_world_cave_advancements_keep_their_column_rule() {
+        let _lock = crate::mods::registry_test_lock();
+        let mut g = Game::new_with(77,false,false,crate::world::GenOptions { version:7,..crate::world::GenOptions::DEFAULT });
+        let (x,z) = (-2000..2000).step_by(32).flat_map(|z| (-2000..2000).step_by(32).map(move |x| (x,z)))
+            .find(|&(x,z)| g.world.generator.deep_dark(x,z) && g.world.generator.cave_biome(x,z)==crate::caves::CaveBiome::Dripstone && g.world.generator.column(x,z).0>40).unwrap();
+        g.ready = true;
+        g.player.body.pos = Vec3::new(x as f32+0.5,10.0,z as f32+0.5);
+        g.explore_advancements(1.0);
+        assert!(g.advancements.earned.iter().any(|a|a=="stalac_tight"),"revision 7 keeps its released advancement rule");
     }
 
     #[test]

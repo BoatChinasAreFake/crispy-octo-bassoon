@@ -550,6 +550,7 @@ impl App {
     }
 
     pub(crate) fn container_screen(&mut self) {
+        if self.game.open.is_some_and(|p|factory::kind(self.game.world.get_v(p)).is_some()){self.factory_screen();return;}
         use containers::{FUEL, INPUT, OUTPUT};
         let Some(pos) = self.game.open else { return };
         let kind = containers::store_kind(&self.game.world, &self.game.vehicles, pos);

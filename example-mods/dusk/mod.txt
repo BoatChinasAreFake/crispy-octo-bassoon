@@ -1,0 +1,977 @@
+[mod]
+name = The Slightly Dim Forest
+version = 1.0
+author = Minceraft example mods
+description = A sealed twilight realm of groves, ruins, trophies and four escalating boss encounters.
+
+[texture moss]
+color b = 44,83,57
+color a = 91,145,82
+color d = 24,45,31
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture bark]
+color b = 67,46,39
+color a = 117,83,65
+color d = 36,25,21
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture leaves]
+color b = 34,62,69
+color a = 69,122,123
+color d = 18,34,37
+dbdbdbbbbbbbbdbd
+bbbbbbbdbdbdbbbb
+bdbabdbbaabbbbdb
+bbbbbbbadbdbaabb
+bbdbdadbbbbabbbd
+dbbaabbbbabdbdbb
+bbadbdbaabbbbabb
+bdbbbbabbbdaabdb
+bbbbabdbdbabbbbb
+dbaabbbbabbdbdbd
+bbbbbdaabdbbabbb
+bdbdbabbbbaadbdb
+bbbabbdbdadbbbbb
+dbabdbbabbbbbabd
+bbbbbbbdbdbdbbbb
+bdbdbdbbbbbbbbdb
+
+[texture rune]
+color b = 63,57,90
+color a = 196,153,243
+color d = 34,31,49
+dbbbbbbabbbdbbbb
+bbbdbbbabbbbbbdb
+bbbbbbdabbbbbbbb
+bbbbbbbabdbbbbbb
+bdbbbbbabbbbdbbb
+bbbbdbaaabbbbbbd
+bbbbbaaaaabbbbbb
+aaaaaaaaaaaaaaaa
+bbdbbaaaaabbbdbb
+bbbbbdaaabbbbbbb
+bbbbbbbadbbbbbbb
+dbbbbbbabbbdbbbb
+bbbdbbbabbbbbbdb
+bbbbbbdabbbbbbbb
+bbbbbbbabdbbbbbb
+bdbbbbbabbbbdbbb
+
+[texture firefly]
+color b = 20,52,57
+color a = 232,233,126
+color d = 11,28,31
+................
+.......aaa......
+......aaaaa.....
+.....aaaaaaa....
+....aaaaaaaaa...
+....aaaaaaaaa...
+....aaaaaaaaa...
+.....aaaaaaa....
+......aaaaa.....
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+
+[texture thorn]
+color b = 34,62,46
+color a = 123,177,113
+color d = 18,34,25
+................
+.......aaa......
+......aaaaa.....
+.....aaaaaaa....
+....aaaaaaaaa...
+....aaaaaaaaa...
+....aaaaaaaaa...
+.....aaaaaaa....
+......aaaaa.....
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+
+[texture moon]
+color b = 180,178,210
+color a = 235,227,254
+color d = 99,97,115
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture boss]
+color b = 84,43,76
+color a = 212,131,167
+color d = 46,23,41
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbddbbbbddbbbb
+bbbbddbbbbddbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbdbbbbbbdbbbb
+bbbbbddddddbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbb
+
+[texture antler]
+color b = 142,111,78
+color a = 224,184,134
+color d = 78,61,42
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+aaaaaaaaaaaaaaaa
+bbabbbdbbbbbbabd
+bbabbdbbbbbbbadb
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+bbabbbbbbbbdbabb
+bdabbbbbbbdbbabb
+dbabbbbbbdbbbabb
+bbabbbbbdbbbbabb
+bbabbbbdbbbbbabb
+bbabbbdbbbbbbabd
+aaaaaaaaaaaaaaaa
+bbabdbbbbbbbbabb
+bbadbbbbbbbbdabb
+
+[texture berry]
+color b = 41,74,75
+color a = 158,113,201
+color d = 22,40,41
+................
+.......aaa......
+......aaaaa.....
+.....aaaaaaa....
+....aaaaaaaaa...
+....aaaaaaaaa...
+....aaaaaaaaa...
+.....aaaaaaa....
+......aaaaa.....
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+.......aaa......
+
+[block gate]
+name = Duskwood Gate Frame
+texture = rune
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 0
+
+[block dusk_stone]
+name = Duskstone
+texture = moss
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 0
+
+[block dusk_grass]
+name = Dusk Moss
+texture = moss
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 0
+
+[block dusk_soil]
+name = Dusk Soil
+texture = bark
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 0
+
+[block dusk_log]
+name = Twisted Duskwood Log
+texture = bark
+hardness = 1.5
+sound = wood
+
+[block dusk_leaves]
+name = Twisted Duskwood Leaves
+texture = dusk_foliage
+hardness = 0.2
+cutout = true
+sound = grass
+
+[block rune_brick]
+name = Rune Bricks
+texture = rune
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 0
+
+[block moon_block]
+name = Moonmetal Block
+texture = moon
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 0
+
+[block serpent_altar]
+name = Soggy Serpent Altar
+texture = antler
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 3
+
+[block lich_altar]
+name = Librarian Lich Altar
+texture = boss
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 3
+
+[block minotaur_altar]
+name = Minotax Altar
+texture = antler
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 3
+
+[block hydra_altar]
+name = Three-Headed Complaint Altar
+texture = boss
+hardness = 2
+tool = pickaxe
+tier = 1
+light = 3
+
+[block firefly]
+name = Firefly Reed
+texture = firefly
+model = cross
+solid = false
+hardness = 0.2
+sound = grass
+light = 6
+drops = self
+
+[block thorn]
+name = Polite Thorn
+texture = thorn
+model = cross
+solid = false
+hardness = 0.2
+sound = grass
+light = 0
+drops = self
+
+[block berry_bush]
+name = Duskberry Bush
+texture = berry
+model = cross
+solid = false
+hardness = 0.2
+sound = grass
+light = 0
+drops = duskberry
+
+[block moon_ore]
+name = Moonmetal Ore
+texture = moon
+hardness = 3
+tool = pickaxe
+tier = 2
+smelts_into = moon_ingot
+
+[item moon_ingot]
+name = Moonmetal Ingot
+texture = moon
+food = 0
+
+[item duskberry]
+name = Duskberry
+texture = berry
+food = 3
+
+[item firefly_jar]
+name = Firefly Jar
+texture = firefly
+food = 0
+
+[item serpent_scale]
+name = Soggy Scale Trophy
+texture = antler
+food = 0
+
+[item lich_crown]
+name = Overdue Crown Trophy
+texture = rune
+food = 0
+
+[item minotax_horn]
+name = Tax-Deductible Horn Trophy
+texture = antler
+food = 0
+
+[item hydra_heart]
+name = Complaint Department Heart
+texture = boss
+food = 0
+
+[item moon_sword]
+name = Moonmetal Sword
+texture = moon
+damage = 9
+durability = 650
+repair = moon_ingot
+
+[item moon_pickaxe]
+name = Moonmetal Pickaxe
+texture = moon
+pickaxe = 4
+durability = 720
+repair = moon_ingot
+
+[item guide]
+name = Dusk Field Guide
+texture = rune
+consume = false
+on_use = message /dusk help: groves, trophies and challenge. This forest has its own dimension, no overworld biome replacement.
+
+[dimension twilit_realm]
+name = The Slightly Dim Forest
+frame = gate
+portal_texture = rune
+stone = dusk_stone
+top = dusk_grass
+under = dusk_soil
+sea = water
+sea_level = 45
+height = 62
+hills = 18
+hill_size = 110
+sky = #302645
+light = 0.48
+
+[ore moonmetal]
+block = moon_ore
+dimension = twilit_realm
+min_y = 8
+max_y = 44
+chance = 0.005
+
+[biome grove]
+name = Duskwood Groves
+in = twilit_realm
+share = 0.55
+size = 260
+top = dusk_grass
+under = dusk_soil
+tree = dusk_log dusk_leaves 0.012 10 twisted
+plant = firefly .045
+
+[biome thicket]
+name = Polite Thorn Thickets
+in = twilit_realm
+share = 0.5
+size = 150
+top = dusk_grass
+under = dusk_soil
+tree = gloam_log gloam_leaves 0.014 9 spire
+plant = thorn .06
+
+[biome glade]
+name = Moonlit Glades
+in = twilit_realm
+share = 1
+size = 320
+top = dusk_grass
+under = dusk_soil
+tree = moonwillow_log moonwillow_leaves 0.005 5 umbrella
+plant = berry_bush .04
+
+[structure serpent_court]
+name = Soggy Courtyard
+dimension = twilit_realm
+spacing = 16
+chance = 0.65
+loot = duskberry 8 1, moon_ingot 2 0.65, guide 1 0.2
+block # = rune_brick
+block a = serpent_altar
+block c = chest
+layer
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+layer
+#########
+#...#..c#
+#.#.#.#.#
+#.#...#.#
+#...a...#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+layer
+#########
+#...#...#
+#.#.#.#.#
+#.#...#.#
+#.......#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+
+[structure lich_library]
+name = Overdue Library
+dimension = twilit_realm
+spacing = 24
+chance = 0.65
+loot = duskberry 8 1, moon_ingot 2 0.65, guide 1 0.2
+block # = rune_brick
+block a = lich_altar
+block c = chest
+layer
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+layer
+#########
+#...#..c#
+#.#.#.#.#
+#.#...#.#
+#...a...#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+layer
+#########
+#...#...#
+#.#.#.#.#
+#.#...#.#
+#.......#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+
+[structure minotax_maze]
+name = Minotax Maze
+dimension = twilit_realm
+spacing = 28
+chance = 0.65
+loot = duskberry 8 1, moon_ingot 2 0.65, guide 1 0.2
+block # = rune_brick
+block a = minotaur_altar
+block c = chest
+layer
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+layer
+#########
+#...#..c#
+#.#.#.#.#
+#.#...#.#
+#...a...#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+layer
+#########
+#...#...#
+#.#.#.#.#
+#.#...#.#
+#.......#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+
+[structure hydra_mound]
+name = Complaint Mound
+dimension = twilit_realm
+spacing = 32
+chance = 0.65
+loot = duskberry 8 1, moon_ingot 2 0.65, guide 1 0.2
+block # = rune_brick
+block a = hydra_altar
+block c = chest
+layer
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+#########
+layer
+#########
+#...#..c#
+#.#.#.#.#
+#.#...#.#
+#...a...#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+layer
+#########
+#...#...#
+#.#.#.#.#
+#.#...#.#
+#.......#
+#.#...#.#
+#.#.#.#.#
+#...#...#
+####.####
+
+[mob deer]
+name = Oh Deer
+texture = antler
+height = 2
+width = 1
+template = quadruped
+health = 14
+speed = 1
+hostile = false
+attack_damage = 0
+drops = duskberry 1
+
+part = body -.35 .5 -.5 .7 .45 1
+part = neck -.2 .85 -.45 .4 .5 .35
+part = head -.25 1.15 -.75 .5 .35 .5 face=antler
+part = antler_l -.3 1.5 -.5 .12 .45 .12 texture=moon
+part = antler_r .18 1.5 -.5 .12 .45 .12 texture=moon
+part = leg_l1 -.3 .05 -.4 .15 .45 .15 anim=walk amount=1
+part = leg_l2 -.3 .05 .25 .15 .45 .15 anim=walk amount=-1
+part = leg_r1 .15 .05 -.4 .15 .45 .15 anim=walk amount=-1
+part = leg_r2 .15 .05 .25 .15 .45 .15 anim=walk amount=1
+
+[mob firefly_mob]
+name = Flying Reading Lamp
+texture = firefly
+template = bird
+health = 5
+speed = 0.6
+hostile = false
+attack_damage = 0
+drops = duskberry 1
+flying = true
+fly_height = 4
+perches = true
+
+[mob kobold]
+name = Pocket Accountant
+texture = boss
+template = biped
+health = 18
+speed = 1.1
+hostile = true
+attack_damage = 3
+drops = duskberry 1
+
+[mob thornling]
+name = Thorny Issue
+texture = leaves
+template = blob
+health = 14
+speed = 0.8
+hostile = true
+attack_damage = 3
+drops = duskberry 1
+
+[mob serpent]
+name = The Soggy Serpent
+texture = antler
+template = quadruped
+width = 1.6
+height = 2.4
+health = 120
+speed = 0.8
+hostile = true
+attack_damage = 5
+attack_reach = 2.4
+aggro_range = 28
+boss = true
+xp = 100
+drops = serpent_scale 1
+part = head -.55 .55 -1.2 1.1 .65 .8 face=boss
+part = body -.5 .35 -.4 1 .65 1.3 anim=sway amount=.3
+part = tail -.3 .25 .9 .6 .4 .9 anim=sway amount=.6
+
+[mob lich]
+name = The Overdue Librarian
+texture = rune
+template = biped
+width = 1.6
+height = 2.4
+health = 170
+speed = 0.8
+hostile = true
+attack_damage = 3
+attack_reach = 2.4
+aggro_range = 28
+boss = true
+xp = 100
+drops = lich_crown 1
+ranged_damage = 5
+projectile_model = billboard
+projectile_texture = rune
+projectile_count = 3
+projectile_spread = 20
+summon = kobold 2
+
+[mob minotax]
+name = Minotax
+texture = antler
+template = quadruped
+width = 1.6
+height = 2.4
+health = 210
+speed = 0.8
+hostile = true
+attack_damage = 8
+attack_reach = 2.4
+aggro_range = 28
+boss = true
+xp = 100
+drops = minotax_horn 1
+enrage_speed = 1.8
+
+[mob hydra]
+name = The Complaint Department
+texture = boss
+template = quadruped
+width = 1.6
+height = 2.4
+health = 300
+speed = 0.8
+hostile = true
+attack_damage = 7
+attack_reach = 2.4
+aggro_range = 28
+boss = true
+xp = 100
+drops = hydra_heart 1
+ranged_damage = 6
+projectile_model = cube
+projectile_texture = boss
+projectile_count = 3
+projectile_spread = 24
+projectile_blast = 2.5
+summon = thornling 2
+part = body -.7 .3 -.4 1.4 1.1 1.4
+part = neck0 -0.75 1.2 -.3 .3 .7 .3 anim=bob amount=.25
+part = head0 -0.85 1.9 -.6 .5 .5 .6 face=boss
+part = neck1 -0.15 1.2 -.3 .3 .7 .3 anim=bob amount=.25
+part = head1 -0.25 1.9 -.6 .5 .5 .6 face=boss
+part = neck2 0.44999999999999996 1.2 -.3 .3 .7 .3 anim=bob amount=.25
+part = head2 0.35 1.9 -.6 .5 .5 .6 face=boss
+
+[recipe]
+inputs = log 2, moss_block 2, diamond 1
+output = gate 4
+
+[recipe]
+inputs = moon_ingot 2, stick 1
+output = moon_sword 1
+
+[recipe]
+inputs = moon_ingot 3, stick 2
+output = moon_pickaxe 1
+
+[recipe]
+inputs = moon_ingot 9
+output = moon_block 1
+
+[recipe]
+inputs = dusk_stone 4
+output = rune_brick 4
+
+[recipe]
+inputs = firefly 2, glass_bottle 1
+output = firefly_jar 1
+
+[recipe]
+inputs = book 1, moss_block 1
+output = guide 1
+
+[texture gloam_bark]
+noise = #334448
+variation = 0.12
+
+[block gloam_log]
+name = Gloam Pine Log
+texture = gloam_bark
+hardness = 1.5
+sound = wood
+
+[block gloam_leaves]
+name = Gloam Pine Leaves
+texture = gloam_foliage
+hardness = 0.2
+cutout = true
+sound = grass
+
+[texture moonwillow_bark]
+noise = #81718b
+variation = 0.12
+
+[block moonwillow_log]
+name = Moonwillow Log
+texture = moonwillow_bark
+hardness = 1.5
+sound = wood
+
+[block moonwillow_leaves]
+name = Moonwillow Leaves
+texture = moonwillow_foliage
+hardness = 0.2
+cutout = true
+sound = grass
+
+[texture dusk_foliage]
+color l = #3e776e
+color h = #709c85
+.hl.lhlllhl.lhhl
+lllh.llhhlll.ll.
+lhhll.hl.lhlllhh
+h.llhlllh.lllhll
+ll.hlllhll.hl.lh
+lhl.lh.llhhlll.l
+lllhhll.hlllhll.
+.lhlllhl.lh.lllh
+h.ll.hlllhll.hll
+lllhl.lhlllhh.ll
+lhlllh.ll.hlllhl
+hl.lhlllhl.lhhll
+llh.llhhlll.ll.h
+hhll.hl.lhlllhh.
+.llhlllh.lllhlll
+l.hlllhll.hl.lhh
+
+[texture gloam_foliage]
+color l = #244e51
+color h = #588584
+.hl.lhlllhl.lhhl
+lllh.llhhlll.ll.
+lhhll.hl.lhlllhh
+h.llhlllh.lllhll
+ll.hlllhll.hl.lh
+lhl.lh.llhhlll.l
+lllhhll.hlllhll.
+.lhlllhl.lh.lllh
+h.ll.hlllhll.hll
+lllhl.lhlllhh.ll
+lhlllh.ll.hlllhl
+hl.lhlllhl.lhhll
+llh.llhhlll.ll.h
+hhll.hl.lhlllhh.
+.llhlllh.lllhlll
+l.hlllhll.hl.lhh
+
+[texture moonwillow_foliage]
+color l = #b8a6d3
+color h = #e0d6f1
+.hl.lhlllhl.lhhl
+lllh.llhhlll.ll.
+lhhll.hl.lhlllhh
+h.llhlllh.lllhll
+ll.hlllhll.hl.lh
+lhl.lh.llhhlll.l
+lllhhll.hlllhll.
+.lhlllhl.lh.lllh
+h.ll.hlllhll.hll
+lllhl.lhlllhh.ll
+lhlllh.ll.hlllhl
+hl.lhlllhl.lhhll
+llh.llhhlll.ll.h
+hhll.hl.lhlllhh.
+.llhlllh.lllhlll
+l.hlllhll.hl.lhh
+
+[block duskwood_planks]
+name = Duskwood Planks
+texture = bark
+hardness = 1
+sound = wood
+
+[block duskwood_slab]
+name = Duskwood Slab
+texture = bark
+shape = slab
+full = duskwood_planks
+hardness = 1
+sound = wood
+
+[block duskwood_stairs]
+name = Duskwood Stairs
+texture = bark
+shape = stairs
+hardness = 1
+sound = wood
+
+[recipe]
+inputs = dusk_log 1
+output = duskwood_planks 4
+
+[recipe]
+inputs = duskwood_planks 3
+output = duskwood_slab 6
+
+[recipe]
+inputs = duskwood_planks 6
+output = duskwood_stairs 4
+
+[block gloamwood_planks]
+name = Gloamwood Planks
+texture = gloam_bark
+hardness = 1
+sound = wood
+
+[block gloamwood_slab]
+name = Gloamwood Slab
+texture = gloam_bark
+shape = slab
+full = gloamwood_planks
+hardness = 1
+sound = wood
+
+[block gloamwood_stairs]
+name = Gloamwood Stairs
+texture = gloam_bark
+shape = stairs
+hardness = 1
+sound = wood
+
+[recipe]
+inputs = gloam_log 1
+output = gloamwood_planks 4
+
+[recipe]
+inputs = gloamwood_planks 3
+output = gloamwood_slab 6
+
+[recipe]
+inputs = gloamwood_planks 6
+output = gloamwood_stairs 4
+
+[block moonwillow_planks]
+name = Moonwillow Planks
+texture = moonwillow_bark
+hardness = 1
+sound = wood
+
+[block moonwillow_slab]
+name = Moonwillow Slab
+texture = moonwillow_bark
+shape = slab
+full = moonwillow_planks
+hardness = 1
+sound = wood
+
+[block moonwillow_stairs]
+name = Moonwillow Stairs
+texture = moonwillow_bark
+shape = stairs
+hardness = 1
+sound = wood
+
+[recipe]
+inputs = moonwillow_log 1
+output = moonwillow_planks 4
+
+[recipe]
+inputs = moonwillow_planks 3
+output = moonwillow_slab 6
+
+[recipe]
+inputs = moonwillow_planks 6
+output = moonwillow_stairs 4
