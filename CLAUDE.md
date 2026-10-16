@@ -120,7 +120,9 @@ A new world generator (version 7) that keeps what works in the current one (read
 13. Action and interaction polish (the user's approved plan): third-person held/offhand items and tool use; shield, bow, spear and hit-reaction poses; moving and stationary climbing; mob swimming, banking and sitting transitions; native controls for existing nuclear and space machines, with host checks and visible ingredients/progress.
 14. Machine industry (the user's approved request): persistent inputs/fuel/coolant/outputs, operating animations, hopper automation and automatic batches, and useful power with portable cells, batteries, solar charging, cables and electric consumers.
 
-Originals: not chosen yet.
+Originals:
+- Landmarks: rare one-off natural wonders (a giant stone arch, a crater lake, a petrified forest) that show on maps with a name.
+- Explorer's Atlas: a book that fills in a biome map as you travel, with notes on each biome's rare finds.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**

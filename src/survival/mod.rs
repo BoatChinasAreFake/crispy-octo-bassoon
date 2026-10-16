@@ -2,6 +2,7 @@
 //! fishing and farming, vehicles, advancements, stats, game modes and world rules.
 
 pub(crate) mod advancements;
+pub(crate) mod atlas;
 pub(crate) mod combat;
 pub(crate) mod cooking;
 pub(crate) mod drops;

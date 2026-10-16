@@ -15,6 +15,7 @@ pub(crate) mod fire;
 pub(crate) mod fortress;
 pub(crate) mod hollow;
 pub(crate) mod houses;
+pub(crate) mod landmarks;
 pub(crate) mod liquids;
 pub(crate) mod monument;
 pub(crate) mod nature;

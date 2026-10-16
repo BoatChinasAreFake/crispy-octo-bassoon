@@ -946,6 +946,9 @@ pub const T_DRIFTWOOD_SIDE: u16 = 1159;
 pub const T_DRIFTWOOD_END: u16 = 1160;
 pub const T_SHELL_PATCH: u16 = 1161;
 pub const T_DUNE_GRASS: u16 = 1162;
+pub const T_PETRIFIED_SIDE: u16 = 1163;
+pub const T_PETRIFIED_TOP: u16 = 1164;
+pub const T_ATLAS: u16 = 1165;
 
 // Crop tiles are four in a row: T_CROP_* + stage.
 
@@ -4049,6 +4052,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     });
 
     paint_coastal(&mut a);
+    paint_landmarks(&mut a);
     paint_new_things(&mut a);
     paint_bees(&mut a);
     paint_critters(&mut a);
@@ -7240,6 +7244,37 @@ const BUNDLE_SPRITE: [&str; 16] = [
     "................",
 ];
 
+
+/// Petrified wood (see landmarks.rs) and the Explorer's Atlas (see atlas.rs).
+fn paint_landmarks(a: &mut Atlas) {
+    // Bark turned to banded stone: greys with rusty ochre streaks.
+    a.each(T_PETRIFIED_SIDE, |x, y, r, _| {
+        let stripe = if x % 4 == 0 { 0.72 } else if x % 4 == 2 { 0.88 } else { 1.0 };
+        let rust = (x * 5 + y / 3) % 11 == 0;
+        shade(if rust { rgb(160, 102, 64) } else { rgb(128, 120, 112) }, stripe * r.range(0.9, 1.08))
+    });
+    // The cut end: tight rings of agate colours.
+    a.each(T_PETRIFIED_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = dx.abs().max(dy.abs());
+        if d > 6.5 {
+            shade(rgb(118, 110, 104), r.range(0.85, 1.05))
+        } else {
+            let band = [rgb(196, 150, 112), rgb(170, 160, 150), rgb(214, 186, 150), rgb(150, 98, 70)][(d as usize) % 4];
+            shade(band, r.range(0.94, 1.06))
+        }
+    });
+    // A green cloth-bound book with a compass rose stamped in gold.
+    a.each(T_ATLAS, |x, y, r, _| {
+        let cover = (2..14).contains(&x) && (2..15).contains(&y);
+        if !cover {
+            return [0, 0, 0, 0];
+        }
+        let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+        let rose = (dx == 0 && dy.abs() <= 3) || (dy == 0 && dx.abs() <= 3) || (dx.abs() == dy.abs() && dx.abs() <= 1);
+        if rose { rgb(232, 196, 86) } else if x < 4 { shade(rgb(36, 74, 52), r.range(0.9, 1.05)) } else { shade(rgb(52, 110, 72), r.range(0.9, 1.05)) }
+    });
+}
 
 fn paint_coastal(a: &mut Atlas) {
     a.each(T_DRIFTWOOD_SIDE,|x,y,r,_|shade(if (y+(x/4)%3)%5==0 {rgb(110,100,81)}else{rgb(178,163,132)},r.range(0.92,1.08)));

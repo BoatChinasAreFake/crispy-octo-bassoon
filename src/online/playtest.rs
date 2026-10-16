@@ -2603,6 +2603,17 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
                 compare_generated_patch(host,team,report,touched,Vec3::new(x as f32+0.5,h as f32+2.05,z as f32+0.5),if beach { "beach ecology" } else { "offshore island" });
             } else { report.problems.push(if beach { "no decorated beach in the placement playtest" } else { "no offshore island in the placement playtest" }.into()); }
         }
+        // Landmarks: each kind built the same for the joined player, who hears they've been somewhere.
+        report.features.push("landmarks");
+        let near=host.world.generator.landmarks_near(host.spawn.x as i32,host.spawn.z as i32,12000);
+        for kind in crate::landmarks::Kind::ALL {
+            let Some(l)=near.iter().find(|l|l.kind==kind).cloned() else { report.problems.push(format!("no {} for the playtest",kind.label())); continue; };
+            let spot=Vec3::new(l.x as f32+0.5,l.y as f32+if kind==crate::landmarks::Kind::CraterLake {4.05} else {1.05},l.z as f32+0.5);
+            compare_generated_patch(host,team,report,touched,spot,kind.label());
+        }
+        if !team[team.len()-1].game.advancements.earned.iter().any(|a|a=="sightseer") {
+            report.problems.push("a bot stood at three landmarks but never heard about sightseer".into());
+        }
         report.features.push("sea wildlife");
         let g=&host.world.generator;
         let found=(-4096..4096).step_by(64).flat_map(|z|(-4096..4096).step_by(64).map(move|x|(x,z)))
@@ -2749,7 +2760,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "sea wildlife", "coastal species", "beach finds and tide pools"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

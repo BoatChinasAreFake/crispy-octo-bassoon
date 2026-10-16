@@ -1445,6 +1445,7 @@ impl Generator {
             }
         }
         self.mod_trees(cx, cz, &mut b, |x, z| self.column(x, z));
+        self.place_landmarks(cx, cz, &mut b);
         self.place_structures(cx, cz, &mut b);
         self.place_crypts(cx, cz, &mut b);
         self.place_mod_structures(cx, cz, &mut b);

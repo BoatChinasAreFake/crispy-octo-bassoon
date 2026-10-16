@@ -436,6 +436,20 @@ impl App {
                         draw_triangle(vec2(bx, by + k), vec2(bx - k, by), vec2(bx + k, by), fill);
                     }
                 }
+                // Landmarks (see landmarks.rs): a little star, and the name under it.
+                let reach = (navigation::MAP_SIZE as f32 * scale / 2.0) as i32;
+                for l in self.game.world.generator.landmarks_near(me.x as i32, me.z as i32, reach) {
+                    let (dx, dz) = ((l.x as f32 + 0.5 - me.x) / scale, (l.z as f32 + 0.5 - me.z) / scale);
+                    let half = navigation::MAP_SIZE as f32 / 2.0;
+                    if dx.abs() < half - 1.0 && dz.abs() < half - 1.0 {
+                        let (bx, by) = (cx + dx * per_px, cy + dz * per_px);
+                        let ink = Color::new(0.1, 0.08, 0.05, 1.0);
+                        draw_poly(bx, by, 5, 5.0 * s, -90.0, ink);
+                        draw_poly(bx, by, 5, 3.5 * s, -90.0, Color::new(0.95, 0.8, 0.3, 1.0));
+                        let tw = self.ui.text_width(&l.name, 6.0);
+                        self.ui.raw_text(&l.name, bx - tw / 2.0, by + 9.0 * s, 6.0, ink);
+                    }
+                }
                 // Ropes hanging down holes: little brown coils.
                 for p in self.game.rope_tops_near(me, navigation::MAP_SIZE as f32 * scale) {
                     let (dx, dz) = ((p.x as f32 + 0.5 - me.x) / scale, (p.z as f32 + 0.5 - me.z) / scale);
@@ -503,6 +517,9 @@ impl App {
         if held == block::COOKBOOK {
             self.cookbook_hud();
         }
+        if held == block::EXPLORERS_ATLAS {
+            self.atlas_hud();
+        }
         if held == block::NEWSPAPER {
             self.paper_hud(dt);
         }
@@ -546,6 +563,74 @@ impl App {
             ly += (size + 3.0) * s;
             if !l.is_empty() {
                 self.ui.raw_text(&l, x + 8.0 * s, ly - 3.0 * s, size, c);
+            }
+        }
+    }
+
+    /// The Explorer's Atlas, held: on the left, the biomes seen round about,
+    /// with you and any landmarks marked; on the right, every biome found so
+    /// far with its note, and the landmarks by name (see atlas.rs).
+    fn atlas_hud(&mut self) {
+        use crate::atlas::{colour, note, CELL};
+        use crate::world::Biome;
+        let s = self.ui.s;
+        let paper = Color::new(0.93, 0.89, 0.76, 0.96);
+        let ink = Color::new(0.22, 0.16, 0.1, 1.0);
+        let faint = Color::new(0.5, 0.45, 0.38, 1.0);
+        let (cells, px) = (41, 3.4 * s);
+        let map = cells as f32 * px;
+        let atlas = &self.game.atlas;
+        let found = atlas.biomes();
+        let line = 9.5 * s;
+        let rows = found.len().max(1) as f32 + if atlas.landmarks.is_empty() { 0.0 } else { 1.5 + atlas.landmarks.len().min(6) as f32 };
+        let (w, h) = (map + 250.0 * s + 24.0 * s, (map + 34.0 * s).max(26.0 * s + rows * line + 8.0 * s));
+        let (x, y) = (screen_width() - w - 10.0 * s, 10.0 * s);
+        draw_rectangle(x, y, w, h, paper);
+        draw_rectangle_lines(x, y, w, h, 2.0 * s, Color::new(0.2, 0.36, 0.25, 1.0));
+        self.ui.text(&format!("Explorer's Atlas ({} of {} biomes)", found.len(), Biome::ALL.len()), x + 8.0 * s, y + 12.0 * s, 10.0, ink);
+        // The map, north at the top, a square for every 64 blocks.
+        let me = self.game.player.body.pos;
+        let (mx, mz) = ((me.x as i32).div_euclid(CELL), (me.z as i32).div_euclid(CELL));
+        let (ox, oy) = (x + 8.0 * s, y + 26.0 * s);
+        draw_rectangle(ox, oy, map, map, Color::new(0.85, 0.8, 0.68, 1.0));
+        for dz in 0..cells {
+            for dx in 0..cells {
+                let key = (mx + dx - cells / 2, mz + dz - cells / 2);
+                if let Some(&b) = atlas.cells.get(&key) {
+                    let c = colour(Biome::ALL[b as usize]);
+                    draw_rectangle(ox + dx as f32 * px, oy + dz as f32 * px, px, px, Color::from_rgba(c[0], c[1], c[2], 255));
+                }
+            }
+        }
+        for l in &atlas.landmarks {
+            let (dx, dz) = (l.x.div_euclid(CELL) - mx + cells / 2, l.z.div_euclid(CELL) - mz + cells / 2);
+            if (0..cells).contains(&dx) && (0..cells).contains(&dz) {
+                let (bx, by) = (ox + (dx as f32 + 0.5) * px, oy + (dz as f32 + 0.5) * px);
+                draw_poly(bx, by, 5, 5.0 * s, -90.0, ink);
+                draw_poly(bx, by, 5, 3.5 * s, -90.0, Color::new(0.95, 0.8, 0.3, 1.0));
+            }
+        }
+        let (cx, cy) = (ox + (cells / 2) as f32 * px + px / 2.0, oy + (cells / 2) as f32 * px + px / 2.0);
+        draw_circle(cx, cy, 3.0 * s, Color::new(0.9, 0.1, 0.1, 1.0));
+        draw_rectangle_lines(ox, oy, map, map, s, ink);
+        // The notes: each biome found, then the landmarks.
+        let (tx, mut ty) = (ox + map + 12.0 * s, oy);
+        if found.is_empty() {
+            self.ui.text("Blank so far. Carry it somewhere new.", tx, ty, 7.0, faint);
+            ty += line;
+        }
+        for b in &found {
+            let name = b.name().split(" (").next().unwrap_or(b.name());
+            self.ui.raw_text(&format!("{}: {}", crate::lang::tr(name), crate::lang::tr(note(*b))), tx, ty, 6.0, ink);
+            ty += line;
+        }
+        if !atlas.landmarks.is_empty() {
+            ty += line * 0.5;
+            self.ui.text("Landmarks", tx, ty, 7.0, ink);
+            ty += line;
+            for l in atlas.landmarks.iter().rev().take(6) {
+                self.ui.raw_text(&format!("{} ({}, at {}, {})", l.name, crate::lang::tr(l.kind.label()), l.x, l.z), tx, ty, 6.0, ink);
+                ty += line;
             }
         }
     }

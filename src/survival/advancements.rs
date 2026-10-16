@@ -261,6 +261,8 @@ pub const ALL: &[Advancement] = &[
     adv("front_page", "Front Page News", "Read a paper whose lead story is about you."),
     adv("down_by_the_river", "Down by the River", "Find a river winding through the valleys to the sea."),
     adv("lifes_a_beach", "Life's a Beach", "Stand on a sandy beach. Mind the sand in your boots."),
+    adv("sightseer", "Sightseer", "Stand at a landmark: an arch, a crater lake or a stone forest."),
+    adv("well_travelled", "Well Travelled", "Fill in twelve biomes in an Explorer's Atlas."),
     adv("castaway", "Castaway", "Set foot on an island far out at sea. Bring a boat home."),
 ];
 

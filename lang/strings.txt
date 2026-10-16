@@ -258,6 +258,7 @@ ASCENT
 AUTOPILOT  |  TIER {}  |  {}
 Abandoned Mineshaft (Mind the Webs)
 Acacia
+Acacias, llamas and savanna villages.
 Accept
 Accept: application/vnd.github+json
 Accepted
@@ -278,6 +279,7 @@ Advancements: {}/{} (they're per world, like memories)
 Adventure
 Ahoy!
 Air
+Ald
 Alexa
 All
 Allay
@@ -318,6 +320,7 @@ Armourer (Clanks When Walking)
 Arms Up
 Arrow hits
 As intended. Starving stops at half a heart.
+Ashen Grove
 Asked to elaborate, the Hmmer hmmed again. We will keep readers informed.
 Asking the router to forward the port (UPnP)...
 Asking your router to open the port (UPnP)...
@@ -325,6 +328,8 @@ Assemble tier 1
 Assemble tier 2
 Assemble tier 3
 Assemble tier 4
+Atlas: {} (a {}) marked.
+Atlas: {} added. {}
 Auto: off
 Auto: on
 Autumn
@@ -350,6 +355,7 @@ Bamboo Stairs (Up, Mostly)
 Bamboozled
 Banned {}.
 Banner (Flag-Adjacent)
+Bare stone, llamas, and the best view in the world.
 Barnacled Compass (Points Down)
 Barrel (A Chest, but Round)
 Barter with a Snout. Gold for... whatever that is.
@@ -389,6 +395,7 @@ Beekeeper level {}  ({} xp)  -  stung {} time{}
 Beekeeper level {}! The bees have started calling you 'the big one'.
 Beekeeping Log
 Bees buzz
+Bees in the oaks, and wood for everything.
 Bell
 Bell (Ding Dong)
 Bellford
@@ -409,6 +416,7 @@ Birch, Please
 Black
 Blackstone (Goth Cobblestone)
 Blackstone Bricks (Snout Architecture)
+Blank so far. Carry it somewhere new.
 Blast Furnace (Blasting)
 Blast Furnace (Everything but Food, Fast)
 Blender
@@ -469,8 +477,10 @@ Breeze Rod (Whooshy Stick)
 Breeze Through
 Brewing Stand (Chemistry, Loosely)
 Bricks
+Bridge
 Bright
 Brightness: {}
+Brin
 Bring bounties are handed in all at once; Defeat bounties count since they went up.
 Bring down a column of kelp.
 Bring {} {}
@@ -589,6 +599,7 @@ Cobble Green
 Cobbled Deepslate (Moody Rubble)
 Cobblestun
 Cobweb (Sticky Situation)
+Cold
 Cold Feet
 Collect driftwood or seashells from the coast.
 Collection complete: {}! Museums would fight over this.
@@ -653,6 +664,7 @@ Copper Leggings (Clanky)
 Copper Ore (Future Statue)
 Copper Pickaxe (Between Stone and Iron)
 Copper Sword (Tarnishes Beautifully)
+Coral reefs, tropical Fishies, sea pickles.
 Cordon Bleu
 Cornflower (Suspiciously Blue)
 Couldn't back up this world first: {}
@@ -708,6 +720,7 @@ Creature
 Creatures
 Crimson
 Crimson Forest (Seeing Red)
+Crooked
 Crop Rotation Enthusiast
 Crop rotation bonus! The soil appreciates the variety.
 Cross
@@ -823,6 +836,7 @@ Down by the River
 Dried Floaty (Just Add Water)
 Dried Kelp (Crunchy Ocean)
 Driftwood (Weathered Shore Wood)
+Driftwood, shells, turtles, and tide pools.
 Drink a potion you brewed. Or found. We don't judge.
 Dripstone Block (Drippy Stone)
 Dropper (Just Drops Things)
@@ -830,6 +844,7 @@ Drops Ominously
 Drowned Port
 Dry Your Eyes
 Dubiety:
+Dun
 Dune Grass (Windblown Tufts)
 Dungeon (Mossy, Moody)
 Dye
@@ -853,6 +868,7 @@ Efficiency
 Efficiency (Faster Hitting of Rocks)
 Efficiency doesn't fit a sword
 Efficiency/Frost Walker/Riptide
+Elbow
 Elbow Grease
 Elder Guardian
 Elder Statesman
@@ -881,6 +897,8 @@ Everything Else
 Experienced
 Expert
 Explorer
+Explorer's Atlas (Hold to Read)
+Explorer's Atlas ({} of {} biomes)
 Explosion
 Exposed Copper (Ageing Gracefully)
 Extra! Extra!
@@ -920,6 +938,7 @@ Field Journal (Mostly Sketches)
 Fill 4 oxygen canisters
 Fill a Crypt's ring of Eye Frames. Something opened.
 Fill all four seats on a Floaty.
+Fill in twelve biomes in an Explorer's Atlas.
 Fills oxygen for your Life Support Pack.
 Find a Crimson Forest down in the Scorchlands.
 Find a Dimond. Spelled that way for legal reasons.
@@ -965,6 +984,7 @@ Fish n' Chips. Legally distinct, emotionally identical.
 Fish up a Soggy Boot. Just the left one.
 Fish up something valuable.
 Fisher (Smells Faintly of Cod)
+Fishies, and a winding way down to the sea.
 Fishing Log
 Fishing Stick (Advanced)
 Fishing: cast, wait for the real bite (not the nibbles!), reel in. Big fish: mind the line tension.
@@ -973,6 +993,7 @@ Fishy Business
 Flat Tops
 Flat-ish
 Floaty
+Flowers, bees, and a long view.
 Fluffer
 Fluffer Escapes, Is Found, Was Never Lost
 Fluffer baas
@@ -991,6 +1012,7 @@ Forgot {}'s key: the next one it shows will be trusted.
 Forgot {}: next time they start afresh.
 Fortune
 Fortune (Rocks Pay Better)
+Fossil Wood
 Found coal in the gravel. Don't ask.
 Frame time: {} ms average, {} ms worst
 Freeze Frame
@@ -1014,7 +1036,9 @@ Fungus Among Us
 Furnace (Omnidirectional)
 Furnace (Toasty)
 GPU: {}
+Gall
 Galloper
+Gallopers, villages, and the odd beehive.
 Game Mode: Creative
 Game Mode: Hardcore
 Game Mode: Survival
@@ -1023,6 +1047,7 @@ Game over!
 Game over. You can still look around.
 Garbled reply from the router
 Garden Soup
+Gate
 Gather seafood from a coastal creature.
 Gather, craft, and try not to get hissed at.
 Gave {} {} to {}.
@@ -1051,6 +1076,7 @@ Get the Oinkstep disc from a Snout. Bangers only.
 GetExternalIPAddress
 Getting Started
 Getting Wood
+Giant
 Giddy Up
 Gilded Age
 Gilded Blackstone (Bling, Geologically)
@@ -1083,6 +1109,7 @@ Gold Chest (Showing Off)
 Gold Galloper Armour (Showy, Surprisingly Sturdy)
 Gold Ingot (Too Soft for Anything)
 Gold Ore (Shiny, Useless)
+Gold close to the surface, and mineshafts in the open.
 Gold ingots (1 to 3)
 Gold is too soft for tools, so you got a wooden one. Economics!
 Gold: shiny, useless, beloved!
@@ -1103,6 +1130,8 @@ Gravelton
 Great 
 Green
 Green Thumb
+Grey
+Grey Timber
 Grilled fish. The Fish Log would be proud.
 Grind the enchantments off something.
 Grinds off the enchantments: about {} experience back.
@@ -1133,6 +1162,7 @@ Hardcore: one life, hard mode. Good luck.
 Hardy
 Harness (Floaty-Sized)
 Harness Test World
+Harrow
 Harvest a crop grown where a different one grew before.
 Harvest a fully grown crop. Farming simulator unlocked.
 Harvest honey or honeycomb from a hive.
@@ -1187,6 +1217,7 @@ Hmph. (This village won't trade with you.)
 Hodgepodge
 Hoe (Dirt Scratcher)
 Hold a Banner to pattern it (or a Shield to paint one of your banners on it).
+Hollin
 Hollow Box (Bigger on the Inside)
 Hollow Portal (Starry)
 Hollow Spire (Loot at the Top of the World)
@@ -1230,7 +1261,9 @@ I Know What This Button Does
 IT'S HERE.
 Ice (Nature's Floor Wax)
 Ice Spikes (Pointy, Chilly)
+Icebergs, and sea ice thick enough to walk on.
 Igloo (Mind the Basement)
+Igloos with a secret, polar bears, and hot springs up in the hills.
 Inbox
 Inbox ({})
 Ingredient on top: Glowshroom, Zappy Dust, Ember Shroom, Carrot, Feather (or Hisspowder)
@@ -1270,6 +1303,7 @@ Item picked up
 Items crafted
 Its builds, inventory, script data and backups will be gone for good.
 Its material, or another one like it
+Ivel
 Jack o'Lantern (Faces Everywhere)
 Join
 Join a game that turned up on your network by itself.
@@ -1285,6 +1319,7 @@ Jungle (Humid)
 Jungle Leaves (Extra Leafy)
 Jungle Log (Tall Tree Chunk)
 Jungle Temple (Mind the String)
+Jungle temples, melons, pandas in the bamboo.
 Just Add Water
 Kaboom
 Keep Inventory: OFF (hardcore)
@@ -1295,6 +1330,7 @@ Keep the cooling tower in place. Output: 4 cells + waste.
 Kelp (Seaweed, Ambitious)
 Kelp Broth
 Kelp Me
+Kesh
 Kettle
 Key
 Key changed!
@@ -1312,6 +1348,7 @@ LEGENDARY! You caught BIG BOB, all {}cm of him. He looks disappointed in you.
 LINE TENSION - EASE OFF!
 LOST: one Clanker's patience. If found, please do not return it.
 Ladder (Up, Mostly)
+Lake {}
 Land a Mace blow on the way down. Gravity did most of the work.
 Land claims are off (posts stay put, and come back into force if they're turned on again).
 Land claims are off here (an operator can turn them on with /claims on).
@@ -1319,11 +1356,13 @@ Land claims are off here.
 Land claims are on: a Survey Post claims the land around it.
 Land claims are {}.
 Land: {}
+Landmarks
 Language
 Lantern (Fancy Torch)
 Lantern (Hanging)
 Large
 Large Amethyst Bud (Nearly)
+Lark
 Launch yourself with a Wind Charge.
 Lava (On the Move)
 Lava (Spicy Water)
@@ -1381,6 +1420,7 @@ Lodestone
 Lodestone (Magnetic Personality)
 Lodestone: gone
 Logs and Progress
+Long
 Long Live the Queen
 Look Ma, No Hands
 Look through a Spyglass.
@@ -1436,6 +1476,7 @@ Melon Slice (Mostly Water)
 Mending
 Mending (Experience Fixes It)
 Merge
+Merrow
 Message in a Bottle
 Mince responsibly!
 Minceraft
@@ -1478,18 +1519,21 @@ Mooer moos
 Moss Block (Soft, Green, Suspicious)
 Moss Carpet (Rug of the Earth)
 Mossy Cobblestun (Vintage)
+Mother
 Mouse Sensitivity: {}%
 MouseLeft
 MouseMiddle
 MouseRight
 Mud (Squelchy)
 Mud Bricks (Sun-Baked, Slightly Crumbly)
+Mud, roots, and frogs in the shallows.
 Muddlecombe
 Mule
 Multiplayer
 Multiplayer: host opens their world with Esc > Open to LAN; friends use Multiplayer. T to chat.
 Museum Piece
 Mushmooer
+Mushmooers, and no monsters at all.
 Mushroom (Probably Fine)
 Mushroom Islands (Fungi to Be With)
 Mushroom Risotto
@@ -1546,6 +1590,7 @@ No block or item called "{}".
 No controller found. Plug one in any time.
 No friends named yet. /claim friend add <name>
 No ingredients
+No landmarks within 6,000 blocks (they're only in worlds made from v0.6 Part 2 on).
 No letters. Things sent to you arrive in the slots above.
 No mods installed yet.
 No monsters, no hunger. Health comes back on its own.
@@ -1609,6 +1654,7 @@ OFF
 OK
 OK: everyone agrees.
 ON
+Ober
 Observer (Nosy)
 Obsidian (Very Committed)
 Obtain a Dubiety Companion Beacon. Small thoughts, portable format.
@@ -1625,6 +1671,7 @@ Offline
 Oinker
 Oinker oinks
 Oinkstep
+Old
 Old 
 Old Debris (Ancient, Stubborn)
 Old Faithful
@@ -1707,6 +1754,7 @@ Perfect. A tear rolls down your blocky cheek.
 Persona Non Grata
 Personal Chest (Yours Alone)
 Personal Space
+Petrified Log (Was a Tree, Got Over It)
 Phosphorus up (and a little nitrogen). The soil feels... bony.
 Pick Block
 Pick Glow Berries off a cave vine. Snack and nightlight in one.
@@ -1717,6 +1765,7 @@ Pilferer Outpost (Keep Out)
 Pilferers Sent Packing
 Pillar of the Community
 Pink Petals (Ground Confetti)
+Pink petals, and the bees love it.
 Piston (Pushy)
 Piston Head
 Pitcher Plant (Ancient, Teal)
@@ -1813,10 +1862,12 @@ Put out a Wisp for good.
 Put something in the slot above to sell it.
 Put something in, or write a letter.
 Pyramid Scheme
+Pyramids with a trap in the floor, and desert villages.
 Queen Bee (In a Jar, Unimpressed)
 Queens caught
 Queens need an empty Beehive (a wild nest won't do).
 Questionable Power
+Quiet Grove
 Quit to Desktop
 Rage Quit to Title
 Raid - Defeat
@@ -1921,6 +1972,7 @@ SERVICES: walls built, roofs mended. No Hissers, please.
 SNAP! The line broke. The fish is telling all its friends about you.
 SOAPAction
 STOVEVILLE
+Saddle
 Saddle (Some Assembly Required)
 Salt (A Pinch)
 Sand
@@ -1975,6 +2027,7 @@ Sea Lantern (Glows Under Pressure)
 Sea Pickle (Not for Eating)
 Sea Snail
 Seagrass (Wet Lawn)
+Seagrass, dolphins, and ruins in the sand.
 Search recipes...
 Search...
 Seashell
@@ -2009,10 +2062,12 @@ Shell Patch (Beach Treasure)
 Shield (Door You Can Carry)
 Ship's Bell (Still Rings)
 Shipwreck (Abandoned, Soggy)
+Shipwrecks, ocean ruins and buried treasure maps.
 Shop Stall (Everything Must Go)
 Shore Supper
 Shrieker shrieks
 Shroomlight (Glows, Squishily)
+Sightseer
 Sign
 Sign (Words Go Here)
 Sign a book you wrote. A literary career begins.
@@ -2030,6 +2085,7 @@ Skin{}
 Skull
 Sky no longer falling, say experts. Celebrations are expected to be loud.
 Sleep in a bed and skip the night. Time is a construct.
+Sleeping
 Slow
 Slowness
 Sly Friend
@@ -2074,9 +2130,11 @@ Some Assembly Required
 Some sun, some cloud, and the sky in its usual place. More of the same is forecast.
 Something
 Something enchanted (or worn)
+Something in the pale oaks wakes at night. Eyeblossoms.
 Something teleports
 Something to enchant
 Something's hurt
+Sorrow
 Sorrow Sand (Sighs Underfoot)
 Sort
 Sorted
@@ -2097,6 +2155,7 @@ Spectating  -  fly with Jump/Sneak, sprint to go faster
 Spectator
 Speed
 Spelunker's Rope (Throw It Down a Hole)
+Spikes of packed ice taller than houses.
 Spire
 Spire Trim Template
 Splash
@@ -2117,11 +2176,13 @@ Sprint: Toggle
 Sprouting
 Spruce Log (Pointy Tree Chunk)
 Spruce Needles
+Spruce villages, Woofers, and the odd llama.
 Spyglass (Pirate Approved)
 Squawker
 Squawker squawks
 Staked a Claim
 Stalac-tight
+Stand at a landmark: an arch, a crater lake or a stone forest.
 Stand beside a {} and load its input slots.
 Stand in a beacon's light. The Wyrm's egg, finally useful.
 Stand on a Magma Block without sneaking. Ow.
@@ -2145,11 +2206,13 @@ Step through a portal into a mod's dimension.
 Stick (Artisanal)
 Sticky Piston (Clingy)
 Sticky Situation
+Still Forest
 Stone
 Stone Age
 Stone Brick
 Stone Bricks (Fancy Rocks)
 Stone Spear (Flint-ish)
+Stone Wood
 Stone needs a pickaxe. Iron needs stone tier. Dimonds need iron tier. Tools wear out. Eat to heal.
 Stony Peaks (Rock Bottom, but Up)
 Stop
@@ -2216,6 +2279,8 @@ Take 64 gold at your Shop Stall.
 Take Back
 Take the potion out first.
 Tall Grass
+Tall white birches, quiet and bright.
+Tam
 Tame a Galloper. It only took several hundred attempts.
 Tame a Llama. It still might spit.
 Tame a Woofer with a bone. It's you. You're the good boy now.
@@ -2300,6 +2365,7 @@ The ice melted. Science!
 The line ran out. You reel it back in.
 The message reads: {}
 The music is kept smaller (or larger) next time the game starts.
+The nearest is {}, a {}, at {}, {}, {} ({} blocks {}).
 The nearest {} is around {}, {} ({} blocks away).
 The nearest {} is around {}, {}, down in the Scorchlands ({} blocks from {}, {}).
 The nearest {} is at {}, {}, {} ({} blocks away).
@@ -2334,6 +2400,7 @@ The worn thing
 The {} has been defeated!
 The {} is yours now. It's sitting; right-click to call it along.
 The {} is yours. It could use a Saddle.
+The {} of {}
 The {} {}
 There's already a team called {}.
 Things eaten
@@ -2351,6 +2418,7 @@ This is {}'s land{}.
 This is {}'s stall. (Look, don't touch.)
 This server needs a password. Type it in the Password box.
 This world isn't open to anyone.
+Thorn
 Throw Item
 Throw a Riptide spear in the rain or the sea, and go with it.
 Throw a Soggy Spear. Go and get it back.
@@ -2542,6 +2610,7 @@ Weed Whacker
 Weeds (Unwelcome)
 Weeper
 Weeper Tear (It Was Sad)
+Weeping
 Weeping Vines (Having a Little Cry)
 Welcome
 Welcome back! Your things were right where you left them.
@@ -2553,6 +2622,8 @@ Welcome to your village paper. Yesterday's news, every morning, from the Notice 
 Welcome to {}. Somebody made this.
 Well
 Well Bucket Missing Again
+Well Travelled
+Wend
 What a Deal
 What the hell is wrong with you?
 Wheat
@@ -2579,11 +2650,13 @@ Wilting
 Wilting Heights
 Wind Charge (Bottled Gust)
 Wind gusts
+Window
 Window: {}x{}  UI size {}
 Winter
 Wishing Well (Doesn't Grant)
 Wisp
 Witch
+Witch huts, mud, and lily pads to walk on.
 Witnesses describe it as "sudden". More tomorrow.
 Wonderful.
 Wood Ash (Potassium!)
@@ -2591,6 +2664,7 @@ Wooden
 Wooden Spear (Pointy Stick, Promoted)
 Woodland Explorer Map (Here Be Pilferers)
 Woodland Mansion (Pilferers' Country House)
+Woodland mansions full of Pilferers, and huge mushrooms.
 Woofer
 Woofer Armour (Very Good Boy Protection)
 Woofer woofs
@@ -2627,6 +2701,7 @@ XRRConfigCurrentRate
 XRRFreeScreenConfigInfo
 XRRGetScreenInfo
 XYZ: {} / {} / {} in {}
+Yawn
 Yellow
 Yellow Terracotta
 You are banned from this server.
@@ -2730,6 +2805,7 @@ a bit bland
 a bit grumpy
 a blast shot is used up when it lands
 a boss never despawns
+a bot stood at three landmarks but never heard about sightseer
 a cactus in the water at {} {} {}
 a cave-in never came down on the host
 a change in front sends a pulse out of the back
@@ -2836,6 +2912,7 @@ coordinate out of range
 copper golem
 couldn't claim land for {}: {}
 couldn't host: {}
+crater lake
 create Blues blue
 create Reds red
 creatures dying
@@ -3065,6 +3142,7 @@ no village anywhere near spawn to try growing villages in
 no village in the placement playtest
 no welcome
 no {} anywhere near spawn
+no {} for the playtest
 no {} found
 nobody got the bottle of honey from the hive
 nobody listed
@@ -3101,6 +3179,7 @@ oversized message
 own skin
 perched (landed: {}) and took off again (flew: {})
 perfectly content
+petrified forest
 pickaxes can be enchanted
 planks into sticks
 plenty of mites
@@ -3171,6 +3250,7 @@ statistics too long
 stepped up onto the slabs
 still holding it
 still there
+stone arch
 stopped by the wall: {}
 string too long
 struck down
@@ -3389,6 +3469,7 @@ zombie hmmer
 {} (backup {})
 {} (from {})
 {} ({} in): {}.
+{} ({}, at {}, {})
 {} - ITS KEY HAS CHANGED: is it really the same server?
 {} - a different version (protocol {})
 {} - can't reach it: {}

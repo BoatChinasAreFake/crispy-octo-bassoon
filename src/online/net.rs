@@ -50,7 +50,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
 /// v59: v0.6 Part 2: generator 8 (caves by depth, broader land, islands,
-/// beach finds), the coastal creatures, held items and poses, rocket flights,
+/// beach finds, landmarks and Petrified Logs), the coastal creatures, the
+/// Explorer's Atlas, held items and poses, rocket flights,
 /// swallowing gluttons and the example packs' machines (FactoryStates,
 /// MachineUse, MachineInfo, RocketFlights, Swallows, MealAnimation).
 pub const PROTOCOL: u32 = 59;

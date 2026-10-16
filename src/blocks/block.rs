@@ -493,7 +493,9 @@ pub const DRIFTWOOD_Z: Id = MYCELIUM + 110;
 pub const SHELL_PATCH: Id = MYCELIUM + 111;
 pub const SHELL_PATCH_WET: Id = MYCELIUM + 112;
 pub const DUNE_GRASS: Id = MYCELIUM + 113;
-pub const NUM_BLOCKS: Id = MYCELIUM + 114;
+/// Stone-hard wood from a petrified forest (see landmarks.rs).
+pub const PETRIFIED_LOG: Id = MYCELIUM + 114;
+pub const NUM_BLOCKS: Id = MYCELIUM + 115;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -770,7 +772,9 @@ pub const CRAB_MEAT: Id = FIRST_ITEM + 281;
 pub const SHELLFISH: Id = FIRST_ITEM + 282;
 pub const COOKED_SEAFOOD: Id = FIRST_ITEM + 283;
 pub const SEASHELL: Id = FIRST_ITEM + 284;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 285;
+/// Fills in a map of the biomes as you travel (see atlas.rs).
+pub const EXPLORERS_ATLAS: Id = FIRST_ITEM + 285;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 286;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2660,6 +2664,7 @@ impl Registry {
             b.shape=Shape::Layer{eighths:2};b.family=SHELL_PATCH;b.creative=id==SHELL_PATCH;blocks.push(b);
         }
         blocks.push(def("dune_grass","Dune Grass (Windblown Tufts)",Cross,false,false,[T_DUNE_GRASS;3],0.0,0,false,DUNE_GRASS,0.0,S_GRASS));
+        blocks.push(def("petrified_log", "Petrified Log (Was a Tree, Got Over It)", Cube, true, true, [T_PETRIFIED_TOP, T_PETRIFIED_SIDE, T_PETRIFIED_TOP], 1.8, 1, true, PETRIFIED_LOG, 0.0, S_STONE));
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2937,6 +2942,7 @@ impl Registry {
         }
         items.push(ItemDef { food:Some(6.0),..item("cooked_seafood","Cooked Seafood",T_SEAFOOD) });
         items.push(item("seashell","Seashell",T_SEASHELL));
+        items.push(ItemDef { stack: 1, consume: false, ..item("explorers_atlas", "Explorer's Atlas (Hold to Read)", T_ATLAS) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -3005,6 +3011,7 @@ impl Registry {
             r(&[(DRIFTWOOD, 1)], (PLANKS, 2)),
             r(&[(SEASHELL, 2)], (SHELL_PATCH, 1)),
             r(&[(SEASHELL, 3)], (BONE_DUST, 2)),
+            r(&[(BOOK, 1), (MAP, 1)], (EXPLORERS_ATLAS, 1)),
             r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),

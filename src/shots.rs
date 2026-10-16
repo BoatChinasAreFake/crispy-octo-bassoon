@@ -82,6 +82,32 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
     }
     // The Scorchlands' structures are a long way east.
     let (cx0, cz0) = if matches!(mode, "fortress" | "camp" | "bastion") { (crate::scorch::SCORCH_ORIGIN / 16, 0) } else { (cx0, cz0) };
+    // Landmarks (see landmarks.rs): the nearest of the kind, from a little way off and up.
+    if let Some(want) = match mode {
+        "landmark_arch" => Some(Some(crate::landmarks::Kind::Arch)),
+        "landmark_crater" => Some(Some(crate::landmarks::Kind::CraterLake)),
+        "landmark_grove" => Some(Some(crate::landmarks::Kind::PetrifiedForest)),
+        "atlas" | "landmark_map" => Some(None),
+        _ => None,
+    } {
+        let (x0, z0) = (cx0 * 16, cz0 * 16);
+        let l = generator.landmarks_near(x0, z0, 8000).into_iter().find(|l| want.is_none_or(|k| l.kind == k))?;
+        let to = Vec3::new(l.x as f32 + 0.5, l.y as f32 + if l.kind == crate::landmarks::Kind::Arch { 9.0 } else { 1.0 }, l.z as f32 + 0.5);
+        let (back, up) = match l.kind {
+            crate::landmarks::Kind::Arch => (34.0, 6.0),
+            crate::landmarks::Kind::CraterLake => (40.0, 16.0),
+            crate::landmarks::Kind::PetrifiedForest => (30.0, 10.0),
+        };
+        // (Side on to an arch, so you see through it.)
+        let side = if l.kind == crate::landmarks::Kind::Arch && l.seed % 2 == 0 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(0.7, 0.0, 0.7) };
+        let mut from = to + side * back;
+        from.y = (generator.column(from.x as i32, from.z as i32).0 as f32 + 3.0).max(l.y as f32 + up);
+        if matches!(mode, "atlas" | "landmark_map") {
+            from = Vec3::new(l.x as f32 + 0.5, l.y as f32 + 2.0, l.z as f32 + 0.5) + Vec3::new(30.0, 0.0, 30.0);
+            from.y = generator.column(from.x as i32, from.z as i32).0 as f32 + 14.0;
+        }
+        return Some(look(from, to));
+    }
     let kind = match mode {
         "outpost" => Kind::Outpost,
         "trials" => Kind::TrialChambers,
@@ -690,7 +716,7 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
-            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" | "rockyshore" | "biomeborder" | "rolling_hills" | "offshore_island" | "large_mushroom" | "beach_ecology" | "sea_wildlife" | "tide_pool" | "beach_showcase" => {
+            "hut" | "tower" | "well" | "dungeon" | "village" | "ravine" | "rain" | "thunder" | "snow" | "swamp" | "jungle" | "badlands" | "taiga" | "cherry" | "mangrove" | "palegarden" | "city" | "ruins" | "trailruins" | "oceanruins" | "shipwreck" | "deepdark" | "dripstone" | "lush" | "geode" | "pyramid" | "jungletemple" | "mineshaft" | "igloo" | "monument" | "beenest" | "outpost" | "fortress" | "camp" | "raid" | "trials" | "aurora" | "autumn" | "rainbow" | "savanna" | "birchforest" | "darkforest" | "mushroomisland" | "icespikes" | "meadow" | "stonypeaks" | "warmocean" | "frozenocean" | "kelp" | "crimson" | "teal" | "basalt" | "soulvalley" | "bastion" | "mansion" | "mansionhall" | "hotspring" | "modhut" | "desertvillage" | "savannavillage" | "taigavillage" | "snowyvillage" | "noticeboard" | "growingvillage" | "shopstall" | "newspaper" | "river" | "beach" | "rockyshore" | "biomeborder" | "rolling_hills" | "offshore_island" | "large_mushroom" | "beach_ecology" | "sea_wildlife" | "tide_pool" | "beach_showcase" | "landmark_arch" | "landmark_crater" | "landmark_grove" | "atlas" | "landmark_map" => {
                 // Somewhere the generator built something (or the sky is doing something).
                 let mut g = shot_game(424242, true, false);
                 g.time = s.time.unwrap_or(if s.mode == "aurora" { 0.8 } else { 0.3 });
@@ -747,6 +773,27 @@ impl App {
                             let target=Vec3::new(xx as f32+0.5,h as f32+1.1,z as f32+0.5);
                             let from=target+Vec3::new(3.5,2.0,2.5);let d=target-(from+Vec3::Y*player::EYE);
                             (s.pos,s.yaw,s.pitch)=(Some(from),d.x.atan2(-d.z),d.y.atan2(Vec2::new(d.x,d.z).length()));
+                        }
+                    }
+                }
+                // Holding an Atlas filled in for a few hundred blocks round about, or a map.
+                if s.mode == "atlas" || s.mode == "landmark_map" {
+                    g.inv.selected = 0;
+                    g.inv.slots[0] = Some((if s.mode == "atlas" { block::EXPLORERS_ATLAS } else { block::MAP }, 1));
+                    if let Some(pos) = s.pos {
+                        let (mx, mz) = ((pos.x as i32).div_euclid(crate::atlas::CELL), (pos.z as i32).div_euclid(crate::atlas::CELL));
+                        for dz in -12..=12 {
+                            for dx in -9..=14 {
+                                if dx * dx + dz * dz > 150 {
+                                    continue;
+                                }
+                                let (cx, cz) = (mx + dx, mz + dz);
+                                let b = g.world.generator.column(cx * crate::atlas::CELL + 32, cz * crate::atlas::CELL + 32).1;
+                                g.atlas.cells.insert((cx, cz), world::Biome::ALL.iter().position(|&x| x == b).unwrap_or(0) as u8);
+                            }
+                        }
+                        for l in g.world.generator.landmarks_near(pos.x as i32, pos.z as i32, 900) {
+                            g.atlas.landmarks.push(crate::atlas::Found { name: l.name, kind: l.kind, x: l.x, z: l.z });
                         }
                     }
                 }
@@ -2677,6 +2724,7 @@ const LATEST_SCENES: &[&str] = &[
     "glutton_inhale", "glutton_swallow", "glutton_gulp", "glutton_belly", "rocket_inflight", "rocket_landing", "rocket_cockpit", "dusk_trees", "half_baked_lab", "astra_rocket", "dusk_guardians", "dubiety_companion", "dubiety_glutton",
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
+    "landmark_arch", "landmark_crater", "landmark_grove", "atlas", "landmark_map",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is

@@ -441,6 +441,8 @@ pub struct Game {
     /// Cooking (see cooking.rs): what's in each pot, and the local player's Cookbook.
     pub pots: HashMap<IVec3, crate::cooking::Pot>,
     pub cookbook: [u8; crate::cooking::DISHES],
+    /// The Explorer's Atlas's map and landmarks (see atlas.rs).
+    pub atlas: crate::atlas::Atlas,
     /// The local player's chill, and the clocks for a spring's healing and the
     /// cold's bite (see springs.rs).
     pub chill: f32,
@@ -728,6 +730,7 @@ impl Game {
             hives: HashMap::new(),
             pots: HashMap::new(),
             cookbook: [0; crate::cooking::DISHES],
+            atlas: Default::default(),
             chill: 0.0,
             spring_heal: 0.0,
             chill_bite: 0.0,
@@ -963,6 +966,7 @@ impl Game {
             ("hives".to_string(), crate::bees::encode(&self.hives)),
             ("pots".to_string(), crate::cooking::encode(&self.pots)),
             ("cookbook".to_string(), crate::cooking::encode_book(&self.cookbook)),
+            ("atlas".to_string(), self.atlas.encode()),
             ("chill".to_string(), self.chill.to_le_bytes().to_vec()),
             ("books".to_string(), crate::books::encode(&self.books, &self.lecterns)),
             ("banners".to_string(), crate::banners::encode(&self.banners)),
@@ -1055,6 +1059,9 @@ impl Game {
         }
         if let Some(b) = extra("cookbook") {
             self.cookbook = crate::cooking::decode_book(b);
+        }
+        if let Some(b) = extra("atlas") {
+            self.atlas = crate::atlas::Atlas::decode(b);
         }
         if let Some(b) = extra("chill").and_then(|b| b.get(..4)) {
             let c = f32::from_le_bytes(b.try_into().unwrap());
@@ -1201,6 +1208,11 @@ impl Game {
         if let Some(k) = key {
             self.advance(k);
         }
+        // Landmarks (see landmarks.rs), and the Explorer's Atlas filling in (see atlas.rs).
+        if self.world.generator.landmark_at(x, z).is_some() {
+            self.advance("sightseer");
+        }
+        self.atlas_tick();
         // Dry land on one of the islands out at sea (see shape.rs).
         let generator = &self.world.generator;
         if generator.opts.version >= 8 && generator.dim == crate::dims::Dim::Over && !self.player.body.in_water
