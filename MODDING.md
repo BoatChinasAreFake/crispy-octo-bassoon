@@ -214,7 +214,7 @@ The tree line optionally accepts a fifth field: `round` (default), `twisted` (be
 
 Base-game trees don't grow in a mod biome, so give it a `tree` if it should have any. The F3 screen shows which biome you're in, and `/locate <name>` finds the nearest patch.
 
-#### Optional climate targets (new Overworld worlds, revision 8+)
+#### Optional climate targets (Overworlds made from v0.6 Part 2 on)
 
 A biome can target the shared surface climate instead of taking an unrestricted patch in its `in` biomes:
 
@@ -565,10 +565,10 @@ Furnaces cook and burn mod things too: give a mod block or item [`smelts_into`](
 
 See [example-mods/README.md](example-mods/README.md) for Half-Baked Nuclear Machinery, Dubiety, Ad Absurdum, and The Slightly Dim Forest. All four may be installed together. Their content uses this data format and host-only scripts, with dimension-aware commands for rockets, fallout and wildlife. Their READMEs explain recipes, commands, progression and the deliberate limits of these small engine-native examples.
 
-Rocket shape presets use bounded model geometry and collision boxes: `rocket_engine` includes a bell nozzle and four swept fins, `rocket_body` has a faceted narrow fuselage, and `rocket_nose` tapers in three voxel steps. They share the normal top/side/bottom textures and work in world, held-block and inventory rendering. They require protocol 51.
+Rocket shape presets use bounded model geometry and collision boxes: `rocket_engine` includes a bell nozzle and four swept fins, `rocket_body` has a faceted narrow fuselage, and `rocket_nose` tapers in three voxel steps. They share the normal top/side/bottom textures and work in world, held-block and inventory rendering.
 
 
-### Glutton companions (protocol 53)
+### Glutton companions
 
 A `[mob]` can opt into `glutton = true` (default `false`). It accepts every non-air held item as a one-unit offering, before name tags, leads, shears and trading interactions; `tame_item` still tames while consuming the offering. Empty-hand owner interaction retains sit/follow. Feeding heals two health, preserves the mob and earns Bottomless Appetite. Normal survival/creative inventory rules and host range/inventory validation apply.
 

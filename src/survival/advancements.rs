@@ -261,6 +261,7 @@ pub const ALL: &[Advancement] = &[
     adv("front_page", "Front Page News", "Read a paper whose lead story is about you."),
     adv("down_by_the_river", "Down by the River", "Find a river winding through the valleys to the sea."),
     adv("lifes_a_beach", "Life's a Beach", "Stand on a sandy beach. Mind the sand in your boots."),
+    adv("castaway", "Castaway", "Set foot on an island far out at sea. Bring a boat home."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).

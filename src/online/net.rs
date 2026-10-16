@@ -49,17 +49,11 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v35: the new Zappy parts' blocks, and mods' dimensions (in dimension ids).
 /// v36: teams and players hitting players (Teams, HitPlayer), Trading Tables
 /// (TradeState, TradeAccept), minigames (Sidebar, SetSpawn), land claims (Claims).
-/// v49: revision 12 confines beach biomes to the immediate shoreline.
-/// v50: mod dimensions can set player gravity.
-/// v51: shaped rocket mod blocks render and collide consistently.
-/// v52: optional custom mod-tree silhouettes regenerate identically on peers.
-/// v53: glutton mod companions accept all offerings before ordinary interactions.
-/// v54: host-authoritative rocket flights and cockpit/landing snapshots.
-/// v55: bounded realm-local swallowing animation snapshots and burps.
-/// v56: player flight flags, cosmetic meal poses and glutton anticipation timing.
-/// v57: held/offhand equipment, combat gestures and host-checked machine panels.
-/// v58: persistent production, power network and realm-local operating states.
-pub const PROTOCOL: u32 = 58;
+/// v59: v0.6 Part 2: generator 8 (caves by depth, broader land, islands,
+/// beach finds), the coastal creatures, held items and poses, rocket flights,
+/// swallowing gluttons and the example packs' machines (FactoryStates,
+/// MachineUse, MachineInfo, RocketFlights, Swallows, MealAnimation).
+pub const PROTOCOL: u32 = 59;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

@@ -2569,7 +2569,7 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
     if let Some(at)=host.world.generator.nearest_site(crate::structures::Kind::Village,home,160) {
         compare_generated_patch(host,team,report,touched,at.as_vec3()+Vec3::new(5.5,2.05,0.5),"village foundation");
     } else { report.problems.push("no village in the placement playtest".into()); }
-    if host.world.generator.opts.version >= 9 {
+    if host.world.generator.opts.version >= 8 {
         report.features.push("broader terrain and rocky coasts");
         for rocky in [false,true] {
             let g=&host.world.generator;
@@ -2586,7 +2586,7 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
         }
     }
     // The CLI installs this mod before both host and clients build generators.
-    if host.world.generator.opts.version>=10 {
+    if host.world.generator.opts.version >= 8 {
         report.features.push("islands and beach ecology");
         for beach in [false,true] {
             let g=&host.world.generator;
@@ -2634,7 +2634,7 @@ fn reshaped_depths(host: &mut Game, team: &mut [Bot], report: &mut Report, touch
         } else { report.problems.push("no open ocean in the wildlife playtest".into()); }
     }
 
-    if host.world.generator.opts.version>=11 {
+    if host.world.generator.opts.version >= 8 {
         report.features.push("beach finds and tide pools");
         let ledger=|host:&Game,id:u32,item:Id|host.peers.get(&id).map(|p|p.ledger.bag.count(item)).unwrap_or(0);
         let g=&host.world.generator;

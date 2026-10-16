@@ -16,7 +16,7 @@ Copy any of these folders into the game's `mods/` folder, enable it on the Mods 
 
 The four parody packs use original names, pixel patterns, scripts and prose. They are examples for this engine, not ports or copies of the Minecraft mods. Their machinery uses chat commands and their rocket is a voxel assembly that becomes a visible autopilot vehicle during ascent and powered descent, with cockpit instruments and exhaust; planet travel changes dimension. Dubiety uses word transitions rather than a neural language model. These choices keep the packs small and self-contained.
 
-The new packs contain 66 declared blocks, 54 items, 68 recipes, 47 textures, 16 mobs, six dimensions, three biomes and ten structures. Slab/portal variants are extra generated registry entries. They require protocol 56 for animated rocket flights, glutton companion interactions and planetary player gravity; the save format remains 16 and Overworld generation remains revision 12.
+The new packs contain 66 declared blocks, 54 items, 68 recipes, 47 textures, 16 mobs, six dimensions, three biomes and ten structures. Slab/portal variants are extra generated registry entries. Installing them doesn't change how the Overworld generates.
 
 Four native achievements accompany their progression: Questionable Power, Rocket Paperwork, Pocket Philosopher, and Complaint Resolved. The usual Off the Map and Homebrew achievements also apply.
 

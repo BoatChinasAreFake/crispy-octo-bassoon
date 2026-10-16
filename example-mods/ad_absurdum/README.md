@@ -42,7 +42,7 @@ Planet wildlife is host-spawned near visiting players with local/global limits. 
 
 Rockets, pending flights, departure points, oxygen buffers and exploration scores persist with the world. Native machine inventories, work, energy and mode are saved with their blocks. Disconnected pilots' departures pause until they return. Each planet has its own saved realm. Crafting a Tier 1 rocket earns **Rocket Paperwork**.
 
-The deployed rocket now has a narrow faceted white fuselage with red trim, a tapered red nose, a dark bell nozzle and four swept red fins. Its five-block assembly and saved block keys are unchanged. The three rocket shape presets keep rendering and collision consistent across clients (protocol 51).
+The deployed rocket now has a narrow faceted white fuselage with red trim, a tapered red nose, a dark bell nozzle and four swept red fins. Its five-block assembly and saved block keys are unchanged. The three rocket shape presets keep rendering and collision consistent across clients.
 
 Flight snapshots synchronize the phase, pilot, safe ground anchor and progress to joining players. Saved script flight records reconstruct a pending ascent or descent after loading; offline pilots pause. Equipment is returned once, after touchdown. Protocol 54 is required. `rocket_inflight`, `rocket_landing` and `rocket_cockpit` stage the actual flight renderer for visual checks.
 

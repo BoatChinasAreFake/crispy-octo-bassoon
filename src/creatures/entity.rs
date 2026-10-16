@@ -1507,11 +1507,12 @@ impl Mob {
                     }
                     if self.flee > 0.0 {
                         want = Some(((-flat.x).atan2(flat.z), 4.5));
+                    } else if self.kind == MobKind::Sardine {
+                        let school = (self.seed as f32 * 0.001 + self.anim * 0.03).sin() * 0.5;
+                        want = Some((self.wander_dir.unwrap_or(school), 1.6));
+                    } else if self.kind == MobKind::Tuna {
+                        want = Some((self.wander_dir.unwrap_or(self.yaw), 2.2));
                     }
-                    if self.kind==MobKind::Sardine {
-                        let school=(self.seed as f32*0.001+self.anim*0.03).sin()*0.5;
-                        want=Some((self.wander_dir.unwrap_or(school),1.6));
-                    } else if self.kind==MobKind::Tuna { want=Some((self.wander_dir.unwrap_or(self.yaw),2.2)); }
                     let above = world.get(self.body.pos.x.floor() as i32, (self.body.pos.y + self.body.height + 0.4).floor() as i32, self.body.pos.z.floor() as i32);
                     let drift = if self.kind==MobKind::Eel {
                         let floor=ground_below(world,self.body.pos,8);

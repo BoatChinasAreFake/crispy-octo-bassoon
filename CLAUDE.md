@@ -112,24 +112,15 @@ A new world generator (version 7) that keeps what works in the current one (read
 5. Mod biomes can give a target climate (hot, dry, inland, rugged...) and take the places nearest to it that the built-in rules leave free.
 6. Settling in: structures, villages, mansions and hot springs placed sensibly on the new land, and biome maps of many seeds checked for variety and sensible neighbours.
 7. Terrain refinements (the user's request): broader continents and climate regions, river widths independent of valley scale, bays and rocky shores with slope-aware beaches, mountain foothills/passes/plateaus, elevation-aware alpine snow, and blended ground cover/tree density at ordinary biome borders. Recheck caves and structures against the larger terrain.
-
 8. Further world refinements (the user's request): restore rolling inland relief, make mushroom islands rare and larger, add ordinary offshore islands, enrich beaches with existing scrub/logs/turtle nests, and increase sea wildlife with local and global caps.
-
 9. Beach and ocean wildlife (the user's request): Starfish, Clams, Crabs, Sardines, Tuna, Mussels, Oysters, Sea Snails and Eels, with distinct models, habitats, bounded populations, seafood/cooking and multiplayer checks.
-
 10. Beach content (the user's request): low driftwood logs, harvestable dry/waterlogged shell patches, dune grass, and small sheltered tide pools, with recipes, support/water rules, advancements, old-generation fixtures and multiplayer checks.
+11. Larger parody example mods (the user's request): nuclear machinery with nukes, a tiny embedded word-model assistant without horror, rockets and separate planet dimensions, and an isolated twilight-style forest, with survival progression, original assets, documentation and multiplayer checks. Dubiety's glutton has a visible whole-mob swallowing animation (the user's request).
+12. Player animation polish (the user's request): shared blended swimming, hovering, ascending/descending flight, gliding, crouching, eating/drinking, and landing poses; built-in/custom skins and armour; multiplayer state; and glutton anticipation before swallowing.
+13. Action and interaction polish (the user's approved plan): third-person held/offhand items and tool use; shield, bow, spear and hit-reaction poses; moving and stationary climbing; mob swimming, banking and sitting transitions; native controls for existing nuclear and space machines, with host checks and visible ingredients/progress.
+14. Machine industry (the user's approved request): persistent inputs/fuel/coolant/outputs, operating animations, hopper automation and automatic batches, and useful power with portable cells, batteries, solar charging, cables and electric consumers.
 
-11. Larger parody example mods (the user's request): nuclear machinery with nukes, a tiny embedded word-model assistant without horror, rockets and separate planet dimensions, and an isolated twilight-style forest, with survival progression, original assets, documentation and multiplayer checks. Dubiety’s glutton has a visible whole-mob swallowing animation (the user’s request).
-
-12. Player animation polish (the user’s request): shared blended swimming, hovering, ascending/descending flight, gliding, crouching, eating/drinking, and landing poses; built-in/custom skins and armour; multiplayer state; and glutton anticipation before swallowing.
-
-13. Action and interaction polish (the user’s approved plan): third-person held/offhand items and tool use; shield, bow, spear and hit-reaction poses; moving and stationary climbing; mob swimming, banking and sitting transitions; native controls for existing nuclear and space machines, with host checks and visible ingredients/progress.
-
-14. Machine industry (the user’s approved request): persistent inputs/fuel/coolant/outputs, operating animations, hopper automation and automatic batches, and useful power with portable cells, batteries, solar charging, cables and electric consumers.
-
-Originals: not chosen yet. The Part 2 core implements items 4 to 14 on a development branch; this does not complete or release Part 2. Its two originals still need the user's choice.
-
-Implementation compatibility: Part 1 worlds retain generator revision 7. The original Part 2 core is revision 8. New worlds now use revision 12 for narrower shoreline beaches, retaining revision 11 finds and tide pools and revision 10 relief/islands. Revisions 0–11 retain their generation rules. Protocol 58 protects the new generator and appended beach block IDs; older clients cannot join.
+Originals: not chosen yet.
 
 Parts:
 - Part 1: items 1, 2 and 3. **(released)**

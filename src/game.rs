@@ -1201,6 +1201,12 @@ impl Game {
         if let Some(k) = key {
             self.advance(k);
         }
+        // Dry land on one of the islands out at sea (see shape.rs).
+        let generator = &self.world.generator;
+        if generator.opts.version >= 8 && generator.dim == crate::dims::Dim::Over && !self.player.body.in_water
+            && generator.ocean_island(x, z) > 0.4 && generator.shape_noise(x, z).0 < -0.28 && generator.column(x, z).0 > generator.sea() {
+            self.advance("castaway");
+        }
         let near_village = self.world.generator.villages_near(x.div_euclid(16), z.div_euclid(16)).iter().any(|v| v.origin.as_vec3().distance(p) < 24.0);
         if near_village {
             self.advance("village_people");
@@ -2604,11 +2610,8 @@ impl Game {
             self.breaking = None;
         }
 
-        if held==BOW {
-            if c.use_held||c.use_pressed {self.bow_draw=(self.bow_draw+dt).min(1.0);}
-            else if self.bow_draw>0.0 {self.shoot_bow();self.bow_draw=0.0;}
-        } else {self.bow_draw=0.0;}
-        if held!=BOW && (c.use_pressed || c.use_held) && self.use_cd <= 0.0 {
+        let using = c.use_held || c.use_pressed;
+        if self.bow_draw <= 0.0 && using && self.use_cd <= 0.0 {
             self.use_cd = 0.25;
             // With a weapon or tool in hand, a block (torches, say) in the other hand gets placed.
             let other = self.inv.offhand.map(|s| s.0).unwrap_or(AIR);
@@ -2620,6 +2623,17 @@ impl Game {
                 self.off_swing=1.0;self.player.swing=right_swing;
             } else {
                 self.use_item();
+            }
+        }
+        // A bow is drawn only when use_item found nothing else to do (a chest, a mob, a boat...).
+        if held != BOW || (!using && self.bow_draw <= 0.0) {
+            self.bow_draw = 0.0;
+        } else if self.bow_draw > 0.0 {
+            if using {
+                self.bow_draw = (self.bow_draw + dt).min(1.0);
+            } else {
+                self.shoot_bow();
+                self.bow_draw = 0.0;
             }
         }
         if !c.use_held {
@@ -2993,7 +3007,8 @@ impl Game {
             return;
         }
         if held == BOW {
-            self.shoot_bow();
+            // Drawn in handle_actions and loosed on release.
+            self.bow_draw = f32::EPSILON;
             return;
         }
         if held == CROSSBOW {
@@ -4154,8 +4169,9 @@ impl Game {
             }
             return;
         }
-        if self.try_coastal_wildlife(p) { return; }
-        if self.try_sea_wildlife(p) { return; }
+        // Sea life has its own caps and doesn't use up the turn for land animals and monsters.
+        self.try_coastal_wildlife(p);
+        self.try_sea_wildlife(p);
         // Kept animals (bred, tamed) don't count against new ones turning up.
         let passive = self.mobs.iter().filter(|m| !m.kind.hostile() && !m.kind.coastal() && !m.persistent && !matches!(m.kind,MobKind::Fishy | MobKind::Dolphin | MobKind::GlowSquid | MobKind::Axolotl)).count();
         // Only wild monsters count towards the monster cap (not fish, Hmmers, pets or bats).
@@ -5077,6 +5093,59 @@ pub(crate) mod tests {
             }
         }
         w
+    }
+
+    #[test]
+    fn landing_on_an_island_out_at_sea_is_an_advancement() {
+        let mut g = Game::new_with(77, false, false, crate::world::GenOptions::DEFAULT);
+        let wg = &g.world.generator;
+        let spot = (-4096..4096).step_by(32).flat_map(|z| (-4096..4096).step_by(32).map(move |x| (x, z)))
+            .find(|&(x, z)| wg.ocean_island(x, z) > 0.6 && wg.shape_noise(x, z).0 < -0.28 && wg.column(x, z).0 > wg.sea() + 2)
+            .expect("an island");
+        let h = wg.column(spot.0, spot.1).0;
+        g.player.body.pos = Vec3::new(spot.0 as f32 + 0.5, h as f32 + 1.0, spot.1 as f32 + 0.5);
+        g.ready = true;
+        g.explore_advancements(5.0);
+        assert!(g.advancements.has("castaway"));
+    }
+
+    #[test]
+    fn a_bow_in_hand_still_opens_chests() {
+        let mut g = arena(804);
+        let chest = IVec3::new(2, 50, 0);
+        g.world.set_v(chest, CHEST);
+        g.player.body.pos = Vec3::new(0.5, 50.0, 0.5);
+        g.inv.selected = 0;
+        g.inv.slots[0] = Some((BOW, 1));
+        g.inv.slots[1] = Some((ARROW, 4));
+        g.target = Some(Target::Block(crate::world::Hit { pos: chest, normal: IVec3::NEG_X, dist: 1.5 }));
+        g.handle_actions(0.016, &Controls { use_pressed: true, ..Default::default() });
+        assert_eq!(g.open, Some(chest));
+        g.handle_actions(0.016, &Controls::default());
+        assert!(g.arrows.is_empty(), "no arrow on letting go");
+        assert_eq!(g.inv.count(ARROW), 4);
+    }
+
+    #[test]
+    fn low_gravity_softens_falls() {
+        assert_eq!(crate::player::fall_damage(9.0, 1.0), 6.0);
+        // A standing jump on the moon peaks near eight blocks up.
+        assert_eq!(crate::player::fall_damage(7.9, 0.17), 0.0);
+        assert_eq!(crate::player::fall_damage(3.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn a_stalled_rocket_flight_sets_its_pilot_down() {
+        let mut g = arena(805);
+        let ground = Vec3::new(0.5, 51.0, 0.5);
+        let f = crate::rockets::RocketFlight { owner: g.player_name.clone(), pilot: g.my_id, ground, landing: false, elapsed: 4.0, tier: 1 };
+        g.rockets.push(f);
+        g.rockets_tick(1.0);
+        assert_eq!(g.rockets.len(), 1, "a script gets time to move it on");
+        g.rockets_tick(crate::rockets::GRACE);
+        g.rockets_tick(0.016);
+        assert!(g.rockets.is_empty());
+        assert!(g.player.body.pos.distance(ground) < 1.0, "back on the ground, not left in the sky");
     }
 
     #[test]

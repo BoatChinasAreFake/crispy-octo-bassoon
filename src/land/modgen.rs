@@ -50,7 +50,7 @@ pub struct ModBiome {
     pub under: Option<Id>,
     pub plants: Vec<(Id, f32)>,
     pub tree: Option<ModTree>,
-    /// Optional target on the Overworld's shared climate axes (revision 8+).
+    /// Optional target on the Overworld's shared climate axes (version 8 on).
     pub climate: Option<ClimateTarget>,
 }
 

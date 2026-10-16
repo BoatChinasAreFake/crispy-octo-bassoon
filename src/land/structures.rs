@@ -361,7 +361,7 @@ impl Generator {
     pub fn structure_slot(&self, cx: i32, cz: i32) -> bool {
         // Mansions use their own grid and have basements plus settling
         // aprons. Reserve their neighbourhood before common sites roll.
-        if self.opts.version >= 9 && (-2..=2).any(|dz| (-2..=2).any(|dx| self.mansion_spot(cx + dx, cz + dz))) {
+        if self.opts.version >= 8 && (-2..=2).any(|dz| (-2..=2).any(|dx| self.mansion_spot(cx + dx, cz + dz))) {
             return false;
         }
         // (From version 7, nothing right beside where a monument may go, either.)
@@ -824,7 +824,7 @@ impl Generator {
                     cover = self.biomes[m].top.unwrap_or(cover);
                     fill = self.biomes[m].under.unwrap_or(fill);
                 }
-                // Revision 8 never extends the apron into an adjacent waterway.
+                // Version 8 never extends the apron into an adjacent waterway.
                 if self.opts.version >= 8 && d > 0 {
                     let (h, biome) = self.column(x, z);
                     if h <= self.sea() || biome.is_ocean() || biome == Biome::River { continue; }
@@ -1393,7 +1393,7 @@ mod tests {
     }
 
     #[test]
-    fn revision_nine_reserves_mansion_neighbourhoods() {
+    fn mansions_keep_their_neighbourhood_clear() {
         let g = Generator::with(31337, crate::world::GenOptions::DEFAULT);
         let mut found = 0;
         for cz in -40..40 {

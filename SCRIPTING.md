@@ -58,7 +58,7 @@ Define any of these functions and the game calls them. Returning `false` from th
 | `random()`, `random_int(lo, hi)` | Random numbers |
 | `get_var(key)`, `set_var(key, value)` | Your mod's memory, **saved with the world** (see below). `get_var` returns `()` for a key that was never set |
 
-**Dimensions and worn armour** (protocol 50):
+**Dimensions and worn armour**:
 
 | Function | Returns |
 | --- | --- |
@@ -181,4 +181,4 @@ Errors appear in chat, in the console, and on the Mods screen (errors when loadi
 
 ### Autopilot rocket scenes
 
-`rocket_depart(player, x, y, z, tier, remaining)` attaches a pilot to a four-second ascent from the engine origin. `rocket_land(player, tier, remaining)` starts or resumes a three-second descent above the player’s current safe landing column. `rocket_clear(player)` removes that player’s scene from every realm and releases a descending pilot at the saved ground anchor. Tiers are 1–4 and times are clamped to the corresponding phase duration. These commands run only on the host; protocol 54 snapshots provide the moving model, exhaust and cockpit to clients. Repeating a phase updates its pilot association without restarting its animation. Scripts retain travel, resource checks and saved phase records.
+`rocket_depart(player, x, y, z, tier, remaining)` attaches a pilot to a four-second ascent from the engine origin. `rocket_land(player, tier, remaining)` starts or resumes a three-second descent above the player’s current safe landing column. `rocket_clear(player)` removes that player’s scene from every realm and releases a descending pilot at the saved ground anchor. Tiers are 1–4 and times are clamped to the corresponding phase duration. These commands run only on the host, which sends the moving model, exhaust and cockpit to everyone. A flight that has finished and isn't moved on (or cleared) within ten seconds ends by itself, setting its pilot down at the ground anchor; so does one whose pilot leaves. Repeating a phase updates its pilot association without restarting its animation. Scripts retain travel, resource checks and saved phase records.

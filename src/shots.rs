@@ -349,17 +349,19 @@ pub(crate) fn scenic_view(g: &Game, mode: &str) -> Option<(Vec3, f32, f32)> {
                     }
                     for (sx, sz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                         let away = |k: i32| generator.column(x + sx * k, z + sz * k);
+                        // How far this side's bank is (rivers run 10 to 20-odd blocks wide).
+                        let bank = (1..=24).find(|&k| away(k).1 != world::Biome::River).unwrap_or(99);
                         let fits = if mode == "river" {
                             // Inland: land on this side, no sea for a long way, and more river a little way along it.
-                            let inland = [(48, 0), (-48, 0), (0, 48), (0, -48), (34, 34), (-34, 34), (34, -34), (-34, -34)].iter().all(|&(i, j)| !generator.column(x + i, z + j).1.is_ocean());
-                            inland && (8..=16).all(|k| !away(k).1.is_ocean() && away(k).1 != world::Biome::River) && (-12..=12).filter(|k| generator.column(x + sz * k, z + sx * k).1 == world::Biome::River).count() >= 9
+                            let inland = [(64, 0), (-64, 0), (0, 64), (0, -64), (45, 45), (-45, 45), (45, -45), (-45, -45)].iter().all(|&(i, j)| !generator.column(x + i, z + j).1.is_ocean());
+                            inland && bank <= 24 && (bank..bank + 10).all(|k| !away(k).1.is_ocean() && away(k).1 != world::Biome::River) && (-12..=12).filter(|k| generator.column(x + sz * k, z + sx * k).1 == world::Biome::River).count() >= 9
                         } else {
                             // The sea out on one side, land behind on the other.
                             (-14..=-8).all(|k| away(k).1.is_ocean()) && (6..=12).all(|k| !away(k).1.is_ocean())
                         };
                         if fits {
                             let sea = generator.sea() as f32;
-                            let (back, up) = if mode == "river" { (14.0, 9.0) } else { (10.0, 6.0) };
+                            let (back, up) = if mode == "river" { (bank as f32 + 8.0, 10.0) } else { (10.0, 6.0) };
                             let to = Vec3::new(x as f32 + 0.5 - sx as f32 * 4.0, sea, z as f32 + 0.5 - sz as f32 * 4.0);
                             let (fx, fz) = (x + sx * back as i32, z + sz * back as i32);
                             // (Above the ground there, and any trees on it.)

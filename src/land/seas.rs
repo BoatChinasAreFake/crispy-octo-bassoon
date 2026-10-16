@@ -26,7 +26,7 @@ pub const KELP_CHANCE: f32 = 0.08;
 /// What grows on this patch of sea floor, if anything: the plant, and (for
 /// kelp) how tall. `depth` is how much water there is above the floor.
 pub fn floor_plant(g: &Generator, biome: Biome, x: i32, z: i32, depth: i32) -> Option<(Id, i32)> {
-    if g.opts.version>=11 && biome.is_ocean() && biome!=Biome::FrozenOcean && (1..=6).contains(&depth) && hash2(g.seed^0xB3AC7,x,z)<0.012 {return Some((SHELL_PATCH_WET,1));}
+    if g.opts.version >= 8 && biome.is_ocean() && biome!=Biome::FrozenOcean && (1..=6).contains(&depth) && hash2(g.seed^0xB3AC7,x,z)<0.012 {return Some((SHELL_PATCH_WET,1));}
     if depth < 2 || biome == Biome::FrozenOcean {
         return None;
     }
@@ -53,12 +53,12 @@ impl Generator {
     /// Small, sheltered basins in level beach sand. The complete rim is
     /// checked from world coordinates, so neighbouring chunks agree.
     pub(crate) fn beach_pool_cell(&self,cx:i32,cz:i32)->Option<(i32,i32,i32,i32)> {
-        if self.opts.version<11 {return None;}
+        if self.opts.version < 8 {return None;}
         let s=self.seed^0x71DE;
         if hash2(s,cx,cz)>0.28 {return None;}
         let (x,z)=(cx*64+8+(hash2(s^1,cx,cz)*48.0) as i32,cz*64+8+(hash2(s^2,cx,cz)*48.0) as i32);
         let (h,b)=self.column(x,z);
-        let min_height=self.sea()+i32::from(self.opts.version<12);
+        let min_height=self.sea();
         if b!=Biome::Beach || !(min_height..=self.sea()+3).contains(&h) || self.climate(x,z).0< -0.1 {return None;}
         let radius=2+(hash2(s^3,cx,cz)*2.0) as i32;
         for dz in -radius-1..=radius+1 {for dx in -radius-1..=radius+1 {
@@ -69,7 +69,7 @@ impl Generator {
     }
 
     pub(crate) fn beach_pool_at(&self,x:i32,z:i32)->Option<i32> {
-        if self.opts.version<11 {return None;}
+        if self.opts.version < 8 {return None;}
         let (cx,cz)=(x.div_euclid(64),z.div_euclid(64));
         let s=self.seed^0x71DE;
         let (mx,mz)=(cx*64+8+(hash2(s^1,cx,cz)*48.0) as i32,cz*64+8+(hash2(s^2,cx,cz)*48.0) as i32);
@@ -79,23 +79,21 @@ impl Generator {
     }
 
 
-    /// Beach scrub, occasional weathered log clusters and sparse turtle nests.
+    /// Beach scrub, shells, dune grass, the odd run of driftwood and sparse turtle nests.
     /// The shared cell anchor makes logs continuous across chunk boundaries.
     pub fn beach_feature(&self,x:i32,z:i32,h:i32)->Option<Id> {
-        if self.opts.version<10 || h<self.sea()+1 { return None; }
+        if self.opts.version < 8 || h<self.sea()+1 { return None; }
         let s=self.seed^0xB3AC0;
         let (cx,cz)=(x.div_euclid(32),z.div_euclid(32));
         if hash2(s,cx,cz)<0.12 {
             let (rx,rz)=(cx*32+8+(hash2(s^1,cx,cz)*16.0) as i32,cz*32+8+(hash2(s^2,cx,cz)*16.0) as i32);
             let len=2+(hash2(s^3,cx,cz)*3.0) as i32;
             let along=if hash2(s^4,cx,cz)<0.5 { z==rz && (rx..rx+len).contains(&x) } else { x==rx && (rz..rz+len).contains(&z) };
-            if along && self.column(rx,rz)==(h,Biome::Beach) {return Some(if self.opts.version<11 {LOG}else if hash2(s^4,cx,cz)<0.5 {DRIFTWOOD_Z}else{DRIFTWOOD});}
+            if along && self.column(rx,rz)==(h,Biome::Beach) {return Some(if hash2(s^4,cx,cz)<0.5 {DRIFTWOOD_Z}else{DRIFTWOOD});}
         }
         let r=hash2(s^5,x,z);
-        if self.opts.version>=11 {
-            if r>0.006 && r<0.065 && h<=self.sea()+2 {return Some(SHELL_PATCH);}
-            if (0.006..0.12).contains(&r) && h>=self.sea()+2 && hash2(s^6,x>>3,z>>3)<0.6 {return Some(DUNE_GRASS);}
-        }
+        if r>0.006 && r<0.065 && h<=self.sea()+2 {return Some(SHELL_PATCH);}
+        if (0.006..0.12).contains(&r) && h>=self.sea()+2 && hash2(s^6,x>>3,z>>3)<0.6 {return Some(DUNE_GRASS);}
         if r<0.0003 && self.climate(x,z).0>0.1 { Some(TURTLE_EGG) }
         else if r<0.006 { Some(DEAD_BUSH) }
         else if r<0.045 && hash2(s^6,x>>3,z>>3)<0.35 { Some(TALL_GRASS) }
@@ -254,7 +252,7 @@ impl Game {
             let dolphins=self.mobs.iter().filter(|m|m.kind==MobKind::Dolphin).count();
             let local_fish=self.mobs.iter().filter(|m|m.kind==MobKind::Fishy && m.body.pos.distance_squared(center)<96.0*96.0).count();
             let local_dolphins=self.mobs.iter().filter(|m|m.kind==MobKind::Dolphin && m.body.pos.distance_squared(center)<96.0*96.0).count();
-            let (kind,n,y)=if biome!=Biome::FrozenOcean && depth>=5 && dolphins<dolphin_cap && local_dolphins<6 && self.rng.chance(0.22) {
+            let (kind,n,y)=if biome!=Biome::FrozenOcean && depth>=5 && !self.is_night() && dolphins<dolphin_cap && local_dolphins<6 && self.rng.chance(0.22) {
                 (MobKind::Dolphin,(self.rng.int(1,2) as usize).min(dolphin_cap-dolphins).min(6-local_dolphins),sea-2)
             } else if fish<fish_cap && local_fish<24 && self.rng.chance(0.8) {
                 (MobKind::Fishy,(self.rng.int(4,7) as usize).min(fish_cap-fish).min(24-local_fish),top-1-self.rng.int(0,(depth-3).min(10)))
@@ -510,7 +508,7 @@ mod tests {
     #[test]
     fn beach_details_use_supported_existing_blocks() {
         let _lock=crate::mods::registry_test_lock();
-        let g=Generator::with(1234,crate::world::GenOptions{version:10,structures:0,..crate::world::GenOptions::DEFAULT});
+        let g=Generator::with(1234,crate::world::GenOptions{structures:0,..crate::world::GenOptions::DEFAULT});
         let mut found=std::collections::HashSet::new();
         let mut checked=0;
         'search: for z in (-4096..4096).step_by(8) { for x in (-4096..4096).step_by(8) {
@@ -529,9 +527,9 @@ mod tests {
                     }
                 }
             } }
-            if found.len()==4 && checked>=12 { break 'search; }
+            if found.len()>=5 && checked>=12 { break 'search; }
         } }
-        assert!(found.contains(&LOG) && found.contains(&TALL_GRASS) && found.contains(&DEAD_BUSH) && found.contains(&TURTLE_EGG),"{found:?}");
+        assert!((found.contains(&DRIFTWOOD) || found.contains(&DRIFTWOOD_Z)) && found.contains(&DUNE_GRASS) && found.contains(&DEAD_BUSH) && found.contains(&TURTLE_EGG),"{found:?}");
     }
 
     /// A pool, 8 deep, over the arena's floor.

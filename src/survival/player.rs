@@ -64,6 +64,13 @@ pub struct Player {
     pub air: f32,
 }
 
+/// Damage for landing after dropping `drop` blocks. Landing speed is what
+/// hurts, so in low gravity (`pull` under 1) the same drop lands softer.
+pub fn fall_damage(drop: f32, pull: f32) -> f32 {
+    let fall = drop * pull;
+    if fall > 3.5 { (fall - 3.0).floor() } else { 0.0 }
+}
+
 impl Player {
     pub fn new(pos: Vec3) -> Self {
         Player {
@@ -209,7 +216,8 @@ impl Player {
         b.vel.x += (target.x - b.vel.x) * k;
         b.vel.z += (target.z - b.vel.z) * k;
 
-        let gravity=GRAVITY*world.generator.mod_dim().map(|d|d.gravity).unwrap_or(1.0);
+        let pull = world.generator.mod_dim().map(|d| d.gravity).unwrap_or(1.0);
+        let gravity = GRAVITY * pull;
         if in_water {
             b.vel.y -= gravity * 0.25 * dt;
             b.vel.y *= (1.0 - dt * 2.5).max(0.0);
@@ -283,12 +291,12 @@ impl Player {
         if b.in_water {
             self.fall_start = b.pos.y;
         } else if b.on_ground {
-            let fall = self.fall_start - b.pos.y;
+            let fall = (self.fall_start - b.pos.y) * pull;
             if fall > 0.6 {
                 self.landed = Some(fall);
             }
-            if fall > 3.5 && !creative {
-                dmg = (fall - 3.0).floor();
+            if !creative {
+                dmg = fall_damage(self.fall_start - b.pos.y, pull);
             }
             self.fall_start = b.pos.y;
         } else if b.vel.y > 0.0 || b.pos.y > self.fall_start {

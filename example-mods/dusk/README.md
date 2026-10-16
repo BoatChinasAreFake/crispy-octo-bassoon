@@ -29,4 +29,4 @@ Commands: `/dusk help`, `/dusk where <guardian>`, `/dusk challenge <guardian>`, 
 
 Guardians, tamed/named creatures, trophies, progression and active encounter records save with the world. Unloaded encounters keep their lock; a loaded, empty encounter area clears a stale lock after a minute. No horror or sleep-harassment mechanics are included.
 
-The optional fifth field in a biome tree line selects its silhouette: `twisted`, `spire` or `umbrella`. Trees use global-coordinate anchors and a six-block reach so neighbouring chunks regenerate the same branches. The older four-field format retains the round-canopy generator. The `dusk_trees` screenshot scene stages the three actual generated tree shapes for comparison; protocol 52 protects their generation rules.
+The optional fifth field in a biome tree line selects its silhouette: `twisted`, `spire` or `umbrella`. Trees use global-coordinate anchors and a six-block reach so neighbouring chunks regenerate the same branches. The older four-field format retains the round-canopy generator. The `dusk_trees` screenshot scene stages the three actual generated tree shapes for comparison.

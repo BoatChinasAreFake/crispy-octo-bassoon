@@ -2745,6 +2745,7 @@ a modded shot must not be blamed on a Rattler: {}
 a newer
 a parcel
 a quarter per ruby
+a script gets time to move it on
 a sitting flier lands: y \= {}
 a skin must be 64x64
 a skin must be 64x64 pixels (this is {}x{})
@@ -2777,6 +2778,7 @@ ate a Pufferfish. It said 'Do Not Eat' right on it
 ate a Suspicious Stew. It was, in fact, suspicious
 baby Hmmers were
 back at the first portal: {}
+back on the ground, not left in the sky
 bad char
 bad data: {}
 bad element count
@@ -3045,6 +3047,7 @@ nested too deeply
 no Pointy Sticks, no shot
 no address found
 no answer
+no arrow on letting go
 no climate-target mod patch
 no decorated beach in the placement playtest
 no flowers in reach (they need some within seven blocks)
