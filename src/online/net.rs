@@ -54,7 +54,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// Explorer's Atlas, held items and poses, rocket flights,
 /// swallowing gluttons and the example packs' machines (FactoryStates,
 /// MachineUse, MachineInfo, RocketFlights, Swallows, MealAnimation).
-pub const PROTOCOL: u32 = 59;
+/// v60: v0.7 Part 1: generator 9 (Hollow Cities, flying ships, Leapstalks),
+/// Mauve stone, Leapfruit, Sulkers and the Floating effect.
+pub const PROTOCOL: u32 = 60;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

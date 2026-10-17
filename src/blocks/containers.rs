@@ -68,6 +68,7 @@ pub fn smelt(id: Id) -> Option<Id> {
         PUFFER => COOKED_PUFFER,
         BOOT => COOKED_BOOT,
         SAND => GLASS,
+        LEAPFRUIT => POPPED_LEAPFRUIT,
         COBBLE => STONE,
         LOG | SPRUCE_LOG | JUNGLE_LOG | CHERRY_LOG | MANGROVE_LOG | PALE_OAK_LOG | ACACIA_LOG | BIRCH_LOG | DARK_OAK_LOG => COAL, // charcoal, legally distinct
         OLD_DEBRIS => SCORCHITE_SCRAP,

@@ -228,6 +228,7 @@
 A Cluckster arrives with {} from {}, sighs, and waddles off. (It's in your inbox at any Post Box.)
 A Cluckster ate your seedlings. Consider a Scarecrow.
 A Cluckster takes it. They get it even if they're away.
+A Floaty Feeling
 A Hisser was seen
 A Hmmer bought {} {} from your stall for {} gold.
 A Hmmer is now a Master of its trade{}. Prices are said to reflect this.
@@ -768,6 +769,7 @@ Defeat a Sizzler. It was getting heated.
 Defeat a Snout Brute.
 Defeat a Soggy Groaner. It was having a bad day anyway.
 Defeat a Starer and take its pearl.
+Defeat a Sulker. It had it coming.
 Defeat a Tusker.
 Defeat a Webber. Eight legs, zero chances.
 Defeat a Weeper with its own fireball.
@@ -855,6 +857,7 @@ Early Night
 Earn Your Stripes
 Earn a Sneaker's trust with Cluckets.
 Easy (Gentle Hissing)
+Eat a Leapfruit and end up somewhere else.
 Eat a Melon Slice. Mostly water, entirely delicious.
 Eat a Suspiciously Golden Oinkchop. Your doctor is concerned.
 Eat cake. It was real all along.
@@ -992,6 +995,7 @@ Fishy
 Fishy Business
 Flat Tops
 Flat-ish
+Floating
 Floaty
 Flowers, bees, and a long view.
 Fluffer
@@ -999,6 +1003,7 @@ Fluffer Escapes, Is Found, Was Never Lost
 Fluffer baas
 Fluffers: ethically sheared!
 Fly, infinite blocks, no damage.
+Flying Ship (No Visible Means of Support)
 Flying the Flag
 Fog
 Folder: {}
@@ -1068,6 +1073,7 @@ Get a village to hate you. (Well done?)
 Get a village to love you.
 Get an Amethyst Shard out of a geode.
 Get cursed with Mining Fatigue by an Elder Guardian.
+Get hit by a Sulker's bullet and float.
 Get hit by a falling Pointy Rock. It was on the label.
 Get some Bamboo. It grew while you read this.
 Get stung. The smoker was right there.
@@ -1219,6 +1225,7 @@ Hoe (Dirt Scratcher)
 Hold a Banner to pattern it (or a Shield to paint one of your banners on it).
 Hollin
 Hollow Box (Bigger on the Inside)
+Hollow City (Sulkers Reside)
 Hollow Portal (Starry)
 Hollow Spire (Loot at the Top of the World)
 Hollow Stone (Pale, Suspicious)
@@ -1229,6 +1236,7 @@ Homebrew
 Honey Block (Sticky Situation)
 Honeycomb
 Honeycomb (Hexagonal, Efficient)
+Hop, Skip
 Hopper (Funnel With Ambition)
 Hoppers feed from top / sides; extract below.
 Host
@@ -1371,7 +1379,10 @@ Lavender (Smells Calming)
 Lavender honey: so calming you feel lighter on your feet.
 Lead (Walkies)
 Leaf Litter (Crunchy)
+Leapflower (Plant It on Hollow Stone)
+Leapfruit (Hop Somewhere Else)
 Leaping
+Leapstalk (Springy)
 Leaves
 Leaves: Still
 Leaves: Waving
@@ -1465,6 +1476,8 @@ Map: one pixel for every {} block(s).
 Market Report
 Master
 Master Class
+Mauve Block (Very Purple)
+Mauve Pillar (Load-Bearing Lavender)
 Max FPS: Unlimited{}
 Max FPS: {}{}
 Meadow (Hay Fever)
@@ -1711,6 +1724,7 @@ Orange
 Orange Terracotta
 Other hand
 Other hand (a shield, torches...)
+Out of Its Shell
 Output
 Output full
 Outputs
@@ -1801,6 +1815,7 @@ Pointy Stick
 Poison
 Pokey Plant (Do Not Hug)
 Polar Bear
+Popped Leapfruit (Crunchy Purple)
 Poppy-ish
 Pork Barrel
 Porridge
@@ -2238,6 +2253,8 @@ Structures: {}
 Strutter
 Subtitles
 Suit Up
+Sulker
+Sulker Shell (Still Sulking)
 Summer
 Summoned {} {}.
 Sun Disc (Warm to the Touch)
@@ -2327,6 +2344,7 @@ The Hollow. Something big is circling.
 The Hush
 The Hush SHUSHES
 The Hush roars
+The Leapfruit fizzes. Nowhere nearby to hop to.
 The Llama is yours now. It'll follow you; give it a chest to carry things.
 The One That Got Away
 The Sneaker trusts you now. It'll follow you about, and bring you things.
@@ -3306,6 +3324,7 @@ the host doesn't know {}
 the host doesn't see {} as a spectator
 the host has no statistics for {}
 the host kept the Hollow Box a bot broke
+the host left a broken Leapstalk hanging
 the host let the spectator {} place a block
 the host let {} craft a chest with no crafting table
 the host never heard how {} died
@@ -3523,6 +3542,7 @@ zombie hmmer
 {} banned address(es) loaded from {}
 {} beat {} for "{}", saw {} on the board, and the host has it done: {}
 {} born yesterday. Beds are reported to be in short supply.
+{} broke a Leapstalk's foot and {} still sees some of it hanging
 {} broke kelp and the host's column didn't come away into water ({})
 {} built on {}'s land
 {} came home and the portal by spawn is gone (it has {})
@@ -3545,6 +3565,7 @@ zombie hmmer
 {} filled and dyed a cauldron and the host has {}
 {} finished a Wilter's T and nothing woke
 {} finished a bounty but never heard about Help Wanted
+{} floated and never heard about floaty_feeling
 {} followed through the portal and is in {}
 {} gave an Allay a diamond, and the host's Allay didn't take it
 {} gave their Donkey a chest and the host's has none
@@ -3590,6 +3611,7 @@ zombie hmmer
 {} never saw the Galloper's gold armour
 {} never saw the Mooer's lead
 {} never saw the Mushmooer sheared
+{} never saw the Sulker open up
 {} never saw the Wilter
 {} never saw the acacia boat
 {} never saw the armour stand's Turtle Shell
@@ -3605,6 +3627,7 @@ zombie hmmer
 {} never saw the raid bar
 {} never saw the soul fire
 {} never saw the tripwire trip
+{} never saw the whole Leapstalk
 {} never saw the whole rope
 {} never saw {}'s own skin
 {} next to {} at {},{}
@@ -3650,6 +3673,7 @@ zombie hmmer
 {} was disconnected: {}
 {} was never told about its Bad Omen
 {} was never told it's a spectator
+{} was shot at by a Sulker and never floated
 {} was told {} after the hit (the host: {})
 {} wasn't an operator.
 {} wasn't on the allow-list.

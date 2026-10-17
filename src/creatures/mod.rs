@@ -23,6 +23,7 @@ pub(crate) mod sniffers;
 pub(crate) mod village_growth;
 pub(crate) mod village_life;
 pub(crate) mod villagers;
+pub(crate) mod sulkers;
 pub(crate) mod wilter;
 pub(crate) mod wildlife;
 

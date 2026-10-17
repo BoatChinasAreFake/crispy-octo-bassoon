@@ -313,6 +313,8 @@ pub enum MobKind {
     Oyster,
     SeaSnail,
     Eel,
+    /// The Hollow Cities' guards: a shell that opens to shoot homing bullets (see sulkers.rs).
+    Sulker,
     Modded(u16),
 }
 
@@ -326,7 +328,7 @@ pub const MAX_MOD_MOBS: usize = (u8::MAX as usize) - MobKind::ALL.len();
 
 impl MobKind {
     /// Every base-game kind, in wire/script index order (append only).
-    pub const ALL: [MobKind; 77] = [
+    pub const ALL: [MobKind; 78] = [
         MobKind::Oinker,
         MobKind::Hisser,
         MobKind::Groaner,
@@ -405,6 +407,7 @@ impl MobKind {
         MobKind::Oyster,
         MobKind::SeaSnail,
         MobKind::Eel,
+        MobKind::Sulker,
     ];
 
     pub fn index(self) -> u8 {
@@ -502,6 +505,7 @@ impl MobKind {
             "oyster" => Some(MobKind::Oyster),
             "sea_snail" | "sea snail" | "seasnail" => Some(MobKind::SeaSnail),
             "eel" => Some(MobKind::Eel),
+            "sulker" | "shulker" => Some(MobKind::Sulker),
             "dolphin" => Some(MobKind::Dolphin),
             "panda" => Some(MobKind::Panda),
             "polar bear" | "polar_bear" | "polarbear" => Some(MobKind::PolarBear),
@@ -588,6 +592,7 @@ impl MobKind {
             MobKind::Oyster => "Oyster",
             MobKind::SeaSnail => "Sea Snail",
             MobKind::Eel => "Eel",
+            MobKind::Sulker => "Sulker",
 
             MobKind::Panda => "Panda",
             MobKind::PolarBear => "Polar Bear",
@@ -679,6 +684,7 @@ impl MobKind {
             MobKind::Sardine => (0.3, 0.25),
             MobKind::Tuna => (0.8, 0.75),
             MobKind::Eel => (0.7, 0.25),
+            MobKind::Sulker => (0.5, 1.0),
             MobKind::Panda => (0.6, 1.25),
             MobKind::PolarBear => (0.6, 1.4),
             MobKind::Llama => (0.45, 1.85),
@@ -745,6 +751,7 @@ impl MobKind {
             MobKind::Dolphin => 10.0,
             MobKind::Starfish | MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => 4.0,
             MobKind::Crab | MobKind::Eel => 6.0,
+            MobKind::Sulker => crate::sulkers::HEALTH,
             MobKind::Sardine => 3.0,
             MobKind::Tuna => 12.0,
             MobKind::Panda => 20.0,
@@ -1054,6 +1061,8 @@ pub enum MobEvent {
     Bleat(Vec3),
     /// One of the Wilter's skulls: (from, velocity).
     WiltSkull(Vec3, Vec3),
+    /// A Sulker's homing bullet: (from, velocity).
+    SulkerShot(Vec3, Vec3),
     /// The Wilter bursts out of its waking.
     WilterWakes(Vec3),
     /// A Tusker's charge: hurts, and throws the player it's after up in the air.
@@ -1223,6 +1232,8 @@ impl Mob {
             self.hurt = 0.5;
             return;
         }
+        // So is a shut Sulker.
+        let amount = if crate::sulkers::shut(self) { amount * crate::sulkers::SHUT_SOAK } else { amount };
         // A curled-up Rollo is mostly shell.
         let amount = if self.kind == MobKind::Rollo && self.fuse > 0.0 { amount * 0.25 } else { amount };
         // Woofer armour soaks up hits until it wears through (see critters.rs).
@@ -1311,6 +1322,10 @@ impl Mob {
             crate::wilter::update(self, dt, world, player, player_visible, rng, &mut ev);
             return ev;
         }
+        if self.kind == MobKind::Sulker {
+            crate::sulkers::update(self, dt, player, player_visible, rng, &mut ev);
+            return ev;
+        }
         let to_player = player - self.body.pos;
         let dist = to_player.length();
         let flat = Vec3::new(to_player.x, 0.0, to_player.z);
@@ -1323,8 +1338,8 @@ impl Mob {
         let mut may_wander = true;
         let face = flat.x.atan2(-flat.z);
         match self.kind {
-            // (The Wyrm and the Wilter fly on their own, see hollow.rs and wilter.rs.)
-            MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Wilter | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer | MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {
+            // (The Wyrm and the Wilter fly on their own, see hollow.rs and wilter.rs; Sulkers sit still, sulkers.rs.)
+            MobKind::Sulker | MobKind::Oinker | MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Hmmer | MobKind::Galloper | MobKind::Wyrm | MobKind::Wilter | MobKind::Squawker | MobKind::Strutter | MobKind::Camel | MobKind::Rotsteed | MobKind::Panda | MobKind::Wanderer | MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {
                 if self.flee > 0.0 {
                     want = Some(((-flat.x).atan2(flat.z), 3.5));
                 } else if let Some(g) = self.goal {
@@ -2509,6 +2524,7 @@ impl Mob {
             MobKind::Sardine => Some((RAW_SARDINE,1)),
             MobKind::Tuna => Some((RAW_TUNA,2+n)),
             MobKind::Eel => Some((RAW_EEL,1)),
+            MobKind::Sulker if rng.chance(crate::sulkers::SHELL_CHANCE) => Some((SULKER_SHELL, 1)),
             MobKind::Crab => Some((CRAB_MEAT,1)),
             MobKind::Clam | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail => Some((SHELLFISH,1)),
             MobKind::Fishy => Some(([COD, COD, SALMON, TROPICAL][rng.int(0, 3) as usize], 1)),
@@ -2679,6 +2695,7 @@ impl Mob {
         let parts = match self.kind {
             MobKind::Fluffer if self.sheared => &FLUFFER_SHEARED[..],
             MobKind::Rollo if self.fuse > 0.0 => &ROLLO_BALL[..],
+            MobKind::Sulker if self.fuse > 0.0 => &SULKER_OPEN[..],
             MobKind::Soggy if self.seed == 1 => &SOGGY_ARMED[..],
             MobKind::Weeper if self.angry => &WEEPER_ANGRY[..],
             MobKind::Creaking if self.sitting => &CREAKING_STILL[..],
@@ -3046,6 +3063,20 @@ static EEL: [Part; 6] = [
     part([-0.04, 0.04, 0.46], [0.08, 0.08, 0.22], [0.0;3], Limb::SwingY(0.5), [T_EEL,T_EEL,T_EEL_BACK,T_EEL_BELLY,T_EEL,T_EEL]),
     part([0.091, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
     part([-0.106, 0.13, -0.44], [0.015, 0.035, 0.035], [0.0;3], Limb::Fixed, [T_COAST_EYE;6]),
+];
+
+/// A Sulker, shut: a cube of purple shell.
+const SK: u16 = T_SULKER;
+static SULKER: [Part; 2] = [
+    part([-0.5, 0.0, -0.5], [1.0, 0.5, 1.0], [0.0; 3], Limb::Fixed, [SK; 6]),
+    part([-0.5, 0.5, -0.5], [1.0, 0.5, 1.0], [0.0; 3], Limb::Fixed, [SK; 6]),
+];
+/// Open: the lid lifted, and its pale head peering out.
+static SULKER_OPEN: [Part; 4] = [
+    part([-0.5, 0.0, -0.5], [1.0, 0.5, 1.0], [0.0; 3], Limb::Fixed, [SK, SK, T_SULKER_INSIDE, SK, SK, SK]),
+    part([-0.5, 0.85, -0.5], [1.0, 0.5, 1.0], [0.0; 3], Limb::Fixed, [SK, SK, SK, T_SULKER_INSIDE, SK, SK]),
+    part([-0.3, 0.4, -0.3], [0.6, 0.45, 0.6], [0.0; 3], Limb::Fixed, [T_SULKER_INSIDE; 6]),
+    part([-0.19, 0.45, -0.38], [0.38, 0.38, 0.38], [0.0, 0.6, 0.0], Limb::Fixed, [T_SULKER_HEAD, T_SULKER_HEAD, T_SULKER_HEAD, T_SULKER_HEAD, T_SULKER_HEAD, T_SULKER_HEAD]),
 ];
 
 static FISHY: [Part; 3] = [
@@ -3781,6 +3812,7 @@ pub(crate) fn model(kind: MobKind) -> &'static [Part] {
         MobKind::Oyster => &OYSTER,
         MobKind::SeaSnail => &SEASNAIL,
         MobKind::Eel => &EEL,
+        MobKind::Sulker => &SULKER,
 
         MobKind::Soggy => &SOGGY,
         MobKind::Bee => &BEE,

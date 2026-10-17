@@ -140,6 +140,10 @@ Originals:
 - Void fishing: cast off an island's edge into the void for strange catches (lost items, star fragments, the odd confused Fishie), tied into the fishing system and Angler levels.
 - Gravity islands: small islands where down is a different direction.
 
+Parts:
+- Part 1: items 1, 2 and 3.
+- Part 2: items 4 and 5, and the two originals (this is the last part).
+
 ## v0.8: Building and creative tools
 
 1. Block sets: copper doors, trapdoors and grates; deepslate and tuff variants; walls for every stone; all slabs, stairs and walls for the v0.3 woods and stones.

@@ -203,6 +203,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     growing_villages(&mut host, &mut team, &mut report);
     new_land(&mut host, &mut team, &mut report);
     reshaped_depths(&mut host, &mut team, &mut report, &mut touched);
+    hollow_filled(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2075,6 +2076,75 @@ fn together(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mu
     let _ = id_b;
 }
 
+/// v0.7: a bot breaks the foot of a Leapstalk and the rest comes down for
+/// everyone; a Sulker opens up and its bullet sets the bot Floating.
+fn hollow_filled(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    use crate::entity::MobKind;
+    revive(host, team);
+    let k = 0;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 3);
+    // A Leapstalk, rooted on Hollow Stone.
+    report.features.push("leapstalks");
+    let base = feet + IVec3::new(4, -1, 0);
+    // (Clear round it, so nothing but its root holds it up.)
+    for dy in 1..=12 {
+        for dz in -3..=3 {
+            for dx in -3..=3 {
+                host.world.set_v(base + IVec3::new(dx, dy, dz), AIR);
+                touched.insert(base + IVec3::new(dx, dy, dz));
+            }
+        }
+    }
+    host.world.set_v(base, crate::block::HOLLOW_STONE);
+    touched.insert(base);
+    let plant = crate::hollowlife::plant_blocks(3, base);
+    for &(p, id) in &plant {
+        host.world.set_v(p, id);
+        touched.insert(p);
+    }
+    pump(host, team, 1.0, |_| idle());
+    if plant.iter().any(|&(p, id)| team[k].game.world.get_v(p) != id) {
+        report.problems.push(format!("{} never saw the whole Leapstalk", team[k].name));
+    }
+    team[k].game.world.set_v(base + IVec3::Y, AIR);
+    pump(host, team, 1.5, |_| idle());
+    for b in team.iter() {
+        if plant.iter().any(|&(p, _)| crate::hollowlife::is_plant(b.game.world.get_v(p))) {
+            report.problems.push(format!("{} broke a Leapstalk's foot and {} still sees some of it hanging", team[k].name, b.name));
+        }
+    }
+    if plant.iter().any(|&(p, _)| crate::hollowlife::is_plant(host.world.get_v(p))) {
+        report.problems.push("the host left a broken Leapstalk hanging".into());
+    }
+    // A Sulker a few blocks off.
+    report.features.push("sulkers");
+    let at = feet + IVec3::new(0, 0, 6);
+    host.world.set_v(at - IVec3::Y, STONE);
+    touched.insert(at - IVec3::Y);
+    let sulker = host.alloc_mob(MobKind::Sulker, at.as_vec3() + Vec3::new(0.5, 0.0, 0.5));
+    let mut opened = false;
+    for _ in 0..12 {
+        pump(host, team, 0.5, |_| idle());
+        opened |= team[k].game.mobs.iter().any(|m| m.id == sulker && m.kind == MobKind::Sulker && m.fuse > 0.0);
+        if team[k].game.has_effect(crate::potions::Potion::Floating) {
+            break;
+        }
+    }
+    if !opened {
+        report.problems.push(format!("{} never saw the Sulker open up", team[k].name));
+    }
+    if !team[k].game.has_effect(crate::potions::Potion::Floating) {
+        report.problems.push(format!("{} was shot at by a Sulker and never floated", team[k].name));
+    } else if !team[k].game.advancements.has("floaty_feeling") {
+        report.problems.push(format!("{} floated and never heard about floaty_feeling", team[k].name));
+    }
+    host.mobs.retain(|m| m.id != sulker);
+    host.arrows.clear();
+    ground(host, team, k);
+}
+
 /// v0.5: a Hmmer with no job claims a bed and a Lectern near a bot and
 /// becomes a Librarian, then goes to bed at night; everyone sees it.
 fn village_life(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
@@ -2760,7 +2830,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools", "leapstalks", "sulkers"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

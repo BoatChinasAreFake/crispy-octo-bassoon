@@ -178,6 +178,8 @@ pub struct Game {
     pub shake_acc: f32,
     /// Seconds towards the next look at monuments and conduits, the next Elder curse, the next conduit zap (see monument.rs).
     pub monument_acc: f32,
+    /// Seconds since Sulkers were last brought round the Hollow Cities (see cities.rs).
+    pub city_acc: f32,
     pub curse_acc: f32,
     pub zap_acc: f32,
     /// Seconds towards Poison's next sting (see potions.rs).
@@ -573,6 +575,7 @@ impl Game {
             random_tick_acc: 0.0,
             shake_acc: 0.0,
             monument_acc: 0.0,
+            city_acc: 0.0,
             curse_acc: 0.0,
             zap_acc: 0.0,
             poison_clock: 0.0,
@@ -2963,6 +2966,20 @@ impl Game {
                 return;
             }
         }
+        // A Leapfruit hops you somewhere nearby, hungry or not (see hollowlife.rs).
+        if held == LEAPFRUIT {
+            self.player.hunger.eat(4.0, 0.3);
+            self.stats.eaten += 1;
+            if !self.creative {
+                self.use_up_held();
+            }
+            self.animate_consumption(held);
+            self.sfx(Sfx::Eat, None);
+            if !self.leapfruit_hop() {
+                self.msg("The Leapfruit fizzes. Nowhere nearby to hop to.");
+            }
+            return;
+        }
         // Food fills the hunger bar (a full bar is what heals you). Legendary
         // food can be eaten any time, and heals you outright.
         if let Some(points) = food_value(held) {
@@ -3363,6 +3380,7 @@ impl Game {
             self.rope_broken(pos);
         }
         self.sea_block_gone(pos, old);
+        self.plant_gone(pos, old);
         self.gold_taken(pos, old);
         if crate::bees::is_hive(old) {
             self.hive_broken(pos, old);
@@ -3741,6 +3759,7 @@ impl Game {
         self.clankers_tick(dt);
         self.beacons_tick(dt);
         self.monument_tick(dt);
+        self.city_tick(dt);
         self.gluttons_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
@@ -3836,7 +3855,7 @@ impl Game {
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama => {}
-                    MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {}
+                    MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel | MobKind::Sulker => {}
                     MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
@@ -3952,6 +3971,7 @@ impl Game {
                 MobEvent::Ink(at) => self.ink_cloud(at),
                 MobEvent::Bleat(at) => self.sfx(Sfx::Bleat, Some(at)),
                 MobEvent::WiltSkull(from, vel) => self.throw_wilt_skull(from, vel),
+                MobEvent::SulkerShot(from, vel) => self.fire_sulker_bullet(from, vel),
                 MobEvent::WilterWakes(at) => self.wilter_wakes(at),
             }
         }
@@ -4023,6 +4043,7 @@ impl Game {
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Starfish => {}
                             MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {},
+                            MobKind::Sulker => self.advance("out_of_its_shell"),
                             MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}

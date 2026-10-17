@@ -261,6 +261,9 @@ pub const ALL: &[Advancement] = &[
     adv("front_page", "Front Page News", "Read a paper whose lead story is about you."),
     adv("down_by_the_river", "Down by the River", "Find a river winding through the valleys to the sea."),
     adv("lifes_a_beach", "Life's a Beach", "Stand on a sandy beach. Mind the sand in your boots."),
+    adv("out_of_its_shell", "Out of Its Shell", "Defeat a Sulker. It had it coming."),
+    adv("floaty_feeling", "A Floaty Feeling", "Get hit by a Sulker's bullet and float."),
+    adv("hop_skip", "Hop, Skip", "Eat a Leapfruit and end up somewhere else."),
     adv("sightseer", "Sightseer", "Stand at a landmark: an arch, a crater lake or a stone forest."),
     adv("well_travelled", "Well Travelled", "Fill in twelve biomes in an Explorer's Atlas."),
     adv("castaway", "Castaway", "Set foot on an island far out at sea. Bring a boat home."),
@@ -281,6 +284,7 @@ const CREATURES: &[&str] = &[
     "pork_barrel", "raising_hell", "spore_loser", "magma_carta", "snuffed_out", "knight_errant",
     "beast_of_burden", "hybrid_vigour", "snow_problem", "walkies", "new_hire", "baby_boom", "early_night", "master_class", "pillar_of_the_community", "persona_non_grata",
     "new_neighbours", "some_assembly_required", "help_wanted", "odd_jobs", "open_for_business", "nest_egg", "extra_extra", "front_page",
+    "out_of_its_shell", "floaty_feeling",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",

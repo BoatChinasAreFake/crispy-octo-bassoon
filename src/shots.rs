@@ -1213,6 +1213,67 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
+            "hollow_city" | "sky_ship" | "sulkers" | "leapstalks" => {
+                // A Hollow City (generator 9), its flying ship, its Sulkers, and the Leapstalks round it.
+                let mut g = shot_game(424242, true, false);
+                g.time = 0.25;
+                let seed = g.world.seed();
+                let back = IVec3::new(hollow::GEN_ORIGIN.x, 0, 0);
+                let city = (1..14)
+                    .flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)]))
+                    .filter_map(|(gx, gz)| hollow::outer_island(seed, gx, gz))
+                    .find(|&(c, r, _)| crate::cities::is_city(seed, c, r));
+                if let Some((c, r, _)) = city {
+                    let gr = &g.world.generator;
+                    let main = gr.city_towers(c, r)[0];
+                    let ship = gr.city_ship(c, r);
+                    let (from, at) = match s.mode.as_str() {
+                        "hollow_city" => (c.as_vec3() + Vec3::new(34.0, 30.0, 30.0), main.base.as_vec3() + Vec3::new(0.5, main.height as f32 * 0.5, 0.5)),
+                        "sky_ship" => (ship.deck.as_vec3() + Vec3::new(14.0, 9.0, 12.0), ship.deck.as_vec3() + Vec3::new(0.5, 3.0, 0.5)),
+                        "sulkers" => {
+                            let roof = main.base + IVec3::new(0, main.height + 1, 0);
+                            (roof.as_vec3() + Vec3::new(4.5, 2.5, 4.5), roof.as_vec3() + Vec3::new(0.5, 0.5, 0.5))
+                        }
+                        _ => {
+                            // The first Leapflower on an island without a city, from the generator.
+                            let wild = (1..14)
+                                .flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)]))
+                                .filter_map(|(gx, gz)| hollow::outer_island(seed, gx, gz))
+                                .find(|&(c, r, spire)| !spire && !crate::cities::is_city(seed, c, r));
+                            let c = wild.map_or(c, |w| w.0);
+                            let (ccx, ccz) = (c.x.div_euclid(16), c.z.div_euclid(16));
+                            let flower = (ccz - 2..=ccz + 2).flat_map(|cz| (ccx - 2..=ccx + 2).map(move |cx| (cx, cz))).find_map(|(cx, cz)| {
+                                let b = gr.generate_hollow(cx, cz);
+                                (0..b.len()).find(|&i| b[i] == block::LEAPFLOWER).map(|i| {
+                                    let (lx, lz, y) = ((i % 16) as i32, ((i / 16) % 16) as i32, (i / 256) as i32);
+                                    IVec3::new(cx * 16 + lx, y, cz * 16 + lz)
+                                })
+                            });
+                            let f = flower.unwrap_or(c).as_vec3();
+                            (f + Vec3::new(7.0, 2.0, 7.0), f + Vec3::new(0.5, -2.5, 0.5))
+                        }
+                    };
+                    let (from, at) = (from - back.as_vec3(), at - back.as_vec3());
+                    let d = at - from;
+                    g.move_local_player(crate::dims::Dim::Hollow, from);
+                    (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                    if s.mode == "sulkers" {
+                        // One shut, one peering out (and neither shooting the camera).
+                        let roof = main.base + IVec3::new(0, main.height + 1, 0) - back;
+                        for (i, dx) in [-1, 1].into_iter().enumerate() {
+                            let id = g.alloc_mob(crate::entity::MobKind::Sulker, (roof + IVec3::new(dx, 0, 0)).as_vec3() + Vec3::new(0.5, 0.0, 0.5));
+                            if let Some(m) = g.mobs.iter_mut().find(|m| m.id == id) {
+                                m.fuse = if i == 0 { 0.0 } else { 1.0e6 };
+                                m.attack_cd = 1.0e6;
+                                m.persistent = true;
+                            }
+                        }
+                    }
+                }
+                g.player.flying = true;
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "controls" => {
                 app.game = shot_game(424242, true, true);
                 // Show a changed binding and one waiting for a key.
@@ -2725,6 +2786,7 @@ const LATEST_SCENES: &[&str] = &[
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
     "landmark_arch", "landmark_crater", "landmark_grove", "atlas", "landmark_map",
+    "hollow_city", "sky_ship", "sulkers", "leapstalks",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is

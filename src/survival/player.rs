@@ -56,6 +56,8 @@ pub struct Player {
     pub speed_boost: f32,
     /// Leaping effect level (zero when absent).
     pub leaping: u8,
+    /// Floating effect level (zero when absent): you drift upward.
+    pub floating: u8,
     /// Set when a bouncy block launched us (the game plays a sound and clears it).
     pub bounced: bool,
     /// Set on landing to how far we fell (for trampling and hay bales).
@@ -98,6 +100,7 @@ impl Player {
             ground_speed: 1.0,
             speed_boost: 1.0,
             leaping: 0,
+            floating: 0,
             bounced: false,
             landed: None,
             air: MAX_AIR,
@@ -237,6 +240,10 @@ impl Player {
             b.vel.x = b.vel.x.clamp(-2.5, 2.5);
             b.vel.z = b.vel.z.clamp(-2.5, 2.5);
             self.fall_start = b.pos.y;
+        } else if self.floating > 0 {
+            // Floating: a steady drift upward (and a long way down once it wears off).
+            let rise = 0.9 * self.floating as f32;
+            b.vel.y += (rise - b.vel.y) * (dt * 4.0).min(1.0);
         } else {
             b.vel.y = (b.vel.y - gravity * dt).max(-60.0);
             if input.jump && b.on_ground {

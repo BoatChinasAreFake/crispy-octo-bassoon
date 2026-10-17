@@ -14,6 +14,8 @@ pub(crate) mod falling;
 pub(crate) mod fire;
 pub(crate) mod fortress;
 pub(crate) mod hollow;
+pub(crate) mod cities;
+pub(crate) mod hollowlife;
 pub(crate) mod houses;
 pub(crate) mod landmarks;
 pub(crate) mod liquids;

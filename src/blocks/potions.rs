@@ -61,6 +61,8 @@ pub enum Potion {
     Hunger,
     /// From the Wilter and Charred Rattlers: health drains, all the way down.
     Wilting,
+    /// From a Sulker's bullets (see sulkers.rs): you float gently upward.
+    Floating,
 }
 
 /// The first five, which beacons give (and whose items come first).
@@ -68,7 +70,7 @@ pub const ALL: [Potion; 5] = [Potion::Healing, Potion::Speed, Potion::FireResist
 /// Everything a brewing stand makes.
 pub const BREWABLE: [Potion; 7] = [Potion::Healing, Potion::Speed, Potion::FireResistance, Potion::NightVision, Potion::Leaping, Potion::Strength, Potion::Regeneration];
 /// Every effect, in wire order.
-pub const EFFECTS: [Potion; 16] = [
+pub const EFFECTS: [Potion; 17] = [
     Potion::Healing,
     Potion::Speed,
     Potion::FireResistance,
@@ -85,6 +87,7 @@ pub const EFFECTS: [Potion; 16] = [
     Potion::Poison,
     Potion::Hunger,
     Potion::Wilting,
+    Potion::Floating,
 ];
 /// Extra melee damage with Strength, and seconds per heart-half with Regeneration.
 pub const STRENGTH_BONUS: f32 = 3.0;
@@ -155,6 +158,7 @@ impl Potion {
             Potion::Poison => "Poison",
             Potion::Hunger => "Hunger",
             Potion::Wilting => "Wilting",
+            Potion::Floating => "Floating",
         }
     }
     pub fn key(self) -> &'static str {
@@ -175,6 +179,7 @@ impl Potion {
             Potion::Poison => "poison",
             Potion::Hunger => "hunger",
             Potion::Wilting => "wilting",
+            Potion::Floating => "floating",
         }
     }
     pub fn colour(self) -> [u8; 3] {
@@ -195,6 +200,7 @@ impl Potion {
             Potion::Poison => [80, 150, 40],
             Potion::Hunger => [90, 110, 60],
             Potion::Wilting => [55, 40, 45],
+            Potion::Floating => [206, 180, 230],
         }
     }
     /// What goes in to make it.
@@ -207,7 +213,7 @@ impl Potion {
             Potion::Leaping => FEATHER,
             Potion::Strength => SIZZLE_POWDER,
             Potion::Regeneration => WEEPER_TEAR,
-            Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower | Potion::Slowness | Potion::Weakness | Potion::Poison | Potion::Hunger | Potion::Wilting => AIR,
+            Potion::BadOmen | Potion::Hero | Potion::MiningFatigue | Potion::ConduitPower | Potion::Slowness | Potion::Weakness | Potion::Poison | Potion::Hunger | Potion::Wilting | Potion::Floating => AIR,
         }
     }
     /// Brewed from this ingredient? (Magma Cream makes Fire Resistance too.)
@@ -367,6 +373,10 @@ impl Game {
             self.player.hunger.exhaust(HUNGER_PER_SEC * hunger * dt);
         }
         self.player.leaping = self.effect_level(Potion::Leaping);
+        self.player.floating = self.effect_level(Potion::Floating);
+        if self.player.floating > 0 {
+            self.advance("floaty_feeling");
+        }
         let regeneration_level = self.effect_level(Potion::Regeneration) as f32;
         if regeneration_level > 0.0 && self.dead.is_none() {
             self.regen_clock += dt;
