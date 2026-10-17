@@ -1,9 +1,13 @@
 # Pack SmolLM2-135M-Instruct for Dubiety and ask it a few questions, to check
-# the game's model code against the real weights (run by hand from Actions).
+# the game's model code against the real weights (by hand from Actions, or when the model code changes).
 name: Model check
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - src/online/smollm.rs
+      - .github/workflows/model-check.yml
 
 jobs:
   check:
