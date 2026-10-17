@@ -128,7 +128,7 @@ Parts:
 - Part 1: items 1, 2 and 3. **(released)**
 - Part 2: items 4 to 14, and the two originals (this is the last part). **(released)**
 
-## v0.7: The Hollow, filled in
+## v0.7: The Hollow, filled in (released)
 
 1. Hollow Cities: tall towers on the outer islands, with a flying ship carrying the Glider.
 2. A Shulker-like mob that hides in a shell, shoots homing bullets that make you float, and drops shells that make Hollow Boxes (replacing the current way of getting them).
@@ -141,8 +141,8 @@ Originals:
 - Gravity islands: small islands where down is a different direction.
 
 Parts:
-- Part 1: items 1, 2 and 3.
-- Part 2: items 4 and 5, and the two originals (this is the last part).
+- Part 1: items 1, 2 and 3. **(released)**
+- Part 2: items 4 and 5, and the two originals (this is the last part). **(released)**
 
 ## v0.8: Building and creative tools
 
