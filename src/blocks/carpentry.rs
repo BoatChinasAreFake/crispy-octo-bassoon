@@ -143,6 +143,14 @@ impl World {
     pub fn reshape_joins(&mut self, p: IVec3) {
         for q in [p, p + IVec3::X, p - IVec3::X, p + IVec3::Z, p - IVec3::Z] {
             let id = self.get_v(q);
+            // (Leapstalks join their own kind; see hollowlife.rs.)
+            if crate::hollowlife::is_stalk(id) {
+                let want = crate::hollowlife::stalk_at(|r| self.get_v(r), q);
+                if want != id {
+                    self.set_v(q, want);
+                }
+                continue;
+            }
             let (first, pane) = if let Some(base) = fence_base(id) {
                 (base, false)
             } else if is_pane(id) {

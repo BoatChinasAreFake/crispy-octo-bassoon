@@ -498,7 +498,18 @@ pub const PETRIFIED_LOG: Id = MYCELIUM + 114;
 /// A fallen Petrified Log, lying east-west (`_X`) or north-south (`_Z`).
 pub const PETRIFIED_LOG_X: Id = MYCELIUM + 115;
 pub const PETRIFIED_LOG_Z: Id = MYCELIUM + 116;
-pub const NUM_BLOCKS: Id = MYCELIUM + 117;
+/// The Hollow's building stone (see hollowlife.rs): blocks and pillars.
+pub const MAUVE_BLOCK: Id = MYCELIUM + 117;
+pub const MAUVE_PILLAR: Id = MYCELIUM + 118;
+/// A Leapstalk's flower, where it grows from.
+pub const LEAPFLOWER: Id = MYCELIUM + 119;
+/// Leapstalk: `LEAPSTALK_FIRST + mask` (the sides it joins, as a fence's).
+pub const LEAPSTALK_FIRST: Id = MYCELIUM + 120;
+/// A small portal that opens each time the Wyrm is beaten (see gateways.rs).
+pub const GATEWAY: Id = MYCELIUM + 136;
+/// The heart of a gravity island, where down is up (see gravity.rs).
+pub const GRAVITY_CORE: Id = MYCELIUM + 137;
+pub const NUM_BLOCKS: Id = MYCELIUM + 138;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -777,7 +788,14 @@ pub const COOKED_SEAFOOD: Id = FIRST_ITEM + 283;
 pub const SEASHELL: Id = FIRST_ITEM + 284;
 /// Fills in a map of the biomes as you travel (see atlas.rs).
 pub const EXPLORERS_ATLAS: Id = FIRST_ITEM + 285;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 286;
+/// Eaten, it hops you a few blocks somewhere else (see hollowlife.rs).
+pub const LEAPFRUIT: Id = FIRST_ITEM + 286;
+pub const POPPED_LEAPFRUIT: Id = FIRST_ITEM + 287;
+/// What a Sulker leaves (see sulkers.rs).
+pub const SULKER_SHELL: Id = FIRST_ITEM + 288;
+/// Fished out of the void (see voidfishing.rs); four make a Wyrm Crystal.
+pub const STAR_FRAGMENT: Id = FIRST_ITEM + 289;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 290;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -994,6 +1012,8 @@ pub enum Shape {
     Candle,
     /// A thin chain running up and down the middle of the cell.
     Chain,
+    /// A Leapstalk: a thick post, with branches to the sides in `mask` (as a fence's).
+    Stalk { mask: u8 },
     /// Scaffolding: four posts and a platform on top.
     Scaffold,
     /// A lantern hanging from the block above.
@@ -1107,6 +1127,19 @@ impl Shape {
                 let post = ([0.44, 0.0, 0.44], [0.56, 0.55, 0.56]);
                 let board = if facing % 2 == 0 { ([0.05, 0.55, 0.44], [0.95, 1.0, 0.56]) } else { ([0.44, 0.55, 0.05], [0.56, 1.0, 0.95]) };
                 ([post, board, full], 2)
+            }
+            Shape::Stalk { mask } => {
+                let post = ([0.25, 0.0, 0.25], [0.75, 1.0, 0.75]);
+                let (mut v, mut n) = ([post, post, post], 1);
+                if mask & 3 != 0 {
+                    v[n] = ([if mask & 2 != 0 { 0.0 } else { 0.5 }, 0.3125, 0.3125], [if mask & 1 != 0 { 1.0 } else { 0.5 }, 0.6875, 0.6875]);
+                    n += 1;
+                }
+                if mask & 12 != 0 {
+                    v[n] = ([0.3125, 0.3125, if mask & 8 != 0 { 0.0 } else { 0.5 }], [0.6875, 0.6875, if mask & 4 != 0 { 1.0 } else { 0.5 }]);
+                    n += 1;
+                }
+                (v, n)
             }
             Shape::Fence { mask } => {
                 let post = ([0.375, 0.0, 0.375], [0.625, 1.0, 0.625]);
@@ -2677,11 +2710,29 @@ impl Registry {
             b.family = PETRIFIED_LOG;
             blocks.push(b);
         }
+        blocks.push(def("mauve_block", "Mauve Block (Very Purple)", Cube, true, true, [T_MAUVE; 3], 1.5, 1, true, MAUVE_BLOCK, 0.0, S_STONE));
+        blocks.push(def("mauve_pillar", "Mauve Pillar (Load-Bearing Lavender)", Cube, true, true, [T_MAUVE_PILLAR_TOP, T_MAUVE_PILLAR_SIDE, T_MAUVE_PILLAR_TOP], 1.5, 1, true, MAUVE_PILLAR, 0.0, S_STONE));
+        blocks.push(def("leapflower", "Leapflower (Plant It on Hollow Stone)", Cube, true, false, [T_LEAPFLOWER; 3], 0.4, 0, false, LEAPFLOWER, 0.0, S_WOOD));
+        for mask in 0..16u8 {
+            let mut d = def(leak(&format!("leapstalk{}", if mask == 0 { String::new() } else { format!("_{mask}") })), "Leapstalk (Springy)", Shaped, true, false, [T_LEAPSTALK; 3], 0.4, 0, false, LEAPFRUIT, 0.0, S_WOOD);
+            d.shape = Shape::Stalk { mask };
+            d.creative = false;
+            d.see_through = true;
+            blocks.push(d);
+        }
+        let mut gateway = def("gateway", "Gateway (Mind the Gap)", Cube, false, false, [T_GATEWAY; 3], -1.0, 0, false, AIR, 12.0, S_GLASS);
+        gateway.creative = false;
+        blocks.push(gateway);
+        let mut core = def("gravity_core", "Gravity Core (Holds Things Down, or Up)", Cube, true, true, [T_GRAVITY_CORE; 3], -1.0, 0, false, AIR, 10.0, S_STONE);
+        core.creative = false;
+        blocks.push(core);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
         debug_assert_eq!(blocks[BELL as usize].key, "bell");
         debug_assert_eq!(blocks[HOLLOW_BOX as usize].key, "hollow_box");
+        debug_assert_eq!(blocks[MAUVE_BLOCK as usize].key, "mauve_block");
+        debug_assert_eq!(blocks[LEAPSTALK_FIRST as usize].key, "leapstalk");
         debug_assert_eq!(blocks[FROGLIGHT_FIRST as usize].key, "ochre_froglight");
         debug_assert_eq!(blocks[DEEPSLATE as usize].key, "deepslate");
         debug_assert_eq!(blocks[SUSPICIOUS_SAND as usize].key, "suspicious_sand");
@@ -2955,6 +3006,10 @@ impl Registry {
         items.push(ItemDef { food:Some(6.0),..item("cooked_seafood","Cooked Seafood",T_SEAFOOD) });
         items.push(item("seashell","Seashell",T_SEASHELL));
         items.push(ItemDef { stack: 1, consume: false, ..item("explorers_atlas", "Explorer's Atlas (Hold to Read)", T_ATLAS) });
+        items.push(ItemDef { food: Some(4.0), ..item("leapfruit", "Leapfruit (Hop Somewhere Else)", T_LEAPFRUIT) });
+        items.push(item("popped_leapfruit", "Popped Leapfruit (Crunchy Purple)", T_POPPED_LEAPFRUIT));
+        items.push(item("sulker_shell", "Sulker Shell (Still Sulking)", T_SULKER_SHELL));
+        items.push(item("star_fragment", "Star Fragment (Fell a Long Way)", T_STAR_FRAGMENT));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -3024,6 +3079,10 @@ impl Registry {
             r(&[(SEASHELL, 2)], (SHELL_PATCH, 1)),
             r(&[(SEASHELL, 3)], (BONE_DUST, 2)),
             r(&[(BOOK, 1), (MAP, 1)], (EXPLORERS_ATLAS, 1)),
+            r(&[(POPPED_LEAPFRUIT, 4)], (MAUVE_BLOCK, 4)),
+            r(&[(MAUVE_BLOCK, 2)], (MAUVE_PILLAR, 2)),
+            r(&[(SULKER_SHELL, 2), (CHEST, 1)], (HOLLOW_BOX, 1)),
+            r(&[(STAR_FRAGMENT, 4), (GLASS, 4), (STARING_EYE, 1)], (WYRM_CRYSTAL, 1)),
             r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),
@@ -3146,7 +3205,6 @@ impl Registry {
         }
         // Gliding, boxes, copper and bamboo.
         recipes.push(r(&[(GUNPOWDER, 1), (STRING, 1)], (ROCKET, 3)));
-        recipes.push(r(&[(CHEST, 1), (HOLLOW_STONE, 4)], (HOLLOW_BOX, 1)));
         recipes.push(r(&[(COPPER_INGOT, 9)], (COPPER_FIRST, 1)));
         recipes.push(r(&[(COPPER_FIRST, 1)], (COPPER_INGOT, 9)));
         for i in 0..4 {

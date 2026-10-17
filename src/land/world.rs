@@ -577,6 +577,8 @@ pub struct GenOptions {
     /// structures settled onto level ground, broader continents and climate,
     /// rolling inland hills, rivers that reach the sea, rocky shores, offshore
     /// islands, the odd large mushroom island, and beaches with their finds.
+    /// 9: the Hollow's outer islands grow Leapstalks, and some carry a Hollow
+    /// City (see hollowlife.rs and hollowcity.rs). The Overworld is as in 8.
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -589,7 +591,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 8, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 9, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -2092,7 +2094,7 @@ impl World {
         }
         // Fences and panes join whatever is beside them (where the world lives; see carpentry.rs).
         let glassy = |b: Id| b == GLASS || crate::carpentry::is_stained_glass(b);
-        if self.simulate_liquids && (is_opaque(old) != is_opaque(id) || crate::carpentry::family(old) != crate::carpentry::family(id) || glassy(old) != glassy(id)) {
+        if self.simulate_liquids && (is_opaque(old) != is_opaque(id) || crate::carpentry::family(old) != crate::carpentry::family(id) || glassy(old) != glassy(id) || crate::hollowlife::is_plant(old) != crate::hollowlife::is_plant(id)) {
             self.reshape_joins(p);
         }
         if self.simulate_liquids {

@@ -178,6 +178,8 @@ pub struct Game {
     pub shake_acc: f32,
     /// Seconds towards the next look at monuments and conduits, the next Elder curse, the next conduit zap (see monument.rs).
     pub monument_acc: f32,
+    /// Seconds since Sulkers were last brought round the Hollow Cities (see cities.rs).
+    pub city_acc: f32,
     pub curse_acc: f32,
     pub zap_acc: f32,
     /// Seconds towards Poison's next sting (see potions.rs).
@@ -221,6 +223,8 @@ pub struct Game {
     pub advancements: Progress,
     /// "Advancement Made!" toasts on screen: (advancement, seconds left).
     pub toasts: Vec<(&'static Advancement, f32)>,
+    /// Show the poem (the Wyrm was just beaten for the first time; see poem.rs).
+    pub poem: bool,
     /// The Fishing Stick's bobber, when cast (see fishing.rs).
     pub bobber: Option<crate::fishing::Bobber>,
     pub fish_log: crate::fishing::FishLog,
@@ -573,6 +577,7 @@ impl Game {
             random_tick_acc: 0.0,
             shake_acc: 0.0,
             monument_acc: 0.0,
+            city_acc: 0.0,
             curse_acc: 0.0,
             zap_acc: 0.0,
             poison_clock: 0.0,
@@ -600,6 +605,7 @@ impl Game {
             saved_script_vars: Vec::new(),
             advancements: Progress::default(),
             toasts: Vec::new(),
+            poem: false,
             bobber: None,
             fish_log: Default::default(),
             farm_timer: 0.0,
@@ -1146,6 +1152,9 @@ impl Game {
             return;
         }
         if let Some(a) = self.advancements.grant(key) {
+            if key == "wyrm_slayer" {
+                self.poem = true;
+            }
             self.toasts.push((a, 5.0));
             self.sfx(Sfx::Fanfare, None);
             self.msg(format!("Advancement made: [{}]", a.title));
@@ -1506,7 +1515,9 @@ impl Game {
             fov_deg
         };
         let proj = Mat4::perspective_rh_gl(fov.to_radians(), aspect, 0.05, 1000.0);
-        let view = Mat4::look_at_rh(pos, pos + dir, Vec3::Y);
+        // Upside down under a gravity island, the world is too.
+        let up = if self.player.upside_down && !self.menu { Vec3::NEG_Y } else { Vec3::Y };
+        let view = Mat4::look_at_rh(pos, pos + dir, up);
         Camera { pos, dir, view_proj: proj * view }
     }
 
@@ -1579,6 +1590,7 @@ impl Game {
             self.sleep_tick(dt, c.input.jump_pressed || c.input.sneak);
             0.0
         } else if self.riding.is_none() && self.mounted.is_none() && self.rocket_pilot().is_none() {
+            self.gravity_tick();
             self.player.update(dt, &c.input, &self.world, self.creative)
         } else {
             0.0
@@ -2963,6 +2975,20 @@ impl Game {
                 return;
             }
         }
+        // A Leapfruit hops you somewhere nearby, hungry or not (see hollowlife.rs).
+        if held == LEAPFRUIT {
+            self.player.hunger.eat(4.0, 0.3);
+            self.stats.eaten += 1;
+            if !self.creative {
+                self.use_up_held();
+            }
+            self.animate_consumption(held);
+            self.sfx(Sfx::Eat, None);
+            if !self.leapfruit_hop() {
+                self.msg("The Leapfruit fizzes. Nowhere nearby to hop to.");
+            }
+            return;
+        }
         // Food fills the hunger bar (a full bar is what heals you). Legendary
         // food can be eaten any time, and heals you outright.
         if let Some(points) = food_value(held) {
@@ -3220,6 +3246,10 @@ impl Game {
             let me = crate::players::record_key(&self.player_name);
             self.try_build_wilter(place, &me);
         }
+        if held == WYRM_CRYSTAL && !self.is_client() {
+            let me = crate::players::record_key(&self.player_name);
+            self.try_resummon_wyrm(place, &me);
+        }
     }
 
     pub fn break_block(&mut self, pos: IVec3, drops: bool) {
@@ -3363,6 +3393,7 @@ impl Game {
             self.rope_broken(pos);
         }
         self.sea_block_gone(pos, old);
+        self.plant_gone(pos, old);
         self.gold_taken(pos, old);
         if crate::bees::is_hive(old) {
             self.hive_broken(pos, old);
@@ -3741,6 +3772,7 @@ impl Game {
         self.clankers_tick(dt);
         self.beacons_tick(dt);
         self.monument_tick(dt);
+        self.city_tick(dt);
         self.gluttons_tick(dt);
         self.animals_tick(dt);
         // (After animals_tick, which sets every mob's goal.)
@@ -3836,7 +3868,7 @@ impl Game {
                     MobKind::ZombieHmmer => noises.push((Sfx::Groan, m.body.pos)),
                     MobKind::Wanderer => noises.push((Sfx::Hmm, m.body.pos)),
                     MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama => {}
-                    MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {}
+                    MobKind::Starfish | MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel | MobKind::Sulker => {}
                     MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                     MobKind::Hisser | MobKind::Starer | MobKind::Galloper | MobKind::Wyrm | MobKind::Clanker | MobKind::Fishy | MobKind::Sneaker | MobKind::Rollo => {}
                     MobKind::Modded(_) => {}
@@ -3952,6 +3984,7 @@ impl Game {
                 MobEvent::Ink(at) => self.ink_cloud(at),
                 MobEvent::Bleat(at) => self.sfx(Sfx::Bleat, Some(at)),
                 MobEvent::WiltSkull(from, vel) => self.throw_wilt_skull(from, vel),
+                MobEvent::SulkerShot(from, vel) => self.fire_sulker_bullet(from, vel),
                 MobEvent::WilterWakes(at) => self.wilter_wakes(at),
             }
         }
@@ -4023,6 +4056,7 @@ impl Game {
                             MobKind::Turtle | MobKind::Dolphin | MobKind::Panda | MobKind::PolarBear | MobKind::Llama | MobKind::ZombieHmmer | MobKind::Wanderer => {}
                             MobKind::Starfish => {}
                             MobKind::Clam | MobKind::Crab | MobKind::Sardine | MobKind::Tuna | MobKind::Mussel | MobKind::Oyster | MobKind::SeaSnail | MobKind::Eel => {},
+                            MobKind::Sulker => self.advance("out_of_its_shell"),
                             MobKind::Donkey | MobKind::Mule | MobKind::SnowGolem => {}
                             MobKind::Strutter | MobKind::Snout | MobKind::Pilferer | MobKind::Hackler | MobKind::Invoicer | MobKind::Fee => {}
                             MobKind::Fluffer | MobKind::Cluckster | MobKind::Mooer | MobKind::Mushmooer | MobKind::Woofer | MobKind::Hmmer | MobKind::Grumbler | MobKind::Galloper | MobKind::Wyrm | MobKind::Squawker | MobKind::Clanker | MobKind::Bee | MobKind::Sneaker | MobKind::Ribbit | MobKind::Rollo => {}
@@ -4717,6 +4751,9 @@ impl Game {
             let asleep = p.flags & crate::net::FLAG_SLEEP != 0 && crate::beds::is_bed(self.world.get_v(bed));
             let root = if asleep {
                 crate::beds::pose(bed, crate::beds::facing(self.world.get_v(bed)))
+            } else if self.world.generator.gravity_flipped(p.pos + Vec3::Y * 0.9) {
+                // Upside down under a gravity island (see gravity.rs): feet on the face above.
+                crate::gravity::flipped_root(p.pos, p.yaw) * p.animation.pose.root()
             } else {
                 Mat4::from_translation(p.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root()
             };
@@ -4735,6 +4772,7 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let root = match self.sleeping {
                 Some(s) => crate::beds::pose(s.bed, crate::beds::facing(self.world.get_v(s.bed))),
+                None if p.upside_down => crate::gravity::flipped_root(p.body.pos, p.yaw) * p.animation.pose.root(),
                 None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root(),
             };
             match self.skin_slot(crate::skins::ME) {

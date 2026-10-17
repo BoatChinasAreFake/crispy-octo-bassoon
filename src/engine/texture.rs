@@ -950,6 +950,21 @@ pub const T_PETRIFIED_SIDE: u16 = 1163;
 pub const T_PETRIFIED_TOP: u16 = 1164;
 pub const T_ATLAS: u16 = 1165;
 pub const T_PETRIFIED_SIDE_H: u16 = 1166;
+pub const T_MAUVE: u16 = 1167;
+pub const T_MAUVE_PILLAR_SIDE: u16 = 1168;
+pub const T_MAUVE_PILLAR_TOP: u16 = 1169;
+pub const T_LEAPSTALK: u16 = 1170;
+pub const T_LEAPFLOWER: u16 = 1171;
+pub const T_LEAPFRUIT: u16 = 1172;
+pub const T_POPPED_LEAPFRUIT: u16 = 1173;
+pub const T_SULKER_SHELL: u16 = 1174;
+pub const T_SULKER: u16 = 1175;
+pub const T_SULKER_INSIDE: u16 = 1176;
+pub const T_SULKER_HEAD: u16 = 1177;
+pub const T_SULKER_BULLET: u16 = 1178;
+pub const T_GATEWAY: u16 = 1179;
+pub const T_GRAVITY_CORE: u16 = 1180;
+pub const T_STAR_FRAGMENT: u16 = 1181;
 
 // Crop tiles are four in a row: T_CROP_* + stage.
 
@@ -4054,6 +4069,7 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
 
     paint_coastal(&mut a);
     paint_landmarks(&mut a);
+    paint_hollow_life(&mut a);
     paint_new_things(&mut a);
     paint_bees(&mut a);
     paint_critters(&mut a);
@@ -7245,6 +7261,78 @@ const BUNDLE_SPRITE: [&str; 16] = [
     "................",
 ];
 
+
+/// The Hollow's mauve stone, Leapstalks and their fruit, and Sulkers (see hollowlife.rs, sulkers.rs).
+fn paint_hollow_life(a: &mut Atlas) {
+    // A Gateway: deep space with a few bright stars.
+    a.each(T_GATEWAY, |x, y, r, _| {
+        if (x * 7 + y * 13) % 29 == 0 { rgb(240, 236, 255) } else { shade(rgb(18, 22, 44), r.range(0.7, 1.3)) }
+    });
+    // A Gravity Core: a glowing teal heart in a dark frame.
+    a.each(T_GRAVITY_CORE, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        shade(if d < 4.0 { rgb(130, 240, 220) } else if d < 6.0 { rgb(60, 150, 150) } else { rgb(40, 50, 70) }, r.range(0.9, 1.08))
+    });
+    // A Star Fragment: a little five-pointed shard of light.
+    a.each(T_STAR_FRAGMENT, |x, y, _r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let spike = 3.0 + 3.5 * ((dy.atan2(dx) * 5.0).cos() * 0.5 + 0.5);
+        if d > spike { [0, 0, 0, 0] } else if d < 2.0 { rgb(255, 255, 240) } else { rgb(250, 226, 140) }
+    });
+    // Mauve block: a grid of squared, faintly pink-violet tiles.
+    a.each(T_MAUVE, |x, y, r, _| {
+        let seam = x % 8 == 0 || y % 8 == 0;
+        shade(if seam { rgb(126, 86, 140) } else { rgb(170, 122, 182) }, r.range(0.92, 1.06))
+    });
+    a.each(T_MAUVE_PILLAR_SIDE, |x, _y, r, _| {
+        let flute = x % 4 == 0;
+        shade(if flute { rgb(132, 92, 146) } else { rgb(174, 128, 186) }, r.range(0.94, 1.05))
+    });
+    a.each(T_MAUVE_PILLAR_TOP, |x, y, r, _| {
+        let (dx, dy) = (x as i32 - 8, y as i32 - 8);
+        let ring = (dx.abs().max(dy.abs()) % 3) == 0;
+        shade(if ring { rgb(138, 96, 150) } else { rgb(176, 130, 188) }, r.range(0.94, 1.05))
+    });
+    // Leapstalk: knobbly, dusty purple-grey stems.
+    a.each(T_LEAPSTALK, |x, y, r, _| {
+        let knot = (x * 3 + y * 7) % 13 == 0;
+        shade(if knot { rgb(88, 62, 96) } else { rgb(134, 104, 140) }, r.range(0.88, 1.08))
+    });
+    // Leapflower: pale lilac petals round a deep centre.
+    a.each(T_LEAPFLOWER, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let c = if d < 2.5 { rgb(96, 54, 112) } else if (dx.atan2(dy) * 2.5).sin() > 0.0 { rgb(222, 196, 232) } else { rgb(196, 160, 212) };
+        shade(c, r.range(0.94, 1.05))
+    });
+    for (tile, body, spot) in [(T_LEAPFRUIT, rgb(150, 98, 168), rgb(206, 170, 220)), (T_POPPED_LEAPFRUIT, rgb(196, 150, 206), rgb(240, 214, 244))] {
+        a.each(tile, move |x, y, r, _| {
+            let (dx, dy) = (x as f32 - 7.5, y as f32 - 8.0);
+            if dx * dx + dy * dy > 34.0 {
+                return [0, 0, 0, 0];
+            }
+            shade(if (x * 5 + y * 3) % 9 == 0 { spot } else { body }, r.range(0.9, 1.06))
+        });
+    }
+    // A Sulker's shell (and the item): ridged purple plates.
+    for tile in [T_SULKER, T_SULKER_SHELL] {
+        a.each(tile, move |x, y, r, _| {
+            if tile == T_SULKER_SHELL && !((2..14).contains(&x) && (4..14).contains(&y)) {
+                return [0, 0, 0, 0];
+            }
+            let ridge = y % 4 == 0 || x % 5 == 0;
+            shade(if ridge { rgb(110, 70, 126) } else { rgb(150, 100, 166) }, r.range(0.92, 1.05))
+        });
+    }
+    a.each(T_SULKER_INSIDE, |_x, _y, r, _| shade(rgb(70, 40, 60), r.range(0.9, 1.1)));
+    // Its head peeking out: pale yellow with two small dark eyes.
+    a.each(T_SULKER_HEAD, |x, y, r, _| {
+        if (y == 6 || y == 7) && (x == 5 || x == 10) { rgb(30, 20, 30) } else { shade(rgb(232, 220, 150), r.range(0.94, 1.05)) }
+    });
+    a.each(T_SULKER_BULLET, |x, y, _r, _| if (x + y) % 3 == 0 { rgb(255, 250, 220) } else { rgb(230, 210, 255) });
+}
 
 /// Petrified wood (see landmarks.rs) and the Explorer's Atlas (see atlas.rs).
 fn paint_landmarks(a: &mut Atlas) {

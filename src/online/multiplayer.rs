@@ -628,6 +628,10 @@ impl Game {
                         let who = self.peer_name(from);
                         self.try_build_wilter(IVec3::new(x, y, z), &crate::players::record_key(&who));
                     }
+                    if id == WYRM_CRYSTAL && old != id {
+                        let who = self.peer_name(from);
+                        self.try_resummon_wyrm(IVec3::new(x, y, z), &crate::players::record_key(&who));
+                    }
                     if id == BANNER && old != BANNER {
                         let design = if self.verified_held(from) == BANNER { self.verified_ench(from) } else { 0 };
                         let facing = self.peers.get(&from).map(|p| crate::banners::facing_from_yaw(p.yaw)).unwrap_or(0);
@@ -2920,6 +2924,58 @@ mod tests {
         client.respawn();
         assert!(pump(&mut host, &mut client, |_, c| c.dim == Dim::Over));
         assert_eq!(host.peer_dim(id), Some(Dim::Over));
+    }
+
+    #[test]
+    fn joined_players_use_gateways_and_fish_the_void() {
+        let mut host = Game::new_with(794, false, false, crate::world::GenOptions::DEFAULT);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Voidy", "").unwrap();
+        let id = client.my_id;
+        // Into the Hollow, through a Crypt's portal.
+        let (x, z) = (spawn.x.floor() as i32 + 3, spawn.z.floor() as i32);
+        let base = IVec3::new(x, host.world.surface_y(x, z) + 1, z);
+        host.world.set_v(base, HOLLOW_PORTAL);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(base) == HOLLOW_PORTAL));
+        client.player.body.pos = base.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+        client.portal_cooldown = 0.0;
+        client.hollow_portal_tick();
+        assert!(pump(&mut host, &mut client, |_, c| c.dim == Dim::Hollow));
+        // The Wyrm is beaten (there): a Gateway opens, and the joined player walks in.
+        host.in_realm(Dim::Hollow, |g| g.wyrm_defeated(crate::hollow::ORIGIN.as_vec3()));
+        let (gx, gz) = crate::gateways::ring_column(0);
+        let gate = (crate::hollow::ORIGIN.y - 12..crate::hollow::ORIGIN.y + 24).map(|y| IVec3::new(gx, y, gz)).find(|&p| host.in_realm(Dim::Hollow, |g| g.world.get_v(p)) == GATEWAY).expect("a Gateway");
+        let seen = |c: &Game| c.world.get_v(gate) == GATEWAY;
+        client.player.body.pos = Vec3::new(gx as f32 + 0.5, gate.y as f32 + 2.0, gz as f32 + 0.5);
+        for _ in 0..600 {
+            if seen(&client) {
+                break;
+            }
+            client.world.stream(&[(gate.as_vec3(), 2)]);
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(seen(&client), "the Gateway shows up for them");
+        // (Portals take a moment between uses.)
+        for _ in 0..150 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        client.player.body.pos = gate.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+        client.portal_cooldown = 0.0;
+        assert!(client.hollow_portal_tick());
+        assert!(pump(&mut host, &mut client, |h, _| h.peer_ref(id).is_some_and(|p| Vec3::new(p.target.x, 0.0, p.target.z).length() > crate::hollow::ISLAND + 40.0)), "out to an island");
+        assert!(pump(&mut host, &mut client, |_, c| c.advancements.has("mind_the_gap")));
+        // Fishing off the edge, into the void: the host rolls something strange.
+        host.give_peer(id, ROD, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(ROD) == 1));
+        let p = host.peer_ref(id).unwrap().target;
+        client.net_send_msg(Msg::Catch { pos: Vec3::new(p.x + 12.0, crate::fishing::VOID_Y, p.z), bait: false });
+        assert!(pump(&mut host, &mut client, |_, c| c.advancements.has("deep_end")), "a catch from the void");
+        assert_eq!(client.dim, Dim::Hollow);
     }
 
     #[test]

@@ -65,6 +65,9 @@ pub enum Kind {
     MansionSecret,
     /// A steaming pool in snowy mountains (see springs.rs).
     HotSpring,
+    /// The Hollow Cities' towers and their flying ships (see cities.rs).
+    HollowCity,
+    SkyShip,
 }
 
 impl Kind {
@@ -96,6 +99,8 @@ impl Kind {
             Kind::Mansion => "Woodland Mansion (Pilferers' Country House)",
             Kind::MansionSecret => "Mansion Secret Room (Shh)",
             Kind::HotSpring => "Hot Spring (Bring a Towel)",
+            Kind::HollowCity => "Hollow City (Sulkers Reside)",
+            Kind::SkyShip => "Flying Ship (No Visible Means of Support)",
         }
     }
 
@@ -402,7 +407,7 @@ impl Generator {
         let door_facing = site.facing;
         match site.kind {
             // Built by the Hollow's own generator.
-            Kind::Spire => {}
+            Kind::Spire | Kind::HollowCity | Kind::SkyShip => {}
             Kind::DesertRuins | Kind::TrailRuins | Kind::OceanRuins => return ruin_blocks(site),
             Kind::HushedCity => return crate::deepdark::city_blocks(site),
             Kind::Fortress => return crate::fortress::fortress_blocks(site, self.opts.version >= 2),
@@ -738,7 +743,16 @@ impl Generator {
     pub fn structure_chests(&self, cx: i32, cz: i32) -> Vec<(IVec3, Kind, u32)> {
         let (cx, back) = (cx + self.dim.gen_cx(), ivec3(self.dim.gen_x(), 0, 0));
         if self.dim == Dim::Hollow {
-            return crate::hollow::spire_chests(self.seed, cx, cz).into_iter().map(|(p, s)| (p - back, Kind::Spire, s)).collect();
+            let mut v: Vec<_> = crate::hollow::spire_chests(self.seed, self.opts.version, cx, cz).into_iter().map(|(p, s)| (p - back, Kind::Spire, s)).collect();
+            let mid = (cx * CW + CW / 2, cz * CW + CW / 2);
+            for (c, r) in self.cities_near(mid.0, mid.1) {
+                for (p, kind) in self.city_chests(c, r) {
+                    if p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz {
+                        v.push((p - back, kind, self.seed ^ (p.x as u32).wrapping_mul(2_654_435_761) ^ (p.y as u32).wrapping_mul(17) ^ p.z as u32));
+                    }
+                }
+            }
+            return v;
         }
         let mut v = Vec::new();
         for (site, blocks) in self.sites_near(cx, cz) {
@@ -975,7 +989,6 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         Kind::Spire => &[
             (GLIDER, 1, 0.45),
             (ROCKET, 16, 0.7),
-            (HOLLOW_BOX, 1, 0.5),
             (DIAMOND, 4, 0.5),
             (STARING_EYE, 3, 0.4),
             (PICK_DIAMOND, 1, 0.25),
@@ -1133,6 +1146,27 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
         ],
         // (No chests at a spring.)
         Kind::HotSpring => &[],
+        Kind::HollowCity => &[
+            (DIAMOND, 4, 0.5),
+            (IRON, 8, 0.6),
+            (GOLD_INGOT, 6, 0.5),
+            (ENCHANTED_BOOK, 1, 0.4),
+            (LEAPFRUIT, 6, 0.6),
+            (ROCKET, 12, 0.5),
+            (PICK_DIAMOND, 1, 0.25),
+            (SWORD_DIAMOND, 1, 0.25),
+            (ARMOR_FIRST + 12 + CHESTPLATE as Id, 1, 0.2),
+            (ARMOR_FIRST + 12 + BOOTS as Id, 1, 0.2),
+            (STARING_EYE, 2, 0.3),
+        ],
+        Kind::SkyShip => &[
+            (GLIDER, 1, 1.0),
+            (ROCKET, 16, 0.7),
+            (DIAMOND, 3, 0.4),
+            (ENCHANTED_BOOK, 1, 0.4),
+            (LEAPFRUIT, 4, 0.5),
+            (GOLDEN_CHOP, 1, 0.2),
+        ],
         Kind::MansionSecret => &[
             (DIAMOND, 4, 0.8),
             (ENCHANTED_BOOK, 2, 0.6),
@@ -1181,7 +1215,7 @@ pub fn loot(kind: Kind, seed: u32) -> Container {
     let disc = match kind {
         Kind::Dungeon => 0.3,
         Kind::HushedCity => 0.3,
-        Kind::Tower | Kind::Spire => 0.12,
+        Kind::Tower | Kind::Spire | Kind::HollowCity => 0.12,
         _ => 0.0,
     };
     if rng.chance(disc) && !free.is_empty() {
@@ -1212,7 +1246,7 @@ fn loot_wear(item: Id, kind: Kind, rng: &mut Rng) -> Wear {
     let Some(max) = durability(item) else { return 0 };
     let used = rng.range(0.1, 0.7) * max as f32;
     let power = match kind {
-        Kind::Spire | Kind::HushedCity | Kind::BastionTreasure | Kind::MansionSecret => 20,
+        Kind::Spire | Kind::HollowCity | Kind::SkyShip | Kind::HushedCity | Kind::BastionTreasure | Kind::MansionSecret => 20,
         Kind::Dungeon => 15,
         Kind::Tower => 10,
         _ => 5,

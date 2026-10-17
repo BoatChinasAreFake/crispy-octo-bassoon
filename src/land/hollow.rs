@@ -84,7 +84,7 @@ pub fn outer_island(seed: u32, gx: i32, gz: i32) -> Option<(IVec3, i32, bool)> {
 }
 
 /// Outer islands that might reach (x, z).
-fn outer_islands_near(seed: u32, x: i32, z: i32) -> Vec<(IVec3, i32, bool)> {
+pub(crate) fn outer_islands_near(seed: u32, x: i32, z: i32) -> Vec<(IVec3, i32, bool)> {
     let (gx, gz) = ((x - GEN_ORIGIN.x).div_euclid(OUTER_CELL), (z - GEN_ORIGIN.z).div_euclid(OUTER_CELL));
     let mut v = Vec::new();
     for dz in -1..=1 {
@@ -164,11 +164,11 @@ pub fn tall_spire_block(dx: i32, dy: i32, dz: i32) -> Option<Id> {
 
 /// The chest in each outer spire in chunk (cx, cz), with a seed for its loot
 /// (all in generator coordinates).
-pub fn spire_chests(seed: u32, cx: i32, cz: i32) -> Vec<(IVec3, u32)> {
+pub fn spire_chests(seed: u32, version: u8, cx: i32, cz: i32) -> Vec<(IVec3, u32)> {
     let mid = ivec3(cx * CW + CW / 2, 0, cz * CW + CW / 2);
     outer_islands_near(seed, mid.x, mid.z)
         .into_iter()
-        .filter(|(_, _, spire)| *spire)
+        .filter(|&(c, r, spire)| spire && !(version >= 9 && crate::cities::is_city(seed, c, r)))
         .map(|(c, _, _)| c + ivec3(0, 2, 0))
         .filter(|p| p.x.div_euclid(CW) == cx && p.z.div_euclid(CW) == cz)
         .map(|p| (p, seed ^ (p.x as u32).wrapping_mul(2_654_435_761) ^ p.z as u32))
@@ -408,6 +408,8 @@ impl Generator {
                 // Outer islands, some with a spire.
                 let tall = self.opts.version >= 3;
                 for (c, r, spire) in outer_islands_near(s, x, z) {
+                    // (From version 9, a city's island has no spire.)
+                    let spire = spire && !(self.opts.version >= 9 && crate::cities::is_city(s, c, r));
                     if tall {
                         self.outer_island_column(x, z, c, r, &mut b, lx, lz);
                         if spire {
@@ -444,18 +446,61 @@ impl Generator {
                 }
             }
         }
+        if self.opts.version >= 9 {
+            self.place_leapstalks(cx, cz, &mut b);
+            self.place_gravity_islands(cx, cz, &mut b);
+            let mid = (cx * CW + CW / 2, cz * CW + CW / 2);
+            for (c, r) in self.cities_near(mid.0, mid.1) {
+                for (p, id) in self.city_blocks(c, r) {
+                    let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
+                    if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (1..CH - 1).contains(&p.y) {
+                        b[crate::world::idx(lx, p.y, lz)] = id;
+                    }
+                }
+            }
+        }
         b
+    }
+
+    /// Wild Leapstalks on the outer islands, from version 9 (a few per island,
+    /// clear of the spire), written where they fall inside chunk (cx, cz).
+    fn place_leapstalks(&self, cx: i32, cz: i32, b: &mut [Id]) {
+        let mid = (cx * CW + CW / 2, cz * CW + CW / 2);
+        for (c, r, _) in outer_islands_near(self.seed, mid.0, mid.1) {
+            // (A city keeps its streets clear.)
+            let towers = if crate::cities::is_city(self.seed, c, r) { self.city_towers(c, r) } else { Vec::new() };
+            for k in 0..6 {
+                let h = |j: i32| hash3(self.seed ^ 0x1EAF, c.x + j, k, c.z);
+                if h(0) < 0.3 {
+                    continue;
+                }
+                let a = h(1) * std::f32::consts::TAU;
+                let d = 6.0 + h(2) * (r as f32 * 0.8 - 6.0).max(0.0);
+                let (x, z) = (c.x + (a.cos() * d) as i32, c.z + (a.sin() * d) as i32);
+                let Some(top) = self.outer_top(x, z, c, r) else { continue };
+                if towers.iter().any(|t| (x - t.base.x).abs() <= t.half + 3 && (z - t.base.z).abs() <= t.half + 3) {
+                    continue;
+                }
+                for (p, id) in crate::hollowlife::plant_blocks(self.seed ^ k as u32, ivec3(x, top, z)) {
+                    let (lx, lz) = (p.x - cx * CW, p.z - cz * CW);
+                    if (0..CW).contains(&lx) && (0..CW).contains(&lz) && (1..CH - 1).contains(&p.y) {
+                        let at = crate::world::idx(lx, p.y, lz);
+                        if b[at] == AIR {
+                            b[at] = id;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 impl Generator {
-    /// One column of an outer island, from version 3: two to four lobes at
-    /// slightly different heights, a craggy underside, and a few rocks
+    /// An outer island's lobes, from version 3: its middle and radius, then
+    /// two to four lobes at slightly different heights, and a few rocks
     /// drifting nearby.
-    #[allow(clippy::too_many_arguments)]
-    fn outer_island_column(&self, x: i32, z: i32, c: IVec3, r: i32, b: &mut [Id], lx: i32, lz: i32) {
+    fn outer_lobes(&self, c: IVec3, r: i32) -> Vec<(IVec3, f32)> {
         let s = self.seed ^ 0x0157;
-        let i = |y: i32| crate::world::idx(lx, y, lz);
         let key = (c.x, c.z);
         let mut lobes = vec![(c, r as f32)];
         for k in 0..3 {
@@ -476,19 +521,36 @@ impl Generator {
                 lobes.push((c + ivec3((a.cos() * off) as i32, up, (a.sin() * off) as i32), 2.0 + hash3(s ^ 9, key.0, k, key.1) * 2.5));
             }
         }
-        for (m, rr) in lobes {
-            let d = ((x - m.x) as f32).hypot((z - m.z) as f32);
-            let edge = rr + self.scorch.noise3(x as f32 / 7.0, m.y as f32, z as f32 / 7.0) * (rr * 0.3).min(3.0);
-            if d >= edge {
-                continue;
-            }
-            let k = 1.0 - d / edge;
-            // A craggy underside: deeper in the middle, in uneven teeth.
-            let crag = (self.scorch.noise3(x as f32 / 3.0, 40.0, z as f32 / 3.0) + 1.0) * 3.0;
-            let depth = (k.sqrt() * (rr * 0.9 + 2.0) + crag * k) as i32 + 1;
-            // A gently uneven top (flat under the spire, which stands on the middle).
-            let bump = if d < 4.0 { 0.0 } else { self.scorch.noise3(x as f32 / 11.0, 9.0, z as f32 / 11.0) * 1.6 * k };
-            let top = m.y + bump as i32;
+        lobes
+    }
+
+    /// Where a lobe covers column (x, z): its top and how far down it goes.
+    fn lobe_column(&self, x: i32, z: i32, m: IVec3, rr: f32) -> Option<(i32, i32)> {
+        let d = ((x - m.x) as f32).hypot((z - m.z) as f32);
+        let edge = rr + self.scorch.noise3(x as f32 / 7.0, m.y as f32, z as f32 / 7.0) * (rr * 0.3).min(3.0);
+        if d >= edge {
+            return None;
+        }
+        let k = 1.0 - d / edge;
+        // A craggy underside: deeper in the middle, in uneven teeth.
+        let crag = (self.scorch.noise3(x as f32 / 3.0, 40.0, z as f32 / 3.0) + 1.0) * 3.0;
+        let depth = (k.sqrt() * (rr * 0.9 + 2.0) + crag * k) as i32 + 1;
+        // A gently uneven top (flat under the spire, which stands on the middle).
+        let bump = if d < 4.0 { 0.0 } else { self.scorch.noise3(x as f32 / 11.0, 9.0, z as f32 / 11.0) * 1.6 * k };
+        Some((m.y + bump as i32, depth))
+    }
+
+    /// The top of an outer island at (x, z), if it reaches there (version 3 on).
+    pub fn outer_top(&self, x: i32, z: i32, c: IVec3, r: i32) -> Option<i32> {
+        self.outer_lobes(c, r).into_iter().filter_map(|(m, rr)| self.lobe_column(x, z, m, rr)).map(|(top, _)| top).max()
+    }
+
+    /// One column of an outer island, from version 3.
+    #[allow(clippy::too_many_arguments)]
+    fn outer_island_column(&self, x: i32, z: i32, c: IVec3, r: i32, b: &mut [Id], lx: i32, lz: i32) {
+        let i = |y: i32| crate::world::idx(lx, y, lz);
+        for (m, rr) in self.outer_lobes(c, r) {
+            let Some((top, depth)) = self.lobe_column(x, z, m, rr) else { continue };
             for y in (top - depth).max(1)..=top {
                 if b[i(y)] == AIR {
                     b[i(y)] = HOLLOW_STONE;
@@ -645,12 +707,20 @@ impl Game {
     pub fn hollow_portal_tick(&mut self) -> bool {
         let b = &self.player.body;
         let feet = IVec3::new(b.pos.x.floor() as i32, (b.pos.y + 0.1).floor() as i32, b.pos.z.floor() as i32);
-        if self.world.get_v(feet) != HOLLOW_PORTAL || self.portal_cooldown > 0.0 || self.dead.is_some() {
+        let gateway = self.world.get_v(feet) == GATEWAY;
+        if (self.world.get_v(feet) != HOLLOW_PORTAL && !gateway) || self.portal_cooldown > 0.0 || self.dead.is_some() {
             return false;
         }
         self.portal_cooldown = 4.0;
         if self.is_client() {
             self.net_send_msg(crate::net::Msg::UsePortal { x: feet.x, y: feet.y, z: feet.z });
+            return true;
+        }
+        if gateway {
+            let to = self.gateway_destination(feet);
+            self.move_local_player(Dim::Hollow, to);
+            self.sfx(Sfx::Warp, None);
+            self.advance("mind_the_gap");
             return true;
         }
         let (dim, to) = self.hollow_destination(feet);
@@ -708,11 +778,21 @@ impl Game {
                 self.world.set_v(ORIGIN + ivec3(x, 1, z), HOLLOW_PORTAL);
             }
         }
-        self.world.set_v(ORIGIN + ivec3(0, 2, 3), WYRM_EGG);
+        // The egg the first time; a Gateway every time (see gateways.rs).
+        let first = crate::gateways::gateways_open(&self.world) == 0;
+        if first {
+            self.world.set_v(ORIGIN + ivec3(0, 2, 3), WYRM_EGG);
+        }
+        self.open_gateway();
         self.spawn_orbs(at, 500);
         self.sfx(Sfx::Fanfare, Some(at));
         self.msg("The Hollow Wyrm is beaten! A portal home opens in the middle of the island.");
         self.advance("wyrm_slayer");
+        // (Everyone who was there gets it too, and the poem the first time.)
+        let there: Vec<String> = self.peers.values().filter(|p| p.target.distance(at) < 160.0).map(|p| crate::players::record_key(&p.name)).collect();
+        for who in there {
+            self.advance_for(&who, "wyrm_slayer");
+        }
     }
 
     /// A Wyrm Crystal was broken: it blows up.
@@ -775,6 +855,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn newer_outer_islands_grow_leapstalks() {
+        let _lock = crate::mods::registry_test_lock();
+        let (c, r, _) = (1..12).flat_map(|r: i32| (-r..=r).flat_map(move |i| [(i, -r), (i, r), (-r, i), (r, i)])).find_map(|(gx, gz)| outer_island(9, gx, gz)).expect("an island");
+        let count = |version: u8| {
+            let g = Generator::with_dim(9, crate::world::GenOptions { version, ..crate::world::GenOptions::DEFAULT }, crate::dims::Dim::Hollow);
+            let reach = (r + 8) / CW + 1;
+            let (ccx, ccz) = (c.x.div_euclid(CW), c.z.div_euclid(CW));
+            let mut n = 0;
+            for cz in ccz - reach..=ccz + reach {
+                for cx in ccx - reach..=ccx + reach {
+                    n += g.generate_hollow(cx, cz).iter().filter(|&&id| crate::hollowlife::is_plant(id)).count();
+                }
+            }
+            n
+        };
+        assert_eq!(count(8), 0, "older worlds keep their bare islands");
+        assert!(count(9) > 0);
+    }
+
+    #[test]
     fn the_hollow_is_an_island_with_pillars() {
         let g = Generator::with_dim(5, crate::world::GenOptions::LEGACY, crate::dims::Dim::Hollow);
         let (cx, cz) = (ORIGIN.x.div_euclid(CW), ORIGIN.z.div_euclid(CW));
@@ -804,7 +904,7 @@ mod tests {
         assert_eq!(at(c + ivec3(3, 8, 3)), AIR);
         assert_eq!(at(c + ivec3(2, 8, 0)), OBSIDIAN);
         assert!((2..=4).all(|y| at(c + ivec3(0, y, 2)) == AIR));
-        assert!(spire_chests(9, (c.x).div_euclid(CW), (c.z).div_euclid(CW)).iter().any(|(p, _)| *p == c + ivec3(0, 2, 0)));
+        assert!(spire_chests(9, 3, (c.x).div_euclid(CW), (c.z).div_euclid(CW)).iter().any(|(p, _)| *p == c + ivec3(0, 2, 0)));
     }
 
     #[test]
