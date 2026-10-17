@@ -146,7 +146,14 @@ fn on_chat(player,text) {
         "ask" => {
             let prompt=if args.len()>2 {tail_text(args)}else{"hello"};let bucket=topic(prompt);
             let recent=value(`recent_${player}`,[]);recent.push(prompt.sub_string(0,160));if recent.len()>4 {recent.remove(0);}set_var(`recent_${player}`,recent);
-            score_add("dubiety_chats",player,1);message(player,`Dubiety: ${generate(bucket)}`);
+            score_add("dubiety_chats",player,1);
+            // With SmolLM2 in this folder (model.lm), the real model answers; otherwise the little word model does.
+            if model_ready() {
+                let notes=value(`notes_${player}`,[]);
+                let system=`You are Dubiety, a friendly, slightly unsure little companion in a blocky survival game. Answer in one or two short sentences. The player is in ${player_dimension(player)}, health ${player_health(player)} of 20, food ${player_food(player)} of 20.`;
+                if notes.len()>0 {system+=` The player asked you to remember: ${notes}.`;}
+                model_ask(player,system,prompt);message(player,"Dubiety is thinking...");
+            } else {message(player,`Dubiety: ${generate(bucket)}`);}
             if player_health(player)<8 {message(player,"Dubiety observes: your health is low. Find somewhere safe.");}
             if player_food(player)<6 {message(player,"Dubiety observes: you need food soon.");}
         }
@@ -168,6 +175,11 @@ fn on_chat(player,text) {
     }
     false
 }
+// The model's answer to /dubiety ask (see model_ask above).
+fn on_model_reply(player,text) {
+    message(player,if text=="" {"Dubiety: ...I lost my train of thought."}else{`Dubiety: ${text.sub_string(0,300)}`});
+}
+
 fn on_tick(dt) {
     let acc=value("acc",0.0)+dt;if acc<1.0 {set_var("acc",acc);return;}set_var("acc",acc-1.0);
     for player in players() {

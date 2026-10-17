@@ -218,6 +218,8 @@ pub struct Game {
     pub dedicated: bool,
     /// Script mods (only where the world lives: single player, host, server).
     pub scripts: Option<ScriptHost>,
+    /// Answers mods' language-model questions (started on first use; see smollm.rs).
+    pub model: Option<crate::smollm::Worker>,
     /// Script variables loaded from the save, handed to the scripts when they start.
     saved_script_vars: Vec<(String, Vec<u8>)>,
     pub advancements: Progress,
@@ -602,6 +604,7 @@ impl Game {
             net_error: None,
             dedicated: false,
             scripts: None,
+            model: None,
             saved_script_vars: Vec::new(),
             advancements: Progress::default(),
             toasts: Vec::new(),
@@ -1743,6 +1746,17 @@ impl Game {
 
     fn script_tick(&mut self, dt: f32) {
         self.minigame_tick(dt);
+        // Answers from mods' language models go back to the mod that asked.
+        let replies = self.model.as_mut().map(|w| w.replies()).unwrap_or_default();
+        for (mod_id, player, text) in replies {
+            let Some(mut host) = self.scripts.take() else { break };
+            let r = host.call_in(self, Some(&mod_id), "on_model_reply", vec![player.into(), text.into()]);
+            self.scripts = Some(host);
+            for e in r.errors {
+                self.msg(format!("Script error {e}"));
+            }
+            self.apply_cmds(r.cmds);
+        }
         self.post_tick(dt);
         if !self.dedicated {
             self.note_land();
@@ -1913,6 +1927,9 @@ impl Game {
                     self.share_teams();
                 }
                 Cmd::SetSpawn(p, at) => self.set_player_spawn(&p, at),
+                Cmd::ModelAsk(mod_id, player, system, prompt) => {
+                    self.model.get_or_insert_with(crate::smollm::Worker::start).ask(crate::smollm::Ask { mod_id, player, system, prompt });
+                }
                 Cmd::WorldSpawn(at) => {
                     if at.is_finite() {
                         self.spawn = at;

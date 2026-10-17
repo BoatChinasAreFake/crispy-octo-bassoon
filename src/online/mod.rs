@@ -15,6 +15,7 @@ pub(crate) mod playtest;
 pub(crate) mod post;
 pub(crate) mod scripting;
 pub(crate) mod server;
+pub(crate) mod smollm;
 pub(crate) mod servers;
 pub(crate) mod teams;
 

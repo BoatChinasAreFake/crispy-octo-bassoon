@@ -1,0 +1,32 @@
+# Pack SmolLM2-135M-Instruct for Dubiety and ask it a few questions, to check
+# the game's model code against the real weights (run by hand from Actions).
+name: Model check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Download SmolLM2-135M-Instruct
+        run: |
+          mkdir hf
+          for f in config.json tokenizer.json model.safetensors; do
+            curl -fsSL -o "hf/$f" "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/$f"
+          done
+      - name: Pack and ask
+        run: |
+          ./target/release/minceraft --pack-model hf model.lm
+          ls -l model.lm
+          for q in "What is the capital of France?" "How do I make a torch?" "Say hello to a friend."; do
+            echo "Q: $q"
+            /usr/bin/time -v ./target/release/minceraft --ask-model model.lm "$q" 2>time.txt; grep -E "Maximum resident|Elapsed" time.txt
+          done
+          ./target/release/minceraft --ask-model model.lm "What is the capital of France?" | grep -qi paris
