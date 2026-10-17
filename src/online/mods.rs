@@ -517,7 +517,7 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                         errs.push(format!("line {}: {} is defined twice", s.line, s.name));
                     } else {
                         // Reserve the slot now (deterministic order); fill it in pass 2.
-                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None, glutton: false, parts: Vec::new(), trades: Vec::new(), boss: false, enrage_at: 0.5, enrage_speed: 1.5, enrage_cooldown: 0.6, summon: None, summon_every: 20.0, knockback_resist: 0.0, xp: None });
+                        reg.mobs.push(ModMob { key: key.clone(), name: s.name.clone(), tile: crate::texture::T_WHITE, half_width: 0.4, height: 0.9, max_health: 10.0, speed: 1.0, hostile: false, attack_damage: 0.0, attack_reach: 1.3, aggro_range: 16.0, attack_cooldown: 1.0, ranged_damage: 0.0, ranged_range: 16.0, projectile_speed: 24.0, projectile_appearance: ProjectileAppearance::default(), projectile_effect: None, projectile_count: 1, projectile_spread: 0.0, projectile_homing: 0.0, projectile_blast: 0.0, ranged_cooldown: 2.0, drop: None, template: crate::block::MobTemplate::Quadruped, flying: false, fly_height: 4.0, fly_speed: 3.0, perches: false, tame_item: None, tame_chance: 1.0 / 3.0, breed_item: None, glutton: false, glutton_fed: String::new(), glutton_hungry: String::new(), parts: Vec::new(), trades: Vec::new(), boss: false, enrage_at: 0.5, enrage_speed: 1.5, enrage_cooldown: 0.6, summon: None, summon_every: 20.0, knockback_resist: 0.0, xp: None });
                     }
                 }
                 _ => {}
@@ -605,6 +605,8 @@ pub fn build(sources: &[ModSource], disabled: &[String]) -> Registry {
                     }
                 }
                 "language" => fill_language(&mut ctx, m, s, errs),
+                "advancement" => fill_advancement(&mut ctx, m, s, errs),
+                "machine" => fill_machine(&mut ctx, m, s, errs),
                 "splashes" => ctx.reg.splashes.extend(s.rows.iter().map(|(r, _)| r.chars().take(60).collect::<String>())),
                 "mod" | "texture" | "dimension" | "biome" => {}
                 other => errs.push(format!("line {}: unknown section [{other}]", s.line)),
@@ -1051,6 +1053,59 @@ fn shape_variants(shape: Option<&str>) -> &'static [&'static str] {
     }
 }
 
+/// `[advancement key]`: title, text, and what earns it (obtain = an item, or feed = one of the mod's mobs).
+fn fill_advancement(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
+    let key = s.name.to_ascii_lowercase();
+    if key.is_empty() || key.contains(':') || crate::advancements::ALL.iter().any(|a| a.key == key) || ctx.reg.advancements.iter().any(|a| a.adv.key == key) {
+        errs.push(format!("line {}: [advancement ...] needs a new simple name, not \"{}\"", s.line, s.name));
+        return;
+    }
+    let (Some(title), Some(text)) = (s.str("title"), s.str("text")) else {
+        errs.push(format!("line {}: [advancement {key}] needs a title and a text", s.line));
+        return;
+    };
+    let obtain = s.str("obtain").and_then(|v| {
+        let id = ctx.resolve(&m.id, v);
+        if id.is_none() {
+            errs.push(format!("line {}: obtain: unknown item \"{v}\"", s.line));
+        }
+        id
+    });
+    let feed = s.str("feed").map(|v| if v.contains(':') { v.to_ascii_lowercase() } else { format!("{}:{}", m.id, v.to_ascii_lowercase()) });
+    let adv: &'static crate::advancements::Advancement = Box::leak(Box::new(crate::advancements::Advancement { key: leak(&key), title: leak(title), desc: leak(text) }));
+    ctx.reg.advancements.push(ModAdvancement { adv, obtain, feed });
+}
+
+/// `[machine block]`: hint, recipe, `action = label | /command | item*n, item*n` (any number), and `status_<name>` lines.
+fn fill_machine(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
+    let Some(block) = ctx.resolve(&m.id, &s.name).filter(|&b| b < FIRST_ITEM) else {
+        errs.push(format!("line {}: [machine {}]: no such block", s.line, s.name));
+        return;
+    };
+    let mut mm = ModMachine { block, hint: s.str("hint").unwrap_or("").to_string(), recipe: s.str("recipe").unwrap_or("").to_string(), ..Default::default() };
+    for (k, v, line) in &s.kv {
+        if k == "action" {
+            let parts: Vec<&str> = v.split('|').map(str::trim).collect();
+            if parts.len() < 2 || !parts[1].starts_with('/') {
+                errs.push(format!("line {line}: action should be label | /command | item*n, ..."));
+                continue;
+            }
+            let inputs = parts.get(2).map_or(Vec::new(), |list| {
+                list.split(',').map(str::trim).filter(|p| !p.is_empty()).map(|p| match p.split_once('*') {
+                    Some((item, n)) => (item.trim().to_string(), n.trim().parse().unwrap_or(1)),
+                    None => (p.to_string(), 1),
+                }).collect()
+            });
+            mm.actions.push(MachineAction { label: parts[0].to_string(), command: parts[1].to_string(), inputs });
+        } else if k == "status_command" {
+            mm.status_command = v.clone();
+        } else if let Some(name) = k.strip_prefix("status_") {
+            mm.status.push((name.to_string(), v.clone()));
+        }
+    }
+    ctx.reg.machines.push(mm);
+}
+
 fn fill_block(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     let Some(id) = ctx.reg.lookup(&format!("{}:{}", m.id, s.name.to_ascii_lowercase())) else { return };
     if id >= FIRST_ITEM {
@@ -1408,6 +1463,8 @@ fn fill_mob(ctx: &mut Ctx, m: &ModSource, s: &Section, errs: &mut Vec<String>) {
     mob.tame_chance = tame_chance;
     mob.breed_item = breed_item;
     mob.glutton = flag(s, "glutton", false, errs);
+    mob.glutton_fed = s.str("fed_line").unwrap_or("").to_string();
+    mob.glutton_hungry = s.str("hungry_line").unwrap_or("").to_string();
     let parts = parse_parts(ctx, m, s, tile, errs);
     ctx.reg.mobs[i].parts = parts;
     let trades = parse_trades(ctx, m, s, errs);

@@ -1639,6 +1639,9 @@ pub struct ModMob {
     pub breed_item: Option<Id>,
     /// Eats any offered item and swallows livestock within five blocks. Off by default.
     pub glutton: bool,
+    /// What a glutton says when fed, and when it's hungry ("{}": its name; empty: nothing).
+    pub glutton_fed: String,
+    pub glutton_hungry: String,
     /// A body built from the mod's own boxes (`part = ...` lines), used
     /// instead of `template` when there are any. At most `MAX_MOD_PARTS`.
     pub parts: Vec<ModPart>,
@@ -1770,6 +1773,44 @@ pub struct PlantGen {
     pub dim: Option<usize>,
 }
 
+/// An advancement a mod brings (`[advancement key]` in mod.txt), earned by
+/// picking up an item or feeding one of its creatures.
+pub struct ModAdvancement {
+    pub adv: &'static crate::advancements::Advancement,
+    pub obtain: Option<Id>,
+    /// A mod mob's key ("pack:name"): earned by feeding one.
+    pub feed: Option<String>,
+}
+
+/// One button on a mod machine's panel: what it says, the chat command it
+/// runs, and what it takes from your inventory.
+pub struct MachineAction {
+    pub label: String,
+    pub command: String,
+    pub inputs: Vec<(String, u32)>,
+}
+
+/// A mod machine's text (`[machine name]` in mod.txt): its panel's hint and
+/// buttons, the recipe line under its slots, and status lines by name
+/// (`status_running = ...`, with `{}` for a number).
+#[derive(Default)]
+pub struct ModMachine {
+    pub block: Id,
+    pub hint: String,
+    pub recipe: String,
+    pub actions: Vec<MachineAction>,
+    pub status: Vec<(String, String)>,
+    /// The chat command that asks for its status (`status_command = ...`).
+    pub status_command: String,
+}
+
+impl ModMachine {
+    /// A status line by name, with `{}` filled in (None: the mod didn't give one).
+    pub fn status(&self, name: &str, n: f32) -> Option<String> {
+        self.status.iter().find(|(k, _)| k == name).map(|(_, t)| t.replacen("{}", &format!("{n:.0}"), 1))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ModInfo {
     pub id: String,
@@ -1807,6 +1848,16 @@ pub struct Registry {
     pub dims: Vec<crate::modgen::ModDim>,
     /// Translations mods bring (see lang.rs).
     pub languages: Vec<crate::lang::Language>,
+    /// Advancements and machine text mods bring (each in its own mod.txt).
+    pub advancements: Vec<ModAdvancement>,
+    pub machines: Vec<ModMachine>,
+}
+
+impl Registry {
+    /// A mod machine's text, by block.
+    pub fn machine(&self, id: Id) -> Option<&ModMachine> {
+        self.machines.iter().find(|m| m.block == id)
+    }
 }
 
 static REGISTRY: AtomicPtr<Registry> = AtomicPtr::new(std::ptr::null_mut());
@@ -3294,7 +3345,7 @@ impl Registry {
                 recipes.push(r(&[(material, n)], (ARMOR_FIRST + (t * 4 + slot) as Id, 1)));
             }
         }
-        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new(), biomes: Vec::new(), structures: Vec::new(), dims: Vec::new(), languages: Vec::new() }
+        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new(), biomes: Vec::new(), structures: Vec::new(), dims: Vec::new(), languages: Vec::new(), advancements: Vec::new(), machines: Vec::new() }
     }
 
     /// Look up a block or item id by key ("stone", "cheese:wheel", ...).

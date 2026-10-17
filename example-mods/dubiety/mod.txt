@@ -178,6 +178,8 @@ tame_item = chip
 tame_chance = 1
 breed_item = none
 glutton = true
+fed_line = {}: Delicious. Now feed me MORE!
+hungry_line = {}: FEED ME! Food, rocks, tools... I want EVERYTHING!
 drops = chip 1
 part = belly -.55 .12 -.5 1.1 .95 1 anim=bob amount=.12 face=appetite_face
 part = top -.4 1.07 -.35 .8 .1 .7 anim=bob amount=.12
@@ -188,3 +190,13 @@ part = right .55 .28 -.34 .11 .55 .68 anim=bob amount=.12
 [recipe]
 inputs = beacon 1, wheat 8
 output = obesity_beacon 1
+
+[advancement pocket_philosopher]
+title = Pocket Philosopher
+text = Obtain a Dubiety Companion Beacon. Small thoughts, portable format.
+obtain = beacon
+
+[advancement bottomless_appetite]
+title = Bottomless Appetite
+text = Feed an item to a glutton companion. It still wants seconds.
+feed = obesity

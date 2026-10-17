@@ -1273,11 +1273,11 @@ impl Game {
             BAMBOO => "bamboozled",
             AMETHYST_SHARD => "crystal_clear",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
-            _ if reg().key_of(item)=="half_baked:energy_cell" => "half_baked_power",
-            _ if reg().key_of(item)=="ad_absurdum:rocket_1" => "rocket_paperwork",
-            _ if reg().key_of(item)=="dubiety:beacon" => "pocket_philosopher",
-            _ if reg().key_of(item)=="dusk:hydra_heart" => "complaint_resolved",
-            _ => return,
+            // (Mods' own advancements for getting their things.)
+            _ => match reg().advancements.iter().find(|a| a.obtain == Some(item)) {
+                Some(a) => a.adv.key,
+                None => return,
+            },
         };
         self.advance(key);
     }

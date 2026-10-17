@@ -507,6 +507,39 @@ If two mods both define a `[mob]` with the same section name, a bare name resolv
 
 Data-defined mobs cover their own stats, a drop, a templated look, hostile melee combat, hostile ranged combat with bounded appearance, timed effects, deterministic multishot, homing and blast projectiles, flying, taming and breeding, custom box-built bodies with simple animations, trading, and bosses. Arbitrary projectile geometry/rendering and custom UI screens still require a Rust change.
 
+### `[advancement <name>]`
+
+An advancement of your own, listed with the game's (and saved the same way, by name):
+
+```
+[advancement pocket_philosopher]
+title = Pocket Philosopher
+text = Obtain a Dubiety Companion Beacon. Small thoughts, portable format.
+obtain = beacon        // earned by picking this item up...
+feed = obesity         // ...or by feeding one of your mobs anything
+```
+
+- The name must be new (not one of the game's own, or another mod's).
+- Its title and text are your mod's, not the game's: translate them in a `[language]` like any of your other text.
+
+### `[machine <block>]`
+
+The text on one of your blocks' machine panel, and the buttons on it (each runs a chat command, so your script does the work):
+
+```
+[machine reactor]
+hint = Keep the cooling tower in place. Output: 4 cells + waste.
+recipe = Pellet + coolant -> 4 cells + waste; 15s; needs tower.
+action = Start 15-second batch | /hbm reactor | half_baked:pellet*1, half_baked:coolant*1
+action = Scram owned batches | /hbm scram
+status_running = Batch running: {}s left. Keep cooling connected.
+status_command = /hbm status
+```
+
+- `action = label | /command | item*n, ...`: a button, the command it sends, and what it needs (full names: `pack:item`). As many as you like, in order.
+- `recipe` is the line under a powered machine's slots; `status_<name>` are lines the game shows while it runs (`{}` is a number of seconds).
+- All of it is your mod's text, so the game's own strings file doesn't list it.
+
 ### `[language <code>]`
 
 A translation of the game. Every line of text Minceraft shows is listed, in English, in [`lang/strings.txt`](lang/strings.txt). A translation is a file in your mod that pairs English lines with yours:
@@ -570,8 +603,8 @@ Rocket shape presets use bounded model geometry and collision boxes: `rocket_eng
 
 ### Glutton companions
 
-A `[mob]` can opt into `glutton = true` (default `false`). It accepts every non-air held item as a one-unit offering, before name tags, leads, shears and trading interactions; `tame_item` still tames while consuming the offering. Empty-hand owner interaction retains sit/follow. Feeding heals two health, preserves the mob and earns Bottomless Appetite. Normal survival/creative inventory rules and host range/inventory validation apply.
+A `[mob]` can opt into `glutton = true` (default `false`). It accepts every non-air held item as a one-unit offering, before name tags, leads, shears and trading interactions; `tame_item` still tames while consuming the offering. Empty-hand owner interaction retains sit/follow. Feeding heals two health and preserves the mob. Its lines are the mod's own: `fed_line = ...` when it's fed and `hungry_line = ...` when it wants more (`{}` is its name; leave them out and it says nothing). Normal survival/creative inventory rules and host range/inventory validation apply.
 
-A living, loaded glutton swallows all living Mooers, Oinkers, Fluffers and Clucksters whose body positions are at most five blocks away in 3D. There is no line-of-sight condition. It removes them directly without death drops or kill credit, including babies and kept animals. It never eats other mob types or across dimensions. It requests food from the nearest player within sixteen blocks every eight seconds (at most one demand per player per update). The demand timer is transient; pet ownership and persistence use the existing mob save format. Older mods retain all their previous interactions.
+A living, loaded glutton swallows all living Mooers, Oinkers, Fluffers and Clucksters whose body positions are at most five blocks away in 3D. There is no line-of-sight condition. It removes them directly without death drops or kill credit, including babies and kept animals. It never eats other mob types or across dimensions. With a `hungry_line`, it requests food from the nearest player within sixteen blocks every eight seconds (at most one demand per player per update). The demand timer is transient; pet ownership and persistence use the existing mob save format. Older mods retain all their previous interactions.
 
 `shape = industrial` selects the native detailed model for the bundled production machines and power cables. Other keys fall back to a box. It preserves the declared solidity/transparency, so cables can be thin, non-blocking models.

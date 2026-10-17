@@ -233,11 +233,6 @@ pub const ALL: &[Advancement] = &[
     adv("bullseye", "Bullseye", "Hit a Target with an arrow."),
     adv("tuning_in", "Tuning In", "Tell a Calibrated Sculk Sensor what to listen for."),
     adv("its_a_trap", "It's a Trap!", "Open a Trapped Chest wired up to something."),
-    adv("half_baked_power", "Questionable Power", "Complete a Half-Baked reactor batch and collect an energy cell."),
-    adv("rocket_paperwork", "Rocket Paperwork", "Craft an Ad Absurdum rocket. The sky has forms to fill in."),
-    adv("bottomless_appetite", "Bottomless Appetite", "Feed an item to a glutton companion. It still wants seconds."),
-    adv("pocket_philosopher", "Pocket Philosopher", "Obtain a Dubiety Companion Beacon. Small thoughts, portable format."),
-    adv("complaint_resolved", "Complaint Resolved", "Defeat the Slightly Dim Forest final guardian and collect its heart."),
     adv("off_the_map", "Off the Map", "Step through a portal into a mod's dimension."),
     adv("homebrew", "Homebrew", "Wander into a biome a mod added."),
     adv("lost_in_translation", "Lost in Translation", "Play in a language a mod brought."),
@@ -318,8 +313,13 @@ pub fn tab_of(key: &str) -> usize {
     }
 }
 
+/// Every advancement: the game's, then those the enabled mods bring.
+pub fn all() -> impl Iterator<Item = &'static Advancement> {
+    ALL.iter().chain(crate::block::reg().advancements.iter().map(|m| m.adv))
+}
+
 pub fn find(key: &str) -> Option<&'static Advancement> {
-    ALL.iter().find(|a| a.key == key)
+    all().find(|a| a.key == key)
 }
 
 #[derive(Default)]
@@ -356,7 +356,7 @@ impl Progress {
 
     /// How many of the known advancements are earned.
     pub fn count(&self) -> usize {
-        ALL.iter().filter(|a| self.has(a.key)).count()
+        all().filter(|a| self.has(a.key)).count()
     }
 }
 

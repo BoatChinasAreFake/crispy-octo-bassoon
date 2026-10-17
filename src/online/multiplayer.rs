@@ -1455,7 +1455,7 @@ impl Game {
             }
             Msg::Advance { key } => {
                 // (Only ones we know of.)
-                if crate::advancements::ALL.iter().any(|a| a.key == key) {
+                if crate::advancements::find(&key).is_some() {
                     self.advance(&key);
                 }
             }

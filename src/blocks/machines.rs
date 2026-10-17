@@ -2,44 +2,15 @@
 use crate::{block::*, game::Game, net::Msg};
 use macroquad::math::IVec3;
 
-pub struct Action {
-    pub label: &'static str,
-    pub command: &'static str,
-    pub inputs: &'static [(&'static str, u32)],
-}
+pub use crate::block::MachineAction as Action;
 pub struct Spec {
     pub hint: &'static str,
     pub actions: &'static [Action],
 }
-const REFINE: &[Action] = &[Action { label: "Refine pellet", command: "/hbm refine", inputs: &[("half_baked:glowium_dust", 2), ("coal", 1)] }];
-const REACTOR: &[Action] = &[
-    Action { label: "Start 15-second batch", command: "/hbm reactor", inputs: &[("half_baked:pellet", 1), ("half_baked:coolant", 1)] },
-    Action { label: "Scram owned batches", command: "/hbm scram", inputs: &[] },
-];
-const FUEL: &[Action] = &[Action { label: "Refine 2 fuel canisters", command: "/astra refine", inputs: &[("coal", 2), ("ad_absurdum:tank", 1)] }];
-const OXYGEN: &[Action] =
-    &[Action { label: "Fill 4 oxygen canisters", command: "/astra refill", inputs: &[("ad_absurdum:battery", 1), ("ad_absurdum:tank", 1)] }];
-const SOLAR: &[Action] = &[Action { label: "Charge 2 batteries", command: "/astra charge", inputs: &[("ad_absurdum:steel", 1), ("zap_dust", 1)] }];
-const ROCKET: &[Action] = &[
-    Action { label: "Assemble tier 1", command: "/astra assemble 1", inputs: &[("ad_absurdum:rocket_1", 1)] },
-    Action { label: "Assemble tier 2", command: "/astra assemble 2", inputs: &[("ad_absurdum:rocket_2", 1)] },
-    Action { label: "Assemble tier 3", command: "/astra assemble 3", inputs: &[("ad_absurdum:rocket_3", 1)] },
-    Action { label: "Assemble tier 4", command: "/astra assemble 4", inputs: &[("ad_absurdum:rocket_4", 1)] },
-    Action { label: "Pack owned rockets", command: "/astra pack", inputs: &[] },
-];
+/// A command-driven mod machine's panel: its text and buttons come from the mod (`[machine ...]`).
 pub fn spec(id: Id) -> Option<Spec> {
-    Some(match reg().key_of(id) {
-        "half_baked:centrifuge" => Spec { hint: "Turns dust and coal into one pellet.", actions: REFINE },
-        "half_baked:reactor" => Spec { hint: "Keep the cooling tower in place. Output: 4 cells + waste.", actions: REACTOR },
-        "half_baked:cooling_tower" => Spec { hint: "Passive cooling for reactors within three blocks.", actions: &[] },
-        "ad_absurdum:refinery" => Spec { hint: "Refines coal into rocket fuel.", actions: FUEL },
-        "ad_absurdum:oxygen_generator" => Spec { hint: "Fills oxygen for your Life Support Pack.", actions: OXYGEN },
-        "ad_absurdum:solar_panel" => Spec { hint: "Each recharge needs 60 seconds between batches.", actions: SOLAR },
-        "ad_absurdum:rocket_workbench" | "ad_absurdum:launch_pad" => {
-            Spec { hint: "Bench and pad must be nearby, with five clear blocks above.", actions: ROCKET }
-        }
-        _ => return None,
-    })
+    let m = reg().machine(id)?;
+    (crate::factory::kind(id).is_none()).then_some(Spec { hint: &m.hint, actions: &m.actions })
 }
 #[derive(Clone)]
 pub struct Panel {
@@ -115,7 +86,7 @@ impl Game {
             if who != self.my_id && !self.peer_rate_ok(who, "machine_action", 0.3) {
                 return;
             }
-            self.fire("on_chat", vec![name.into(), a.command.into()]);
+            self.fire("on_chat", vec![name.into(), a.command.clone().into()]);
         } else if who != self.my_id && !self.peer_rate_ok(who, "machine_status", 0.4) {
             return;
         }
@@ -138,11 +109,8 @@ impl Game {
                 .filter(|p| (**p - pos).abs().max_element() <= 3)
                 .filter_map(|p| self.factory_visual(*p))
                 .find(|v| crate::factory::kind(v.block) == Some(crate::factory::Kind::Reactor) && v.state == 2);
-            return if let Some(v) = active {
-                ("Cooling active. Steam venting.".into(), v.progress)
-            } else {
-                ("Cooling ready. Keep this tower beside the reactor.".into(), 0)
-            };
+            let text = |name: &str| reg().machine(id).and_then(|m| m.status(name, 0.0)).unwrap_or_default();
+            return if let Some(v) = active { (text("active"), v.progress) } else { (text("idle"), 0) };
         }
         let Some(host) = self.scripts.as_ref() else { return ("Machine script is not installed.".into(), 0) };
         let key = reg().key_of(id);
@@ -163,7 +131,8 @@ impl Game {
                         && at.is_some_and(|a| a.len() == 3 && a.iter().zip([pos.x, pos.y, pos.z]).all(|(v, p)| number(v) == Some(p as f32)))
                     {
                         let left = m.get("left").and_then(number).unwrap_or(15.0).clamp(0.0, 15.0);
-                        return (format!("Batch running: {left:.0}s left. Keep cooling connected."), ((1.0 - left / 15.0) * 255.0) as u8);
+                        let text = reg().machine(id).and_then(|mm| mm.status("running", left)).unwrap_or_default();
+                        return (text, ((1.0 - left / 15.0) * 255.0) as u8);
                     }
                 }
             }
@@ -171,7 +140,8 @@ impl Game {
         if key == "ad_absurdum:solar_panel" {
             let left = host.variable("ad_absurdum", &format!("charge_{name}")).as_ref().and_then(number).unwrap_or(0.0);
             if left > 0.0 {
-                return (format!("Recharging: {left:.0}s until the next batch."), ((1.0 - left / 60.0).clamp(0.0, 1.0) * 255.0) as u8);
+                let text = reg().machine(id).and_then(|m| m.status("running", left)).unwrap_or_default();
+                return (text, ((1.0 - left / 60.0).clamp(0.0, 1.0) * 255.0) as u8);
             }
         }
         ("Ready. Ingredients come from your inventory.".into(), 0)

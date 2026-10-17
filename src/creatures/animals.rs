@@ -266,7 +266,7 @@ impl Game {
             } else {
                 self.smoke(pos, 5, 0.2);
             }
-            if def.glutton {self.advance_for(who,"bottomless_appetite");}
+            if def.glutton {self.fed_mod_mob(who,def.key.as_str());}
             return Some(Interaction::Ate);
         }
         if item != AIR && def.glutton {
@@ -274,8 +274,8 @@ impl Game {
             m.health=(m.health+2.0).min(def.max_health);
             self.hearts(pos,2);
             self.sfx(Sfx::Eat,Some(pos));
-            self.tell(who,&format!("{}: Delicious. Now feed me MORE!",def.name));
-            self.advance_for(who,"bottomless_appetite");
+            if !def.glutton_fed.is_empty() {self.tell(who,&def.glutton_fed.replacen("{}",&def.name,1));}
+            self.fed_mod_mob(who,def.key.as_str());
             return Some(Interaction::Ate);
         }
         if item != AIR && def.breed_item == Some(item) {
@@ -391,6 +391,14 @@ impl Game {
     }
 
     /// An advancement for one player (by record key): ours, or a joined player's (sent to them).
+    /// Fed one of a mod's creatures: any advancements its mod gives for that.
+    pub fn fed_mod_mob(&mut self, who: &str, mob: &str) {
+        let keys: Vec<&'static str> = reg().advancements.iter().filter(|a| a.feed.as_deref() == Some(mob)).map(|a| a.adv.key).collect();
+        for k in keys {
+            self.advance_for(who, k);
+        }
+    }
+
     pub fn advance_for(&mut self, who: &str, key: &str) {
         if record_key(&self.player_name) == who && !self.away() {
             self.advance(key);
@@ -444,7 +452,7 @@ impl Game {
             m.appetite_cd=(m.appetite_cd-dt.max(0.0)).max(0.0);
             if m.appetite_cd<=0.0 && let Some((who,_,_))=players.iter().filter(|p|p.1.distance(m.body.pos)<=16.0).min_by(|a,b|a.1.distance_squared(m.body.pos).total_cmp(&b.1.distance_squared(m.body.pos))) {
                 m.appetite_cd=8.0;
-                if !requests.iter().any(|(key,_)|key==who) {requests.push((who.clone(),format!("{}: FEED ME! Food, rocks, tools... I want EVERYTHING!",d.name)));}
+                if !d.glutton_hungry.is_empty() && !requests.iter().any(|(key,_)|key==who) {requests.push((who.clone(),d.glutton_hungry.replacen("{}",&d.name,1)));}
             }
         }
         if !eaters.is_empty() {

@@ -281,18 +281,66 @@ pub(crate) fn extract_strings(src: &std::path::Path) -> Vec<String> {
         }
     }
     files.sort();
-    for f in files {
+    let read = |f: &std::path::Path| std::fs::read_to_string(f).unwrap_or_default().replace("\r\n", "\n");
+    // Whole files that are only tests (`#[cfg(test)] mod name;` beside them).
+    let test_only: std::collections::BTreeSet<std::path::PathBuf> = files
+        .iter()
+        .flat_map(|f| {
+            let code = read(f);
+            let dir = f.parent().unwrap().to_path_buf();
+            code.split("#[cfg(test)]\n")
+                .skip(1)
+                .filter_map(|rest| rest.lines().next().and_then(|l| l.trim().trim_start_matches("pub(crate) ").trim_start_matches("pub ").strip_prefix("mod ")).and_then(|l| l.strip_suffix(';')).map(str::to_string))
+                .map(|name| dir.join(format!("{name}.rs")))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for f in files.iter().filter(|f| !test_only.contains(*f)) {
         // (Windows checkouts end lines with \r\n.)
-        let code = std::fs::read_to_string(&f).unwrap_or_default().replace("\r\n", "\n");
+        let code = read(f);
         // Tests' text isn't shown to anyone.
-        let code = code.split("#[cfg(test)]\nmod tests").next().unwrap_or("");
-        for lit in literals(code) {
+        let code = without_test_modules(&code);
+        for lit in literals(&code) {
             if let Some(s) = shown_text(&lit) {
                 found.insert(s);
             }
         }
     }
     found.into_iter().collect()
+}
+
+/// Code with its `#[cfg(test)] mod name { ... }` blocks taken out, wherever they are.
+#[cfg(test)]
+fn without_test_modules(code: &str) -> String {
+    let mut out = String::new();
+    let mut rest = code;
+    while let Some(at) = rest.find("#[cfg(test)]\nmod ") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at..];
+        let Some(open) = after.find('{').filter(|&o| !after[..o].contains(';')) else {
+            rest = &after[1..];
+            continue;
+        };
+        // (Braces inside strings like "{}" come in pairs, so counting is enough.)
+        let mut depth = 0;
+        let mut end = after.len();
+        for (i, c) in after[open..].char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = open + i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The string literals in some Rust code (plain "..." ones), still escaped.
