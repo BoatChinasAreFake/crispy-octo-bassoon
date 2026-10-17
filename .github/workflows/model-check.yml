@@ -31,6 +31,7 @@ jobs:
           ls -l model.lm
           for q in "What is the capital of France?" "How do I make a torch?" "Say hello to a friend."; do
             echo "Q: $q"
-            /usr/bin/time -v ./target/release/minceraft --ask-model model.lm "$q" 2>time.txt; grep -E "Maximum resident|Elapsed" time.txt
+            a=$(/usr/bin/time -v ./target/release/minceraft --ask-model model.lm "$q" 2>time.txt)
+            echo "::notice title=$q::$a | $(grep -E 'Maximum resident' time.txt | xargs) | $(grep -E 'Elapsed' time.txt | xargs) | $(ls -l model.lm | awk '{print $5}') bytes"
           done
           ./target/release/minceraft --ask-model model.lm "What is the capital of France?" | grep -qi paris
