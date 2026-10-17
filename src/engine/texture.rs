@@ -962,6 +962,9 @@ pub const T_SULKER: u16 = 1175;
 pub const T_SULKER_INSIDE: u16 = 1176;
 pub const T_SULKER_HEAD: u16 = 1177;
 pub const T_SULKER_BULLET: u16 = 1178;
+pub const T_GATEWAY: u16 = 1179;
+pub const T_GRAVITY_CORE: u16 = 1180;
+pub const T_STAR_FRAGMENT: u16 = 1181;
 
 // Crop tiles are four in a row: T_CROP_* + stage.
 
@@ -7261,6 +7264,23 @@ const BUNDLE_SPRITE: [&str; 16] = [
 
 /// The Hollow's mauve stone, Leapstalks and their fruit, and Sulkers (see hollowlife.rs, sulkers.rs).
 fn paint_hollow_life(a: &mut Atlas) {
+    // A Gateway: deep space with a few bright stars.
+    a.each(T_GATEWAY, |x, y, r, _| {
+        if (x * 7 + y * 13) % 29 == 0 { rgb(240, 236, 255) } else { shade(rgb(18, 22, 44), r.range(0.7, 1.3)) }
+    });
+    // A Gravity Core: a glowing teal heart in a dark frame.
+    a.each(T_GRAVITY_CORE, |x, y, r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        shade(if d < 4.0 { rgb(130, 240, 220) } else if d < 6.0 { rgb(60, 150, 150) } else { rgb(40, 50, 70) }, r.range(0.9, 1.08))
+    });
+    // A Star Fragment: a little five-pointed shard of light.
+    a.each(T_STAR_FRAGMENT, |x, y, _r, _| {
+        let (dx, dy) = (x as f32 - 7.5, y as f32 - 7.5);
+        let d = (dx * dx + dy * dy).sqrt();
+        let spike = 3.0 + 3.5 * ((dy.atan2(dx) * 5.0).cos() * 0.5 + 0.5);
+        if d > spike { [0, 0, 0, 0] } else if d < 2.0 { rgb(255, 255, 240) } else { rgb(250, 226, 140) }
+    });
     // Mauve block: a grid of squared, faintly pink-violet tiles.
     a.each(T_MAUVE, |x, y, r, _| {
         let seam = x % 8 == 0 || y % 8 == 0;

@@ -10,6 +10,13 @@
 //! and your Angler level (which rises with every catch). A Fishing Log keeps
 //! count, and the biggest of each.
 //!
+//! **Void fishing**: in the Hollow, cast off an island's edge and the bobber
+//! drifts down until it hangs in the void, well below the islands. The void
+//! bites slowly, and what comes up is strange: things people have lost over
+//! the edge, Star Fragments (four make a Wyrm Crystal), and now and then a
+//! Fishie, alive and very confused about where it's been. It all counts
+//! toward your Angler level.
+//!
 //! The rod, bobber and tug-of-war run on the fisher's own machine; the catch
 //! itself is rolled wherever the world lives, so joined players can't award
 //! themselves a Big Bob.
@@ -55,6 +62,14 @@ pub struct Bobber {
     /// Seconds since a nibble (for the bob animation and "too early" messages).
     pub since_nibble: f32,
     pub bait: bool,
+}
+
+/// How far down the void a bobber hangs, in the Hollow (below every island's underside).
+pub const VOID_Y: f32 = 20.0;
+
+/// Is `p` out in the void (where a bobber can hang and fish)?
+pub fn in_void(world: &World, p: Vec3) -> bool {
+    world.is_hollow() && p.y <= VOID_Y + 0.5
 }
 
 /// Something that happened this tick that the game should react to.
@@ -113,7 +128,13 @@ impl Bobber {
                 self.vel.y -= 20.0 * dt;
                 let next = self.pos + self.vel * dt;
                 let cell = world.get(next.x.floor() as i32, next.y.floor() as i32, next.z.floor() as i32);
-                if is_water(cell) {
+                if world.is_hollow() && next.y <= VOID_Y && !is_solid(cell) {
+                    // Hanging in the void: it waits like water, only stranger.
+                    self.pos = Vec3::new(next.x, VOID_Y, next.z);
+                    self.vel = Vec3::ZERO;
+                    self.state = BobberState::Floating { wait: void_wait(self.bait, angler, rng), nibble: rng.range(1.0, 3.0) };
+                    ev.push(FishEvent::Splashdown);
+                } else if is_water(cell) {
                     self.pos = next;
                     self.vel = Vec3::ZERO;
                     self.state = BobberState::Floating { wait: bite_wait(world, self.pos, time, self.bait, angler, raining, rng), nibble: rng.range(1.0, 3.0) };
@@ -126,9 +147,11 @@ impl Bobber {
                 }
             }
             BobberState::Floating { mut wait, mut nibble } => {
-                // Ride the surface.
-                let surface = water_surface(world, self.pos);
-                self.pos.y += (surface - 0.1 - self.pos.y) * (dt * 6.0).min(1.0);
+                // Ride the surface (or hang where it is, in the void).
+                if !in_void(world, self.pos) {
+                    let surface = water_surface(world, self.pos);
+                    self.pos.y += (surface - 0.1 - self.pos.y) * (dt * 6.0).min(1.0);
+                }
                 wait -= dt;
                 nibble -= dt;
                 if nibble <= 0.0 && wait > 0.8 {
@@ -147,7 +170,8 @@ impl Bobber {
             BobberState::Biting { window } => {
                 let window = window - dt;
                 if window <= 0.0 {
-                    self.state = BobberState::Floating { wait: bite_wait(world, self.pos, time, self.bait, angler, raining, rng), nibble: rng.range(1.0, 3.0) };
+                    let wait = if in_void(world, self.pos) { void_wait(self.bait, angler, rng) } else { bite_wait(world, self.pos, time, self.bait, angler, raining, rng) };
+                    self.state = BobberState::Floating { wait, nibble: rng.range(1.0, 3.0) };
                     ev.push(FishEvent::GotAway);
                 } else {
                     self.state = BobberState::Biting { window };
@@ -230,6 +254,12 @@ fn bite_wait(world: &World, p: Vec3, time: f32, bait: bool, angler: &FishLog, ra
     rng.range(5.0, 14.0) * water * bait * skill * rain * time_factor(time)
 }
 
+/// Seconds until the void bites (it takes its time).
+fn void_wait(bait: bool, angler: &FishLog, rng: &mut Rng) -> f32 {
+    let bait = if bait { 0.6 } else { 1.0 };
+    rng.range(9.0, 20.0) * bait * (1.0 - angler.level() as f32 * 0.03)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Category {
     Fish,
@@ -244,10 +274,32 @@ pub struct Catch {
     /// Length in cm for fish.
     pub cm: Option<f32>,
     pub category: Category,
+    /// A live Fishie out of the void (it comes out as a mob, not an item).
+    pub confused: bool,
+}
+
+/// Things that fell over the edge, one day, and are still falling.
+pub const LOST_THINGS: [Id; 9] = [BOOT, MAP, COMPASS, BOOK, NAME_TAG, SADDLE, PICK_IRON, SWORD_IRON, BOTTLE];
+
+/// What comes up out of the void.
+pub fn roll_void_catch(level: u32, bait: bool, rng: &mut Rng) -> Catch {
+    let r = rng.f32();
+    let star = 0.22 + level as f32 * 0.01 + if bait { 0.04 } else { 0.0 };
+    if r < star {
+        Catch { item: STAR_FRAGMENT, n: 1, cm: None, category: Category::Treasure, confused: false }
+    } else if r < star + 0.12 {
+        Catch { item: COD, n: 1, cm: Some(rng.range(20.0, 60.0)), category: Category::Fish, confused: true }
+    } else {
+        let item = LOST_THINGS[rng.int(0, LOST_THINGS.len() as i32 - 1) as usize];
+        Catch { item, n: 1, cm: None, category: Category::Junk, confused: false }
+    }
 }
 
 /// What comes up. Rolled where the world lives.
 pub fn roll_catch(world: &World, p: Vec3, time: f32, level: u32, bait: bool, rng: &mut Rng) -> Catch {
+    if in_void(world, p) {
+        return roll_void_catch(level, bait, rng);
+    }
     let (depth, area) = water_info(world, p);
     let puddle = area < 6 || depth < 2;
     let (_, biome) = world.generator.column(p.x.floor() as i32, p.z.floor() as i32);
@@ -268,14 +320,14 @@ pub fn roll_catch(world: &World, p: Vec3, time: f32, level: u32, bait: bool, rng
         Category::Fish
     };
     match category {
-        Category::Legendary => Catch { item: BIG_BOB, n: 1, cm: Some(rng.range(120.0, 180.0)), category },
+        Category::Legendary => Catch { item: BIG_BOB, n: 1, cm: Some(rng.range(120.0, 180.0)), category, confused: false },
         Category::Treasure => {
             let item = [DIAMOND, GOLD_INGOT, PEARL, IRON][rng.int(0, 3) as usize];
-            Catch { item, n: 1, cm: None, category }
+            Catch { item, n: 1, cm: None, category, confused: false }
         }
         Category::Junk => {
             let item = [BOOT, BOTTLE, STICK, STRING][rng.int(0, 3) as usize];
-            Catch { item, n: 1, cm: None, category }
+            Catch { item, n: 1, cm: None, category, confused: false }
         }
         Category::Fish => {
             let warm = matches!(biome, Biome::Desert | Biome::Plains | Biome::Jungle | Biome::Swamp | Biome::Badlands);
@@ -292,7 +344,7 @@ pub fn roll_catch(world: &World, p: Vec3, time: f32, level: u32, bait: bool, rng
             };
             // Deeper water and skill mean bigger fish.
             let size = rng.f32().powf(1.6 - (depth.min(8) as f32 * 0.05 + lvl * 0.03).min(0.8));
-            Catch { item, n: 1, cm: Some(min + (max - min) * size), category }
+            Catch { item, n: 1, cm: Some(min + (max - min) * size), category, confused: false }
         }
     }
 }
@@ -497,13 +549,29 @@ impl Game {
         self.msg(line);
         // The catch flies out of the water toward you, like it should.
         let me = self.player.body.pos + Vec3::Y * 0.9;
-        self.fling_catch(p, me, c.item, c.n);
+        self.deliver_catch(&c, p, me);
+        if in_void(&self.world, p) {
+            self.advance("deep_end");
+            if c.item == STAR_FRAGMENT {
+                self.advance("wish_upon");
+            }
+        }
         let points = self.rng.int(1, 6) as u32;
         self.add_xp(points);
         self.catch_advancements(c.item, c.category);
         let new_level = self.fish_log.level();
         if new_level > level {
             self.msg(format!("Angler level {new_level}! The fish have started a group chat about you."));
+        }
+    }
+
+    /// Send a catch to whoever caught it: an item on an arc, or (out of the void) a live, confused Fishie.
+    fn deliver_catch(&mut self, c: &Catch, from: Vec3, to: Vec3) {
+        if c.confused {
+            self.alloc_mob(crate::entity::MobKind::Fishy, to + Vec3::Y * 0.5);
+            self.sfx(Sfx::Bloop, Some(to));
+        } else {
+            self.fling_catch(from, to, c.item, c.n);
         }
     }
 
@@ -522,7 +590,7 @@ impl Game {
         let Some(peer) = self.peers.get(&from) else { return };
         let them = peer.target + Vec3::Y * 0.9;
         let near = peer.target.distance(pos) < 42.0;
-        let wet = (0..2).any(|dy| is_water(self.world.get(pos.x.floor() as i32, pos.y.floor() as i32 - dy, pos.z.floor() as i32)));
+        let wet = in_void(&self.world, pos) || (0..2).any(|dy| is_water(self.world.get(pos.x.floor() as i32, pos.y.floor() as i32 - dy, pos.z.floor() as i32)));
         if !near || !wet || !pos.is_finite() || !self.peer_has(from, ROD) {
             return;
         }
@@ -534,7 +602,14 @@ impl Game {
         let bait = bait && self.peer_take(from, BAIT, 1);
         let c = roll_catch(&self.world, pos, self.time, 0, bait, &mut self.rng);
         self.system_message(Some(from), &catch_line(&c, false));
-        self.fling_catch(pos, them, c.item, c.n);
+        self.deliver_catch(&c, pos, them);
+        if in_void(&self.world, pos) {
+            let who = crate::players::record_key(&self.peer_name(from));
+            self.advance_for(&who, "deep_end");
+            if c.item == STAR_FRAGMENT {
+                self.advance_for(&who, "wish_upon");
+            }
+        }
         self.host_wear(from, ROD, 1);
         let points = self.rng.int(1, 6) as u32;
         self.give_peer_xp(from, points);
@@ -545,6 +620,8 @@ impl Game {
 pub fn catch_line(c: &Catch, best: bool) -> String {
     let name = item_name(c.item);
     let mut s = match (c.category, c.cm) {
+        _ if c.confused => "A Fishie comes up out of the void, flapping, deeply confused about where it's been.".to_string(),
+        _ if c.item == STAR_FRAGMENT => "A Star Fragment, still warm from falling. Make a wish (it won't help).".to_string(),
         (Category::Legendary, Some(cm)) => format!("LEGENDARY! You caught BIG BOB, all {cm:.0}cm of him. He looks disappointed in you."),
         (_, Some(cm)) => format!("You caught a {cm:.0}cm {name}!"),
         (Category::Treasure, None) => format!("Sunken treasure: {name}!"),
@@ -559,6 +636,35 @@ pub fn catch_line(c: &Catch, best: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_void_bites_with_strange_things() {
+        let mut g = crate::game::Game::new_with(41, false, false, crate::world::GenOptions::DEFAULT);
+        g.ready = true;
+        let (dim, to) = g.hollow_destination(macroquad::math::IVec3::ZERO);
+        g.move_local_player(dim, to);
+        // Cast out over the edge: it drops, then hangs well down in the void.
+        let mut b = Bobber::cast(Vec3::new(200.0, 60.0, 0.5), Vec3::X, false);
+        let mut rng = Rng::new(3);
+        let log = FishLog::default();
+        let mut splashed = false;
+        for _ in 0..400 {
+            let rod = b.pos + Vec3::new(-5.0, 10.0, 0.0);
+            splashed |= b.update(0.05, &g.world, &log, 0.3, false, rod, false, &mut rng).contains(&FishEvent::Splashdown);
+        }
+        assert!(splashed && in_void(&g.world, b.pos), "{:?} at {}", b.state, b.pos);
+        // What comes up: lost things, Star Fragments and the odd Fishie.
+        let catches: Vec<Catch> = (0..400).map(|_| roll_catch(&g.world, b.pos, 0.3, 0, false, &mut rng)).collect();
+        assert!(catches.iter().any(|c| c.item == STAR_FRAGMENT));
+        assert!(catches.iter().any(|c| c.confused));
+        assert!(catches.iter().any(|c| LOST_THINGS.contains(&c.item)));
+        assert!(catches.iter().all(|c| c.item == STAR_FRAGMENT || c.confused || LOST_THINGS.contains(&c.item)));
+        // Landing one counts toward the Angler level, and the advancement.
+        let xp = g.fish_log.xp;
+        g.land_catch(b.pos);
+        assert!(g.fish_log.xp > xp);
+        assert!(g.advancements.has("deep_end"));
+    }
 
     #[test]
     fn time_of_day_matters() {

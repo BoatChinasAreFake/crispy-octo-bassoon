@@ -448,6 +448,7 @@ impl Generator {
         }
         if self.opts.version >= 9 {
             self.place_leapstalks(cx, cz, &mut b);
+            self.place_gravity_islands(cx, cz, &mut b);
             let mid = (cx * CW + CW / 2, cz * CW + CW / 2);
             for (c, r) in self.cities_near(mid.0, mid.1) {
                 for (p, id) in self.city_blocks(c, r) {
@@ -706,12 +707,20 @@ impl Game {
     pub fn hollow_portal_tick(&mut self) -> bool {
         let b = &self.player.body;
         let feet = IVec3::new(b.pos.x.floor() as i32, (b.pos.y + 0.1).floor() as i32, b.pos.z.floor() as i32);
-        if self.world.get_v(feet) != HOLLOW_PORTAL || self.portal_cooldown > 0.0 || self.dead.is_some() {
+        let gateway = self.world.get_v(feet) == GATEWAY;
+        if (self.world.get_v(feet) != HOLLOW_PORTAL && !gateway) || self.portal_cooldown > 0.0 || self.dead.is_some() {
             return false;
         }
         self.portal_cooldown = 4.0;
         if self.is_client() {
             self.net_send_msg(crate::net::Msg::UsePortal { x: feet.x, y: feet.y, z: feet.z });
+            return true;
+        }
+        if gateway {
+            let to = self.gateway_destination(feet);
+            self.move_local_player(Dim::Hollow, to);
+            self.sfx(Sfx::Warp, None);
+            self.advance("mind_the_gap");
             return true;
         }
         let (dim, to) = self.hollow_destination(feet);
@@ -769,11 +778,21 @@ impl Game {
                 self.world.set_v(ORIGIN + ivec3(x, 1, z), HOLLOW_PORTAL);
             }
         }
-        self.world.set_v(ORIGIN + ivec3(0, 2, 3), WYRM_EGG);
+        // The egg the first time; a Gateway every time (see gateways.rs).
+        let first = crate::gateways::gateways_open(&self.world) == 0;
+        if first {
+            self.world.set_v(ORIGIN + ivec3(0, 2, 3), WYRM_EGG);
+        }
+        self.open_gateway();
         self.spawn_orbs(at, 500);
         self.sfx(Sfx::Fanfare, Some(at));
         self.msg("The Hollow Wyrm is beaten! A portal home opens in the middle of the island.");
         self.advance("wyrm_slayer");
+        // (Everyone who was there gets it too, and the poem the first time.)
+        let there: Vec<String> = self.peers.values().filter(|p| p.target.distance(at) < 160.0).map(|p| crate::players::record_key(&p.name)).collect();
+        for who in there {
+            self.advance_for(&who, "wyrm_slayer");
+        }
     }
 
     /// A Wyrm Crystal was broken: it blows up.

@@ -56,7 +56,8 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// MachineUse, MachineInfo, RocketFlights, Swallows, MealAnimation).
 /// v60: v0.7 Part 1: generator 9 (Hollow Cities, flying ships, Leapstalks),
 /// Mauve stone, Leapfruit, Sulkers and the Floating effect.
-pub const PROTOCOL: u32 = 60;
+/// v61: v0.7 Part 2: Gateways, gravity islands (Gravity Cores) and Star Fragments.
+pub const PROTOCOL: u32 = 61;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player

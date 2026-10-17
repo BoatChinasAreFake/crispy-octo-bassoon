@@ -12,7 +12,7 @@ mod survival;
 mod online;
 
 pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, mesher, meshpool, narrator, noise, pacing, pad, palette, paths, regions, render, save, settings, sound, squash, texture, tint, ui, updates, upnp};
-pub(crate) use land::{archaeology, bastion, caveins, caves, cities, copper, deepdark, dims, falling, fire, fortress, hollow, hollowlife, houses, landmarks, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
+pub(crate) use land::{archaeology, bastion, caveins, caves, cities, copper, gateways, gravity, poem, deepdark, dims, falling, fire, fortress, hollow, hollowlife, houses, landmarks, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{factory,machines,anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stalls, stash, together, trading, trims, villageblocks, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{swallow, animals, beasts, bees, bounties, creaking, critters, entity, floaty, horses, leads, nametags, night, paper, pathing, raids, reputation, skins, sniffers, village_growth, village_life, villagers, wildlife, wilter, sulkers};
 pub(crate) use survival::{poses, advancements, atlas, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rockets, rules, stats, tools, vehicles, xp};
@@ -101,6 +101,8 @@ enum Screen {
     Access { from_title: bool },
     Help { from_title: bool },
     Advancements,
+    /// The poem after the Wyrm is first beaten (see poem.rs).
+    Poem,
     /// What you've done in this world (see stats.rs).
     Stats,
     FishLog,
@@ -253,6 +255,8 @@ struct App {
     rebind_armed: bool,
     mods_scroll: usize,
     adv_scroll: usize,
+    /// How far the poem has scrolled (seconds; see poem.rs).
+    poem_time: f32,
     /// Which advancements tab is showing (see advancements::TABS).
     adv_tab: usize,
     /// Joined a server, so its mods (not ours) are active.
@@ -691,8 +695,10 @@ impl App {
                     let zoom = if self.game.spyglassing() { 0.25 } else { 1.0 };
                     let s = 0.0026 * self.settings.sensitivity * zoom;
                     let p = &mut self.game.player;
-                    p.yaw = (p.yaw + d.x * s).rem_euclid(std::f32::consts::TAU);
-                    p.pitch = (p.pitch - d.y * s).clamp(-1.55, 1.55);
+                    // (Upside down, so is the mouse.)
+                    let f = if p.upside_down { -1.0 } else { 1.0 };
+                    p.yaw = (p.yaw + f * d.x * s).rem_euclid(std::f32::consts::TAU);
+                    p.pitch = (p.pitch - f * d.y * s).clamp(-1.55, 1.55);
                 }
             }
         self.last_mouse = Some(m);
@@ -701,8 +707,9 @@ impl App {
         if self.screen == Screen::Playing && look != [0.0; 2] {
             let s = get_frame_time().min(0.05) * 2.8 * self.settings.sensitivity;
             let p = &mut self.game.player;
-            p.yaw = (p.yaw + look[0] * s).rem_euclid(std::f32::consts::TAU);
-            p.pitch = (p.pitch + look[1] * s * 0.8).clamp(-1.55, 1.55);
+            let f = if p.upside_down { -1.0 } else { 1.0 };
+            p.yaw = (p.yaw + f * look[0] * s).rem_euclid(std::f32::consts::TAU);
+            p.pitch = (p.pitch + f * look[1] * s * 0.8).clamp(-1.55, 1.55);
         }
     }
 
@@ -993,6 +1000,12 @@ impl App {
                     type_into(&mut self.sign_lines[self.sign_line], decor::LINE_LEN);
                 }
             }
+            Screen::Poem => {
+                let skip = get_last_key_pressed().is_some() || is_mouse_button_pressed(MouseButton::Left);
+                if skip || self.poem_time > poem::SCROLL_SECS {
+                    self.set_screen(Screen::Playing);
+                }
+            }
             Screen::Advancements | Screen::Stats | Screen::FishLog | Screen::WorldSettings | Screen::BeeLog => {
                 if is_key_pressed(KeyCode::Escape) {
                     self.set_screen(Screen::Paused);
@@ -1142,6 +1155,11 @@ impl App {
         self.poll_upnp();
         if self.game.dead.is_some() && self.screen != Screen::Dead {
             self.set_screen(Screen::Dead);
+        }
+        if self.game.poem && self.screen == Screen::Playing {
+            self.game.poem = false;
+            self.poem_time = 0.0;
+            self.set_screen(Screen::Poem);
         }
         if let Some((_, t)) = &mut self.status {
             *t -= dt;
@@ -1792,6 +1810,7 @@ impl App {
                     Screen::NameTag => self.name_tag_screen(),
                     Screen::WorldSettings => self.world_settings_screen(),
                     Screen::Dead => self.death_screen(),
+                    Screen::Poem => self.poem_screen(),
                     _ => {}
                 }
             }
@@ -2126,6 +2145,7 @@ async fn game_main() {
         rebind_armed: false,
         mods_scroll: 0,
         adv_scroll: 0,
+        poem_time: 0.0,
         adv_tab: 0,
         using_server_mods: false,
         current_world: None,

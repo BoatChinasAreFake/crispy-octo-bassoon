@@ -58,6 +58,8 @@ pub struct Player {
     pub leaping: u8,
     /// Floating effect level (zero when absent): you drift upward.
     pub floating: u8,
+    /// Under a gravity island, where down is up (see gravity.rs).
+    pub upside_down: bool,
     /// Set when a bouncy block launched us (the game plays a sound and clears it).
     pub bounced: bool,
     /// Set on landing to how far we fell (for trampling and hay bales).
@@ -101,6 +103,7 @@ impl Player {
             speed_boost: 1.0,
             leaping: 0,
             floating: 0,
+            upside_down: false,
             bounced: false,
             landed: None,
             air: MAX_AIR,
@@ -109,6 +112,10 @@ impl Player {
 
     pub fn eye(&self) -> Vec3 {
         let sneak = if self.sneaking && !self.flying { 0.12 } else { 0.0 };
+        if self.upside_down {
+            // Head down: the eyes are near the bottom of the body.
+            return self.body.pos + Vec3::Y * (self.body.height - EYE + sneak);
+        }
         self.body.pos + Vec3::Y * (EYE - sneak)
     }
 
@@ -127,7 +134,9 @@ impl Player {
         self.swing = (self.swing - dt * 4.0).max(0.0);
         let fwd = Vec3::new(self.yaw.sin(), 0.0, -self.yaw.cos());
         let right = Vec3::new(self.yaw.cos(), 0.0, self.yaw.sin());
-        let mut wish = fwd * input.forward + right * input.strafe;
+        // (Upside down, the screen's right is the world's left.)
+        let strafe = if self.upside_down { -input.strafe } else { input.strafe };
+        let mut wish = fwd * input.forward + right * strafe;
         if wish.length_squared() > 1.0 {
             wish = wish.normalize();
         }
@@ -240,6 +249,13 @@ impl Player {
             b.vel.x = b.vel.x.clamp(-2.5, 2.5);
             b.vel.z = b.vel.z.clamp(-2.5, 2.5);
             self.fall_start = b.pos.y;
+        } else if self.upside_down && !self.flying {
+            // Under a gravity island: everything falls up.
+            b.vel.y = (b.vel.y + gravity * dt).min(60.0);
+            if input.jump && b.on_ground {
+                b.vel.y = -8.7;
+                self.jumped = true;
+            }
         } else if self.floating > 0 {
             // Floating: a steady drift upward (and a long way down once it wears off).
             let rise = 0.9 * self.floating as f32;
@@ -268,7 +284,16 @@ impl Player {
         let was_ground = b.on_ground;
         let falling_speed = -b.vel.y;
         let before = b.pos;
-        move_body(world, b, dt, self.sneaking && was_ground);
+        move_body(world, b, dt, self.sneaking && was_ground && !self.upside_down);
+        if self.upside_down && !self.flying {
+            // Standing on a ceiling, then.
+            let top = b.pos.y + b.height;
+            let (min, max) = (Vec3::new(b.pos.x - b.half, top + 0.01, b.pos.z - b.half), Vec3::new(b.pos.x + b.half, top + 0.1, b.pos.z + b.half));
+            b.on_ground = b.vel.y >= 0.0 && crate::entity::collides(world, min, max, top).is_some();
+            if b.on_ground {
+                b.vel.y = 0.0;
+            }
+        }
         if !creative {
             let moved = Vec3::new(b.pos.x - before.x, 0.0, b.pos.z - before.z).length();
             if in_water {

@@ -41,7 +41,7 @@ impl Body {
 /// The first block box overlapping the box `min..max`, in world coordinates.
 /// `from_y` is where the bottom of the box was before this move: lily pads
 /// only hold up what comes down onto them (swimmers and boats pass under).
-fn collides(world: &World, min: Vec3, max: Vec3, from_y: f32) -> Option<(Vec3, Vec3)> {
+pub(crate) fn collides(world: &World, min: Vec3, max: Vec3, from_y: f32) -> Option<(Vec3, Vec3)> {
     const E: f32 = 1e-4;
     let low = (min.y + E).floor() as i32;
     // One row lower too: fences and shut gates reach above their cell.

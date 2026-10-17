@@ -3,6 +3,29 @@
 use crate::*;
 
 impl App {
+    /// The poem, scrolling up over a starry dark (see poem.rs).
+    pub(crate) fn poem_screen(&mut self) {
+        let (w, h) = (screen_width(), screen_height());
+        let s = self.ui.s;
+        self.poem_time += get_frame_time().min(0.1);
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.02, 0.02, 0.06, 0.96));
+        let line_h = 16.0 * s;
+        let total = crate::poem::POEM.len() as f32 * line_h + h;
+        let y0 = h - total * (self.poem_time / crate::poem::SCROLL_SECS).min(1.0);
+        for (i, line) in crate::poem::POEM.iter().enumerate() {
+            let y = y0 + h * 0.5 + i as f32 * line_h;
+            if y < -line_h || y > h + line_h {
+                continue;
+            }
+            let (text, colour) = match line.strip_prefix("> ") {
+                Some(t) => (t, Color::new(0.55, 0.85, 0.75, 1.0)),
+                None => (*line, Color::new(0.85, 0.75, 1.0, 1.0)),
+            };
+            self.ui.text_centered(text, w / 2.0, y, 10.0, colour);
+        }
+        self.ui.text_centered("(Any key to skip)", w / 2.0, h - 10.0 * s, 7.0, GRAY);
+    }
+
     pub(crate) fn advancements_screen(&mut self) {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;

@@ -264,13 +264,18 @@ pub const ALL: &[Advancement] = &[
     adv("out_of_its_shell", "Out of Its Shell", "Defeat a Sulker. It had it coming."),
     adv("floaty_feeling", "A Floaty Feeling", "Get hit by a Sulker's bullet and float."),
     adv("hop_skip", "Hop, Skip", "Eat a Leapfruit and end up somewhere else."),
+    adv("mind_the_gap", "Mind the Gap", "Go through a Gateway. It's smaller on the inside."),
+    adv("round_two", "Round Two", "Call the Hollow Wyrm back with four Wyrm Crystals. It was having a nice rest."),
+    adv("deep_end", "Fishing in the Deep End", "Catch something out of the void."),
+    adv("wish_upon", "Wish Upon a Star", "Fish a Star Fragment out of the void."),
+    adv("down_is_up", "Down Is Up", "Stand on the underside of a gravity island."),
     adv("sightseer", "Sightseer", "Stand at a landmark: an arch, a crater lake or a stone forest."),
     adv("well_travelled", "Well Travelled", "Fill in twelve biomes in an Explorer's Atlas."),
     adv("castaway", "Castaway", "Set foot on an island far out at sea. Bring a boat home."),
 ];
 
 /// The advancements screen's tabs (everything not listed is an Adventure).
-pub const TABS: [&str; 5] = ["All", "Getting Started", "Creatures", "Home and Craft", "Adventure"];
+pub const TABS: [&str; 6] = ["All", "Getting Started", "Creatures", "Home and Craft", "Adventure", "The Hollow"];
 const STARTED: &[&str] = &[
     "getting_wood", "benchmarking", "stone_age", "tool_time", "iron_will", "dimonds", "fools_gold", "golden_boy", "boing", "ouch", "zoomies", "sweet_dreams", "cake", "spooky", "thirsty",
     "kaboom", "centurion", "why_cross", "suit_up", "cover_me", "open_door_policy", "butterfingers", "hot_stuff", "not_today",
@@ -284,7 +289,10 @@ const CREATURES: &[&str] = &[
     "pork_barrel", "raising_hell", "spore_loser", "magma_carta", "snuffed_out", "knight_errant",
     "beast_of_burden", "hybrid_vigour", "snow_problem", "walkies", "new_hire", "baby_boom", "early_night", "master_class", "pillar_of_the_community", "persona_non_grata",
     "new_neighbours", "some_assembly_required", "help_wanted", "odd_jobs", "open_for_business", "nest_egg", "extra_extra", "front_page",
-    "out_of_its_shell", "floaty_feeling",
+];
+const HOLLOW: &[&str] = &[
+    "eye_spy", "hollow", "wyrm_slayer", "wings", "rocket_man", "out_of_its_shell", "floaty_feeling", "hop_skip",
+    "mind_the_gap", "round_two", "deep_end", "wish_upon", "down_is_up",
 ];
 const HOME: &[&str] = &[
     "green_thumb", "crop_rotation", "soil_scientist", "weed_whacker", "hay_there", "gone_fishin", "one_that_got_away", "bootiful", "sunken_treasure", "big_bob", "its_alive",
@@ -303,6 +311,8 @@ pub fn tab_of(key: &str) -> usize {
         2
     } else if HOME.contains(&key) {
         3
+    } else if HOLLOW.contains(&key) {
+        5
     } else {
         4
     }

@@ -223,6 +223,8 @@ pub struct Game {
     pub advancements: Progress,
     /// "Advancement Made!" toasts on screen: (advancement, seconds left).
     pub toasts: Vec<(&'static Advancement, f32)>,
+    /// Show the poem (the Wyrm was just beaten for the first time; see poem.rs).
+    pub poem: bool,
     /// The Fishing Stick's bobber, when cast (see fishing.rs).
     pub bobber: Option<crate::fishing::Bobber>,
     pub fish_log: crate::fishing::FishLog,
@@ -603,6 +605,7 @@ impl Game {
             saved_script_vars: Vec::new(),
             advancements: Progress::default(),
             toasts: Vec::new(),
+            poem: false,
             bobber: None,
             fish_log: Default::default(),
             farm_timer: 0.0,
@@ -1149,6 +1152,9 @@ impl Game {
             return;
         }
         if let Some(a) = self.advancements.grant(key) {
+            if key == "wyrm_slayer" {
+                self.poem = true;
+            }
             self.toasts.push((a, 5.0));
             self.sfx(Sfx::Fanfare, None);
             self.msg(format!("Advancement made: [{}]", a.title));
@@ -1509,7 +1515,9 @@ impl Game {
             fov_deg
         };
         let proj = Mat4::perspective_rh_gl(fov.to_radians(), aspect, 0.05, 1000.0);
-        let view = Mat4::look_at_rh(pos, pos + dir, Vec3::Y);
+        // Upside down under a gravity island, the world is too.
+        let up = if self.player.upside_down && !self.menu { Vec3::NEG_Y } else { Vec3::Y };
+        let view = Mat4::look_at_rh(pos, pos + dir, up);
         Camera { pos, dir, view_proj: proj * view }
     }
 
@@ -1582,6 +1590,7 @@ impl Game {
             self.sleep_tick(dt, c.input.jump_pressed || c.input.sneak);
             0.0
         } else if self.riding.is_none() && self.mounted.is_none() && self.rocket_pilot().is_none() {
+            self.gravity_tick();
             self.player.update(dt, &c.input, &self.world, self.creative)
         } else {
             0.0
@@ -3237,6 +3246,10 @@ impl Game {
             let me = crate::players::record_key(&self.player_name);
             self.try_build_wilter(place, &me);
         }
+        if held == WYRM_CRYSTAL && !self.is_client() {
+            let me = crate::players::record_key(&self.player_name);
+            self.try_resummon_wyrm(place, &me);
+        }
     }
 
     pub fn break_block(&mut self, pos: IVec3, drops: bool) {
@@ -4738,6 +4751,9 @@ impl Game {
             let asleep = p.flags & crate::net::FLAG_SLEEP != 0 && crate::beds::is_bed(self.world.get_v(bed));
             let root = if asleep {
                 crate::beds::pose(bed, crate::beds::facing(self.world.get_v(bed)))
+            } else if self.world.generator.gravity_flipped(p.pos + Vec3::Y * 0.9) {
+                // Upside down under a gravity island (see gravity.rs): feet on the face above.
+                crate::gravity::flipped_root(p.pos, p.yaw) * p.animation.pose.root()
             } else {
                 Mat4::from_translation(p.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root()
             };
@@ -4756,6 +4772,7 @@ impl Game {
             g.begin(Pass::Opaque, tint, false);
             let root = match self.sleeping {
                 Some(s) => crate::beds::pose(s.bed, crate::beds::facing(self.world.get_v(s.bed))),
+                None if p.upside_down => crate::gravity::flipped_root(p.body.pos, p.yaw) * p.animation.pose.root(),
                 None => Mat4::from_translation(p.body.pos) * Mat4::from_rotation_y(-p.yaw) * p.animation.pose.root(),
             };
             match self.skin_slot(crate::skins::ME) {

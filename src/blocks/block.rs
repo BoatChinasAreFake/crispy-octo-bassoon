@@ -505,7 +505,11 @@ pub const MAUVE_PILLAR: Id = MYCELIUM + 118;
 pub const LEAPFLOWER: Id = MYCELIUM + 119;
 /// Leapstalk: `LEAPSTALK_FIRST + mask` (the sides it joins, as a fence's).
 pub const LEAPSTALK_FIRST: Id = MYCELIUM + 120;
-pub const NUM_BLOCKS: Id = MYCELIUM + 136;
+/// A small portal that opens each time the Wyrm is beaten (see gateways.rs).
+pub const GATEWAY: Id = MYCELIUM + 136;
+/// The heart of a gravity island, where down is up (see gravity.rs).
+pub const GRAVITY_CORE: Id = MYCELIUM + 137;
+pub const NUM_BLOCKS: Id = MYCELIUM + 138;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -789,7 +793,9 @@ pub const LEAPFRUIT: Id = FIRST_ITEM + 286;
 pub const POPPED_LEAPFRUIT: Id = FIRST_ITEM + 287;
 /// What a Sulker leaves (see sulkers.rs).
 pub const SULKER_SHELL: Id = FIRST_ITEM + 288;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 289;
+/// Fished out of the void (see voidfishing.rs); four make a Wyrm Crystal.
+pub const STAR_FRAGMENT: Id = FIRST_ITEM + 289;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 290;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2714,6 +2720,12 @@ impl Registry {
             d.see_through = true;
             blocks.push(d);
         }
+        let mut gateway = def("gateway", "Gateway (Mind the Gap)", Cube, false, false, [T_GATEWAY; 3], -1.0, 0, false, AIR, 12.0, S_GLASS);
+        gateway.creative = false;
+        blocks.push(gateway);
+        let mut core = def("gravity_core", "Gravity Core (Holds Things Down, or Up)", Cube, true, true, [T_GRAVITY_CORE; 3], -1.0, 0, false, AIR, 10.0, S_STONE);
+        core.creative = false;
+        blocks.push(core);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -2997,6 +3009,7 @@ impl Registry {
         items.push(ItemDef { food: Some(4.0), ..item("leapfruit", "Leapfruit (Hop Somewhere Else)", T_LEAPFRUIT) });
         items.push(item("popped_leapfruit", "Popped Leapfruit (Crunchy Purple)", T_POPPED_LEAPFRUIT));
         items.push(item("sulker_shell", "Sulker Shell (Still Sulking)", T_SULKER_SHELL));
+        items.push(item("star_fragment", "Star Fragment (Fell a Long Way)", T_STAR_FRAGMENT));
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -3069,6 +3082,7 @@ impl Registry {
             r(&[(POPPED_LEAPFRUIT, 4)], (MAUVE_BLOCK, 4)),
             r(&[(MAUVE_BLOCK, 2)], (MAUVE_PILLAR, 2)),
             r(&[(SULKER_SHELL, 2), (CHEST, 1)], (HOLLOW_BOX, 1)),
+            r(&[(STAR_FRAGMENT, 4), (GLASS, 4), (STARING_EYE, 1)], (WYRM_CRYSTAL, 1)),
             r(&[(COD, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(SALMON, 1), (POTATO, 1)], (FISH_CHIPS, 1)),
             r(&[(MUSHROOM, 2), (FLOWER, 1)], (STEW, 1)),

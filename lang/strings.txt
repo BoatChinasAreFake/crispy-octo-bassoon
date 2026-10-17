@@ -70,6 +70,7 @@
 #version 100
 #version 150
 #version 150\n#define HAS_DERIVATIVES 1\n#define HAS_TEXTURE_LOD 1\nout vec4 frag_color;\n{}
+(Any key to skip)
 (Hot off the press...)
 (Reading the notes...)
 (and {} older)
@@ -224,17 +225,34 @@
 <?xml version="1.0"?>r\n<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:{} xmlns:u="{}">{}</u:{}></s:Body></s:Envelope>
 <Player1> and here's a much longer message, the kind somebody types when they're explaining exactly where they left the diamonds, which wraps onto the next line instead of running off the edge of the screen
 <Player{}> chat line number {}
+> (Eat something first.)
+> Are they listening now?
+> Books and quills. Notice boards. A newspaper about a woman who punched a tree.
+> Everyone in the paper is them. The paper has a circulation of one.
+> Go on, then.
+> Or you'll go back and build a nicer roof. That's also allowed.
+> Should we tell them something wise?
+> Straight down. We told them not to.
+> Tell them it is, technically, still mostly noise.
+> Tell them to put a torch in every corner. Every corner.
+> The cows did not ask for a house.
+> The last thing? They have chests full of things to read.
+> The one who just hit a dragon with a sword made of shiny rocks?
+> They fell in lava twice and blamed the lava.
 > press <
 A Cluckster arrives with {} from {}, sighs, and waddles off. (It's in your inbox at any Post Box.)
 A Cluckster ate your seedlings. Consider a Scarecrow.
 A Cluckster takes it. They get it even if they're away.
+A Fishie comes up out of the void, flapping, deeply confused about where it's been.
 A Floaty Feeling
+A Gateway opens at the edge of the island.
 A Hisser was seen
 A Hmmer bought {} {} from your stall for {} gold.
 A Hmmer is now a Master of its trade{}. Prices are said to reflect this.
 A Little Tide Time
 A Minceraft server
 A Square Deal
+A Star Fragment, still warm from falling. Make a wish (it won't help).
 A Water Bottle (or a potion) below
 A baby Hmmer was
 A baked potato. The potato's redemption arc is complete.
@@ -520,6 +538,7 @@ Byproduct
 Cake (Not a Lie)
 Calcite (Chalky)
 Calibrated Sculk Sensor (Picky Listener)
+Call the Hollow Wyrm back with four Wyrm Crystals. It was having a nice rest.
 Camel
 Campfire (Marshmallows Not Included)
 Can't be opened: {}
@@ -537,6 +556,7 @@ Castle Town
 Cat
 Catch a Fishy with your bare hands (well, hit one).
 Catch anything at all with a Fishing Stick.
+Catch something out of the void.
 Catch the legendary Big Bob. Dawn or dusk, deep ocean. Good luck.
 Cauldron (Double, Double)
 Cauldron of Water
@@ -834,6 +854,7 @@ Don't look at the Starers!
 Done
 Donkey
 Door (Opens Both Ways, Emotionally)
+Down Is Up
 Down by the River
 Dried Floaty (Just Add Water)
 Dried Kelp (Crunchy Ocean)
@@ -981,6 +1002,7 @@ First Course
 First Issue!
 Fish
 Fish Chowder
+Fish a Star Fragment out of the void.
 Fish caught
 Fish n' Chips (Legally Distinct)
 Fish n' Chips. Legally distinct, emotionally identical.
@@ -990,6 +1012,7 @@ Fisher (Smells Faintly of Cod)
 Fishies, and a winding way down to the sea.
 Fishing Log
 Fishing Stick (Advanced)
+Fishing in the Deep End
 Fishing: cast, wait for the real bite (not the nibbles!), reel in. Big fish: mind the line tension.
 Fishy
 Fishy Business
@@ -1053,6 +1076,7 @@ Game over. You can still look around.
 Garbled reply from the router
 Garden Soup
 Gate
+Gateway (Mind the Gap)
 Gather seafood from a coastal creature.
 Gather, craft, and try not to get hissed at.
 Gave {} {} to {}.
@@ -1105,6 +1129,7 @@ Glowshroom (Cave Nightlight)
 Glug. The sponge drank {} blocks of water. It's still thirsty.
 Glutted
 Go from freezing to warm again in a hot spring.
+Go through a Gateway. It's smaller on the inside.
 Goat
 Goat Horn (Very Loud)
 Goat Horn sounds
@@ -1133,6 +1158,7 @@ Grade {}
 Grass Block
 Gravel
 Gravelton
+Gravity Core (Holds Things Down, or Up)
 Great 
 Green
 Green Thumb
@@ -1266,6 +1292,7 @@ Hushed Ones
 Hut (Definitely Not a Village)
 Hybrid Vigour
 I Know What This Button Does
+I see the player you mean.
 IT'S HERE.
 Ice (Nature's Floor Wax)
 Ice Spikes (Pointy, Chilly)
@@ -1505,6 +1532,7 @@ Minceraft: no sound card found. Continuing in silence.
 Minceraft: no usable audio device ({}). Continuing in silence.
 Minceraft: {}
 Mind Your Head
+Mind the Gap
 Mine / Attack
 Mine Gold Ore. It's useless. You did it anyway.
 Mine Iron Ore. Heavy metal!
@@ -1799,6 +1827,7 @@ Plants and Nature
 Play Selected World
 Play With Others
 Play in a language a mod brought.
+Player. You are awake now, or you are about to be.
 Players can hurt each other now (teams decide about their own, see /team friendlyfire).
 Players can't hurt each other now.
 Players {} hurt each other. /pvp on or off.
@@ -1975,6 +2004,7 @@ Rollo Scute (Shed With Dignity)
 Rollo scuttles
 Rope-a-Dope
 Rotsteed
+Round Two
 Round ends in
 Router address didn't resolve
 Router description request failed (HTTP {}).
@@ -2203,6 +2233,8 @@ Stand in a beacon's light. The Wyrm's egg, finally useful.
 Stand on a Magma Block without sneaking. Ow.
 Stand on a sandy beach. Mind the sand in your boots.
 Stand on a stony peak.
+Stand on the underside of a gravity island.
+Star Fragment (Fell a Long Way)
 Star Power
 Stare Pearl (Throw to Teleport)
 Starer
@@ -2310,6 +2342,8 @@ Team {} is no more.
 Teleported {} to {} at {}, {}, {}.
 Teleported {} to {}, {}, {}.
 Tell a Calibrated Sculk Sensor what to listen for.
+Tell them the night is long and the Hissers are many, and that this is fine.
+Tell them the world was made of noise, and they made it into a place.
 Template, Dimond gear, Scorchite Ingot: Scorchite gear.
 Temple Run
 Terracotta (Fancy Mud)
@@ -2370,6 +2404,7 @@ The comb isn't ready to harvest yet.
 The compass needle swings round to the Lodestone.
 The console has no body; say who to move: tp <player> <x y z | player>
 The console isn't on a team.
+The crystals hum. Something big is coming back.
 The eye drifts {} toward something about {} blocks away.
 The eye just... sits there. Nothing to find around here.
 The eye shattered. Rude.
@@ -2380,6 +2415,7 @@ The host decides these. You just live here.
 The host didn't answer. Check the address, and that the world is open / the port is forwarded.
 The host stopped responding (timed out).
 The ice melted. Science!
+The lava was fine about it.
 The line ran out. You reel it back in.
 The message reads: {}
 The music is kept smaller (or larger) next time the game starts.
@@ -2420,7 +2456,13 @@ The {} is yours now. It's sitting; right-click to call it along.
 The {} is yours. It could use a Saddle.
 The {} of {}
 The {} {}
+There is no end. There is only the portal home, and then lunch.
 There's already a team called {}.
+They are reading. Reading is listening with your eyes and less patience.
+They asked for wheat. The player gave them a house. That is love, of a kind.
+They built a house. Then a bigger house. Then a house for the cows.
+They dug down, in the beginning.
+They wrote that woman. She was them, you know.
 Things eaten
 Thinking...
 Third Person
@@ -2580,6 +2622,7 @@ WANTED: anyone who has seen a diamond. Just to talk.
 Waiting for host...
 Wake The Hush. Bold choice.
 Wake a Dried Floaty by putting it next to water.
+Wake up.
 Walk Backward
 Walk Forward
 Walkies
@@ -2611,6 +2654,7 @@ Wax some copper with Goo. It'll stay shiny forever. Probably.
 Waxed {}
 Waypoints: /wp add <name>, /wp remove <name>, /wp list.
 We Need to Go Hotter
+We didn't, actually. We were busy being a void.
 Weakness
 Wear a full set of Dimond armour. Subtle.
 Wear a skin of your own.
@@ -2671,6 +2715,7 @@ Wind gusts
 Window
 Window: {}x{}  UI size {}
 Winter
+Wish Upon a Star
 Wishing Well (Doesn't Grant)
 Wisp
 Witch
@@ -2710,6 +2755,7 @@ Wrote {} sounds to {}/
 Wyrm Crystal (Do Not Touch)
 Wyrm Egg (Trophy, Allegedly)
 Wyrm Slayer
+Wyrm. It was a Wyrm. Be precise, it's the last thing they'll read.
 X Marks the Spot
 X marks the spot: dig here!
 XCloseDisplay

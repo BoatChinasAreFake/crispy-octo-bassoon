@@ -1274,6 +1274,58 @@ impl App {
                 app.start_game(g);
                 app.show_debug = false;
             }
+            "gateway" | "poem" => {
+                // The main island after the Wyrm: the portal home, and the first Gateway.
+                let mut g = shot_game(424242, true, false);
+                g.time = 0.25;
+                let (dim, to) = g.hollow_destination(IVec3::ZERO);
+                g.move_local_player(dim, to);
+                for dz in -4..=4 {
+                    for dx in -4..=4 {
+                        g.world.load_now(dx, dz);
+                    }
+                }
+                g.wyrm_defeated(hollow::ORIGIN.as_vec3());
+                g.poem = false;
+                let (gx, gz) = crate::gateways::ring_column(0);
+                let at = Vec3::new(gx as f32 + 0.5, hollow::ORIGIN.y as f32 + 2.5, gz as f32 + 0.5);
+                let from = at + Vec3::new(-6.0, 3.0, -7.0);
+                let d = at - from;
+                g.move_local_player(crate::dims::Dim::Hollow, from);
+                (s.pos, s.yaw, s.pitch) = (Some(from), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                g.player.flying = true;
+                app.start_game(g);
+                app.show_debug = false;
+                if s.mode == "poem" {
+                    app.poem_time = 30.0;
+                    app.set_screen(Screen::Poem);
+                }
+            }
+            "gravity_island" => {
+                // Standing on the underside of a gravity island, the void overhead.
+                let mut g = shot_game(424242, true, false);
+                g.time = 0.25;
+                let seed = g.world.seed();
+                let island = (-8..8).flat_map(|gz| (-8..8).map(move |gx| (gx, gz))).find_map(|(gx, gz)| crate::gravity::gravity_island(seed, gx, gz));
+                if let Some((c, r)) = island {
+                    let c = c - IVec3::new(hollow::GEN_ORIGIN.x, 0, 0);
+                    let feet = Vec3::new(c.x as f32 + r as f32 * 0.5 + 0.5, c.y as f32 - 1.8, c.z as f32 + 0.5);
+                    g.move_local_player(crate::dims::Dim::Hollow, feet);
+                    let (cx, cz) = (c.x.div_euclid(16), c.z.div_euclid(16));
+                    for dz in -2..=2 {
+                        for dx in -2..=2 {
+                            g.world.load_now(cx + dx, cz + dz);
+                        }
+                    }
+                    g.player.upside_down = true;
+                    // Looking across the face, at the core.
+                    let at = c.as_vec3() + Vec3::new(0.5, 0.0, 0.5);
+                    let d = at - g.player.eye();
+                    (s.pos, s.yaw, s.pitch) = (Some(feet), d.x.atan2(-d.z), d.y.atan2(Vec2::new(d.x, d.z).length()));
+                }
+                app.start_game(g);
+                app.show_debug = false;
+            }
             "controls" => {
                 app.game = shot_game(424242, true, true);
                 // Show a changed binding and one waiting for a key.
@@ -2786,7 +2838,7 @@ const LATEST_SCENES: &[&str] = &[
     "coastal_floor", "coastal_fish", "coastal_starfish", "tide_pool", "beach_showcase",
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
     "landmark_arch", "landmark_crater", "landmark_grove", "atlas", "landmark_map",
-    "hollow_city", "sky_ship", "sulkers", "leapstalks",
+    "hollow_city", "sky_ship", "sulkers", "leapstalks", "gateway", "poem", "gravity_island",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is

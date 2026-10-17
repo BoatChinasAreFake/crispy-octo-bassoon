@@ -261,6 +261,13 @@ impl Game {
         let Some(p) = self.peers.get(&from) else { return };
         let near = p.target.distance(at.as_vec3() + Vec3::splat(0.5)) < 3.0;
         // The Hollow's portals go straight there (or home).
+        if near && self.world.get_v(at) == GATEWAY {
+            let to = self.gateway_destination(at);
+            self.move_peer(from, crate::dims::Dim::Hollow, to);
+            let who = crate::players::record_key(&self.peer_name(from));
+            self.advance_for(&who, "mind_the_gap");
+            return;
+        }
         if near && self.world.get_v(at) == HOLLOW_PORTAL {
             let (dim, to) = self.hollow_destination(at);
             self.move_peer(from, dim, to);
