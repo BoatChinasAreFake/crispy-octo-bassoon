@@ -86,10 +86,8 @@ pub fn family(id: Id) -> Option<Id> {
         Some(PANE_FIRST)
     } else if is_ladder(id) {
         Some(LADDER_FIRST)
-    } else if let Some(base) = trapdoor_base(id) {
-        Some(base)
     } else {
-        None
+        trapdoor_base(id)
     }
 }
 

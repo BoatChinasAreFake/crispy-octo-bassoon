@@ -707,7 +707,7 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" => {
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" | "blocksets" | "copperwork" | "dyed" => {
                 let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
@@ -1421,7 +1421,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" | "blocksets" | "copperwork" | "dyed") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2239,6 +2239,62 @@ impl App {
                     app.game.inv.wear[k] = wear;
                 }
             }
+            if matches!(s.mode.as_str(), "blocksets" | "copperwork" | "dyed") && frames == 125 {
+                // v0.8: rows of the new blocks on the floor in front.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let away = if fwd.x.abs() > fwd.z.abs() { if fwd.x > 0.0 { 1 } else { 3 } } else if fwd.z > 0.0 { 2 } else { 0 };
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                let w = &mut app.game.world;
+                match s.mode.as_str() {
+                    "blocksets" => {
+                        // Each stone: a block, a slab, stairs and a short wall, row by row.
+                        use crate::stonesets::*;
+                        // (Five sets a row, three blocks apart: block, slab and stairs across, a wall behind.)
+                        for (i, set) in SETS.iter().enumerate().skip(2).take(20) {
+                            let k = i - 2;
+                            let (fo, ro) = (5 + (k / 5) as i32 * 3, (k % 5) as i32 * 4 - 17);
+                            w.set_v(at(fo, ro, 0), set.full);
+                            if let Some(sl) = slab(i) {
+                                w.set_v(at(fo, ro + 1, 0), sl);
+                                w.set_v(at(fo, ro + 2, 0), stairs(i).unwrap() + ((away + 3) % 4) as block::Id);
+                            }
+                            if let Some(wl) = wall(i) {
+                                for d in 0..3 {
+                                    w.set_v(at(fo + 1, ro + d, 0), wl);
+                                }
+                            }
+                        }
+                        for (k, id) in [block::TUFF, block::POLISHED_TUFF, block::POLISHED_DEEPSLATE, block::CHISELED_DEEPSLATE, block::CRACKED_DEEPSLATE_BRICKS, block::CRACKED_DEEPSLATE_TILES].into_iter().enumerate() {
+                            w.set_v(at(18, k as i32 * 2 - 14, 0), id);
+                            w.set_v(at(18, k as i32 * 2 - 14, 1), id);
+                        }
+                    }
+                    "copperwork" => {
+                        // The four stages: a door, a trapdoor (one open) and a grate each.
+                        use crate::copperworks::*;
+                        for v in 0..4usize {
+                            let ro = v as i32 * 3 - 13;
+                            w.set_v(at(6, ro, 0), block::door_of(door(v), away, v % 2 == 1, false));
+                            w.set_v(at(6, ro, 1), block::door_of(door(v), away, v % 2 == 1, true));
+                            w.set_v(at(5, ro + 1, 0), trapdoor(v) + (v % 2) as block::Id);
+                            w.set_v(at(6, ro + 1, 0), grate(v));
+                            w.set_v(at(6, ro + 1, 1), grate(v));
+                        }
+                    }
+                    _ => {
+                        // A bed in every colour, and a candle (lit) by each.
+                        for c in 0..8usize {
+                            let ro = c as i32 * 2 - 15;
+                            w.set_v(at(6, ro, 0), crate::dyed::bed(c, away));
+                            w.set_v(at(5, ro, 0), crate::dyed::candle(Some(c), c % 2 == 0));
+                        }
+                    }
+                }
+            }
             if s.mode == "woods" && frames == 125 {
                 // v0.3's woods, one row each: log, leaves, planks, slab, stairs, fence and gate, door; a boat.
                 use crate::woods::{id, part};
@@ -2839,6 +2895,7 @@ const LATEST_SCENES: &[&str] = &[
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
     "landmark_arch", "landmark_crater", "landmark_grove", "atlas", "landmark_map",
     "hollow_city", "sky_ship", "sulkers", "leapstalks", "gateway", "poem", "gravity_island",
+    "blocksets", "copperwork", "dyed",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is

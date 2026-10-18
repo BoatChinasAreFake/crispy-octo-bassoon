@@ -2966,6 +2966,7 @@ climbed to {}
 coastal encounter advancement never arrived
 coastal species
 collection complete!
+coloured candles
 config.json: no {}
 connection closed
 connection closed during the handshake (is the other side on an older version?)
@@ -2973,6 +2974,7 @@ connection refused
 controlURL
 cooking pot
 coordinate out of range
+copper doors
 copper golem
 couldn't claim land for {}: {}
 couldn't host: {}
@@ -3602,6 +3604,8 @@ zombie hmmer
 {} chunks ready
 {} cost: {} level{}{}
 {} couldn't join: {}
+{} couldn't light a yellow candle
+{} couldn't open a copper door (host {}, bot {}, expected {})
 {} couldn't see into its own Llama's pack
 {} couldn't swat a fireball back
 {} does nothing to {}.
@@ -3734,6 +3738,7 @@ zombie hmmer
 {}'s members {} hurt each other now.
 {}'s paper doesn't mention them: {}
 {}'s stall: owner {}, lot {}, price {}
+{}'s wall never joined the host's (host {} {}, bot {} {})
 {}'s world
 {}, and maybe more
 {}, button

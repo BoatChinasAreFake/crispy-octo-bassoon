@@ -18,6 +18,12 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
+/// Token bytes to ids, and merge pairs to (rank, merged id).
+type Vocab = HashMap<Vec<u8>, u32>;
+type Merges = HashMap<(u32, u32), (usize, u32)>;
+/// Tensors by name: shape and values.
+type Tensors = HashMap<String, (Vec<usize>, Vec<f32>)>;
+
 const MAGIC: &[u8; 8] = b"MCLM0001";
 /// How many tokens a reply may run to, and how much context there's room for.
 pub const MAX_NEW: usize = 80;
@@ -134,7 +140,7 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
-    fn tables(&self) -> (HashMap<Vec<u8>, u32>, HashMap<(u32, u32), (usize, u32)>) {
+    fn tables(&self) -> (Vocab, Merges) {
         let by_bytes = self.tokens.iter().enumerate().filter(|(_, t)| !t.is_empty()).map(|(i, t)| (t.clone(), i as u32)).collect();
         let ranks = self.merges.iter().enumerate().map(|(r, &(a, b, m))| ((a, b), (r, m))).collect();
         (by_bytes, ranks)
@@ -736,7 +742,7 @@ pub fn tokenizer_from_json(j: &Json) -> Result<Tokenizer, String> {
 }
 
 /// The tensors in a .safetensors file, as floats (F32, F16 or BF16).
-pub fn read_safetensors(bytes: &[u8]) -> Result<HashMap<String, (Vec<usize>, Vec<f32>)>, String> {
+pub fn read_safetensors(bytes: &[u8]) -> Result<Tensors, String> {
     let n = u64::from_le_bytes(bytes.get(..8).ok_or("short file")?.try_into().unwrap()) as usize;
     let header = Json::parse(std::str::from_utf8(bytes.get(8..8 + n).ok_or("short file")?).map_err(|e| e.to_string())?)?;
     let data = &bytes[8 + n..];
