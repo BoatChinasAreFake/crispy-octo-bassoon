@@ -814,7 +814,9 @@ pub const STAR_FRAGMENT: Id = FIRST_ITEM + 289;
 pub const COPPER_DOOR_FIRST: Id = FIRST_ITEM + 290;
 /// Marks a selection's corners (see buildtools.rs).
 pub const SELECTION_WAND: Id = FIRST_ITEM + 298;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 299;
+/// A map that keeps a picture of its square (see mapart.rs); its wear says which.
+pub const RECORDED_MAP: Id = FIRST_ITEM + 299;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 300;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -3122,6 +3124,7 @@ impl Registry {
         items.push(item("star_fragment", "Star Fragment (Fell a Long Way)", T_STAR_FRAGMENT));
         items.extend(crate::copperworks::items());
         items.push(ItemDef { stack: 1, consume: false, ..item("selection_wand", "Selection Wand (Points at Things)", T_SELECTION_WAND) });
+        items.push(ItemDef { stack: 1, consume: false, ..item("recorded_map", "Recorded Map (Remembers the View)", T_RECORDED_MAP) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };

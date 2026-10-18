@@ -57,8 +57,9 @@ pub const DEFAULT_PORT: u16 = 25565;
 /// v60: v0.7 Part 1: generator 9 (Hollow Cities, flying ships, Leapstalks),
 /// Mauve stone, Leapfruit, Sulkers and the Floating effect.
 /// v61: v0.7 Part 2: Gateways, gravity islands (Gravity Cores) and Star Fragments.
+/// v63: v0.8 Part 2: recorded maps (MapArt, UseMap).
 /// v62: v0.8 Part 1: block sets (walls), copper doors/trapdoors/grates, coloured beds and candles.
-pub const PROTOCOL: u32 = 62;
+pub const PROTOCOL: u32 = 63;
 /// `Chat.from` for messages from scripts or the server itself (shown without a name).
 pub const SYSTEM: u32 = u32::MAX;
 /// Drop a connection that has been silent this long (mob snapshots and player
@@ -320,6 +321,10 @@ pub enum Msg {
     /// Both ways: a player's own skin, 64x64 RGBA (empty: back to a built-in
     /// one; client -> host: mine, `id` is ignored).
     SkinData { id: u32, pixels: Vec<u8> },
+    /// host -> client: a recorded map's picture (see mapart.rs).
+    MapArt { id: u32, x: i32, z: i32, locked: bool, px: Vec<u8> },
+    /// client -> host: I used this map (record, copy or lock it).
+    UseMap { item: Id, wear: u32, sneaking: bool },
     /// host -> client: the teams, and whether players can hurt each other (see teams.rs).
     Teams { pvp: bool, data: Vec<u8> },
     /// client -> host: I hit this player (the host checks it, see teams.rs).
@@ -1098,6 +1103,21 @@ impl Msg {
                 w.str(version);
                 w.u8(*password as u8);
             }
+            Msg::MapArt { id, x, z, locked, px } => {
+                w.u8(119);
+                w.u32(*id);
+                w.i32(*x);
+                w.i32(*z);
+                w.u8(*locked as u8);
+                w.u32(px.len() as u32);
+                w.bytes(px);
+            }
+            Msg::UseMap { item, wear, sneaking } => {
+                w.u8(120);
+                w.u16(*item);
+                w.u32(*wear);
+                w.u8(*sneaking as u8);
+            }
             Msg::SkinData { id, pixels } => {
                 w.u8(93);
                 w.u32(*id);
@@ -1541,6 +1561,15 @@ impl Msg {
             58 => Msg::MountMob { mob: r.u32()? },
             60 => Msg::MobName { mob: r.u32()?, name: r.str()? },
             61 => Msg::PlayerSkin { id: r.u32()?, skin: r.u8()? },
+            119 => {
+                let (id, x, z, locked) = (r.u32()?, r.i32()?, r.i32()?, r.u8()? != 0);
+                let n = r.u32()? as usize;
+                if n != (crate::mapart::ART * crate::mapart::ART * 3) as usize {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "a recorded map is 64x64"));
+                }
+                Msg::MapArt { id, x, z, locked, px: r.take(n)?.to_vec() }
+            }
+            120 => Msg::UseMap { item: r.u16()?, wear: r.u32()?, sneaking: r.u8()? != 0 },
             62 => Msg::BeaconEffect { item: r.u16()? },
             91 => Msg::StatusAsk,
             92 => Msg::Status { name: r.str()?, players: r.u16()?, max: r.u16()?, protocol: r.u32()?, version: r.str()?, password: r.u8()? != 0 },

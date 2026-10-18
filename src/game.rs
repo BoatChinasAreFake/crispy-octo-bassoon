@@ -341,6 +341,11 @@ pub struct Game {
     pub selections: HashMap<String, [Option<IVec3>; 2]>,
     pub my_selection: [Option<IVec3>; 2],
     pub builds: std::collections::BTreeMap<String, String>,
+    /// Recorded maps by number (see mapart.rs), when unlocked ones are next
+    /// redrawn, and a count that changes whenever one does (for drawing).
+    pub map_art: BTreeMap<u32, crate::mapart::MapArt>,
+    pub map_art_timer: f32,
+    pub map_art_version: u32,
     pub on_land: Option<String>,
     /// Scores, timers and the sidebar for mods' minigames (see minigames.rs).
     pub board: crate::minigames::Board,
@@ -689,6 +694,9 @@ impl Game {
             selections: HashMap::new(),
             my_selection: [None, None],
             builds: Default::default(),
+            map_art: BTreeMap::new(),
+            map_art_timer: 0.0,
+            map_art_version: 0,
             on_land: None,
             personal_spawn: None,
             smooth_far: false,
@@ -1015,6 +1023,9 @@ impl Game {
         if !self.builds.is_empty() {
             v.push(("builds".into(), crate::buildtools::encode(&self.builds)));
         }
+        if !self.map_art.is_empty() {
+            v.push(("map_art".into(), crate::mapart::encode(&self.map_art)));
+        }
         if self.claims != crate::claims::Claims::default() {
             v.push(("claims".into(), self.claims.encode()));
         }
@@ -1127,6 +1138,9 @@ impl Game {
         }
         if let Some(b) = extra("builds") {
             self.builds = crate::buildtools::decode(b);
+        }
+        if let Some(b) = extra("map_art") {
+            self.map_art = crate::mapart::decode(b);
         }
         if let Some(b) = extra("claims") {
             self.claims = crate::claims::Claims::decode(b);
@@ -2727,6 +2741,10 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        // Maps: record a blank one (sneaking), copy or lock a recorded one (see mapart.rs).
+        if self.use_held_map() {
+            return;
+        }
         // Goo (or honeycomb) waxes copper so it stops ageing.
         if matches!(held, GOO | HONEYCOMB)
             && let Some(Target::Block(h)) = &self.target
@@ -4206,6 +4224,7 @@ impl Game {
         self.hive_tick(dt);
         self.trees_tick(dt);
         self.random_ticks(dt);
+        self.map_art_tick(dt);
         self.hollow_tick(dt);
         self.fire_tick(dt);
         self.container_tick(dt);

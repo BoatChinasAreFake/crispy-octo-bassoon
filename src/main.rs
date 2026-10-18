@@ -15,7 +15,7 @@ pub(crate) use engine::{access, backups, compose, keybinds, lang, light, lod, me
 pub(crate) use land::{archaeology, bastion, caveins, caves, cities, copper, gateways, gravity, poem, deepdark, dims, falling, fire, fortress, hollow, hollowlife, houses, landmarks, liquids, mansion, modgen, monument, realms, scorch, seas, seasons, springs, skies, structures, temples, treasure, trial, weather, wilds, world};
 pub(crate) use blocks::{factory,machines,anvil, backpacks, banners, beacon, beds, block, books, boxes, carpentry, chests, containers, contraptions, crafting, decor, enchant, fireworks, home, homecraft, hoppers, masonry, models, music, potions, smithing, stalls, stash, together, trading, stonesets, copperworks, dyed, buildtools, trims, villageblocks, tripwire, wiring, woods, zapparts};
 pub(crate) use creatures::{swallow, animals, beasts, bees, bounties, creaking, critters, entity, floaty, horses, leads, nametags, night, paper, pathing, raids, reputation, skins, sniffers, village_growth, village_life, villagers, wildlife, wilter, sulkers};
-pub(crate) use survival::{poses, advancements, atlas, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, modes, navigation, player, qol, rockets, rules, stats, tools, vehicles, xp};
+pub(crate) use survival::{poses, advancements, atlas, combat, cooking, drops, farming, fishing, gadgets, glider, hunger, inventory, mapart, modes, navigation, player, qol, rockets, rules, stats, tools, vehicles, xp};
 pub(crate) use online::{admin, cheats, claims, crypto, ledger, minigames, mods, multiplayer, net, players, playtest, post, scripting, server, servers, smollm, teams};
 mod screens;
 mod shots;
@@ -234,6 +234,8 @@ struct App {
     map_colors: Vec<[u8; 3]>,
     map_tex: Option<Texture2D>,
     map_timer: f32,
+    /// Which recorded map (and version of it) `map_tex` shows, if one.
+    art_key: Option<(u32, u32)>,
     /// Lines being written on a sign, and which line.
     sign_lines: [String; 4],
     sign_line: usize,
@@ -2134,6 +2136,7 @@ async fn game_main() {
         skin_gen: 0,
         map_tex: None,
         map_timer: 0.0,
+        art_key: None,
         sign_lines: Default::default(),
         sign_line: 0,
         book_pages: Vec::new(),

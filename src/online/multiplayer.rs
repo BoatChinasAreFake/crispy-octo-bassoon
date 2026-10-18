@@ -478,6 +478,7 @@ impl Game {
             roster.push(self.rules_msg());
             roster.push(self.teams_msg());
             roster.push(self.claims_msg());
+            roster.extend(self.map_art.keys().filter_map(|&id| self.map_art_msg(id)).collect::<Vec<_>>());
             if !self.board.shown.is_empty() {
                 roster.push(self.sidebar_msg());
             }
@@ -830,6 +831,7 @@ impl Game {
                     self.host_mob_name(from, mob, name);
                 }
             }
+            Msg::UseMap { item, wear, sneaking } => self.peer_used_map(from, item, wear, sneaking),
             Msg::PlayerSkin { skin, .. } => {
                 let skin = skin % crate::nametags::SKINS.len() as u8;
                 if let Some(p) = self.peers.get_mut(&from) {
@@ -1412,6 +1414,7 @@ impl Game {
                 }
             }
             Msg::SkinData { id, pixels } => self.note_peer_skin(id, pixels),
+            Msg::MapArt { id, x, z, locked, px } => self.got_map_art(id, x, z, locked, px),
             Msg::TradeState { x, y, z, seats, accepted, done, mine } => self.apply_deal(IVec3::new(x, y, z), seats, accepted, done, mine),
             Msg::Sidebar { title, lines, countdown } => self.board.shown = crate::minigames::Shown { title, lines, countdown },
             Msg::Claims { data } => self.claims = crate::claims::Claims::decode(&data),
@@ -1492,7 +1495,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::MachineUse{..} | Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } => {}
+            Msg::MachineUse{..} | Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } | Msg::UseMap { .. } => {}
         }
     }
 
