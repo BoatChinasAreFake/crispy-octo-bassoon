@@ -157,7 +157,7 @@ Originals:
 - Paint roller: recolour placed wool, concrete, glass and terracotta without breaking them.
 
 Parts:
-- Part 1: items 1 and 4.
+- Part 1: items 1 and 4. **(released)**
 - Part 2: items 2, 3 and 5.
 - Part 3: the two originals (this is the last part).
 
