@@ -76,7 +76,7 @@ pub fn growth(s: Option<Season>) -> f32 {
 
 /// Does rain fall as snow here?
 pub fn snows(biome: Biome, s: Option<Season>) -> bool {
-    biome == Biome::Snowy || (s == Some(Season::Winter) && !biome.dry() && !matches!(biome, Biome::Jungle | Biome::Mangrove | Biome::Swamp))
+    matches!(biome, Biome::Snowy | Biome::IceSpikes | Biome::FrozenOcean) || (s == Some(Season::Winter) && !biome.dry() && !matches!(biome, Biome::Jungle | Biome::Mangrove | Biome::Swamp))
 }
 
 /// The season the chunk mesher tints with (4: none).

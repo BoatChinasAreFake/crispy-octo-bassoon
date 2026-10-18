@@ -538,7 +538,12 @@ pub fn mesh_parts(c: [Option<&Chunk>; 9], field: Option<crate::tint::Field>, cx:
                                 if is_opaque(nb) || (nb == id && def.see_through) {
                                     continue;
                                 }
-                                let tile = face_tile(id, f);
+                                // Grass with snow on it has snowy sides.
+                                let tile = if id == GRASS && f != 2 && f != 3 && matches!(hood.get(lx, y + 1, lz), x if is_snow_layer(x) || x == SNOW_BLOCK) {
+                                    crate::texture::T_SNOW_SIDE
+                                } else {
+                                    face_tile(id, f)
+                                };
                                 let shade = if dapples_sky(id) { &FOLIAGE_SHADE[f] } else { shade };
                                 // Faces looking out into water are marked (x + 4) for the shader's caustics.
                                 let wet = if is_water(nb) { 4.0 } else { 0.0 };

@@ -322,6 +322,9 @@ impl Generator {
             let width = river_half_width(self.hills.noise2(fx / 170.0, fz / 170.0));
             river_channel(reach, gradient, width)
         } else { RIVER * reach };
+        // (From generator 10 the banks wander a little, so a river doesn't run
+        // between two long straight staircases of shore.)
+        let aw = if self.opts.version >= 10 && channel > 0.0 { (aw + self.hills.noise2(fx / 11.0 + 5.0, fz / 11.0 - 3.0) * channel * 0.3).max(0.0) } else { aw };
         let river = aw < channel && h < seaf + 3.0;
         if self.opts.version >= 8 {
             // Shape the dry bank as well as the waterbed. The old cut only
