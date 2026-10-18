@@ -528,3 +528,32 @@ output = cable 8
 [recipe]
 inputs = steel_ingot 2, glass 1
 output = empty_cell 2
+
+// ---------------------------------------------------------------- machine text
+// (The game shows these on the machines' panels; they live here, not in the
+// game's own strings, so a translation of this pack goes with this pack.)
+[machine centrifuge]
+hint = Turns dust and coal into one pellet.
+recipe = 2 dust + coal -> pellet; use coal or cells for power.
+action = Refine pellet | /hbm refine | half_baked:glowium_dust*2, coal*1
+
+[machine reactor]
+hint = Keep the cooling tower in place. Output: 4 cells + waste.
+recipe = Pellet + coolant -> 4 cells + waste; 15s; needs tower.
+action = Start 15-second batch | /hbm reactor | half_baked:pellet*1, half_baked:coolant*1
+action = Scram owned batches | /hbm scram
+status_running = Batch running: {}s left. Keep cooling connected.
+status_command = /hbm status
+
+[machine cooling_tower]
+hint = Passive cooling for reactors within three blocks.
+status_active = Cooling active. Steam venting.
+status_idle = Cooling ready. Keep this tower beside the reactor.
+
+[machine battery]
+recipe = Store solar power or discharge cells. Charge empty cells.
+
+[advancement half_baked_power]
+title = Questionable Power
+text = Complete a Half-Baked reactor batch and collect an energy cell.
+obtain = energy_cell

@@ -45,16 +45,17 @@ impl Game {
     /// Right-clicked a candle: light it with a Sparker or torch, put it out empty-handed.
     pub fn use_candle(&mut self, p: IVec3) -> bool {
         let held = self.inv.held();
-        let new = match self.world.get_v(p) {
-            CANDLE if matches!(held, SPARKER | TORCH) => CANDLE_LIT,
-            CANDLE_LIT if held == AIR => CANDLE,
+        let Some((colour, lit)) = crate::dyed::candle_of(self.world.get_v(p)) else { return false };
+        let new = match lit {
+            false if matches!(held, SPARKER | TORCH) => crate::dyed::candle(colour, true),
+            true if held == AIR => crate::dyed::candle(colour, false),
             _ => return false,
         };
         self.world.set_v(p, new);
         if held == SPARKER {
             self.use_tool(1);
         }
-        self.sfx(if new == CANDLE_LIT { Sfx::Click } else { Sfx::Hiss }, Some(p.as_vec3() + Vec3::splat(0.5)));
+        self.sfx(if crate::dyed::candle_of(new).is_some_and(|c| c.1) { Sfx::Click } else { Sfx::Hiss }, Some(p.as_vec3() + Vec3::splat(0.5)));
         self.player.swing = 1.0;
         true
     }

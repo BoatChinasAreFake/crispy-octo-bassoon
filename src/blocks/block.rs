@@ -509,7 +509,20 @@ pub const LEAPSTALK_FIRST: Id = MYCELIUM + 120;
 pub const GATEWAY: Id = MYCELIUM + 136;
 /// The heart of a gravity island, where down is up (see gravity.rs).
 pub const GRAVITY_CORE: Id = MYCELIUM + 137;
-pub const NUM_BLOCKS: Id = MYCELIUM + 138;
+/// v0.8's tuff and deepslate variants.
+pub const TUFF: Id = MYCELIUM + 138;
+pub const POLISHED_TUFF: Id = MYCELIUM + 139;
+pub const POLISHED_DEEPSLATE: Id = MYCELIUM + 140;
+pub const CHISELED_DEEPSLATE: Id = MYCELIUM + 141;
+pub const CRACKED_DEEPSLATE_BRICKS: Id = MYCELIUM + 142;
+pub const CRACKED_DEEPSLATE_TILES: Id = MYCELIUM + 143;
+/// Block sets: slabs, stairs and walls (see stonesets.rs).
+pub const SET_FIRST: Id = MYCELIUM + 144;
+/// Copper doors, trapdoors and grates in every stage (see copperworks.rs).
+pub const COPPERWORKS_FIRST: Id = SET_FIRST + crate::stonesets::COUNT;
+/// Coloured beds and candles (see dyed.rs).
+pub const DYED_FIRST: Id = COPPERWORKS_FIRST + crate::copperworks::COUNT;
+pub const NUM_BLOCKS: Id = DYED_FIRST + crate::dyed::COUNT;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -795,7 +808,9 @@ pub const POPPED_LEAPFRUIT: Id = FIRST_ITEM + 287;
 pub const SULKER_SHELL: Id = FIRST_ITEM + 288;
 /// Fished out of the void (see voidfishing.rs); four make a Wyrm Crystal.
 pub const STAR_FRAGMENT: Id = FIRST_ITEM + 289;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 290;
+/// Copper doors: `+ variant` (see copperworks.rs).
+pub const COPPER_DOOR_FIRST: Id = FIRST_ITEM + 290;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 298;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -980,6 +995,8 @@ pub enum Shape {
     Frame { facing: u8 },
     /// A fence post with rails to the sides in `mask` (1 east, 2 west, 4 south, 8 north).
     Fence { mask: u8 },
+    /// A stone wall: a thick post with arms to the sides in `mask` (as fences).
+    Wall { mask: u8 },
     /// A glass pane, joined to the sides in `mask`.
     Pane { mask: u8 },
     /// A fence gate across x (or z), open or shut.
@@ -1151,6 +1168,20 @@ impl Shape {
                 }
                 if mask & 12 != 0 {
                     v[n] = ([0.4375, y0, if mask & 8 != 0 { 0.0 } else { 0.5 }], [0.5625, y1, if mask & 4 != 0 { 1.0 } else { 0.5 }]);
+                    n += 1;
+                }
+                (v, n)
+            }
+            Shape::Wall { mask } => {
+                let post = ([0.25, 0.0, 0.25], [0.75, 1.0, 0.75]);
+                let (mut v, mut n) = ([post, post, post], 1);
+                let y1 = 0.875;
+                if mask & 3 != 0 {
+                    v[n] = ([if mask & 2 != 0 { 0.0 } else { 0.5 }, 0.0, 0.3125], [if mask & 1 != 0 { 1.0 } else { 0.5 }, y1, 0.6875]);
+                    n += 1;
+                }
+                if mask & 12 != 0 {
+                    v[n] = ([0.3125, 0.0, if mask & 8 != 0 { 0.0 } else { 0.5 }], [0.6875, y1, if mask & 4 != 0 { 1.0 } else { 0.5 }]);
                     n += 1;
                 }
                 (v, n)
@@ -1333,8 +1364,13 @@ pub fn placing_item(id: Id) -> Option<Id> {
     if id == SMOKER_LIT || id == BLAST_FURNACE_LIT {
         return Some(id - 1);
     }
-    if id == CANDLE_LIT {
-        return Some(CANDLE);
+    if let Some((colour, true)) = crate::dyed::candle_of(id) {
+        return Some(crate::dyed::candle(colour, false));
+    }
+    if let Some((colour, f)) = crate::dyed::bed_of(id)
+        && f != 0
+    {
+        return Some(crate::dyed::bed(colour, 0));
     }
     if id == LANTERN_HANGING {
         return Some(LANTERN);
@@ -1354,7 +1390,7 @@ pub fn placing_item(id: Id) -> Option<Id> {
         return Some(TORCH);
     }
     if crate::beds::is_bed(id) {
-        return Some(BED);
+        return Some(crate::dyed::bed(crate::dyed::bed_colour(id), 0));
     }
     if crate::hoppers::is_hopper(id) {
         return Some(HOPPER_FIRST);
@@ -1639,6 +1675,9 @@ pub struct ModMob {
     pub breed_item: Option<Id>,
     /// Eats any offered item and swallows livestock within five blocks. Off by default.
     pub glutton: bool,
+    /// What a glutton says when fed, and when it's hungry ("{}": its name; empty: nothing).
+    pub glutton_fed: String,
+    pub glutton_hungry: String,
     /// A body built from the mod's own boxes (`part = ...` lines), used
     /// instead of `template` when there are any. At most `MAX_MOD_PARTS`.
     pub parts: Vec<ModPart>,
@@ -1770,6 +1809,44 @@ pub struct PlantGen {
     pub dim: Option<usize>,
 }
 
+/// An advancement a mod brings (`[advancement key]` in mod.txt), earned by
+/// picking up an item or feeding one of its creatures.
+pub struct ModAdvancement {
+    pub adv: &'static crate::advancements::Advancement,
+    pub obtain: Option<Id>,
+    /// A mod mob's key ("pack:name"): earned by feeding one.
+    pub feed: Option<String>,
+}
+
+/// One button on a mod machine's panel: what it says, the chat command it
+/// runs, and what it takes from your inventory.
+pub struct MachineAction {
+    pub label: String,
+    pub command: String,
+    pub inputs: Vec<(String, u32)>,
+}
+
+/// A mod machine's text (`[machine name]` in mod.txt): its panel's hint and
+/// buttons, the recipe line under its slots, and status lines by name
+/// (`status_running = ...`, with `{}` for a number).
+#[derive(Default)]
+pub struct ModMachine {
+    pub block: Id,
+    pub hint: String,
+    pub recipe: String,
+    pub actions: Vec<MachineAction>,
+    pub status: Vec<(String, String)>,
+    /// The chat command that asks for its status (`status_command = ...`).
+    pub status_command: String,
+}
+
+impl ModMachine {
+    /// A status line by name, with `{}` filled in (None: the mod didn't give one).
+    pub fn status(&self, name: &str, n: f32) -> Option<String> {
+        self.status.iter().find(|(k, _)| k == name).map(|(_, t)| t.replacen("{}", &format!("{n:.0}"), 1))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ModInfo {
     pub id: String,
@@ -1807,6 +1884,16 @@ pub struct Registry {
     pub dims: Vec<crate::modgen::ModDim>,
     /// Translations mods bring (see lang.rs).
     pub languages: Vec<crate::lang::Language>,
+    /// Advancements and machine text mods bring (each in its own mod.txt).
+    pub advancements: Vec<ModAdvancement>,
+    pub machines: Vec<ModMachine>,
+}
+
+impl Registry {
+    /// A mod machine's text, by block.
+    pub fn machine(&self, id: Id) -> Option<&ModMachine> {
+        self.machines.iter().find(|m| m.block == id)
+    }
 }
 
 static REGISTRY: AtomicPtr<Registry> = AtomicPtr::new(std::ptr::null_mut());
@@ -2726,6 +2813,22 @@ impl Registry {
         let mut core = def("gravity_core", "Gravity Core (Holds Things Down, or Up)", Cube, true, true, [T_GRAVITY_CORE; 3], -1.0, 0, false, AIR, 10.0, S_STONE);
         core.creative = false;
         blocks.push(core);
+        let tuffs = [
+            ("tuff", "Tuff (Grey, Humble)", T_TUFF),
+            ("polished_tuff", "Polished Tuff (Grey, Buffed)", T_POLISHED_TUFF),
+            ("polished_deepslate", "Polished Deepslate (Moody, Smooth)", T_POLISHED_DEEPSLATE),
+            ("chiseled_deepslate", "Chiseled Deepslate (Moody Doodles)", T_CHISELED_DEEPSLATE),
+            ("cracked_deepslate_bricks", "Cracked Deepslate Bricks (Seen Things)", T_CRACKED_DEEPSLATE_BRICKS),
+            ("cracked_deepslate_tiles", "Cracked Deepslate Tiles (Tidy, Was)", T_CRACKED_DEEPSLATE_TILES),
+        ];
+        for (i, (key, name, tile)) in tuffs.into_iter().enumerate() {
+            let hard = if i < 2 { 1.5 } else { 3.5 };
+            blocks.push(def(key, name, Cube, true, true, [tile; 3], hard, 1, true, TUFF + i as Id, 0.0, S_STONE));
+        }
+        let sets = crate::stonesets::defs(&blocks);
+        blocks.extend(sets);
+        blocks.extend(crate::copperworks::defs());
+        blocks.extend(crate::dyed::defs());
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -3010,6 +3113,7 @@ impl Registry {
         items.push(item("popped_leapfruit", "Popped Leapfruit (Crunchy Purple)", T_POPPED_LEAPFRUIT));
         items.push(item("sulker_shell", "Sulker Shell (Still Sulking)", T_SULKER_SHELL));
         items.push(item("star_fragment", "Star Fragment (Fell a Long Way)", T_STAR_FRAGMENT));
+        items.extend(crate::copperworks::items());
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
@@ -3275,6 +3379,12 @@ impl Registry {
         recipes.push(r(&[(HEART_OF_THE_SEA, 1), (NAUTILUS_SHELL, 8)], (CONDUIT, 1)));
         recipes.push(r(&[(STRING, 6), (STICK, 1)], (ROPE, 2)));
         recipes.extend(crate::woods::recipes());
+        recipes.extend(crate::stonesets::recipes());
+        recipes.extend(crate::copperworks::recipes());
+        recipes.extend(crate::dyed::recipes());
+        recipes.push(r(&[(COBBLED_DEEPSLATE, 4)], (POLISHED_DEEPSLATE, 4)));
+        recipes.push(r(&[(DEEPSLATE_BRICKS, 2)], (CHISELED_DEEPSLATE, 1)));
+        recipes.push(r(&[(TUFF, 4)], (POLISHED_TUFF, 4)));
         recipes.extend(crate::wilds::recipes());
         recipes.extend(crate::homecraft::recipes());
         recipes.push(Recipe { inputs: vec![(STRING, 4), (GOO, 1)], output: (LEAD, 2) });
@@ -3294,7 +3404,7 @@ impl Registry {
                 recipes.push(r(&[(material, n)], (ARMOR_FIRST + (t * 4 + slot) as Id, 1)));
             }
         }
-        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new(), biomes: Vec::new(), structures: Vec::new(), dims: Vec::new(), languages: Vec::new() }
+        Registry { blocks, items, recipes, ores: Vec::new(), plants: Vec::new(), splashes: Vec::new(), mods: Vec::new(), textures: Vec::new(), smelting: Vec::new(), fuels: Vec::new(), mobs: Vec::new(), biomes: Vec::new(), structures: Vec::new(), dims: Vec::new(), languages: Vec::new(), advancements: Vec::new(), machines: Vec::new() }
     }
 
     /// Look up a block or item id by key ("stone", "cheese:wheel", ...).

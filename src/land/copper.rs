@@ -88,6 +88,10 @@ impl Game {
                     self.advance("patina");
                 }
             }
+        } else if crate::copperworks::weathered(id).is_some() {
+            if self.rng.chance(WEATHER_CHANCE) {
+                self.weather_copperwork(p);
+            }
         } else if id == KELP {
             self.kelp_grows(p);
         } else if id == LEAPFLOWER {
@@ -151,10 +155,36 @@ impl Game {
         }
     }
 
-    /// Goo on a copper block waxes it. Returns whether it did.
+    /// A copper door, trapdoor or grate at `p` moves on a stage (a door, both halves).
+    pub fn weather_copperwork(&mut self, p: IVec3) {
+        self.change_copperwork(p, crate::copperworks::weathered);
+    }
+
+    /// Swap the copperwork at `p` (and a door's other half) for `to` of it.
+    fn change_copperwork(&mut self, p: IVec3, to: fn(Id) -> Option<Id>) -> bool {
+        let id = self.world.get_v(p);
+        let Some(new) = to(id) else { return false };
+        if let Some((_, _, top)) = door_state(id) {
+            let other = if top { p - IVec3::Y } else { p + IVec3::Y };
+            if let Some(o) = to(self.world.get_v(other)).filter(|_| door_base(self.world.get_v(other)) == door_base(id)) {
+                self.world.set_v(other, o);
+            }
+        }
+        self.world.set_v(p, new);
+        true
+    }
+
+    /// Goo on a copper block (or door, trapdoor or grate) waxes it. Returns whether it did.
     pub fn wax_copper(&mut self, pos: IVec3) -> bool {
-        let Some(w) = waxed(self.world.get_v(pos)) else { return false };
-        self.world.set_v(pos, w);
+        if let Some(w) = waxed(self.world.get_v(pos)) {
+            self.world.set_v(pos, w);
+        } else if self.change_copperwork(pos, crate::copperworks::waxed) {
+            if is_door(self.world.get_v(pos)) {
+                self.advance("copper_bottomed");
+            }
+        } else {
+            return false;
+        }
         self.sfx(crate::sound::Sfx::Place(crate::sound::Mat::Glass), Some(pos.as_vec3()));
         self.player.swing = 1.0;
         self.advance("waxed");

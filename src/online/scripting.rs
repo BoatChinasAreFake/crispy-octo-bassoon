@@ -64,9 +64,13 @@ pub enum Cmd {
     Pvp(bool),
     SetSpawn(String, Vec3),
     WorldSpawn(Vec3),
+    /// A question for the asking mod's language model: (mod, player, system, prompt). See smollm.rs.
+    ModelAsk(String, String, String, String),
 }
 
 struct Ctx {
+    /// The mod whose script is running.
+    mod_id: String,
     game: *const Game,
     cmds: Vec<Cmd>,
     vars: HashMap<String, Dynamic>,
@@ -427,6 +431,12 @@ fn register_api(e: &mut Engine) {
         };
         push(Cmd::Sound(s, Vec3::new(num(&x)? as f32, num(&y)? as f32, num(&z)? as f32)))
     });
+    // A small language model the mod brings (mods/<id>/model.lm; see smollm.rs).
+    e.register_fn("model_ready", || -> Res<bool> { with_ctx(|c| crate::smollm::model_path(&c.mod_id).is_file()) });
+    e.register_fn("model_ask", |player: &str, system: &str, prompt: &str| -> Res<()> {
+        let id = with_ctx(|c| c.mod_id.clone())?;
+        push(Cmd::ModelAsk(id, player.into(), system.chars().take(1200).collect(), prompt.chars().take(400).collect()))
+    });
     e.register_fn("log", |text: &str| {
         let _ = with_ctx(|c| c.log.push(text.to_string()));
     });
@@ -537,15 +547,20 @@ impl ScriptHost {
 
     /// Run `hook` in every mod that defines it with a matching number of parameters.
     pub fn call(&mut self, game: &Game, hook: &str, args: Vec<Dynamic>) -> HookResult {
+        self.call_in(game, None, hook, args)
+    }
+
+    /// Run `hook` in one mod (or, with None, every mod).
+    pub fn call_in(&mut self, game: &Game, only: Option<&str>, hook: &str, args: Vec<Dynamic>) -> HookResult {
         let mut out = HookResult { allow: true, ..Default::default() };
         for m in self.mods.iter_mut() {
-            if m.disabled || m.fns.get(hook) != Some(&args.len()) {
+            if m.disabled || m.fns.get(hook) != Some(&args.len()) || only.is_some_and(|id| id != m.id) {
                 continue;
             }
             out.handled = true;
             let seed = self.rng.next_u64();
             CTX.with(|c| {
-                *c.borrow_mut() = Some(Ctx { game, cmds: Vec::new(), vars: std::mem::take(&mut m.vars), log: Vec::new(), rng: Rng::new(seed) });
+                *c.borrow_mut() = Some(Ctx { mod_id: m.id.clone(), game, cmds: Vec::new(), vars: std::mem::take(&mut m.vars), log: Vec::new(), rng: Rng::new(seed) });
             });
             let result = self.engine.call_fn::<Dynamic>(&mut Scope::new(), &m.ast, hook, args.clone());
             let ctx = CTX.with(|c| c.borrow_mut().take()).expect("script context vanished");

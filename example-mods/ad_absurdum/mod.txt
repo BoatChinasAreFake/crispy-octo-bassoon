@@ -1109,3 +1109,49 @@ output = electric_furnace 1
 [recipe]
 inputs = steel 1, glass 1
 output = empty_battery 2
+
+// ---------------------------------------------------------------- machine text
+// (The game shows these on the machines' panels; they live here, not in the
+// game's own strings, so a translation of this pack goes with this pack.)
+[machine refinery]
+hint = Refines coal into rocket fuel.
+recipe = 2 coal + tank -> 2 fuel; 4s; 8 energy/s.
+action = Refine 2 fuel canisters | /astra refine | coal*2, ad_absurdum:tank*1
+
+[machine oxygen_generator]
+hint = Fills oxygen for your Life Support Pack.
+recipe = Battery + tank -> 4 oxygen + empty battery; 8 energy/s.
+action = Fill 4 oxygen canisters | /astra refill | ad_absurdum:battery*1, ad_absurdum:tank*1
+
+[machine solar_panel]
+hint = Each recharge needs 60 seconds between batches.
+recipe = Charge empty cells. Clear daylight generates 6 energy/s.
+action = Charge 2 batteries | /astra charge | ad_absurdum:steel*1, zap_dust*1
+status_running = Recharging: {}s until the next batch.
+
+[machine power_bank]
+recipe = Store solar power or discharge cells. Charge empty cells.
+
+[machine electric_furnace]
+recipe = Smelt one item in 4 powered seconds; 8 energy/s.
+
+[machine rocket_workbench]
+hint = Bench and pad must be nearby, with five clear blocks above.
+action = Assemble tier 1 | /astra assemble 1 | ad_absurdum:rocket_1*1
+action = Assemble tier 2 | /astra assemble 2 | ad_absurdum:rocket_2*1
+action = Assemble tier 3 | /astra assemble 3 | ad_absurdum:rocket_3*1
+action = Assemble tier 4 | /astra assemble 4 | ad_absurdum:rocket_4*1
+action = Pack owned rockets | /astra pack
+
+[machine launch_pad]
+hint = Bench and pad must be nearby, with five clear blocks above.
+action = Assemble tier 1 | /astra assemble 1 | ad_absurdum:rocket_1*1
+action = Assemble tier 2 | /astra assemble 2 | ad_absurdum:rocket_2*1
+action = Assemble tier 3 | /astra assemble 3 | ad_absurdum:rocket_3*1
+action = Assemble tier 4 | /astra assemble 4 | ad_absurdum:rocket_4*1
+action = Pack owned rockets | /astra pack
+
+[advancement rocket_paperwork]
+title = Rocket Paperwork
+text = Craft an Ad Absurdum rocket. The sky has forms to fill in.
+obtain = rocket_1

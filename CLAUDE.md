@@ -156,6 +156,11 @@ Originals:
 - Blueprints: copy a build at a Drafting Table, then Copper Golems build it from the materials in nearby chests, in survival.
 - Paint roller: recolour placed wool, concrete, glass and terracotta without breaking them.
 
+Parts:
+- Part 1: items 1 and 4. **(released)**
+- Part 2: items 2, 3 and 5.
+- Part 3: the two originals (this is the last part).
+
 ## v0.9: Atmosphere
 
 1. Ambient sound: each biome has its own background (wind on peaks, birds in forests, drips in caves, bubbles at sea).

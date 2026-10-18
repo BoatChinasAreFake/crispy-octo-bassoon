@@ -22,7 +22,7 @@ impl App {
         for (i, a) in spec.actions.iter().enumerate() {
             let yy = y + (63.0 + i as f32 * 38.0) * s;
             let ready = a.inputs.iter().all(|(key, n)| block::reg().lookup(key).is_some_and(|id| self.game.inv.count(id) >= *n));
-            if self.ui.button(Rect::new(x + 10.0 * s, yy, w - 20.0 * s, 21.0 * s), a.label, ready) {
+            if self.ui.button(Rect::new(x + 10.0 * s, yy, w - 20.0 * s, 21.0 * s), &a.label, ready) {
                 self.game.machine_action(i as u8);
             }
             let cost = if a.inputs.is_empty() {

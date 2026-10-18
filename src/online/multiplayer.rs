@@ -1175,6 +1175,10 @@ impl Game {
             let on_farmland = is_farmland(self.world.get(x, y - 1, z));
             return replaceable(old) && on_farmland && (stage == 0 || (self.creative && block(new).creative));
         }
+        // Waxing copperwork (the host takes the Goo; see ledger.rs).
+        if crate::copperworks::waxed(old) == Some(new) {
+            return true;
+        }
         // Doors open and close; a door's top half only goes on its own bottom half.
         if let (Some((f, o, t)), Some((nf, no, nt))) = (door_state(old), door_state(new)) {
             return f == nf && t == nt && o != no && door_base(old) == door_base(new);
@@ -1194,9 +1198,15 @@ impl Game {
         }
         // Gates and trapdoors swing; fences and panes may be placed at any join (the host reshapes them).
         if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new)) {
-            return a == b && (crate::carpentry::is_gate(a) || a == TRAPDOOR_FIRST);
+            return a == b && (crate::carpentry::is_gate(a) || crate::carpentry::is_trapdoor(a));
         }
         // Levers flip both ways, buttons only go in (the host lets them out).
+        if let (Some((ca, la)), Some((cb, lb))) = (crate::dyed::candle_of(old), crate::dyed::candle_of(new))
+            && ca == cb
+            && la != lb
+        {
+            return true;
+        }
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON) | (CANDLE, CANDLE_LIT) | (CANDLE_LIT, CANDLE) | (CAVE_VINES_LIT, CAVE_VINES)) {
             return true;
         }
@@ -1455,7 +1465,7 @@ impl Game {
             }
             Msg::Advance { key } => {
                 // (Only ones we know of.)
-                if crate::advancements::ALL.iter().any(|a| a.key == key) {
+                if crate::advancements::find(&key).is_some() {
                     self.advance(&key);
                 }
             }
@@ -2976,6 +2986,47 @@ mod tests {
         client.net_send_msg(Msg::Catch { pos: Vec3::new(p.x + 12.0, crate::fishing::VOID_Y, p.z), bait: false });
         assert!(pump(&mut host, &mut client, |_, c| c.advancements.has("deep_end")), "a catch from the void");
         assert_eq!(client.dim, Dim::Hollow);
+    }
+
+    #[test]
+    fn joined_players_build_walls_and_use_copper_doors_and_coloured_candles() {
+        let mut host = Game::new_with(795, false, false, crate::world::GenOptions::DEFAULT);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Masony", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 3, spawn.z.floor() as i32);
+        let y = host.world.surface_y(x, z) + 1;
+        let tuff = crate::stonesets::wall(crate::stonesets::set_of(TUFF).unwrap()).unwrap();
+        let a = IVec3::new(x, y, z);
+        host.world.set_v(a, tuff);
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(a) == tuff));
+        // A wall the joined player puts down joins the host's.
+        host.give_peer(id, tuff, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(tuff) == 1));
+        client.inv.consume_held();
+        client.world.set_v(a + IVec3::X, tuff);
+        assert!(pump(&mut host, &mut client, |h, c| h.world.get_v(a) == tuff + 1 && c.world.get_v(a) == tuff + 1), "joined up for everyone");
+        // A copper door and trapdoor open by hand; a coloured candle lights.
+        let door = IVec3::new(x, y, z + 3);
+        let d0 = crate::copperworks::door(2);
+        host.world.set_v(door, door_of(d0, 0, false, false));
+        host.world.set_v(door + IVec3::Y, door_of(d0, 0, false, true));
+        let trap = IVec3::new(x + 2, y, z + 3);
+        host.world.set_v(trap, crate::copperworks::trapdoor(1));
+        let wick = IVec3::new(x - 2, y, z + 3);
+        host.world.set_v(wick, crate::dyed::candle(Some(6), false));
+        assert!(pump(&mut host, &mut client, |_, c| c.world.get_v(wick) == crate::dyed::candle(Some(6), false) && c.world.get_v(trap) == crate::copperworks::trapdoor(1)));
+        client.world.set_v(door, door_of(d0, 0, true, false));
+        client.world.set_v(trap, crate::copperworks::trapdoor(1) + 1);
+        client.world.set_v(wick, crate::dyed::candle(Some(6), true));
+        assert!(pump(&mut host, &mut client, |h, _| h.world.get_v(door) == door_of(d0, 0, true, false) && h.world.get_v(trap) == crate::copperworks::trapdoor(1) + 1 && h.world.get_v(wick) == crate::dyed::candle(Some(6), true)));
+        // But nobody repaints a candle or ages a door by wishing.
+        assert!(!host.edit_allowed(wick.x, wick.y, wick.z, crate::dyed::candle(Some(6), true), crate::dyed::candle(Some(2), true)));
+        assert!(!host.edit_allowed(trap.x, trap.y, trap.z, crate::copperworks::trapdoor(1), crate::copperworks::trapdoor(3)));
+        // Waxing (with Goo) is fine.
+        assert!(host.edit_allowed(trap.x, trap.y, trap.z, crate::copperworks::trapdoor(1), crate::copperworks::trapdoor(5)));
     }
 
     #[test]

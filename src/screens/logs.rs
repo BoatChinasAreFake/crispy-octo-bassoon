@@ -30,13 +30,13 @@ impl App {
         let (w, h) = (screen_width(), screen_height());
         let s = self.ui.s;
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
-        let title = format!("Advancements: {}/{} (they're per world, like memories)", self.game.advancements.count(), advancements::ALL.len());
+        let title = format!("Advancements: {}/{} (they're per world, like memories)", self.game.advancements.count(), advancements::all().count());
         self.ui.text_centered(&title, w / 2.0, h * 0.06, 14.0, WHITE);
         // Tabs, each with how many are done.
         let tab_w = ((w - 20.0 * s) / advancements::TABS.len() as f32).min(118.0 * s);
         let tabs_x = w / 2.0 - tab_w * advancements::TABS.len() as f32 / 2.0;
         for (t, name) in advancements::TABS.iter().enumerate() {
-            let on: Vec<&advancements::Advancement> = advancements::ALL.iter().filter(|a| t == 0 || advancements::tab_of(a.key) == t).collect();
+            let on: Vec<&advancements::Advancement> = advancements::all().filter(|a| t == 0 || advancements::tab_of(a.key) == t).collect();
             let done = on.iter().filter(|a| self.game.advancements.has(a.key)).count();
             let label = self.ui.fit(&format!("{name} {done}/{}", on.len()), 8.0, tab_w - 8.0 * s);
             let r = Rect::new(tabs_x + t as f32 * tab_w + 1.0 * s, h * 0.085, tab_w - 2.0 * s, 15.0 * s);
@@ -45,7 +45,7 @@ impl App {
                 self.adv_scroll = 0;
             }
         }
-        let shown: Vec<&advancements::Advancement> = advancements::ALL.iter().filter(|a| self.adv_tab == 0 || advancements::tab_of(a.key) == self.adv_tab).collect();
+        let shown: Vec<&advancements::Advancement> = advancements::all().filter(|a| self.adv_tab == 0 || advancements::tab_of(a.key) == self.adv_tab).collect();
         let p = &self.game.advancements;
         let cols = if w >= 2.0 * 220.0 * s { 2 } else { 1 };
         let col_w = ((w - 20.0 * s) / cols as f32).min(290.0 * s);

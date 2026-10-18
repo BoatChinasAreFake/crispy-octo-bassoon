@@ -590,7 +590,7 @@ impl App {
                 }
             }
             PausePage::Logs => {
-                let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::ALL.len());
+                let adv = format!("Advancements ({}/{})", self.game.advancements.count(), advancements::all().count());
                 let rows: [(&str, Screen); 5] = [
                     (&adv, Screen::Advancements),
                     ("Statistics", Screen::Stats),

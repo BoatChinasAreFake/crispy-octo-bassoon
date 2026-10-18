@@ -61,9 +61,42 @@ jobs:
           name: minceraft-${{ matrix.name }}
           path: minceraft-*.zip
 
+  # Dubiety's language model (SmolLM2-135M-Instruct, 8-bit): too big for the
+  # game's zips, so it's a download of its own. Packed from Hugging Face's
+  # files by the game itself, then asked a question to check it answers.
+  model:
+    name: Pack the Dubiety model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Download SmolLM2-135M-Instruct
+        run: |
+          mkdir hf
+          for f in config.json tokenizer.json model.safetensors; do
+            curl -fsSL -o "hf/$f" "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/$f"
+          done
+      - name: Pack and check it
+        run: |
+          mkdir -p "dubiety-model/dubiety"
+          ./target/release/minceraft --pack-model hf dubiety-model/dubiety/model.lm
+          answer=$(./target/release/minceraft --ask-model dubiety-model/dubiety/model.lm "What is the capital of France?")
+          echo "$answer"
+          echo "$answer" | grep -qi paris
+          cp example-mods/dubiety/README.md dubiety-model/dubiety/README-model.md
+          (cd dubiety-model && zip -qr "../dubiety-model-${VERSION}.zip" dubiety)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dubiety-model
+          path: dubiety-model-*.zip
+
   publish:
     name: Publish the release
-    needs: build
+    needs: [build, model]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -82,5 +115,7 @@ jobs:
             - **Windows:** `minceraft-${{ env.VERSION }}-windows.zip`, then double-click `minceraft.exe`. Windows may warn about an unrecognised app the first time: click **More info**, then **Run anyway**.
             - **Linux:** `minceraft-${{ env.VERSION }}-linux.zip`, then run `./minceraft` (needs the usual X11/GL and ALSA libraries).
             - **macOS:** `minceraft-${{ env.VERSION }}-macos.zip` (Apple silicon). The first time, right-click `minceraft` and choose **Open**.
+
+            **Dubiety's language model** (optional, ~140 MB): unzip `dubiety-model-${{ env.VERSION }}.zip` into your `mods` folder so it adds `mods/dubiety/model.lm`. Without it, Dubiety uses its own tiny word model.
 
             Worlds and settings are kept in your data folder (`%APPDATA%\Minceraft` on Windows), and the first run copies over any `saves` and `settings.txt` found beside the game. See the README for controls and multiplayer.

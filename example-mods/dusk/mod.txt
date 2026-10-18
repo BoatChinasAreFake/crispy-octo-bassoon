@@ -975,3 +975,8 @@ output = moonwillow_slab 6
 [recipe]
 inputs = moonwillow_planks 6
 output = moonwillow_stairs 4
+
+[advancement complaint_resolved]
+title = Complaint Resolved
+text = Defeat the Slightly Dim Forest final guardian and collect its heart.
+obtain = hydra_heart

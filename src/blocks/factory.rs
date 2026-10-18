@@ -43,16 +43,9 @@ pub fn output(slot: usize) -> bool {
 fn lookup(key: &str) -> Option<Id> {
     reg().lookup(key)
 }
+/// The recipe line under a machine's slots (from its mod's `[machine ...] recipe = ...`).
 pub fn hint(id: Id) -> &'static str {
-    match kind(id) {
-        Some(Kind::Centrifuge) => "2 dust + coal -> pellet; use coal or cells for power.",
-        Some(Kind::Reactor) => "Pellet + coolant -> 4 cells + waste; 15s; needs tower.",
-        Some(Kind::Refinery) => "2 coal + tank -> 2 fuel; 4s; 8 energy/s.",
-        Some(Kind::Oxygen) => "Battery + tank -> 4 oxygen + empty battery; 8 energy/s.",
-        Some(Kind::Solar) => "Charge empty cells. Clear daylight generates 6 energy/s.",
-        Some(Kind::Battery) => "Store solar power or discharge cells. Charge empty cells.",
-        _ => "Smelt one item in 4 powered seconds; 8 energy/s.",
-    }
+    reg().machine(id).map_or("", |m| m.recipe.as_str())
 }
 /// Charged portable cells produce stored energy and a reusable empty shell.
 pub fn cell(id: Id) -> Option<(Id, f32)> {
@@ -308,7 +301,8 @@ impl Game {
             && let Some(mut scripts) = self.scripts.take()
         {
             // Previously paid script batches retain their original save data until stopped or finished.
-            let result = scripts.call(self, "on_chat", vec![name.into(), "/hbm scram".into()]);
+            let scram = reg().machine(self.world.get_v(p)).and_then(|m| m.actions.get(1)).map_or(String::new(), |a| a.command.clone());
+            let result = scripts.call(self, "on_chat", vec![name.into(), scram.into()]);
             self.scripts = Some(scripts);
             for error in result.errors {
                 self.msg(format!("Script error {error}"));
@@ -338,17 +332,15 @@ impl Game {
         let (Some(name), Some(text)) = (name.clone().try_cast::<rhai::ImmutableString>(), text.clone().try_cast::<rhai::ImmutableString>()) else {
             return false;
         };
-        let (key, action) = match text.trim() {
-            "/hbm refine" => ("half_baked:centrifuge", 0),
-            "/hbm reactor" => ("half_baked:reactor", 0),
-            "/hbm scram" => ("half_baked:reactor", 1),
-            "/hbm status" => ("half_baked:reactor", 255),
-            "/astra refine" => ("ad_absurdum:refinery", 0),
-            "/astra refill" => ("ad_absurdum:oxygen_generator", 0),
-            "/astra charge" => ("ad_absurdum:solar_panel", 0),
-            _ => return false,
-        };
-        let Some(id) = lookup(key) else { return false };
+        // Which machine's button (or status) this command is, from the mods' `[machine ...]` text.
+        let text = text.trim();
+        let found = reg().machines.iter().filter(|m| kind(m.block).is_some()).find_map(|m| {
+            if m.status_command == text {
+                return Some((m.block, 255u8));
+            }
+            m.actions.iter().position(|a| a.command == text).map(|i| (m.block, i as u8))
+        });
+        let Some((id, action)) = found else { return false };
         let Some(at) = self.player_position(name.as_str()) else { return false };
         let from = if self.is_local_player(name.as_str()) {
             self.my_id

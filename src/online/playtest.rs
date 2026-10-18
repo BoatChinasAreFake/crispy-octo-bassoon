@@ -204,6 +204,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     new_land(&mut host, &mut team, &mut report);
     reshaped_depths(&mut host, &mut team, &mut report, &mut touched);
     hollow_filled(&mut host, &mut team, &mut report, &mut touched);
+    block_sets(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2145,6 +2146,58 @@ fn hollow_filled(host: &mut Game, team: &mut [Bot], report: &mut Report, touched
     ground(host, team, k);
 }
 
+/// v0.8: a bot builds a wall that joins up, opens and waxes a copper door,
+/// and lights a coloured candle; everyone sees the same blocks.
+fn block_sets(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    revive(host, team);
+    let k = 0;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    report.features.push("walls");
+    let wall = crate::stonesets::wall(crate::stonesets::set_of(crate::block::TUFF).unwrap()).unwrap();
+    let a = feet + IVec3::new(3, 0, 0);
+    for p in [a, a + IVec3::X] {
+        touched.insert(p);
+    }
+    host.world.set_v(a, wall);
+    let id = team[k].game.my_id;
+    host.give_peer(id, wall, 1);
+    pump(host, team, 0.5, |_| idle());
+    team[k].game.inv.consume_held();
+    team[k].game.world.set_v(a + IVec3::X, wall);
+    pump(host, team, 1.0, |_| idle());
+    if host.world.get_v(a) != wall + 1 {
+        report.problems.push(format!("{}'s wall never joined the host's (host {} {}, bot {} {})", team[k].name, host.world.get_v(a), host.world.get_v(a + IVec3::X), team[k].game.world.get_v(a), team[k].game.world.get_v(a + IVec3::X)));
+    }
+    report.features.push("copper doors");
+    let d = crate::copperworks::door(0);
+    let door = feet + IVec3::new(-3, 0, 0);
+    for p in [door, door + IVec3::Y] {
+        touched.insert(p);
+    }
+    host.world.set_v(door, door_of(d, 0, false, false));
+    host.world.set_v(door + IVec3::Y, door_of(d, 0, false, true));
+    pump(host, team, 0.5, |_| idle());
+    team[k].game.world.set_v(door, door_of(d, 0, true, false));
+    team[k].game.world.set_v(door + IVec3::Y, door_of(d, 0, true, true));
+    pump(host, team, 1.0, |_| idle());
+    if host.world.get_v(door) != door_of(d, 0, true, false) {
+        report.problems.push(format!("{} couldn't open a copper door (host {}, bot {}, expected {})", team[k].name, host.world.get_v(door), team[k].game.world.get_v(door), door_of(d, 0, true, false)));
+    }
+    report.features.push("coloured candles");
+    let wick = feet + IVec3::new(0, 0, 3);
+    touched.insert(wick);
+    host.world.set_v(wick, crate::dyed::candle(Some(4), false));
+    pump(host, team, 0.5, |_| idle());
+    team[k].game.world.set_v(wick, crate::dyed::candle(Some(4), true));
+    pump(host, team, 1.0, |_| idle());
+    if host.world.get_v(wick) != crate::dyed::candle(Some(4), true) {
+        report.problems.push(format!("{} couldn't light a yellow candle", team[k].name));
+    }
+    ground(host, team, k);
+}
+
 /// v0.5: a Hmmer with no job claims a bed and a Lectern near a bot and
 /// becomes a Librarian, then goes to bed at night; everyone sees it.
 fn village_life(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
@@ -2830,7 +2883,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools", "leapstalks", "sulkers"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools", "leapstalks", "sulkers", "walls", "copper doors", "coloured candles"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

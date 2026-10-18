@@ -218,6 +218,8 @@ pub struct Game {
     pub dedicated: bool,
     /// Script mods (only where the world lives: single player, host, server).
     pub scripts: Option<ScriptHost>,
+    /// Answers mods' language-model questions (started on first use; see smollm.rs).
+    pub model: Option<crate::smollm::Worker>,
     /// Script variables loaded from the save, handed to the scripts when they start.
     saved_script_vars: Vec<(String, Vec<u8>)>,
     pub advancements: Progress,
@@ -602,6 +604,7 @@ impl Game {
             net_error: None,
             dedicated: false,
             scripts: None,
+            model: None,
             saved_script_vars: Vec::new(),
             advancements: Progress::default(),
             toasts: Vec::new(),
@@ -1273,11 +1276,11 @@ impl Game {
             BAMBOO => "bamboozled",
             AMETHYST_SHARD => "crystal_clear",
             _ if (CORAL_FIRST..=DEAD_CORAL).contains(&item) => "reef_madness",
-            _ if reg().key_of(item)=="half_baked:energy_cell" => "half_baked_power",
-            _ if reg().key_of(item)=="ad_absurdum:rocket_1" => "rocket_paperwork",
-            _ if reg().key_of(item)=="dubiety:beacon" => "pocket_philosopher",
-            _ if reg().key_of(item)=="dusk:hydra_heart" => "complaint_resolved",
-            _ => return,
+            // (Mods' own advancements for getting their things.)
+            _ => match reg().advancements.iter().find(|a| a.obtain == Some(item)) {
+                Some(a) => a.adv.key,
+                None => return,
+            },
         };
         self.advance(key);
     }
@@ -1575,6 +1578,10 @@ impl Game {
         if (0..crate::woods::WOODS.len()).all(|w| self.inv.count(crate::woods::id(w, crate::woods::part::LOG)) > 0) {
             self.advance("branching_out");
         }
+        let walls = (0..crate::stonesets::SETS.len()).filter(|&i| crate::stonesets::wall(i).is_some_and(|w| self.inv.count(w) > 0)).count();
+        if walls >= 5 {
+            self.advance("wall_to_wall");
+        }
         if self.inv.armor_points() > 0 {
             self.advance("suit_up");
             if self.inv.armor.iter().all(|s| s.and_then(|(id, _)| armor_of(id)).is_some_and(|(_, tier)| tier == 3)) {
@@ -1743,6 +1750,17 @@ impl Game {
 
     fn script_tick(&mut self, dt: f32) {
         self.minigame_tick(dt);
+        // Answers from mods' language models go back to the mod that asked.
+        let replies = self.model.as_mut().map(|w| w.replies()).unwrap_or_default();
+        for (mod_id, player, text) in replies {
+            let Some(mut host) = self.scripts.take() else { break };
+            let r = host.call_in(self, Some(&mod_id), "on_model_reply", vec![player.into(), text.into()]);
+            self.scripts = Some(host);
+            for e in r.errors {
+                self.msg(format!("Script error {e}"));
+            }
+            self.apply_cmds(r.cmds);
+        }
         self.post_tick(dt);
         if !self.dedicated {
             self.note_land();
@@ -1913,6 +1931,9 @@ impl Game {
                     self.share_teams();
                 }
                 Cmd::SetSpawn(p, at) => self.set_player_spawn(&p, at),
+                Cmd::ModelAsk(mod_id, player, system, prompt) => {
+                    self.model.get_or_insert_with(crate::smollm::Worker::start).ask(crate::smollm::Ask { mod_id, player, system, prompt });
+                }
                 Cmd::WorldSpawn(at) => {
                     if at.is_finite() {
                         self.spawn = at;
@@ -2021,6 +2042,11 @@ impl Game {
         self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
         self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set. Your back hurts.");
         self.advance("sweet_dreams");
+        if let Some(s) = self.sleeping
+            && crate::dyed::bed_of(self.world.get_v(s.bed)).is_some()
+        {
+            self.advance("colour_coordinated");
+        }
     }
 
     /// Throw a Stare Pearl: blink to wherever you're looking.
@@ -3078,7 +3104,7 @@ impl Game {
             return;
         }
         // Candles light and go out.
-        if matches!(hit_id, CANDLE | CANDLE_LIT) && self.use_candle(hit_pos) {
+        if crate::dyed::is_candle(hit_id) && self.use_candle(hit_pos) {
             return;
         }
         // Gates and trapdoors swing (sneak to place against them instead).
@@ -3129,7 +3155,7 @@ impl Game {
             self.at_table = true;
             return;
         }
-        if let Some(base) = crate::woods::door_for_item(held) {
+        if let Some(base) = crate::woods::door_for_item(held).or_else(|| crate::copperworks::door_for_item(held)) {
             self.place_door(base, hit_pos, normal, hit_id);
             return;
         }

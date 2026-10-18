@@ -10,6 +10,12 @@ Dubiety uses an original **64-sentence, nine-topic trigram corpus**. The corpus 
 
 Topic routing recognizes mining, food, building, combat, travel, nuclear machinery, space and the dusk forest; unmatched prompts use general conversation. Word generation can recombine shared phrases and can be awkward. This is deliberately a very small language model with limited knowledge, not a reasoning chatbot or an autonomous planner. Its game-state observations are separate, factual API reads.
 
+## SmolLM2, when it's there
+
+With **SmolLM2-135M-Instruct** in this folder (`mods/dubiety/model.lm`, from the `dubiety-model` download on each release, about 137 MB), `/dubiety ask` is answered by that model instead: a real (if very small) language model, run on the CPU by the game itself with 8-bit weights. It's told your dimension, health, food and notes, takes a few seconds to reply on its own thread, and uses about 140 MB of memory once loaded. It only runs where the world lives, and the file is never sent to joining players. Without the file, the trigram corpus below answers as before.
+
+To make the file yourself: download `config.json`, `tokenizer.json` and `model.safetensors` from [HuggingFaceTB/SmolLM2-135M-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct) into a folder and run `minceraft --pack-model <folder> mods/dubiety/model.lm`. `minceraft --ask-model mods/dubiety/model.lm "a question"` tries it.
+
 ## Meet the companion
 
 Craft a Quite Small Thinking Chip from Gold, Zap Dust and a Book. Use a chip plus Iron and Glass to make a Terminal, or a chip plus two Glass to make a Companion Beacon. A Notebook gives a reminder of the note commands.

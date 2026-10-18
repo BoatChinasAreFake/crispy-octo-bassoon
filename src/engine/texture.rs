@@ -965,6 +965,22 @@ pub const T_SULKER_BULLET: u16 = 1178;
 pub const T_GATEWAY: u16 = 1179;
 pub const T_GRAVITY_CORE: u16 = 1180;
 pub const T_STAR_FRAGMENT: u16 = 1181;
+pub const T_TUFF: u16 = 1182;
+pub const T_POLISHED_TUFF: u16 = 1183;
+pub const T_POLISHED_DEEPSLATE: u16 = 1184;
+pub const T_CHISELED_DEEPSLATE: u16 = 1185;
+pub const T_CRACKED_DEEPSLATE_BRICKS: u16 = 1186;
+pub const T_CRACKED_DEEPSLATE_TILES: u16 = 1187;
+/// Copper doors, trapdoors and grates: `+ stage` (grates from exposed on).
+pub const T_COPPER_DOOR_TOP: u16 = 1188;
+pub const T_COPPER_DOOR_BOTTOM: u16 = 1192;
+pub const T_COPPER_TRAPDOOR: u16 = 1196;
+pub const T_COPPER_GRATE_STAGE: u16 = 1200;
+pub const T_COPPER_DOOR_ITEM: u16 = 1203;
+/// Coloured beds: tops `+ slot * 4 + facing`, sides `+ slot`; candles `+ colour * 2 + lit` (see dyed.rs).
+pub const T_DYED_BED_TOP: u16 = 1207;
+pub const T_DYED_BED_SIDE: u16 = 1235;
+pub const T_DYED_CANDLE: u16 = 1242;
 
 // Crop tiles are four in a row: T_CROP_* + stage.
 
@@ -4104,8 +4120,49 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     }
     home_tiles(&mut a);
     paint_models(&mut a);
+    paint_dyed(&mut a);
 
     a.px
+}
+
+/// Coloured beds and candles: the plain ones' tiles, recoloured.
+fn paint_dyed(a: &mut Atlas) {
+    let tint = |p: Rgba, c: [u8; 3], from: f32| {
+        let l = (p[0] as f32 * 0.3 + p[1] as f32 * 0.59 + p[2] as f32 * 0.11) / from;
+        [(c[0] as f32 * l).min(255.0) as u8, (c[1] as f32 * l).min(255.0) as u8, (c[2] as f32 * l).min(255.0) as u8, p[3]]
+    };
+    let red = |p: Rgba| p[3] > 0 && p[0] as i32 > p[1] as i32 + 60;
+    for c in (0..8).filter(|&c| c != crate::dyed::RED) {
+        let rgb = crate::carpentry::colour_rgb(c);
+        let s = if c > crate::dyed::RED { c - 1 } else { c } as u16;
+        for (f, from) in [T_BED_TOP, T_BED_TOP_E, T_BED_TOP_S, T_BED_TOP_W, T_BED_SIDE].into_iter().enumerate() {
+            let to = if f < 4 { T_DYED_BED_TOP + s * 4 + f as u16 } else { T_DYED_BED_SIDE + s };
+            a.copy(from, to);
+            for y in 0..16 {
+                for x in 0..16 {
+                    let p = a.get(to, x, y);
+                    if red(p) {
+                        a.set(to, x, y, tint(p, rgb, 75.0));
+                    }
+                }
+            }
+        }
+    }
+    for c in 0..8u16 {
+        let rgb = crate::carpentry::colour_rgb(c as usize);
+        for lit in 0..2u16 {
+            let to = T_DYED_CANDLE + c * 2 + lit;
+            a.copy(if lit == 1 { T_CANDLE_LIT } else { T_CANDLE }, to);
+            for y in 6..16 {
+                for x in 6..10 {
+                    let p = a.get(to, x, y);
+                    if p[3] > 0 {
+                        a.set(to, x, y, tint(p, rgb, 225.0));
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Textures for the detailed block models (see models.rs), and the blocks
@@ -7054,6 +7111,59 @@ fn paint_trials_and_friends(a: &mut Atlas) {
         let ring = (x == 3 || x == 12 || y == 3 || y == 12) && (3..13).contains(&x) && (3..13).contains(&y);
         shade(if ring { rgb(70, 74, 68) } else { tuff }, r.range(0.9, 1.06))
     });
+    // v0.8: plain and polished tuff, and polished, chiseled and cracked deepslate.
+    a.each(T_TUFF, |x, y, r, p| {
+        let n = p.noise3(x as f32 * 0.5, y as f32 * 0.5, 9.0);
+        shade(if n > 0.35 { rgb(120, 118, 100) } else { tuff }, r.range(0.86, 1.1))
+    });
+    a.each(T_POLISHED_TUFF, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if rim { rgb(70, 74, 68) } else { rgb(105, 110, 102) }, r.range(0.95, 1.04))
+    });
+    let slate = rgb(78, 78, 86);
+    a.each(T_POLISHED_DEEPSLATE, |x, y, r, _| {
+        let rim = x == 0 || y == 0 || x == 15 || y == 15;
+        shade(if rim { rgb(50, 50, 56) } else { slate }, r.range(0.95, 1.04))
+    });
+    a.each(T_CHISELED_DEEPSLATE, |x, y, r, _| {
+        let ring = |k: i32| (x as i32 - 7).abs().max((y as i32 - 7).abs()) == k;
+        shade(if ring(7) || ring(4) || ring(1) { rgb(45, 45, 50) } else { slate }, r.range(0.92, 1.05))
+    });
+    let crack = |x: usize, y: usize| (x as i32 - 3 - (y as i32 / 2)).abs() == 0 && (2..14).contains(&y) || (x + y == 20 && x > 8);
+    a.each(T_CRACKED_DEEPSLATE_BRICKS, move |x, y, r, _| {
+        let row = y / 4;
+        let mortar = y % 4 == 3 || (x + if row % 2 == 1 { 4 } else { 0 }) % 8 == 7;
+        shade(if mortar || crack(x, y) { rgb(40, 40, 45) } else { rgb(85, 85, 92) }, r.range(0.9, 1.05))
+    });
+    a.each(T_CRACKED_DEEPSLATE_TILES, move |x, y, r, _| {
+        let mortar = y % 4 == 3 || x % 4 == 3;
+        shade(if mortar || crack(15 - x, y) { rgb(36, 36, 40) } else { rgb(70, 70, 78) }, r.range(0.9, 1.05))
+    });
+    // Copper doors, trapdoors and grates, in the four stages of copper blocks.
+    let stages = [rgb(200, 115, 75), rgb(165, 120, 95), rgb(110, 150, 115), rgb(85, 170, 140)];
+    for (i, c) in stages.into_iter().enumerate() {
+        let s = i as u16;
+        for (tile, top) in [(T_COPPER_DOOR_BOTTOM + s, false), (T_COPPER_DOOR_TOP + s, true)] {
+            a.each(tile, move |x, y, r, _| {
+                let frame = x <= 1 || x >= 14 || (!top && y >= 14) || (top && y <= 1);
+                let window = top && (3..13).contains(&x) && (3..13).contains(&y) && (x % 5 == 2 || y % 5 == 2);
+                let rivet = (x == 3 || x == 12) && y % 4 == 2;
+                if window { [0, 0, 0, 0] } else if frame || rivet { shade(c, r.range(0.6, 0.75)) } else { shade(c, r.range(0.9, 1.08)) }
+            });
+        }
+        a.each(T_COPPER_TRAPDOOR + s, move |x, y, r, _| {
+            let frame = x < 2 || y < 2 || x > 13 || y > 13;
+            let hole = !frame && (x % 4 == 1) && (y % 4 == 1);
+            if hole { [0, 0, 0, 0] } else { shade(c, r.range(0.85, 1.08) * if frame { 0.75 } else { 1.0 }) }
+        });
+        if i > 0 {
+            a.each(T_COPPER_GRATE_STAGE + s - 1, move |x, y, r, _| {
+                let bar = x % 4 == 0 || y % 4 == 0 || x == 15 || y == 15;
+                if bar { shade(c, r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
+            });
+        }
+        a.sprite(T_COPPER_DOOR_ITEM + s, &DOOR_ITEM, &[('#', shade(c, 0.5)), ('b', c), ('d', shade(c, 0.75)), ('w', rgb(60, 60, 60))]);
+    }
     a.each(T_COPPER_GRATE, |x, y, r, _| {
         let bar = x % 4 == 0 || y % 4 == 0 || x == 15 || y == 15;
         if bar { shade(rgb(200, 115, 75), r.range(0.85, 1.1)) } else { [0, 0, 0, 0] }
