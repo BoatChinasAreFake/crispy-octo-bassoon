@@ -336,6 +336,11 @@ pub struct Game {
     pub pvp: bool,
     /// Land claimed with Survey Posts (see claims.rs), and whose land we're on.
     pub claims: crate::claims::Claims,
+    /// Building tools (see buildtools.rs): everyone's selection corners (by
+    /// name, where the world lives), your own (to draw), and saved builds.
+    pub selections: HashMap<String, [Option<IVec3>; 2]>,
+    pub my_selection: [Option<IVec3>; 2],
+    pub builds: std::collections::BTreeMap<String, String>,
     pub on_land: Option<String>,
     /// Scores, timers and the sidebar for mods' minigames (see minigames.rs).
     pub board: crate::minigames::Board,
@@ -681,6 +686,9 @@ impl Game {
             life: Default::default(),
             board: Default::default(),
             claims: Default::default(),
+            selections: HashMap::new(),
+            my_selection: [None, None],
+            builds: Default::default(),
             on_land: None,
             personal_spawn: None,
             smooth_far: false,
@@ -1004,6 +1012,9 @@ impl Game {
         if !self.waypoints.is_empty() {
             v.push(("waypoints2".into(), crate::qol::encode(&self.waypoints)));
         }
+        if !self.builds.is_empty() {
+            v.push(("builds".into(), crate::buildtools::encode(&self.builds)));
+        }
         if self.claims != crate::claims::Claims::default() {
             v.push(("claims".into(), self.claims.encode()));
         }
@@ -1113,6 +1124,9 @@ impl Game {
             self.waypoints = crate::qol::decode(b, false);
         } else if let Some(b) = extra("waypoints") {
             self.waypoints = crate::qol::decode(b, true);
+        }
+        if let Some(b) = extra("builds") {
+            self.builds = crate::buildtools::decode(b);
         }
         if let Some(b) = extra("claims") {
             self.claims = crate::claims::Claims::decode(b);
@@ -2605,6 +2619,14 @@ impl Game {
             }
             Some(Target::Block(h)) => {
                 let pos = h.pos;
+                // The Selection Wand marks the first corner instead of breaking.
+                if held == SELECTION_WAND && self.creative {
+                    if c.attack_pressed {
+                        self.wand_corner(0, pos);
+                    }
+                    self.breaking = None;
+                    return;
+                }
                 // A frame with something in it gives that up before breaking.
                 if c.attack_pressed && self.attack_cd <= 0.0 && self.hit_frame(pos) {
                     self.attack_cd = 0.25;
@@ -3089,6 +3111,16 @@ impl Game {
         let hit_id = self.world.get_v(hit_pos);
         // Levers and buttons (sneak to place against one instead).
         if !self.player.sneaking && (self.use_switch(hit_pos, hit_id) || self.use_zappart(hit_pos, hit_id)) {
+            return;
+        }
+        // Building tools: the Structure Block, and the wand's second corner.
+        if hit_id == STRUCTURE_BLOCK && self.use_structure_block(hit_pos) {
+            return;
+        }
+        if held == SELECTION_WAND {
+            if self.creative {
+                self.wand_corner(1, hit_pos);
+            }
             return;
         }
         // Item frames take what you're holding.
@@ -4877,6 +4909,16 @@ impl Game {
                     let m = Mat4::from_translation(min - Vec3::splat(0.006)) * Mat4::from_scale(max - min + Vec3::splat(0.012));
                     g.cube(&m, [T_CRACK0 + stage; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
                 }
+        }
+
+        // Your building selection (see buildtools.rs), while holding the wand.
+        if self.creative && self.inv.held() == SELECTION_WAND {
+            let [a, b] = self.my_selection;
+            if let Some(a) = a.or(b) {
+                let (lo, hi) = crate::buildtools::corners(a, b.unwrap_or(a));
+                g.begin(Pass::Blend, [1.0, 0.85, 0.2, 0.9], true);
+                outline(&mut g, lo.as_vec3() - Vec3::splat(0.02), hi.as_vec3() + Vec3::splat(1.02), 0.04);
+            }
         }
 
         if !self.third_person && !self.spectator && self.rocket_pilot().is_none() {

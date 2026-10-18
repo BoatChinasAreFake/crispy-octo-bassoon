@@ -522,7 +522,9 @@ pub const SET_FIRST: Id = MYCELIUM + 144;
 pub const COPPERWORKS_FIRST: Id = SET_FIRST + crate::stonesets::COUNT;
 /// Coloured beds and candles (see dyed.rs).
 pub const DYED_FIRST: Id = COPPERWORKS_FIRST + crate::copperworks::COUNT;
-pub const NUM_BLOCKS: Id = DYED_FIRST + crate::dyed::COUNT;
+/// Holds a saved build (see buildtools.rs).
+pub const STRUCTURE_BLOCK: Id = DYED_FIRST + crate::dyed::COUNT;
+pub const NUM_BLOCKS: Id = STRUCTURE_BLOCK + 1;
 
 /// A block that sits in water: it's drawn with water round it, you swim
 /// through it, and breaking it leaves water behind.
@@ -810,7 +812,9 @@ pub const SULKER_SHELL: Id = FIRST_ITEM + 288;
 pub const STAR_FRAGMENT: Id = FIRST_ITEM + 289;
 /// Copper doors: `+ variant` (see copperworks.rs).
 pub const COPPER_DOOR_FIRST: Id = FIRST_ITEM + 290;
-pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 298;
+/// Marks a selection's corners (see buildtools.rs).
+pub const SELECTION_WAND: Id = FIRST_ITEM + 298;
+pub const FIRST_MOD_ITEM: Id = FIRST_ITEM + 299;
 
 /// Longest a liquid runs from its source: water 7 blocks, lava 3.
 pub const WATER_REACH: u8 = 7;
@@ -2829,6 +2833,9 @@ impl Registry {
         blocks.extend(sets);
         blocks.extend(crate::copperworks::defs());
         blocks.extend(crate::dyed::defs());
+        let mut sb = def("structure_block", "Structure Block (Remembers Builds)", Cube, true, true, [T_STRUCTURE_BLOCK; 3], 50.0, 3, true, AIR, 0.0, S_STONE);
+        sb.creative = true;
+        blocks.push(sb);
         debug_assert_eq!(blocks.len(), NUM_BLOCKS as usize);
         debug_assert_eq!(blocks[NOTE_BLOCK as usize].key, "note_block");
         debug_assert_eq!(blocks[JUKEBOX as usize].key, "jukebox");
@@ -3114,6 +3121,7 @@ impl Registry {
         items.push(item("sulker_shell", "Sulker Shell (Still Sulking)", T_SULKER_SHELL));
         items.push(item("star_fragment", "Star Fragment (Fell a Long Way)", T_STAR_FRAGMENT));
         items.extend(crate::copperworks::items());
+        items.push(ItemDef { stack: 1, consume: false, ..item("selection_wand", "Selection Wand (Points at Things)", T_SELECTION_WAND) });
         debug_assert_eq!(items.len(), (FIRST_MOD_ITEM - FIRST_ITEM) as usize);
 
         let r = |inputs: &[(Id, u8)], output: (Id, u8)| Recipe { inputs: inputs.to_vec(), output };
