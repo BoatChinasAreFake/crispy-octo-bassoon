@@ -64,8 +64,15 @@ pub fn is_gate(id: Id) -> bool {
 pub fn is_ladder(id: Id) -> bool {
     (LADDER_FIRST..LADDER_FIRST + 4).contains(&id)
 }
+/// The first block of a trapdoor's family (shut, hinged north): the plain one's, or copper's.
+pub fn trapdoor_base(id: Id) -> Option<Id> {
+    match block(id).shape {
+        Shape::Trapdoor { facing, open } => Some(id - (facing as Id * 2 + open as Id)),
+        _ => None,
+    }
+}
 pub fn is_trapdoor(id: Id) -> bool {
-    (TRAPDOOR_FIRST..TRAPDOOR_FIRST + 8).contains(&id)
+    trapdoor_base(id).is_some()
 }
 pub fn is_stained_glass(id: Id) -> bool {
     (STAINED_GLASS..STAINED_GLASS + 8).contains(&id)
@@ -73,14 +80,14 @@ pub fn is_stained_glass(id: Id) -> bool {
 
 /// The item a family member is placed from (and drops as).
 pub fn family(id: Id) -> Option<Id> {
-    if let Some(base) = fence_base(id).or_else(|| gate_base(id)) {
+    if let Some(base) = fence_base(id).or_else(|| gate_base(id)).or_else(|| crate::stonesets::wall_base(id)) {
         Some(base)
     } else if is_pane(id) {
         Some(PANE_FIRST)
     } else if is_ladder(id) {
         Some(LADDER_FIRST)
-    } else if is_trapdoor(id) {
-        Some(TRAPDOOR_FIRST)
+    } else if let Some(base) = trapdoor_base(id) {
+        Some(base)
     } else {
         None
     }
@@ -108,12 +115,20 @@ pub fn join_mask_by(get: impl Fn(IVec3) -> Id, p: IVec3, pane: bool) -> u8 {
     SIDES.iter().filter(|(d, _)| joins(pane, get(p + *d))).fold(0, |m, (_, b)| m | b)
 }
 
+/// Which sides a wall at `p` should join: walls, gates and solid blocks.
+pub fn wall_mask_by(get: impl Fn(IVec3) -> Id, p: IVec3) -> u8 {
+    SIDES.iter().filter(|(d, _)| {
+        let o = get(p + *d);
+        crate::stonesets::is_wall(o) || is_gate(o) || is_opaque(o)
+    }).fold(0, |m, (_, b)| m | b)
+}
+
 /// How high fences stand for collisions: a little over a jump.
 pub const TALL: f32 = 1.6;
 
 /// Things that stand taller than their block for anything trying to jump them.
 pub fn is_tall(id: Id) -> bool {
-    is_fence(id) || (is_gate(id) && !gate_state(id).1)
+    is_fence(id) || crate::stonesets::is_wall(id) || (is_gate(id) && !gate_state(id).1)
 }
 
 /// A gate's state: (spans east-west, open).
@@ -151,6 +166,13 @@ impl World {
                 }
                 continue;
             }
+            if let Some(base) = crate::stonesets::wall_base(id) {
+                let want = base + wall_mask_by(|r| self.get_v(r), q) as Id;
+                if want != id {
+                    self.set_v(q, want);
+                }
+                continue;
+            }
             let (first, pane) = if let Some(base) = fence_base(id) {
                 (base, false)
             } else if is_pane(id) {
@@ -174,9 +196,9 @@ impl Game {
             let (x_axis, open) = gate_state(id);
             // Gates open away from you, which here just means across your way.
             gate_of(base, x_axis, !open)
-        } else if is_trapdoor(id) {
-            let k = id - TRAPDOOR_FIRST;
-            trapdoor((k / 2) as u8, k.is_multiple_of(2))
+        } else if let Some(base) = trapdoor_base(id) {
+            let k = id - base;
+            base + (k / 2) * 2 + k.is_multiple_of(2) as Id
         } else {
             return false;
         };
@@ -199,10 +221,10 @@ impl Game {
                 Some(gate_of(g, f.is_multiple_of(2), false))
             }
             LADDER_FIRST => crate::decor::frame_facing(normal).map(|f| LADDER_FIRST + f as Id),
-            TRAPDOOR_FIRST => {
+            t if trapdoor_base(t) == Some(t) => {
                 // Hinged on the side you put it against, or the side nearest you.
                 let f = crate::decor::frame_facing(normal).unwrap_or((self.facing() + 2) % 4);
-                Some(trapdoor(f, false))
+                Some(t + f as Id * 2)
             }
             _ => None,
         }

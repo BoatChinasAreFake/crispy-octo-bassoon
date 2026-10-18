@@ -1194,9 +1194,15 @@ impl Game {
         }
         // Gates and trapdoors swing; fences and panes may be placed at any join (the host reshapes them).
         if let (Some(a), Some(b)) = (crate::carpentry::family(old), crate::carpentry::family(new)) {
-            return a == b && (crate::carpentry::is_gate(a) || a == TRAPDOOR_FIRST);
+            return a == b && (crate::carpentry::is_gate(a) || crate::carpentry::is_trapdoor(a));
         }
         // Levers flip both ways, buttons only go in (the host lets them out).
+        if let (Some((ca, la)), Some((cb, lb))) = (crate::dyed::candle_of(old), crate::dyed::candle_of(new))
+            && ca == cb
+            && la != lb
+        {
+            return true;
+        }
         if matches!((old, new), (LEVER, LEVER_ON) | (LEVER_ON, LEVER) | (BUTTON, BUTTON_ON) | (CANDLE, CANDLE_LIT) | (CANDLE_LIT, CANDLE) | (CAVE_VINES_LIT, CAVE_VINES)) {
             return true;
         }

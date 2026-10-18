@@ -1578,6 +1578,10 @@ impl Game {
         if (0..crate::woods::WOODS.len()).all(|w| self.inv.count(crate::woods::id(w, crate::woods::part::LOG)) > 0) {
             self.advance("branching_out");
         }
+        let walls = (0..crate::stonesets::SETS.len()).filter(|&i| crate::stonesets::wall(i).is_some_and(|w| self.inv.count(w) > 0)).count();
+        if walls >= 5 {
+            self.advance("wall_to_wall");
+        }
         if self.inv.armor_points() > 0 {
             self.advance("suit_up");
             if self.inv.armor.iter().all(|s| s.and_then(|(id, _)| armor_of(id)).is_some_and(|(_, tier)| tier == 3)) {
@@ -2038,6 +2042,11 @@ impl Game {
         self.mobs.retain(|m| !m.menacing() || m.body.pos.distance(me) > 64.0);
         self.msg("You slept like a log (a Tree Chunk). Good morning! Spawn point set. Your back hurts.");
         self.advance("sweet_dreams");
+        if let Some(s) = self.sleeping
+            && crate::dyed::bed_of(self.world.get_v(s.bed)).is_some()
+        {
+            self.advance("colour_coordinated");
+        }
     }
 
     /// Throw a Stare Pearl: blink to wherever you're looking.
@@ -3095,7 +3104,7 @@ impl Game {
             return;
         }
         // Candles light and go out.
-        if matches!(hit_id, CANDLE | CANDLE_LIT) && self.use_candle(hit_pos) {
+        if crate::dyed::is_candle(hit_id) && self.use_candle(hit_pos) {
             return;
         }
         // Gates and trapdoors swing (sneak to place against them instead).
@@ -3146,7 +3155,7 @@ impl Game {
             self.at_table = true;
             return;
         }
-        if let Some(base) = crate::woods::door_for_item(held) {
+        if let Some(base) = crate::woods::door_for_item(held).or_else(|| crate::copperworks::door_for_item(held)) {
             self.place_door(base, hit_pos, normal, hit_id);
             return;
         }

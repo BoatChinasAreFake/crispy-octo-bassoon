@@ -62,8 +62,8 @@ impl Game {
             _ => {}
         }
         // A bed's head goes the way you're looking (you climb in from the foot).
-        if held == BED {
-            return crate::beds::bed(self.facing());
+        if held == BED || crate::dyed::bed_of(held).is_some_and(|b| b.1 == 0) {
+            return crate::dyed::bed(crate::dyed::bed_colour(held), self.facing());
         }
         // A lantern put on the underside of a block hangs from it.
         if held == LANTERN && normal == IVec3::NEG_Y {

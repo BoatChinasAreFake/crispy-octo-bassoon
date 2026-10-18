@@ -20,11 +20,14 @@ pub const SLEEP_SECS: f32 = 3.5;
 
 /// Any bed, whichever way it faces.
 pub fn is_bed(id: Id) -> bool {
-    id == BED || (BED_FACING_FIRST..BED_FACING_FIRST + 3).contains(&id)
+    id == BED || (BED_FACING_FIRST..BED_FACING_FIRST + 3).contains(&id) || crate::dyed::bed_of(id).is_some()
 }
 
 /// Which way the head of the bed is (0 north .. 3 west).
 pub fn facing(id: Id) -> u8 {
+    if let Some((_, f)) = crate::dyed::bed_of(id) {
+        return f;
+    }
     if id == BED { 0 } else { (id - BED_FACING_FIRST) as u8 + 1 }
 }
 

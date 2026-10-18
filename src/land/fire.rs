@@ -32,7 +32,7 @@ pub fn flammability(id: Id) -> (f32, f32) {
     use crate::carpentry::{is_fence, is_gate, is_ladder, is_trapdoor};
     if is_leaves(id) || matches!(id, TALL_GRASS | FLOWER | WEEDS | SAPLING | HAY | SCARECROW | DEAD_BUSH | LILY_PAD) || id == WOOL || (DYED_WOOL..DYED_WOOL + 7).contains(&id) {
         (0.6, 0.6)
-    } else if matches!(id, PLANKS | BOOKSHELF | TABLE) || is_fence(id) || is_gate(id) || is_ladder(id) || is_trapdoor(id) || is_door(id) || ((slab_of(id).is_some() || stairs_of(id).is_some()) && made_of(id) == PLANKS) {
+    } else if matches!(id, PLANKS | BOOKSHELF | TABLE) || is_fence(id) || is_gate(id) || is_ladder(id) || (is_trapdoor(id) && crate::copperworks::variant_of(id).is_none()) || is_door(id) || ((slab_of(id).is_some() || stairs_of(id).is_some()) && made_of(id) == PLANKS) {
         (0.25, 0.2)
     } else if is_log(id) {
         (0.1, 0.08)
