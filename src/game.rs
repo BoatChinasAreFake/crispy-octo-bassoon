@@ -283,6 +283,10 @@ pub struct Game {
     pub clouds_on: bool,
     pub fog_on: bool,
     pub view_bobbing: bool,
+    /// Build helpers (creative): a see-through preview of where the held
+    /// block would go, and mirror building (which axes, about which block).
+    pub ghost_preview: bool,
+    pub symmetry: Option<(u8, IVec3)>,
     pub particle_level: u8,
     pub water_reflections: bool,
     /// Sun shadows, and deep water with caustics (Video Settings; see render.rs).
@@ -654,6 +658,8 @@ impl Game {
             clouds_on: true,
             fog_on: true,
             view_bobbing: true,
+            ghost_preview: true,
+            symmetry: None,
             particle_level: 0,
             water_reflections: true,
             shadows: true,
@@ -2657,6 +2663,11 @@ impl Game {
                     if self.creative {
                         if self.attack_cd <= 0.0 {
                             self.break_block(pos, false);
+                            for m in self.mirror_spots(pos) {
+                                if self.world.get_v(m) == id {
+                                    self.break_block(m, false);
+                                }
+                            }
                             self.attack_cd = 0.22;
                         }
                     } else {
@@ -3286,6 +3297,7 @@ impl Game {
             oriented = WALL_TORCH_FIRST + f as Id;
         }
         self.world.set_v(place, oriented);
+        self.place_mirrored(place, oriented);
         if held == HOLLOW_BOX && !self.is_client() {
             let wear = self.inv.wear[self.inv.selected];
             self.unpack_box(place, wear);
@@ -4930,6 +4942,15 @@ impl Game {
                 }
         }
 
+        // Build helpers: a see-through block where the held one would go (and its mirror images).
+        if let Some(spots) = self.ghost_spots() {
+            let t = block(self.inv.held()).tex;
+            g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.38], false);
+            for p in spots {
+                let m = Mat4::from_translation(p.as_vec3() + Vec3::splat(0.04)) * Mat4::from_scale(Vec3::splat(0.92));
+                g.cube(&m, [t[1], t[1], t[0], t[2], t[1], t[1]], 1.0, [0.0, 0.0, 1.0, 1.0]);
+            }
+        }
         // Your building selection (see buildtools.rs), while holding the wand.
         if self.creative && self.inv.held() == SELECTION_WAND {
             let [a, b] = self.my_selection;

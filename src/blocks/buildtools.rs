@@ -159,7 +159,112 @@ pub fn block_build_name(p: IVec3) -> String {
     format!("block_{}_{}_{}", p.x, p.y, p.z)
 }
 
+/// Where mirror building copies `p`: across the x plane, the z plane, or both
+/// (mask 1, 2, 3), about the middle of block `c`.
+pub fn mirrors(mask: u8, c: IVec3, p: IVec3) -> Vec<IVec3> {
+    let mx = ivec3(2 * c.x - p.x, p.y, p.z);
+    let mz = ivec3(p.x, p.y, 2 * c.z - p.z);
+    let both = ivec3(2 * c.x - p.x, p.y, 2 * c.z - p.z);
+    let mut v = match mask & 3 {
+        1 => vec![mx],
+        2 => vec![mz],
+        3 => vec![mx, mz, both],
+        _ => vec![],
+    };
+    v.retain(|&q| q != p);
+    v.dedup();
+    v
+}
+
+/// A block as it looks in a mirror: stairs turn to face the other way.
+pub fn mirrored(id: Id, across_x: bool) -> Id {
+    match stairs_of(id) {
+        Some((base, f)) => base + match (across_x, f) {
+            (true, 1) => 3,
+            (true, 3) => 1,
+            (false, 0) => 2,
+            (false, 2) => 0,
+            _ => f,
+        } as Id,
+        None => id,
+    }
+}
+
 impl Game {
+    /// `/symmetry [x | z | both | off]`: mirror what you build and break
+    /// (in creative), about the block you're standing on. Just for you.
+    pub fn symmetry_command(&mut self, text: &str) -> Option<Vec<String>> {
+        let rest = text.strip_prefix("/symmetry")?;
+        if !rest.is_empty() && !rest.starts_with(' ') {
+            return None;
+        }
+        if !self.creative {
+            return Some(vec!["Mirror building is for creative mode.".into()]);
+        }
+        let here = self.player.body.pos.floor().as_ivec3();
+        let mask = match rest.trim().to_ascii_lowercase().as_str() {
+            "" if self.symmetry.is_some() => 0,
+            "" | "both" | "xz" => 3,
+            "x" => 1,
+            "z" => 2,
+            "off" => 0,
+            _ => return Some(vec!["Usage: /symmetry [x | z | both | off]".into()]),
+        };
+        if mask == 0 {
+            self.symmetry = None;
+            return Some(vec!["Mirror building off.".into()]);
+        }
+        self.symmetry = Some((mask, here));
+        let what = ["", "across x", "across z", "across x and z"][mask as usize];
+        Some(vec![format!("Mirror building {what}, about {}, {}, {}.", here.x, here.y, here.z)])
+    }
+
+    /// Where mirror building copies `p` to (none when it's off, or out of creative).
+    pub fn mirror_spots(&self, p: IVec3) -> Vec<IVec3> {
+        match self.symmetry {
+            Some((mask, c)) if self.creative => mirrors(mask, c, p),
+            _ => Vec::new(),
+        }
+    }
+
+    /// A block was placed at `p`: put its mirror images down too (where there's room).
+    pub fn place_mirrored(&mut self, p: IVec3, id: Id) {
+        let Some((mask, c)) = self.symmetry.filter(|_| self.creative) else { return };
+        for q in mirrors(mask, c, p) {
+            if (1..crate::world::CH).contains(&q.y) && replaceable(self.world.get_v(q)) {
+                let across_x = q.x != p.x;
+                let across_z = q.z != p.z;
+                let mut m = id;
+                if across_x {
+                    m = mirrored(m, true);
+                }
+                if across_z {
+                    m = mirrored(m, false);
+                }
+                self.world.set_v(q, m);
+            }
+        }
+        self.advance("mirror_mirror");
+    }
+
+    /// Where the ghost preview goes: the spot the held block would take, and
+    /// its mirror images (creative, with the option on, looking at a block).
+    pub fn ghost_spots(&self) -> Option<Vec<IVec3>> {
+        let held = self.inv.held();
+        if !self.creative || !self.ghost_preview || held == AIR || held >= FIRST_ITEM || held == SELECTION_WAND {
+            return None;
+        }
+        let Some(crate::game::Target::Block(h)) = &self.target else { return None };
+        let hit = self.world.get_v(h.pos);
+        let place = if replaceable(hit) { h.pos } else { h.pos + h.normal };
+        if !replaceable(self.world.get_v(place)) {
+            return None;
+        }
+        let mut v = vec![place];
+        v.extend(self.mirror_spots(place).into_iter().filter(|&q| replaceable(self.world.get_v(q))));
+        Some(v)
+    }
+
     /// Put `b` down with its low corner at `at` (air in it clears what's there).
     pub fn paste_build(&mut self, b: &Build, at: IVec3) -> usize {
         let mut n = 0;
@@ -426,6 +531,44 @@ impl Game {
 mod tests {
     use super::*;
     use crate::admin::Caller;
+
+    #[test]
+    fn mirror_building_copies_placing_and_breaking() {
+        let mut g = crate::game::tests::arena(842);
+        g.creative = false;
+        assert_eq!(g.symmetry_command("/symmetry x").unwrap()[0], "Mirror building is for creative mode.");
+        g.creative = true;
+        let c = g.player.body.pos.floor().as_ivec3();
+        assert!(g.symmetry_command("/symmetry both").unwrap()[0].starts_with("Mirror building across x and z"));
+        let p = c + ivec3(2, 1, 3);
+        let stairs = stairs(0, 1);
+        g.world.set_v(p, stairs);
+        g.place_mirrored(p, stairs);
+        assert_eq!(g.world.get_v(c + ivec3(-2, 1, 3)), stairs - 1 + 3, "facing west in the mirror");
+        assert_eq!(g.world.get_v(c + ivec3(2, 1, -3)), stairs, "east still, across z");
+        assert_eq!(g.world.get_v(c + ivec3(-2, 1, -3)), stairs - 1 + 3);
+        assert!(g.advancements.has("mirror_mirror"));
+        assert_eq!(g.mirror_spots(p).len(), 3);
+        assert!(g.symmetry_command("/symmetry").unwrap()[0].contains("off"));
+        assert!(g.mirror_spots(p).is_empty());
+        assert!(g.symmetry_command("/symmetryish").is_none());
+    }
+
+    #[test]
+    fn the_ghost_shows_where_a_block_would_go() {
+        let mut g = crate::game::tests::arena(843);
+        g.creative = true;
+        let floor = ivec3(3, 49, 0);
+        g.world.set_v(floor, STONE);
+        g.target = Some(crate::game::Target::Block(crate::world::Hit { pos: floor, normal: IVec3::Y, dist: 2.0 }));
+        g.inv.slots[g.inv.selected] = Some((BRICK, 1));
+        assert_eq!(g.ghost_spots(), Some(vec![floor + IVec3::Y]));
+        g.ghost_preview = false;
+        assert_eq!(g.ghost_spots(), None, "it can be turned off");
+        g.ghost_preview = true;
+        g.creative = false;
+        assert_eq!(g.ghost_spots(), None, "creative only");
+    }
 
     fn run(g: &mut Game, line: &str) -> Vec<String> {
         g.admin_command(Caller::Host, line).unwrap()

@@ -260,6 +260,8 @@ layer
 #.#
 ```
 
+You can build one in the game and write it out: select it, `/structure save hut`, then `/structure export hut` writes `exports/hut.txt` in this format, ready to paste in.
+
 Structures are built only on dry land, and at most 32 blocks each way. Chests in a template are filled from `loot` when they're built. Add `dimension = <name>` to build it in a mod dimension (one built in a mod dimension's biome goes there by itself). `/locate <name>` finds the nearest one.
 
 ### `[dimension <name>]`

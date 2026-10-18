@@ -1679,6 +1679,7 @@ impl App {
         self.game.clouds_on = self.settings.clouds;
         self.game.fog_on = self.settings.fog;
         self.game.view_bobbing = self.settings.view_bobbing;
+        self.game.ghost_preview = self.settings.ghost_preview;
         self.game.particle_level = self.settings.particles;
         self.game.water_reflections = self.settings.water_reflections;
         self.game.shadows = self.settings.shadows;

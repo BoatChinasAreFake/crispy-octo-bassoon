@@ -16,8 +16,10 @@
  (Upside Down)
  (and VSync)
  (and you're a friend)
+ (mod structures are at most 32 blocks each way, so trim it before using it in a mod)
  (scripts in {} switched off after {} errors)
  (worn {})
+ ({} blocks)
  ({} crack{})
  ({}/{} uses left)
  + IPv6
@@ -62,7 +64,7 @@
 "Walked the trail again today. It's a loop. We've been doing this for years."
 "We built the city to keep it asleep. Tiptoe. Always tiptoe."
 "{}" is an item, not a block
-# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\nrender_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nskin_file={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\nlow_memory={}\nlanguage={}\nnarrator={}\ntoggle_sneak={}\ntoggle_sprint={}\nhigh_contrast={}\n
+# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\nrender_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nskin_file={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\nlow_memory={}\nlanguage={}\nnarrator={}\ntoggle_sneak={}\ntoggle_sprint={}\nhigh_contrast={}\nghost_preview={}\n
 # Minceraft's saved servers (server=name|address) and each server's key as first seen.\n
 # One IP address per line. Managed by the ban/unban commands.\n{}\n
 # Operators: players who may use server commands in chat.\n{}\n
@@ -70,6 +72,7 @@
 #version 100
 #version 150
 #version 150\n#define HAS_DERIVATIVES 1\n#define HAS_TEXTURE_LOD 1\nout vec4 frag_color;\n{}
+'{}' isn't in the legend
 (Any key to skip)
 (Hot off the press...)
 (Reading the notes...)
@@ -173,8 +176,13 @@
 ..hHhhhhhhHHh...
 ..hh.....#oHHh..
 /claim, /claim list, /claim friend add|remove <name>, /claim friends.
+/fill bricks outline
+/fill glass hollow
+/fill {} {} {} {} {} {} bricks
 /gamemode spectator {}
 /gamemode survival {}
+/structure load {} {} {} {}
+/structure save {} {} {} {}
 /tc <message> talks to your team.
 /team create <name> [colour], join <name>, leave, list, colour <colour>, friendlyfire on|off, remove <name>.
 /team create Reds red
@@ -227,6 +235,7 @@ A blank map. Look in shipwrecks for a marked one.
 A blank map: no mansion anywhere near where it was drawn.
 A bounty was done
 A copy is made each time you open the world; the last {} are kept. Restoring makes a new world.
+A copy, for the wall.
 A day of almost complete calm. Our reporters remain on alert.
 A little Hmmer. It looks at you, says "hmm" very seriously, and wanders off.
 A mod is a folder with a mod.txt inside, placed in the folder above.
@@ -384,6 +393,7 @@ Benchmarking
 Big Backpack (45 Slots of Your Pack)
 Big Bob
 Big Bob (Legendary Carp)
+Big Fill
 Bigger on the Inside
 Bin Them
 Biome: the Hollow
@@ -487,6 +497,7 @@ Bugle
 Build a Copper Golem: a pumpkin on a block of copper.
 Build a Snow Golem.
 Build the Wilter. Why would you do that?
+Build with /symmetry on and watch it build itself twice.
 Building Blocks
 Built-in
 Bullseye
@@ -506,6 +517,7 @@ Call the Hollow Wyrm back with four Wyrm Crystals. It was having a nice rest.
 Camel
 Campfire (Marshmallows Not Included)
 Can't be opened: {}
+Can't save that: {}.
 Cancel
 Candle (Lit)
 Candle (Romantic, Probably)
@@ -515,6 +527,7 @@ Carrots
 Carry acacia, birch and dark oak logs at once.
 Carry walls of five different stones at once.
 Cartographer (Knows Where Things Are)
+Cartographer of Note
 Cartography Table (Here Be Dragons)
 Castaway
 Castle Town
@@ -531,6 +544,7 @@ Cave Vines (Dangly)
 Cave Vines (With Glow Berries)
 Centurion
 Chain (Strong Links)
+Change a thousand blocks with one /fill.
 Change any key in Options > Controls. Game controllers work too (sticks walk and look).
 Char-Broiled
 Charred Rattler
@@ -572,6 +586,7 @@ Clean Slate
 Clean an Encrusted Relic at a Restoration Bench.
 Cleric (Mysterious, Purple)
 Click: a stack. Right-click: one.
+Cloned {} blocks ({} changed).
 Close
 Clouds: Fancy
 Clouds: Fast
@@ -654,6 +669,7 @@ Copper Sword (Tarnishes Beautifully)
 Copper-Bottomed
 Coral reefs, tropical Fishies, sea pickles.
 Cordon Bleu
+Corner {} set to {}, {}, {}{}.
 Cornflower (Suspiciously Blue)
 Couldn't back up this world first: {}
 Couldn't connect to {}: {}
@@ -677,6 +693,7 @@ Couldn't start hosting: {}
 Couldn't use the skin {}: {}
 Couldn't use {}: {}; keeping files beside the game.
 Couldn't write {}: {}
+Couldn't write {}: {}.
 Country Lode, Take Me Home
 Courier
 Cover Me in Dimonds
@@ -778,6 +795,7 @@ Delete "{}"?
 Delete Forever
 DeletePortMapping
 Deleted "{}".
+Deleted {}.
 Delicious.
 Delta Force
 Desert (Dry Humour)
@@ -931,6 +949,7 @@ Field Journal (Mostly Sketches)
 Fill a Crypt's ring of Eye Frames. Something opened.
 Fill all four seats on a Floaty.
 Fill in twelve biomes in an Explorer's Atlas.
+Filled {} block{}.
 Find a Crimson Forest down in the Scorchlands.
 Find a Dimond. Spelled that way for legal reasons.
 Find a Hmmer tucked up in bed at night.
@@ -1077,6 +1096,7 @@ Get the Oinkstep disc from a Snout. Bangers only.
 GetExternalIPAddress
 Getting Started
 Getting Wood
+Ghost Preview
 Giant
 Giddy Up
 Gilded Age
@@ -1308,6 +1328,7 @@ It's Alive!
 It's a Trap!
 It's a big one! Hold right-click to reel in, but ease off before the line snaps!
 It's a {} now.
+It's already locked.
 Item Frame (Look What I Have)
 Item picked up
 Items crafted
@@ -1428,6 +1449,7 @@ Local Flavour
 Local Hmmer Hmms
 Local Player {} Punches Tree
 Locked out {} for 10 minutes after repeated wrong passwords
+Locked: this map won't change again.
 Lodestone
 Lodestone (Magnetic Personality)
 Lodestone: gone
@@ -1518,6 +1540,10 @@ Minecart (Wheeled Bucket)
 Minecart with Chest (Freight)
 Minecart with Hopper (Vacuum)
 Mining Fatigue
+Mirror building is for creative mode.
+Mirror building off.
+Mirror building {}, about {}, {}, {}.
+Mirror, Mirror
 Missing fuel / coolant
 Missing input
 Mobs defeated
@@ -1609,6 +1635,8 @@ No UPnP router answered (UPnP may be turned off in the router settings).
 No backups yet. One is made the next time you play this world.
 No block called "{}".
 No block or item called "{}".
+No build called {} (see /structure list).
+No build called {}.
 No controller found. Plug one in any time.
 No friends named yet. /claim friend add <name>
 No ingredients
@@ -1622,6 +1650,7 @@ No player or address called {}.
 No player or mob called {}.
 No players remembered yet.
 No safe landing site nearby.
+No saved builds yet: /structure save <name>.
 No script handled {}
 No servers yet. Games on your network show up here by themselves;
 No speech program found: the narrator can't speak (see the README).
@@ -1765,6 +1794,7 @@ Password (if the server has one)
 Password removed: anyone can join.
 Password required to join
 Password set (applies to new logins).
+Pasted {} at {}, {}, {} ({} blocks changed).
 Pattern
 Pattern a banner at a Loom.
 Pays {} Gold Ingot{} and {} experience
@@ -1933,6 +1963,8 @@ Read a paper whose lead story is about you.
 Read the village paper.
 Ready
 Ready. Ingredients come from your inventory.
+Record a map, then lock it or copy it.
+Recorded Map (Remembers the View)
 Recovery Compass (Points to Your Last Mistake)
 Red
 Red Mushroom Block (Spotty Roof)
@@ -2009,11 +2041,15 @@ Sardine
 Savanna (Flat Tops)
 Save Name
 Save World Now
+Save a build with /structure or a Structure Block.
 Save and Quit to Title
 Save failed: {}
 Save {}
+Saved builds: {}
+Saved for Later
 Saved screenshot: {}
 Saved {}
+Saved {}: {}x{}x{}, {} blocks.
 Say who gets it: give <player> <item> [count]
 Say whose mode: gamemode <mode> <player>
 Scaffolding (Climb Inside It)
@@ -2067,6 +2103,8 @@ Seed: {}
 Seed: {}  Mode: {}{}
 Seeing Red
 Select World
+Select something first: /pos1 and /pos2, or the Selection Wand.
+Selection Wand (Points at Things)
 Sell something to a Hmmer from your own Shop Stall.
 Send
 Send Post
@@ -2265,6 +2303,7 @@ Strapped In
 Strength
 String (Not Spaghetti)
 Stripe
+Structure Block (Remembers Builds)
 Structures: {}
 Strutter
 Subtitles
@@ -2338,6 +2377,9 @@ That one needs a Crafting Table. Four planks; you can make one in your pockets.
 That would overlap {}'s land.
 That's on someone else's land.
 That's outside the world.
+That's {} blocks; /clone does at most {} at once.
+That's {} blocks; /fill does at most {} at once.
+That's {} blocks; a build is at most {}.
 That's {} friends already.
 That's {} teams already. Remove one first.
 That's {} waypoints already. Remove one first (/wp remove <name>).
@@ -2387,6 +2429,7 @@ The ceiling settles. That'll hold.
 The comb isn't ready to harvest yet.
 The compass needle swings round to the Lodestone.
 The console has no body; say who to move: tp <player> <x y z | player>
+The console has no selection.
 The console isn't on a team.
 The crystals hum. Something big is coming back.
 The eye drifts {} toward something about {} blocks away.
@@ -2566,13 +2609,18 @@ Upgrade Dimond gear to Scorchite.
 Upgrade to Scorchite (enchantments and wear are kept).
 Upgrading this takes {} {}.
 Upper 
+Usage: /symmetry [x | z | both | off]
 Usage: allowlist <on|off|list|add <name>|remove <name>>
+Usage: clone [x1 y1 z1 x2 y2 z2] <x y z>
+Usage: fill [x1 y1 z1 x2 y2 z2] <block> [hollow | outline | keep | replace <block>]
 Usage: gamemode <survival|creative|spectator> [player]
 Usage: kill [player | mobs | monsters | <mob>]
 Usage: locate <structure|biome> (village, dungeon, tower, hut, well, outpost, desert ruins, trail ruins, ocean ruins, hushed city, fortress, snout camp, or a biome)
+Usage: pos{} [x y z]
 Usage: see /help (/{} needs more).
 Usage: setblock <x y z> <block>
 Usage: setblock <x y z> <block> (numbers, or ~ for here)
+Usage: structure save <name> | load <name> [x y z] | export <name> | list | delete <name>
 Usage: summon <mob> [x y z] [count]
 Usage: time <day|noon|night|midnight|0.0-1.0>
 Usage: tp [player] <x y z | player>
@@ -2747,6 +2795,7 @@ Write on the sign (Enter: next line, Esc: done)
 Written Book (Signed and Everything)
 Wrong password.
 Wrote {}
+Wrote {} as a mod structure template{}. Paste it into a mod.txt.
 Wrote {} sounds to {}/
 Wyrm Crystal (Do Not Touch)
 Wyrm Egg (Trophy, Allegedly)
@@ -2779,6 +2828,7 @@ You cut out some honeycomb.
 You died! (skill issue)
 You dish up a {}. Grade {}{}.
 You don't have any banners with you.
+You draw the land from {}, {} to {}, {}.
 You dug it up instead of brushing it. Whatever was inside crumbled. Archaeologists everywhere wince.
 You dust the hive with wood ash. The mites are having a terrible day.
 You feel a Bad Omen. Something's going to go wrong (on purpose).
@@ -2854,6 +2904,7 @@ Zoomies
 [mob pup]\ntexture \= stone\nhealth \= 12\nhostile \= true\nattack_damage \= 4\naggro_range \= 20\ntame_item \= bone\ntame_chance \= 1\nbreed_item \= wheat\n
 [mob slinger]\nname \= Slinger\ntexture \= stone\ntemplate \= biped\nhostile \= true\nranged_damage \= 6\nranged_range \= 22\nprojectile_speed \= 24\nranged_cooldown \= 2\naggro_range \= 12\n
 [mod]\nname \= Playtest Moon\n[block moon_rock]\ntexture \= stone\n[block moon_frame]\ntexture \= white\n[dimension moon]\nname \= The Playtest Moon\nstone \= moon_rock\ntop \= moon_rock\nunder \= moon_rock\nframe \= moon_frame\nheight \= 40\nhills \= 4\n\n[biome climate_fields]\nshare \= 0.15\nclimate_temperature \= 0.1\nclimate_moisture \= -0.1\nclimate_continentalness \= 0.3\nclimate_erosion \= 0.2\ntop \= moon_rock\nunder \= moon_rock\n
+[structure {}]\nname \= {}\n
 [{}] saved variables are damaged ({}); starting fresh
 [{}] {} ran /{}
 a Hmmer at {}'s stall bought: {}, and {} sees {} in the till
@@ -2882,6 +2933,7 @@ a modded shot must not be blamed on a Rattler: {}
 a newer
 a parcel
 a quarter per ruby
+a recorded map is 64x64
 a script gets time to move it on
 a second click straight after does nothing
 a sitting flier lands: y \= {}
@@ -2893,6 +2945,9 @@ a village
 a well-lit cave stays empty
 a {} can't be saved
 acacia boat
+across x
+across x and z
+across z
 after a trade the village thinks {} of {}, who was told {}
 after the swap {} has {} gold and {} coal, {} {} gold and {} coal
 already as good as it gets
@@ -2923,6 +2978,7 @@ bad char
 bad data: {}
 bad element count
 bad header
+bad legend line: {}
 bad length
 bad merge
 bad mod pack entry
@@ -2944,6 +3000,7 @@ beachcomber advancement never arrived
 birch door
 blast radius must be finite
 blasts never break blocks
+block {} \= {}\n
 blocks placed and broken
 books are enchantable
 bosses shrug off knockback by default
@@ -3191,11 +3248,13 @@ no Pointy Sticks, no shot
 no address found
 no answer
 no arrow on letting go
+no block called {}
 no climate-target mod patch
 no decorated beach in the placement playtest
 no dtype
 no flowers in reach (they need some within seven blocks)
 no free port
+no layers
 no naturally open {} cave
 no offsets
 no offshore island in the placement playtest
@@ -3257,6 +3316,7 @@ powered and lit
 properly cross
 rained on
 ranged off by default: no arrow ever spawns
+recorded maps
 red mooer
 red-spotted mooer
 region file damaged (number too long)
@@ -3412,6 +3472,7 @@ too dark
 too many chunks
 too many edits
 too many files in pack
+too many kinds of block for a template ({} at most)
 too many machine states
 too many meals
 too many mods in pack
@@ -3419,7 +3480,7 @@ too many rocket flights
 too many world changes in one event
 too soon
 too wide: prop it up
-tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|creative|spectator> [player], weather <clear|rain|thunder>, seed, summon <mob> [x y z] [count], locate <structure|biome>, setblock <x y z> <block>, kill [player | mobs | <mob>]
+tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|creative|spectator> [player], weather <clear|rain|thunder>, seed, summon <mob> [x y z] [count], locate <structure|biome>, setblock <x y z> <block>, kill [player | mobs | <mob>], pos1/pos2 [x y z], fill [x1 y1 z1 x2 y2 z2] <block> [hollow|outline|keep|replace <block>], clone [x1 y1 z1 x2 y2 z2] <x y z>, structure save|load|export|list|delete <name>
 trade levels
 trading table
 trapped chest
@@ -3609,6 +3670,7 @@ zombie hmmer
 {} couldn't see into its own Llama's pack
 {} couldn't swat a fireball back
 {} does nothing to {}.
+{} doesn't have the same picture of map {}
 {} doesn't see the Librarian in bed
 {} emptied a composter and got no Compost
 {} fed two Tuskers and the host saw no baby
@@ -3637,6 +3699,7 @@ zombie hmmer
 {} is already your friend.
 {} is back where they left off.
 {} is built: {} not {}
+{} is damaged: {}.
 {} is in the way
 {} is no longer an operator.
 {} is now an operator.
@@ -3655,6 +3718,7 @@ zombie hmmer
 {} near {}, and then, briefly, not seen at all. Repairs are under way.
 {} never had the village at {} load around them
 {} never heard how {} died
+{} never saw the /fill
 {} never saw the Donkey's chest
 {} never saw the Galloper's gold armour
 {} never saw the Mooer's lead
@@ -3714,6 +3778,7 @@ zombie hmmer
 {} took the coal out of their inbox and has {} (had {})
 {} traded with a Hmmer one short of Apprentice and the host has it at {}
 {} trim ({})
+{} used a blank map and the host recorded nothing
 {} walked into a mod's portal and is in {} (the host says {})
 {} walked into a portal and is in {} (the host says {})
 {} walked into tripwire and the host's line didn't trip

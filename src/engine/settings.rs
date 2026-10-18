@@ -79,6 +79,8 @@ pub struct Settings {
     pub toggle_sprint: bool,
     /// Plain, strong colours behind and around the UI (see ui.rs).
     pub high_contrast: bool,
+    /// In creative, a see-through block where the held one would go (see build helpers in game.rs).
+    pub ghost_preview: bool,
 }
 
 /// Max FPS choices (0: unlimited).
@@ -132,6 +134,7 @@ impl Default for Settings {
             toggle_sneak: false,
             toggle_sprint: false,
             high_contrast: false,
+            ghost_preview: true,
         }
     }
 }
@@ -149,7 +152,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         format!(
             "# Minceraft settings. Edit freely; nonsense is quietly replaced with defaults.\n\
-             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nskin_file={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\nlow_memory={}\nlanguage={}\nnarrator={}\ntoggle_sneak={}\ntoggle_sprint={}\nhigh_contrast={}\n",
+             render_distance={}\nfov={}\nsensitivity={}\nfullscreen={}\nvolume={}\nmusic={}\nname={}\nserver={}\nskin={}\nskin_file={}\nsubtitles={}\ncolour_blind={}\nwaving_leaves={}\nwater_reflections={}\nsmooth_lighting={}\nbrightness={}\nfancy_clouds={}\nui_scale={}\ncheck_updates={}\nvsync={}\nmax_fps={}\nmsaa={}\nparticles={}\nview_bobbing={}\nfog={}\nclouds={}\nshadows={}\nshadow_quality={}\nfancy_water={}\ndistant_terrain={}\nsmooth_far={}\nshield_banner={}\nlow_memory={}\nlanguage={}\nnarrator={}\ntoggle_sneak={}\ntoggle_sprint={}\nhigh_contrast={}\nghost_preview={}\n",
             self.render_distance,
             self.fov,
             self.sensitivity,
@@ -188,6 +191,7 @@ impl Settings {
             self.toggle_sneak,
             self.toggle_sprint,
             self.high_contrast,
+            self.ghost_preview,
         ) + self.hotbars.iter().enumerate().map(|(i, h)| format!("hotbar{}={}\n", i + 1, clean(h, 600))).collect::<String>().as_str()
             + self.binds.to_text().as_str()
     }
@@ -247,6 +251,7 @@ impl Settings {
                 "toggle_sneak" => s.toggle_sneak = flag(s.toggle_sneak),
                 "toggle_sprint" => s.toggle_sprint = flag(s.toggle_sprint),
                 "high_contrast" => s.high_contrast = flag(s.high_contrast),
+                "ghost_preview" => s.ghost_preview = flag(s.ghost_preview),
                 k => {
                     s.binds.read(k, v);
                 }
@@ -346,6 +351,7 @@ mod tests {
             toggle_sneak: true,
             toggle_sprint: true,
             high_contrast: true,
+            ghost_preview: false,
         };
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let dir = std::env::temp_dir().join(format!("minceraft-settings-{}", std::process::id()));

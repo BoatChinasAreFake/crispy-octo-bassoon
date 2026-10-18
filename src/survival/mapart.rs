@@ -23,6 +23,9 @@ const PARCHMENT: [u8; 3] = [196, 178, 140];
 /// How often unlocked maps with someone in their square are redrawn.
 const REDRAW_SECS: f32 = 2.0;
 
+/// What using a map does: what to say, the items taken and given (item, wear).
+pub type MapUse = (String, Vec<(Id, u32)>, Vec<(Id, u32)>);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MapArt {
     /// The north-west corner of its square.
@@ -110,7 +113,7 @@ impl Game {
     /// map in hand. A blank Map is recorded; a recorded one is copied (with a
     /// blank Map to hand) or, sneaking with a Glass Pane to hand, locked.
     /// Returns what to tell them, and the item changes: (take, give).
-    pub fn use_map_art(&mut self, held: Id, wear: u32, at: Vec3, sneaking: bool, has: impl Fn(Id) -> bool) -> Option<(String, Vec<(Id, u32)>, Vec<(Id, u32)>)> {
+    pub fn use_map_art(&mut self, held: Id, wear: u32, at: Vec3, sneaking: bool, has: impl Fn(Id) -> bool) -> Option<MapUse> {
         match held {
             MAP => {
                 let id = self.new_map_art(at);
