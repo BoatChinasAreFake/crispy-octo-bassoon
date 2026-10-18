@@ -12,6 +12,7 @@
   mod {} problem: {}
   or  [{}]:{}
  (Half the Commitment)
+ (Lit)
  (Upside Down)
  (and VSync)
  (and you're a friend)
@@ -77,6 +78,7 @@
 (mouse wheel, Page Up or the scrollbar to read back)
 (scroll for more)
 (scrolled back {} lines: Page Down or the wheel to return)
+(the model couldn't load: {})
 (waiting for someone)
 *nom* Oinkchop acquired (internally).
 , and they look ready to swarm: have an empty hive nearby
@@ -338,6 +340,7 @@ Bare stone, llamas, and the best view in the world.
 Barnacled Compass (Points Down)
 Barrel (A Chest, but Round)
 Barter with a Snout. Gold for... whatever that is.
+Basalt
 Basalt (Volcanic, Stripy)
 Basalt Deltas (Ashes to Ashes)
 Base
@@ -391,6 +394,7 @@ Birch
 Birch Forest (Pale and Interesting)
 Birch, Please
 Black
+Blackstone
 Blackstone (Goth Cobblestone)
 Blackstone Bricks (Snout Architecture)
 Blank so far. Carry it somewhere new.
@@ -453,6 +457,7 @@ Breeze
 Breeze Rod (Whooshy Stick)
 Breeze Through
 Brewing Stand (Chemistry, Loosely)
+Brick
 Bricks
 Bridge
 Bright
@@ -494,6 +499,7 @@ Button (Press It)
 Buy something from a Wanderer before it wanders off.
 Byproduct
 Cake (Not a Lie)
+Calcite
 Calcite (Chalky)
 Calibrated Sculk Sensor (Picky Listener)
 Call the Hollow Wyrm back with four Wyrm Crystals. It was having a nice rest.
@@ -507,6 +513,7 @@ Careful Hands
 Carrot (Crunchy)
 Carrots
 Carry acacia, birch and dark oak logs at once.
+Carry walls of five different stones at once.
 Cartographer (Knows Where Things Are)
 Cartography Table (Here Be Dragons)
 Castaway
@@ -535,6 +542,7 @@ Checking machine...
 Cheese Kingdom
 Cheese Merchant
 Chef's Kiss
+Cherry
 Cherry Blossom (Extremely Pink)
 Cherry Grove (Aggressively Pink)
 Cherry Log (Pink Inside)
@@ -547,6 +555,7 @@ Chilly
 Chimes
 Chipped Anvil (Still Ominous)
 Chirpier
+Chiseled Deepslate (Moody Doodles)
 Chiseled Sandstone (Ancient Doodles)
 Chiseled Tuff (Fancy Grey)
 Chunks: {} meshed, {} loaded; {} regions of edits in memory
@@ -576,6 +585,7 @@ Coal for the kitchen.
 Coast
 Coast Trim Template
 Cobble Green
+Cobbled Deepslate
 Cobbled Deepslate (Moody Rubble)
 Cobblestun
 Cobweb (Sticky Situation)
@@ -585,6 +595,7 @@ Collect driftwood or seashells from the coast.
 Collection complete: {}! Museums would fight over this.
 Colonies known nearby
 Colonies started
+Colour Coordinated
 Colour-blind
 Colours: {}.
 Command
@@ -640,6 +651,7 @@ Copper Leggings (Clanky)
 Copper Ore (Future Statue)
 Copper Pickaxe (Between Stone and Iron)
 Copper Sword (Tarnishes Beautifully)
+Copper-Bottomed
 Coral reefs, tropical Fishies, sea pickles.
 Cordon Bleu
 Cornflower (Suspiciously Blue)
@@ -672,6 +684,8 @@ Crab
 Crack! You pressed too hard. Gently does it.
 Cracked
 Cracked Blackstone Bricks (Lived In)
+Cracked Deepslate Bricks (Seen Things)
+Cracked Deepslate Tiles (Tidy, Was)
 Craft a pickaxe. Hitting rocks with rocks, but fancier.
 Craft something big at a Crafting Table. It has a job now.
 Craftable now
@@ -715,6 +729,7 @@ Dandelion (Sunny Disposition)
 Danger
 Dark Forest (Bring a Torch)
 Dark Oak
+Dark Prismarine
 Dark Prismarine (Moody Sea-Stone)
 Day {}. Free from the Notice Board.
 Daylight Cycle: OFF (the sun is taking a break)
@@ -727,7 +742,9 @@ Deaths
 Decorated Pot (Plain, Tasteful)
 Decorated Pot ({})
 Deepslate (Stone, But Moody)
+Deepslate Brick
 Deepslate Bricks (Very Serious)
+Deepslate Tile
 Deepslate Tiles (Tidy Gloom)
 Defeat The Hush. Shh.
 Defeat a Bloop. Watch it become several Bloops.
@@ -815,6 +832,7 @@ Dried Kelp (Crunchy Ocean)
 Driftwood (Weathered Shore Wood)
 Driftwood, shells, turtles, and tide pools.
 Drink a potion you brewed. Or found. We don't judge.
+Dripstone
 Dripstone Block (Drippy Stone)
 Dropper (Just Drops Things)
 Drops Ominously
@@ -876,6 +894,7 @@ Explorer
 Explorer's Atlas (Hold to Read)
 Explorer's Atlas ({} of {} biomes)
 Explosion
+Exposed 
 Exposed Copper (Ageing Gracefully)
 Extra! Extra!
 Eye Contact
@@ -1209,6 +1228,7 @@ Hollow Box (Bigger on the Inside)
 Hollow City (Sulkers Reside)
 Hollow Portal (Starry)
 Hollow Spire (Loot at the Top of the World)
+Hollow Stone
 Hollow Stone (Pale, Suspicious)
 Hollow Wyrm
 Home
@@ -1444,6 +1464,7 @@ Magma Carta
 Magma Cream (Do Not Moisturise)
 Make eye contact with a Starer. Bold.
 Mall Muzak
+Mangrove
 Mangrove Leaves (Salty)
 Mangrove Log (Damp Tree Chunk)
 Mangrove Planks (Reddish)
@@ -1458,6 +1479,7 @@ Map: one pixel for every {} block(s).
 Market Report
 Master
 Master Class
+Mauve
 Mauve Block (Very Purple)
 Mauve Pillar (Load-Bearing Lavender)
 Max FPS: Unlimited{}
@@ -1514,6 +1536,7 @@ Mooer
 Mooer moos
 Moss Block (Soft, Green, Suspicious)
 Moss Carpet (Rug of the Earth)
+Mossy Cobblestun
 Mossy Cobblestun (Vintage)
 Mother
 Mouse Sensitivity: {}%
@@ -1522,6 +1545,7 @@ MouseMiddle
 MouseRight
 Moved waypoint "{}" here.
 Mud (Squelchy)
+Mud Brick
 Mud Bricks (Sun-Baked, Slightly Crumbly)
 Mud, roots, and frogs in the shallows.
 Muddlecombe
@@ -1714,6 +1738,7 @@ Out of Its Shell
 Output
 Output full
 Outputs
+Oxidized 
 Oxidized Copper (Statue Chic)
 Oyster
 PRESSURE - EASE OFF!
@@ -1798,6 +1823,10 @@ Pointy Stick
 Poison
 Pokey Plant (Do Not Hug)
 Polar Bear
+Polished Deepslate
+Polished Deepslate (Moody, Smooth)
+Polished Tuff
+Polished Tuff (Grey, Buffed)
 Popped Leapfruit (Crunchy Purple)
 Poppy-ish
 Pork Barrel
@@ -1828,7 +1857,9 @@ Pressure (let go to ease off)
 Pressure Plate (Step On It)
 Pretty Polly
 Prices Steady at the Stalls
+Prismarine
 Prismarine (Sea-Stone, Shifty Colours)
+Prismarine Brick
 Prismarine Bricks (Tidy Sea-Stone)
 Prismarine Crystals (Wet Sparkles)
 Prismarine Shard (Fishbone, Basically)
@@ -1928,6 +1959,7 @@ Repair
 Repair something at an anvil. Hit it until it's fixed.
 Repeater (Says It Again)
 Reset to Defaults
+Resin Brick
 Resin Brick (Amber, Tiny)
 Resin Bricks (Amber Masonry)
 Resin Clump (Tree Gum, Basically)
@@ -1970,6 +2002,7 @@ Saddle (Some Assembly Required)
 Salt (A Pinch)
 Sand
 Sand, cobble and the like on top (twice as fast; no food)
+Sandstone
 Sandstone (Sand, But Committed)
 Sapling (Tree, Eventually)
 Sardine
@@ -1986,6 +2019,7 @@ Say whose mode: gamemode <mode> <player>
 Scaffolding (Climb Inside It)
 Scarab Charm (Lucky, Allegedly)
 Scarecrow (Unconvincing)
+Scorch Brick
 Scorch Bricks (Grim Masonry)
 Scorch Fortress (Bring Fire Resistance)
 Scorched Gold Ore (Still Useless, Now Warm)
@@ -2003,6 +2037,7 @@ Scorchite Shovel (Digs Holes in Holes)
 Scorchite Sword (Unreasonably Sharp)
 Scorchite Upgrade Template
 Scorchite Upgrade Template (Some Assembly Required)
+Scorchrock
 Scorchrock (Grumbly)
 Screenshot
 Script error {}
@@ -2077,6 +2112,7 @@ Skin{}
 Skull
 Sky no longer falling, say experts. Celebrations are expected to be loud.
 Sleep in a bed and skip the night. Time is a construct.
+Sleep through the night in a bed that isn't red.
 Sleeping
 Slow
 Slowness
@@ -2089,6 +2125,7 @@ Smith (Hits Things Professionally)
 Smithing Table (Hammer Time)
 Smoker (Food, Fast)
 Smoker (Smoking)
+Smooth Basalt
 Smooth Basalt (Geode Rind)
 Snap your line fighting a big fish. It was THIS big.
 Snare
@@ -2160,6 +2197,7 @@ Spooky Scary
 Spore Loser
 Sporeling
 Spring
+Spring Rock
 Spring Rock (Warm to the Touch)
 Sprint
 Sprint across Ice. Nature's floor wax.
@@ -2488,6 +2526,9 @@ Tripwire Hook (Gotcha)
 Tropical Fish (Suspiciously Colorful)
 Try the example: copy example-mods/cheese into mods/, then press Reload.
 Tube Coral Block (Blue, Busy)
+Tuff
+Tuff (Grey, Humble)
+Tuff Brick
 Tuff Bricks (Grey, Proud)
 Tuna
 Tune a Note Block. Perfect pitch not required.
@@ -2573,6 +2614,7 @@ Wake up.
 Walk Backward
 Walk Forward
 Walkies
+Wall to Wall
 Wander into a biome a mod added.
 Wanderer
 Wanderer (Just Passing Through)
@@ -2599,6 +2641,7 @@ Water physics: on vacation!
 Water: Plain
 Water: Shiny
 Wave {} of {}!
+Wax a copper door. Front doors deserve to stay shiny too.
 Wax some copper with Goo. It'll stay shiny forever. Probably.
 Waxed {}
 Waxing Crescent
@@ -2617,6 +2660,7 @@ Weather set to {}.
 Weather: Clear
 Weather: Rain
 Weather: Thunderstorm
+Weathered 
 Weathered Copper (Mostly Green)
 Webber
 Webber skitters
@@ -2720,6 +2764,7 @@ XYZ: {} / {} / {} in {}
 Yawn
 Yellow
 Yellow Terracotta
+You are a helpful assistant. Answer in one short sentence.
 You are banned from this server.
 You ate Big Bob. You monster. Fully healed, though.
 You ate Groaner Goo. You feel... gooey.
@@ -2873,13 +2918,19 @@ ate a Suspicious Stew. It was, in fact, suspicious
 baby Hmmers were
 back at the first portal: {}
 back on the ground, not left in the sky
+bad JSON
 bad char
 bad data: {}
 bad element count
+bad header
 bad length
+bad merge
 bad mod pack entry
+bad offsets
 bad palette entry
+bad size
 bad text
+bad vocab id
 bad wear list
 bad world id
 barely bothering
@@ -2915,6 +2966,7 @@ climbed to {}
 coastal encounter advancement never arrived
 coastal species
 collection complete!
+config.json: no {}
 connection closed
 connection closed during the handshake (is the other side on an older version?)
 connection refused
@@ -2924,6 +2976,8 @@ coordinate out of range
 copper golem
 couldn't claim land for {}: {}
 couldn't host: {}
+couldn't pack the model: {}
+couldn't start the model thread
 crater lake
 create Blues blue
 create Reds red
@@ -3137,13 +3191,17 @@ no answer
 no arrow on letting go
 no climate-target mod patch
 no decorated beach in the placement playtest
+no dtype
 no flowers in reach (they need some within seven blocks)
 no free port
 no naturally open {} cave
+no offsets
 no offshore island in the placement playtest
 no open ocean in the wildlife playtest
 no river in the placement playtest
 no rocky coast in the placement playtest
+no shape
+no tensor {}
 no tide pool in the beach playtest
 no village anywhere near spawn to try growing villages in
 no village in the placement playtest
@@ -3157,6 +3215,7 @@ non-finite float
 north (-Z)
 not a Minceraft save
 not a PNG we can read ({})
+not a model file (or a newer one)
 not a region
 not a skin name
 not cooking yet (it wants a campfire under it)
@@ -3226,6 +3285,7 @@ shader failed to compile: {}
 shadow shader failed to compile: {}
 sheltering from the rain
 shop stall
+short file
 should hit terrain
 snout brute
 snout chest
@@ -3314,6 +3374,9 @@ the host refused {}'s chest at a crafting table
 the hush
 the mended tool is less worn
 the mod tool wore a use
+the model file is cut short
+the model's shape doesn't add up
+the model's weights don't match its shape
 the new house: the host has built {} and {} sees {} of its blocks differently ({})
 the other side isn't speaking the same (encrypted) language: is one of you on an older version?
 the pair had a baby
@@ -3341,6 +3404,8 @@ tide pool
 tide pool advancement never arrived
 tilling makes a soil record
 timed out
+tokenizer.json has no model
+tokenizer.json has no vocab
 too dark
 too many chunks
 too many edits
@@ -3379,6 +3444,8 @@ urn:schemas-upnp-org:device:InternetGatewayDevice:1
 urn:schemas-upnp-org:device:InternetGatewayDevice:2
 urn:schemas-upnp-org:service:WANIPConnection:1
 urn:schemas-upnp-org:service:WANPPPConnection:1
+usage: --ask-model <file.lm> <question>
+usage: --pack-model <folder with config.json, tokenizer.json, model.safetensors> <out.lm>
 vegetables, and nothing that swims or moos
 village foundation
 village life
@@ -3480,7 +3547,9 @@ zombie hmmer
 {} ... third person    F3 ... debug info    F11 ... fullscreen    Esc ... pause
 {} ... walk    {} ... jump / swim up
 {} Axe (Chop Chop)
+{} Bed
 {} Boat
+{} Candle{}
 {} Concrete
 {} Concrete Powder (Just Add Water)
 {} Defeats {}
@@ -3509,6 +3578,7 @@ zombie hmmer
 {} Stairs (Up, Mostly)
 {} Stem (A Mushroom's Idea of a Tree)
 {} Sword
+{} Wall
 {} Wart Block (Squishy)
 {} Witnesses describe the tree as "fine, considering".
 {} Wool
@@ -3674,6 +3744,7 @@ zombie hmmer
 {}: OFF
 {}: ON
 {}: best {}
+{}: can't read {} weights
 {}: host edit didn't arrive
 {}: joined player's chunks timed out
 {}: more than {} lines
@@ -3686,6 +3757,9 @@ zombie hmmer
 {}: {}, at {}, {}, {}{}
 {}: {}. Ingredients come from its input slots.
 {}: {}; kept as .bad
+{}Copper Door
+{}Copper Grate
+{}Copper Trapdoor
 {}Potion of {}
 {}{} blocks, {} items, {} recipes{}
 {}{}: {} at {}, {}, {}, health {}, {} xp

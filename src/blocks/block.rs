@@ -1390,7 +1390,7 @@ pub fn placing_item(id: Id) -> Option<Id> {
         return Some(TORCH);
     }
     if crate::beds::is_bed(id) {
-        return Some(BED);
+        return Some(crate::dyed::bed(crate::dyed::bed_colour(id), 0));
     }
     if crate::hoppers::is_hopper(id) {
         return Some(HOPPER_FIRST);

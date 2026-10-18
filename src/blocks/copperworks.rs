@@ -164,7 +164,7 @@ mod tests {
         }
         assert_eq!(block(door(7) + 15).key, "waxed_oxidized_copper_door_west_open_top");
         assert_eq!(block(grate(7)).key, "waxed_oxidized_copper_grate");
-        assert_eq!(COPPERWORKS_FIRST + COUNT, NUM_BLOCKS);
+        assert_eq!(COPPERWORKS_FIRST + COUNT, DYED_FIRST);
     }
 
     #[test]
