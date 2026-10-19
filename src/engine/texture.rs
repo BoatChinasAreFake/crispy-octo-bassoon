@@ -981,6 +981,9 @@ pub const T_COPPER_DOOR_ITEM: u16 = 1203;
 pub const T_DYED_BED_TOP: u16 = 1207;
 pub const T_DYED_BED_SIDE: u16 = 1235;
 pub const T_DYED_CANDLE: u16 = 1242;
+pub const T_SELECTION_WAND: u16 = 1258;
+pub const T_STRUCTURE_BLOCK: u16 = 1259;
+pub const T_RECORDED_MAP: u16 = 1260;
 
 // Crop tiles are four in a row: T_CROP_* + stage.
 
@@ -4121,6 +4124,24 @@ pub fn build_atlas(seed: u64) -> Vec<u8> {
     home_tiles(&mut a);
     paint_models(&mut a);
     paint_dyed(&mut a);
+    a.each(T_STRUCTURE_BLOCK, |x, y, r, _| {
+        let rim = x < 2 || y < 2 || x > 13 || y > 13;
+        let mark = (5..11).contains(&x) && (5..11).contains(&y) && (x == 5 || x == 10 || y == 5 || y == 10);
+        shade(if rim { rgb(60, 45, 75) } else if mark { rgb(230, 200, 90) } else { rgb(110, 85, 130) }, r.range(0.9, 1.06))
+    });
+    a.each(T_RECORDED_MAP, |x, y, r, _| {
+        if !(1..15).contains(&x) || !(2..14).contains(&y) {
+            return [0, 0, 0, 0];
+        }
+        let edge = x == 1 || x == 14 || y == 2 || y == 13;
+        let land = (x * 3 + y * 5) % 7 < 3;
+        shade(if edge { rgb(150, 120, 80) } else if land { rgb(90, 150, 70) } else { rgb(70, 110, 190) }, r.range(0.9, 1.05))
+    });
+    a.each(T_SELECTION_WAND, |x, y, _, _| {
+        let stick = x + y == 15 && (4..15).contains(&y);
+        let tip = x + y >= 14 && x + y <= 16 && y < 5;
+        if tip { rgb(240, 210, 90) } else if stick { rgb(130, 90, 50) } else { [0, 0, 0, 0] }
+    });
 
     a.px
 }

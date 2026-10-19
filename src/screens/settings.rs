@@ -120,6 +120,10 @@ impl App {
             self.settings.toggle_sprint = !st.toggle_sprint;
         }
         y += bh + 5.0 * s;
+        if self.ui.button(Rect::new(left, y, half, bh), &on_off("Ghost Preview", st.ghost_preview), true) {
+            self.settings.ghost_preview = !st.ghost_preview;
+        }
+        y += bh + 5.0 * s;
         if self.settings.narrator && !crate::narrator::available() {
             self.ui.text_centered("No speech program found: the narrator can't speak (see the README).", w / 2.0, y + 9.0 * s, 8.0, GOLD);
         }

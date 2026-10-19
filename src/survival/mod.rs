@@ -14,6 +14,7 @@ pub(crate) mod hunger;
 pub(crate) mod inventory;
 pub(crate) mod modes;
 pub(crate) mod navigation;
+pub(crate) mod mapart;
 pub(crate) mod player;
 pub(crate) mod qol;
 pub(crate) mod rules;

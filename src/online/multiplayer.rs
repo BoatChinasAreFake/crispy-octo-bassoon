@@ -237,6 +237,13 @@ impl Game {
         if text.is_empty() {
             return;
         }
+        // So is mirror building (see buildtools.rs).
+        if let Some(lines) = self.symmetry_command(&text) {
+            for l in lines {
+                self.msg(l);
+            }
+            return;
+        }
         // Waypoints are your own business.
         if crate::qol::is_command(&text) {
             for l in self.waypoint_command(&text) {
@@ -478,6 +485,7 @@ impl Game {
             roster.push(self.rules_msg());
             roster.push(self.teams_msg());
             roster.push(self.claims_msg());
+            roster.extend(self.map_art.keys().filter_map(|&id| self.map_art_msg(id)).collect::<Vec<_>>());
             if !self.board.shown.is_empty() {
                 roster.push(self.sidebar_msg());
             }
@@ -830,6 +838,7 @@ impl Game {
                     self.host_mob_name(from, mob, name);
                 }
             }
+            Msg::UseMap { item, wear, sneaking } => self.peer_used_map(from, item, wear, sneaking),
             Msg::PlayerSkin { skin, .. } => {
                 let skin = skin % crate::nametags::SKINS.len() as u8;
                 if let Some(p) = self.peers.get_mut(&from) {
@@ -1412,6 +1421,7 @@ impl Game {
                 }
             }
             Msg::SkinData { id, pixels } => self.note_peer_skin(id, pixels),
+            Msg::MapArt { id, x, z, locked, px } => self.got_map_art(id, x, z, locked, px),
             Msg::TradeState { x, y, z, seats, accepted, done, mine } => self.apply_deal(IVec3::new(x, y, z), seats, accepted, done, mine),
             Msg::Sidebar { title, lines, countdown } => self.board.shown = crate::minigames::Shown { title, lines, countdown },
             Msg::Claims { data } => self.claims = crate::claims::Claims::decode(&data),
@@ -1492,7 +1502,7 @@ impl Game {
                     self.inv_sync.note_host(item, -(n as i64));
                 }
             }
-            Msg::MachineUse{..} | Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } => {}
+            Msg::MachineUse{..} | Msg::Hello { .. } | Msg::Welcome { .. } | Msg::Attack { .. } | Msg::Ignite { .. } | Msg::Challenge { .. } | Msg::Auth { .. } | Msg::ModPack { .. } | Msg::UseItem { .. } | Msg::Shoot { .. } | Msg::Interact { .. } | Msg::Catch { .. } | Msg::Craft { .. } | Msg::Consume { .. } | Msg::InventoryCheck { .. } | Msg::OpenContainer { .. } | Msg::CloseContainer { .. } | Msg::ContainerMove { .. } | Msg::Pickup { .. } | Msg::DropItem { .. } | Msg::Repair { .. } | Msg::PlayerData { .. } | Msg::Enchant { .. } | Msg::MobInteract { .. } | Msg::Trade { .. } | Msg::UsePortal { .. } | Msg::VehicleUse { .. } | Msg::Ride { .. } | Msg::PlaceVehicle { .. } | Msg::FrameUse { .. } | Msg::Splash { .. } | Msg::RideMob { .. } | Msg::Excavate { .. } | Msg::Smith { .. } | Msg::Died { .. } | Msg::Deflect { .. } | Msg::BundleUse { .. } | Msg::BookWrite { .. } | Msg::BookAsk { .. } | Msg::LecternTake { .. } | Msg::Loom { .. } | Msg::SortContainer { .. } | Msg::RegularAsk { .. } | Msg::CampfirePut { .. } | Msg::Mend { .. } | Msg::FrostWalk | Msg::ChestUpgrade { .. } | Msg::Respawn | Msg::StatusAsk | Msg::Status { .. } | Msg::HitPlayer { .. } | Msg::TradeAccept { .. } | Msg::PostSend { .. } | Msg::PostBin | Msg::BoardAsk { .. } | Msg::Bounty { .. } | Msg::StallPrice { .. } | Msg::TakePaper { .. } | Msg::PaperAsk { .. } | Msg::UseMap { .. } => {}
         }
     }
 
@@ -2986,6 +2996,55 @@ mod tests {
         client.net_send_msg(Msg::Catch { pos: Vec3::new(p.x + 12.0, crate::fishing::VOID_Y, p.z), bait: false });
         assert!(pump(&mut host, &mut client, |_, c| c.advancements.has("deep_end")), "a catch from the void");
         assert_eq!(client.dim, Dim::Hollow);
+    }
+
+    #[test]
+    fn joined_operators_fill_and_everyone_sees_recorded_maps() {
+        let mut host = Game::new_with(796, false, false, crate::world::GenOptions::DEFAULT);
+        let spawn = host.spawn;
+        load_around(&mut host, spawn);
+        host.map_colors = (0..NUM_BLOCKS).map(|i| [(i % 251) as u8, 40, 60]).collect();
+        let port = host.open_lan("Hosty", None).unwrap();
+        let mut client = join(&mut host, port, "Archy", "").unwrap();
+        let id = client.my_id;
+        let (x, z) = (spawn.x.floor() as i32 + 4, spawn.z.floor() as i32);
+        let y = host.world.surface_y(x, z) + 4;
+        // Not an operator yet: refused.
+        client.send_chat(&format!("/pos1 {x} {y} {z}"));
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.selection("archy"), [None, None]);
+        host.admin.ops.insert(crate::players::record_key("Archy"));
+        client.wand_corner(0, IVec3::new(x, y, z));
+        client.wand_corner(1, IVec3::new(x + 2, y + 1, z + 2));
+        assert!(pump(&mut host, &mut client, |h, _| h.selection("archy")[1].is_some()));
+        assert_eq!(client.my_selection[1], Some(IVec3::new(x + 2, y + 1, z + 2)), "they see their own selection");
+        client.send_chat("/fill bricks");
+        let corner = IVec3::new(x + 2, y + 1, z + 2);
+        assert!(pump(&mut host, &mut client, |h, c| h.world.get_v(corner) == BRICK && c.world.get_v(corner) == BRICK), "filled for everyone");
+        // A blank map, recorded: the host draws it and sends the picture.
+        host.give_peer(id, MAP, 1);
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(MAP) == 1));
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == MAP)).unwrap();
+        client.inv.selected = slot;
+        client.player.sneaking = true;
+        client.target = None;
+        assert!(client.use_held_map());
+        assert!(pump(&mut host, &mut client, |_, c| c.inv.count(RECORDED_MAP) == 1 && c.inv.count(MAP) == 0));
+        let slot = client.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == RECORDED_MAP)).unwrap();
+        let map = client.inv.wear[slot];
+        assert!(pump(&mut host, &mut client, |h, c| c.map_art.contains_key(&map) && c.map_art.get(&map) == h.map_art.get(&map)), "the same picture on both sides");
+        assert!(pump(&mut host, &mut client, |_, c| c.advancements.has("cartographer_of_note")));
+        // A forged map from a player who has none does nothing.
+        let before = host.map_art.len();
+        client.net_send_msg(Msg::UseMap { item: MAP, wear: 0, sneaking: true });
+        for _ in 0..40 {
+            host.update(0.016, &idle());
+            client.update(0.016, &idle());
+        }
+        assert_eq!(host.map_art.len(), before);
     }
 
     #[test]

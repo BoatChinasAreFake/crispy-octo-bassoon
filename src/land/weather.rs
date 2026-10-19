@@ -103,7 +103,7 @@ impl Game {
             Mood::Day
         };
         // (While it eases off, the patter does too, rather than stopping dead.)
-        let wet = self.weather.strength > 0.0 && !self.elsewhere() && !biome.dry() && !crate::seasons::snows(biome, self.season());
+        let wet = self.weather.strength > 0.0 && !self.elsewhere() && !biome.dry() && !self.snows_at(e.x, e.z, self.season());
         // Out in it: full; under a roof: a muffled patter, fainter the deeper you are.
         let open = e.y >= self.world.rain_top(e.x, e.z);
         let rain = if wet && (open || sky > 0.0) { self.weather.strength * if open { 0.25 + 0.75 * sky } else { 0.3 * sky } } else { 0.0 };
@@ -173,7 +173,7 @@ impl Game {
                 }
                 let y = self.world.surface_y(x, z);
                 let top = self.world.get(x, y, z);
-                let snows_here = snowing && crate::seasons::snows(self.world.generator.column(x, z).1, season) && self.world.sky_light(x, y + 1, z) >= 1.0;
+                let snows_here = snowing && self.snows_at(x, z, season) && self.world.sky_light(x, y + 1, z) >= 1.0;
                 if snows_here {
                     if is_snow_layer(top) {
                         if top < SNOW_LAYER_FIRST + SNOW_LAYERS - 1 {
@@ -182,7 +182,7 @@ impl Game {
                     } else if y + 1 < crate::world::CH && takes_snow(top) && self.world.get(x, y + 1, z) == AIR {
                         self.world.set(x, y + 1, z, SNOW_LAYER_FIRST);
                     }
-                } else if is_snow_layer(top) && !snowing && !crate::seasons::snows(self.world.generator.column(x, z).1, season) {
+                } else if is_snow_layer(top) && !snowing && !self.snows_at(x, z, season) {
                     self.world.set(x, y, z, if top == SNOW_LAYER_FIRST { AIR } else { top - 1 });
                 }
             }
@@ -199,6 +199,13 @@ impl Game {
         self.net_broadcast_all(Msg::Weather { kind: kind.index() });
     }
 
+    /// Does it snow (rather than rain) in column (x, z)? Snowy biomes always;
+    /// rivers, beaches and seas where it's cold enough for the water to freeze.
+    pub fn snows_at(&self, x: i32, z: i32, season: Option<crate::seasons::Season>) -> bool {
+        let biome = self.world.generator.column(x, z).1;
+        crate::seasons::snows(biome, season) || ((biome.is_ocean() || matches!(biome, crate::world::Biome::River | crate::world::Biome::Beach)) && self.world.generator.cold(x, z))
+    }
+
     /// A strike somewhere near a random player.
     fn random_lightning(&mut self) {
         let mut near: Vec<Vec3> = self.peers.values().filter(|p| p.alive()).map(|p| p.target).collect();
@@ -210,7 +217,8 @@ impl Game {
         }
         let c = near[self.rng.int(0, near.len() as i32 - 1) as usize];
         let (x, z) = ((c.x + self.rng.range(-28.0, 28.0)).floor() as i32, (c.z + self.rng.range(-28.0, 28.0)).floor() as i32);
-        if !self.world.is_loaded(x, z) || !self.rained_on(x, crate::world::CH - 1, z) {
+        // (No lightning where it's snowing: a blizzard isn't a thunderstorm.)
+        if !self.world.is_loaded(x, z) || !self.rained_on(x, crate::world::CH - 1, z) || self.snows_at(x, z, self.season()) {
             return;
         }
         let y = self.world.surface_y(x, z) + 1;
@@ -279,7 +287,7 @@ impl Game {
         }
         let (ex, ez) = (eye.x.floor() as i32, eye.z.floor() as i32);
         let season = self.season();
-        let snowy = crate::seasons::snows(self.world.generator.column(ex, ez).1, season);
+        let snowy = self.snows_at(ex, ez, season);
         let tint = if snowy { [1.0, 1.0, 1.0, 0.85 * strength] } else { [0.7, 0.75, 0.9, 0.45 * strength] };
         g.begin(Pass::Blend, tint, false);
         let t = self.clock;
@@ -294,7 +302,7 @@ impl Game {
                 if biome.dry() {
                     continue;
                 }
-                let snow = crate::seasons::snows(biome, season);
+                let snow = self.snows_at(x, z, season);
                 let speed = if snow { 2.0 } else { 14.0 };
                 let span = 18.0;
                 let phase = hash2(17, x, z) * span;
@@ -328,6 +336,25 @@ mod tests {
         assert_eq!(dimming(Weather::Rain, 0.0), 1.0);
         for w in [Weather::Clear, Weather::Rain, Weather::Thunder] {
             assert_eq!(Weather::from_index(w.index()), w);
+        }
+    }
+
+    #[test]
+    fn snow_falls_on_ice_spikes_and_frozen_water_and_lightning_keeps_out() {
+        use crate::world::Biome;
+        assert!(crate::seasons::snows(Biome::IceSpikes, None));
+        assert!(crate::seasons::snows(Biome::FrozenOcean, None));
+        assert!(!crate::seasons::snows(Biome::Plains, None));
+        // A frozen river: snow, though rivers aren't a snowy biome.
+        let g = crate::game::tests::arena(236);
+        let wg = &g.world.generator;
+        let cold_river = (-4000..4000).step_by(16).flat_map(|z| (-4000..4000).step_by(16).map(move |x| (x, z))).find(|&(x, z)| wg.column(x, z).1 == Biome::River && wg.cold(x, z));
+        if let Some((x, z)) = cold_river {
+            assert!(g.snows_at(x, z, None), "snow on a frozen river");
+        }
+        let warm_river = (-4000..4000).step_by(16).flat_map(|z| (-4000..4000).step_by(16).map(move |x| (x, z))).find(|&(x, z)| wg.column(x, z).1 == Biome::River && !wg.cold(x, z));
+        if let Some((x, z)) = warm_river {
+            assert!(!g.snows_at(x, z, None), "rain on a warm one");
         }
     }
 

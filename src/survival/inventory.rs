@@ -38,7 +38,7 @@ pub fn max_uses(item: Id, w: Wear) -> Option<u32> {
 /// Items that remember their wear: tools, weapons, armour, and enchanted books.
 pub fn keeps_wear(item: Id) -> bool {
     // (A marked map's wear is where its X is; a dish's, its grade; a newspaper's, its issue.)
-    durability(item).is_some() || tagged(item) || matches!(item, TREASURE_MAP | WOODLAND_MAP | NEWSPAPER) || crate::cooking::Dish::of_item(item).is_some()
+    durability(item).is_some() || tagged(item) || matches!(item, TREASURE_MAP | WOODLAND_MAP | NEWSPAPER | RECORDED_MAP) || crate::cooking::Dish::of_item(item).is_some()
 }
 
 /// Items whose wear's high half is a label rather than damage: a Hollow Box's
@@ -51,7 +51,8 @@ pub fn tagged(item: Id) -> bool {
 /// Keep only what makes sense for `item` (saves and other players can't be trusted).
 pub fn sanitize_wear(item: Id, w: Wear) -> Wear {
     // A Treasure Map's wear is where its X is (see treasure.rs); a newspaper's, its issue (paper.rs).
-    if item == TREASURE_MAP || item == WOODLAND_MAP || item == NEWSPAPER {
+    // (A recorded map's, which map it is: mapart.rs.)
+    if item == TREASURE_MAP || item == WOODLAND_MAP || item == NEWSPAPER || item == RECORDED_MAP {
         return w;
     }
     // A dish's wear is its grade (see cooking.rs).

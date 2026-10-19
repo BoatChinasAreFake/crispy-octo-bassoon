@@ -131,7 +131,7 @@ mod tests {
         }
         assert_eq!(block(bed(6, 3)).key, "blue_bed_west");
         assert_eq!(block(candle(Some(1), true)).key, "black_candle_lit");
-        assert_eq!(DYED_FIRST + COUNT, NUM_BLOCKS);
+        assert_eq!(DYED_FIRST + COUNT, STRUCTURE_BLOCK);
     }
 
     #[test]

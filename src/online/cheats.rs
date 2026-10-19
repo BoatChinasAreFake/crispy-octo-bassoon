@@ -11,9 +11,9 @@ use crate::scripting::Cmd;
 use macroquad::math::Vec3;
 
 /// The commands this module answers (without the slash).
-pub const WORDS: [&str; 11] = ["tp", "teleport", "give", "gamemode", "gm", "weather", "seed", "summon", "locate", "setblock", "kill"];
+pub const WORDS: [&str; 16] = ["tp", "teleport", "give", "gamemode", "gm", "weather", "seed", "summon", "locate", "setblock", "kill", "pos1", "pos2", "fill", "clone", "structure"];
 
-pub const HELP: &str = "tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|creative|spectator> [player], weather <clear|rain|thunder>, seed, summon <mob> [x y z] [count], locate <structure|biome>, setblock <x y z> <block>, kill [player | mobs | <mob>]";
+pub const HELP: &str = "tp [player] <x y z | player>, give [player] <item> [count], gamemode <survival|creative|spectator> [player], weather <clear|rain|thunder>, seed, summon <mob> [x y z] [count], locate <structure|biome>, setblock <x y z> <block>, kill [player | mobs | <mob>], pos1/pos2 [x y z], fill [x1 y1 z1 x2 y2 z2] <block> [hollow|outline|keep|replace <block>], clone [x1 y1 z1 x2 y2 z2] <x y z>, structure save|load|export|list|delete <name>";
 
 /// Find a block or item by key ("oak_log"), by key without the mod prefix, or
 /// by its name ("Tree Chunk", "tree chunk", "tree_chunk").
@@ -37,6 +37,11 @@ pub fn find_item(name: &str) -> Option<Id> {
         }
     }
     r.items.iter().enumerate().find(|(_, it)| it.real && plain(it.name) == n).map(|(i, _)| i as Id + FIRST_ITEM)
+}
+
+/// A block coordinate: "12", "~", "~-3" (relative to `base`).
+pub fn coord_i(s: &str, base: i32) -> Option<i32> {
+    coord(s, base as f32).map(|v| v.floor() as i32)
 }
 
 /// "12", "~", "~-3": a coordinate, maybe relative to `base`.
@@ -92,6 +97,16 @@ impl Game {
             "locate" => self.cmd_locate(&me, &args),
             "setblock" => self.cmd_setblock(&me, &args),
             "kill" => self.cmd_kill(&me, &args),
+            "pos1" | "pos2" | "fill" | "clone" | "structure" => {
+                let here = self.caller_spot(&me).0.floor().as_ivec3();
+                match word {
+                    "pos1" => self.cmd_pos(&me, 0, &args, here),
+                    "pos2" => self.cmd_pos(&me, 1, &args, here),
+                    "fill" => self.cmd_fill(&me, &args, here),
+                    "clone" => self.cmd_clone(&me, &args, here),
+                    _ => self.cmd_structure(&me, &args, here),
+                }
+            }
             "weather" => {
                 let kind = match args.first().map(|a| a.to_ascii_lowercase()) {
                     Some(a) if a == "clear" || a == "sun" => crate::weather::Weather::Clear,

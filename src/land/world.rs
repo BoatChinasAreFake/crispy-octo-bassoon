@@ -579,6 +579,10 @@ pub struct GenOptions {
     /// islands, the odd large mushroom island, and beaches with their finds.
     /// 9: the Hollow's outer islands grow Leapstalks, and some carry a Hollow
     /// City (see hollowlife.rs and hollowcity.rs). The Overworld is as in 8.
+    /// 10: snowy land is grass under a layer of snow, ice spikes stand on deep
+    /// snow, sea ice and river banks have ragged edges, villages keep trees
+    /// off their ground, and underground lakes left open beside a cave are
+    /// walled with stone rather than hanging in the air.
     pub version: u8,
     /// Structures: 0 none, 1 few, 2 normal, 3 lots.
     pub structures: u8,
@@ -591,7 +595,7 @@ pub struct GenOptions {
 impl GenOptions {
     pub const LEGACY: GenOptions = GenOptions { version: 0, structures: 2, biome_size: 0, terrain: 1 };
     /// What a new world gets unless you choose otherwise.
-    pub const DEFAULT: GenOptions = GenOptions { version: 9, structures: 2, biome_size: 1, terrain: 1 };
+    pub const DEFAULT: GenOptions = GenOptions { version: 10, structures: 2, biome_size: 1, terrain: 1 };
 
     pub fn pack(self) -> u32 {
         u32::from_le_bytes([self.structures, self.biome_size, self.terrain, self.version])
@@ -664,6 +668,35 @@ pub struct Generator {
     pub(crate) biomes: Vec<crate::modgen::ModBiome>,
     pub(crate) structures: Vec<crate::modgen::ModStructure>,
     pub(crate) dims: Vec<crate::modgen::ModDim>,
+}
+
+/// Underground water and lava left standing beside open air (a cave or a
+/// structure cut into a lake after it was filled) gets a wall of stone
+/// there, instead of hanging in a sheer face (generator 10 on). Only inside
+/// the chunk, and only below the surface and the sea.
+fn seal_hanging_liquids(b: &mut [Id], cols: &[(i32, Biome); 256], sea: i32) {
+    let mut seal = Vec::new();
+    for lz in 0..CW {
+        for lx in 0..CW {
+            let h = cols[(lz * CW + lx) as usize].0;
+            for y in 1..(h.min(sea) - 2).max(1) {
+                let id = b[idx(lx, y, lz)];
+                if !matches!(id, WATER | LAVA) {
+                    continue;
+                }
+                let open = [(1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1), (0, -1, 0)].iter().any(|&(dx, dy, dz)| {
+                    let (nx, ny, nz) = (lx + dx, y + dy, lz + dz);
+                    (0..CW).contains(&nx) && (0..CW).contains(&nz) && ny > 0 && b[idx(nx, ny, nz)] == AIR
+                });
+                if open {
+                    seal.push(idx(lx, y, lz));
+                }
+            }
+        }
+    }
+    for i in seal {
+        b[i] = STONE;
+    }
 }
 
 impl Generator {
@@ -973,6 +1006,18 @@ impl Generator {
         if keeps(other) || keeps(own) || (self.opts.version >= 8 && (special(other) || special(own))) { own } else { other }
     }
 
+    /// Does the sea freeze over at (x, z)? Where it's cold; from generator 10
+    /// the edge of the ice wanders and breaks up into floes, rather than
+    /// following the temperature's long, smooth line.
+    pub fn freezes(&self, x: i32, z: i32) -> bool {
+        if self.opts.version < 10 {
+            return self.cold(x, z);
+        }
+        let t = self.climate(x, z).0;
+        let wobble = self.hills.noise2(x as f32 / 23.0 + 71.0, z as f32 / 23.0 - 19.0) * 0.05 + (hash2(self.seed ^ 0x1CE, x, z) - 0.5) * 0.025;
+        t + wobble < -0.38
+    }
+
     /// Cold enough for the sea to freeze (the same temperature that makes snowy biomes).
     pub fn cold(&self, x: i32, z: i32) -> bool {
         if self.opts.version >= 3 {
@@ -1029,6 +1074,11 @@ impl Generator {
         // Swamp trees and mangroves stand in the shallows too.
         let ground = if matches!(biome, Biome::Swamp | Biome::Mangrove) { self.sea() - 2 } else { self.sea() + 1 };
         if h <= ground || hash2(self.seed ^ 0x7EE, x, z) >= density {
+            return None;
+        }
+        // (From generator 10, villages keep their ground clear of trees, so a
+        // house never cuts one in half.)
+        if self.opts.version >= 10 && self.site_near(macroquad::math::Vec3::new(x as f32, h as f32, z as f32), 30.0) == Some(crate::structures::Kind::Village) {
             return None;
         }
         let kind = match biome.tree() {
@@ -1144,7 +1194,7 @@ impl Generator {
                         // Deserts sit on a few layers of sandstone.
                         if biome == Biome::Desert && y >= h - 8 { SANDSTONE } else { STONE }
                     } else if y < h {
-                        if matches!(biome, Biome::Desert | Biome::Beach) || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else if peaks { STONE } else { DIRT }
+                        if matches!(biome, Biome::Desert | Biome::Beach) || beach { SAND } else if swamp && hash2(s ^ 0x3D, x, z) < 0.5 { MUD } else if peaks { STONE } else if biome == Biome::IceSpikes && self.opts.version >= 10 { SNOW_BLOCK } else { DIRT }
                     } else if y == h && h >= self.sea() - 1 && matches!(biome, Biome::StonyPeaks | Biome::MushroomIslands | Biome::IceSpikes) {
                         match biome {
                             // Bare rock, with patches of gravel and calcite.
@@ -1166,7 +1216,8 @@ impl Generator {
                         } else if matches!(biome, Biome::Desert | Biome::Beach) || beach {
                             SAND
                         } else if biome == Biome::Snowy {
-                            SNOW_GRASS
+                            // (From generator 10, grass with a layer of snow on it; see below.)
+                            if self.opts.version >= 10 { GRASS } else { SNOW_GRASS }
                         } else {
                             GRASS
                         }
@@ -1310,6 +1361,14 @@ impl Generator {
                         }
                     }
                 }
+                // Snowy land: a layer of snow over the grass (generator 10 on).
+                // (It buries the little plants: snowy land is white all over.)
+                if self.opts.version >= 10 && top < CH && biome == Biome::Snowy && b[idx(lx, h, lz)] == GRASS && (b[idx(lx, top, lz)] == AIR || block(b[idx(lx, top, lz)]).model == Model::Cross) {
+                    if top + 1 < CH && block(b[idx(lx, top + 1, lz)]).model == Model::Cross {
+                        b[idx(lx, top + 1, lz)] = AIR;
+                    }
+                    b[idx(lx, top, lz)] = SNOW_LAYER_FIRST;
+                }
                 // Mushrooms on mycelium.
                 if top < CH && b[idx(lx, h, lz)] == MYCELIUM && b[idx(lx, top, lz)] == AIR && hash2(s ^ 0x3C0, x, z) < 0.04 {
                     b[idx(lx, top, lz)] = MUSHROOM;
@@ -1376,8 +1435,8 @@ impl Generator {
                         b[idx(lx, y, lz)] = CACTUS;
                     }
                 }
-                // Cold seas freeze over.
-                if h < self.sea() && b[idx(lx, self.sea(), lz)] == WATER && self.cold(x, z) {
+                // Cold seas freeze over (from generator 10, with a ragged edge of floes).
+                if h < self.sea() && b[idx(lx, self.sea(), lz)] == WATER && self.freezes(x, z) {
                     b[idx(lx, self.sea(), lz)] = ICE;
                 }
                 if top < CH && b[idx(lx, top, lz)] == AIR {
@@ -1451,6 +1510,9 @@ impl Generator {
         self.place_structures(cx, cz, &mut b);
         self.place_crypts(cx, cz, &mut b);
         self.place_mod_structures(cx, cz, &mut b);
+        if self.opts.version >= 10 {
+            seal_hanging_liquids(&mut b, &cols, self.sea());
+        }
         b
     }
 }
@@ -2575,5 +2637,110 @@ mod v3_tests {
         // Older worlds keep their straight edges.
         let old = Generator::with(7, GenOptions { version: 2, ..GenOptions::DEFAULT });
         assert_eq!(old.ground_biome(5, 5, Biome::Plains), Biome::Plains);
+    }
+}
+
+#[cfg(test)]
+mod v10_tests {
+    use super::*;
+
+    fn gens(seed: u32) -> (Generator, Generator) {
+        (Generator::with_dim(seed, GenOptions::DEFAULT, Dim::Over), Generator::with_dim(seed, GenOptions { version: 9, ..GenOptions::DEFAULT }, Dim::Over))
+    }
+
+    /// Somewhere well inside a biome, on dry land.
+    fn find(g: &Generator, biome: Biome) -> Option<(i32, i32)> {
+        (-6000..6000).step_by(48).flat_map(|z| (-6000..6000).step_by(48).map(move |x| (x, z))).find(|&(x, z)| {
+            let (h, b) = g.column(x, z);
+            b == biome && h > g.sea() + 2 && [(12, 0), (-12, 0), (0, 12), (0, -12)].iter().all(|&(dx, dz)| g.column(x + dx, z + dz).1 == biome)
+        })
+    }
+
+    #[test]
+    fn snowy_land_is_grass_under_snow_from_generator_10() {
+        let (new, old) = gens(77);
+        let (x, z) = find(&new, Biome::Snowy).expect("snowy land");
+        let surface = |g: &Generator| {
+            let chunk = g.generate(x.div_euclid(CW), z.div_euclid(CW));
+            let mut counts = (0, 0, 0);
+            for lz in 0..CW {
+                for lx in 0..CW {
+                    let (wx, wz) = (x.div_euclid(CW) * CW + lx, z.div_euclid(CW) * CW + lz);
+                    let (h, b) = g.column(wx, wz);
+                    // (At the border, some ground is the neighbour's: see `ground_biome`.)
+                    if g.ground_biome(wx, wz, b) != Biome::Snowy {
+                        continue;
+                    }
+                    let (top, above) = (chunk[idx(lx, h, lz)], chunk[idx(lx, h + 1, lz)]);
+                    if top == SNOW_GRASS {
+                        counts.0 += 1;
+                    }
+                    if top == GRASS && is_snow_layer(above) {
+                        counts.1 += 1;
+                    }
+                    if top == GRASS && block(above).model == Model::Cross {
+                        counts.2 += 1;
+                    }
+                }
+            }
+            counts
+        };
+        let (snowy_grass, _, _) = surface(&old);
+        assert!(snowy_grass > 100, "older worlds keep their snowy grass");
+        let (snowy_grass, under_snow, bare_plants) = surface(&new);
+        assert_eq!(snowy_grass, 0);
+        assert!(under_snow > 100, "grass under a layer of snow: {under_snow}");
+        assert_eq!(bare_plants, 0, "no grass tufts poking out of the snow");
+    }
+
+    #[test]
+    fn the_edge_of_the_ice_breaks_up() {
+        let (new, old) = gens(78);
+        // Along a line across the freezing edge, the new ice comes and goes more than once.
+        let mut changes = (0, 0);
+        for z in (-3000..3000).step_by(97) {
+            let (mut a, mut b) = (None, None);
+            for x in -3000..3000 {
+                let (fa, fb) = (new.freezes(x, z), old.freezes(x, z));
+                if a.is_some_and(|p| p != fa) {
+                    changes.0 += 1;
+                }
+                if b.is_some_and(|p| p != fb) {
+                    changes.1 += 1;
+                }
+                (a, b) = (Some(fa), Some(fb));
+            }
+        }
+        assert!(changes.1 > 0, "the line does cross the edge");
+        assert!(changes.0 > changes.1 * 3, "ragged: {} against {}", changes.0, changes.1);
+    }
+
+    #[test]
+    fn liquids_left_beside_a_cave_are_walled_off() {
+        let mut b = vec![STONE; CHUNK_VOL];
+        let cols = [(80, Biome::Plains); 256];
+        // A lava pool, with a passage cut beside it, and a lake's surface under open air.
+        for x in 4..8 {
+            b[idx(x, 20, 4)] = LAVA;
+        }
+        b[idx(8, 20, 4)] = AIR;
+        b[idx(2, 30, 2)] = WATER;
+        b[idx(2, 31, 2)] = AIR;
+        seal_hanging_liquids(&mut b, &cols, 63);
+        assert_eq!(b[idx(7, 20, 4)], STONE, "the face next to the passage");
+        assert_eq!(b[idx(6, 20, 4)], LAVA, "the rest stays");
+        assert_eq!(b[idx(2, 30, 2)], WATER, "air above is fine");
+    }
+
+    #[test]
+    fn villages_keep_trees_off_their_ground() {
+        let (new, _) = gens(79);
+        let Some(site) = (-40..40).flat_map(|cz| (-40..40).map(move |cx| (cx, cz))).find_map(|(cx, cz)| new.site(cx, cz).filter(|s| s.kind == crate::structures::Kind::Village)) else { return };
+        let o = site.origin;
+        for dz in -20..=20 {
+            for dx in -20..=20 {
+                assert!(new.tree_at(o.x + dx, o.z + dz).is_none(), "a tree at {dx}, {dz} from the square");
+            }
+        }
     }
 }

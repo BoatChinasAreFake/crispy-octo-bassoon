@@ -707,11 +707,15 @@ impl App {
                 app.start_game(shot_game(424242, true, false));
                 app.show_debug = false;
             }
-            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" | "blocksets" | "copperwork" | "dyed" => {
-                let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks"), false);
+            "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "glider" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" | "blocksets" | "copperwork" | "dyed" | "buildtools" | "mapart" | "symmetry" => {
+                let mut g = shot_game(424242, matches!(s.mode.as_str(), "farm" | "newblocks" | "buildtools" | "mapart" | "symmetry"), false);
                 g.time = s.time.unwrap_or(0.2);
                 if s.mode == "fish" {
                     g.inv.slots[0] = Some((block::ROD, 1));
+                }
+                if s.mode == "symmetry" {
+                    // Looking down a little more, at floor within reach (for the ghost preview).
+                    s.pitch = -0.42;
                 }
                 app.start_game(g);
                 app.show_debug = false;
@@ -1421,7 +1425,7 @@ impl App {
             if s.mode == "parody" && frames == 140 {
                 app.game.advance("dimonds");
             }
-            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" | "blocksets" | "copperwork" | "dyed") && frames == 120 {
+            if matches!(s.mode.as_str(), "zoo" | "newmobs" | "modzoo" | "music" | "animals" | "banners" | "golems" | "homestead" | "farm" | "fish" | "kitchen" | "chest" | "chests" | "bigchest" | "furnace" | "building" | "armour" | "anvil" | "rules" | "xp" | "enchant" | "table" | "liquids" | "zappy" | "trade" | "vehicles" | "decor" | "carpentry" | "brewing" | "contraptions" | "machines" | "underworks" | "woods" | "models" | "newblocks" | "homecraft" | "cooking" | "skins" | "zapparts" | "tradetable" | "postbox" | "together" | "bedtime" | "tradeliked" | "tradedisliked" | "tradehated" | "blocksets" | "copperwork" | "dyed" | "buildtools" | "mapart" | "symmetry") && frames == 120 {
                 // A flat, clear stone floor in front of the camera.
                 let p = app.game.player.body.pos;
                 let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
@@ -2239,6 +2243,69 @@ impl App {
                     app.game.inv.wear[k] = wear;
                 }
             }
+            if matches!(s.mode.as_str(), "buildtools" | "mapart" | "symmetry") && frames == 125 {
+                // v0.8 Part 2: a selection being filled, a wall of recorded maps, mirror building.
+                let p = app.game.player.body.pos;
+                let fwd = Vec3::new(s.yaw.sin(), 0.0, -s.yaw.cos());
+                let f = if fwd.x.abs() > fwd.z.abs() { IVec3::new(fwd.x.signum() as i32, 0, 0) } else { IVec3::new(0, 0, fwd.z.signum() as i32) };
+                let r = IVec3::new(-f.z, 0, f.x);
+                let away = if fwd.x.abs() > fwd.z.abs() { if fwd.x > 0.0 { 1 } else { 3 } } else if fwd.z > 0.0 { 2 } else { 0 };
+                let base = IVec3::new(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
+                let at = |fo: i32, ro: i32, up: i32| base + f * fo + r * ro + IVec3::Y * up;
+                match s.mode.as_str() {
+                    "buildtools" => {
+                        // Half a glass box filled in, the selection round all of it, and a Structure Block.
+                        let (a, b) = (at(5, -11, 0), at(9, -5, 3));
+                        let me = app.game.player_name.clone();
+                        app.game.set_corner(&me, 0, a);
+                        app.game.set_corner(&me, 1, b);
+                        app.game.admin_command(crate::admin::Caller::Host, "/fill glass hollow");
+                        let half = at(7, -5, 3);
+                        app.game.set_corner(&me, 1, half);
+                        app.game.admin_command(crate::admin::Caller::Host, "/fill bricks outline");
+                        app.game.set_corner(&me, 1, b);
+                        app.game.world.set_v(at(4, -4, 0), block::STRUCTURE_BLOCK);
+                        app.game.inv.slots[app.game.inv.selected] = Some((block::SELECTION_WAND, 1));
+                    }
+                    "mapart" => {
+                        // Four recorded maps of the squares round here on a wall, and one in hand.
+                        let wall = 4;
+                        for up in 0..4 {
+                            for ro in -11..-5 {
+                                app.game.world.set_v(at(wall + 1, ro, up), block::STONE_BRICKS);
+                            }
+                        }
+                        let mut ids = Vec::new();
+                        for (dx, dz) in [(0, 0), (64, 0), (0, 64), (64, 64)] {
+                            ids.push(app.game.new_map_art(p + Vec3::new(dx as f32, 0.0, dz as f32)));
+                        }
+                        for (k, (ro, up)) in [(-9, 2), (-8, 2), (-9, 1), (-8, 1)].into_iter().enumerate() {
+                            let q = at(wall, ro, up);
+                            app.game.world.set_v(q, block::FRAME_FIRST + away as block::Id);
+                            app.game.world.frames.insert(q, (block::RECORDED_MAP, ids[k]));
+                        }
+                        app.game.map_art.get_mut(&ids[0]).unwrap().locked = true;
+                        app.game.inv.slots[app.game.inv.selected] = Some((block::RECORDED_MAP, 1));
+                        app.game.inv.wear[app.game.inv.selected] = ids[1];
+                    }
+                    _ => {
+                        // Mirror building across x and z: a little castle built a quarter at a time.
+                        let c = at(8, -8, 0);
+                        app.game.symmetry = Some((3, c));
+                        for (fo, ro) in [(3, 3), (3, 2), (2, 3), (3, 1), (1, 3), (3, 0)] {
+                            for up in 0..3 {
+                                let q = c + f * fo + r * ro + IVec3::Y * up;
+                                app.game.world.set_v(q, block::STONE_BRICKS);
+                                app.game.place_mirrored(q, block::STONE_BRICKS);
+                            }
+                        }
+                        let tower = c + f * 3 + r * 3 + IVec3::Y * 3;
+                        app.game.world.set_v(tower, block::stairs(2, away));
+                        app.game.place_mirrored(tower, block::stairs(2, away));
+                        app.game.inv.slots[app.game.inv.selected] = Some((block::BRICK, 1));
+                    }
+                }
+            }
             if matches!(s.mode.as_str(), "blocksets" | "copperwork" | "dyed") && frames == 125 {
                 // v0.8: rows of the new blocks on the floor in front.
                 let p = app.game.player.body.pos;
@@ -2895,7 +2962,7 @@ const LATEST_SCENES: &[&str] = &[
     "rolling_hills", "offshore_island", "large_mushroom", "beach_ecology", "sea_wildlife",
     "landmark_arch", "landmark_crater", "landmark_grove", "atlas", "landmark_map",
     "hollow_city", "sky_ship", "sulkers", "leapstalks", "gateway", "poem", "gravity_island",
-    "blocksets", "copperwork", "dyed",
+    "blocksets", "copperwork", "dyed", "buildtools", "mapart", "symmetry",
 ];
 
 /// A game for a scene. `--gen N` picks the generator (see `GenOptions`; 0 is

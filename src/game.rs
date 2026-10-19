@@ -283,6 +283,10 @@ pub struct Game {
     pub clouds_on: bool,
     pub fog_on: bool,
     pub view_bobbing: bool,
+    /// Build helpers (creative): a see-through preview of where the held
+    /// block would go, and mirror building (which axes, about which block).
+    pub ghost_preview: bool,
+    pub symmetry: Option<(u8, IVec3)>,
     pub particle_level: u8,
     pub water_reflections: bool,
     /// Sun shadows, and deep water with caustics (Video Settings; see render.rs).
@@ -336,6 +340,16 @@ pub struct Game {
     pub pvp: bool,
     /// Land claimed with Survey Posts (see claims.rs), and whose land we're on.
     pub claims: crate::claims::Claims,
+    /// Building tools (see buildtools.rs): everyone's selection corners (by
+    /// name, where the world lives), your own (to draw), and saved builds.
+    pub selections: HashMap<String, [Option<IVec3>; 2]>,
+    pub my_selection: [Option<IVec3>; 2],
+    pub builds: std::collections::BTreeMap<String, String>,
+    /// Recorded maps by number (see mapart.rs), when unlocked ones are next
+    /// redrawn, and a count that changes whenever one does (for drawing).
+    pub map_art: BTreeMap<u32, crate::mapart::MapArt>,
+    pub map_art_timer: f32,
+    pub map_art_version: u32,
     pub on_land: Option<String>,
     /// Scores, timers and the sidebar for mods' minigames (see minigames.rs).
     pub board: crate::minigames::Board,
@@ -644,6 +658,8 @@ impl Game {
             clouds_on: true,
             fog_on: true,
             view_bobbing: true,
+            ghost_preview: true,
+            symmetry: None,
             particle_level: 0,
             water_reflections: true,
             shadows: true,
@@ -681,6 +697,12 @@ impl Game {
             life: Default::default(),
             board: Default::default(),
             claims: Default::default(),
+            selections: HashMap::new(),
+            my_selection: [None, None],
+            builds: Default::default(),
+            map_art: BTreeMap::new(),
+            map_art_timer: 0.0,
+            map_art_version: 0,
             on_land: None,
             personal_spawn: None,
             smooth_far: false,
@@ -1004,6 +1026,12 @@ impl Game {
         if !self.waypoints.is_empty() {
             v.push(("waypoints2".into(), crate::qol::encode(&self.waypoints)));
         }
+        if !self.builds.is_empty() {
+            v.push(("builds".into(), crate::buildtools::encode(&self.builds)));
+        }
+        if !self.map_art.is_empty() {
+            v.push(("map_art".into(), crate::mapart::encode(&self.map_art)));
+        }
         if self.claims != crate::claims::Claims::default() {
             v.push(("claims".into(), self.claims.encode()));
         }
@@ -1113,6 +1141,12 @@ impl Game {
             self.waypoints = crate::qol::decode(b, false);
         } else if let Some(b) = extra("waypoints") {
             self.waypoints = crate::qol::decode(b, true);
+        }
+        if let Some(b) = extra("builds") {
+            self.builds = crate::buildtools::decode(b);
+        }
+        if let Some(b) = extra("map_art") {
+            self.map_art = crate::mapart::decode(b);
         }
         if let Some(b) = extra("claims") {
             self.claims = crate::claims::Claims::decode(b);
@@ -2605,6 +2639,14 @@ impl Game {
             }
             Some(Target::Block(h)) => {
                 let pos = h.pos;
+                // The Selection Wand marks the first corner instead of breaking.
+                if held == SELECTION_WAND && self.creative {
+                    if c.attack_pressed {
+                        self.wand_corner(0, pos);
+                    }
+                    self.breaking = None;
+                    return;
+                }
                 // A frame with something in it gives that up before breaking.
                 if c.attack_pressed && self.attack_cd <= 0.0 && self.hit_frame(pos) {
                     self.attack_cd = 0.25;
@@ -2621,6 +2663,11 @@ impl Game {
                     if self.creative {
                         if self.attack_cd <= 0.0 {
                             self.break_block(pos, false);
+                            for m in self.mirror_spots(pos) {
+                                if self.world.get_v(m) == id {
+                                    self.break_block(m, false);
+                                }
+                            }
                             self.attack_cd = 0.22;
                         }
                     } else {
@@ -2705,6 +2752,10 @@ impl Game {
 
     fn use_item(&mut self) {
         let held = self.inv.held();
+        // Maps: record a blank one (sneaking), copy or lock a recorded one (see mapart.rs).
+        if self.use_held_map() {
+            return;
+        }
         // Goo (or honeycomb) waxes copper so it stops ageing.
         if matches!(held, GOO | HONEYCOMB)
             && let Some(Target::Block(h)) = &self.target
@@ -3091,6 +3142,16 @@ impl Game {
         if !self.player.sneaking && (self.use_switch(hit_pos, hit_id) || self.use_zappart(hit_pos, hit_id)) {
             return;
         }
+        // Building tools: the Structure Block, and the wand's second corner.
+        if hit_id == STRUCTURE_BLOCK && self.use_structure_block(hit_pos) {
+            return;
+        }
+        if held == SELECTION_WAND {
+            if self.creative {
+                self.wand_corner(1, hit_pos);
+            }
+            return;
+        }
         // Item frames take what you're holding.
         if !self.player.sneaking && crate::decor::is_frame(hit_id) && self.use_frame(hit_pos) {
             return;
@@ -3236,6 +3297,7 @@ impl Game {
             oriented = WALL_TORCH_FIRST + f as Id;
         }
         self.world.set_v(place, oriented);
+        self.place_mirrored(place, oriented);
         if held == HOLLOW_BOX && !self.is_client() {
             let wear = self.inv.wear[self.inv.selected];
             self.unpack_box(place, wear);
@@ -4174,6 +4236,7 @@ impl Game {
         self.hive_tick(dt);
         self.trees_tick(dt);
         self.random_ticks(dt);
+        self.map_art_tick(dt);
         self.hollow_tick(dt);
         self.fire_tick(dt);
         self.container_tick(dt);
@@ -4877,6 +4940,25 @@ impl Game {
                     let m = Mat4::from_translation(min - Vec3::splat(0.006)) * Mat4::from_scale(max - min + Vec3::splat(0.012));
                     g.cube(&m, [T_CRACK0 + stage; 6], 1.0, [0.0, 0.0, 1.0, 1.0]);
                 }
+        }
+
+        // Build helpers: a see-through block where the held one would go (and its mirror images).
+        if let Some(spots) = self.ghost_spots() {
+            let t = block(self.inv.held()).tex;
+            g.begin(Pass::Blend, [1.0, 1.0, 1.0, 0.38], false);
+            for p in spots {
+                let m = Mat4::from_translation(p.as_vec3() + Vec3::splat(0.04)) * Mat4::from_scale(Vec3::splat(0.92));
+                g.cube(&m, [t[1], t[1], t[0], t[2], t[1], t[1]], 1.0, [0.0, 0.0, 1.0, 1.0]);
+            }
+        }
+        // Your building selection (see buildtools.rs), while holding the wand.
+        if self.creative && self.inv.held() == SELECTION_WAND {
+            let [a, b] = self.my_selection;
+            if let Some(a) = a.or(b) {
+                let (lo, hi) = crate::buildtools::corners(a, b.unwrap_or(a));
+                g.begin(Pass::Blend, [1.0, 0.85, 0.2, 0.9], true);
+                outline(&mut g, lo.as_vec3() - Vec3::splat(0.02), hi.as_vec3() + Vec3::splat(1.02), 0.04);
+            }
         }
 
         if !self.third_person && !self.spectator && self.rocket_pilot().is_none() {

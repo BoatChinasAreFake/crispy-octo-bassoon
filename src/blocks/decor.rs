@@ -161,7 +161,7 @@ impl Game {
     /// Everything hung in frames nearby.
     pub fn draw_frames(&self, g: &mut DynGeo, eye: Vec3, range: f32) {
         g.begin(Pass::Opaque, [1.0; 4], false);
-        for (&pos, &(item, _)) in &self.world.frames {
+        for (&pos, &(item, wear)) in &self.world.frames {
             let center = pos.as_vec3() + Vec3::splat(0.5);
             if center.distance(eye) > range {
                 continue;
@@ -173,6 +173,12 @@ impl Game {
             let at = center - out * 0.4;
             let yaw = out.x.atan2(out.z);
             let root = Mat4::from_translation(at) * Mat4::from_rotation_y(yaw);
+            if item == RECORDED_MAP {
+                // Its picture, edge to edge: a wall of them makes one big picture.
+                self.draw_framed_art(g, &root, wear, sky);
+                g.begin(Pass::Opaque, [1.0; 4], false);
+                continue;
+            }
             if item == MAP && !self.map_colors.is_empty() {
                 // A map of the land round the frame (a wall of them shows the whole area).
                 self.draw_framed_map(g, &root, pos, sky);
@@ -193,6 +199,28 @@ impl Game {
 }
 
 impl Game {
+    /// A framed recorded map (see mapart.rs): its 64 by 64 picture, each
+    /// row drawn as runs of one colour.
+    fn draw_framed_art(&self, g: &mut DynGeo, root: &Mat4, id: u32, sky: f32) {
+        use crate::mapart::ART;
+        let s = 0.5;
+        let cell = 2.0 * s / ART as f32;
+        for row in 0..ART {
+            let mut col = 0;
+            while col < ART {
+                let c = self.map_art_pixel(id, col, row);
+                let mut end = col + 1;
+                while end < ART && self.map_art_pixel(id, end, row) == c {
+                    end += 1;
+                }
+                let (x0, x1, y0) = (-s + col as f32 * cell, -s + end as f32 * cell, s - (row + 1) as f32 * cell);
+                let corners = [Vec3::new(x0, y0, 0.03), Vec3::new(x1, y0, 0.03), Vec3::new(x1, y0 + cell, 0.03), Vec3::new(x0, y0 + cell, 0.03)].map(|p| root.transform_point3(p));
+                g.quad_tinted(corners, crate::texture::T_WHITE, [1.0, sky], c);
+                col = end;
+            }
+        }
+    }
+
     /// A framed map: 16 by 16 cells, four blocks each, of the land around
     /// the frame, lined up on a 64-block grid so that a wall of framed maps
     /// fits together into one big map.

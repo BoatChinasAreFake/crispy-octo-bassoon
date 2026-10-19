@@ -34,6 +34,7 @@ pub(crate) mod woods;
 pub(crate) mod stonesets;
 pub(crate) mod copperworks;
 pub(crate) mod dyed;
+pub(crate) mod buildtools;
 pub(crate) mod wiring;
 pub(crate) mod together;
 pub(crate) mod trading;

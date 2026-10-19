@@ -205,6 +205,7 @@ pub fn playtest(bots: usize, seconds: f32, seed: u32, port: u16) -> Result<Repor
     reshaped_depths(&mut host, &mut team, &mut report, &mut touched);
     hollow_filled(&mut host, &mut team, &mut report, &mut touched);
     block_sets(&mut host, &mut team, &mut report, &mut touched);
+    creative_tools(&mut host, &mut team, &mut report, &mut touched);
     // Let everything arrive.
     for _ in 0..(3.0 / DT) as usize {
         host.update(DT, &idle());
@@ -2198,6 +2199,61 @@ fn block_sets(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &
     ground(host, team, k);
 }
 
+/// v0.8 Part 2: the host fills a box with /fill, and a bot records a map;
+/// everyone sees the blocks and the same picture.
+fn creative_tools(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
+    revive(host, team);
+    let k = 0;
+    ground(host, team, k);
+    let feet = team[k].game.player.body.pos.floor().as_ivec3();
+    pad(host, touched, feet, 4);
+    report.features.push("fill");
+    let (a, b) = (feet + IVec3::new(2, 1, -1), feet + IVec3::new(3, 2, 1));
+    for y in a.y..=b.y {
+        for z in a.z..=b.z {
+            for x in a.x..=b.x {
+                touched.insert(IVec3::new(x, y, z));
+            }
+        }
+    }
+    let line = format!("/fill {} {} {} {} {} {} bricks", a.x, a.y, a.z, b.x, b.y, b.z);
+    host.admin_command(crate::admin::Caller::Console, &line);
+    pump(host, team, 1.0, |_| idle());
+    for bot in team.iter() {
+        // (Bots far off don't have that bit of the world.)
+        if bot.game.world.is_loaded(b.x, b.z) && bot.game.world.get_v(b) != BRICK {
+            report.problems.push(format!("{} never saw the /fill", bot.name));
+        }
+    }
+    report.features.push("recorded maps");
+    if host.map_colors.is_empty() {
+        host.map_colors = (0..NUM_BLOCKS).map(|i| [(i % 251) as u8, 90, 90]).collect();
+    }
+    let id = team[k].game.my_id;
+    host.give_peer(id, MAP, 1);
+    pump(host, team, 0.5, |_| idle());
+    let before = host.map_art.len();
+    if let Some(slot) = team[k].game.inv.slots.iter().position(|s| s.is_some_and(|s| s.0 == MAP)) {
+        let g = &mut team[k].game;
+        g.inv.selected = slot;
+        g.player.sneaking = true;
+        g.target = None;
+        g.use_held_map();
+        g.player.sneaking = false;
+    }
+    pump(host, team, 1.0, |_| idle());
+    if host.map_art.len() != before + 1 {
+        report.problems.push(format!("{} used a blank map and the host recorded nothing", team[k].name));
+    } else if let Some((&map, art)) = host.map_art.iter().next_back() {
+        for bot in team.iter() {
+            if bot.game.map_art.get(&map) != Some(art) {
+                report.problems.push(format!("{} doesn't have the same picture of map {map}", bot.name));
+            }
+        }
+    }
+    ground(host, team, k);
+}
+
 /// v0.5: a Hmmer with no job claims a bed and a Lectern near a bot and
 /// becomes a Librarian, then goes to bed at night; everyone sees it.
 fn village_life(host: &mut Game, team: &mut [Bot], report: &mut Report, touched: &mut HashSet<IVec3>) {
@@ -2883,7 +2939,7 @@ mod tests {
         let r = super::playtest(6, 60.0, 1234, 26170).expect("it runs");
         assert!(r.chats > 110, "only {} lines", r.chats);
         assert!(r.placed > 0 && r.chats > 0, "the bots did nothing: {r:?}");
-        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools", "leapstalks", "sulkers", "walls", "copper doors", "coloured candles"]);
+        assert_eq!(r.features, ["glide", "spear", "box", "spectator", "stats", "table", "honey", "brush", "smithing", "death message", "falling", "music", "fireball", "raid", "totem", "campfire", "llama", "armour stand", "glow berries", "tripwire", "allay", "witch potion", "rope", "wilter", "starred beacon", "cave-in", "birch door", "acacia boat", "mushmooer", "kelp", "huge fungus", "tusker", "soul fire", "sporeling", "snout chest", "dimensions", "cauldron", "composter", "lead", "donkey pack", "galloper armour", "cooking pot", "own skin", "server status", "trapped chest", "daylight sensor", "teams", "trading table", "sidebar", "claims", "post", "village life", "trade levels", "reputation", "notice board", "bounties", "growing village", "shop stall", "village paper", "rivers and beaches", "climate and depth caves", "settled structures", "broader terrain and rocky coasts", "islands and beach ecology", "landmarks", "sea wildlife", "coastal species", "beach finds and tide pools", "leapstalks", "sulkers", "walls", "copper doors", "coloured candles", "fill", "recorded maps"]);
         assert!(r.ok(), "{:#?}", r.problems);
     }
 }

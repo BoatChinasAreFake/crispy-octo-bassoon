@@ -380,7 +380,33 @@ impl App {
                 self.ui.text_centered(&text, cx, cy + r + 12.0 * s, 8.0, WHITE);
             }
         }
-        if held == block::MAP {
+        if held == block::RECORDED_MAP {
+            // A recorded map: its own picture, redrawn when it changes (see mapart.rs).
+            let id = self.game.inv.wear[self.game.inv.selected];
+            let key = (id, self.game.map_art_version);
+            if self.art_key != Some(key) || self.map_tex.is_none() {
+                self.art_key = Some(key);
+                let n = mapart::ART;
+                let px: Vec<u8> = (0..n).flat_map(|r| (0..n).map(move |c| (r, c))).flat_map(|(r, c)| {
+                    let p = self.game.map_art_pixel(id, c, r);
+                    [p[0], p[1], p[2], 255]
+                }).collect();
+                let t = Texture2D::from_rgba8(n as u16, n as u16, &px);
+                t.set_filter(FilterMode::Nearest);
+                self.map_tex = Some(t);
+            }
+            if let Some(t) = &self.map_tex {
+                let size = 150.0 * s;
+                let (x, y) = (w - size - 10.0 * s, 10.0 * s);
+                let locked = self.game.map_art.get(&id).is_some_and(|m| m.locked);
+                draw_rectangle(x - 4.0 * s, y - 4.0 * s, size + 8.0 * s, size + 8.0 * s, if locked { Color::new(0.35, 0.45, 0.55, 1.0) } else { Color::new(0.55, 0.43, 0.26, 1.0) });
+                draw_texture_ex(t, x, y, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+            }
+        } else if held == block::MAP {
+            // (The picture was a recorded map's, a different size: start afresh.)
+            if self.art_key.take().is_some() {
+                self.map_tex = None;
+            }
             self.map_timer -= dt;
             if self.map_timer <= 0.0 || self.map_tex.is_none() {
                 self.map_timer = 0.5;
